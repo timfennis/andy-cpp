@@ -1,9 +1,12 @@
+mod scanner;
+
 use clap::Parser;
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::PathBuf;
+use crate::scanner::{Scanner, ScannerError};
 
 #[derive(Parser)]
 #[command(name = "Andy C++")]
@@ -37,7 +40,11 @@ fn main() -> anyhow::Result<()> {
             }
 
             // Print the response from the interpreter
-            println!("{}", run(&line)?);
+            let result = run(&line);
+            match run(&line) {
+                Ok(output) => println!("{}", output),
+                Err(err) => eprintln!("Error: {}", err),
+            }
         }
         println!("Bye!");
     }
@@ -47,16 +54,26 @@ fn main() -> anyhow::Result<()> {
 
 #[derive(Debug)]
 enum InterpreterError {
-    GenericError,
+    ScannerError { cause: ScannerError },
 }
 
 fn run(input: &str) -> Result<String, InterpreterError> {
-    Ok(String::from("TODO: implement the interpreter"))
+    let scanner = Scanner::from_str(input);
+    for token in scanner {
+        let token = token.map_err(|error| InterpreterError::ScannerError { cause: error })?;
+        println!("{:?}", token);
+
+    }
+
+    Ok(String::from(""))
 }
 
 impl Display for InterpreterError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Generic Interpreter Error")
+        match self {
+            InterpreterError::ScannerError { cause } => write!(f, "Scanner error: {cause}"),
+        }
+
     }
 }
 
