@@ -1,24 +1,27 @@
-// lexeme == blob of characters like '=' or 'while' or ';'
-
-use std::collections::VecDeque;
 use std::fmt::{Display, Formatter};
 use std::iter::Peekable;
 use std::str::Chars;
 
 #[derive(Debug, Eq, PartialEq)]
 enum TokenType {
-    // Single character
+    // Random operators
+    Dot,
+
+    // Control
+    Semicolon,
+    Comma,
     LeftParentheses,
     RightParentheses,
     LeftBrace,
     RightBrace,
-    Comma,
-    Dot,
+    ColonEquals,
+
+    // Math
     Minus,
     Plus,
-    Semicolon,
-    Slash,
     Star,
+    Slash,
+    Percent,
 
     // One or more
     Bang,
@@ -31,9 +34,9 @@ enum TokenType {
     LessEqual,
 
     // Literal
-    Identifier,
+    Identifier(String),
     String(String),
-    Integer,
+    Integer(i64),
 
     // Keywords
     Fn,
@@ -44,7 +47,7 @@ enum TokenType {
     While,
     True,
     False,
-    This,
+    _Self,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -65,7 +68,7 @@ impl<'a> Scanner<'a> {
         Self {
             source: source.chars().peekable(),
             line: 1,
-            column: 0,
+            column: 1,
         }
     }
 }
@@ -76,6 +79,7 @@ impl Iterator for Scanner<'_> {
     fn next(&mut self) -> Option<Self::Item> {
         // TODO: possibly use peekmore https://docs.rs/peekmore/latest/peekmore/ to look ahead further
         'iterator: while let Some(char) = self.source.next() {
+            let start_column = self.column;
             self.column += 1;
             let peek = self.source.peek();
             let (token_type, consume_next) = match (char, peek) {
@@ -88,6 +92,9 @@ impl Iterator for Scanner<'_> {
                 ('+', _) => (TokenType::Plus, false),
                 (';', _) => (TokenType::Semicolon, false),
                 ('*', _) => (TokenType::Star, false),
+                ('%', _) => (TokenType::Percent, false),
+                ('.', _) => (TokenType::Dot, false),
+                (':', Some('=')) => (TokenType::ColonEquals, true),
                 ('!', Some('=')) => (TokenType::BangEqual, true),
                 ('!', _) => (TokenType::Bang, false),
                 ('=', Some('=')) => (TokenType::EqualEqual, true),
@@ -105,6 +112,7 @@ impl Iterator for Scanner<'_> {
                         }
 
                         self.source.next();
+                        self.column += 1;
                     }
 
                     continue 'iterator;
@@ -115,18 +123,20 @@ impl Iterator for Scanner<'_> {
                 }
                 ('\n', _) => {
                     self.line += 1;
-                    self.column = 0;
+                    self.column = 1;
                     continue 'iterator;
                 }
                 ('"', _) => {
                     let mut buf = String::new();
                     let mut valid = false;
                     while let Some(next_ch) = self.source.next() {
+                        self.column += 1;
                         match next_ch {
                             '\n' => {
                                 self.line += 1;
                             }
                             '"' => {
+                                // advance iterator and end the string
                                 valid = true;
                                 break;
                             }
@@ -141,16 +151,69 @@ impl Iterator for Scanner<'_> {
                     } else {
                         return Some(Err(ScannerError::UnterminatedString {
                             line: self.line,
-                            column: self.column,
+                            column: start_column,
                         }));
                     }
                 }
-                (c, _) => {
+                (char, _) if char.is_ascii_digit() => {
+                    let mut num =
+                        char.to_digit(10).expect("has to be a digit at this point") as i64;
+                    while let Some(next_char) = self.source.peek() {
+                        match next_char {
+                            next_char if next_char.is_ascii_digit() => {
+                                num *= 10;
+                                num += self
+                                    .source
+                                    .next()
+                                    .and_then(|ch| ch.to_digit(10))
+                                    .expect("has to be a digit at this point")
+                                    as i64;
+                                self.column += 1;
+                            }
+                            _ => {
+                                break;
+                            }
+                        }
+                    }
+                    (TokenType::Integer(num), false)
+                }
+                //TODO: For now we just support boring c-style identifiers but maybe allowing Emoji or other characters
+                //      could be cool too
+                (char, _) if char.is_alphabetic() || char == '_' => {
+                    // Parse an identifier, or not
+                    let mut buf = String::new();
+                    buf.push(char);
+                    while let Some(next_char) = self.source.peek() {
+                        if next_char.is_alphanumeric() {
+                            // advance iterator for next
+                            buf.push(self.source.next().expect("has to be Some"));
+                            self.column += 1;
+                        } else {
+                            break;
+                        }
+                    }
+
+                    let token_type = match buf.as_str() {
+                        "while" => TokenType::While,
+                        "if" => TokenType::If,
+                        "else" => TokenType::Else,
+                        "fn" => TokenType::Fn,
+                        "for" => TokenType::For,
+                        "true" => TokenType::True,
+                        "false" => TokenType::False,
+                        "return" => TokenType::Return,
+                        "self" => TokenType::_Self,
+                        _ => TokenType::Identifier(buf),
+                    };
+
+                    (token_type, false)
+                }
+                (char, _) => {
                     // In case of an error we still push back the next character so we can continue parsing
                     return Some(Err(ScannerError::UnexpectedCharacter {
-                        char: c,
+                        char,
                         line: self.line,
-                        column: self.column,
+                        column: start_column,
                     }));
                 }
             };
@@ -158,12 +221,13 @@ impl Iterator for Scanner<'_> {
             if consume_next {
                 // swallow the next char
                 self.source.next();
+                self.column += 1;
             }
 
             return Some(Ok(Token {
                 kind: token_type,
                 line: self.line,
-                column: self.column,
+                column: start_column,
             }));
         }
 
@@ -203,11 +267,89 @@ impl Display for ScannerError {
 
 #[cfg(test)]
 mod test {
-    use crate::scanner::{Scanner, Token};
+    use crate::scanner::{Scanner, Token, TokenType};
 
     #[test]
-    fn test_that_it_produces_no_errors() {
+    fn loads_of_operators() {
         let scanner = Scanner::from_str(include_str!("../tests/scanner.andy"));
         assert!(scanner.collect::<Result<Vec<Token>, _>>().is_ok());
+    }
+
+    #[test]
+    fn simple_script() {
+        let script = r#"while foo := bar() { print("foobar"); }"#;
+        let scanner = Scanner::from_str(script);
+        let scanned = scanner.collect::<Result<Vec<Token>, _>>().unwrap();
+        let expected = vec![
+            Token {
+                kind: TokenType::While,
+                line: 1,
+                column: 1,
+            },
+            Token {
+                kind: TokenType::Identifier("foo".to_owned()),
+                line: 1,
+                column: 7,
+            },
+            Token {
+                kind: TokenType::ColonEquals,
+                line: 1,
+                column: 11,
+            },
+            Token {
+                kind: TokenType::Identifier("bar".to_owned()),
+                line: 1,
+                column: 14,
+            },
+            Token {
+                kind: TokenType::LeftParentheses,
+                line: 1,
+                column: 17,
+            },
+            Token {
+                kind: TokenType::RightParentheses,
+                line: 1,
+                column: 18,
+            },
+            Token {
+                kind: TokenType::LeftBrace,
+                line: 1,
+                column: 20,
+            },
+            Token {
+                kind: TokenType::Identifier("print".to_owned()),
+                line: 1,
+                column: 22,
+            },
+            Token {
+                kind: TokenType::LeftParentheses,
+                line: 1,
+                column: 27,
+            },
+            Token {
+                kind: TokenType::String("foobar".to_owned()),
+                line: 1,
+                column: 28,
+            },
+            Token {
+                kind: TokenType::RightParentheses,
+                line: 1,
+                column: 36,
+            },
+            Token {
+                kind: TokenType::Semicolon,
+                line: 1,
+                column: 37,
+            },
+            Token {
+                kind: TokenType::RightBrace,
+                line: 1,
+                column: 39,
+            },
+        ];
+
+        for (a, b) in scanned.iter().zip(&expected) {
+            assert_eq!(a, b);
+        }
     }
 }
