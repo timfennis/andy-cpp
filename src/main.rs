@@ -1,12 +1,12 @@
 mod scanner;
 
+use crate::scanner::{Scanner, ScannerError};
 use clap::Parser;
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::PathBuf;
-use crate::scanner::{Scanner, ScannerError};
 
 #[derive(Parser)]
 #[command(name = "Andy C++")]
@@ -63,7 +63,6 @@ fn run(input: &str) -> Result<String, InterpreterError> {
     for token in scanner {
         let token = token.map_err(|error| InterpreterError::ScannerError { cause: error })?;
         println!("{:?}", token);
-
     }
 
     Ok(String::from(""))
@@ -74,7 +73,6 @@ impl Display for InterpreterError {
         match self {
             InterpreterError::ScannerError { cause } => write!(f, "Scanner error: {cause}"),
         }
-
     }
 }
 

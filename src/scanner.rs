@@ -32,7 +32,7 @@ enum TokenType {
 
     // Literal
     Identifier,
-    String,
+    String(String),
     Integer,
 
     // Keywords
@@ -45,7 +45,6 @@ enum TokenType {
     True,
     False,
     This,
-
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -55,7 +54,6 @@ pub struct Token {
     column: usize,
 }
 
-
 pub struct Scanner<'a> {
     source: Peekable<Chars<'a>>,
     column: usize,
@@ -64,10 +62,13 @@ pub struct Scanner<'a> {
 
 impl<'a> Scanner<'a> {
     pub fn from_str(source: &'a str) -> Self {
-        Self { source: source.chars().peekable(), line: 1, column: 0 }
+        Self {
+            source: source.chars().peekable(),
+            line: 1,
+            column: 0,
+        }
     }
 }
-
 
 impl Iterator for Scanner<'_> {
     type Item = Result<Token, ScannerError>;
@@ -117,9 +118,40 @@ impl Iterator for Scanner<'_> {
                     self.column = 0;
                     continue 'iterator;
                 }
+                ('"', _) => {
+                    let mut buf = String::new();
+                    let mut valid = false;
+                    while let Some(next_ch) = self.source.next() {
+                        match next_ch {
+                            '\n' => {
+                                self.line += 1;
+                            }
+                            '"' => {
+                                valid = true;
+                                break;
+                            }
+                            _ => {
+                                buf.push(next_ch);
+                            }
+                        }
+                    }
+
+                    if valid {
+                        (TokenType::String(buf), false)
+                    } else {
+                        return Some(Err(ScannerError::UnterminatedString {
+                            line: self.line,
+                            column: self.column,
+                        }));
+                    }
+                }
                 (c, _) => {
                     // In case of an error we still push back the next character so we can continue parsing
-                    return Some(Err(ScannerError::UnexpectedCharacter { char: c, line: self.line, column: self.column }));
+                    return Some(Err(ScannerError::UnexpectedCharacter {
+                        char: c,
+                        line: self.line,
+                        column: self.column,
+                    }));
                 }
             };
 
@@ -141,13 +173,30 @@ impl Iterator for Scanner<'_> {
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum ScannerError {
-    UnexpectedCharacter { char: char, line: usize, column: usize },
+    UnexpectedCharacter {
+        char: char,
+        line: usize,
+        column: usize,
+    },
+    UnterminatedString {
+        line: usize,
+        column: usize,
+    },
 }
 
 impl Display for ScannerError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            ScannerError::UnexpectedCharacter { char, line, column } => write!(f, "Unexpected character '{char}' at line {line} column {column}"),
+            ScannerError::UnexpectedCharacter { char, line, column } => write!(
+                f,
+                "Unexpected character '{char}' at line {line} column {column}"
+            ),
+            ScannerError::UnterminatedString { line, column } => {
+                write!(
+                    f,
+                    "File ended with unterminated string starting at line {line} column {column}"
+                )
+            }
         }
     }
 }
