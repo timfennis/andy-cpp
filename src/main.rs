@@ -40,11 +40,12 @@ fn main() -> anyhow::Result<()> {
             }
 
             // Print the response from the interpreter
-            let result = run(&line);
             match run(&line) {
                 Ok(output) => println!("{}", output),
                 Err(err) => eprintln!("Error: {}", err),
             }
+
+            line.clear();
         }
         println!("Bye!");
     }
