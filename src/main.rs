@@ -1,3 +1,4 @@
+mod ast;
 mod lexer;
 
 use crate::lexer::{Lexer, LexerError};

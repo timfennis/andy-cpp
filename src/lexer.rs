@@ -3,7 +3,7 @@ use std::fmt::{Display, Formatter};
 use std::str::Chars;
 
 #[derive(Debug, Eq, PartialEq)]
-enum TokenKind {
+pub enum TokenKind {
     // Random operators
     Dot,
 
@@ -48,6 +48,7 @@ enum TokenKind {
     True,
     False,
     _Self,
+    Nil,
 }
 
 struct SourceIterator<'a> {
@@ -250,6 +251,7 @@ impl Iterator for Lexer<'_> {
                         "false" => TokenKind::False,
                         "return" => TokenKind::Return,
                         "self" => TokenKind::_Self,
+                        "nil" => TokenKind::Nil,
                         _ => TokenKind::Identifier(buf),
                     };
 
