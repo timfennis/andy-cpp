@@ -316,8 +316,8 @@ mod test {
     use crate::lexer::{Lexer, Token, TokenKind};
 
     #[test]
-    fn loads_of_operators() {
-        let scanner = Lexer::from_str(include_str!("../tests/scanner.andy"));
+    fn load_file_with_loads_of_tokens() {
+        let scanner = Lexer::from_str(include_str!("../tests/lex.andy"));
         assert!(scanner.collect::<Result<Vec<Token>, _>>().is_ok());
     }
 
