@@ -1,10 +1,9 @@
 use std::collections::VecDeque;
 use std::fmt::{Display, Formatter};
-use std::iter::Peekable;
 use std::str::Chars;
 
 #[derive(Debug, Eq, PartialEq)]
-enum TokenType {
+enum TokenKind {
     // Random operators
     Dot,
 
@@ -110,16 +109,16 @@ impl<'a> SourceIterator<'a> {
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct Token {
-    kind: TokenType,
+    kind: TokenKind,
     line: usize,
     column: usize,
 }
 
-pub struct Scanner<'a> {
+pub struct Lexer<'a> {
     source: SourceIterator<'a>,
 }
 
-impl<'a> Scanner<'a> {
+impl<'a> Lexer<'a> {
     pub fn from_str(source: &'a str) -> Self {
         Self {
             source: SourceIterator {
@@ -132,8 +131,8 @@ impl<'a> Scanner<'a> {
     }
 }
 
-impl Iterator for Scanner<'_> {
-    type Item = Result<Token, ScannerError>;
+impl Iterator for Lexer<'_> {
+    type Item = Result<Token, LexerError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         'iterator: while let Some(char) = self.source.next() {
@@ -141,26 +140,26 @@ impl Iterator for Scanner<'_> {
             let next = self.source.peek_one();
 
             let (token_type, consume_next) = match (char, next) {
-                ('(', _) => (TokenType::LeftParentheses, false),
-                (')', _) => (TokenType::RightParentheses, false),
-                ('{', _) => (TokenType::LeftBrace, false),
-                ('}', _) => (TokenType::RightBrace, false),
-                (',', _) => (TokenType::Comma, false),
-                ('-', _) => (TokenType::Minus, false),
-                ('+', _) => (TokenType::Plus, false),
-                (';', _) => (TokenType::Semicolon, false),
-                ('*', _) => (TokenType::Star, false),
-                ('%', _) => (TokenType::Percent, false),
-                ('.', _) => (TokenType::Dot, false),
-                (':', Some('=')) => (TokenType::ColonEquals, true),
-                ('!', Some('=')) => (TokenType::BangEqual, true),
-                ('!', _) => (TokenType::Bang, false),
-                ('=', Some('=')) => (TokenType::EqualEqual, true),
-                ('=', _) => (TokenType::Equal, false),
-                ('>', Some('=')) => (TokenType::GreaterEqual, true),
-                ('>', _) => (TokenType::Greater, false),
-                ('<', Some('=')) => (TokenType::LessEqual, true),
-                ('<', _) => (TokenType::Less, false),
+                ('(', _) => (TokenKind::LeftParentheses, false),
+                (')', _) => (TokenKind::RightParentheses, false),
+                ('{', _) => (TokenKind::LeftBrace, false),
+                ('}', _) => (TokenKind::RightBrace, false),
+                (',', _) => (TokenKind::Comma, false),
+                ('-', _) => (TokenKind::Minus, false),
+                ('+', _) => (TokenKind::Plus, false),
+                (';', _) => (TokenKind::Semicolon, false),
+                ('*', _) => (TokenKind::Star, false),
+                ('%', _) => (TokenKind::Percent, false),
+                ('.', _) => (TokenKind::Dot, false),
+                (':', Some('=')) => (TokenKind::ColonEquals, true),
+                ('!', Some('=')) => (TokenKind::BangEqual, true),
+                ('!', _) => (TokenKind::Bang, false),
+                ('=', Some('=')) => (TokenKind::EqualEqual, true),
+                ('=', _) => (TokenKind::Equal, false),
+                ('>', Some('=')) => (TokenKind::GreaterEqual, true),
+                ('>', _) => (TokenKind::Greater, false),
+                ('<', Some('=')) => (TokenKind::LessEqual, true),
+                ('<', _) => (TokenKind::Less, false),
                 ('/', Some('/')) => {
                     // We ran into a doc comment and we just keep consuming characters as long as we
                     // don't encounter a linebreak
@@ -175,7 +174,7 @@ impl Iterator for Scanner<'_> {
 
                     continue 'iterator;
                 }
-                ('/', Some(_)) => (TokenType::Slash, false),
+                ('/', Some(_)) => (TokenKind::Slash, false),
                 (' ' | '\t' | '\r', _) => {
                     continue 'iterator;
                 }
@@ -199,9 +198,9 @@ impl Iterator for Scanner<'_> {
                     }
 
                     if valid {
-                        (TokenType::String(buf), false)
+                        (TokenKind::String(buf), false)
                     } else {
-                        return Some(Err(ScannerError::UnterminatedString {
+                        return Some(Err(LexerError::UnterminatedString {
                             line: self.source.line,
                             column: start_column,
                         }));
@@ -211,24 +210,19 @@ impl Iterator for Scanner<'_> {
                     let mut num =
                         char.to_digit(10).expect("has to be a digit at this point") as i64;
                     while let Some(next_char) = self.source.next() {
-                        match next_char {
-                            next_char if next_char.is_ascii_digit() => {
+                        match next_char.to_digit(10) {
+                            Some(digit) => {
                                 num *= 10;
-                                num += self
-                                    .source
-                                    .next()
-                                    .and_then(|ch| ch.to_digit(10))
-                                    .expect("has to be a digit at this point")
-                                    as i64;
+                                num += digit as i64;
                             }
-                            ch => {
+                            None => {
                                 // Something we dont' want we just give back
-                                self.source.push_front(ch);
+                                self.source.push_front(next_char);
                                 break;
                             }
                         }
                     }
-                    (TokenType::Integer(num), false)
+                    (TokenKind::Integer(num), false)
                 }
                 //TODO: For now we just support boring c-style identifiers but maybe allowing Emoji or other characters
                 //      could be cool too
@@ -237,7 +231,7 @@ impl Iterator for Scanner<'_> {
                     let mut buf = String::new();
                     buf.push(char);
                     while let Some(next_char) = self.source.next() {
-                        if next_char.is_alphanumeric() {
+                        if next_char.is_alphanumeric() || next_char == '_' {
                             // advance iterator for next
                             buf.push(next_char);
                         } else {
@@ -247,23 +241,23 @@ impl Iterator for Scanner<'_> {
                     }
 
                     let token_type = match buf.as_str() {
-                        "while" => TokenType::While,
-                        "if" => TokenType::If,
-                        "else" => TokenType::Else,
-                        "fn" => TokenType::Fn,
-                        "for" => TokenType::For,
-                        "true" => TokenType::True,
-                        "false" => TokenType::False,
-                        "return" => TokenType::Return,
-                        "self" => TokenType::_Self,
-                        _ => TokenType::Identifier(buf),
+                        "while" => TokenKind::While,
+                        "if" => TokenKind::If,
+                        "else" => TokenKind::Else,
+                        "fn" => TokenKind::Fn,
+                        "for" => TokenKind::For,
+                        "true" => TokenKind::True,
+                        "false" => TokenKind::False,
+                        "return" => TokenKind::Return,
+                        "self" => TokenKind::_Self,
+                        _ => TokenKind::Identifier(buf),
                     };
 
                     (token_type, false)
                 }
                 (char, _) => {
                     // In case of an error we still push back the next character so we can continue parsing
-                    return Some(Err(ScannerError::UnexpectedCharacter {
+                    return Some(Err(LexerError::UnexpectedCharacter {
                         char,
                         line: self.source.line,
                         column: start_column,
@@ -288,7 +282,7 @@ impl Iterator for Scanner<'_> {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-pub enum ScannerError {
+pub enum LexerError {
     UnexpectedCharacter {
         char: char,
         line: usize,
@@ -300,14 +294,14 @@ pub enum ScannerError {
     },
 }
 
-impl Display for ScannerError {
+impl Display for LexerError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            ScannerError::UnexpectedCharacter { char, line, column } => write!(
+            LexerError::UnexpectedCharacter { char, line, column } => write!(
                 f,
                 "Unexpected character '{char}' at line {line} column {column}"
             ),
-            ScannerError::UnterminatedString { line, column } => {
+            LexerError::UnterminatedString { line, column } => {
                 write!(
                     f,
                     "File ended with unterminated string starting at line {line} column {column}"
@@ -319,82 +313,113 @@ impl Display for ScannerError {
 
 #[cfg(test)]
 mod test {
-    use crate::scanner::{Scanner, Token, TokenType};
+    use crate::lexer::{Lexer, Token, TokenKind};
 
     #[test]
     fn loads_of_operators() {
-        let scanner = Scanner::from_str(include_str!("../tests/scanner.andy"));
+        let scanner = Lexer::from_str(include_str!("../tests/scanner.andy"));
         assert!(scanner.collect::<Result<Vec<Token>, _>>().is_ok());
+    }
+
+    #[test]
+    fn simple_arithmetic_assignment() {
+        let lexer = Lexer::from_str("foo := 33");
+        let tokens = lexer
+            .collect::<Result<Vec<Token>, _>>()
+            .expect("must have only valid tokens");
+
+        assert_eq!(
+            Token {
+                kind: TokenKind::Integer(33),
+                line: 1,
+                column: 8
+            },
+            tokens[2]
+        );
+    }
+    #[test]
+    fn identifiers_with_underscores() {
+        let lexer = Lexer::from_str("_this_is_a_single_1dentifi3r");
+        let tokens = lexer.collect::<Result<Vec<Token>, _>>().unwrap();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(
+            *tokens.first().unwrap(),
+            Token {
+                kind: TokenKind::Identifier("_this_is_a_single_1dentifi3r".to_owned()),
+                column: 1,
+                line: 1
+            }
+        )
     }
 
     #[test]
     fn simple_script() {
         let script = r#"while foo := bar() { print("foobar"); }"#;
-        let scanner = Scanner::from_str(script);
+        let scanner = Lexer::from_str(script);
         let scanned = scanner.collect::<Result<Vec<Token>, _>>().unwrap();
         let expected = vec![
             Token {
-                kind: TokenType::While,
+                kind: TokenKind::While,
                 line: 1,
                 column: 1,
             },
             Token {
-                kind: TokenType::Identifier("foo".to_owned()),
+                kind: TokenKind::Identifier("foo".to_owned()),
                 line: 1,
                 column: 7,
             },
             Token {
-                kind: TokenType::ColonEquals,
+                kind: TokenKind::ColonEquals,
                 line: 1,
                 column: 11,
             },
             Token {
-                kind: TokenType::Identifier("bar".to_owned()),
+                kind: TokenKind::Identifier("bar".to_owned()),
                 line: 1,
                 column: 14,
             },
             Token {
-                kind: TokenType::LeftParentheses,
+                kind: TokenKind::LeftParentheses,
                 line: 1,
                 column: 17,
             },
             Token {
-                kind: TokenType::RightParentheses,
+                kind: TokenKind::RightParentheses,
                 line: 1,
                 column: 18,
             },
             Token {
-                kind: TokenType::LeftBrace,
+                kind: TokenKind::LeftBrace,
                 line: 1,
                 column: 20,
             },
             Token {
-                kind: TokenType::Identifier("print".to_owned()),
+                kind: TokenKind::Identifier("print".to_owned()),
                 line: 1,
                 column: 22,
             },
             Token {
-                kind: TokenType::LeftParentheses,
+                kind: TokenKind::LeftParentheses,
                 line: 1,
                 column: 27,
             },
             Token {
-                kind: TokenType::String("foobar".to_owned()),
+                kind: TokenKind::String("foobar".to_owned()),
                 line: 1,
                 column: 28,
             },
             Token {
-                kind: TokenType::RightParentheses,
+                kind: TokenKind::RightParentheses,
                 line: 1,
                 column: 36,
             },
             Token {
-                kind: TokenType::Semicolon,
+                kind: TokenKind::Semicolon,
                 line: 1,
                 column: 37,
             },
             Token {
-                kind: TokenType::RightBrace,
+                kind: TokenKind::RightBrace,
                 line: 1,
                 column: 39,
             },
