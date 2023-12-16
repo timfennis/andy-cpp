@@ -1,6 +1,28 @@
+use std::fmt;
 enum Operator {
     Equals,
+    Plus,
+    Minus,
+    Multiply,
+    Divide,
 }
+
+impl fmt::Debug for Operator {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(
+            f,
+            "{}",
+            match self {
+                Operator::Equals => "-",
+                Operator::Plus => "+",
+                Operator::Minus => "-",
+                Operator::Multiply => "*",
+                Operator::Divide => "/",
+            }
+        )
+    }
+}
+
 enum Literal {
     Number(i64),
     String(String),
@@ -9,20 +31,81 @@ enum Literal {
     Nil,
 }
 
+impl fmt::Debug for Literal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        match self {
+            Literal::Number(n) => write!(f, "{n}"),
+            Literal::String(val) => write!(f, "\"{val}\""),
+            Literal::True => write!(f, "true"),
+            Literal::False => write!(f, "false"),
+            Literal::Nil => write!(f, "nil"),
+        }
+    }
+}
+
 enum UnaryOperator {
     Neg,
     Not,
 }
+
+impl fmt::Debug for UnaryOperator {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        match self {
+            UnaryOperator::Neg => write!(f, "-"),
+            UnaryOperator::Not => write!(f, "!"),
+        }
+    }
+}
+
 enum Expression {
     Literal(Literal),
     Unary {
         operator: UnaryOperator,
-        expression: Expression,
+        expression: Box<Expression>,
     },
     Binary {
-        left: Expression,
+        left: Box<Expression>,
         operator: Operator,
-        right: Expression,
+        right: Box<Expression>,
     },
-    Grouping(Expression),
+    Grouping(Box<Expression>),
+}
+
+impl fmt::Debug for Expression {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        match self {
+            Expression::Literal(lit) => write!(f, "{:?}", lit),
+            Expression::Unary {
+                operator,
+                expression,
+            } => write!(f, "({:?} {:?})", operator, expression),
+            Expression::Binary {
+                left,
+                operator,
+                right,
+            } => write!(f, "({:?} {:?} {:?})", operator, left, right),
+            Expression::Grouping(expr) => write!(f, "(group {:?})", expr),
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn printing() {
+        let ast = Expression::Binary {
+            left: Box::new(Expression::Unary {
+                operator: UnaryOperator::Neg,
+                expression: Box::new(Expression::Literal(Literal::Number(123))),
+            }),
+            operator: Operator::Multiply,
+            right: Box::new(Expression::Grouping(Box::new(Expression::Literal(
+                Literal::Number(69),
+            )))),
+        };
+
+        assert_eq!(format!("{:?}", ast), "(* (- 123) (group 69))");
+    }
 }
