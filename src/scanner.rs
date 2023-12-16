@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::fmt::{Display, Formatter};
 use std::iter::Peekable;
 use std::str::Chars;
@@ -50,6 +51,63 @@ enum TokenType {
     _Self,
 }
 
+struct SourceIterator<'a> {
+    inner: Chars<'a>,
+    buffer: VecDeque<char>,
+    line: usize,
+    column: usize,
+}
+
+impl<'a> Iterator for SourceIterator<'a> {
+    type Item = char;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let next = match self.buffer.pop_front() {
+            Some(ch) => Some(ch),
+            _ => self.inner.next(),
+        };
+
+        match next {
+            Some('\n') => {
+                self.line += 1;
+                self.column = 0;
+            }
+            Some(_) => {
+                self.column += 1;
+            }
+            None => {}
+        }
+
+        next
+    }
+}
+
+impl<'a> SourceIterator<'a> {
+    pub fn peek_next(&mut self) -> Option<char> {
+        let next = self.inner.next()?;
+        self.buffer.push_back(next);
+        Some(next)
+    }
+
+    pub fn peek_one(&mut self) -> Option<char> {
+        return if let Some(head) = self.buffer.get(0) {
+            Some(*head)
+        } else {
+            self.peek_next()
+        };
+    }
+
+    pub fn push_front(&mut self, ch: char) {
+        if ch != '\n' {
+            self.column -= 1;
+        } else {
+            self.line -= 1;
+            // TODO: we can't reset the column number here, what to do, just assume it's never a problem?
+        }
+        self.buffer.push_front(ch)
+    }
+}
+
 #[derive(Debug, Eq, PartialEq)]
 pub struct Token {
     kind: TokenType,
@@ -58,17 +116,18 @@ pub struct Token {
 }
 
 pub struct Scanner<'a> {
-    source: Peekable<Chars<'a>>,
-    column: usize,
-    line: usize,
+    source: SourceIterator<'a>,
 }
 
 impl<'a> Scanner<'a> {
     pub fn from_str(source: &'a str) -> Self {
         Self {
-            source: source.chars().peekable(),
-            line: 1,
-            column: 1,
+            source: SourceIterator {
+                inner: source.chars(),
+                buffer: Default::default(),
+                line: 1,
+                column: 0,
+            },
         }
     }
 }
@@ -77,12 +136,11 @@ impl Iterator for Scanner<'_> {
     type Item = Result<Token, ScannerError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // TODO: possibly use peekmore https://docs.rs/peekmore/latest/peekmore/ to look ahead further
         'iterator: while let Some(char) = self.source.next() {
-            let start_column = self.column;
-            self.column += 1;
-            let peek = self.source.peek();
-            let (token_type, consume_next) = match (char, peek) {
+            let start_column = self.source.column;
+            let next = self.source.peek_one();
+
+            let (token_type, consume_next) = match (char, next) {
                 ('(', _) => (TokenType::LeftParentheses, false),
                 (')', _) => (TokenType::RightParentheses, false),
                 ('{', _) => (TokenType::LeftBrace, false),
@@ -106,13 +164,13 @@ impl Iterator for Scanner<'_> {
                 ('/', Some('/')) => {
                     // We ran into a doc comment and we just keep consuming characters as long as we
                     // don't encounter a linebreak
-                    while let Some(ch) = self.source.peek() {
-                        if *ch == '\n' {
+                    while let Some(ch) = self.source.next() {
+                        if ch == '\n' {
+                            self.source.push_front('\n');
                             continue 'iterator;
                         }
 
                         self.source.next();
-                        self.column += 1;
                     }
 
                     continue 'iterator;
@@ -122,19 +180,13 @@ impl Iterator for Scanner<'_> {
                     continue 'iterator;
                 }
                 ('\n', _) => {
-                    self.line += 1;
-                    self.column = 1;
                     continue 'iterator;
                 }
                 ('"', _) => {
                     let mut buf = String::new();
                     let mut valid = false;
                     while let Some(next_ch) = self.source.next() {
-                        self.column += 1;
                         match next_ch {
-                            '\n' => {
-                                self.line += 1;
-                            }
                             '"' => {
                                 // advance iterator and end the string
                                 valid = true;
@@ -150,7 +202,7 @@ impl Iterator for Scanner<'_> {
                         (TokenType::String(buf), false)
                     } else {
                         return Some(Err(ScannerError::UnterminatedString {
-                            line: self.line,
+                            line: self.source.line,
                             column: start_column,
                         }));
                     }
@@ -158,7 +210,7 @@ impl Iterator for Scanner<'_> {
                 (char, _) if char.is_ascii_digit() => {
                     let mut num =
                         char.to_digit(10).expect("has to be a digit at this point") as i64;
-                    while let Some(next_char) = self.source.peek() {
+                    while let Some(next_char) = self.source.next() {
                         match next_char {
                             next_char if next_char.is_ascii_digit() => {
                                 num *= 10;
@@ -168,9 +220,10 @@ impl Iterator for Scanner<'_> {
                                     .and_then(|ch| ch.to_digit(10))
                                     .expect("has to be a digit at this point")
                                     as i64;
-                                self.column += 1;
                             }
-                            _ => {
+                            ch => {
+                                // Something we dont' want we just give back
+                                self.source.push_front(ch);
                                 break;
                             }
                         }
@@ -183,12 +236,12 @@ impl Iterator for Scanner<'_> {
                     // Parse an identifier, or not
                     let mut buf = String::new();
                     buf.push(char);
-                    while let Some(next_char) = self.source.peek() {
+                    while let Some(next_char) = self.source.next() {
                         if next_char.is_alphanumeric() {
                             // advance iterator for next
-                            buf.push(self.source.next().expect("has to be Some"));
-                            self.column += 1;
+                            buf.push(next_char);
                         } else {
+                            self.source.push_front(next_char);
                             break;
                         }
                     }
@@ -212,7 +265,7 @@ impl Iterator for Scanner<'_> {
                     // In case of an error we still push back the next character so we can continue parsing
                     return Some(Err(ScannerError::UnexpectedCharacter {
                         char,
-                        line: self.line,
+                        line: self.source.line,
                         column: start_column,
                     }));
                 }
@@ -221,12 +274,11 @@ impl Iterator for Scanner<'_> {
             if consume_next {
                 // swallow the next char
                 self.source.next();
-                self.column += 1;
             }
 
             return Some(Ok(Token {
                 kind: token_type,
-                line: self.line,
+                line: self.source.line,
                 column: start_column,
             }));
         }
