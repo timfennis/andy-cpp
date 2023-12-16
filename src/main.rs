@@ -1,7 +1,9 @@
+use clap::Parser;
+use std::error::Error;
+use std::fmt::{Debug, Display, Formatter};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::PathBuf;
-use clap::Parser;
 
 #[derive(Parser)]
 #[command(name = "Andy C++")]
@@ -18,7 +20,7 @@ fn main() -> anyhow::Result<()> {
         let mut file = File::open(path)?;
         let mut string = String::new();
         file.read_to_string(&mut string)?;
-        println!("{}", run(&string));
+        println!("{}", run(&string)?);
     } else {
         let mut line = String::new();
         loop {
@@ -35,7 +37,7 @@ fn main() -> anyhow::Result<()> {
             }
 
             // Print the response from the interpreter
-            println!("{}", run(&line));
+            println!("{}", run(&line)?);
         }
         println!("Bye!");
     }
@@ -43,15 +45,27 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn run(input: &str) -> String {
-    String::from("TODO: implement the interpreter")
+#[derive(Debug)]
+enum InterpreterError {
+    GenericError,
 }
 
+fn run(input: &str) -> Result<String, InterpreterError> {
+    Ok(String::from("TODO: implement the interpreter"))
+}
+
+impl Display for InterpreterError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Generic Interpreter Error")
+    }
+}
+
+impl Error for InterpreterError {}
 
 #[cfg(test)]
 mod test {
-    use clap::CommandFactory;
     use crate::Cli;
+    use clap::CommandFactory;
 
     #[test]
     fn test_clap() {
