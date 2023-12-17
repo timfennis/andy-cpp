@@ -96,16 +96,6 @@ impl<'a> SourceIterator<'a> {
             self.peek_next()
         };
     }
-
-    pub fn push_front(&mut self, ch: char) {
-        if ch != '\n' {
-            self.column -= 1;
-        } else {
-            self.line -= 1;
-            // TODO: we can't reset the column number here, what to do, just assume it's never a problem?
-        }
-        self.buffer.push_front(ch)
-    }
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -164,12 +154,12 @@ impl Iterator for Lexer<'_> {
                 ('/', Some('/')) => {
                     // We ran into a doc comment and we just keep consuming characters as long as we
                     // don't encounter a linebreak
-                    while let Some(ch) = self.source.next() {
+                    while let Some(ch) = self.source.peek_one() {
                         if ch == '\n' {
-                            self.source.push_front('\n');
                             continue 'iterator;
                         }
 
+                        // Just consume the tokens
                         self.source.next();
                     }
 
@@ -210,15 +200,15 @@ impl Iterator for Lexer<'_> {
                 (char, _) if char.is_ascii_digit() => {
                     let mut num =
                         char.to_digit(10).expect("has to be a digit at this point") as i64;
-                    while let Some(next_char) = self.source.next() {
+                    while let Some(next_char) = self.source.peek_one() {
                         match next_char.to_digit(10) {
                             Some(digit) => {
                                 num *= 10;
                                 num += digit as i64;
+                                self.source.next();
                             }
                             None => {
                                 // Something we dont' want we just give back
-                                self.source.push_front(next_char);
                                 break;
                             }
                         }
@@ -231,12 +221,12 @@ impl Iterator for Lexer<'_> {
                     // Parse an identifier, or not
                     let mut buf = String::new();
                     buf.push(char);
-                    while let Some(next_char) = self.source.next() {
+                    while let Some(next_char) = self.source.peek_one() {
                         if next_char.is_alphanumeric() || next_char == '_' {
                             // advance iterator for next
                             buf.push(next_char);
+                            self.source.next();
                         } else {
-                            self.source.push_front(next_char);
                             break;
                         }
                     }
@@ -258,7 +248,6 @@ impl Iterator for Lexer<'_> {
                     (token_type, false)
                 }
                 (char, _) => {
-                    // In case of an error we still push back the next character so we can continue parsing
                     return Some(Err(LexerError::UnexpectedCharacter {
                         char,
                         line: self.source.line,
