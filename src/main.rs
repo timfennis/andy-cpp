@@ -1,7 +1,9 @@
 mod ast;
+mod interpreter;
 mod lexer;
 
 use crate::ast::parser::ParserError;
+use crate::interpreter::Evaluate;
 use crate::lexer::{Lexer, LexerError, Token};
 use clap::Parser;
 use std::error::Error;
@@ -44,7 +46,7 @@ fn main() -> anyhow::Result<()> {
             // Print the response from the interpreter
             match run(&line) {
                 Ok(output) => println!("{}", output),
-                Err(err) => eprintln!("Error: {}", err),
+                Err(err) => eprintln!("{}", err),
             }
 
             line.clear();
@@ -65,15 +67,16 @@ fn run(input: &str) -> Result<String, InterpreterError> {
     let scanner = Lexer::from_str(input);
     let tokens = scanner.collect::<Result<Vec<Token>, _>>()?;
 
-    for token in &tokens {
-        println!("{:?}", token);
-    }
+    // for token in &tokens {
+    //     println!("{:?}", token);
+    // }
 
-    let mut parser = ast::parser::Parser::from_tokens(tokens);
+    let mut parser = ast::Parser::from_tokens(tokens);
     let expression = parser.parse()?;
 
-    println!("Expression: {:?}", expression);
-    Ok(String::from(""))
+    // println!("Expression: {:?}", expression);
+    // println!("Result: {:?}", expression.evaluate());
+    Ok(format!("{}", expression.evaluate()))
 }
 
 impl From<LexerError> for InterpreterError {

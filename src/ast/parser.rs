@@ -1,6 +1,6 @@
-use crate::ast::{Expression, Literal, Operator};
-use crate::lexer;
+use crate::ast::{Expression, Literal};
 use crate::lexer::{Token, TokenType};
+use std::error::Error;
 use std::fmt;
 use std::fmt::Formatter;
 
@@ -170,6 +170,8 @@ pub enum ParserError {
     ExpectedExpression { token: Token },
 }
 
+impl Error for ParserError {}
+
 impl fmt::Display for ParserError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         // TODO: Stop using debug formatting for token types
@@ -182,7 +184,7 @@ impl fmt::Display for ParserError {
             ParserError::UnexpectedEndOfStream => write!(f, "Unexpected end of stream"),
             ParserError::ExpectedOperator { token } => write!(
                 f,
-                "Expected operator got {:?} on line {} column {}",
+                "Expected operator got TokenType::{:?} on line {} column {}",
                 token.typ, token.line, token.column
             ),
             ParserError::ExpectedExpression { token } => write!(
