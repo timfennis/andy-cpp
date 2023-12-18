@@ -19,6 +19,8 @@ use std::path::PathBuf;
 #[command(about = "An interpreter for the Andy C++ language")]
 struct Cli {
     file: Option<PathBuf>,
+    #[arg(long)]
+    debug: bool,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -27,7 +29,7 @@ fn main() -> anyhow::Result<()> {
         let mut file = File::open(path)?;
         let mut string = String::new();
         file.read_to_string(&mut string)?;
-        println!("{}", run(&string)?);
+        println!("{}", run(&string, cli.debug)?);
     } else {
         let mut line = String::new();
         loop {
@@ -44,7 +46,7 @@ fn main() -> anyhow::Result<()> {
             }
 
             // Print the response from the interpreter
-            match run(&line) {
+            match run(&line, cli.debug) {
                 Ok(output) => println!("{}", output),
                 Err(err) => eprintln!("{}", err),
             }
@@ -63,19 +65,23 @@ enum InterpreterError {
     ParserError { cause: ParserError },
 }
 
-fn run(input: &str) -> Result<String, InterpreterError> {
+fn run(input: &str, debug: bool) -> Result<String, InterpreterError> {
     let scanner = Lexer::from_str(input);
     let tokens = scanner.collect::<Result<Vec<Token>, _>>()?;
 
-    // for token in &tokens {
-    //     println!("{:?}", token);
-    // }
+    if debug {
+        for token in &tokens {
+            println!("{:?}", token);
+        }
+    }
 
     let mut parser = ast::Parser::from_tokens(tokens);
     let expression = parser.parse()?;
 
-    // println!("Expression: {:?}", expression);
-    // println!("Result: {:?}", expression.evaluate());
+    if debug {
+        println!("Expression: {:?}", expression);
+        println!("Result: {:?}", expression.evaluate());
+    }
     Ok(format!("{}", expression.evaluate()))
 }
 

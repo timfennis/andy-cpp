@@ -42,29 +42,19 @@ impl Evaluate for Expression {
 fn apply_operator(left: Literal, operator: Operator, right: Literal) -> Literal {
     match (left, operator, right) {
         // Integer
-        (Literal::Integer(a), Operator::Divide, Literal::Integer(b)) => a
-            .checked_div_euclid(b)
-            .expect("TODO: handle division by zero")
-            .into(),
-
-        (Literal::Integer(a), Operator::Multiply, Literal::Integer(b)) => a
-            .checked_mul(b)
-            .expect("TODO: handle integer overflow")
-            .into(),
-        (Literal::Integer(a), Operator::Minus, Literal::Integer(b)) => a
-            .checked_sub(b)
-            .expect("TODO: handle integer overflow")
-            .into(),
-        (Literal::Integer(a), Operator::Plus, Literal::Integer(b)) => a
-            .checked_add(b)
-            .expect("TODO: handle integer overflow")
-            .into(),
-        (Literal::Integer(a), Operator::Equals, Literal::Integer(b)) => (a == b).into(),
-        (Literal::Integer(a), Operator::NotEquals, Literal::Integer(b)) => (a != b).into(),
-        (Literal::Integer(a), Operator::Greater, Literal::Integer(b)) => (a > b).into(),
-        (Literal::Integer(a), Operator::GreaterEquals, Literal::Integer(b)) => (a >= b).into(),
-        (Literal::Integer(a), Operator::Less, Literal::Integer(b)) => (a < b).into(),
-        (Literal::Integer(a), Operator::LessEquals, Literal::Integer(b)) => (a <= b).into(),
+        (Literal::Integer(a), op, Literal::Integer(b)) => match op {
+            Operator::Equals => (a == b).into(),
+            Operator::NotEquals => (a != b).into(),
+            Operator::Greater => (a > b).into(),
+            Operator::GreaterEquals => (a >= b).into(),
+            Operator::Less => (a < b).into(),
+            Operator::LessEquals => (a <= b).into(),
+            Operator::Plus => (a + b).into(),
+            Operator::Minus => (a - b).into(),
+            Operator::Multiply => (a * b).into(),
+            Operator::Divide => (a / b).into(),
+            Operator::Modulo => a.rem_euclid(b).into(),
+        },
         // Boolean
         (
             a @ Literal::True | a @ Literal::False,
@@ -96,6 +86,7 @@ fn apply_operator(left: Literal, operator: Operator, right: Literal) -> Literal 
                 Operator::Less => (comp == Ordering::Less).into(),
                 Operator::LessEquals => (comp != Ordering::Greater).into(),
                 Operator::Plus => Literal::String(format!("{}{}", a, b).to_string()),
+                Operator::Modulo => panic!("syntax error modulo not supported on strings"),
                 Operator::Minus => panic!("syntax error cannot subtract strings"),
                 Operator::Multiply => panic!("cannot multiply a string with another string"),
                 Operator::Divide => panic!("syntax error cannot divide strings"),

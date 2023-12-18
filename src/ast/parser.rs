@@ -96,7 +96,7 @@ impl Parser {
     fn factor(&mut self) -> Result<Expression, ParserError> {
         self.consume_binary_expression_left_associative(
             Self::unary,
-            &[TokenType::Slash, TokenType::Star],
+            &[TokenType::Slash, TokenType::Star, TokenType::Percent],
         )
     }
 

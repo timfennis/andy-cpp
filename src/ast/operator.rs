@@ -17,6 +17,7 @@ pub enum Operator {
     Minus,
     Multiply,
     Divide,
+    Modulo,
 }
 
 impl TryFrom<&Token> for Operator {
@@ -34,6 +35,7 @@ impl TryFrom<&Token> for Operator {
             lexer::TokenType::GreaterEqual => Ok(Operator::GreaterEquals),
             lexer::TokenType::Less => Ok(Operator::Less),
             lexer::TokenType::LessEqual => Ok(Operator::LessEquals),
+            lexer::TokenType::Percent => Ok(Operator::Modulo),
             _ => Err(ParserError::ExpectedOperator {
                 token: value.clone(),
             }),
@@ -57,6 +59,7 @@ impl fmt::Display for Operator {
                 Operator::GreaterEquals => ">=",
                 Operator::Less => "<",
                 Operator::LessEquals => "<=",
+                Operator::Modulo => "%",
             }
         )
     }

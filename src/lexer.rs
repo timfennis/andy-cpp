@@ -16,12 +16,18 @@ pub enum TokenType {
     RightBrace,
     ColonEquals,
 
+    // Boolean stuff
+    BooleanAnd,
+    BooleanOr,
+
     // Math
     Minus,
     Plus,
     Star,
-    Slash,
     Percent,
+
+    // Mixed usage?
+    Slash,
 
     // One or more
     Bang,
