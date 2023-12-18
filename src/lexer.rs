@@ -3,7 +3,7 @@ use std::fmt::{Display, Formatter};
 use std::str::Chars;
 
 #[derive(Debug, Eq, PartialEq)]
-pub enum TokenKind {
+pub enum TokenType {
     // Random operators
     Dot,
 
@@ -100,7 +100,7 @@ impl<'a> SourceIterator<'a> {
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct Token {
-    kind: TokenKind,
+    typ: TokenType,
     line: usize,
     column: usize,
 }
@@ -131,26 +131,26 @@ impl Iterator for Lexer<'_> {
             let next = self.source.peek_one();
 
             let (token_type, consume_next) = match (char, next) {
-                ('(', _) => (TokenKind::LeftParentheses, false),
-                (')', _) => (TokenKind::RightParentheses, false),
-                ('{', _) => (TokenKind::LeftBrace, false),
-                ('}', _) => (TokenKind::RightBrace, false),
-                (',', _) => (TokenKind::Comma, false),
-                ('-', _) => (TokenKind::Minus, false),
-                ('+', _) => (TokenKind::Plus, false),
-                (';', _) => (TokenKind::Semicolon, false),
-                ('*', _) => (TokenKind::Star, false),
-                ('%', _) => (TokenKind::Percent, false),
-                ('.', _) => (TokenKind::Dot, false),
-                (':', Some('=')) => (TokenKind::ColonEquals, true),
-                ('!', Some('=')) => (TokenKind::BangEqual, true),
-                ('!', _) => (TokenKind::Bang, false),
-                ('=', Some('=')) => (TokenKind::EqualEqual, true),
-                ('=', _) => (TokenKind::Equal, false),
-                ('>', Some('=')) => (TokenKind::GreaterEqual, true),
-                ('>', _) => (TokenKind::Greater, false),
-                ('<', Some('=')) => (TokenKind::LessEqual, true),
-                ('<', _) => (TokenKind::Less, false),
+                ('(', _) => (TokenType::LeftParentheses, false),
+                (')', _) => (TokenType::RightParentheses, false),
+                ('{', _) => (TokenType::LeftBrace, false),
+                ('}', _) => (TokenType::RightBrace, false),
+                (',', _) => (TokenType::Comma, false),
+                ('-', _) => (TokenType::Minus, false),
+                ('+', _) => (TokenType::Plus, false),
+                (';', _) => (TokenType::Semicolon, false),
+                ('*', _) => (TokenType::Star, false),
+                ('%', _) => (TokenType::Percent, false),
+                ('.', _) => (TokenType::Dot, false),
+                (':', Some('=')) => (TokenType::ColonEquals, true),
+                ('!', Some('=')) => (TokenType::BangEqual, true),
+                ('!', _) => (TokenType::Bang, false),
+                ('=', Some('=')) => (TokenType::EqualEqual, true),
+                ('=', _) => (TokenType::Equal, false),
+                ('>', Some('=')) => (TokenType::GreaterEqual, true),
+                ('>', _) => (TokenType::Greater, false),
+                ('<', Some('=')) => (TokenType::LessEqual, true),
+                ('<', _) => (TokenType::Less, false),
                 ('/', Some('/')) => {
                     // We ran into a doc comment and we just keep consuming characters as long as we
                     // don't encounter a linebreak
@@ -165,7 +165,7 @@ impl Iterator for Lexer<'_> {
 
                     continue 'iterator;
                 }
-                ('/', Some(_)) => (TokenKind::Slash, false),
+                ('/', Some(_)) => (TokenType::Slash, false),
                 (' ' | '\t' | '\r', _) => {
                     continue 'iterator;
                 }
@@ -189,7 +189,7 @@ impl Iterator for Lexer<'_> {
                     }
 
                     if valid {
-                        (TokenKind::String(buf), false)
+                        (TokenType::String(buf), false)
                     } else {
                         return Some(Err(LexerError::UnterminatedString {
                             line: self.source.line,
@@ -213,7 +213,7 @@ impl Iterator for Lexer<'_> {
                             }
                         }
                     }
-                    (TokenKind::Integer(num), false)
+                    (TokenType::Integer(num), false)
                 }
                 //TODO: For now we just support boring c-style identifiers but maybe allowing Emoji or other characters
                 //      could be cool too
@@ -232,17 +232,17 @@ impl Iterator for Lexer<'_> {
                     }
 
                     let token_type = match buf.as_str() {
-                        "while" => TokenKind::While,
-                        "if" => TokenKind::If,
-                        "else" => TokenKind::Else,
-                        "fn" => TokenKind::Fn,
-                        "for" => TokenKind::For,
-                        "true" => TokenKind::True,
-                        "false" => TokenKind::False,
-                        "return" => TokenKind::Return,
-                        "self" => TokenKind::_Self,
-                        "nil" => TokenKind::Nil,
-                        _ => TokenKind::Identifier(buf),
+                        "while" => TokenType::While,
+                        "if" => TokenType::If,
+                        "else" => TokenType::Else,
+                        "fn" => TokenType::Fn,
+                        "for" => TokenType::For,
+                        "true" => TokenType::True,
+                        "false" => TokenType::False,
+                        "return" => TokenType::Return,
+                        "self" => TokenType::_Self,
+                        "nil" => TokenType::Nil,
+                        _ => TokenType::Identifier(buf),
                     };
 
                     (token_type, false)
@@ -262,7 +262,7 @@ impl Iterator for Lexer<'_> {
             }
 
             return Some(Ok(Token {
-                kind: token_type,
+                typ: token_type,
                 line: self.source.line,
                 column: start_column,
             }));
@@ -304,7 +304,7 @@ impl Display for LexerError {
 
 #[cfg(test)]
 mod test {
-    use crate::lexer::{Lexer, Token, TokenKind};
+    use crate::lexer::{Lexer, Token, TokenType};
 
     #[test]
     fn load_file_with_loads_of_tokens() {
@@ -321,7 +321,7 @@ mod test {
 
         assert_eq!(
             Token {
-                kind: TokenKind::Integer(33),
+                typ: TokenType::Integer(33),
                 line: 1,
                 column: 8
             },
@@ -336,7 +336,7 @@ mod test {
         assert_eq!(
             *tokens.first().unwrap(),
             Token {
-                kind: TokenKind::Identifier("_this_is_a_single_1dentifi3r".to_owned()),
+                typ: TokenType::Identifier("_this_is_a_single_1dentifi3r".to_owned()),
                 column: 1,
                 line: 1
             }
@@ -350,67 +350,67 @@ mod test {
         let scanned = scanner.collect::<Result<Vec<Token>, _>>().unwrap();
         let expected = vec![
             Token {
-                kind: TokenKind::While,
+                typ: TokenType::While,
                 line: 1,
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("foo".to_owned()),
+                typ: TokenType::Identifier("foo".to_owned()),
                 line: 1,
                 column: 7,
             },
             Token {
-                kind: TokenKind::ColonEquals,
+                typ: TokenType::ColonEquals,
                 line: 1,
                 column: 11,
             },
             Token {
-                kind: TokenKind::Identifier("bar".to_owned()),
+                typ: TokenType::Identifier("bar".to_owned()),
                 line: 1,
                 column: 14,
             },
             Token {
-                kind: TokenKind::LeftParentheses,
+                typ: TokenType::LeftParentheses,
                 line: 1,
                 column: 17,
             },
             Token {
-                kind: TokenKind::RightParentheses,
+                typ: TokenType::RightParentheses,
                 line: 1,
                 column: 18,
             },
             Token {
-                kind: TokenKind::LeftBrace,
+                typ: TokenType::LeftBrace,
                 line: 1,
                 column: 20,
             },
             Token {
-                kind: TokenKind::Identifier("print".to_owned()),
+                typ: TokenType::Identifier("print".to_owned()),
                 line: 1,
                 column: 22,
             },
             Token {
-                kind: TokenKind::LeftParentheses,
+                typ: TokenType::LeftParentheses,
                 line: 1,
                 column: 27,
             },
             Token {
-                kind: TokenKind::String("foobar".to_owned()),
+                typ: TokenType::String("foobar".to_owned()),
                 line: 1,
                 column: 28,
             },
             Token {
-                kind: TokenKind::RightParentheses,
+                typ: TokenType::RightParentheses,
                 line: 1,
                 column: 36,
             },
             Token {
-                kind: TokenKind::Semicolon,
+                typ: TokenType::Semicolon,
                 line: 1,
                 column: 37,
             },
             Token {
-                kind: TokenKind::RightBrace,
+                typ: TokenType::RightBrace,
                 line: 1,
                 column: 39,
             },

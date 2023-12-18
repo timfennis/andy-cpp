@@ -1,8 +1,8 @@
-use crate::lexer::{self, TokenKind};
+use crate::lexer;
 use std::fmt;
 
 enum ParserError {
-    InvalidOperator(TokenKind),
+    InvalidOperator(lexer::TokenType),
 }
 enum Operator {
     Equals,
@@ -13,12 +13,12 @@ enum Operator {
 }
 
 /// Example of what converting tokens to AST operators could look like
-impl TryFrom<lexer::TokenKind> for Operator {
+impl TryFrom<lexer::TokenType> for Operator {
     type Error = ParserError;
 
-    fn try_from(value: lexer::TokenKind) -> Result<Self, Self::Error> {
+    fn try_from(value: lexer::TokenType) -> Result<Self, Self::Error> {
         match value {
-            lexer::TokenKind::Minus => Ok(Operator::Minus),
+            lexer::TokenType::Minus => Ok(Operator::Minus),
             token => Err(ParserError::InvalidOperator(token)),
         }
     }
