@@ -3,6 +3,7 @@ use crate::lexer;
 use crate::lexer::Token;
 use std::fmt;
 
+#[derive(Copy, Clone, Eq, PartialEq)]
 pub enum Operator {
     // Comparison
     Equals,
@@ -29,6 +30,10 @@ impl TryFrom<&Token> for Operator {
             lexer::TokenType::Slash => Ok(Operator::Divide),
             lexer::TokenType::EqualEqual => Ok(Operator::Equals),
             lexer::TokenType::BangEqual => Ok(Operator::NotEquals),
+            lexer::TokenType::Greater => Ok(Operator::Greater),
+            lexer::TokenType::GreaterEqual => Ok(Operator::GreaterEquals),
+            lexer::TokenType::Less => Ok(Operator::Less),
+            lexer::TokenType::LessEqual => Ok(Operator::LessEquals),
             _ => Err(ParserError::ExpectedOperator {
                 token: value.clone(),
             }),

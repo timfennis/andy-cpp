@@ -25,7 +25,7 @@ impl Parser {
                 }
             }
         }
-        return false;
+        false
     }
 
     fn advance(&mut self) {
@@ -114,7 +114,7 @@ impl Parser {
             });
         }
 
-        return self.primary();
+        self.primary()
     }
 
     fn primary(&mut self) -> Result<Expression, ParserError> {
@@ -125,7 +125,7 @@ impl Parser {
 
         self.advance();
 
-        return Ok(match &token.typ {
+        Ok(match &token.typ {
             TokenType::False => Expression::Literal(Literal::False),
             TokenType::True => Expression::Literal(Literal::True),
             TokenType::Nil => Expression::Literal(Literal::Nil),
@@ -141,7 +141,7 @@ impl Parser {
                     token: token.clone(),
                 })
             }
-        });
+        })
     }
 
     fn consume(&mut self, typ: TokenType) -> Result<&Token, ParserError> {
@@ -184,12 +184,12 @@ impl fmt::Display for ParserError {
             ParserError::UnexpectedEndOfStream => write!(f, "Unexpected end of stream"),
             ParserError::ExpectedOperator { token } => write!(
                 f,
-                "Expected operator got TokenType::{:?} on line {} column {}",
+                "Expected operator got '{:?}' on line {} column {}",
                 token.typ, token.line, token.column
             ),
             ParserError::ExpectedExpression { token } => write!(
                 f,
-                "Unexpected token {:?} expected expression on line {} column {}",
+                "Unexpected token '{:?}' expected expression on line {} column {}",
                 token.typ, token.line, token.column
             ),
         }

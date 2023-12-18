@@ -175,6 +175,7 @@ impl Iterator for Lexer<'_> {
                 ('"', _) => {
                     let mut buf = String::new();
                     let mut valid = false;
+                    #[allow(clippy::while_let_on_iterator)]
                     while let Some(next_ch) = self.source.next() {
                         match next_ch {
                             '"' => {
