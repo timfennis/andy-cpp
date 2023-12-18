@@ -17,8 +17,8 @@ pub enum TokenType {
     ColonEquals,
 
     // Boolean stuff
-    BooleanAnd,
-    BooleanOr,
+    // BooleanAnd,
+    // BooleanOr,
 
     // Math
     Minus,

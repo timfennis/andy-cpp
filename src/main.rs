@@ -2,15 +2,17 @@ mod ast;
 mod interpreter;
 mod lexer;
 
+#[cfg(feature = "repl")]
+mod repl;
+
 use crate::ast::parser::ParserError;
 use crate::interpreter::Evaluate;
 use crate::lexer::{Lexer, LexerError, Token};
-use anyhow::{anyhow, Context};
 use clap::Parser;
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -33,48 +35,11 @@ fn main() -> anyhow::Result<()> {
         println!("{}", run(&string, cli.debug)?);
     } else {
         #[cfg(feature = "repl")]
-        {
-            crate::run_repl(cli.debug)?;
-            return Ok(());
-        }
+        repl::run_repl(cli.debug)?;
 
-        Err(anyhow!("You must supply a filename"))?;
+        #[cfg(not(feature = "repl"))]
+        Err(anyhow::anyhow!("You must supply a filename"))?;
     }
-    Ok(())
-}
-
-#[cfg(feature = "repl")]
-fn run_repl(debug: bool) -> anyhow::Result<()> {
-    use rustyline::error::ReadlineError;
-    use rustyline::{Config, DefaultEditor};
-
-    let mut rl = DefaultEditor::new()?;
-    // let mut rl = DefaultEditor::with_config(Config::builder().build())?;
-
-    loop {
-        match rl.readline("λ ") {
-            Ok(line) => {
-                // If we can't append the history we just ignore this
-                let _ = rl.add_history_entry(line.as_str());
-
-                // Run the line we just read through the interpreter
-                match run(line.as_str(), debug) {
-                    Ok(output) => println!("{}", output),
-                    Err(err) => eprintln!("{}", err),
-                }
-            }
-            Err(ReadlineError::Interrupted | ReadlineError::Eof) => {
-                // User wants to exit the REPL
-                println!("Bye!");
-                break;
-            }
-            Err(err) => {
-                eprintln!("Error: {err}");
-                break;
-            }
-        }
-    }
-
     Ok(())
 }
 
