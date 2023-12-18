@@ -5,6 +5,7 @@ mod lexer;
 use crate::ast::parser::ParserError;
 use crate::interpreter::Evaluate;
 use crate::lexer::{Lexer, LexerError, Token};
+use anyhow::{anyhow, Context};
 use clap::Parser;
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
@@ -31,29 +32,47 @@ fn main() -> anyhow::Result<()> {
         file.read_to_string(&mut string)?;
         println!("{}", run(&string, cli.debug)?);
     } else {
-        let mut line = String::new();
-        loop {
-            // print prompt
-            print!("λ ");
-            std::io::stdout().flush()?;
+        #[cfg(feature = "repl")]
+        {
+            crate::run_repl(cli.debug)?;
+            return Ok(());
+        }
 
-            // Read a line
-            let len = std::io::stdin().read_line(&mut line)?;
+        Err(anyhow!("You must supply a filename"))?;
+    }
+    Ok(())
+}
 
-            // If the line was empty (from pressing CTRL+D) we quit
-            if len == 0 {
+#[cfg(feature = "repl")]
+fn run_repl(debug: bool) -> anyhow::Result<()> {
+    use rustyline::error::ReadlineError;
+    use rustyline::{Config, DefaultEditor};
+
+    let mut rl = DefaultEditor::new()?;
+    // let mut rl = DefaultEditor::with_config(Config::builder().build())?;
+
+    loop {
+        match rl.readline("λ ") {
+            Ok(line) => {
+                // If we can't append the history we just ignore this
+                let _ = rl.add_history_entry(line.as_str());
+
+                // Run the line we just read through the interpreter
+                match run(line.as_str(), debug) {
+                    Ok(output) => println!("{}", output),
+                    Err(err) => eprintln!("{}", err),
+                }
+            }
+            Err(ReadlineError::Interrupted | ReadlineError::Eof) => {
+                // User wants to exit the REPL
+                println!("Bye!");
                 break;
             }
-
-            // Print the response from the interpreter
-            match run(&line, cli.debug) {
-                Ok(output) => println!("{}", output),
-                Err(err) => eprintln!("{}", err),
+            Err(err) => {
+                eprintln!("Error: {err}");
+                break;
             }
-
-            line.clear();
         }
-        println!("Bye!");
     }
 
     Ok(())
