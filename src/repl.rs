@@ -59,7 +59,7 @@ pub fn run_repl(debug: bool) -> anyhow::Result<()> {
                 break;
             }
             Err(err) => {
-                eprintln!("Error: {err}");
+                eprintln!("{err}");
                 break;
             }
         }

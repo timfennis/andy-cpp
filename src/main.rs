@@ -14,6 +14,7 @@ use std::fmt::{Debug, Display, Formatter};
 use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
+use std::process::exit;
 
 #[derive(Parser)]
 #[command(name = "Andy C++")]
@@ -32,7 +33,15 @@ fn main() -> anyhow::Result<()> {
         let mut file = File::open(path)?;
         let mut string = String::new();
         file.read_to_string(&mut string)?;
-        println!("{}", run(&string, cli.debug)?);
+        match run(&string, cli.debug) {
+            Ok(out) => {
+                println!("{}", out);
+            }
+            Err(err) => {
+                eprintln!("{}", err);
+                exit(1);
+            }
+        }
     } else {
         #[cfg(feature = "repl")]
         repl::run_repl(cli.debug)?;
