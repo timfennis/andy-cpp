@@ -1,7 +1,8 @@
 mod ast;
 mod lexer;
 
-use crate::lexer::{Lexer, LexerError};
+use crate::ast::parser::ParserError;
+use crate::lexer::{Lexer, LexerError, Token};
 use clap::Parser;
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
@@ -57,14 +58,21 @@ fn main() -> anyhow::Result<()> {
 #[derive(Debug)]
 enum InterpreterError {
     LexerError { cause: LexerError },
+    ParserError { cause: ParserError },
 }
 
 fn run(input: &str) -> Result<String, InterpreterError> {
     let scanner = Lexer::from_str(input);
-    for token in scanner {
-        println!("{:?}", token?);
+    let tokens = scanner.collect::<Result<Vec<Token>, _>>()?;
+
+    for token in &tokens {
+        println!("{:?}", token);
     }
 
+    let mut parser = ast::parser::Parser::from_tokens(tokens);
+    let expression = parser.parse()?;
+
+    println!("Expression: {:?}", expression);
     Ok(String::from(""))
 }
 
@@ -74,10 +82,17 @@ impl From<LexerError> for InterpreterError {
     }
 }
 
+impl From<ParserError> for InterpreterError {
+    fn from(value: ParserError) -> Self {
+        InterpreterError::ParserError { cause: value }
+    }
+}
+
 impl Display for InterpreterError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            InterpreterError::LexerError { cause } => write!(f, "Scanner error: {cause}"),
+            InterpreterError::LexerError { cause } => write!(f, "Lexer error: {cause}"),
+            InterpreterError::ParserError { cause } => write!(f, "Parser error: {cause}"),
         }
     }
 }

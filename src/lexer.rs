@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::fmt::{Display, Formatter};
 use std::str::Chars;
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum TokenType {
     // Random operators
     Dot,
@@ -98,11 +98,11 @@ impl<'a> SourceIterator<'a> {
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct Token {
-    typ: TokenType,
-    line: usize,
-    column: usize,
+    pub typ: TokenType,
+    pub line: usize,
+    pub column: usize,
 }
 
 pub struct Lexer<'a> {

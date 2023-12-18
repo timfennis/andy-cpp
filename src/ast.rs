@@ -1,25 +1,47 @@
+use crate::ast::parser::ParserError;
 use crate::lexer;
+use crate::lexer::Token;
 use std::fmt;
 
-enum ParserError {
-    InvalidOperator(lexer::TokenType),
-}
+pub mod parser;
+
 enum Operator {
     Equals,
+    NotEquals,
     Plus,
     Minus,
     Multiply,
     Divide,
 }
 
-/// Example of what converting tokens to AST operators could look like
-impl TryFrom<lexer::TokenType> for Operator {
+impl TryFrom<&Token> for Operator {
     type Error = ParserError;
 
-    fn try_from(value: lexer::TokenType) -> Result<Self, Self::Error> {
-        match value {
+    fn try_from(value: &Token) -> Result<Self, Self::Error> {
+        match &value.typ {
             lexer::TokenType::Minus => Ok(Operator::Minus),
-            token => Err(ParserError::InvalidOperator(token)),
+            lexer::TokenType::Plus => Ok(Operator::Plus),
+            lexer::TokenType::Star => Ok(Operator::Multiply),
+            lexer::TokenType::Slash => Ok(Operator::Divide),
+            lexer::TokenType::EqualEqual => Ok(Operator::Equals),
+            lexer::TokenType::BangEqual => Ok(Operator::NotEquals),
+            _ => Err(ParserError::ExpectedOperator {
+                token: value.clone(),
+            }),
+        }
+    }
+}
+
+impl TryFrom<&Token> for UnaryOperator {
+    type Error = ParserError;
+
+    fn try_from(value: &Token) -> Result<Self, Self::Error> {
+        match &value.typ {
+            lexer::TokenType::Bang => Ok(UnaryOperator::Not),
+            lexer::TokenType::Minus => Ok(UnaryOperator::Neg),
+            _ => Err(ParserError::ExpectedOperator {
+                token: value.clone(),
+            }),
         }
     }
 }
@@ -30,7 +52,8 @@ impl fmt::Debug for Operator {
             f,
             "{}",
             match self {
-                Operator::Equals => "-",
+                Operator::Equals => "==",
+                Operator::NotEquals => "!=",
                 Operator::Plus => "+",
                 Operator::Minus => "-",
                 Operator::Multiply => "*",
@@ -41,7 +64,7 @@ impl fmt::Debug for Operator {
 }
 
 enum Literal {
-    Number(i64),
+    Integer(i64),
     String(String),
     True,
     False,
@@ -51,7 +74,7 @@ enum Literal {
 impl fmt::Debug for Literal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match self {
-            Literal::Number(n) => write!(f, "{n}"),
+            Literal::Integer(n) => write!(f, "{n}"),
             Literal::String(val) => write!(f, "\"{val}\""),
             Literal::True => write!(f, "true"),
             Literal::False => write!(f, "false"),
@@ -74,7 +97,7 @@ impl fmt::Debug for UnaryOperator {
     }
 }
 
-enum Expression {
+pub enum Expression {
     Literal(Literal),
     Unary {
         operator: UnaryOperator,
@@ -115,11 +138,11 @@ mod test {
         let ast = Expression::Binary {
             left: Box::new(Expression::Unary {
                 operator: UnaryOperator::Neg,
-                expression: Box::new(Expression::Literal(Literal::Number(123))),
+                expression: Box::new(Expression::Literal(Literal::Integer(123))),
             }),
             operator: Operator::Multiply,
             right: Box::new(Expression::Grouping(Box::new(Expression::Literal(
-                Literal::Number(69),
+                Literal::Integer(69),
             )))),
         };
 
