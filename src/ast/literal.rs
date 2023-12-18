@@ -6,7 +6,18 @@ pub enum Literal {
     String(String),
     True,
     False,
-    Nil,
+    Null,
+}
+
+impl Literal {
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            Literal::Integer(_) => "int",
+            Literal::String(_) => "string",
+            Literal::True | Literal::False => "bool",
+            Literal::Null => "null"
+        }
+    }
 }
 
 impl fmt::Debug for Literal {
@@ -22,7 +33,7 @@ impl fmt::Display for Literal {
             Literal::String(val) => write!(f, "\"{val}\""),
             Literal::True => write!(f, "true"),
             Literal::False => write!(f, "false"),
-            Literal::Nil => write!(f, "nil"),
+            Literal::Null => write!(f, "nil"),
         }
     }
 }

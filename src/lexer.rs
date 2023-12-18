@@ -54,7 +54,7 @@ pub enum TokenType {
     True,
     False,
     _Self,
-    Nil,
+    Null,
 }
 
 struct SourceIterator<'a> {
@@ -248,7 +248,7 @@ impl Iterator for Lexer<'_> {
                         "false" => TokenType::False,
                         "return" => TokenType::Return,
                         "self" => TokenType::_Self,
-                        "nil" => TokenType::Nil,
+                        "null" => TokenType::Null,
                         _ => TokenType::Identifier(buf),
                     };
 

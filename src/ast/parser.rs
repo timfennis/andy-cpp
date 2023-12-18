@@ -128,7 +128,7 @@ impl Parser {
         Ok(match &token.typ {
             TokenType::False => Expression::Literal(Literal::False),
             TokenType::True => Expression::Literal(Literal::True),
-            TokenType::Nil => Expression::Literal(Literal::Nil),
+            TokenType::Null => Expression::Literal(Literal::Null),
             TokenType::Integer(num) => Expression::Literal(Literal::Integer(*num)),
             TokenType::String(string) => Expression::Literal(Literal::String(string.clone())),
             TokenType::LeftParentheses => {
