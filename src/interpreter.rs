@@ -3,7 +3,8 @@ use crate::ast::{Expression, Literal};
 use std::cmp::Ordering;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
-use std::ops::{Neg, Rem};
+use std::num::TryFromIntError;
+use std::ops::Neg;
 use crate::lexer::Token;
 
 pub trait Evaluate {
@@ -80,7 +81,12 @@ fn apply_operator(
             Operator::CModulo => a.checked_rem(b).ok_or_else(mk_div_zero)?.into(),
             Operator::EuclideanModulo => a.checked_rem_euclid(b).ok_or_else(mk_div_zero)?.into(),
             //TODO: better error handling when casting to u32
-            Operator::Exponent => a.checked_pow(b as u32).ok_or_else(mk_int_overflow)?.into(),
+            Operator::Exponent => {
+                let exponent  = u32::try_from(b)?;
+                a.checked_pow(exponent)
+                    .ok_or_else(mk_int_overflow)?
+                    .into()
+            },
             _ => {
                 return Err(EvaluationError::InvalidOperator {
                     operator_token: operator_token.clone(),
@@ -189,3 +195,9 @@ impl Display for EvaluationError {
 }
 
 impl Error for EvaluationError {}
+
+impl From<TryFromIntError> for EvaluationError {
+    fn from(_value: TryFromIntError) -> Self {
+        EvaluationError::TypeError { message: "cannot convert between integer types, possibly because you're using a large exponent".to_string() }
+    }
+}
