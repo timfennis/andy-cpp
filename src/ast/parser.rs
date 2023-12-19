@@ -1,5 +1,6 @@
+use crate::ast::operator::Operator;
 use crate::ast::{Expression, Literal};
-use crate::lexer::{Token, TokenType};
+use crate::lexer::{Keyword, Symbol, Token, TokenType};
 use std::error::Error;
 use std::fmt;
 use std::fmt::Formatter;
@@ -16,10 +17,11 @@ impl Parser {
     fn current_token(&self) -> Option<&Token> {
         self.tokens.get(self.current)
     }
-    fn consume_token(&mut self, types: &[TokenType]) -> bool {
+    fn consume_token(&mut self, types: &[impl Into<TokenType> + Clone]) -> bool {
         for typ in types {
             if let Some(token) = self.current_token() {
-                if &token.typ == typ {
+                let typ: TokenType = typ.clone().into();
+                if token.typ == typ {
                     self.advance();
                     return true;
                 }
@@ -48,19 +50,20 @@ impl Parser {
     fn consume_binary_expression_left_associative(
         &mut self,
         next: fn(&mut Self) -> Result<Expression, ParserError>,
-        valid_tokens: &[TokenType],
+        valid_tokens: &[impl Into<TokenType> + Clone],
     ) -> Result<Expression, ParserError> {
         let mut expr = next(self)?;
         while self.consume_token(valid_tokens) {
-            let operator = self
+            let operator_token = self
                 .get_previous()
                 .ok_or(ParserError::UnexpectedEndOfStream)?
-                .try_into()?;
+                .clone();
             let right = next(self)?;
 
             expr = Expression::Binary {
                 left: Box::new(expr),
-                operator,
+                // TODO: maybe we can get rid of this clone if we consume the stream of tokens in a different way
+                operator_token,
                 right: Box::new(right),
             };
         }
@@ -70,7 +73,7 @@ impl Parser {
     fn equality(&mut self) -> Result<Expression, ParserError> {
         self.consume_binary_expression_left_associative(
             Self::comparison,
-            &[TokenType::EqualEqual, TokenType::BangEqual],
+            &[Operator::Equality, Operator::Inequality],
         )
     }
 
@@ -78,10 +81,10 @@ impl Parser {
         self.consume_binary_expression_left_associative(
             Self::term,
             &[
-                TokenType::Greater,
-                TokenType::GreaterEqual,
-                TokenType::Less,
-                TokenType::LessEqual,
+                Operator::Greater,
+                Operator::GreaterEquals,
+                Operator::Less,
+                Operator::LessEquals,
             ],
         )
     }
@@ -89,27 +92,28 @@ impl Parser {
     fn term(&mut self) -> Result<Expression, ParserError> {
         self.consume_binary_expression_left_associative(
             Self::factor,
-            &[TokenType::Plus, TokenType::Minus],
+            &[Operator::Plus, Operator::Minus],
         )
     }
 
     fn factor(&mut self) -> Result<Expression, ParserError> {
         self.consume_binary_expression_left_associative(
             Self::unary,
-            &[TokenType::Slash, TokenType::Star, TokenType::Percent],
+            &[Operator::Divide, Operator::Multiply, Operator::Modulo],
         )
     }
 
     fn unary(&mut self) -> Result<Expression, ParserError> {
-        if self.consume_token(&[TokenType::Bang, TokenType::Minus]) {
-            let operator = self
+        if self.consume_token(&[Operator::Bang, Operator::Minus]) {
+            // TODO: maybe we can get rid of this clone if we consume the token stream in a different way
+            let operator_token = self
                 .get_previous()
                 .ok_or(ParserError::UnexpectedEndOfStream)?
-                .try_into()?;
+                .clone();
 
             let right = self.unary()?;
             return Ok(Expression::Unary {
-                operator,
+                operator_token,
                 expression: Box::new(right),
             });
         }
@@ -126,25 +130,26 @@ impl Parser {
         self.advance();
 
         Ok(match &token.typ {
-            TokenType::False => Expression::Literal(Literal::False),
-            TokenType::True => Expression::Literal(Literal::True),
-            TokenType::Null => Expression::Literal(Literal::Null),
+            TokenType::Keyword(Keyword::False) => Expression::Literal(Literal::False),
+            TokenType::Keyword(Keyword::True) => Expression::Literal(Literal::True),
+            TokenType::Keyword(Keyword::Null) => Expression::Literal(Literal::Null),
             TokenType::Integer(num) => Expression::Literal(Literal::Integer(*num)),
             TokenType::String(string) => Expression::Literal(Literal::String(string.clone())),
-            TokenType::LeftParentheses => {
+            TokenType::Symbol(Symbol::LeftParentheses) => {
                 let expr = self.expression()?;
-                self.consume(TokenType::RightParentheses)?;
+                self.consume(Symbol::RightParentheses)?;
                 Expression::Grouping(Box::new(expr))
             }
             _ => {
                 return Err(ParserError::ExpectedExpression {
                     token: token.clone(),
-                })
+                });
             }
         })
     }
 
-    fn consume(&mut self, typ: TokenType) -> Result<&Token, ParserError> {
+    fn consume(&mut self, typ: impl Into<TokenType>) -> Result<&Token, ParserError> {
+        let typ = typ.into();
         return if let Some(token) = self.current_token() {
             if token.typ == typ {
                 self.advance();
@@ -165,9 +170,9 @@ impl Parser {
 #[derive(Debug, Eq, PartialEq)]
 pub enum ParserError {
     MissingExpectedToken { typ: TokenType, token: Token },
-    ExpectedOperator { token: Token },
     UnexpectedEndOfStream,
     ExpectedExpression { token: Token },
+    OperatorExpected { got: Token },
 }
 
 impl Error for ParserError {}
@@ -182,15 +187,16 @@ impl fmt::Display for ParserError {
                 typ, token.line, token.column
             ),
             ParserError::UnexpectedEndOfStream => write!(f, "Unexpected end of stream"),
-            ParserError::ExpectedOperator { token } => write!(
-                f,
-                "Expected operator got '{:?}' on line {} column {}",
-                token.typ, token.line, token.column
-            ),
             ParserError::ExpectedExpression { token } => write!(
                 f,
                 "Unexpected token '{:?}' expected expression on line {} column {}",
                 token.typ, token.line, token.column
+            ),
+            //TODO: this is now a member of ParserError but the error occurs during evaluation, is this a problem
+            ParserError::OperatorExpected { got } => write!(
+                f,
+                "unexpected token '{:?}', expected operator on line {} column {}",
+                got.typ, got.line, got.column
             ),
         }
     }

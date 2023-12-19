@@ -15,7 +15,7 @@ impl Literal {
             Literal::Integer(_) => "int",
             Literal::String(_) => "string",
             Literal::True | Literal::False => "bool",
-            Literal::Null => "null"
+            Literal::Null => "null",
         }
     }
 }

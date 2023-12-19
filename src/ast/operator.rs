@@ -1,13 +1,16 @@
-use crate::ast::ParserError;
-use crate::lexer;
-use crate::lexer::Token;
+use crate::interpreter::EvaluationError;
+use crate::lexer::{Token, TokenType};
 use std::fmt;
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub enum Operator {
+    // Assignment
+    CreateVar,
+    EqualsSign,
+
     // Comparison
-    Equals,
-    NotEquals,
+    Equality,
+    Inequality,
     Greater,
     GreaterEquals,
     Less,
@@ -18,27 +21,26 @@ pub enum Operator {
     Multiply,
     Divide,
     Modulo,
+    // Unary
+    Bang,
+}
+
+impl From<Operator> for TokenType {
+    fn from(value: Operator) -> Self {
+        Self::Operator(value)
+    }
 }
 
 impl TryFrom<&Token> for Operator {
-    type Error = ParserError;
+    type Error = EvaluationError;
 
     fn try_from(value: &Token) -> Result<Self, Self::Error> {
-        match &value.typ {
-            lexer::TokenType::Minus => Ok(Operator::Minus),
-            lexer::TokenType::Plus => Ok(Operator::Plus),
-            lexer::TokenType::Star => Ok(Operator::Multiply),
-            lexer::TokenType::Slash => Ok(Operator::Divide),
-            lexer::TokenType::EqualEqual => Ok(Operator::Equals),
-            lexer::TokenType::BangEqual => Ok(Operator::NotEquals),
-            lexer::TokenType::Greater => Ok(Operator::Greater),
-            lexer::TokenType::GreaterEqual => Ok(Operator::GreaterEquals),
-            lexer::TokenType::Less => Ok(Operator::Less),
-            lexer::TokenType::LessEqual => Ok(Operator::LessEquals),
-            lexer::TokenType::Percent => Ok(Operator::Modulo),
-            _ => Err(ParserError::ExpectedOperator {
-                token: value.clone(),
-            }),
+        match value {
+            Token {
+                typ: TokenType::Operator(op),
+                ..
+            } => Ok(*op),
+            token => Err(EvaluationError::OperatorExpected { got: token.clone() }),
         }
     }
 }
@@ -49,8 +51,8 @@ impl fmt::Display for Operator {
             f,
             "{}",
             match self {
-                Operator::Equals => "==",
-                Operator::NotEquals => "!=",
+                Operator::Equality => "==",
+                Operator::Inequality => "!=",
                 Operator::Plus => "+",
                 Operator::Minus => "-",
                 Operator::Multiply => "*",
@@ -60,6 +62,9 @@ impl fmt::Display for Operator {
                 Operator::Less => "<",
                 Operator::LessEquals => "<=",
                 Operator::Modulo => "%",
+                Operator::CreateVar => ":=",
+                Operator::EqualsSign => "=",
+                Operator::Bang => "!",
             }
         )
     }
@@ -67,33 +72,5 @@ impl fmt::Display for Operator {
 impl fmt::Debug for Operator {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(f, "Operator({})", self)
-    }
-}
-
-pub enum UnaryOperator {
-    Neg,
-    Not,
-}
-
-impl fmt::Debug for UnaryOperator {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        match self {
-            UnaryOperator::Neg => write!(f, "-"),
-            UnaryOperator::Not => write!(f, "!"),
-        }
-    }
-}
-
-impl TryFrom<&Token> for UnaryOperator {
-    type Error = ParserError;
-
-    fn try_from(value: &Token) -> Result<Self, Self::Error> {
-        match &value.typ {
-            lexer::TokenType::Bang => Ok(UnaryOperator::Not),
-            lexer::TokenType::Minus => Ok(UnaryOperator::Neg),
-            _ => Err(ParserError::ExpectedOperator {
-                token: value.clone(),
-            }),
-        }
     }
 }

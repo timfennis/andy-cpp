@@ -102,7 +102,7 @@ impl Display for InterpreterError {
         match self {
             InterpreterError::LexerError { cause } => write!(f, "Lexer error: {cause}"),
             InterpreterError::ParserError { cause } => write!(f, "Parser error: {cause}"),
-            InterpreterError::EvaluationError { cause } => write!(f, "Evaluation error: {cause}")
+            InterpreterError::EvaluationError { cause } => write!(f, "Evaluation error: {cause}"),
         }
     }
 }

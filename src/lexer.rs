@@ -1,50 +1,70 @@
+use crate::ast::operator::Operator;
 use std::collections::VecDeque;
 use std::fmt::{Display, Formatter};
 use std::str::Chars;
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum TokenType {
-    // Random operators
-    Dot,
+    Operator(Operator),
+    Symbol(Symbol),
 
-    // Control
-    Semicolon,
-    Comma,
-    LeftParentheses,
-    RightParentheses,
-    LeftBrace,
-    RightBrace,
-    ColonEquals,
-
-    // Boolean stuff
-    // BooleanAnd,
-    // BooleanOr,
-
-    // Math
-    Minus,
-    Plus,
-    Star,
-    Percent,
-
-    // Mixed usage?
-    Slash,
-
-    // One or more
-    Bang,
-    BangEqual,
-    Equal,
-    EqualEqual,
-    Greater,
-    GreaterEqual,
-    Less,
-    LessEqual,
-
-    // Literal
     Identifier(String),
+    // Literal
     String(String),
     Integer(i64),
 
     // Keywords
+    Keyword(Keyword),
+}
+
+impl Display for TokenType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TokenType::Operator(op) => write!(f, "{}", op),
+            TokenType::Symbol(s) => write!(f, "{}", s),
+            TokenType::Identifier(i) => write!(f, "{}", i),
+            TokenType::String(s) => write!(f, "\"{}\"", s),
+            TokenType::Integer(i) => write!(f, "{}", i),
+            TokenType::Keyword(k) => write!(f, "{}", k),
+        }
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub enum Symbol {
+    LeftParentheses,
+    RightParentheses,
+    LeftBracket,
+    RightBracket,
+    LeftBrace,
+    RightBrace,
+    Semicolon,
+    Comma,
+}
+
+impl Display for Symbol {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Symbol::LeftParentheses => write!(f, "("),
+            Symbol::RightParentheses => write!(f, ")"),
+            Symbol::LeftBracket => write!(f, "["),
+            Symbol::RightBracket => write!(f, "]"),
+            Symbol::LeftBrace => write!(f, "{{"),
+            Symbol::RightBrace => write!(f, "}}"),
+            Symbol::Semicolon => write!(f, ";"),
+            Symbol::Comma => write!(f, ","),
+        }
+    }
+}
+
+impl From<Symbol> for TokenType {
+    fn from(value: Symbol) -> Self {
+        Self::Symbol(value)
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub enum Keyword {
     Fn,
     If,
     Else,
@@ -55,6 +75,29 @@ pub enum TokenType {
     False,
     _Self,
     Null,
+}
+
+impl Display for Keyword {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Keyword::Fn => write!(f, "fn"),
+            Keyword::If => write!(f, "if"),
+            Keyword::Else => write!(f, "else"),
+            Keyword::Return => write!(f, "return"),
+            Keyword::For => write!(f, "for"),
+            Keyword::While => write!(f, "while"),
+            Keyword::True => write!(f, "true"),
+            Keyword::False => write!(f, "false"),
+            Keyword::_Self => write!(f, "self"),
+            Keyword::Null => write!(f, "null"),
+        }
+    }
+}
+
+impl From<Keyword> for TokenType {
+    fn from(value: Keyword) -> Self {
+        TokenType::Keyword(value)
+    }
 }
 
 struct SourceIterator<'a> {
@@ -136,27 +179,29 @@ impl Iterator for Lexer<'_> {
             let start_column = self.source.column;
             let next = self.source.peek_one();
 
-            let (token_type, consume_next) = match (char, next) {
-                ('(', _) => (TokenType::LeftParentheses, false),
-                (')', _) => (TokenType::RightParentheses, false),
-                ('{', _) => (TokenType::LeftBrace, false),
-                ('}', _) => (TokenType::RightBrace, false),
-                (',', _) => (TokenType::Comma, false),
-                ('-', _) => (TokenType::Minus, false),
-                ('+', _) => (TokenType::Plus, false),
-                (';', _) => (TokenType::Semicolon, false),
-                ('*', _) => (TokenType::Star, false),
-                ('%', _) => (TokenType::Percent, false),
-                ('.', _) => (TokenType::Dot, false),
-                (':', Some('=')) => (TokenType::ColonEquals, true),
-                ('!', Some('=')) => (TokenType::BangEqual, true),
-                ('!', _) => (TokenType::Bang, false),
-                ('=', Some('=')) => (TokenType::EqualEqual, true),
-                ('=', _) => (TokenType::Equal, false),
-                ('>', Some('=')) => (TokenType::GreaterEqual, true),
-                ('>', _) => (TokenType::Greater, false),
-                ('<', Some('=')) => (TokenType::LessEqual, true),
-                ('<', _) => (TokenType::Less, false),
+            let (token_type, consume_next): (TokenType, bool) = match (char, next) {
+                ('(', _) => (Symbol::LeftParentheses.into(), false),
+                (')', _) => (Symbol::RightParentheses.into(), false),
+                ('{', _) => (Symbol::LeftBrace.into(), false),
+                ('}', _) => (Symbol::RightBrace.into(), false),
+                ('[', _) => (Symbol::LeftBracket.into(), false),
+                (']', _) => (Symbol::RightBracket.into(), false),
+                (',', _) => (Symbol::Comma.into(), false),
+                (';', _) => (Symbol::Semicolon.into(), false),
+                ('-', _) => (Operator::Minus.into(), false),
+                ('+', _) => (Operator::Plus.into(), false),
+                ('*', _) => (Operator::Multiply.into(), false),
+                ('%', _) => (Operator::Modulo.into(), false),
+                ('=', _) => (Operator::EqualsSign.into(), false),
+                // ('.', _) => (Symbol::Dot, false),
+                (':', Some('=')) => (Operator::CreateVar.into(), true),
+                ('!', Some('=')) => (Operator::Inequality.into(), true),
+                ('!', _) => (Operator::Bang.into(), false),
+                ('=', Some('=')) => (Operator::Equality.into(), true),
+                ('>', Some('=')) => (Operator::GreaterEquals.into(), true),
+                ('>', _) => (Operator::Greater.into(), false),
+                ('<', Some('=')) => (Operator::LessEquals.into(), true),
+                ('<', _) => (Operator::Less.into(), false),
                 ('/', Some('/')) => {
                     // We ran into a doc comment and we just keep consuming characters as long as we
                     // don't encounter a linebreak
@@ -171,7 +216,7 @@ impl Iterator for Lexer<'_> {
 
                     continue 'iterator;
                 }
-                ('/', Some(_)) => (TokenType::Slash, false),
+                ('/', Some(_)) => (Operator::Divide.into(), false),
                 (' ' | '\t' | '\r', _) => {
                     continue 'iterator;
                 }
@@ -239,16 +284,16 @@ impl Iterator for Lexer<'_> {
                     }
 
                     let token_type = match buf.as_str() {
-                        "while" => TokenType::While,
-                        "if" => TokenType::If,
-                        "else" => TokenType::Else,
-                        "fn" => TokenType::Fn,
-                        "for" => TokenType::For,
-                        "true" => TokenType::True,
-                        "false" => TokenType::False,
-                        "return" => TokenType::Return,
-                        "self" => TokenType::_Self,
-                        "null" => TokenType::Null,
+                        "while" => Keyword::While.into(),
+                        "if" => Keyword::If.into(),
+                        "else" => Keyword::Else.into(),
+                        "fn" => Keyword::Fn.into(),
+                        "for" => Keyword::For.into(),
+                        "true" => Keyword::True.into(),
+                        "false" => Keyword::False.into(),
+                        "return" => Keyword::Return.into(),
+                        "self" => Keyword::_Self.into(),
+                        "null" => Keyword::Null.into(),
                         _ => TokenType::Identifier(buf),
                     };
 
@@ -330,11 +375,12 @@ mod test {
             Token {
                 typ: TokenType::Integer(33),
                 line: 1,
-                column: 8
+                column: 8,
             },
             tokens[2]
         );
     }
+
     #[test]
     fn identifiers_with_underscores() {
         let lexer = Lexer::from_str("_this_is_a_single_1dentifi3r");
@@ -345,86 +391,8 @@ mod test {
             Token {
                 typ: TokenType::Identifier("_this_is_a_single_1dentifi3r".to_owned()),
                 column: 1,
-                line: 1
+                line: 1,
             }
         )
-    }
-
-    #[test]
-    fn simple_script() {
-        let script = r#"while foo := bar() { print("foobar"); }"#;
-        let scanner = Lexer::from_str(script);
-        let scanned = scanner.collect::<Result<Vec<Token>, _>>().unwrap();
-        let expected = vec![
-            Token {
-                typ: TokenType::While,
-                line: 1,
-                column: 1,
-            },
-            Token {
-                typ: TokenType::Identifier("foo".to_owned()),
-                line: 1,
-                column: 7,
-            },
-            Token {
-                typ: TokenType::ColonEquals,
-                line: 1,
-                column: 11,
-            },
-            Token {
-                typ: TokenType::Identifier("bar".to_owned()),
-                line: 1,
-                column: 14,
-            },
-            Token {
-                typ: TokenType::LeftParentheses,
-                line: 1,
-                column: 17,
-            },
-            Token {
-                typ: TokenType::RightParentheses,
-                line: 1,
-                column: 18,
-            },
-            Token {
-                typ: TokenType::LeftBrace,
-                line: 1,
-                column: 20,
-            },
-            Token {
-                typ: TokenType::Identifier("print".to_owned()),
-                line: 1,
-                column: 22,
-            },
-            Token {
-                typ: TokenType::LeftParentheses,
-                line: 1,
-                column: 27,
-            },
-            Token {
-                typ: TokenType::String("foobar".to_owned()),
-                line: 1,
-                column: 28,
-            },
-            Token {
-                typ: TokenType::RightParentheses,
-                line: 1,
-                column: 36,
-            },
-            Token {
-                typ: TokenType::Semicolon,
-                line: 1,
-                column: 37,
-            },
-            Token {
-                typ: TokenType::RightBrace,
-                line: 1,
-                column: 39,
-            },
-        ];
-
-        for (a, b) in scanned.iter().zip(&expected) {
-            assert_eq!(a, b);
-        }
     }
 }

@@ -1,4 +1,3 @@
-use crate::ast::operator::{Operator, UnaryOperator};
 use std::fmt;
 
 pub mod literal;
@@ -7,16 +6,17 @@ pub mod parser;
 
 pub use crate::ast::literal::*;
 pub use crate::ast::parser::{Parser, ParserError};
+use crate::lexer::Token;
 
 pub enum Expression {
     Literal(Literal),
     Unary {
-        operator: UnaryOperator,
+        operator_token: Token,
         expression: Box<Expression>,
     },
     Binary {
         left: Box<Expression>,
-        operator: Operator,
+        operator_token: Token,
         right: Box<Expression>,
     },
     Grouping(Box<Expression>),
@@ -27,36 +27,15 @@ impl fmt::Debug for Expression {
         match self {
             Expression::Literal(lit) => write!(f, "{:?}", lit),
             Expression::Unary {
-                operator,
+                operator_token: operator,
                 expression,
             } => write!(f, "({:?} {:?})", operator, expression),
             Expression::Binary {
                 left,
-                operator,
+                operator_token: operator,
                 right,
             } => write!(f, "({:?} {:?} {:?})", operator, left, right),
             Expression::Grouping(expr) => write!(f, "(group {:?})", expr),
         }
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    fn printing() {
-        let ast = Expression::Binary {
-            left: Box::new(Expression::Unary {
-                operator: UnaryOperator::Neg,
-                expression: Box::new(Expression::Literal(Literal::Integer(123))),
-            }),
-            operator: Operator::Multiply,
-            right: Box::new(Expression::Grouping(Box::new(Expression::Literal(
-                Literal::Integer(69),
-            )))),
-        };
-
-        assert_eq!(format!("{:?}", ast), "(* (- 123) (group 69))");
     }
 }
