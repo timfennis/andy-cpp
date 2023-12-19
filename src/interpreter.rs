@@ -1,6 +1,6 @@
 use crate::ast::operator::Operator;
-use crate::ast::{Expression, Literal, ParserError};
-use crate::lexer::{Token, TokenType};
+use crate::ast::{Expression, Literal};
+use crate::lexer::{Token};
 use std::cmp::Ordering;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -122,7 +122,7 @@ fn apply_operator(
             }
         }
 
-        (a, op, b) => {
+        (a, _op, b) => {
             return Err(EvaluationError::InvalidOperator {
                 operator_token: operator_token.clone(),
                 type_a: a,
@@ -166,7 +166,7 @@ impl Display for EvaluationError {
             } => write!(
                 f,
                 "unable to apply the '{}' operator to {} and {} on line {} column {}",
-                op.typ, type_a, type_b, op.line, op.column
+                op.typ, type_a.type_name(), type_b.type_name(), op.line, op.column
             ),
         }
     }

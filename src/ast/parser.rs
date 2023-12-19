@@ -172,7 +172,6 @@ pub enum ParserError {
     MissingExpectedToken { typ: TokenType, token: Token },
     UnexpectedEndOfStream,
     ExpectedExpression { token: Token },
-    OperatorExpected { got: Token },
 }
 
 impl Error for ParserError {}
@@ -191,12 +190,6 @@ impl fmt::Display for ParserError {
                 f,
                 "Unexpected token '{:?}' expected expression on line {} column {}",
                 token.typ, token.line, token.column
-            ),
-            //TODO: this is now a member of ParserError but the error occurs during evaluation, is this a problem
-            ParserError::OperatorExpected { got } => write!(
-                f,
-                "unexpected token '{:?}', expected operator on line {} column {}",
-                got.typ, got.line, got.column
             ),
         }
     }
