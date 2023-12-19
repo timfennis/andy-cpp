@@ -3,32 +3,9 @@ use std::collections::VecDeque;
 use std::fmt::{Display, Formatter};
 use std::str::Chars;
 
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub enum TokenType {
-    Operator(Operator),
-    Symbol(Symbol),
+mod token;
+pub use token::{TokenType, Token};
 
-    Identifier(String),
-    // Literal
-    String(String),
-    Integer(i64),
-
-    // Keywords
-    Keyword(Keyword),
-}
-
-impl Display for TokenType {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            TokenType::Operator(op) => write!(f, "{}", op),
-            TokenType::Symbol(s) => write!(f, "{}", s),
-            TokenType::Identifier(i) => write!(f, "{}", i),
-            TokenType::String(s) => write!(f, "\"{}\"", s),
-            TokenType::Integer(i) => write!(f, "{}", i),
-            TokenType::Keyword(k) => write!(f, "{}", k),
-        }
-    }
-}
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Symbol {
@@ -54,12 +31,6 @@ impl Display for Symbol {
             Symbol::Semicolon => write!(f, ";"),
             Symbol::Comma => write!(f, ","),
         }
-    }
-}
-
-impl From<Symbol> for TokenType {
-    fn from(value: Symbol) -> Self {
-        Self::Symbol(value)
     }
 }
 
@@ -91,12 +62,6 @@ impl Display for Keyword {
             Keyword::_Self => write!(f, "self"),
             Keyword::Null => write!(f, "null"),
         }
-    }
-}
-
-impl From<Keyword> for TokenType {
-    fn from(value: Keyword) -> Self {
-        TokenType::Keyword(value)
     }
 }
 
@@ -147,13 +112,6 @@ impl<'a> SourceIterator<'a> {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub struct Token {
-    pub typ: TokenType,
-    pub line: usize,
-    pub column: usize,
-}
-
 pub struct Lexer<'a> {
     source: SourceIterator<'a>,
 }
@@ -191,7 +149,9 @@ impl Iterator for Lexer<'_> {
                 ('-', _) => (Operator::Minus.into(), false),
                 ('+', _) => (Operator::Plus.into(), false),
                 ('*', _) => (Operator::Multiply.into(), false),
-                ('%', _) => (Operator::Modulo.into(), false),
+                ('^', _) => (Operator::Exponent.into(), false),
+                ('%', Some('%')) => (Operator::EuclideanModulo.into(), true),
+                ('%', _) => (Operator::CModulo.into(), false),
                 // ('.', _) => (Symbol::Dot, false),
                 (':', Some('=')) => (Operator::CreateVar.into(), true),
                 ('!', Some('=')) => (Operator::Inequality.into(), true),
@@ -356,7 +316,8 @@ impl Display for LexerError {
 
 #[cfg(test)]
 mod test {
-    use crate::lexer::{Lexer, Token, TokenType};
+    use crate::lexer::Lexer;
+    use crate::lexer::token::{Token, TokenType};
 
     #[test]
     fn load_file_with_loads_of_tokens() {

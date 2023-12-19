@@ -1,9 +1,10 @@
 use crate::ast::operator::Operator;
 use crate::ast::{Expression, Literal};
-use crate::lexer::{Keyword, Symbol, Token, TokenType};
+use crate::lexer::{Keyword, Symbol};
 use std::error::Error;
 use std::fmt;
 use std::fmt::Formatter;
+use crate::lexer::{Token, TokenType};
 
 pub struct Parser {
     tokens: Vec<Token>,
@@ -98,8 +99,15 @@ impl Parser {
 
     fn factor(&mut self) -> Result<Expression, ParserError> {
         self.consume_binary_expression_left_associative(
+            Self::exponent,
+            &[Operator::Divide, Operator::Multiply, Operator::CModulo, Operator::EuclideanModulo],
+        )
+    }
+
+    fn exponent(&mut self) -> Result<Expression, ParserError> {
+        self.consume_binary_expression_left_associative(
             Self::unary,
-            &[Operator::Divide, Operator::Multiply, Operator::Modulo],
+            &[Operator::Exponent],
         )
     }
 

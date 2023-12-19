@@ -1,6 +1,6 @@
-use crate::interpreter::EvaluationError;
-use crate::lexer::{Token, TokenType};
+use crate::interpreter::{EvaluationError};
 use std::fmt;
+use crate::lexer::{Token, TokenType};
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub enum Operator {
@@ -20,7 +20,9 @@ pub enum Operator {
     Minus,
     Multiply,
     Divide,
-    Modulo,
+    CModulo,
+    EuclideanModulo,
+    Exponent,
     // Unary
     Bang,
 }
@@ -61,10 +63,12 @@ impl fmt::Display for Operator {
                 Operator::GreaterEquals => ">=",
                 Operator::Less => "<",
                 Operator::LessEquals => "<=",
-                Operator::Modulo => "%",
+                Operator::CModulo => "%",
+                Operator::EuclideanModulo => "%%",
                 Operator::CreateVar => ":=",
                 Operator::EqualsSign => "=",
                 Operator::Bang => "!",
+                Operator::Exponent => "^"
             }
         )
     }

@@ -7,7 +7,7 @@ mod repl;
 
 use crate::ast::parser::ParserError;
 use crate::interpreter::{Evaluate, EvaluationError};
-use crate::lexer::{Lexer, LexerError, Token};
+use crate::lexer::{Lexer, LexerError};
 use clap::Parser;
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
@@ -15,6 +15,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
 use std::process::exit;
+use lexer::Token;
 
 #[derive(Parser)]
 #[command(name = "Andy C++")]
@@ -54,9 +55,9 @@ fn main() -> anyhow::Result<()> {
 
 #[derive(Debug)]
 enum InterpreterError {
-    LexerError { cause: LexerError },
-    ParserError { cause: ParserError },
-    EvaluationError { cause: EvaluationError },
+    Lexer { cause: LexerError },
+    Parser { cause: ParserError },
+    Evaluation { cause: EvaluationError },
 }
 
 fn run(input: &str, debug: bool) -> Result<String, InterpreterError> {
@@ -81,28 +82,28 @@ fn run(input: &str, debug: bool) -> Result<String, InterpreterError> {
 
 impl From<LexerError> for InterpreterError {
     fn from(value: LexerError) -> Self {
-        InterpreterError::LexerError { cause: value }
+        InterpreterError::Lexer { cause: value }
     }
 }
 
 impl From<ParserError> for InterpreterError {
     fn from(value: ParserError) -> Self {
-        InterpreterError::ParserError { cause: value }
+        InterpreterError::Parser { cause: value }
     }
 }
 
 impl From<EvaluationError> for InterpreterError {
     fn from(value: EvaluationError) -> Self {
-        InterpreterError::EvaluationError { cause: value }
+        InterpreterError::Evaluation { cause: value }
     }
 }
 
 impl Display for InterpreterError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            InterpreterError::LexerError { cause } => write!(f, "Lexer error: {cause}"),
-            InterpreterError::ParserError { cause } => write!(f, "Parser error: {cause}"),
-            InterpreterError::EvaluationError { cause } => write!(f, "Evaluation error: {cause}"),
+            InterpreterError::Lexer { cause } => write!(f, "Lexer error: {cause}"),
+            InterpreterError::Parser { cause } => write!(f, "Parser error: {cause}"),
+            InterpreterError::Evaluation { cause } => write!(f, "Evaluation error: {cause}"),
         }
     }
 }
