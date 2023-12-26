@@ -1,10 +1,12 @@
 use crate::ast::operator::Operator;
-use crate::ast::{Expression, Literal};
-use crate::lexer::{Keyword, Symbol};
+use crate::ast::literal::Literal;
+use crate::lexer::Keyword;
 use std::error::Error;
 use std::fmt;
 use std::fmt::Formatter;
+use crate::ast::expression::Expression;
 use crate::lexer::{Token, TokenType};
+use crate::lexer::Symbol;
 
 pub struct Parser {
     tokens: Vec<Token>,

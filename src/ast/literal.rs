@@ -52,3 +52,9 @@ impl From<i64> for Literal {
         Literal::Integer(value)
     }
 }
+
+impl From<String> for Literal {
+    fn from(value: String) -> Self {
+        Literal::String(value)
+    }
+}

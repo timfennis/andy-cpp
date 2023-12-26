@@ -1,6 +1,7 @@
 use std::fmt::{Display, Formatter};
-use crate::ast::operator::Operator;
-use crate::lexer::{Keyword, Symbol};
+use crate::ast::Operator;
+use crate::lexer::keyword::Keyword;
+use crate::lexer::symbol::Symbol;
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct Token {

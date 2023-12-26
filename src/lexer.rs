@@ -1,116 +1,15 @@
-use crate::ast::operator::Operator;
+use crate::ast::Operator;
 use std::collections::VecDeque;
 use std::fmt::{Display, Formatter};
 use std::str::Chars;
 
 mod token;
-pub use token::{TokenType, Token};
+mod symbol;
+mod keyword;
 
-
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub enum Symbol {
-    LeftParentheses,
-    RightParentheses,
-    LeftBracket,
-    RightBracket,
-    LeftBrace,
-    RightBrace,
-    Semicolon,
-    Comma,
-}
-
-impl Display for Symbol {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Symbol::LeftParentheses => write!(f, "("),
-            Symbol::RightParentheses => write!(f, ")"),
-            Symbol::LeftBracket => write!(f, "["),
-            Symbol::RightBracket => write!(f, "]"),
-            Symbol::LeftBrace => write!(f, "{{"),
-            Symbol::RightBrace => write!(f, "}}"),
-            Symbol::Semicolon => write!(f, ";"),
-            Symbol::Comma => write!(f, ","),
-        }
-    }
-}
-
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub enum Keyword {
-    Fn,
-    If,
-    Else,
-    Return,
-    For,
-    While,
-    True,
-    False,
-    _Self,
-    Null,
-}
-
-impl Display for Keyword {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Keyword::Fn => write!(f, "fn"),
-            Keyword::If => write!(f, "if"),
-            Keyword::Else => write!(f, "else"),
-            Keyword::Return => write!(f, "return"),
-            Keyword::For => write!(f, "for"),
-            Keyword::While => write!(f, "while"),
-            Keyword::True => write!(f, "true"),
-            Keyword::False => write!(f, "false"),
-            Keyword::_Self => write!(f, "self"),
-            Keyword::Null => write!(f, "null"),
-        }
-    }
-}
-
-struct SourceIterator<'a> {
-    inner: Chars<'a>,
-    buffer: VecDeque<char>,
-    line: usize,
-    column: usize,
-}
-
-impl<'a> Iterator for SourceIterator<'a> {
-    type Item = char;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let next = match self.buffer.pop_front() {
-            Some(ch) => Some(ch),
-            _ => self.inner.next(),
-        };
-
-        match next {
-            Some('\n') => {
-                self.line += 1;
-                self.column = 0;
-            }
-            Some(_) => {
-                self.column += 1;
-            }
-            None => {}
-        }
-
-        next
-    }
-}
-
-impl<'a> SourceIterator<'a> {
-    pub fn peek_next(&mut self) -> Option<char> {
-        let next = self.inner.next()?;
-        self.buffer.push_back(next);
-        Some(next)
-    }
-
-    pub fn peek_one(&mut self) -> Option<char> {
-        return if let Some(head) = self.buffer.get(0) {
-            Some(*head)
-        } else {
-            self.peek_next()
-        };
-    }
-}
+pub use token::{Token, TokenType};
+pub use symbol::Symbol;
+pub use keyword::Keyword;
 
 pub struct Lexer<'a> {
     source: SourceIterator<'a>,
@@ -283,6 +182,53 @@ impl Iterator for Lexer<'_> {
         None
     }
 }
+struct SourceIterator<'a> {
+    inner: Chars<'a>,
+    buffer: VecDeque<char>,
+    line: usize,
+    column: usize,
+}
+
+impl<'a> Iterator for SourceIterator<'a> {
+    type Item = char;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let next = match self.buffer.pop_front() {
+            Some(ch) => Some(ch),
+            _ => self.inner.next(),
+        };
+
+        match next {
+            Some('\n') => {
+                self.line += 1;
+                self.column = 0;
+            }
+            Some(_) => {
+                self.column += 1;
+            }
+            None => {}
+        }
+
+        next
+    }
+}
+
+impl<'a> SourceIterator<'a> {
+    pub fn peek_next(&mut self) -> Option<char> {
+        let next = self.inner.next()?;
+        self.buffer.push_back(next);
+        Some(next)
+    }
+
+    pub fn peek_one(&mut self) -> Option<char> {
+        return if let Some(head) = self.buffer.get(0) {
+            Some(*head)
+        } else {
+            self.peek_next()
+        };
+    }
+}
+
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum LexerError {

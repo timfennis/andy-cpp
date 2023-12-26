@@ -5,7 +5,7 @@ mod lexer;
 #[cfg(feature = "repl")]
 mod repl;
 
-use crate::ast::parser::ParserError;
+use crate::ast::ParserError;
 use crate::interpreter::{Evaluate, EvaluationError};
 use crate::lexer::{Lexer, LexerError};
 use clap::Parser;

@@ -1,10 +1,11 @@
-use crate::ast::operator::Operator;
-use crate::ast::{Expression, Literal};
+use crate::ast::Operator;
+use crate::ast::Literal;
 use std::cmp::Ordering;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::num::TryFromIntError;
 use std::ops::Neg;
+use crate::ast::Expression;
 use crate::lexer::Token;
 
 pub trait Evaluate {
