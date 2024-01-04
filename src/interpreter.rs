@@ -1,12 +1,12 @@
-use crate::ast::Operator;
+use crate::ast::Expression;
 use crate::ast::Literal;
+use crate::ast::{Operator, Statement};
+use crate::lexer::Token;
 use std::cmp::Ordering;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::num::TryFromIntError;
 use std::ops::Neg;
-use crate::ast::Expression;
-use crate::lexer::Token;
 
 pub trait Evaluate {
     fn evaluate(&self) -> Result<Literal, EvaluationError>;
@@ -55,14 +55,30 @@ impl Evaluate for Expression {
     }
 }
 
+impl Evaluate for Statement {
+    fn evaluate(&self) -> Result<Literal, EvaluationError> {
+        match self {
+            Statement::Print(expr) => {
+                println!("{}", expr.evaluate()?);
+                Ok(Literal::Unit)
+            }
+            Statement::Expression(expr) => Ok(expr.evaluate()?),
+        }
+    }
+}
+
 fn apply_operator(
     left: Literal,
     operator_token: &Token,
     right: Literal,
 ) -> Result<Literal, EvaluationError> {
     // Some temporary functions to make errors
-    let mk_int_overflow = || EvaluationError::IntegerOverflow { operator_token: operator_token.clone() };
-    let mk_div_zero = || EvaluationError::DivisionByZero { operator_token: operator_token.clone() };
+    let mk_int_overflow = || EvaluationError::IntegerOverflow {
+        operator_token: operator_token.clone(),
+    };
+    let mk_div_zero = || EvaluationError::DivisionByZero {
+        operator_token: operator_token.clone(),
+    };
 
     let operator: Operator = operator_token.try_into()?;
     let literal = match (left, operator, right) {
@@ -83,11 +99,9 @@ fn apply_operator(
             Operator::EuclideanModulo => a.checked_rem_euclid(b).ok_or_else(mk_div_zero)?.into(),
             //TODO: better error handling when casting to u32
             Operator::Exponent => {
-                let exponent  = u32::try_from(b)?;
-                a.checked_pow(exponent)
-                    .ok_or_else(mk_int_overflow)?
-                    .into()
-            },
+                let exponent = u32::try_from(b)?;
+                a.checked_pow(exponent).ok_or_else(mk_int_overflow)?.into()
+            }
             _ => {
                 return Err(EvaluationError::InvalidOperator {
                     operator_token: operator_token.clone(),
@@ -187,10 +201,22 @@ impl Display for EvaluationError {
             } => write!(
                 f,
                 "unable to apply the '{}' operator to {} and {} on line {} column {}",
-                op.typ, type_a.type_name(), type_b.type_name(), op.line, op.column
+                op.typ,
+                type_a.type_name(),
+                type_b.type_name(),
+                op.line,
+                op.column
             ),
-            EvaluationError::IntegerOverflow { operator_token } => write!(f, "integer overflow while applying the '{}' operator on line {} column {}", operator_token.typ, operator_token.line, operator_token.column),
-            EvaluationError::DivisionByZero { operator_token } => write!(f, "division by zero when applying '{}' on line {} column {}", operator_token.typ, operator_token.line, operator_token.column)
+            EvaluationError::IntegerOverflow { operator_token } => write!(
+                f,
+                "integer overflow while applying the '{}' operator on line {} column {}",
+                operator_token.typ, operator_token.line, operator_token.column
+            ),
+            EvaluationError::DivisionByZero { operator_token } => write!(
+                f,
+                "division by zero when applying '{}' on line {} column {}",
+                operator_token.typ, operator_token.line, operator_token.column
+            ),
         }
     }
 }

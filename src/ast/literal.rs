@@ -4,6 +4,7 @@ use std::fmt;
 pub enum Literal {
     Integer(i64),
     String(String),
+    Unit,
     True,
     False,
     Null,
@@ -16,6 +17,7 @@ impl Literal {
             Literal::String(_) => "string",
             Literal::True | Literal::False => "bool",
             Literal::Null => "null",
+            Literal::Unit => "unit",
         }
     }
 }
@@ -34,6 +36,7 @@ impl fmt::Display for Literal {
             Literal::True => write!(f, "true"),
             Literal::False => write!(f, "false"),
             Literal::Null => write!(f, "nil"),
+            Literal::Unit => write!(f, "()"),
         }
     }
 }

@@ -1,6 +1,6 @@
-use std::fmt;
 use crate::ast::literal::Literal;
 use crate::lexer::Token;
+use std::fmt;
 
 pub enum Expression {
     Literal(Literal),

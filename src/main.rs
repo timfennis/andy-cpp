@@ -5,17 +5,17 @@ mod lexer;
 #[cfg(feature = "repl")]
 mod repl;
 
-use crate::ast::ParserError;
+use crate::ast::{Literal, ParserError};
 use crate::interpreter::{Evaluate, EvaluationError};
 use crate::lexer::{Lexer, LexerError};
 use clap::Parser;
+use lexer::Token;
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
 use std::process::exit;
-use lexer::Token;
 
 #[derive(Parser)]
 #[command(name = "Andy C++")]
@@ -71,13 +71,13 @@ fn run(input: &str, debug: bool) -> Result<String, InterpreterError> {
     }
 
     let mut parser = ast::Parser::from_tokens(tokens);
-    let expression = parser.parse()?;
 
-    if debug {
-        println!("Expression: {:?}", expression);
-        println!("Result: {:?}", expression.evaluate());
+    let mut value = None;
+    for statement in parser.parse()? {
+        value = Some(statement.evaluate()?);
     }
-    Ok(format!("{}", expression.evaluate()?))
+
+    Ok(format!("{}", value.unwrap_or(Literal::Unit)))
 }
 
 impl From<LexerError> for InterpreterError {

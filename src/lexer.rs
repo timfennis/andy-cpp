@@ -3,13 +3,13 @@ use std::collections::VecDeque;
 use std::fmt::{Display, Formatter};
 use std::str::Chars;
 
-mod token;
-mod symbol;
 mod keyword;
+mod symbol;
+mod token;
 
-pub use token::{Token, TokenType};
-pub use symbol::Symbol;
 pub use keyword::Keyword;
+pub use symbol::Symbol;
+pub use token::{Token, TokenType};
 
 pub struct Lexer<'a> {
     source: SourceIterator<'a>,
@@ -221,14 +221,13 @@ impl<'a> SourceIterator<'a> {
     }
 
     pub fn peek_one(&mut self) -> Option<char> {
-        return if let Some(head) = self.buffer.get(0) {
+        return if let Some(head) = self.buffer.front() {
             Some(*head)
         } else {
             self.peek_next()
         };
     }
 }
-
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum LexerError {
@@ -262,8 +261,8 @@ impl Display for LexerError {
 
 #[cfg(test)]
 mod test {
-    use crate::lexer::Lexer;
     use crate::lexer::token::{Token, TokenType};
+    use crate::lexer::Lexer;
 
     #[test]
     fn load_file_with_loads_of_tokens() {

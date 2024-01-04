@@ -1,6 +1,6 @@
-use crate::interpreter::{EvaluationError};
-use std::fmt;
+use crate::interpreter::EvaluationError;
 use crate::lexer::{Token, TokenType};
+use std::fmt;
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub enum Operator {
@@ -68,7 +68,7 @@ impl fmt::Display for Operator {
                 Operator::CreateVar => ":=",
                 Operator::EqualsSign => "=",
                 Operator::Bang => "!",
-                Operator::Exponent => "^"
+                Operator::Exponent => "^",
             }
         )
     }
