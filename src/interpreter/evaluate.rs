@@ -119,6 +119,10 @@ pub enum EvaluationError {
     DivisionByZero {
         operator_token: Token,
     },
+    UndefinedVariable {
+        token: Token,
+    },
+    InvalidToken,
 }
 
 impl Display for EvaluationError {
@@ -154,6 +158,14 @@ impl Display for EvaluationError {
                 "division by zero when applying '{}' on line {} column {}",
                 operator_token.typ, operator_token.line, operator_token.column
             ),
+            EvaluationError::UndefinedVariable { token } => write!(
+                f,
+                "variable {} is undefined on line {} column {}",
+                token.typ, token.line, token.column
+            ),
+            EvaluationError::InvalidToken => {
+                write!(f, "A token was of an unexpected kind during evaluation")
+            }
         }
     }
 }

@@ -11,6 +11,16 @@ impl Environment {
         self.values.insert(name.into(), value);
     }
 
+    //TODO: maybe take an owned String for name here
+    pub fn assign(&mut self, name: &str, value: Literal) -> bool {
+        if !self.values.contains_key(name) {
+            return false;
+        }
+        self.values.insert(name.into(), value);
+
+        true
+    }
+
     pub fn get(&self, name: &str) -> Option<&Literal> {
         self.values.get(name)
     }

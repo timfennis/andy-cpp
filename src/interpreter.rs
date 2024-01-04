@@ -3,8 +3,11 @@ mod evaluate;
 
 use crate::ast::{Expression, Literal, Operator, Statement};
 use crate::interpreter::environment::Environment;
+use crate::lexer::{Lexer, Token};
+use crate::{ast, InterpreterError};
 pub use evaluate::EvaluationError;
 use std::ops::Neg;
+use std::process::id;
 
 #[derive(Default)]
 pub struct Interpreter {
@@ -12,10 +15,23 @@ pub struct Interpreter {
 }
 
 impl Interpreter {
-    pub fn new() -> Self {
-        Default::default()
-    }
+    pub fn run_str(&mut self, input: &str, debug: bool) -> Result<String, InterpreterError> {
+        let scanner = Lexer::from_str(input);
+        let tokens = scanner.collect::<Result<Vec<Token>, _>>()?;
 
+        if debug {
+            for token in &tokens {
+                eprintln!("{:?}", token);
+            }
+        }
+
+        let mut parser = ast::Parser::from_tokens(tokens);
+        let statements = parser.parse()?;
+
+        let final_value = self.interpret(statements.into_iter())?;
+
+        Ok(format!("{}", final_value))
+    }
     pub fn interpret(
         &mut self,
         statements: impl Iterator<Item = Statement>,
@@ -24,13 +40,13 @@ impl Interpreter {
         let mut value = Literal::Unit;
 
         for statement in statements {
-            value = self.evaluate(statement)?;
+            value = self.evaluate_statement(statement)?;
         }
 
         Ok(value)
     }
 
-    fn evaluate(&mut self, statement: Statement) -> Result<Literal, EvaluationError> {
+    fn evaluate_statement(&mut self, statement: Statement) -> Result<Literal, EvaluationError> {
         match statement {
             Statement::Print(expr) => {
                 println!("{}", self.evaluate_expression(expr)?);
@@ -40,7 +56,18 @@ impl Interpreter {
             Statement::VariableDeclaration { identifier, expr } => {
                 let value = self.evaluate_expression(expr)?;
                 // TODO: declarations evaluating to their RHS means we have to clone here, is that worth it?
-                self.environment.declare(&identifier, value.clone());
+                let identifier_str = identifier.identifier_or(EvaluationError::InvalidToken)?;
+                self.environment.declare(identifier_str, value.clone());
+                Ok(value)
+            }
+            Statement::VariableAssignment { identifier, expr } => {
+                let value = self.evaluate_expression(expr)?;
+                let identifier_str = identifier.identifier_or(EvaluationError::InvalidToken)?;
+
+                if !self.environment.assign(identifier_str, value.clone()) {
+                    return Err(EvaluationError::UndefinedVariable { token: identifier });
+                }
+
                 Ok(value)
             }
         }
@@ -81,12 +108,12 @@ impl Interpreter {
                 evaluate::apply_operator(left, &operator_token, right)?
             }
             Expression::Grouping(expr) => self.evaluate_expression(*expr)?,
-            // TODO: big FIXME, figure out if we can somehow return a reference instead of having to clone here
-            //       does returning a reference make sense though since we're interested in the result at this point?
-            Expression::Variable(name) => self
+            Expression::Variable { token } => self
                 .environment
-                .get(&name)
-                .expect("TODO: handle error, undeclared variable")
+                .get(token.identifier_or(EvaluationError::InvalidToken).unwrap())
+                .ok_or(EvaluationError::UndefinedVariable { token })?
+                // TODO: big FIXME, figure out if we can somehow return a reference instead of having to clone here
+                //       does returning a reference make sense though since we're interested in the result at this point?
                 .clone(),
         };
 

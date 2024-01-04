@@ -24,7 +24,14 @@ impl Literal {
 
 impl fmt::Debug for Literal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        write!(f, "Literal({})", self)
+        match self {
+            Literal::Integer(n) => write!(f, "{n}"),
+            Literal::String(val) => write!(f, "\"{val}\""),
+            Literal::True => write!(f, "true"),
+            Literal::False => write!(f, "false"),
+            Literal::Null => write!(f, "null"),
+            Literal::Unit => write!(f, "()"),
+        }
     }
 }
 
@@ -32,11 +39,11 @@ impl fmt::Display for Literal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match self {
             Literal::Integer(n) => write!(f, "{n}"),
-            Literal::String(val) => write!(f, "\"{val}\""),
+            Literal::String(val) => write!(f, "{val}"),
             Literal::True => write!(f, "true"),
             Literal::False => write!(f, "false"),
-            Literal::Null => write!(f, "nil"),
-            Literal::Unit => write!(f, "()"),
+            Literal::Null => write!(f, "null"),
+            Literal::Unit => Ok(()),
         }
     }
 }

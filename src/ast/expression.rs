@@ -1,5 +1,5 @@
 use crate::ast::literal::Literal;
-use crate::lexer::Token;
+use crate::lexer::{Token, TokenType};
 use std::fmt;
 
 pub enum Expression {
@@ -14,7 +14,9 @@ pub enum Expression {
         right: Box<Expression>,
     },
     Grouping(Box<Expression>),
-    Variable(String),
+    Variable {
+        token: Token,
+    },
 }
 
 impl fmt::Debug for Expression {
@@ -31,7 +33,11 @@ impl fmt::Debug for Expression {
                 right,
             } => write!(f, "({} {:?} {:?})", operator, left, right),
             Expression::Grouping(expr) => write!(f, "(group {:?})", expr),
-            Expression::Variable(name) => write!(f, "{name}"),
+            Expression::Variable { token } => {
+                //TODO: fmt::Error::default() what does that even do?
+                let identifier = token.identifier_or(fmt::Error::default())?;
+                write!(f, "{identifier}")
+            }
         }
     }
 }

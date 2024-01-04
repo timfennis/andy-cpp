@@ -1,8 +1,8 @@
-use crate::run;
 use rustyline::config::Configurer;
 use rustyline::error::ReadlineError;
 use rustyline::highlight::MatchingBracketHighlighter;
 // use rustyline::validate::{ValidationContext, ValidationResult};
+use crate::interpreter::Interpreter;
 use rustyline::{ColorMode, Completer, Editor, Hinter, Validator};
 use rustyline::{Helper, Highlighter};
 
@@ -38,6 +38,7 @@ pub fn run_repl(debug: bool) -> anyhow::Result<()> {
     rl.set_helper(Some(h));
     // let mut rl = DefaultEditor::with_config(Config::builder().build())?;
 
+    let mut interpreter: Interpreter = Default::default();
     loop {
         match rl.readline("λ ") {
             Ok(line) => {
@@ -45,7 +46,7 @@ pub fn run_repl(debug: bool) -> anyhow::Result<()> {
                 let _ = rl.add_history_entry(line.as_str());
 
                 // Run the line we just read through the interpreter
-                match run(line.as_str(), debug) {
+                match interpreter.run_str(line.as_str(), debug) {
                     Ok(output) => println!("{}", output),
                     Err(err) => eprintln!("{}", err),
                 }

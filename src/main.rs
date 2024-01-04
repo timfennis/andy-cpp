@@ -5,7 +5,7 @@ mod lexer;
 #[cfg(feature = "repl")]
 mod repl;
 
-use crate::ast::{Literal, ParserError};
+use crate::ast::ParserError;
 use crate::interpreter::{EvaluationError, Interpreter};
 use crate::lexer::{Lexer, LexerError};
 use clap::Parser;
@@ -34,7 +34,8 @@ fn main() -> anyhow::Result<()> {
         let mut file = File::open(path)?;
         let mut string = String::new();
         file.read_to_string(&mut string)?;
-        match run(&string, cli.debug) {
+        let mut interpreter: Interpreter = Default::default();
+        match interpreter.run_str(&string, cli.debug) {
             // we can just ignore successful runs because we have print statements
             Ok(_final_value) => {}
             Err(err) => {
@@ -57,25 +58,6 @@ enum InterpreterError {
     Lexer { cause: LexerError },
     Parser { cause: ParserError },
     Evaluation { cause: EvaluationError },
-}
-
-fn run(input: &str, debug: bool) -> Result<String, InterpreterError> {
-    let scanner = Lexer::from_str(input);
-    let tokens = scanner.collect::<Result<Vec<Token>, _>>()?;
-
-    if debug {
-        for token in &tokens {
-            println!("{:?}", token);
-        }
-    }
-
-    let mut parser = ast::Parser::from_tokens(tokens);
-    let statements = parser.parse()?;
-
-    let mut interpreter: Interpreter = Default::default();
-    let final_value = interpreter.interpret(statements.into_iter())?;
-
-    Ok(format!("{}", final_value))
 }
 
 impl From<LexerError> for InterpreterError {

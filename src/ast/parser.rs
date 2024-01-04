@@ -1,7 +1,5 @@
-use crate::ast::expression::Expression;
-use crate::ast::literal::Literal;
 use crate::ast::operator::Operator;
-use crate::ast::Statement;
+use crate::ast::{Expression, Literal, Statement};
 use crate::lexer::Keyword;
 use crate::lexer::Symbol;
 use crate::lexer::{Token, TokenType};
@@ -29,6 +27,11 @@ impl Parser {
 
     fn current_token(&self) -> Option<&Token> {
         self.tokens.get(self.current)
+    }
+
+    /// Returns the token at a given position relative to the current token. token_at(0) is equal to current_token()
+    fn token_at(&self, idx: usize) -> Option<&Token> {
+        self.tokens.get(self.current + idx)
     }
 
     fn previous_token(&self) -> Option<&Token> {
@@ -102,6 +105,18 @@ impl Parser {
         Ok(token)
     }
 
+    fn require_identifier(&mut self) -> Result<Token, ParserError> {
+        match self.require_current_token()? {
+            token @ Token {
+                typ: TokenType::Identifier(_),
+                ..
+            } => Ok(token),
+            token => Err(ParserError::ExpectedIdentifier {
+                actual_token: token,
+            }),
+        }
+    }
+
     fn consume_binary_expression_left_associative(
         &mut self,
         next: fn(&mut Self) -> Result<Expression, ParserError>,
@@ -134,41 +149,19 @@ impl Parser {
     /************************************************* PARSER *************************************************/
 
     fn statement(&mut self) -> Result<Statement, ParserError> {
-        return match self.current_token() {
-            Some(token) if token.typ == TokenType::Identifier(String::from("print")) => {
-                self.advance();
-                self.print_statement()
-            }
-            // For now we can just treat any kind of identifier as the start of a declaration?
-            // TODO: this fails we should check if there is an identifier followed by an assignment operator
-            // Some(Token {
-            //     typ: TokenType::Identifier(_),
-            //     ..
-            // }) => self.variable_declaration(),
-            _ => self.expression_statement(),
-        };
-    }
-
-    // TODO
-    fn variable_declaration(&mut self) -> Result<Statement, ParserError> {
-        let identifier = self.require_current_token()?;
-        let identifier = match identifier.typ {
-            TokenType::Identifier(identifier) => identifier,
-            _ => panic!("we are guaranteed to get an identifier here, but maybe handle this case in the future"),
-        };
-
-        // TODO: possibly temporarily handle this special case here (mostly for the REPL)
-        //       this case is triggered if the entire statement is JUST an identifier with no assignment following it
-        if self.current_token().is_none() {
-            return Ok(Statement::Expression(Expression::Variable(identifier)));
+        // match print statements (which is a temporary construct until we add functions)
+        if matches!(
+            self.current_token(),
+            Some(Token {
+                typ: TokenType::Identifier(ident),
+                ..
+            }) if ident == "print"
+        ) {
+            self.advance();
+            return self.print_statement();
         }
 
-        self.require_current_token_matches(Operator::CreateVar)?;
-
-        let expr = self.expression()?;
-        self.require_semicolon_or_end_of_stream()?;
-
-        Ok(Statement::VariableDeclaration { identifier, expr })
+        self.expression_statement()
     }
 
     fn print_statement(&mut self) -> Result<Statement, ParserError> {
@@ -179,13 +172,62 @@ impl Parser {
     }
 
     fn expression_statement(&mut self) -> Result<Statement, ParserError> {
+        match (self.token_at(0), self.token_at(1)) {
+            // If the current token is an identifier followed by the create var operator we create a new variable
+            (
+                Some(Token {
+                    typ: TokenType::Identifier(_),
+                    ..
+                }),
+                Some(Token {
+                    typ: TokenType::Operator(Operator::CreateVar),
+                    ..
+                }),
+            ) => return self.variable_declaration(),
+            // If the current token is an identifier followed by an equals sign we assign the variable
+            (
+                Some(Token {
+                    typ: TokenType::Identifier(_),
+                    ..
+                }),
+                Some(Token {
+                    typ: TokenType::Operator(Operator::EqualsSign),
+                    ..
+                }),
+            ) => {
+                return self.variable_assignment();
+            }
+            _ => {}
+        }
+
         let expr = self.expression()?;
         self.require_semicolon_or_end_of_stream()?;
 
         Ok(Statement::Expression(expr))
     }
+
     fn expression(&mut self) -> Result<Expression, ParserError> {
         self.equality()
+    }
+
+    fn variable_declaration(&mut self) -> Result<Statement, ParserError> {
+        let identifier = self.require_identifier()?;
+        self.require_current_token_matches(Operator::CreateVar)?;
+
+        let expr = self.expression()?;
+        self.require_semicolon_or_end_of_stream()?;
+
+        Ok(Statement::VariableDeclaration { identifier, expr })
+    }
+
+    fn variable_assignment(&mut self) -> Result<Statement, ParserError> {
+        let identifier = self.require_identifier()?;
+        self.require_current_token_matches(Operator::EqualsSign)?;
+
+        let expr = self.expression()?;
+        self.require_semicolon_or_end_of_stream()?;
+
+        Ok(Statement::VariableAssignment { identifier, expr })
     }
 
     fn equality(&mut self) -> Result<Expression, ParserError> {
@@ -262,9 +304,11 @@ impl Parser {
                 self.require_current_token_matches(Symbol::RightParentheses)?;
                 Expression::Grouping(Box::new(expr))
             }
-            TokenType::Identifier(name) => Expression::Variable(name),
+            TokenType::Identifier(_) => Expression::Variable { token },
             _ => {
-                return Err(ParserError::ExpectedExpression { token });
+                return Err(ParserError::ExpectedExpression {
+                    actual_token: token,
+                });
             }
         };
 
@@ -280,7 +324,10 @@ pub enum ParserError {
     },
     UnexpectedEndOfStream,
     ExpectedExpression {
-        token: Token,
+        actual_token: Token,
+    },
+    ExpectedIdentifier {
+        actual_token: Token,
     },
 }
 
@@ -299,9 +346,18 @@ impl fmt::Display for ParserError {
                 typ, token.line, token.column
             ),
             ParserError::UnexpectedEndOfStream => write!(f, "Unexpected end of stream"),
-            ParserError::ExpectedExpression { token } => write!(
+            ParserError::ExpectedExpression {
+                actual_token: token,
+            } => write!(
                 f,
                 "Unexpected token '{:?}' expected expression on line {} column {}",
+                token.typ, token.line, token.column
+            ),
+            ParserError::ExpectedIdentifier {
+                actual_token: token,
+            } => write!(
+                f,
+                "Unexpected token '{:?}' expected identifier on line {} column {}",
                 token.typ, token.line, token.column
             ),
         }

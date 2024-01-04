@@ -1,6 +1,7 @@
 use crate::ast::Operator;
 use crate::lexer::keyword::Keyword;
 use crate::lexer::symbol::Symbol;
+use std::error::Error;
 use std::fmt::{Display, Formatter};
 
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -8,6 +9,18 @@ pub struct Token {
     pub typ: TokenType,
     pub line: usize,
     pub column: usize,
+}
+
+impl Token {
+    pub fn identifier_or<E: Error>(&self, err: E) -> Result<&str, E> {
+        match self {
+            Token {
+                typ: TokenType::Identifier(identifier),
+                ..
+            } => Ok(identifier),
+            _ => Err(err),
+        }
+    }
 }
 
 impl Display for Token {
