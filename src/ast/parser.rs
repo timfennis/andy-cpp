@@ -69,6 +69,8 @@ impl Parser {
             }
         }
     }
+    /// Requires that the current token matches a type, if it doesn't an error is thrown.
+    /// If the token does match the expected type we advance the iterator
     fn require_current_token_matches(
         &mut self,
         typ: impl Into<TokenType>,
@@ -137,8 +139,36 @@ impl Parser {
                 self.advance();
                 self.print_statement()
             }
+            // For now we can just treat any kind of identifier as the start of a declaration?
+            // TODO: this fails we should check if there is an identifier followed by an assignment operator
+            // Some(Token {
+            //     typ: TokenType::Identifier(_),
+            //     ..
+            // }) => self.variable_declaration(),
             _ => self.expression_statement(),
         };
+    }
+
+    // TODO
+    fn variable_declaration(&mut self) -> Result<Statement, ParserError> {
+        let identifier = self.require_current_token()?;
+        let identifier = match identifier.typ {
+            TokenType::Identifier(identifier) => identifier,
+            _ => panic!("we are guaranteed to get an identifier here, but maybe handle this case in the future"),
+        };
+
+        // TODO: possibly temporarily handle this special case here (mostly for the REPL)
+        //       this case is triggered if the entire statement is JUST an identifier with no assignment following it
+        if self.current_token().is_none() {
+            return Ok(Statement::Expression(Expression::Variable(identifier)));
+        }
+
+        self.require_current_token_matches(Operator::CreateVar)?;
+
+        let expr = self.expression()?;
+        self.require_semicolon_or_end_of_stream()?;
+
+        Ok(Statement::VariableDeclaration { identifier, expr })
     }
 
     fn print_statement(&mut self) -> Result<Statement, ParserError> {
@@ -221,17 +251,18 @@ impl Parser {
     fn primary(&mut self) -> Result<Expression, ParserError> {
         let token = self.require_current_token()?;
 
-        let expression = match &token.typ {
+        let expression = match token.typ {
             TokenType::Keyword(Keyword::False) => Expression::Literal(Literal::False),
             TokenType::Keyword(Keyword::True) => Expression::Literal(Literal::True),
             TokenType::Keyword(Keyword::Null) => Expression::Literal(Literal::Null),
-            TokenType::Integer(num) => Expression::Literal(Literal::Integer(*num)),
+            TokenType::Integer(num) => Expression::Literal(Literal::Integer(num)),
             TokenType::String(string) => Expression::Literal(Literal::String(string.clone())),
             TokenType::Symbol(Symbol::LeftParentheses) => {
                 let expr = self.expression()?;
                 self.require_current_token_matches(Symbol::RightParentheses)?;
                 Expression::Grouping(Box::new(expr))
             }
+            TokenType::Identifier(name) => Expression::Variable(name),
             _ => {
                 return Err(ParserError::ExpectedExpression { token });
             }
@@ -264,7 +295,7 @@ impl fmt::Display for ParserError {
                 expected_token: typ,
             } => write!(
                 f,
-                "Missing expected token {:?} on line {} column {}",
+                "Missing expected token {} on line {} column {}",
                 typ, token.line, token.column
             ),
             ParserError::UnexpectedEndOfStream => write!(f, "Unexpected end of stream"),

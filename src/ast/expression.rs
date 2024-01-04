@@ -14,6 +14,7 @@ pub enum Expression {
         right: Box<Expression>,
     },
     Grouping(Box<Expression>),
+    Variable(String),
 }
 
 impl fmt::Debug for Expression {
@@ -30,6 +31,7 @@ impl fmt::Debug for Expression {
                 right,
             } => write!(f, "({} {:?} {:?})", operator, left, right),
             Expression::Grouping(expr) => write!(f, "(group {:?})", expr),
+            Expression::Variable(name) => write!(f, "{name}"),
         }
     }
 }

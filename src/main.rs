@@ -6,7 +6,7 @@ mod lexer;
 mod repl;
 
 use crate::ast::{Literal, ParserError};
-use crate::interpreter::{Evaluate, EvaluationError};
+use crate::interpreter::{EvaluationError, Interpreter};
 use crate::lexer::{Lexer, LexerError};
 use clap::Parser;
 use lexer::Token;
@@ -36,7 +36,7 @@ fn main() -> anyhow::Result<()> {
         file.read_to_string(&mut string)?;
         match run(&string, cli.debug) {
             // we can just ignore successful runs because we have print statements
-            Ok(_value_of_last_expression) => {}
+            Ok(_final_value) => {}
             Err(err) => {
                 eprintln!("{}", err);
                 exit(1);
@@ -70,13 +70,12 @@ fn run(input: &str, debug: bool) -> Result<String, InterpreterError> {
     }
 
     let mut parser = ast::Parser::from_tokens(tokens);
+    let statements = parser.parse()?;
 
-    let mut value = None;
-    for statement in parser.parse()? {
-        value = Some(statement.evaluate()?);
-    }
+    let mut interpreter: Interpreter = Default::default();
+    let final_value = interpreter.interpret(statements.into_iter())?;
 
-    Ok(format!("{}", value.unwrap_or(Literal::Unit)))
+    Ok(format!("{}", final_value))
 }
 
 impl From<LexerError> for InterpreterError {
