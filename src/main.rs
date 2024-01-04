@@ -35,9 +35,8 @@ fn main() -> anyhow::Result<()> {
         let mut string = String::new();
         file.read_to_string(&mut string)?;
         match run(&string, cli.debug) {
-            Ok(out) => {
-                println!("{}", out);
-            }
+            // we can just ignore successful runs because we have print statements
+            Ok(_value_of_last_expression) => {}
             Err(err) => {
                 eprintln!("{}", err);
                 exit(1);
