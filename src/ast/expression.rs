@@ -22,7 +22,7 @@ pub enum Expression {
 impl fmt::Debug for Expression {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match self {
-            Expression::Literal(lit) => write!(f, "{}", lit),
+            Expression::Literal(lit) => write!(f, "{lit}"),
             Expression::Unary {
                 operator_token,
                 expression,
@@ -32,7 +32,7 @@ impl fmt::Debug for Expression {
                 operator_token,
                 right,
             } => write!(f, "({} {:?} {:?})", operator_token.operator, left, right),
-            Expression::Grouping(expr) => write!(f, "(group {:?})", expr),
+            Expression::Grouping(expr) => write!(f, "(group {expr:?})"),
             Expression::Variable { token } => {
                 write!(f, "{}", token.name)
             }

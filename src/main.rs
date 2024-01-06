@@ -1,3 +1,6 @@
+#![deny(clippy::all)]
+#![warn(clippy::pedantic)]
+
 mod ast;
 mod interpreter;
 mod lexer;
@@ -5,12 +8,10 @@ mod lexer;
 #[cfg(feature = "repl")]
 mod repl;
 
-use crate::ast::ParserError;
+use crate::ast::Error;
 use crate::interpreter::{EvaluationError, Interpreter};
-use crate::lexer::{Lexer, LexerError};
+use crate::lexer::Error as LexerError;
 use clap::Parser;
-use lexer::Token;
-use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use std::fs::File;
 use std::io::Read;
@@ -34,18 +35,18 @@ fn main() -> anyhow::Result<()> {
         let mut file = File::open(path)?;
         let mut string = String::new();
         file.read_to_string(&mut string)?;
-        let mut interpreter: Interpreter = Default::default();
+        let mut interpreter = Interpreter::default();
         match interpreter.run_str(&string, cli.debug) {
             // we can just ignore successful runs because we have print statements
             Ok(_final_value) => {}
             Err(err) => {
-                eprintln!("{}", err);
+                eprintln!("{err}");
                 exit(1);
             }
         }
     } else {
         #[cfg(feature = "repl")]
-        repl::run_repl(cli.debug)?;
+        repl::run(cli.debug)?;
 
         #[cfg(not(feature = "repl"))]
         Err(anyhow::anyhow!("You must supply a filename"))?;
@@ -56,7 +57,7 @@ fn main() -> anyhow::Result<()> {
 #[derive(Debug)]
 enum InterpreterError {
     Lexer { cause: LexerError },
-    Parser { cause: ParserError },
+    Parser { cause: Error },
     Evaluation { cause: EvaluationError },
 }
 
@@ -66,8 +67,8 @@ impl From<LexerError> for InterpreterError {
     }
 }
 
-impl From<ParserError> for InterpreterError {
-    fn from(value: ParserError) -> Self {
+impl From<Error> for InterpreterError {
+    fn from(value: Error) -> Self {
         InterpreterError::Parser { cause: value }
     }
 }
@@ -88,7 +89,7 @@ impl Display for InterpreterError {
     }
 }
 
-impl Error for InterpreterError {}
+impl std::error::Error for InterpreterError {}
 
 #[cfg(test)]
 mod test {

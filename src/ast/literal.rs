@@ -50,9 +50,10 @@ impl fmt::Display for Literal {
 
 impl From<bool> for Literal {
     fn from(value: bool) -> Self {
-        match value {
-            true => Literal::True,
-            false => Literal::False,
+        if value {
+            Literal::True
+        } else {
+            Literal::False
         }
     }
 }

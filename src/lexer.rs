@@ -5,6 +5,7 @@ use std::str::Chars;
 
 mod keyword;
 mod symbol;
+#[allow(clippy::module_name_repetitions)]
 mod token;
 
 pub use keyword::Keyword;
@@ -23,7 +24,7 @@ impl<'a> Lexer<'a> {
         Self {
             source: SourceIterator {
                 inner: source.chars(),
-                buffer: Default::default(),
+                buffer: VecDeque::default(),
                 line: 1,
                 column: 0,
             },
@@ -32,8 +33,9 @@ impl<'a> Lexer<'a> {
 }
 
 impl Iterator for Lexer<'_> {
-    type Item = Result<Token, LexerError>;
+    type Item = Result<Token, Error>;
 
+    #[allow(clippy::too_many_lines)]
     fn next(&mut self) -> Option<Self::Item> {
         'iterator: while let Some(char) = self.source.next() {
             let start = Position {
@@ -74,10 +76,7 @@ impl Iterator for Lexer<'_> {
 
                     continue 'iterator;
                 }
-                (' ' | '\t' | '\r', _) => {
-                    continue 'iterator;
-                }
-                ('\n', _) => {
+                (' ' | '\t' | '\r' | '\n', _) => {
                     continue 'iterator;
                 }
                 ('"', _) => {
@@ -107,7 +106,7 @@ impl Iterator for Lexer<'_> {
                             },
                         })
                     } else {
-                        return Some(Err(LexerError::UnterminatedString {
+                        return Some(Err(Error::UnterminatedString {
                             line: self.source.line,
                             column: start.column,
                         }));
@@ -115,12 +114,12 @@ impl Iterator for Lexer<'_> {
                 }
                 (char, _) if char.is_ascii_digit() => {
                     let mut num =
-                        char.to_digit(10).expect("has to be a digit at this point") as i64;
+                        i64::from(char.to_digit(10).expect("has to be a digit at this point"));
                     while let Some(next_char) = self.source.peek_one() {
                         match next_char.to_digit(10) {
                             Some(digit) => {
                                 num *= 10;
-                                num += digit as i64;
+                                num += i64::from(digit);
                                 self.source.next();
                             }
                             None => {
@@ -172,7 +171,7 @@ impl Iterator for Lexer<'_> {
                     })
                 }
                 (char, _) => {
-                    return Some(Err(LexerError::UnexpectedCharacter {
+                    return Some(Err(Error::UnexpectedCharacter {
                         char,
                         line: self.source.line,
                         column: self.source.column,
@@ -234,7 +233,7 @@ impl<'a> SourceIterator<'a> {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-pub enum LexerError {
+pub enum Error {
     UnexpectedCharacter {
         char: char,
         line: usize,
@@ -246,14 +245,14 @@ pub enum LexerError {
     },
 }
 
-impl Display for LexerError {
+impl Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            LexerError::UnexpectedCharacter { char, line, column } => write!(
+            Error::UnexpectedCharacter { char, line, column } => write!(
                 f,
                 "Unexpected character '{char}' at line {line} column {column}"
             ),
-            LexerError::UnterminatedString { line, column } => {
+            Error::UnterminatedString { line, column } => {
                 write!(
                     f,
                     "File ended with unterminated string starting at line {line} column {column}"

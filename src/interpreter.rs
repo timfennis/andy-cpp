@@ -7,7 +7,6 @@ use crate::lexer::{Lexer, Token};
 use crate::{ast, InterpreterError};
 pub use evaluate::EvaluationError;
 use std::ops::Neg;
-use std::process::id;
 
 #[derive(Default)]
 pub struct Interpreter {
@@ -21,7 +20,7 @@ impl Interpreter {
 
         if debug {
             for token in &tokens {
-                eprintln!("{:?}", token);
+                eprintln!("{token:?}");
             }
         }
 
@@ -30,7 +29,7 @@ impl Interpreter {
 
         let final_value = self.interpret(statements.into_iter())?;
 
-        Ok(format!("{}", final_value))
+        Ok(format!("{final_value}"))
     }
     pub fn interpret(
         &mut self,

@@ -12,7 +12,7 @@ struct RustlylineHelper {
     highlighter: MatchingBracketHighlighter,
 }
 
-pub fn run_repl(debug: bool) -> anyhow::Result<()> {
+pub fn run(debug: bool) -> anyhow::Result<()> {
     // impl Validator for Foobar {
     //     fn validate(&self, ctx: &mut ValidationContext) -> rustyline::Result<ValidationResult> {
     //         let input = ctx.input();
@@ -38,7 +38,7 @@ pub fn run_repl(debug: bool) -> anyhow::Result<()> {
     rl.set_helper(Some(h));
     // let mut rl = DefaultEditor::with_config(Config::builder().build())?;
 
-    let mut interpreter: Interpreter = Default::default();
+    let mut interpreter = Interpreter::default();
     loop {
         match rl.readline("λ ") {
             Ok(line) => {
@@ -47,8 +47,8 @@ pub fn run_repl(debug: bool) -> anyhow::Result<()> {
 
                 // Run the line we just read through the interpreter
                 match interpreter.run_str(line.as_str(), debug) {
-                    Ok(output) => println!("{}", output),
-                    Err(err) => eprintln!("{}", err),
+                    Ok(output) => println!("{output}"),
+                    Err(err) => eprintln!("{err}"),
                 }
             }
             Err(ReadlineError::Interrupted) => {

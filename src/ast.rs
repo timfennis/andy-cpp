@@ -3,11 +3,11 @@ mod literal;
 mod operator;
 mod parser;
 
-use crate::lexer::{IdentifierToken, Token};
+use crate::lexer::IdentifierToken;
 pub use expression::Expression;
 pub use literal::Literal;
 pub use operator::Operator;
-pub use parser::{Parser, ParserError};
+pub use parser::{Error, Parser};
 
 pub enum Statement {
     Print(Expression),

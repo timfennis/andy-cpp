@@ -118,19 +118,19 @@ impl TryFrom<Token> for OperatorToken {
 
 impl fmt::Debug for Token {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self)
+        write!(f, "{self}")
     }
 }
 
 impl fmt::Display for Token {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            Token::String(t) => write!(f, "{}", t),
-            Token::Identifier(t) => write!(f, "{}", t),
-            Token::Operator(t) => write!(f, "{}", t),
-            Token::Number(t) => write!(f, "{}", t),
-            Token::Keyword(t) => write!(f, "{}", t),
-            Token::Symbol(t) => write!(f, "{}", t),
+            Token::String(t) => write!(f, "{t}"),
+            Token::Identifier(t) => write!(f, "{t}"),
+            Token::Operator(t) => write!(f, "{t}"),
+            Token::Number(t) => write!(f, "{t}"),
+            Token::Keyword(t) => write!(f, "{t}"),
+            Token::Symbol(t) => write!(f, "{t}"),
         }
     }
 }

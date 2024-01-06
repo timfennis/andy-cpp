@@ -1,5 +1,5 @@
-use crate::ast::{Expression, Literal, Operator, Statement};
-use crate::lexer::{IdentifierToken, OperatorToken, Token};
+use crate::ast::{Literal, Operator};
+use crate::lexer::{IdentifierToken, OperatorToken};
 use std::cmp::Ordering;
 use std::error::Error;
 use std::fmt;
@@ -46,22 +46,22 @@ pub fn apply_operator(
         },
         // Boolean
         (
-            a @ Literal::True | a @ Literal::False,
+            a @ (Literal::True | Literal::False),
             Operator::Equality,
-            b @ Literal::True | b @ Literal::False,
+            b @ (Literal::True | Literal::False),
         ) => (a == b).into(),
         (
-            a @ Literal::True | a @ Literal::False,
+            a @ (Literal::True | Literal::False),
             Operator::Inequality,
-            b @ Literal::True | b @ Literal::False,
+            b @ (Literal::True | Literal::False),
         ) => (a != b).into(),
 
         // Some mixed memes
         (Literal::String(a), Operator::Multiply, Literal::Integer(b)) => {
-            Literal::String(a.repeat(b as usize))
+            Literal::String(a.repeat(usize::try_from(b)?))
         }
         (Literal::Integer(a), Operator::Multiply, Literal::String(b)) => {
-            Literal::String(b.repeat(a as usize))
+            Literal::String(b.repeat(usize::try_from(a)?))
         }
 
         // String apply operators to strings
@@ -74,10 +74,10 @@ pub fn apply_operator(
                 Operator::GreaterEquals => (comp != Ordering::Less).into(),
                 Operator::Less => (comp == Ordering::Less).into(),
                 Operator::LessEquals => (comp != Ordering::Greater).into(),
-                Operator::Plus => Literal::String(format!("{}{}", a, b).to_string()),
+                Operator::Plus => Literal::String(format!("{a}{b}").to_string()),
                 _ => {
                     return Err(EvaluationError::InvalidOperator {
-                        operator_token: operator_token.clone(),
+                        operator_token,
                         type_a: Literal::String(a),
                         type_b: Literal::String(b),
                     });
@@ -87,7 +87,7 @@ pub fn apply_operator(
 
         (a, _op, b) => {
             return Err(EvaluationError::InvalidOperator {
-                operator_token: operator_token.clone(),
+                operator_token,
                 type_a: a,
                 type_b: b,
             });
@@ -115,7 +115,6 @@ pub enum EvaluationError {
     UndefinedVariable {
         token: IdentifierToken,
     },
-    InvalidToken,
 }
 
 impl Display for EvaluationError {
@@ -151,23 +150,22 @@ impl Display for EvaluationError {
                 "variable {} is undefined on line {} column {}",
                 token, token.start.line, token.start.column
             ),
-            EvaluationError::InvalidToken => {
-                write!(f, "A token was of an unexpected kind during evaluation")
-            }
         }
     }
 }
 
 impl fmt::Debug for EvaluationError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self)
+        write!(f, "{self}")
     }
 }
 
 impl Error for EvaluationError {}
 
 impl From<TryFromIntError> for EvaluationError {
-    fn from(_value: TryFromIntError) -> Self {
-        EvaluationError::TypeError { message: "cannot convert between integer types, possibly because you're using a large exponent".to_string() }
+    fn from(err: TryFromIntError) -> Self {
+        EvaluationError::TypeError {
+            message: format!("cannot convert between integer types {err}"),
+        }
     }
 }

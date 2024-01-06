@@ -92,6 +92,6 @@ impl fmt::Display for Operator {
 }
 impl fmt::Debug for Operator {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        write!(f, "Operator({})", self)
+        write!(f, "Operator({self})")
     }
 }
