@@ -1,12 +1,24 @@
 use std::fmt;
 
+/// Enumeration representing literals in the Andy C++ programming language.
 #[derive(Eq, PartialEq, Clone)]
 pub enum Literal {
+    /// Represents an integer literal.
     Integer(i64),
+
+    /// Represents a string literal.
     String(String),
+
+    /// Represents a unit `()` literal that represents the absence of any value.
     Unit,
+
+    /// Represents the boolean literal `true`.
     True,
+
+    /// Represents the boolean literal `false`.
     False,
+
+    /// Represents the null literal.
     Null,
 }
 
