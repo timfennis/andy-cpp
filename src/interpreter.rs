@@ -4,8 +4,8 @@ mod evaluate;
 use crate::ast::{Expression, Literal, Operator, Statement};
 use crate::interpreter::environment::Environment;
 use crate::lexer::{Lexer, Token};
-use crate::{ast, InterpreterError};
 pub use evaluate::EvaluationError;
+use std::fmt::{Display, Formatter};
 use std::ops::Neg;
 
 #[derive(Default)]
@@ -14,8 +14,12 @@ pub struct Interpreter {
 }
 
 impl Interpreter {
-    pub fn run_str(&mut self, input: &str, debug: bool) -> Result<String, InterpreterError> {
-        let scanner = Lexer::from_str(input);
+    /// Parse and execute the string
+    /// # Errors
+    ///
+    /// Will return an Interpreter error if Lexing, Parsing or Evaluation of the code failed. See [Error].
+    pub fn run_str(&mut self, input: &str, debug: bool) -> Result<String, Error> {
+        let scanner = Lexer::new(input);
         let tokens = scanner.collect::<Result<Vec<Token>, _>>()?;
 
         if debug {
@@ -24,14 +28,14 @@ impl Interpreter {
             }
         }
 
-        let mut parser = ast::Parser::from_tokens(tokens);
+        let mut parser = crate::ast::Parser::from_tokens(tokens);
         let statements = parser.parse()?;
 
         let final_value = self.interpret(statements.into_iter())?;
 
         Ok(format!("{final_value}"))
     }
-    pub fn interpret(
+    fn interpret(
         &mut self,
         statements: impl Iterator<Item = Statement>,
     ) -> Result<Literal, EvaluationError> {
@@ -116,3 +120,40 @@ impl Interpreter {
         Ok(literal)
     }
 }
+
+#[derive(Debug)]
+pub enum Error {
+    Lexer { cause: crate::lexer::Error },
+    Parser { cause: crate::ast::Error },
+    Evaluation { cause: EvaluationError },
+}
+
+impl From<crate::lexer::Error> for Error {
+    fn from(value: crate::lexer::Error) -> Self {
+        Error::Lexer { cause: value }
+    }
+}
+
+impl From<crate::ast::Error> for Error {
+    fn from(value: crate::ast::Error) -> Self {
+        Error::Parser { cause: value }
+    }
+}
+
+impl From<EvaluationError> for Error {
+    fn from(value: EvaluationError) -> Self {
+        Error::Evaluation { cause: value }
+    }
+}
+
+impl Display for Error {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::Lexer { cause } => write!(f, "Lexer error: {cause}"),
+            Error::Parser { cause } => write!(f, "Parser error: {cause}"),
+            Error::Evaluation { cause } => write!(f, "Evaluation error: {cause}"),
+        }
+    }
+}
+
+impl std::error::Error for Error {}

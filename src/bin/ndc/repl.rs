@@ -1,8 +1,7 @@
+use ndc_lib::interpreter::Interpreter;
 use rustyline::config::Configurer;
 use rustyline::error::ReadlineError;
 use rustyline::highlight::MatchingBracketHighlighter;
-// use rustyline::validate::{ValidationContext, ValidationResult};
-use crate::interpreter::Interpreter;
 use rustyline::{ColorMode, Completer, Editor, Hinter, Validator};
 use rustyline::{Helper, Highlighter};
 
@@ -16,7 +15,7 @@ pub fn run(debug: bool) -> anyhow::Result<()> {
     // impl Validator for Foobar {
     //     fn validate(&self, ctx: &mut ValidationContext) -> rustyline::Result<ValidationResult> {
     //         let input = ctx.input();
-    //         let lexer = Lexer::from_str(input);
+    //         let lexer = Lexer::new(input);
     //         let result = lexer.collect::<Result<Vec<Token>, _>>();
     //
     //         match result {

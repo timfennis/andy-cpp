@@ -20,7 +20,8 @@ pub struct Lexer<'a> {
 }
 
 impl<'a> Lexer<'a> {
-    pub fn from_str(source: &'a str) -> Self {
+    #[must_use]
+    pub fn new(source: &'a str) -> Self {
         Self {
             source: SourceIterator {
                 inner: source.chars(),
@@ -269,7 +270,7 @@ mod test {
 
     #[test]
     fn load_file_with_loads_of_tokens() {
-        let scanner = Lexer::from_str(include_str!("../tests/lex.andy"));
+        let scanner = Lexer::new(include_str!("../tests/lex.andy"));
         assert!(scanner.collect::<Result<Vec<Token>, _>>().is_ok());
     }
 }

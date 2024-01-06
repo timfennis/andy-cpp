@@ -11,7 +11,7 @@ pub enum Literal {
 }
 
 impl Literal {
-    pub fn type_name(&self) -> &'static str {
+    pub(crate) fn type_name(&self) -> &'static str {
         match self {
             Literal::Integer(_) => "int",
             Literal::String(_) => "string",

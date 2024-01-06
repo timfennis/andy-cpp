@@ -7,7 +7,8 @@ use crate::lexer::IdentifierToken;
 pub use expression::Expression;
 pub use literal::Literal;
 pub use operator::Operator;
-pub use parser::{Error, Parser};
+pub use parser::Error;
+pub(crate) use parser::Parser;
 
 pub enum Statement {
     Print(Expression),

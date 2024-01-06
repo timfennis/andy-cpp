@@ -93,6 +93,7 @@ impl Token {
     /// let token = Token::String(StringToken { value: "", start, end: start });
     /// assert_eq!(token.position(), start);
     /// ```
+    #[must_use]
     pub fn position(&self) -> Position {
         match self {
             Token::String(t) => t.start,

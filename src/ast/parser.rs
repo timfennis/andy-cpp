@@ -6,16 +6,20 @@ use crate::lexer::{SymbolToken, Token};
 use std::fmt;
 use std::fmt::Formatter;
 
-pub struct Parser {
+pub(crate) struct Parser {
     tokens: Vec<Token>,
     current: usize,
 }
 
 impl Parser {
-    pub fn from_tokens(tokens: Vec<Token>) -> Self {
+    pub(crate) fn from_tokens(tokens: Vec<Token>) -> Self {
         Self { tokens, current: 0 }
     }
-    pub fn parse(&mut self) -> Result<Vec<Statement>, Error> {
+    /// Parse a Vec of Tokens into a Vec of statements
+    /// # Errors
+    /// If the parsing fails which it could do for many different reasons it will return an [Error]. See the variants of
+    /// this type for more information about the different kinds of errors.
+    pub(crate) fn parse(&mut self) -> Result<Vec<Statement>, Error> {
         let mut v = Vec::new();
         while self.current_token().is_some() {
             // Right now we just break when we se any error but maybe we should handle this differently
