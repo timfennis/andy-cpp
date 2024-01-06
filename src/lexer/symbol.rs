@@ -1,6 +1,5 @@
 use std::fmt::{Display, Formatter};
-
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Copy, Clone)]
 pub enum Symbol {
     LeftParentheses,
     RightParentheses,
@@ -10,6 +9,24 @@ pub enum Symbol {
     RightBrace,
     Semicolon,
     Comma,
+}
+
+impl TryFrom<char> for Symbol {
+    type Error = ();
+
+    fn try_from(value: char) -> Result<Self, Self::Error> {
+        match value {
+            '(' => Ok(Symbol::LeftParentheses),
+            ')' => Ok(Symbol::RightParentheses),
+            '{' => Ok(Symbol::LeftBrace),
+            '}' => Ok(Symbol::RightBrace),
+            '[' => Ok(Symbol::LeftBracket),
+            ']' => Ok(Symbol::RightBracket),
+            ',' => Ok(Symbol::Comma),
+            ';' => Ok(Symbol::Semicolon),
+            _ => Err(()),
+        }
+    }
 }
 
 impl Display for Symbol {

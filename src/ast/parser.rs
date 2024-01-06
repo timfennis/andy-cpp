@@ -1,8 +1,8 @@
 use crate::ast::operator::Operator;
 use crate::ast::{Expression, Literal, Statement};
-use crate::lexer::Keyword;
-use crate::lexer::Symbol;
-use crate::lexer::{Token, TokenType};
+use crate::lexer::{IdentifierToken, KeywordToken, NumberToken, Symbol};
+use crate::lexer::{Keyword, OperatorToken};
+use crate::lexer::{SymbolToken, Token};
 use std::error::Error;
 use std::fmt;
 use std::fmt::Formatter;
@@ -40,14 +40,16 @@ impl Parser {
 
     // If the next token is one of the given tokens they are discarded from the stream and the function returns true
     // if the next token is not equal to one of the provided tokens this function returns false.
-    fn consume_token_if(&mut self, types: &[impl Into<TokenType> + Clone]) -> bool {
-        for typ in types {
-            if let Some(token) = self.current_token() {
-                let typ: TokenType = typ.clone().into();
-                if token.typ == typ {
+    fn consume_operator_if(&mut self, operators: &[Operator]) -> bool {
+        for search_operator in operators {
+            match self.current_token() {
+                Some(Token::Operator(OperatorToken { operator, .. }))
+                    if operator == search_operator =>
+                {
                     self.advance();
                     return true;
                 }
+                _ => {}
             }
         }
         false
@@ -59,34 +61,77 @@ impl Parser {
             // No token is fine
             None => Ok(()),
             // If there is a token it must be a semicolon
-            Some(token) => {
-                if token.typ == TokenType::Symbol(Symbol::Semicolon) {
-                    self.advance();
-                    Ok(())
-                } else {
-                    Err(ParserError::MissingExpectedToken {
-                        actual_token: token.clone(),
-                        expected_token: TokenType::Symbol(Symbol::Semicolon),
-                    })
-                }
+            Some(Token::Symbol(SymbolToken {
+                symbol: Symbol::Semicolon,
+                ..
+            })) => {
+                self.advance();
+                Ok(())
             }
+            Some(_) => Err(ParserError::ExpectedSymbol {
+                actual_token: self.require_current_token()?,
+                expected_symbol: Symbol::Semicolon,
+            }),
+        }
+    }
+
+    fn require_operator(&mut self, match_operator: Operator) -> Result<OperatorToken, ParserError> {
+        let current_token = self.require_current_token()?;
+        match current_token {
+            Token::Operator(operator_token @ OperatorToken { operator, .. })
+                if match_operator == operator =>
+            {
+                Ok(operator_token)
+            }
+            _ => Err(ParserError::ExpectedOperator {
+                actual_token: current_token,
+                expected_operator: match_operator,
+            }),
         }
     }
     /// Requires that the current token matches a type, if it doesn't an error is thrown.
     /// If the token does match the expected type we advance the iterator
-    fn require_current_token_matches(
+    fn require_current_token_matches_symbol(
         &mut self,
-        typ: impl Into<TokenType>,
+        match_symbol: Symbol,
     ) -> Result<&Token, ParserError> {
-        let typ = typ.into();
-        return if let Some(token) = self.current_token() {
-            if token.typ == typ {
+        let token = self
+            .current_token()
+            .ok_or(ParserError::UnexpectedEndOfStream)?;
+
+        return if let Token::Symbol(SymbolToken { symbol: value, .. }) = token {
+            if match_symbol == *value {
                 self.advance();
                 self.previous_token()
                     .ok_or(ParserError::UnexpectedEndOfStream)
             } else {
-                Err(ParserError::MissingExpectedToken {
-                    expected_token: typ,
+                Err(ParserError::ExpectedSymbol {
+                    expected_symbol: match_symbol,
+                    actual_token: token.clone(),
+                })
+            }
+        } else {
+            Err(ParserError::UnexpectedEndOfStream)
+        };
+    }
+
+    fn require_current_token_matches_operator(
+        &mut self,
+        match_operator: Operator,
+    ) -> Result<&Token, ParserError> {
+        // match (self.current_token(), typ.into()) {};
+        let token = self
+            .current_token()
+            .ok_or(ParserError::UnexpectedEndOfStream)?;
+
+        return if let Token::Operator(OperatorToken { operator, .. }) = token {
+            if match_operator == *operator {
+                self.advance();
+                self.previous_token()
+                    .ok_or(ParserError::UnexpectedEndOfStream)
+            } else {
+                Err(ParserError::ExpectedOperator {
+                    expected_operator: match_operator,
                     actual_token: token.clone(),
                 })
             }
@@ -105,12 +150,9 @@ impl Parser {
         Ok(token)
     }
 
-    fn require_identifier(&mut self) -> Result<Token, ParserError> {
+    fn require_identifier(&mut self) -> Result<IdentifierToken, ParserError> {
         match self.require_current_token()? {
-            token @ Token {
-                typ: TokenType::Identifier(_),
-                ..
-            } => Ok(token),
+            Token::Identifier(identifier_token) => Ok(identifier_token),
             token => Err(ParserError::ExpectedIdentifier {
                 actual_token: token,
             }),
@@ -120,14 +162,16 @@ impl Parser {
     fn consume_binary_expression_left_associative(
         &mut self,
         next: fn(&mut Self) -> Result<Expression, ParserError>,
-        valid_tokens: &[impl Into<TokenType> + Clone],
+        valid_operators: &[Operator],
     ) -> Result<Expression, ParserError> {
         let mut expr = next(self)?;
-        while self.consume_token_if(valid_tokens) {
-            let operator_token = self
+        while self.consume_operator_if(valid_operators) {
+            let operator_token: OperatorToken = self
                 .previous_token()
-                .ok_or(ParserError::UnexpectedEndOfStream)?
-                .clone();
+                .expect("consume_operator_if that there exists a previous token")
+                .clone()
+                .try_into()
+                .expect("consume_operator_if guaranteed us that this is an OperatorToken");
             let right = next(self)?;
 
             expr = Expression::Binary {
@@ -152,10 +196,7 @@ impl Parser {
         // match print statements (which is a temporary construct until we add functions)
         if matches!(
             self.current_token(),
-            Some(Token {
-                typ: TokenType::Identifier(ident),
-                ..
-            }) if ident == "print"
+            Some(Token::Identifier(IdentifierToken { name, .. })) if name == "print"
         ) {
             self.advance();
             return self.print_statement();
@@ -175,25 +216,19 @@ impl Parser {
         match (self.token_at(0), self.token_at(1)) {
             // If the current token is an identifier followed by the create var operator we create a new variable
             (
-                Some(Token {
-                    typ: TokenType::Identifier(_),
+                Some(Token::Identifier(_)),
+                Some(Token::Operator(OperatorToken {
+                    operator: Operator::CreateVar,
                     ..
-                }),
-                Some(Token {
-                    typ: TokenType::Operator(Operator::CreateVar),
-                    ..
-                }),
+                })),
             ) => return self.variable_declaration(),
             // If the current token is an identifier followed by an equals sign we assign the variable
             (
-                Some(Token {
-                    typ: TokenType::Identifier(_),
+                Some(Token::Identifier(_)),
+                Some(Token::Operator(OperatorToken {
+                    operator: Operator::EqualsSign,
                     ..
-                }),
-                Some(Token {
-                    typ: TokenType::Operator(Operator::EqualsSign),
-                    ..
-                }),
+                })),
             ) => {
                 return self.variable_assignment();
             }
@@ -212,7 +247,7 @@ impl Parser {
 
     fn variable_declaration(&mut self) -> Result<Statement, ParserError> {
         let identifier = self.require_identifier()?;
-        self.require_current_token_matches(Operator::CreateVar)?;
+        self.require_current_token_matches_operator(Operator::CreateVar)?;
 
         let expr = self.expression()?;
         self.require_semicolon_or_end_of_stream()?;
@@ -222,7 +257,7 @@ impl Parser {
 
     fn variable_assignment(&mut self) -> Result<Statement, ParserError> {
         let identifier = self.require_identifier()?;
-        self.require_current_token_matches(Operator::EqualsSign)?;
+        self.require_current_token_matches_operator(Operator::EqualsSign)?;
 
         let expr = self.expression()?;
         self.require_semicolon_or_end_of_stream()?;
@@ -273,12 +308,14 @@ impl Parser {
     }
 
     fn unary(&mut self) -> Result<Expression, ParserError> {
-        if self.consume_token_if(&[Operator::Bang, Operator::Minus]) {
+        if self.consume_operator_if(&[Operator::Bang, Operator::Minus]) {
             // TODO: maybe we can get rid of this clone if we consume the token stream in a different way
-            let operator_token = self
+            let operator_token: OperatorToken = self
                 .previous_token()
                 .ok_or(ParserError::UnexpectedEndOfStream)?
-                .clone();
+                .clone()
+                .try_into()
+                .expect("consume_operator_if guaranteed us that the next token is an Operator");
 
             let right = self.unary()?;
             return Ok(Expression::Unary {
@@ -293,18 +330,32 @@ impl Parser {
     fn primary(&mut self) -> Result<Expression, ParserError> {
         let token = self.require_current_token()?;
 
-        let expression = match token.typ {
-            TokenType::Keyword(Keyword::False) => Expression::Literal(Literal::False),
-            TokenType::Keyword(Keyword::True) => Expression::Literal(Literal::True),
-            TokenType::Keyword(Keyword::Null) => Expression::Literal(Literal::Null),
-            TokenType::Integer(num) => Expression::Literal(Literal::Integer(num)),
-            TokenType::String(string) => Expression::Literal(Literal::String(string.clone())),
-            TokenType::Symbol(Symbol::LeftParentheses) => {
+        let expression = match token {
+            Token::Keyword(KeywordToken {
+                keyword: Keyword::False,
+                ..
+            }) => Expression::Literal(Literal::False),
+            Token::Keyword(KeywordToken {
+                keyword: Keyword::True,
+                ..
+            }) => Expression::Literal(Literal::True),
+            Token::Keyword(KeywordToken {
+                keyword: Keyword::Null,
+                ..
+            }) => Expression::Literal(Literal::Null),
+            Token::Number(number_token) => {
+                Expression::Literal(Literal::Integer(number_token.value))
+            }
+            Token::String(string_token) => Expression::Literal(Literal::String(string_token.value)),
+            Token::Symbol(SymbolToken {
+                symbol: Symbol::LeftParentheses,
+                ..
+            }) => {
                 let expr = self.expression()?;
-                self.require_current_token_matches(Symbol::RightParentheses)?;
+                self.require_current_token_matches_symbol(Symbol::RightParentheses)?;
                 Expression::Grouping(Box::new(expr))
             }
-            TokenType::Identifier(_) => Expression::Variable { token },
+            Token::Identifier(identifier) => Expression::Variable { token: identifier },
             _ => {
                 return Err(ParserError::ExpectedExpression {
                     actual_token: token,
@@ -318,16 +369,20 @@ impl Parser {
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum ParserError {
-    MissingExpectedToken {
-        expected_token: TokenType,
-        actual_token: Token,
-    },
     UnexpectedEndOfStream,
     ExpectedExpression {
         actual_token: Token,
     },
     ExpectedIdentifier {
         actual_token: Token,
+    },
+    ExpectedOperator {
+        actual_token: Token,
+        expected_operator: Operator,
+    },
+    ExpectedSymbol {
+        actual_token: Token,
+        expected_symbol: Symbol,
     },
 }
 
@@ -337,28 +392,42 @@ impl fmt::Display for ParserError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         // TODO: Stop using debug formatting for token types
         match self {
-            ParserError::MissingExpectedToken {
-                actual_token: token,
-                expected_token: typ,
-            } => write!(
-                f,
-                "Missing expected token {} on line {} column {}",
-                typ, token.line, token.column
-            ),
             ParserError::UnexpectedEndOfStream => write!(f, "Unexpected end of stream"),
             ParserError::ExpectedExpression {
                 actual_token: token,
             } => write!(
                 f,
-                "Unexpected token '{:?}' expected expression on line {} column {}",
-                token.typ, token.line, token.column
+                "Unexpected token '{:?}' expected expression on {}",
+                token,
+                token.position()
             ),
             ParserError::ExpectedIdentifier {
                 actual_token: token,
             } => write!(
                 f,
-                "Unexpected token '{:?}' expected identifier on line {} column {}",
-                token.typ, token.line, token.column
+                "Unexpected token '{:?}' expected identifier on {}",
+                token,
+                token.position()
+            ),
+            ParserError::ExpectedOperator {
+                actual_token,
+                expected_operator,
+            } => write!(
+                f,
+                "Unexpected token '{:?}' expected operator {} on {}",
+                actual_token,
+                expected_operator,
+                actual_token.position(),
+            ),
+            ParserError::ExpectedSymbol {
+                actual_token,
+                expected_symbol,
+            } => write!(
+                f,
+                "Unexpected token '{:?}' expected symbol {} on {}",
+                actual_token,
+                expected_symbol,
+                actual_token.position()
             ),
         }
     }

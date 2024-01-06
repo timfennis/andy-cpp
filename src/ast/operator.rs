@@ -1,5 +1,3 @@
-use crate::interpreter::EvaluationError;
-use crate::lexer::{Token, TokenType};
 use std::fmt;
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -27,22 +25,41 @@ pub enum Operator {
     Bang,
 }
 
-impl From<Operator> for TokenType {
-    fn from(value: Operator) -> Self {
-        Self::Operator(value)
+impl TryFrom<char> for Operator {
+    type Error = ();
+
+    fn try_from(value: char) -> Result<Self, Self::Error> {
+        match value {
+            '-' => Ok(Operator::Minus),
+            '+' => Ok(Operator::Plus),
+            '*' => Ok(Operator::Multiply),
+            '^' => Ok(Operator::Exponent),
+            '%' => Ok(Operator::CModulo),
+            '!' => Ok(Operator::Bang),
+            '=' => Ok(Operator::EqualsSign),
+            '>' => Ok(Operator::Greater),
+            '<' => Ok(Operator::Less),
+            '/' => Ok(Operator::Divide),
+            _ => Err(()),
+        }
     }
 }
 
-impl TryFrom<&Token> for Operator {
-    type Error = EvaluationError;
+impl TryFrom<(char, Option<char>)> for Operator {
+    type Error = ();
 
-    fn try_from(value: &Token) -> Result<Self, Self::Error> {
-        match value {
-            Token {
-                typ: TokenType::Operator(op),
-                ..
-            } => Ok(*op),
-            token => Err(EvaluationError::OperatorExpected { got: token.clone() }),
+    fn try_from((cur, next): (char, Option<char>)) -> Result<Self, Self::Error> {
+        let Some(next) = next else {
+            return Err(());
+        };
+        match (cur, next) {
+            ('%', '%') => Ok(Operator::EuclideanModulo),
+            (':', '=') => Ok(Operator::CreateVar),
+            ('=', '=') => Ok(Operator::Equality),
+            ('!', '=') => Ok(Operator::Inequality),
+            ('>', '=') => Ok(Operator::GreaterEquals),
+            ('<', '=') => Ok(Operator::LessEquals),
+            _ => Err(()),
         }
     }
 }

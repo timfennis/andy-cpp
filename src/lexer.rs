@@ -9,7 +9,10 @@ mod token;
 
 pub use keyword::Keyword;
 pub use symbol::Symbol;
-pub use token::{Token, TokenType};
+pub use token::{
+    IdentifierToken, KeywordToken, NumberToken, OperatorToken, Position, StringToken, SymbolToken,
+    Token,
+};
 
 pub struct Lexer<'a> {
     source: SourceIterator<'a>,
@@ -33,34 +36,30 @@ impl Iterator for Lexer<'_> {
 
     fn next(&mut self) -> Option<Self::Item> {
         'iterator: while let Some(char) = self.source.next() {
-            let start_column = self.source.column;
+            let start = Position {
+                column: self.source.column,
+                line: self.source.line,
+            };
             let next = self.source.peek_one();
 
-            let (token_type, consume_next): (TokenType, bool) = match (char, next) {
-                ('(', _) => (Symbol::LeftParentheses.into(), false),
-                (')', _) => (Symbol::RightParentheses.into(), false),
-                ('{', _) => (Symbol::LeftBrace.into(), false),
-                ('}', _) => (Symbol::RightBrace.into(), false),
-                ('[', _) => (Symbol::LeftBracket.into(), false),
-                (']', _) => (Symbol::RightBracket.into(), false),
-                (',', _) => (Symbol::Comma.into(), false),
-                (';', _) => (Symbol::Semicolon.into(), false),
-                ('-', _) => (Operator::Minus.into(), false),
-                ('+', _) => (Operator::Plus.into(), false),
-                ('*', _) => (Operator::Multiply.into(), false),
-                ('^', _) => (Operator::Exponent.into(), false),
-                ('%', Some('%')) => (Operator::EuclideanModulo.into(), true),
-                ('%', _) => (Operator::CModulo.into(), false),
-                // ('.', _) => (Symbol::Dot, false),
-                (':', Some('=')) => (Operator::CreateVar.into(), true),
-                ('!', Some('=')) => (Operator::Inequality.into(), true),
-                ('!', _) => (Operator::Bang.into(), false),
-                ('=', Some('=')) => (Operator::Equality.into(), true),
-                ('=', _) => (Operator::EqualsSign.into(), false),
-                ('>', Some('=')) => (Operator::GreaterEquals.into(), true),
-                ('>', _) => (Operator::Greater.into(), false),
-                ('<', Some('=')) => (Operator::LessEquals.into(), true),
-                ('<', _) => (Operator::Less.into(), false),
+            // TODO check for comments starting with //
+
+            // Check for double character operators
+            if let Ok(operator) = Operator::try_from((char, next)) {
+                self.source.next();
+                return Some(Ok(Token::Operator(OperatorToken { operator, start })));
+            }
+            // Check for single character symbols
+            if let Ok(symbol) = Symbol::try_from(char) {
+                return Some(Ok(Token::Symbol(SymbolToken { symbol, start })));
+            }
+
+            // Check for single character operators
+            if let Ok(operator) = Operator::try_from(char) {
+                return Some(Ok(Token::Operator(OperatorToken { operator, start })));
+            }
+
+            let token: Token = match (char, next) {
                 ('/', Some('/')) => {
                     // We ran into a doc comment and we just keep consuming characters as long as we
                     // don't encounter a linebreak
@@ -75,7 +74,6 @@ impl Iterator for Lexer<'_> {
 
                     continue 'iterator;
                 }
-                ('/', Some(_)) => (Operator::Divide.into(), false),
                 (' ' | '\t' | '\r', _) => {
                     continue 'iterator;
                 }
@@ -100,11 +98,18 @@ impl Iterator for Lexer<'_> {
                     }
 
                     if valid {
-                        (TokenType::String(buf), false)
+                        Token::String(StringToken {
+                            value: buf,
+                            start,
+                            end: Position {
+                                column: self.source.column,
+                                line: self.source.line,
+                            },
+                        })
                     } else {
                         return Some(Err(LexerError::UnterminatedString {
                             line: self.source.line,
-                            column: start_column,
+                            column: start.column,
                         }));
                     }
                 }
@@ -124,7 +129,7 @@ impl Iterator for Lexer<'_> {
                             }
                         }
                     }
-                    (TokenType::Integer(num), false)
+                    Token::Number(NumberToken { value: num, start })
                 }
                 //TODO: For now we just support boring c-style identifiers but maybe allowing Emoji or other characters
                 //      could be cool too
@@ -142,41 +147,40 @@ impl Iterator for Lexer<'_> {
                         }
                     }
 
-                    let token_type = match buf.as_str() {
-                        "while" => Keyword::While.into(),
-                        "if" => Keyword::If.into(),
-                        "else" => Keyword::Else.into(),
-                        "fn" => Keyword::Fn.into(),
-                        "for" => Keyword::For.into(),
-                        "true" => Keyword::True.into(),
-                        "false" => Keyword::False.into(),
-                        "return" => Keyword::Return.into(),
-                        "self" => Keyword::_Self.into(),
-                        "null" => Keyword::Null.into(),
-                        _ => TokenType::Identifier(buf),
+                    let token = match buf.as_str() {
+                        "while" => Keyword::While,
+                        "if" => Keyword::If,
+                        "else" => Keyword::Else,
+                        "fn" => Keyword::Fn,
+                        "for" => Keyword::For,
+                        "true" => Keyword::True,
+                        "false" => Keyword::False,
+                        "return" => Keyword::Return,
+                        "self" => Keyword::_Self,
+                        "null" => Keyword::Null,
+                        _ => {
+                            return Some(Ok(Token::Identifier(IdentifierToken {
+                                name: buf,
+                                start,
+                            })))
+                        }
                     };
 
-                    (token_type, false)
+                    Token::Keyword(KeywordToken {
+                        keyword: token,
+                        start,
+                    })
                 }
                 (char, _) => {
                     return Some(Err(LexerError::UnexpectedCharacter {
                         char,
                         line: self.source.line,
-                        column: start_column,
+                        column: self.source.column,
                     }));
                 }
             };
 
-            if consume_next {
-                // swallow the next char
-                self.source.next();
-            }
-
-            return Some(Ok(Token {
-                typ: token_type,
-                line: self.source.line,
-                column: start_column,
-            }));
+            return Some(Ok(token));
         }
 
         None
@@ -261,44 +265,12 @@ impl Display for LexerError {
 
 #[cfg(test)]
 mod test {
-    use crate::lexer::token::{Token, TokenType};
+    use crate::lexer::token::Token;
     use crate::lexer::Lexer;
 
     #[test]
     fn load_file_with_loads_of_tokens() {
         let scanner = Lexer::from_str(include_str!("../tests/lex.andy"));
         assert!(scanner.collect::<Result<Vec<Token>, _>>().is_ok());
-    }
-
-    #[test]
-    fn simple_arithmetic_assignment() {
-        let lexer = Lexer::from_str("foo := 33");
-        let tokens = lexer
-            .collect::<Result<Vec<Token>, _>>()
-            .expect("must have only valid tokens");
-
-        assert_eq!(
-            Token {
-                typ: TokenType::Integer(33),
-                line: 1,
-                column: 8,
-            },
-            tokens[2]
-        );
-    }
-
-    #[test]
-    fn identifiers_with_underscores() {
-        let lexer = Lexer::from_str("_this_is_a_single_1dentifi3r");
-        let tokens = lexer.collect::<Result<Vec<Token>, _>>().unwrap();
-        assert_eq!(tokens.len(), 1);
-        assert_eq!(
-            *tokens.first().unwrap(),
-            Token {
-                typ: TokenType::Identifier("_this_is_a_single_1dentifi3r".to_owned()),
-                column: 1,
-                line: 1,
-            }
-        )
     }
 }

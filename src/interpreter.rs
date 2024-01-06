@@ -56,15 +56,13 @@ impl Interpreter {
             Statement::VariableDeclaration { identifier, expr } => {
                 let value = self.evaluate_expression(expr)?;
                 // TODO: declarations evaluating to their RHS means we have to clone here, is that worth it?
-                let identifier_str = identifier.identifier_or(EvaluationError::InvalidToken)?;
-                self.environment.declare(identifier_str, value.clone());
+                self.environment.declare(&identifier.name, value.clone());
                 Ok(value)
             }
             Statement::VariableAssignment { identifier, expr } => {
                 let value = self.evaluate_expression(expr)?;
-                let identifier_str = identifier.identifier_or(EvaluationError::InvalidToken)?;
 
-                if !self.environment.assign(identifier_str, value.clone()) {
+                if !self.environment.assign(&identifier.name, value.clone()) {
                     return Err(EvaluationError::UndefinedVariable { token: identifier });
                 }
 
@@ -80,8 +78,7 @@ impl Interpreter {
                 operator_token,
             } => {
                 let value = self.evaluate_expression(*expression)?;
-                let operator: Operator = (&operator_token).try_into()?;
-                match (value, operator) {
+                match (value, operator_token.operator) {
                     (Literal::Integer(n), Operator::Minus) => Literal::Integer(n.neg()),
                     (Literal::True, Operator::Bang) => Literal::False,
                     (Literal::False, Operator::Bang) => Literal::True,
@@ -105,12 +102,12 @@ impl Interpreter {
             } => {
                 let left = self.evaluate_expression(*left)?;
                 let right = self.evaluate_expression(*right)?;
-                evaluate::apply_operator(left, &operator_token, right)?
+                evaluate::apply_operator(left, operator_token, right)?
             }
             Expression::Grouping(expr) => self.evaluate_expression(*expr)?,
             Expression::Variable { token } => self
                 .environment
-                .get(token.identifier_or(EvaluationError::InvalidToken).unwrap())
+                .get(&token.name)
                 .ok_or(EvaluationError::UndefinedVariable { token })?
                 // TODO: big FIXME, figure out if we can somehow return a reference instead of having to clone here
                 //       does returning a reference make sense though since we're interested in the result at this point?

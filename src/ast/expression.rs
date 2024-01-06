@@ -1,21 +1,21 @@
 use crate::ast::literal::Literal;
-use crate::lexer::{Token, TokenType};
+use crate::lexer::{IdentifierToken, OperatorToken};
 use std::fmt;
 
 pub enum Expression {
     Literal(Literal),
     Unary {
-        operator_token: Token,
+        operator_token: OperatorToken,
         expression: Box<Expression>,
     },
     Binary {
         left: Box<Expression>,
-        operator_token: Token,
+        operator_token: OperatorToken,
         right: Box<Expression>,
     },
     Grouping(Box<Expression>),
     Variable {
-        token: Token,
+        token: IdentifierToken,
     },
 }
 
@@ -24,19 +24,17 @@ impl fmt::Debug for Expression {
         match self {
             Expression::Literal(lit) => write!(f, "{}", lit),
             Expression::Unary {
-                operator_token: operator,
+                operator_token,
                 expression,
-            } => write!(f, "({} {:?})", operator, expression),
+            } => write!(f, "({} {:?})", operator_token.operator, expression),
             Expression::Binary {
                 left,
-                operator_token: operator,
+                operator_token,
                 right,
-            } => write!(f, "({} {:?} {:?})", operator, left, right),
+            } => write!(f, "({} {:?} {:?})", operator_token.operator, left, right),
             Expression::Grouping(expr) => write!(f, "(group {:?})", expr),
             Expression::Variable { token } => {
-                //TODO: fmt::Error::default() what does that even do?
-                let identifier = token.identifier_or(fmt::Error::default())?;
-                write!(f, "{identifier}")
+                write!(f, "{}", token.name)
             }
         }
     }
