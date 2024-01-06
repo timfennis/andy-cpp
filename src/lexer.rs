@@ -262,15 +262,3 @@ impl Display for Error {
         }
     }
 }
-
-#[cfg(test)]
-mod test {
-    use crate::lexer::token::Token;
-    use crate::lexer::Lexer;
-
-    #[test]
-    fn load_file_with_loads_of_tokens() {
-        let scanner = Lexer::new(include_str!("../tests/lex.andy"));
-        assert!(scanner.collect::<Result<Vec<Token>, _>>().is_ok());
-    }
-}

@@ -115,6 +115,15 @@ pub enum EvaluationError {
     UndefinedVariable {
         token: IdentifierToken,
     },
+    IO {
+        cause: std::io::Error,
+    },
+}
+
+impl From<std::io::Error> for EvaluationError {
+    fn from(value: std::io::Error) -> Self {
+        Self::IO { cause: value }
+    }
 }
 
 impl Display for EvaluationError {
@@ -150,6 +159,7 @@ impl Display for EvaluationError {
                 "variable {} is undefined on line {} column {}",
                 token, token.start.line, token.start.column
             ),
+            EvaluationError::IO { cause } => write!(f, "IO error: {cause}"),
         }
     }
 }

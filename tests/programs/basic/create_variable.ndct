@@ -1,0 +1,5 @@
+--PROGRAM--
+var := "Hello, World!";
+print var;
+--EXPECT--
+Hello, World!

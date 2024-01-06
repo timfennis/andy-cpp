@@ -1,0 +1,4 @@
+--PROGRAM--
+print -(3 * 3);
+--EXPECT--
+-9

@@ -1,0 +1,14 @@
+--PROGRAM--
+print "Tim" > "Robert";
+print "Tim" >= "Tim";
+print "Tim" <= "Lindsey";
+print "Foo" == "Foo";
+print "Foo" == "Bar";
+print "Foo" != "Bar";
+--EXPECT--
+true
+true
+false
+true
+false
+true

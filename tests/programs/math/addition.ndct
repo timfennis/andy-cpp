@@ -1,0 +1,4 @@
+--PROGRAM--
+print 15 + 3;
+--EXPECT--
+18

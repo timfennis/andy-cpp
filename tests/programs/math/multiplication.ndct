@@ -1,0 +1,4 @@
+--PROGRAM--
+print 10 * -5;
+--EXPECT--
+-50

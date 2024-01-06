@@ -1,0 +1,29 @@
+--PROGRAM--
+print 6 > 5;
+print 5 >= 5;
+print 4 < 5;
+print 5 <= 5;
+
+print 6 < 5;
+print 6 <= 5;
+print 4 >= 5;
+print 4 > 5;
+
+print 5 == 5;
+print 4 == 5;
+
+print 4 != 4;
+print 4 != 5;
+--EXPECT--
+true
+true
+true
+true
+false
+false
+false
+false
+true
+false
+false
+true

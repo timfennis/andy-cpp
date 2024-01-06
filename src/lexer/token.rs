@@ -89,8 +89,9 @@ impl Token {
     /// Returns the position of the token. Currently only the start position of the token is returned, this should
     /// probably be a range at some point.
     /// ```
-    /// # let start = Position { line: 30, column: 10 };
-    /// let token = Token::String(StringToken { value: "", start, end: start });
+    /// # use ndc_lib::lexer::{Position, Token, StringToken};
+    /// let start = Position { line: 30, column: 10 };
+    /// let token = Token::String(StringToken { value: String::from("foobar"), start, end: start });
     /// assert_eq!(token.position(), start);
     /// ```
     #[must_use]

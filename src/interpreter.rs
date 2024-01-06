@@ -8,12 +8,19 @@ pub use evaluate::EvaluationError;
 use std::fmt::{Display, Formatter};
 use std::ops::Neg;
 
-#[derive(Default)]
-pub struct Interpreter {
+pub struct Interpreter<'a, W> {
+    destination: &'a mut W,
     environment: Environment,
 }
 
-impl Interpreter {
+impl<'a, W: std::io::Write> Interpreter<'a, W> {
+    pub fn new(dest: &'a mut W) -> Self {
+        Self {
+            destination: dest,
+            environment: Environment::default(),
+        }
+    }
+
     /// Parse and execute the string
     /// # Errors
     ///
@@ -33,7 +40,7 @@ impl Interpreter {
 
         let final_value = self.interpret(statements.into_iter())?;
 
-        Ok(format!("{final_value}"))
+        Ok(format!("{final_value:?}"))
     }
     fn interpret(
         &mut self,
@@ -52,7 +59,7 @@ impl Interpreter {
     fn evaluate_statement(&mut self, statement: Statement) -> Result<Literal, EvaluationError> {
         match statement {
             Statement::Print(expr) => {
-                println!("{}", self.evaluate_expression(expr)?);
+                writeln!(self.destination, "{}", self.evaluate_expression(expr)?)?;
                 Ok(Literal::Unit)
             }
             Statement::Expression(expr) => Ok(self.evaluate_expression(expr)?),
