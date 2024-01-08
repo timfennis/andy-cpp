@@ -4,21 +4,17 @@ This is the source code for the Andy C++ programming language. Not meant for any
 
 ## Example
 
-Currently, the language only has a Lexer and isn't able to execute any expressions. This is what the language might look like in the future:
+Currently, the language only has some very basic features. I'll try to update the sample below as I make more progress.
 
-```andycpp
-foo := 3 * (2 + 5);
-print(foo, str(foo) + " wow so good");
+```ndc
+x := 3;
+y := 5;
+x = x + 1;
 
-while foo > true {
-    // creates a new variable bar
-    bar := if 3 > 2 { 6 } else { 5 };
-    foo = bar;
-}
+z := x * y;
+print z; // 20
 
-fn do_something() {
-    return "does nothing";
-}
+print "Hello" + (2 * " hello") + ", World!"; // Hello hello hello, World!
 ```
 
 ## Thanks

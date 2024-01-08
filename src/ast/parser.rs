@@ -5,7 +5,6 @@ use crate::lexer::{Keyword, OperatorToken};
 use crate::lexer::{SymbolToken, Token};
 use std::fmt;
 use std::fmt::Formatter;
-use std::string::ParseError;
 
 pub(crate) struct Parser {
     tokens: Vec<Token>,
@@ -33,11 +32,6 @@ impl Parser {
         self.tokens.get(self.current)
     }
 
-    /// Returns the token at a given position relative to the current token. `token_at(0`) is equal to `current_token`()
-    fn token_at(&self, idx: usize) -> Option<&Token> {
-        self.tokens.get(self.current + idx)
-    }
-
     fn previous_token(&self) -> Option<&Token> {
         self.tokens.get(self.current - 1)
     }
@@ -57,10 +51,6 @@ impl Parser {
             }
         }
         false
-    }
-
-    fn is_end_of_stream(&self) -> bool {
-        self.current_token().is_none()
     }
 
     // This is a helper function probably mostly for the REPL but maybe useful for the last line in a function or expression body
@@ -112,32 +102,6 @@ impl Parser {
         };
     }
 
-    fn require_current_token_matches_operator(
-        &mut self,
-        match_operator: Operator,
-    ) -> Result<&Token, Error> {
-        let token = self.current_token().ok_or(Error::UnexpectedEndOfStream {
-            help_text: format!("expected a {match_operator} but got end of stream instead"),
-        })?;
-
-        return if let Token::Operator(OperatorToken { operator, .. }) = token {
-            if match_operator == *operator {
-                self.advance();
-                Ok(self
-                    .previous_token()
-                    .expect("we are guaranteed to have a previous token at this point"))
-            } else {
-                Err(Error::ExpectedOperator {
-                    expected_operator: match_operator,
-                    actual_token: token.clone(),
-                })
-            }
-        } else {
-            // Err(Error::UnexpectedEndOfStream)
-            panic!("TODO: handle this case better, I think we expected an operator but got a different type of token")
-        };
-    }
-
     // Requires that there is a valid current token, otherwise it returns Err(ParserError)
     fn require_current_token(&mut self) -> Result<Token, Error> {
         let token = self
@@ -146,15 +110,6 @@ impl Parser {
             .clone();
         self.advance();
         Ok(token)
-    }
-
-    fn require_identifier(&mut self) -> Result<IdentifierToken, Error> {
-        match self.require_current_token()? {
-            Token::Identifier(identifier_token) => Ok(identifier_token),
-            token => Err(Error::ExpectedIdentifier {
-                actual_token: token,
-            }),
-        }
     }
 
     fn consume_binary_expression_left_associative(
