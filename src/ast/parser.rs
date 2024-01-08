@@ -195,50 +195,61 @@ impl Parser {
         Ok(Statement::Print(value))
     }
 
-    fn expression_statement(&mut self) -> Result<Statement, Error> {
-        match (self.token_at(0), self.token_at(1)) {
-            // If the current token is an identifier followed by the create var operator we create a new variable
-            (
-                Some(Token::Identifier(_)),
-                Some(Token::Operator(OperatorToken {
-                    operator: Operator::CreateVar,
-                    ..
-                })),
-            ) => return self.variable_declaration(),
-            // If the current token is an identifier followed by an equals sign we assign the variable
-            (
-                Some(Token::Identifier(_)),
-                Some(Token::Operator(OperatorToken {
-                    operator: Operator::EqualsSign,
-                    ..
-                })),
-            ) => {
-                return self.variable_assignment();
-            }
-            _ => {}
-        }
-
-        let expr = self.expression()?;
-        self.require_semicolon_or_end_of_stream()?;
-
-        Ok(Statement::Expression(expr))
-    }
+    // fn expression_statement(&mut self) -> Result<Statement, Error> {
+    //     match (self.token_at(0), self.token_at(1)) {
+    //         // If the current token is an identifier followed by the create var operator we create a new variable
+    //         (
+    //             Some(Token::Identifier(_)),
+    //             Some(Token::Operator(OperatorToken {
+    //                 operator: Operator::CreateVar,
+    //                 ..
+    //             })),
+    //         ) => return self.variable_declaration(),
+    //         // If the current token is an identifier followed by an equals sign we assign the variable
+    //         (
+    //             Some(Token::Identifier(_)),
+    //             Some(Token::Operator(OperatorToken {
+    //                 operator: Operator::EqualsSign,
+    //                 ..
+    //             })),
+    //         ) => {
+    //             return self.variable_assignment();
+    //         }
+    //         _ => {}
+    //     }
+    //
+    //     let expr = self.expression()?;
+    //     self.require_semicolon_or_end_of_stream()?;
+    //
+    //     Ok(Statement::Expression(expr))
+    // }
 
     fn expression(&mut self) -> Result<Expression, Error> {
         self.equality()
     }
 
-    fn variable_declaration(&mut self) -> Result<Statement, Error> {
-        let identifier = self.require_identifier()?;
-        self.require_current_token_matches_operator(Operator::CreateVar)?;
+    fn variable_declaration(&mut self) -> Result<Expression, Error> {
+        let maybe_identifier = self.expression()?;
 
-        let expr = self.expression()?;
-        self.require_semicolon_or_end_of_stream()?;
+        return if let Expression::Variable {
+            token: identifier_token,
+        } = maybe_identifier
+        {
+            if self.consume_operator_if(&[Operator::CreateVar]) {
 
-        Ok(Statement::VariableDeclaration { identifier, expr })
+                Ok(Expression::VariableDeclaration {
+                    token: identifier_token,
+                    value: self.expression()?,
+                })
+            } else {
+                variable_assignemnt()
+            }
+        } else {
+            Ok(maybe_identifier)
+        };
     }
 
-    fn variable_assignment(&mut self) -> Result<Statement, Error> {
+    fn variable_assignment(&mut self) -> Result<Expression, Error> {
         let identifier = self.require_identifier()?;
         self.require_current_token_matches_operator(Operator::EqualsSign)?;
 

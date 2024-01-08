@@ -1,0 +1,15 @@
+--PROGRAM--
+print true == false;
+print true == true;
+print false == true;
+print false == false;
+
+print false != false;
+print true != true;
+--EXPECT--
+false
+true
+false
+true
+false
+false

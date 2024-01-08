@@ -17,6 +17,14 @@ pub enum Expression {
     Variable {
         token: IdentifierToken,
     },
+    VariableDeclaration {
+        token: IdentifierToken,
+        value: Box<Expression>,
+    },
+    VariableAssignment {
+        token: IdentifierToken,
+        value: Box<Expression>,
+    },
 }
 
 impl fmt::Debug for Expression {
@@ -33,9 +41,10 @@ impl fmt::Debug for Expression {
                 right,
             } => write!(f, "({} {:?} {:?})", operator_token.operator, left, right),
             Expression::Grouping(expr) => write!(f, "(group {expr:?})"),
-            Expression::Variable { token } => {
-                write!(f, "{}", token.name)
-            }
+            Expression::Variable { token } => write!(f, "{}", token.name),
+
+            Expression::VariableDeclaration { .. } => write!(f, "TODO"),
+            Expression::VariableAssignment { .. } => write!(f, "TODO"),
         }
     }
 }
