@@ -17,7 +17,7 @@ fn run_dir<P: AsRef<Path>>(dir: P) {
                 Ok(file) if file.path().is_dir() => {
                     run_dir(file.path());
                 }
-                _ => panic!("invalid test file"),
+                _ => panic!("invalid test file: {file:?}"),
             }
         }
     }

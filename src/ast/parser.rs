@@ -5,6 +5,7 @@ use crate::lexer::{Keyword, OperatorToken};
 use crate::lexer::{SymbolToken, Token};
 use std::fmt;
 use std::fmt::Formatter;
+use std::string::ParseError;
 
 pub(crate) struct Parser {
     tokens: Vec<Token>,
@@ -58,6 +59,10 @@ impl Parser {
         false
     }
 
+    fn is_end_of_stream(&self) -> bool {
+        self.current_token().is_none()
+    }
+
     // This is a helper function probably mostly for the REPL but maybe useful for the last line in a function or expression body
     fn require_semicolon_or_end_of_stream(&mut self) -> Result<(), Error> {
         match self.current_token() {
@@ -84,12 +89,16 @@ impl Parser {
         &mut self,
         match_symbol: Symbol,
     ) -> Result<&Token, Error> {
-        let token = self.current_token().ok_or(Error::UnexpectedEndOfStream)?;
+        let token = self.current_token().ok_or(Error::UnexpectedEndOfStream {
+            help_text: format!("Expected a {match_symbol} but got end of stream instead"),
+        })?;
 
         return if let Token::Symbol(SymbolToken { symbol: value, .. }) = token {
             if match_symbol == *value {
                 self.advance();
-                self.previous_token().ok_or(Error::UnexpectedEndOfStream)
+                Ok(self
+                    .previous_token()
+                    .expect("We are guaranteed to have a previous token here"))
             } else {
                 Err(Error::ExpectedSymbol {
                     expected_symbol: match_symbol,
@@ -97,7 +106,9 @@ impl Parser {
                 })
             }
         } else {
-            Err(Error::UnexpectedEndOfStream)
+            dbg!(&match_symbol, &token);
+            panic!("TODO:  handle this case better, I think we're expecting a symbol but we're getting some other token");
+            // Err(Error::UnexpectedEndOfStream)
         };
     }
 
@@ -105,13 +116,16 @@ impl Parser {
         &mut self,
         match_operator: Operator,
     ) -> Result<&Token, Error> {
-        // match (self.current_token(), typ.into()) {};
-        let token = self.current_token().ok_or(Error::UnexpectedEndOfStream)?;
+        let token = self.current_token().ok_or(Error::UnexpectedEndOfStream {
+            help_text: format!("expected a {match_operator} but got end of stream instead"),
+        })?;
 
         return if let Token::Operator(OperatorToken { operator, .. }) = token {
             if match_operator == *operator {
                 self.advance();
-                self.previous_token().ok_or(Error::UnexpectedEndOfStream)
+                Ok(self
+                    .previous_token()
+                    .expect("we are guaranteed to have a previous token at this point"))
             } else {
                 Err(Error::ExpectedOperator {
                     expected_operator: match_operator,
@@ -119,7 +133,8 @@ impl Parser {
                 })
             }
         } else {
-            Err(Error::UnexpectedEndOfStream)
+            // Err(Error::UnexpectedEndOfStream)
+            panic!("TODO: handle this case better, I think we expected an operator but got a different type of token")
         };
     }
 
@@ -127,7 +142,7 @@ impl Parser {
     fn require_current_token(&mut self) -> Result<Token, Error> {
         let token = self
             .current_token()
-            .ok_or(Error::UnexpectedEndOfStream)?
+            .ok_or_else(|| Error::UnexpectedEndOfStream { help_text: String::from("a token was required but an end of stream was found instead (require_current_token)")})?
             .clone();
         self.advance();
         Ok(token)
@@ -196,28 +211,6 @@ impl Parser {
     }
 
     fn expression_statement(&mut self) -> Result<Statement, Error> {
-        match (self.token_at(0), self.token_at(1)) {
-            // If the current token is an identifier followed by the create var operator we create a new variable
-            (
-                Some(Token::Identifier(_)),
-                Some(Token::Operator(OperatorToken {
-                    operator: Operator::CreateVar,
-                    ..
-                })),
-            ) => return self.variable_declaration(),
-            // If the current token is an identifier followed by an equals sign we assign the variable
-            (
-                Some(Token::Identifier(_)),
-                Some(Token::Operator(OperatorToken {
-                    operator: Operator::EqualsSign,
-                    ..
-                })),
-            ) => {
-                return self.variable_assignment();
-            }
-            _ => {}
-        }
-
         let expr = self.expression()?;
         self.require_semicolon_or_end_of_stream()?;
 
@@ -225,27 +218,50 @@ impl Parser {
     }
 
     fn expression(&mut self) -> Result<Expression, Error> {
-        self.equality()
+        self.variable_declaration_or_assignment()
     }
 
-    fn variable_declaration(&mut self) -> Result<Statement, Error> {
-        let identifier = self.require_identifier()?;
-        self.require_current_token_matches_operator(Operator::CreateVar)?;
+    fn variable_declaration_or_assignment(&mut self) -> Result<Expression, Error> {
+        // NOTE: I think the way we implemented this method makes it right associative
+        // self.equality() is the next order of precedence at this point
+        let maybe_identifier = self.equality()?;
 
-        let expr = self.expression()?;
-        self.require_semicolon_or_end_of_stream()?;
+        // If the token we parsed is some kind of variable we can potentially assign to it. Next we'll check if the next
+        // token matches either the declaration operator or the assignment operator. If neither of those matches we are
+        // just returning the variable expression as is.
+        if let Expression::Variable { token } = maybe_identifier {
+            return if self.consume_operator_if(&[Operator::CreateVar]) {
+                Ok(Expression::VariableDeclaration {
+                    token,
+                    value: Box::new(self.variable_declaration_or_assignment()?),
+                })
+            } else if self.consume_operator_if(&[Operator::EqualsSign]) {
+                Ok(Expression::VariableAssignment {
+                    token,
+                    value: Box::new(self.variable_declaration_or_assignment()?),
+                })
+            } else {
+                // Does this m ake any sense???????
+                Ok(Expression::Variable { token })
+            };
+        }
 
-        Ok(Statement::VariableDeclaration { identifier, expr })
-    }
-
-    fn variable_assignment(&mut self) -> Result<Statement, Error> {
-        let identifier = self.require_identifier()?;
-        self.require_current_token_matches_operator(Operator::EqualsSign)?;
-
-        let expr = self.expression()?;
-        self.require_semicolon_or_end_of_stream()?;
-
-        Ok(Statement::VariableAssignment { identifier, expr })
+        // In this case we got some kind of expression that we can't assign to. We can just return the expression as is.
+        // But to improve error handling and stuff it would be nice if we could check if the next token matches one
+        // of the assignment operator and throw an appropriate error.
+        match self.current_token() {
+            Some(Token::Operator(OperatorToken {
+                operator: Operator::CreateVar,
+                ..
+            }))
+            | Some(Token::Operator(OperatorToken {
+                operator: Operator::EqualsSign,
+                ..
+            })) => Err(Error::InvalidAssignmentTarget {
+                target: maybe_identifier,
+            }),
+            _ => Ok(maybe_identifier),
+        }
     }
 
     fn equality(&mut self) -> Result<Expression, Error> {
@@ -295,7 +311,7 @@ impl Parser {
             // TODO: maybe we can get rid of this clone if we consume the token stream in a different way
             let operator_token: OperatorToken = self
                 .previous_token()
-                .ok_or(Error::UnexpectedEndOfStream)?
+                .expect("we're guaranteed to have an operator token by the previous call to self.consume_operator_if")
                 .clone()
                 .try_into()
                 .expect("consume_operator_if guaranteed us that the next token is an Operator");
@@ -352,7 +368,9 @@ impl Parser {
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum Error {
-    UnexpectedEndOfStream,
+    UnexpectedEndOfStream {
+        help_text: String,
+    },
     ExpectedExpression {
         actual_token: Token,
     },
@@ -367,6 +385,9 @@ pub enum Error {
         actual_token: Token,
         expected_symbol: Symbol,
     },
+    InvalidAssignmentTarget {
+        target: Expression,
+    },
 }
 
 impl std::error::Error for Error {}
@@ -375,7 +396,9 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         // TODO: Stop using debug formatting for token types
         match self {
-            Error::UnexpectedEndOfStream => write!(f, "Unexpected end of stream"),
+            Error::UnexpectedEndOfStream { help_text } => {
+                write!(f, "Unexpected end of stream: {help_text}")
+            }
             Error::ExpectedExpression {
                 actual_token: token,
             } => write!(
@@ -412,6 +435,7 @@ impl fmt::Display for Error {
                 expected_symbol,
                 actual_token.position()
             ),
+            Error::InvalidAssignmentTarget { target } => write!(f, "Invalid variable declaration or assignment. Cannot assign a value to expression: {target:?}")
         }
     }
 }

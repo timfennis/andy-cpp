@@ -1,0 +1,6 @@
+--PROGRAM--
+print 10 / 2;
+print 10 / 3;
+--EXPECT--
+5
+3

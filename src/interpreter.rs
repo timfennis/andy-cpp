@@ -59,28 +59,15 @@ impl<'a, W: std::io::Write> Interpreter<'a, W> {
     fn evaluate_statement(&mut self, statement: Statement) -> Result<Literal, EvaluationError> {
         match statement {
             Statement::Print(expr) => {
-                writeln!(self.destination, "{}", self.evaluate_expression(expr)?)?;
+                let value = self.evaluate_expression(expr)?;
+                writeln!(self.destination, "{}", value)?;
                 Ok(Literal::Unit)
             }
             Statement::Expression(expr) => Ok(self.evaluate_expression(expr)?),
-            Statement::VariableDeclaration { identifier, expr } => {
-                let value = self.evaluate_expression(expr)?;
-                // TODO: declarations evaluating to their RHS means we have to clone here, is that worth it?
-                self.environment.declare(&identifier.name, value.clone());
-                Ok(value)
-            }
-            Statement::VariableAssignment { identifier, expr } => {
-                let value = self.evaluate_expression(expr)?;
-
-                if !self.environment.assign(&identifier.name, value.clone()) {
-                    return Err(EvaluationError::UndefinedVariable { token: identifier });
-                }
-
-                Ok(value)
-            }
         }
     }
-    fn evaluate_expression(&self, expr: Expression) -> Result<Literal, EvaluationError> {
+
+    fn evaluate_expression(&mut self, expr: Expression) -> Result<Literal, EvaluationError> {
         let literal = match expr {
             Expression::Literal(l) => l.clone(),
             Expression::Unary {
@@ -122,6 +109,18 @@ impl<'a, W: std::io::Write> Interpreter<'a, W> {
                 // TODO: big FIXME, figure out if we can somehow return a reference instead of having to clone here
                 //       does returning a reference make sense though since we're interested in the result at this point?
                 .clone(),
+            Expression::VariableDeclaration { token, value } => {
+                let value = self.evaluate_expression(*value)?;
+                self.environment.declare(&token.name, value.clone());
+                value
+            }
+            Expression::VariableAssignment { token, value } => {
+                let value = self.evaluate_expression(*value)?;
+                if !self.environment.assign(&token.name, value.clone()) {
+                    return Err(EvaluationError::UndefinedVariable { token });
+                }
+                value
+            }
         };
 
         Ok(literal)
