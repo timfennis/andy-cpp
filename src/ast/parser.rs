@@ -4,7 +4,7 @@ use crate::lexer::{IdentifierToken, KeywordToken, Symbol};
 use crate::lexer::{Keyword, OperatorToken};
 use crate::lexer::{SymbolToken, Token};
 use std::fmt;
-use std::fmt::Formatter;
+use std::fmt::{Formatter, Write};
 
 pub(crate) struct Parser {
     tokens: Vec<Token>,
@@ -23,7 +23,7 @@ impl Parser {
         let mut v = Vec::new();
         while self.current_token().is_some() {
             // Right now we just break when we se any error but maybe we should handle this differently
-            v.push(self.statement()?);
+            v.push(self.statement(false)?);
         }
         Ok(v)
     }
@@ -34,6 +34,19 @@ impl Parser {
 
     fn previous_token(&self) -> Option<&Token> {
         self.tokens.get(self.current - 1)
+    }
+
+    fn consume_symbol_if(&mut self, symbols: &[Symbol]) -> bool {
+        for search_symbol in symbols {
+            match self.current_token() {
+                Some(Token::Symbol(SymbolToken { symbol, .. })) if symbol == search_symbol => {
+                    self.advance();
+                    return true;
+                }
+                _ => {}
+            }
+        }
+        false
     }
 
     // If the next token is one of the given tokens they are discarded from the stream and the function returns true
@@ -53,8 +66,14 @@ impl Parser {
         false
     }
 
-    // This is a helper function probably mostly for the REPL but maybe useful for the last line in a function or expression body
-    fn require_semicolon_or_end_of_stream(&mut self) -> Result<(), Error> {
+    /// This method checks the current token and requires that it terminates a statement or an expression.
+    /// It handles the following cases
+    ///  * If there are no more tokens it returns `Ok(())`
+    ///  * If there is a semicolon `;` it consumes the semicolon and returns `Ok(())`
+    ///  * If there is a right curly bracket `}` and `in_block` is `true` it doesn't consume the token but returns Ok()
+    ///    basically treating this like it's an end of stream (for the current block).
+    ///  * If there is a another token it returns an `Err`
+    fn require_end_of_statement_or_expression(&mut self, in_block: bool) -> Result<(), Error> {
         match self.current_token() {
             // No token is fine
             None => Ok(()),
@@ -66,10 +85,23 @@ impl Parser {
                 self.advance();
                 Ok(())
             }
-            Some(_) => Err(Error::ExpectedSymbol {
-                actual_token: self.require_current_token()?,
-                expected_symbol: Symbol::Semicolon,
-            }),
+            // If we run into a closing curly bracket
+            Some(Token::Symbol(SymbolToken {
+                symbol: Symbol::RightCurlyBracket,
+                ..
+            })) if in_block => Ok(()),
+            Some(_) => {
+                let valid_symbols = if in_block {
+                    vec![Symbol::Semicolon, Symbol::RightCurlyBracket]
+                } else {
+                    vec![Symbol::Semicolon]
+                };
+
+                Err(Error::ExpectedSymbol {
+                    actual_token: self.require_current_token()?,
+                    expected_symbols: valid_symbols,
+                })
+            }
         }
     }
 
@@ -91,7 +123,7 @@ impl Parser {
                     .expect("We are guaranteed to have a previous token here"))
             } else {
                 Err(Error::ExpectedSymbol {
-                    expected_symbol: match_symbol,
+                    expected_symbols: vec![match_symbol],
                     actual_token: token.clone(),
                 })
             }
@@ -145,35 +177,65 @@ impl Parser {
 
     /************************************************* PARSER *************************************************/
 
-    fn statement(&mut self) -> Result<Statement, Error> {
+    fn statement(&mut self, in_block: bool) -> Result<Statement, Error> {
         // match print statements (which is a temporary construct until we add functions)
         if matches!(
             self.current_token(),
             Some(Token::Identifier(IdentifierToken { name, .. })) if name == "print"
         ) {
             self.advance();
-            return self.print_statement();
+            return self.print_statement(in_block);
         }
 
-        self.expression_statement()
+        self.expression_statement(in_block)
     }
 
-    fn print_statement(&mut self) -> Result<Statement, Error> {
+    fn print_statement(&mut self, in_block: bool) -> Result<Statement, Error> {
         let value = self.expression()?;
-        self.require_semicolon_or_end_of_stream()?;
+        self.require_end_of_statement_or_expression(in_block)?;
 
         Ok(Statement::Print(value))
     }
 
-    fn expression_statement(&mut self) -> Result<Statement, Error> {
+    fn expression_statement(&mut self, in_block: bool) -> Result<Statement, Error> {
         let expr = self.expression()?;
-        self.require_semicolon_or_end_of_stream()?;
+
+        // TODO: having to add this logic is pretty ugly. What this method currently does is basically decide
+        //       whether a semicolon is required to continue parsing. If a block just ended we done have to require
+        //       a semicolon
+        if let Expression::BlockExpression { .. } = expr {
+        } else {
+            self.require_end_of_statement_or_expression(in_block)?;
+        }
 
         Ok(Statement::Expression(expr))
     }
 
     fn expression(&mut self) -> Result<Expression, Error> {
+        if self.consume_symbol_if(&[Symbol::LeftCurlyBracket]) {
+            return self.block();
+        }
+
         self.variable_declaration_or_assignment()
+    }
+
+    fn block(&mut self) -> Result<Expression, Error> {
+        let mut statements = Vec::new();
+        // let mut expression = Expression::Literal(Literal::Unit);
+
+        loop {
+            if self.consume_symbol_if(&[Symbol::RightCurlyBracket]) {
+                break;
+            }
+
+            if self.current_token().is_some() {
+                statements.push(self.statement(true)?);
+            } else {
+                break;
+            }
+        }
+
+        Ok(Expression::BlockExpression { statements })
     }
 
     fn variable_declaration_or_assignment(&mut self) -> Result<Expression, Error> {
@@ -188,12 +250,12 @@ impl Parser {
             return if self.consume_operator_if(&[Operator::CreateVar]) {
                 Ok(Expression::VariableDeclaration {
                     token,
-                    value: Box::new(self.variable_declaration_or_assignment()?),
+                    value: Box::new(self.expression()?),
                 })
             } else if self.consume_operator_if(&[Operator::EqualsSign]) {
                 Ok(Expression::VariableAssignment {
                     token,
-                    value: Box::new(self.variable_declaration_or_assignment()?),
+                    value: Box::new(self.expression()?),
                 })
             } else {
                 // Does this m ake any sense???????
@@ -206,11 +268,7 @@ impl Parser {
         // of the assignment operator and throw an appropriate error.
         match self.current_token() {
             Some(Token::Operator(OperatorToken {
-                operator: Operator::CreateVar,
-                ..
-            }))
-            | Some(Token::Operator(OperatorToken {
-                operator: Operator::EqualsSign,
+                operator: Operator::CreateVar | Operator::EqualsSign,
                 ..
             })) => Err(Error::InvalidAssignmentTarget {
                 target: maybe_identifier,
@@ -311,6 +369,8 @@ impl Parser {
             }
             Token::Identifier(identifier) => Expression::Variable { token: identifier },
             _ => {
+                // TODO: this error might not be the best way to describe what's happening here
+                //       figure out if there is a better way to handle errors here.
                 return Err(Error::ExpectedExpression {
                     actual_token: token,
                 });
@@ -338,7 +398,7 @@ pub enum Error {
     },
     ExpectedSymbol {
         actual_token: Token,
-        expected_symbol: Symbol,
+        expected_symbols: Vec<Symbol>,
     },
     InvalidAssignmentTarget {
         target: Expression,
@@ -382,15 +442,23 @@ impl fmt::Display for Error {
             ),
             Error::ExpectedSymbol {
                 actual_token,
-                expected_symbol,
+                expected_symbols,
             } => write!(
                 f,
                 "Unexpected token '{:?}' expected symbol {} on {}",
                 actual_token,
-                expected_symbol,
+                symbols_to_string(expected_symbols),
                 actual_token.position()
             ),
             Error::InvalidAssignmentTarget { target } => write!(f, "Invalid variable declaration or assignment. Cannot assign a value to expression: {target:?}")
         }
     }
+}
+
+fn symbols_to_string(symbols: &[Symbol]) -> String {
+    let mut buf = String::new();
+    for sym in symbols {
+        write!(buf, "{sym}").expect("serializing symbols must succeed");
+    }
+    buf
 }

@@ -60,7 +60,7 @@ impl<'a, W: std::io::Write> Interpreter<'a, W> {
         match statement {
             Statement::Print(expr) => {
                 let value = self.evaluate_expression(expr)?;
-                writeln!(self.destination, "{}", value)?;
+                writeln!(self.destination, "{value}")?;
                 Ok(Literal::Unit)
             }
             Statement::Expression(expr) => Ok(self.evaluate_expression(expr)?),
@@ -119,6 +119,15 @@ impl<'a, W: std::io::Write> Interpreter<'a, W> {
                 if !self.environment.assign(&token.name, value.clone()) {
                     return Err(EvaluationError::UndefinedVariable { token });
                 }
+                value
+            }
+            Expression::BlockExpression { statements } => {
+                self.environment.new_scope();
+                let mut value = Literal::Unit;
+                for stm in statements {
+                    value = self.evaluate_statement(stm)?;
+                }
+                self.environment.destroy_scope();
                 value
             }
         };

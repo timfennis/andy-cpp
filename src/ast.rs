@@ -9,6 +9,7 @@ pub use operator::Operator;
 pub use parser::Error;
 pub(crate) use parser::Parser;
 
+#[derive(Eq, PartialEq)]
 pub enum Statement {
     Print(Expression),
     Expression(Expression),

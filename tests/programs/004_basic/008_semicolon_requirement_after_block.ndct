@@ -1,0 +1,6 @@
+--PROGRAM--
+x := { 5 }
+y := { 10 }
+print x + y;
+--EXPECT-ERROR--
+Unexpected token 'y'

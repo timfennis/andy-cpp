@@ -1,0 +1,19 @@
+--PROGRAM--
+text := "";
+{
+    {
+        {
+            {
+                text = text + "Hello";
+            }
+            text = text + ", ";
+        }
+        {
+            {}
+        }
+    }
+    text = text + "World";
+}
+print text + "!";
+--EXPECT--
+Hello, World!

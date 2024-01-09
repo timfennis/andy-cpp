@@ -1,0 +1,7 @@
+--PROGRAM--
+{
+    x := 5;
+}
+print x;
+--EXPECT-ERROR--
+variable x is undefined

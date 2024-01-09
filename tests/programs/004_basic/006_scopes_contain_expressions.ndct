@@ -1,0 +1,6 @@
+--PROGRAM--
+x := { 5 };
+y := { 8 * x };
+print y * x;
+--EXPECT--
+200

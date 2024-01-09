@@ -1,4 +1,5 @@
 use crate::ast::literal::Literal;
+use crate::ast::Statement;
 use crate::lexer::{IdentifierToken, OperatorToken};
 use std::fmt;
 
@@ -26,6 +27,9 @@ pub enum Expression {
         token: IdentifierToken,
         value: Box<Expression>,
     },
+    BlockExpression {
+        statements: Vec<Statement>,
+    },
 }
 
 impl fmt::Debug for Expression {
@@ -43,9 +47,7 @@ impl fmt::Debug for Expression {
             } => write!(f, "({} {:?} {:?})", operator_token.operator, left, right),
             Expression::Grouping(expr) => write!(f, "(group {expr:?})"),
             Expression::Variable { token } => write!(f, "{}", token.name),
-
-            Expression::VariableDeclaration { .. } => write!(f, "TODO"),
-            Expression::VariableAssignment { .. } => write!(f, "TODO"),
+            _ => write!(f, "TODO"),
         }
     }
 }

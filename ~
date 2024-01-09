@@ -1,2 +1,0 @@
-number := 10 * 10;
-print "hoi" + (number - 1) * " hoi";
