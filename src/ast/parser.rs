@@ -231,7 +231,11 @@ impl Parser {
             if self.current_token().is_some() {
                 statements.push(self.statement(true)?);
             } else {
-                break;
+                return Err(Error::UnexpectedEndOfStream {
+                    help_text: String::from(
+                        "Unexpected end of stream while parsing a block, expected '}'",
+                    ),
+                });
             }
         }
 

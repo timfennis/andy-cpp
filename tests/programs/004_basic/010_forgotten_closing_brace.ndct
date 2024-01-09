@@ -1,0 +1,4 @@
+--PROGRAM--
+foo := { 3
+--EXPECT-ERROR--
+expected '}'
