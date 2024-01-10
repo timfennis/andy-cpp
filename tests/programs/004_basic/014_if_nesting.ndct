@@ -1,0 +1,10 @@
+--PROGRAM--
+a := 3;
+b := 3;
+if if a == b { a } else { b } == a {
+    print true;
+} else {
+    print false;
+}
+--EXPECT--
+true
