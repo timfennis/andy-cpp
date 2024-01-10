@@ -248,57 +248,7 @@ impl Parser {
     }
 
     fn expression(&mut self) -> Result<Expression, Error> {
-        if self.match_symbol(&[Symbol::LeftCurlyBracket]) {
-            return self.block();
-        }
-
-        if self.consume_keyword_if(&[Keyword::If]) {
-            return self.if_expression();
-        }
-
         self.variable_declaration_or_assignment()
-    }
-
-    fn if_expression(&mut self) -> Result<Expression, Error> {
-        let expression = self.expression()?;
-        let on_true = self.block()?;
-
-        let on_false = if self.consume_keyword_if(&[Keyword::Else]) {
-            Some(Box::new(self.block()?))
-        } else {
-            None
-        };
-
-        Ok(Expression::IfExpression {
-            expression: Box::new(expression),
-            on_true: Box::new(on_true),
-            on_false,
-        })
-    }
-
-    fn block(&mut self) -> Result<Expression, Error> {
-        self.require_symbol(&[Symbol::LeftCurlyBracket])?;
-
-        let mut statements = Vec::new();
-        // let mut expression = Expression::Literal(Literal::Unit);
-
-        loop {
-            if self.consume_symbol_if(&[Symbol::RightCurlyBracket]) {
-                break;
-            }
-
-            if self.current_token().is_some() {
-                statements.push(self.statement(true)?);
-            } else {
-                return Err(Error::UnexpectedEndOfStream {
-                    help_text: String::from(
-                        "Unexpected end of stream while parsing a block, expected '}'",
-                    ),
-                });
-            }
-        }
-
-        Ok(Expression::BlockExpression { statements })
     }
 
     fn variable_declaration_or_assignment(&mut self) -> Result<Expression, Error> {
@@ -403,6 +353,14 @@ impl Parser {
     }
 
     fn primary(&mut self) -> Result<Expression, Error> {
+        if self.consume_keyword_if(&[Keyword::If]) {
+            return self.if_expression();
+        }
+
+        if self.match_symbol(&[Symbol::LeftCurlyBracket]) {
+            return self.block();
+        }
+
         let token = self.require_current_token()?;
 
         let expression = match token {
@@ -441,6 +399,48 @@ impl Parser {
         };
 
         Ok(expression)
+    }
+
+    fn if_expression(&mut self) -> Result<Expression, Error> {
+        let expression = self.expression()?;
+        let on_true = self.block()?;
+
+        let on_false = if self.consume_keyword_if(&[Keyword::Else]) {
+            Some(Box::new(self.block()?))
+        } else {
+            None
+        };
+
+        Ok(Expression::IfExpression {
+            expression: Box::new(expression),
+            on_true: Box::new(on_true),
+            on_false,
+        })
+    }
+
+    fn block(&mut self) -> Result<Expression, Error> {
+        self.require_symbol(&[Symbol::LeftCurlyBracket])?;
+
+        let mut statements = Vec::new();
+        // let mut expression = Expression::Literal(Literal::Unit);
+
+        loop {
+            if self.consume_symbol_if(&[Symbol::RightCurlyBracket]) {
+                break;
+            }
+
+            if self.current_token().is_some() {
+                statements.push(self.statement(true)?);
+            } else {
+                return Err(Error::UnexpectedEndOfStream {
+                    help_text: String::from(
+                        "Unexpected end of stream while parsing a block, expected '}'",
+                    ),
+                });
+            }
+        }
+
+        Ok(Expression::BlockExpression { statements })
     }
 }
 
