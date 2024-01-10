@@ -1,0 +1,5 @@
+--PROGRAM--
+foo := if true { 10 } else { 20 } - if false { 1 } else { 2 };
+print foo;
+--EXPECT--
+8
