@@ -130,6 +130,27 @@ impl<'a, W: std::io::Write> Interpreter<'a, W> {
                 self.environment.destroy_scope();
                 value
             }
+            Expression::IfExpression {
+                expression,
+                on_true,
+                on_false,
+            } => {
+                let result = self.evaluate_expression(*expression)?;
+
+                match (result, on_false) {
+                    (Literal::True, _) => self.evaluate_expression(*on_true)?,
+                    (Literal::False, Some(block)) => self.evaluate_expression(*block)?,
+                    (Literal::False, None) => Literal::Unit,
+                    (literal, _) => {
+                        return Err(EvaluationError::TypeError {
+                            message: format!(
+                                "mismatched types: expected bool, found {}",
+                                literal.type_name()
+                            ),
+                        })
+                    }
+                }
+            }
         };
 
         Ok(literal)

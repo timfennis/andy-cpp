@@ -36,16 +36,52 @@ impl Parser {
         self.tokens.get(self.current - 1)
     }
 
-    fn consume_symbol_if(&mut self, symbols: &[Symbol]) -> bool {
+    fn match_symbol(&mut self, symbols: &[Symbol]) -> bool {
         for search_symbol in symbols {
             match self.current_token() {
                 Some(Token::Symbol(SymbolToken { symbol, .. })) if symbol == search_symbol => {
+                    return true;
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+
+    fn require_symbol(&mut self, symbols: &[Symbol]) -> Result<(), Error> {
+        if self.consume_symbol_if(symbols) {
+            Ok(())
+        } else {
+            Err(Error::ExpectedSymbol {
+                expected_symbols: Vec::from(symbols),
+                actual_token: self
+                    .current_token()
+                    .expect("guaranteed to have a token")
+                    .clone(),
+            })
+        }
+    }
+
+    fn consume_symbol_if(&mut self, symbols: &[Symbol]) -> bool {
+        if self.match_symbol(symbols) {
+            self.advance();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn consume_keyword_if(&mut self, keywords: &[Keyword]) -> bool {
+        for search_keyword in keywords {
+            match self.current_token() {
+                Some(Token::Keyword(KeywordToken { keyword, .. })) if keyword == search_keyword => {
                     self.advance();
                     return true;
                 }
                 _ => {}
             }
         }
+
         false
     }
 
@@ -212,14 +248,37 @@ impl Parser {
     }
 
     fn expression(&mut self) -> Result<Expression, Error> {
-        if self.consume_symbol_if(&[Symbol::LeftCurlyBracket]) {
+        if self.match_symbol(&[Symbol::LeftCurlyBracket]) {
             return self.block();
+        }
+
+        if self.consume_keyword_if(&[Keyword::If]) {
+            return self.if_expression();
         }
 
         self.variable_declaration_or_assignment()
     }
 
+    fn if_expression(&mut self) -> Result<Expression, Error> {
+        let expression = self.expression()?;
+        let on_true = self.block()?;
+
+        let on_false = if self.consume_keyword_if(&[Keyword::Else]) {
+            Some(Box::new(self.block()?))
+        } else {
+            None
+        };
+
+        Ok(Expression::IfExpression {
+            expression: Box::new(expression),
+            on_true: Box::new(on_true),
+            on_false,
+        })
+    }
+
     fn block(&mut self) -> Result<Expression, Error> {
+        self.require_symbol(&[Symbol::LeftCurlyBracket])?;
+
         let mut statements = Vec::new();
         // let mut expression = Expression::Literal(Literal::Unit);
 

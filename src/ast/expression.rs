@@ -30,6 +30,11 @@ pub enum Expression {
     BlockExpression {
         statements: Vec<Statement>,
     },
+    IfExpression {
+        expression: Box<Expression>,
+        on_true: Box<Expression>,
+        on_false: Option<Box<Expression>>,
+    },
 }
 
 impl fmt::Debug for Expression {

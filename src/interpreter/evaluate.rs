@@ -118,6 +118,7 @@ pub enum EvaluationError {
     IO {
         cause: std::io::Error,
     },
+    
 }
 
 impl From<std::io::Error> for EvaluationError {
