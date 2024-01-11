@@ -1,0 +1,12 @@
+--PROGRAM--
+if if {
+    x := 5;
+    y := 9;
+    y ^ x
+} > 12 ^ { one := 1; one + one } { ten := 10 } else { minus_ten := -10 } > 0 {
+    print true;
+} else {
+    print false;
+}
+--EXPECT--
+true
