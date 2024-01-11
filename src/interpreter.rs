@@ -1,9 +1,9 @@
 mod environment;
 mod evaluate;
 
-use crate::ast::{Expression, Literal, Operator};
+use crate::ast::{Expression, ExpressionLocation, Literal, Lvalue, UnaryOperator};
 use crate::interpreter::environment::Environment;
-use crate::lexer::{Lexer, Token};
+use crate::lexer::{Lexer, TokenLocation};
 pub use evaluate::EvaluationError;
 use std::fmt::{Display, Formatter};
 use std::ops::Neg;
@@ -27,7 +27,7 @@ impl<'a, W: std::io::Write> Interpreter<'a, W> {
     /// Will return an Interpreter error if Lexing, Parsing or Evaluation of the code failed. See [Error].
     pub fn run_str(&mut self, input: &str, debug: bool) -> Result<String, Error> {
         let scanner = Lexer::new(input);
-        let tokens = scanner.collect::<Result<Vec<Token>, _>>()?;
+        let tokens = scanner.collect::<Result<Vec<TokenLocation>, _>>()?;
 
         if debug {
             for token in &tokens {
@@ -44,7 +44,7 @@ impl<'a, W: std::io::Write> Interpreter<'a, W> {
     }
     fn interpret(
         &mut self,
-        expressions: impl Iterator<Item = Expression>,
+        expressions: impl Iterator<Item = ExpressionLocation>,
     ) -> Result<Literal, EvaluationError> {
         // TODO: The interpreter defaults to returning unit if there are no statements, this makes no sense.
         let mut value = Literal::Unit;
@@ -56,34 +56,38 @@ impl<'a, W: std::io::Write> Interpreter<'a, W> {
         Ok(value)
     }
 
-    fn evaluate_expression(&mut self, expr: Expression) -> Result<Literal, EvaluationError> {
-        let literal = match expr {
+    #[allow(clippy::too_many_lines)]
+    fn evaluate_expression(
+        &mut self,
+        expression_location: ExpressionLocation,
+    ) -> Result<Literal, EvaluationError> {
+        let (start, end) = (expression_location.start, expression_location.end);
+        let literal = match expression_location.expression {
             Expression::Literal(l) => l.clone(),
             Expression::Unary {
-                expression,
-                operator_token,
+                expression: expression_location,
+                operator,
             } => {
-                let value = self.evaluate_expression(*expression)?;
-                match (value, operator_token.operator) {
-                    (Literal::Integer(n), Operator::Minus) => Literal::Integer(n.neg()),
-                    (Literal::True, Operator::Bang) => Literal::False,
-                    (Literal::False, Operator::Bang) => Literal::True,
-                    (_, Operator::Bang) => {
+                let value = self.evaluate_expression(*expression_location)?;
+                match (value, operator) {
+                    (Literal::Integer(n), UnaryOperator::Neg) => Literal::Integer(n.neg()),
+                    (Literal::True, UnaryOperator::Bang) => Literal::False,
+                    (Literal::False, UnaryOperator::Bang) => Literal::True,
+                    (_, UnaryOperator::Bang) => {
                         return Err(EvaluationError::TypeError {
                             message: "the '!' operator cannot be applied to this type".to_string(),
                         });
                     }
-                    (_, Operator::Minus) => {
+                    (_, UnaryOperator::Neg) => {
                         return Err(EvaluationError::TypeError {
                             message: "this type cannot be negated".to_string(),
                         });
                     }
-                    _ => panic!("invalid unary operator encountered"),
                 }
             }
             Expression::Binary {
                 left,
-                operator_token,
+                operator: operator_token,
                 right,
             } => {
                 let left = self.evaluate_expression(*left)?;
@@ -91,23 +95,38 @@ impl<'a, W: std::io::Write> Interpreter<'a, W> {
                 evaluate::apply_operator(left, operator_token, right)?
             }
             Expression::Grouping(expr) => self.evaluate_expression(*expr)?,
-            Expression::Variable { token } => self
+            Expression::Variable { ref identifier } => self
                 .environment
-                .get(&token.name)
-                .ok_or(EvaluationError::UndefinedVariable { token })?
+                .get(identifier)
+                .ok_or(EvaluationError::UndefinedVariable {
+                    identifier: identifier.clone(),
+                    start,
+                    end,
+                })?
                 // TODO: big FIXME, figure out if we can somehow return a reference instead of having to clone here
                 //       does returning a reference make sense though since we're interested in the result at this point?
                 .clone(),
-            Expression::VariableDeclaration { token, value } => {
+            Expression::VariableDeclaration {
+                l_value: Lvalue::Variable { identifier },
+                value,
+            } => {
                 let value = self.evaluate_expression(*value)?;
-                self.environment.declare(&token.name, value.clone());
+                self.environment.declare(&identifier, value.clone());
                 value
             }
-            Expression::VariableAssignment { token, value } => {
-                let value = self.evaluate_expression(*value)?;
-                if !self.environment.assign(&token.name, value.clone()) {
-                    return Err(EvaluationError::UndefinedVariable { token });
+            Expression::VariableAssignment {
+                l_value: Lvalue::Variable { ref identifier },
+                value,
+            } => {
+                if !self.environment.contains(identifier) {
+                    return Err(EvaluationError::UndefinedVariable {
+                        identifier: identifier.clone(),
+                        start,
+                        end,
+                    });
                 }
+                let value = self.evaluate_expression(*value)?;
+                self.environment.assign(identifier, value.clone());
                 value
             }
             Expression::BlockExpression { statements } => {

@@ -1,121 +1,50 @@
-use crate::ast::Operator;
-use crate::lexer::keyword::Keyword;
-use crate::lexer::Symbol;
 use std::fmt;
-use std::fmt::Formatter;
-
-#[derive(Eq, PartialEq, Clone)]
-pub struct StringToken {
-    pub value: String,
-    pub start: Position,
-    pub end: Position,
-}
-
-impl fmt::Display for StringToken {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.value)
-    }
-}
-#[derive(Eq, PartialEq, Clone)]
-pub struct IdentifierToken {
-    pub name: String,
-    pub start: Position,
-}
-
-impl fmt::Display for IdentifierToken {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.name)
-    }
-}
-
-#[derive(Eq, PartialEq, Copy, Clone)]
-pub struct OperatorToken {
-    pub operator: Operator,
-    pub start: Position,
-}
-
-impl fmt::Display for OperatorToken {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.operator)
-    }
-}
-
-#[derive(Eq, PartialEq, Copy, Clone)]
-pub struct NumberToken {
-    pub value: i64,
-    pub start: Position,
-}
-
-impl fmt::Display for NumberToken {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.value)
-    }
-}
-
-#[derive(Eq, PartialEq, Copy, Clone)]
-pub struct KeywordToken {
-    pub keyword: Keyword,
-    pub start: Position,
-}
-
-impl fmt::Display for KeywordToken {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.keyword)
-    }
-}
-#[derive(Eq, PartialEq, Copy, Clone)]
-pub struct SymbolToken {
-    pub symbol: Symbol,
-    pub start: Position,
-}
-
-impl fmt::Display for SymbolToken {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.symbol)
-    }
-}
+use std::fmt::{Display, Formatter};
 
 #[derive(Eq, PartialEq, Clone)]
 pub enum Token {
-    String(StringToken),
-    Identifier(IdentifierToken),
-    Operator(OperatorToken),
-    Number(NumberToken),
-    Keyword(KeywordToken),
-    Symbol(SymbolToken),
-}
-
-impl Token {
-    /// Returns the position of the token. Currently only the start position of the token is returned, this should
-    /// probably be a range at some point.
-    /// ```
-    /// # use ndc_lib::lexer::{Position, Token, StringToken};
-    /// let start = Position { line: 30, column: 10 };
-    /// let token = Token::String(StringToken { value: String::from("foobar"), start, end: start });
-    /// assert_eq!(token.position(), start);
-    /// ```
-    #[must_use]
-    pub fn position(&self) -> Position {
-        match self {
-            Token::String(t) => t.start,
-            Token::Identifier(t) => t.start,
-            Token::Operator(t) => t.start,
-            Token::Number(t) => t.start,
-            Token::Keyword(t) => t.start,
-            Token::Symbol(t) => t.start,
-        }
-    }
-}
-
-impl TryFrom<Token> for OperatorToken {
-    type Error = ();
-
-    fn try_from(value: Token) -> Result<Self, Self::Error> {
-        match value {
-            Token::Operator(token) => Ok(token),
-            _ => Err(()),
-        }
-    }
+    String(String),
+    Number(i64),
+    Identifier(String),
+    // Operator - Assignment
+    CreateVar,
+    EqualsSign,
+    // Operator - Comparison
+    Equality,
+    Inequality,
+    Greater,
+    GreaterEquals,
+    Less,
+    LessEquals,
+    // Operator - Math
+    Plus,
+    Minus,
+    Multiply,
+    Divide,
+    CModulo,
+    EuclideanModulo,
+    Exponent,
+    // Operator - Unary
+    Bang,
+    // Keywords
+    Fn,
+    If,
+    Else,
+    Return,
+    For,
+    While,
+    True,
+    False,
+    _Self,
+    // Symbols
+    LeftParentheses,
+    RightParentheses,
+    LeftSquareBracket,
+    RightSquareBracket,
+    LeftCurlyBracket,
+    RightCurlyBracket,
+    Semicolon,
+    Comma,
 }
 
 impl fmt::Debug for Token {
@@ -126,25 +55,142 @@ impl fmt::Debug for Token {
 
 impl fmt::Display for Token {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Token::String(t) => write!(f, "{t}"),
-            Token::Identifier(t) => write!(f, "{t}"),
-            Token::Operator(t) => write!(f, "{t}"),
-            Token::Number(t) => write!(f, "{t}"),
-            Token::Keyword(t) => write!(f, "{t}"),
-            Token::Symbol(t) => write!(f, "{t}"),
-        }
+        let s: &str = match self {
+            Token::String(str) => str,
+            Token::Number(n) => {
+                return write!(f, "{n}");
+            }
+            Token::Identifier(ident) => ident,
+            Token::CreateVar => ":=",
+            Token::EqualsSign => "=",
+            Token::Equality => "==",
+            Token::Inequality => "!=",
+            Token::Greater => ">",
+            Token::GreaterEquals => ">=",
+            Token::Less => "<",
+            Token::LessEquals => "<=",
+            Token::Plus => "+",
+            Token::Minus => "-",
+            Token::Multiply => "*",
+            Token::Divide => "/",
+            Token::CModulo => "%",
+            Token::EuclideanModulo => "%%",
+            Token::Exponent => "^",
+            Token::Bang => "!",
+            Token::Fn => "fn",
+            Token::If => "if",
+            Token::Else => "else",
+            Token::Return => "return",
+            Token::For => "for",
+            Token::While => "while",
+            Token::True => "true",
+            Token::False => "false",
+            Token::_Self => "self",
+            Token::LeftParentheses => "(",
+            Token::RightParentheses => ")",
+            Token::LeftSquareBracket => "[",
+            Token::RightSquareBracket => "]",
+            Token::LeftCurlyBracket => "{",
+            Token::RightCurlyBracket => "}",
+            Token::Semicolon => ";",
+            Token::Comma => ",",
+        };
+        write!(f, "{s}")
     }
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct TokenLocation {
+    pub token: Token,
+    pub location: Location,
+}
+
+impl Display for TokenLocation {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{} on {}", self.token, self.location)
+    }
+}
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub struct Position {
+pub struct Location {
     pub line: usize,
     pub column: usize,
 }
 
-impl fmt::Display for Position {
+impl fmt::Display for Location {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "line {} column {}", self.line, self.column)
+    }
+}
+
+impl TryFrom<(char, Option<char>)> for Token {
+    type Error = ();
+
+    fn try_from((c1, next): (char, Option<char>)) -> Result<Self, Self::Error> {
+        if let Some(c2) = next {
+            (c1, c2).try_into()
+        } else {
+            c1.try_into()
+        }
+    }
+}
+impl TryFrom<(char, char)> for Token {
+    type Error = ();
+
+    fn try_from((c1, c2): (char, char)) -> Result<Self, Self::Error> {
+        match (c1, c2) {
+            ('%', '%') => Ok(Token::EuclideanModulo),
+            (':', '=') => Ok(Token::CreateVar),
+            ('=', '=') => Ok(Token::Equality),
+            ('!', '=') => Ok(Token::Inequality),
+            ('>', '=') => Ok(Token::GreaterEquals),
+            ('<', '=') => Ok(Token::LessEquals),
+            _ => Err(()),
+        }
+    }
+}
+
+impl TryFrom<char> for Token {
+    type Error = ();
+
+    fn try_from(value: char) -> Result<Self, Self::Error> {
+        match value {
+            '-' => Ok(Token::Minus),
+            '+' => Ok(Token::Plus),
+            '*' => Ok(Token::Multiply),
+            '^' => Ok(Token::Exponent),
+            '%' => Ok(Token::CModulo),
+            '!' => Ok(Token::Bang),
+            '=' => Ok(Token::EqualsSign),
+            '>' => Ok(Token::Greater),
+            '<' => Ok(Token::Less),
+            '/' => Ok(Token::Divide),
+            '(' => Ok(Token::LeftParentheses),
+            ')' => Ok(Token::RightParentheses),
+            '[' => Ok(Token::LeftSquareBracket),
+            ']' => Ok(Token::RightSquareBracket),
+            '{' => Ok(Token::LeftCurlyBracket),
+            '}' => Ok(Token::RightCurlyBracket),
+            ',' => Ok(Token::Comma),
+            ';' => Ok(Token::Semicolon),
+            _ => Err(()),
+        }
+    }
+}
+
+impl From<String> for Token {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "while" => Token::While,
+            "if" => Token::If,
+            "else" => Token::Else,
+            "fn" => Token::Fn,
+            "for" => Token::For,
+            "true" => Token::True,
+            "false" => Token::False,
+            "return" => Token::Return,
+            "self" => Token::_Self,
+            // "null" => Token::Null,
+            _ => Token::Identifier(value),
+        }
     }
 }

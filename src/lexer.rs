@@ -1,19 +1,11 @@
-use crate::ast::Operator;
 use std::collections::VecDeque;
 use std::fmt::{Display, Formatter};
 use std::str::Chars;
 
-mod keyword;
-mod symbol;
 #[allow(clippy::module_name_repetitions)]
 mod token;
 
-pub use keyword::Keyword;
-pub use symbol::Symbol;
-pub use token::{
-    IdentifierToken, KeywordToken, NumberToken, OperatorToken, Position, StringToken, SymbolToken,
-    Token,
-};
+pub use token::{Location, Token, TokenLocation};
 
 pub struct Lexer<'a> {
     source: SourceIterator<'a>,
@@ -34,12 +26,12 @@ impl<'a> Lexer<'a> {
 }
 
 impl Iterator for Lexer<'_> {
-    type Item = Result<Token, Error>;
+    type Item = Result<TokenLocation, Error>;
 
     #[allow(clippy::too_many_lines)]
     fn next(&mut self) -> Option<Self::Item> {
         'iterator: while let Some(char) = self.source.next() {
-            let start = Position {
+            let start = Location {
                 column: self.source.column,
                 line: self.source.line,
             };
@@ -47,22 +39,23 @@ impl Iterator for Lexer<'_> {
 
             // TODO check for comments starting with //
 
-            // Check for double character operators
-            if let Ok(operator) = Operator::try_from((char, next)) {
-                self.source.next();
-                return Some(Ok(Token::Operator(OperatorToken { operator, start })));
+            // Check for double character tokens
+            if let Ok(token) = Token::try_from((char, next)) {
+                self.source.next(); //TODO is this a bug
+                return Some(Ok(TokenLocation {
+                    token,
+                    location: start,
+                }));
             }
-            // Check for single character symbols
-            if let Ok(symbol) = Symbol::try_from(char) {
-                return Some(Ok(Token::Symbol(SymbolToken { symbol, start })));
+            // Check for single character tokens
+            if let Ok(token) = Token::try_from(char) {
+                return Some(Ok(TokenLocation {
+                    token,
+                    location: start,
+                }));
             }
 
-            // Check for single character operators
-            if let Ok(operator) = Operator::try_from(char) {
-                return Some(Ok(Token::Operator(OperatorToken { operator, start })));
-            }
-
-            let token: Token = match (char, next) {
+            match (char, next) {
                 ('/', Some('/')) => {
                     // We ran into a doc comment and we just keep consuming characters as long as we
                     // don't encounter a linebreak
@@ -97,21 +90,17 @@ impl Iterator for Lexer<'_> {
                         }
                     }
 
-                    if valid {
-                        Token::String(StringToken {
-                            value: buf,
-                            start,
-                            end: Position {
-                                column: self.source.column,
-                                line: self.source.line,
-                            },
-                        })
+                    return if valid {
+                        Some(Ok(TokenLocation {
+                            token: Token::String(buf),
+                            location: start,
+                        }))
                     } else {
-                        return Some(Err(Error::UnterminatedString {
+                        Some(Err(Error::UnterminatedString {
                             line: self.source.line,
                             column: start.column,
-                        }));
-                    }
+                        }))
+                    };
                 }
                 (char, _) if char.is_ascii_digit() => {
                     let mut num =
@@ -129,7 +118,10 @@ impl Iterator for Lexer<'_> {
                             }
                         }
                     }
-                    Token::Number(NumberToken { value: num, start })
+                    return Some(Ok(TokenLocation {
+                        token: Token::Number(num),
+                        location: start,
+                    }));
                 }
                 //TODO: For now we just support boring c-style identifiers but maybe allowing Emoji or other characters
                 //      could be cool too
@@ -146,30 +138,10 @@ impl Iterator for Lexer<'_> {
                             break;
                         }
                     }
-
-                    let token = match buf.as_str() {
-                        "while" => Keyword::While,
-                        "if" => Keyword::If,
-                        "else" => Keyword::Else,
-                        "fn" => Keyword::Fn,
-                        "for" => Keyword::For,
-                        "true" => Keyword::True,
-                        "false" => Keyword::False,
-                        "return" => Keyword::Return,
-                        "self" => Keyword::_Self,
-                        "null" => Keyword::Null,
-                        _ => {
-                            return Some(Ok(Token::Identifier(IdentifierToken {
-                                name: buf,
-                                start,
-                            })))
-                        }
-                    };
-
-                    Token::Keyword(KeywordToken {
-                        keyword: token,
-                        start,
-                    })
+                    return Some(Ok(TokenLocation {
+                        token: buf.into(),
+                        location: start,
+                    }));
                 }
                 (char, _) => {
                     return Some(Err(Error::UnexpectedCharacter {
@@ -179,8 +151,6 @@ impl Iterator for Lexer<'_> {
                     }));
                 }
             };
-
-            return Some(Ok(token));
         }
 
         None

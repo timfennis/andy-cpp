@@ -48,6 +48,12 @@ impl Environment {
         false
     }
 
+    pub fn contains(&self, name: &str) -> bool {
+        self.contexts
+            .iter()
+            .any(|ctx| ctx.values.contains_key(name))
+    }
+
     pub fn get(&self, name: &str) -> Option<&Literal> {
         for ctx in self.contexts.iter().rev() {
             if let Some(v) = ctx.values.get(name) {

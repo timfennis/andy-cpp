@@ -1,5 +1,5 @@
 use crate::ast::{Literal, Operator};
-use crate::lexer::{IdentifierToken, OperatorToken};
+use crate::lexer::Location;
 use std::cmp::Ordering;
 use std::error::Error;
 use std::fmt;
@@ -8,14 +8,14 @@ use std::num::TryFromIntError;
 
 pub fn apply_operator(
     left: Literal,
-    operator_token: OperatorToken,
+    operator: Operator,
     right: Literal,
 ) -> Result<Literal, EvaluationError> {
     // Some temporary functions to make errors
-    let mk_int_overflow = || EvaluationError::IntegerOverflow { operator_token };
-    let mk_div_zero = || EvaluationError::DivisionByZero { operator_token };
+    let mk_int_overflow = || EvaluationError::IntegerOverflow { operator };
+    let mk_div_zero = || EvaluationError::DivisionByZero { operator };
 
-    let literal = match (left, operator_token.operator, right) {
+    let literal = match (left, operator, right) {
         // Integer
         (Literal::Integer(a), op, Literal::Integer(b)) => match op {
             Operator::Equality => (a == b).into(),
@@ -35,13 +35,6 @@ pub fn apply_operator(
             Operator::Exponent => {
                 let exponent = u32::try_from(b)?;
                 a.checked_pow(exponent).ok_or_else(mk_int_overflow)?.into()
-            }
-            _ => {
-                return Err(EvaluationError::InvalidOperator {
-                    operator_token,
-                    type_a: Literal::Integer(a),
-                    type_b: Literal::Integer(b),
-                });
             }
         },
         // Boolean
@@ -77,7 +70,7 @@ pub fn apply_operator(
                 Operator::Plus => Literal::String(format!("{a}{b}").to_string()),
                 _ => {
                     return Err(EvaluationError::InvalidOperator {
-                        operator_token,
+                        operator,
                         type_a: Literal::String(a),
                         type_b: Literal::String(b),
                     });
@@ -87,7 +80,7 @@ pub fn apply_operator(
 
         (a, _op, b) => {
             return Err(EvaluationError::InvalidOperator {
-                operator_token,
+                operator,
                 type_a: a,
                 type_b: b,
             });
@@ -102,23 +95,24 @@ pub enum EvaluationError {
         message: String,
     },
     InvalidOperator {
-        operator_token: OperatorToken,
+        operator: Operator,
         type_a: Literal,
         type_b: Literal,
     },
     IntegerOverflow {
-        operator_token: OperatorToken,
+        operator: Operator,
     },
     DivisionByZero {
-        operator_token: OperatorToken,
+        operator: Operator,
     },
     UndefinedVariable {
-        token: IdentifierToken,
+        identifier: String,
+        start: Location,
+        end: Location,
     },
     IO {
         cause: std::io::Error,
     },
-    
 }
 
 impl From<std::io::Error> for EvaluationError {
@@ -133,33 +127,35 @@ impl Display for EvaluationError {
         match self {
             EvaluationError::TypeError { message } => write!(f, "{message}"),
             EvaluationError::InvalidOperator {
-                operator_token: op,
+                operator: op,
                 type_a,
                 type_b,
             } => write!(
                 f,
-                "unable to apply the '{}' operator to {} and {} on line {} column {}",
-                op.operator,
+                "unable to apply the '{:?}' operator to {} and {} on line {} column {}",
+                op,
                 type_a.type_name(),
                 type_b.type_name(),
-                op.start.line,
-                op.start.column
+                0,
+                0 // TODO: fix this error
             ),
-            EvaluationError::IntegerOverflow { operator_token } => write!(
+            EvaluationError::IntegerOverflow {
+                operator: operator_token,
+            } => write!(
                 f,
-                "integer overflow while applying the '{}' operator on line {} column {}",
-                operator_token.operator, operator_token.start.line, operator_token.start.column
+                "integer overflow while applying the '{:?}' operator on line {} column {}",
+                operator_token, 0, 0
             ),
-            EvaluationError::DivisionByZero { operator_token } => write!(
+            EvaluationError::DivisionByZero {
+                operator: operator_token,
+            } => write!(
                 f,
-                "division by zero when applying '{}' on line {} column {}",
-                operator_token.operator, operator_token.start.line, operator_token.start.column
+                "division by zero when applying '{:?}' on line {} column {}",
+                operator_token, 0, 0
             ),
-            EvaluationError::UndefinedVariable { token } => write!(
-                f,
-                "variable {} is undefined on line {} column {}",
-                token, token.start.line, token.start.column
-            ),
+            EvaluationError::UndefinedVariable {
+                identifier, start, ..
+            } => write!(f, "variable {identifier} is undefined on {start}",),
             EvaluationError::IO { cause } => write!(f, "IO error: {cause}"),
         }
     }

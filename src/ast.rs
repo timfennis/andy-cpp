@@ -1,10 +1,8 @@
 mod expression;
 mod literal;
-mod operator;
 mod parser;
 
-pub use expression::Expression;
+pub use expression::{Expression, ExpressionLocation, Lvalue, Operator, UnaryOperator};
 pub use literal::Literal;
-pub use operator::Operator;
 pub use parser::Error;
 pub(crate) use parser::Parser;
