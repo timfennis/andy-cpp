@@ -54,10 +54,7 @@ impl Parser {
         } else {
             Err(Error::ExpectedSymbol {
                 expected_symbols: Vec::from(symbols),
-                actual_token: self
-                    .current_token()
-                    .expect("guaranteed to have a token")
-                    .clone(),
+                actual_token: self.current_token().cloned(),
             })
         }
     }
@@ -134,7 +131,7 @@ impl Parser {
                 };
 
                 Err(Error::ExpectedSymbol {
-                    actual_token: self.require_current_token()?,
+                    actual_token: Some(self.require_current_token()?),
                     expected_symbols: valid_symbols,
                 })
             }
@@ -160,7 +157,7 @@ impl Parser {
             } else {
                 Err(Error::ExpectedSymbol {
                     expected_symbols: vec![match_symbol],
-                    actual_token: token.clone(),
+                    actual_token: Some(token.clone()),
                 })
             }
         } else {
@@ -460,7 +457,7 @@ pub enum Error {
         expected_operator: Operator,
     },
     ExpectedSymbol {
-        actual_token: Token,
+        actual_token: Option<Token>,
         expected_symbols: Vec<Symbol>,
     },
     InvalidAssignmentTarget {
@@ -506,13 +503,16 @@ impl fmt::Display for Error {
             Error::ExpectedSymbol {
                 actual_token,
                 expected_symbols,
-            } => write!(
-                f,
-                "Unexpected token '{:?}' expected symbol {} on {}",
-                actual_token,
-                symbols_to_string(expected_symbols),
-                actual_token.position()
-            ),
+            } => match actual_token {
+                Some(actual_token) => write!(
+                        f,
+                        "Unexpected token '{:?}' expected symbol {} on {}",
+                        actual_token,
+                        symbols_to_string(expected_symbols),
+                        actual_token.position()
+                    ),
+                None => write!(f, "Unexpected end of stream, expected {}", symbols_to_string(expected_symbols))
+            }
             Error::InvalidAssignmentTarget { target } => write!(f, "Invalid variable declaration or assignment. Cannot assign a value to expression: {target:?}")
         }
     }

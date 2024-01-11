@@ -1,0 +1,4 @@
+--PROGRAM--
+if if 5 > 3 { true } else { false }
+--EXPECT-ERROR--
+expected {
