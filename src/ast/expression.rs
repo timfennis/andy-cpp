@@ -1,10 +1,11 @@
 use crate::ast::literal::Literal;
-use crate::ast::Statement;
 use crate::lexer::{IdentifierToken, OperatorToken};
 use std::fmt;
 
 #[derive(Eq, PartialEq)]
 pub enum Expression {
+    Statement(Box<Expression>),
+    Print(Box<Expression>),
     Literal(Literal),
     Unary {
         operator_token: OperatorToken,
@@ -28,7 +29,7 @@ pub enum Expression {
         value: Box<Expression>,
     },
     BlockExpression {
-        statements: Vec<Statement>,
+        statements: Vec<Expression>,
     },
     IfExpression {
         expression: Box<Expression>,

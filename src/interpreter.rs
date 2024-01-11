@@ -1,7 +1,7 @@
 mod environment;
 mod evaluate;
 
-use crate::ast::{Expression, Literal, Operator, Statement};
+use crate::ast::{Expression, Literal, Operator};
 use crate::interpreter::environment::Environment;
 use crate::lexer::{Lexer, Token};
 pub use evaluate::EvaluationError;
@@ -44,27 +44,16 @@ impl<'a, W: std::io::Write> Interpreter<'a, W> {
     }
     fn interpret(
         &mut self,
-        statements: impl Iterator<Item = Statement>,
+        expressions: impl Iterator<Item = Expression>,
     ) -> Result<Literal, EvaluationError> {
         // TODO: The interpreter defaults to returning unit if there are no statements, this makes no sense.
         let mut value = Literal::Unit;
 
-        for statement in statements {
-            value = self.evaluate_statement(statement)?;
+        for expr in expressions {
+            value = self.evaluate_expression(expr)?;
         }
 
         Ok(value)
-    }
-
-    fn evaluate_statement(&mut self, statement: Statement) -> Result<Literal, EvaluationError> {
-        match statement {
-            Statement::Print(expr) => {
-                let value = self.evaluate_expression(expr)?;
-                writeln!(self.destination, "{value}")?;
-                Ok(Literal::Unit)
-            }
-            Statement::Expression(expr) => Ok(self.evaluate_expression(expr)?),
-        }
     }
 
     fn evaluate_expression(&mut self, expr: Expression) -> Result<Literal, EvaluationError> {
@@ -123,10 +112,12 @@ impl<'a, W: std::io::Write> Interpreter<'a, W> {
             }
             Expression::BlockExpression { statements } => {
                 self.environment.new_scope();
+
                 let mut value = Literal::Unit;
                 for stm in statements {
-                    value = self.evaluate_statement(stm)?;
+                    value = self.evaluate_expression(stm)?;
                 }
+
                 self.environment.destroy_scope();
                 value
             }
@@ -150,6 +141,15 @@ impl<'a, W: std::io::Write> Interpreter<'a, W> {
                         })
                     }
                 }
+            }
+            Expression::Statement(expression) => {
+                self.evaluate_expression(*expression)?;
+                Literal::Unit
+            }
+            Expression::Print(expression) => {
+                let value = self.evaluate_expression(*expression)?;
+                writeln!(self.destination, "{value}")?;
+                Literal::Unit
             }
         };
 

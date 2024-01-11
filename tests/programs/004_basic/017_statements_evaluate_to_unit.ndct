@@ -1,0 +1,7 @@
+--PROGRAM--
+x := {
+    y := 3;
+    z := 4;
+};
+print x;
+--EXPECT--

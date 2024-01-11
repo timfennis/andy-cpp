@@ -1,5 +1,5 @@
 use crate::ast::operator::Operator;
-use crate::ast::{Expression, Literal, Statement};
+use crate::ast::{Expression, Literal};
 use crate::lexer::{IdentifierToken, KeywordToken, Symbol};
 use crate::lexer::{Keyword, OperatorToken};
 use crate::lexer::{SymbolToken, Token};
@@ -19,11 +19,32 @@ impl Parser {
     /// # Errors
     /// If the parsing fails which it could do for many different reasons it will return an [Error]. See the variants of
     /// this type for more information about the different kinds of errors.
-    pub(crate) fn parse(&mut self) -> Result<Vec<Statement>, Error> {
+    pub(crate) fn parse(&mut self) -> Result<Vec<Expression>, Error> {
+        let is_valid_statement = |expr: &Expression| -> bool {
+            matches!(
+                expr,
+                Expression::BlockExpression { .. } | Expression::Statement(_)
+            )
+        };
         let mut v = Vec::new();
         while self.current_token().is_some() {
+            let expr = self.expression_or_statement()?;
+
+            if is_valid_statement(&expr) {
+                // we can continue safely
+                v.push(expr);
+            } else {
+                v.push(expr);
+                break;
+            }
             // Right now we just break when we se any error but maybe we should handle this differently
-            v.push(self.statement(false)?);
+        }
+
+        if self.current_token().is_some() {
+            return Err(Error::ExpectedSymbol {
+                expected_symbols: vec![Symbol::Semicolon],
+                actual_token: self.current_token().cloned(),
+            });
         }
         Ok(v)
     }
@@ -99,45 +120,6 @@ impl Parser {
         false
     }
 
-    /// This method checks the current token and requires that it terminates a statement or an expression.
-    /// It handles the following cases
-    ///  * If there are no more tokens it returns `Ok(())`
-    ///  * If there is a semicolon `;` it consumes the semicolon and returns `Ok(())`
-    ///  * If there is a right curly bracket `}` and `in_block` is `true` it doesn't consume the token but returns Ok()
-    ///    basically treating this like it's an end of stream (for the current block).
-    ///  * If there is a another token it returns an `Err`
-    fn require_end_of_statement_or_expression(&mut self, in_block: bool) -> Result<(), Error> {
-        match self.current_token() {
-            // No token is fine
-            None => Ok(()),
-            // If there is a token it must be a semicolon
-            Some(Token::Symbol(SymbolToken {
-                symbol: Symbol::Semicolon,
-                ..
-            })) => {
-                self.advance();
-                Ok(())
-            }
-            // If we run into a closing curly bracket
-            Some(Token::Symbol(SymbolToken {
-                symbol: Symbol::RightCurlyBracket,
-                ..
-            })) if in_block => Ok(()),
-            Some(_) => {
-                let valid_symbols = if in_block {
-                    vec![Symbol::Semicolon, Symbol::RightCurlyBracket]
-                } else {
-                    vec![Symbol::Semicolon]
-                };
-
-                Err(Error::ExpectedSymbol {
-                    actual_token: Some(self.require_current_token()?),
-                    expected_symbols: valid_symbols,
-                })
-            }
-        }
-    }
-
     /// Requires that the current token matches a type, if it doesn't an error is thrown.
     /// If the token does match the expected type we advance the iterator
     fn require_current_token_matches_symbol(
@@ -210,42 +192,32 @@ impl Parser {
 
     /************************************************* PARSER *************************************************/
 
-    fn statement(&mut self, in_block: bool) -> Result<Statement, Error> {
+    fn expression_or_statement(&mut self) -> Result<Expression, Error> {
         // match print statements (which is a temporary construct until we add functions)
-        if matches!(
+        let mut expression = if matches!(
             self.current_token(),
             Some(Token::Identifier(IdentifierToken { name, .. })) if name == "print"
         ) {
             self.advance();
-            return self.print_statement(in_block);
-        }
-
-        self.expression_statement(in_block)
-    }
-
-    fn print_statement(&mut self, in_block: bool) -> Result<Statement, Error> {
-        let value = self.expression()?;
-        self.require_end_of_statement_or_expression(in_block)?;
-
-        Ok(Statement::Print(value))
-    }
-
-    fn expression_statement(&mut self, in_block: bool) -> Result<Statement, Error> {
-        let expr = self.expression()?;
-
-        // TODO: having to add this logic is pretty ugly. What this method currently does is basically decide
-        //       whether a semicolon is required to continue parsing. If a block just ended we done have to require
-        //       a semicolon
-        if let Expression::BlockExpression { .. } = expr {
+            self.print_expression()?
         } else {
-            self.require_end_of_statement_or_expression(in_block)?;
+            self.variable_declaration_or_assignment()?
+        };
+
+        if self.match_symbol(&[Symbol::Semicolon]) {
+            self.advance();
+            expression = Expression::Statement(Box::new(expression));
         }
 
-        Ok(Statement::Expression(expr))
+        Ok(expression)
     }
 
     fn expression(&mut self) -> Result<Expression, Error> {
         self.variable_declaration_or_assignment()
+    }
+    fn print_expression(&mut self) -> Result<Expression, Error> {
+        let value = self.expression()?;
+        Ok(Expression::Print(Box::new(value)))
     }
 
     fn variable_declaration_or_assignment(&mut self) -> Result<Expression, Error> {
@@ -427,7 +399,7 @@ impl Parser {
             }
 
             if self.current_token().is_some() {
-                statements.push(self.statement(true)?);
+                statements.push(self.expression_or_statement()?);
             } else {
                 return Err(Error::UnexpectedEndOfStream {
                     help_text: String::from(
