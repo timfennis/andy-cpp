@@ -65,10 +65,10 @@ impl Parser {
         None
     }
 
-    fn require_token(&mut self, tokens: &[Token]) -> Result<&TokenLocation, Error> {
-        if self.match_token(tokens).is_some() {
+    fn require_token(&mut self, tokens: &[Token]) -> Result<TokenLocation, Error> {
+        if let Some(token) = self.match_token(tokens).cloned() {
             self.advance();
-            return Ok(self.current_token().expect("guaranteed"));
+            return Ok(token);
         }
 
         if self.current_token().is_some() {

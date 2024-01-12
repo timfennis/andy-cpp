@@ -25,6 +25,8 @@ impl<'a> Lexer<'a> {
     }
 
     fn lex_string(&mut self, start: Location) -> Result<TokenLocation, Error> {
+        // TODO: support \u8080 type escape sequences
+        // TODO: should we handle bytes like \xFF? Probably not for strings because they aren't valid UTF-8
         let mut buf = String::new();
         #[allow(clippy::while_let_on_iterator)]
         while let Some(next_ch) = self.source.next() {
