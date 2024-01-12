@@ -1,5 +1,6 @@
 use crate::ast::literal::Literal;
 use crate::ast::parser::Error as ParseError;
+use crate::ast::Error::ExpectedToken;
 use crate::lexer::{Location, Token, TokenLocation};
 
 #[derive(Debug, Eq, PartialEq)]
@@ -40,6 +41,29 @@ pub enum Operator {
     CModulo,
     EuclideanModulo,
     Exponent,
+}
+
+#[derive(Debug, Eq, PartialEq, Copy, Clone)]
+pub enum LogicalOperator {
+    And,
+    Or,
+}
+
+impl TryFrom<TokenLocation> for LogicalOperator {
+    type Error = ParseError;
+
+    fn try_from(value: TokenLocation) -> Result<Self, Self::Error> {
+        Ok(match value.token {
+            Token::LogicAnd => LogicalOperator::And,
+            Token::LogicOr => LogicalOperator::Or,
+            _ => {
+                return Err(ExpectedToken {
+                    actual_token: value,
+                    expected_tokens: vec![Token::LogicAnd, Token::LogicOr],
+                })
+            }
+        })
+    }
 }
 
 impl TryFrom<TokenLocation> for Operator {
@@ -108,6 +132,11 @@ pub enum Expression {
     Binary {
         left: Box<ExpressionLocation>,
         operator: Operator,
+        right: Box<ExpressionLocation>,
+    },
+    Logical {
+        left: Box<ExpressionLocation>,
+        operator: LogicalOperator,
         right: Box<ExpressionLocation>,
     },
     Grouping(Box<ExpressionLocation>),

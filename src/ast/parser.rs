@@ -1,4 +1,6 @@
-use crate::ast::expression::{ExpressionLocation, Lvalue, Operator, UnaryOperator};
+use crate::ast::expression::{
+    ExpressionLocation, LogicalOperator, Lvalue, Operator, UnaryOperator,
+};
 use crate::ast::{Expression, Literal};
 use crate::lexer::{Token, TokenLocation};
 use std::fmt;
@@ -148,6 +150,30 @@ impl Parser {
         Ok(left)
     }
 
+    fn consume_logical_expression_left_associative(
+        &mut self,
+        next: fn(&mut Self) -> Result<ExpressionLocation, Error>,
+        valid_tokens: &[Token],
+    ) -> Result<ExpressionLocation, Error> {
+        let mut left = next(self)?;
+        while let Some(token_location) = self.consume_token_if(valid_tokens) {
+            let operator: LogicalOperator = token_location
+                .clone()
+                .try_into()
+                .expect("consume_operator_if guaranteed us that this is an operator");
+            let right = next(self)?;
+            let start = left.start;
+            let end = right.end;
+            left = Expression::Logical {
+                left: Box::new(left),
+                operator,
+                right: Box::new(right),
+            }
+            .to_location(start, end);
+        }
+        Ok(left)
+    }
+
     fn advance(&mut self) {
         if self.current < self.tokens.len() {
             self.current += 1;
@@ -188,7 +214,7 @@ impl Parser {
     fn variable_declaration_or_assignment(&mut self) -> Result<ExpressionLocation, Error> {
         // NOTE: I think the way we implemented this method makes it right associative
         // self.equality() is the next order of precedence at this point
-        let maybe_identifier = self.equality()?;
+        let maybe_identifier = self.logic_or()?;
 
         // If the token we parsed is some kind of variable we can potentially assign to it. Next we'll check if the next
         // token matches either the declaration operator or the assignment operator. If neither of those matches we are
@@ -226,6 +252,14 @@ impl Parser {
             }),
             _ => Ok(maybe_identifier),
         }
+    }
+
+    fn logic_or(&mut self) -> Result<ExpressionLocation, Error> {
+        self.consume_logical_expression_left_associative(Self::logic_and, &[Token::LogicOr])
+    }
+
+    fn logic_and(&mut self) -> Result<ExpressionLocation, Error> {
+        self.consume_logical_expression_left_associative(Self::equality, &[Token::LogicAnd])
     }
 
     fn equality(&mut self) -> Result<ExpressionLocation, Error> {

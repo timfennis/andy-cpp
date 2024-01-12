@@ -1,7 +1,7 @@
 mod environment;
 mod evaluate;
 
-use crate::ast::{Expression, ExpressionLocation, Literal, Lvalue, UnaryOperator};
+use crate::ast::{Expression, ExpressionLocation, Literal, LogicalOperator, Lvalue, UnaryOperator};
 use crate::interpreter::environment::Environment;
 use crate::lexer::{Lexer, TokenLocation};
 pub use evaluate::EvaluationError;
@@ -164,6 +164,24 @@ impl<'a, W: std::io::Write> Interpreter<'a, W> {
                 let value = self.evaluate_expression(*expression)?;
                 writeln!(self.destination, "{value}")?;
                 Literal::Unit
+            }
+            Expression::Logical {
+                operator,
+                left,
+                right,
+            } => {
+                let left = self.evaluate_expression(*left)?;
+                match (operator, left) {
+                    (LogicalOperator::And, Literal::True) => self.evaluate_expression(*right)?,
+                    (LogicalOperator::And, Literal::False) => Literal::False,
+                    (LogicalOperator::Or, Literal::False) => self.evaluate_expression(*right)?,
+                    (LogicalOperator::Or, Literal::True) => Literal::True,
+                    (LogicalOperator::And | LogicalOperator::Or, literal) => {
+                        return Err(EvaluationError::TypeError {
+                            message: "Cannot apply logical operator to non bool value".to_string(),
+                        })
+                    }
+                }
             }
         };
 

@@ -1,0 +1,19 @@
+--PROGRAM--
+print true && true; // true
+print true && false; // false
+print false && true; // false
+print false && false; // false
+
+print true || false; // true
+print true || true; // true
+print false || true; // true
+print false || false; // false
+--EXPECT--
+true
+false
+false
+false
+true
+true
+true
+false

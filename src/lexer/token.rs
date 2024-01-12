@@ -6,9 +6,13 @@ pub enum Token {
     String(String),
     Number(i64),
     Identifier(String),
+
     // Operator - Assignment
     CreateVar,
     EqualsSign,
+    // Operator - Logic
+    LogicAnd,
+    LogicOr,
     // Operator - Comparison
     Equality,
     Inequality,
@@ -94,6 +98,8 @@ impl fmt::Display for Token {
             Token::RightCurlyBracket => "}",
             Token::Semicolon => ";",
             Token::Comma => ",",
+            Token::LogicAnd => "&&",
+            Token::LogicOr => "||",
         };
         write!(f, "{s}")
     }
@@ -138,6 +144,8 @@ impl TryFrom<(char, char)> for Token {
 
     fn try_from((c1, c2): (char, char)) -> Result<Self, Self::Error> {
         match (c1, c2) {
+            ('&', '&') => Ok(Token::LogicAnd),
+            ('|', '|') => Ok(Token::LogicOr),
             ('%', '%') => Ok(Token::EuclideanModulo),
             (':', '=') => Ok(Token::CreateVar),
             ('=', '=') => Ok(Token::Equality),
