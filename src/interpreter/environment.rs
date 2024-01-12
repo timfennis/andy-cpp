@@ -36,10 +36,9 @@ impl Environment {
             .insert(name.into(), value);
     }
 
-    //TODO: maybe take an owned String for name here
-    pub fn assign(&mut self, name: &str, value: Literal) -> bool {
+    pub fn assign(&mut self, name: String, value: Literal) -> bool {
         for ctx in &mut self.contexts {
-            if ctx.values.contains_key(name) {
+            if ctx.values.contains_key(&name) {
                 ctx.values.insert(name.into(), value);
                 return true;
             }
@@ -91,7 +90,7 @@ mod test {
         env.new_scope();
         env.declare("inner_value", Literal::Integer(234));
         env.declare("shadowed", Literal::Integer(2));
-        assert!(env.assign("mutated_value", Literal::Integer(420)));
+        assert!(env.assign("mutated_value".into(), Literal::Integer(420)));
 
         assert_eq!(env.get("parent_value"), Some(&Literal::Integer(123)));
         assert_eq!(env.get("mutated_value"), Some(&Literal::Integer(420)));

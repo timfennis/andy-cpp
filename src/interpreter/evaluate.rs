@@ -31,7 +31,6 @@ pub fn apply_operator(
             Operator::Divide => (a.checked_div(b)).ok_or_else(mk_div_zero)?.into(),
             Operator::CModulo => a.checked_rem(b).ok_or_else(mk_div_zero)?.into(),
             Operator::EuclideanModulo => a.checked_rem_euclid(b).ok_or_else(mk_div_zero)?.into(),
-            //TODO: better error handling when casting to u32
             Operator::Exponent => {
                 let exponent = u32::try_from(b)?;
                 a.checked_pow(exponent).ok_or_else(mk_int_overflow)?.into()

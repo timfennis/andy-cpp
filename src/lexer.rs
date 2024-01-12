@@ -23,6 +23,62 @@ impl<'a> Lexer<'a> {
             },
         }
     }
+
+    fn lex_string(&mut self, start: Location) -> Result<TokenLocation, Error> {
+        let mut buf = String::new();
+        #[allow(clippy::while_let_on_iterator)]
+        while let Some(next_ch) = self.source.next() {
+            match next_ch {
+                '\\' => match self.source.next() {
+                    Some('n') => {
+                        buf.push('\n');
+                    }
+                    Some('r') => {
+                        buf.push('\r');
+                    }
+                    Some('t') => {
+                        buf.push('\t');
+                    }
+                    Some('0') => {
+                        buf.push('\0');
+                    }
+                    Some('\\') => {
+                        buf.push('\\');
+                    }
+                    Some('"') => {
+                        buf.push('"');
+                    }
+                    Some(x) => {
+                        return Err(Error::InvalidEscapeSequence {
+                            sequence: format!("\\{x}"),
+                            location: self.source.location(),
+                        });
+                    }
+                    None => {
+                        return Err(Error::UnterminatedString {
+                            line: self.source.line,
+                            column: start.column,
+                        });
+                    }
+                },
+                '"' => {
+                    // advance iterator and end the string
+                    return Ok(TokenLocation {
+                        token: Token::String(buf),
+                        location: start,
+                    });
+                }
+                _ => {
+                    buf.push(next_ch);
+                }
+            }
+        }
+
+        Err(Error::UnterminatedString {
+            line: self.source.line,
+            column: start.column,
+        })
+    }
 }
 
 impl Iterator for Lexer<'_> {
@@ -37,16 +93,30 @@ impl Iterator for Lexer<'_> {
             };
             let next = self.source.peek_one();
 
-            // TODO check for comments starting with //
+            // Exclude // docs
+            if matches!((char, next), ('/', Some('/'))) {
+                // We ran into a doc comment and we just keep consuming characters as long as we
+                // don't encounter a linebreak
+                while let Some(ch) = self.source.peek_one() {
+                    if ch == '\n' {
+                        continue 'iterator;
+                    }
 
+                    // Just consume the tokens
+                    self.source.next();
+                }
+
+                continue 'iterator;
+            }
             // Check for double character tokens
             if let Ok(token) = Token::try_from((char, next)) {
-                self.source.next(); //TODO is this a bug
+                self.source.next();
                 return Some(Ok(TokenLocation {
                     token,
                     location: start,
                 }));
             }
+
             // Check for single character tokens
             if let Ok(token) = Token::try_from(char) {
                 return Some(Ok(TokenLocation {
@@ -56,52 +126,10 @@ impl Iterator for Lexer<'_> {
             }
 
             match (char, next) {
-                ('/', Some('/')) => {
-                    // We ran into a doc comment and we just keep consuming characters as long as we
-                    // don't encounter a linebreak
-                    while let Some(ch) = self.source.peek_one() {
-                        if ch == '\n' {
-                            continue 'iterator;
-                        }
-
-                        // Just consume the tokens
-                        self.source.next();
-                    }
-
-                    continue 'iterator;
-                }
                 (' ' | '\t' | '\r' | '\n', _) => {
                     continue 'iterator;
                 }
-                ('"', _) => {
-                    let mut buf = String::new();
-                    let mut valid = false;
-                    #[allow(clippy::while_let_on_iterator)]
-                    while let Some(next_ch) = self.source.next() {
-                        match next_ch {
-                            '"' => {
-                                // advance iterator and end the string
-                                valid = true;
-                                break;
-                            }
-                            _ => {
-                                buf.push(next_ch);
-                            }
-                        }
-                    }
-
-                    return if valid {
-                        Some(Ok(TokenLocation {
-                            token: Token::String(buf),
-                            location: start,
-                        }))
-                    } else {
-                        Some(Err(Error::UnterminatedString {
-                            line: self.source.line,
-                            column: start.column,
-                        }))
-                    };
-                }
+                ('"', _) => return Some(self.lex_string(start)),
                 (char, _) if char.is_ascii_digit() => {
                     let mut num =
                         i64::from(char.to_digit(10).expect("has to be a digit at this point"));
@@ -163,6 +191,15 @@ struct SourceIterator<'a> {
     column: usize,
 }
 
+impl SourceIterator<'_> {
+    pub fn location(&self) -> Location {
+        Location {
+            column: self.column,
+            line: self.line,
+        }
+    }
+}
+
 impl<'a> Iterator for SourceIterator<'a> {
     type Item = char;
 
@@ -205,14 +242,20 @@ impl<'a> SourceIterator<'a> {
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum Error {
+    //TODO: refactor to location
     UnexpectedCharacter {
         char: char,
         line: usize,
         column: usize,
     },
+    //TODO: refactor to location
     UnterminatedString {
         line: usize,
         column: usize,
+    },
+    InvalidEscapeSequence {
+        sequence: String,
+        location: Location,
     },
 }
 
@@ -223,11 +266,13 @@ impl Display for Error {
                 f,
                 "Unexpected character '{char}' at line {line} column {column}"
             ),
-            Error::UnterminatedString { line, column } => {
-                write!(
-                    f,
-                    "File ended with unterminated string starting at line {line} column {column}"
-                )
+            Error::UnterminatedString { line, column } => write!(
+                f,
+                "File ended with unterminated string starting at line {line} column {column}"
+            ),
+
+            Error::InvalidEscapeSequence { sequence, location } => {
+                write!(f, "Invalid escape sequence '{sequence}' on {location}")
             }
         }
     }
