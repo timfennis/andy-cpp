@@ -2,9 +2,10 @@ use crate::ast::Operator;
 use crate::interpreter::int::Int;
 use crate::interpreter::EvaluationError;
 use num::{BigInt, BigRational};
+use ops::Sub;
 use std::fmt::Formatter;
 use std::ops;
-use std::ops::{Add, Rem};
+use std::ops::{Add, Div, Mul, Rem};
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Number {
@@ -41,7 +42,7 @@ impl ops::Neg for Number {
     }
 }
 
-impl ops::Add for Number {
+impl Add for Number {
     type Output = Number;
 
     fn add(self, rhs: Self) -> Self::Output {
@@ -55,6 +56,14 @@ impl ops::Add for Number {
             (Number::Float(p1), Number::Int(p2)) => Number::Float(p1.add(f64::from(p2))),
             (Number::Int(p1), Number::Float(p2)) => Number::Float(f64::from(p1).add(p2)),
 
+            // Rational vs Int
+            (Number::Rational(p1), Number::Int(p2)) => {
+                Number::Rational(p1.add(BigRational::from(p2)))
+            }
+            (Number::Int(p1), Number::Rational(p2)) => {
+                Number::Rational(BigRational::from(p1).add(p2))
+            }
+
             // TODO: obviously we should implement all other cases instead of throwing an error
             (a, b) => panic!(
                 "addition between {} and {} is not implemented",
@@ -65,7 +74,7 @@ impl ops::Add for Number {
     }
 }
 
-impl ops::Sub for Number {
+impl Sub for Number {
     type Output = Number;
     fn sub(self, rhs: Self) -> Self::Output {
         match (self, rhs) {
@@ -73,6 +82,14 @@ impl ops::Sub for Number {
             (Number::Int(i1), Number::Int(i2)) => Number::Int(i1 - i2),
             (Number::Float(f1), Number::Float(f2)) => Number::Float(f1.add(f2)),
             (Number::Rational(r1), Number::Rational(r2)) => Number::Rational(r1 - r2),
+
+            // Rational vs Int
+            (Number::Rational(p1), Number::Int(p2)) => {
+                Number::Rational(p1.sub(BigRational::from(p2)))
+            }
+            (Number::Int(p1), Number::Rational(p2)) => {
+                Number::Rational(BigRational::from(p1).sub(p2))
+            }
             // TODO: implement other cases
             (a, b) => panic!(
                 "subtraction between {} and {} is not implemented",
@@ -96,6 +113,14 @@ impl ops::Div for Number {
             }
             (Number::Float(p1), Number::Float(p2)) => Number::Float(p1 / p2),
             (Number::Rational(p1), Number::Rational(p2)) => Number::Rational(p1 / p2),
+
+            // Rational vs Int
+            (Number::Rational(p1), Number::Int(p2)) => {
+                Number::Rational(p1.div(BigRational::from(p2)))
+            }
+            (Number::Int(p1), Number::Rational(p2)) => {
+                Number::Rational(BigRational::from(p1).div(p2))
+            }
             // TODO: implement other cases
             (a, b) => panic!(
                 "division between {} and {} is not implemented",
@@ -114,6 +139,14 @@ impl ops::Mul for Number {
             (Number::Int(p1), Number::Int(p2)) => Number::Int(p1 * p2),
             (Number::Float(p1), Number::Float(p2)) => Number::Float(p1 * p2),
             (Number::Rational(p1), Number::Rational(p2)) => Number::Rational(p1 * p2),
+            // Rational vs Int
+            (Number::Rational(p1), Number::Int(p2)) => {
+                Number::Rational(p1.mul(BigRational::from(p2)))
+            }
+            (Number::Int(p1), Number::Rational(p2)) => {
+                Number::Rational(BigRational::from(p1).mul(p2))
+            }
+
             // TODO: implement other cases
             (a, b) => panic!(
                 "multiplication between {} and {} is not implemented",
@@ -124,7 +157,7 @@ impl ops::Mul for Number {
     }
 }
 
-impl ops::Rem for Number {
+impl Rem for Number {
     type Output = Number;
 
     fn rem(self, rhs: Self) -> Self::Output {
@@ -132,6 +165,14 @@ impl ops::Rem for Number {
             (Number::Int(p1), Number::Int(p2)) => Number::Int(p1.rem(p2)),
             (Number::Float(p1), Number::Float(p2)) => Number::Float(p1.rem(p2)),
             (Number::Rational(p1), Number::Rational(p2)) => Number::Rational(p1.rem(p2)),
+
+            // Rational vs Int
+            (Number::Rational(p1), Number::Int(p2)) => {
+                Number::Rational(p1.rem(BigRational::from(p2)))
+            }
+            (Number::Int(p1), Number::Rational(p2)) => {
+                Number::Rational(BigRational::from(p1).rem(p2))
+            }
             // TODO: implement other cases
             (a, b) => panic!(
                 "remainder between {} and {} is not implemented",

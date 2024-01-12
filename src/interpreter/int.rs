@@ -1,5 +1,6 @@
+use num::bigint::ToBigInt;
 use num::traits::CheckedEuclid;
-use num::{BigInt, ToPrimitive};
+use num::{BigInt, BigRational, ToPrimitive};
 use std::fmt::{Display, Formatter};
 use std::ops;
 
@@ -145,6 +146,12 @@ impl From<&Int> for BigInt {
             Int::Int64(i) => BigInt::from(*i),
             Int::BigInt(b) => b.clone(),
         }
+    }
+}
+
+impl From<Int> for BigRational {
+    fn from(value: Int) -> Self {
+        BigRational::from(value.to_bigint())
     }
 }
 
