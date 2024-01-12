@@ -133,6 +133,8 @@ impl Iterator for Lexer<'_> {
                 }
                 ('"', _) => return Some(self.lex_string(start)),
                 (char, _) if char.is_ascii_digit() => {
+                    //TODO: support floats
+                    //TODO: support complex numbers
                     let mut num =
                         i64::from(char.to_digit(10).expect("has to be a digit at this point"));
                     while let Some(next_char) = self.source.peek_one() {
