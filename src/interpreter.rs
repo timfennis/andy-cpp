@@ -1,12 +1,19 @@
 mod environment;
 mod evaluate;
+mod int;
+mod num;
+mod value;
 
-use crate::ast::{Expression, ExpressionLocation, Literal, LogicalOperator, Lvalue, UnaryOperator};
+use crate::ast::{Expression, ExpressionLocation, LogicalOperator, Lvalue, UnaryOperator};
 use crate::interpreter::environment::Environment;
+pub use crate::interpreter::num::Number;
+pub use crate::interpreter::value::{Sequence, Value, ValueType};
 use crate::lexer::{Lexer, TokenLocation};
 pub use evaluate::EvaluationError;
+
+use crate::interpreter::int::Int;
 use std::fmt::{Display, Formatter};
-use std::ops::Neg;
+use std::ops::{Neg, Not};
 
 pub struct Interpreter<'a, W> {
     destination: &'a mut W,
@@ -40,13 +47,13 @@ impl<'a, W: std::io::Write> Interpreter<'a, W> {
 
         let final_value = self.interpret(statements.into_iter())?;
 
-        Ok(format!("{final_value:?}"))
+        Ok(format!("{final_value}"))
     }
     fn interpret(
         &mut self,
         expressions: impl Iterator<Item = ExpressionLocation>,
-    ) -> Result<Literal, EvaluationError> {
-        let mut value = Literal::Unit;
+    ) -> Result<Value, EvaluationError> {
+        let mut value = Value::Unit;
         for expr in expressions {
             value = self.evaluate_expression(&expr)?;
         }
@@ -57,19 +64,17 @@ impl<'a, W: std::io::Write> Interpreter<'a, W> {
     fn evaluate_expression(
         &mut self,
         expression_location: &ExpressionLocation,
-    ) -> Result<Literal, EvaluationError> {
+    ) -> Result<Value, EvaluationError> {
         let (start, end) = (expression_location.start, expression_location.end);
-        let literal = match &expression_location.expression {
-            Expression::Literal(l) => l.clone(),
+        let literal: Value = match &expression_location.expression {
             Expression::Unary {
                 expression: expression_location,
                 operator,
             } => {
                 let value = self.evaluate_expression(expression_location)?;
                 match (value, operator) {
-                    (Literal::Integer(n), UnaryOperator::Neg) => Literal::Integer(n.neg()),
-                    (Literal::True, UnaryOperator::Bang) => Literal::False,
-                    (Literal::False, UnaryOperator::Bang) => Literal::True,
+                    (Value::Number(n), UnaryOperator::Neg) => Value::Number(n.neg()),
+                    (Value::Bool(b), UnaryOperator::Bang) => Value::Bool(!b),
                     (_, UnaryOperator::Bang) => {
                         return Err(EvaluationError::TypeError {
                             message: "the '!' operator cannot be applied to this type".to_string(),
@@ -127,7 +132,7 @@ impl<'a, W: std::io::Write> Interpreter<'a, W> {
             Expression::BlockExpression { statements } => {
                 self.environment.new_scope();
 
-                let mut value = Literal::Unit;
+                let mut value = Value::Unit;
                 for stm in statements {
                     value = self.evaluate_expression(stm)?;
                 }
@@ -143,14 +148,14 @@ impl<'a, W: std::io::Write> Interpreter<'a, W> {
                 let result = self.evaluate_expression(expression)?;
 
                 match (result, on_false) {
-                    (Literal::True, _) => self.evaluate_expression(on_true)?,
-                    (Literal::False, Some(block)) => self.evaluate_expression(block)?,
-                    (Literal::False, None) => Literal::Unit,
-                    (literal, _) => {
+                    (Value::Bool(true), _) => self.evaluate_expression(on_true)?,
+                    (Value::Bool(false), Some(block)) => self.evaluate_expression(block)?,
+                    (Value::Bool(false), None) => Value::Unit,
+                    (value, _) => {
                         return Err(EvaluationError::TypeError {
                             message: format!(
                                 "mismatched types: expected bool, found {}",
-                                literal.type_name()
+                                ValueType::from(value)
                             ),
                         })
                     }
@@ -158,12 +163,13 @@ impl<'a, W: std::io::Write> Interpreter<'a, W> {
             }
             Expression::Statement(expression) => {
                 self.evaluate_expression(expression)?;
-                Literal::Unit
+                Value::Unit
             }
             Expression::Print(expression) => {
                 let value = self.evaluate_expression(expression)?;
+                // TODO maybe don't use debug printing
                 writeln!(self.destination, "{value}")?;
-                Literal::Unit
+                Value::Unit
             }
             Expression::Logical {
                 operator,
@@ -172,15 +178,15 @@ impl<'a, W: std::io::Write> Interpreter<'a, W> {
             } => {
                 let left = self.evaluate_expression(left)?;
                 match (operator, left) {
-                    (LogicalOperator::And, Literal::True) => self.evaluate_expression(right)?,
-                    (LogicalOperator::And, Literal::False) => Literal::False,
-                    (LogicalOperator::Or, Literal::False) => self.evaluate_expression(right)?,
-                    (LogicalOperator::Or, Literal::True) => Literal::True,
-                    (LogicalOperator::And | LogicalOperator::Or, literal) => {
+                    (LogicalOperator::And, Value::Bool(true)) => self.evaluate_expression(right)?,
+                    (LogicalOperator::And, Value::Bool(false)) => Value::Bool(false),
+                    (LogicalOperator::Or, Value::Bool(false)) => self.evaluate_expression(right)?,
+                    (LogicalOperator::Or, Value::Bool(true)) => Value::Bool(true),
+                    (LogicalOperator::And | LogicalOperator::Or, value) => {
                         return Err(EvaluationError::TypeError {
                             message: format!(
                                 "Cannot apply logical operator to non bool value {}",
-                                literal.type_name()
+                                ValueType::from(value)
                             ),
                         })
                     }
@@ -193,9 +199,9 @@ impl<'a, W: std::io::Write> Interpreter<'a, W> {
                 self.environment.new_scope();
                 loop {
                     let lit = self.evaluate_expression(expression)?;
-                    if lit == Literal::True {
+                    if let Value::Bool(true) = lit {
                         self.evaluate_expression(loop_body)?;
-                    } else if lit == Literal::False {
+                    } else if let Value::Bool(false) = lit {
                         break;
                     } else {
                         return Err(EvaluationError::TypeError {
@@ -205,8 +211,11 @@ impl<'a, W: std::io::Write> Interpreter<'a, W> {
                     }
                 }
                 self.environment.destroy_scope();
-                Literal::Unit
+                Value::Unit
             }
+            Expression::BoolLiteral(b) => Value::Bool(*b),
+            Expression::StringLiteral(s) => Value::Sequence(Sequence::String(s.clone())),
+            Expression::NumberLiteral(n) => Value::Number(Number::Int(Int::Int64(*n))),
         };
 
         Ok(literal)

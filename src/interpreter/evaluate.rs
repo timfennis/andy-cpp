@@ -1,23 +1,22 @@
-use crate::ast::{Literal, Operator};
+use crate::ast::Operator;
+use crate::interpreter::{Number, Sequence, Value, ValueType};
 use crate::lexer::Location;
 use std::cmp::Ordering;
 use std::error::Error;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::num::TryFromIntError;
+use std::ops::Rem;
+use std::rc::Rc;
 
 pub fn apply_operator(
-    left: Literal,
+    left: Value,
     operator: Operator,
-    right: Literal,
-) -> Result<Literal, EvaluationError> {
-    // Some temporary functions to make errors
-    let mk_int_overflow = || EvaluationError::IntegerOverflow { operator };
-    let mk_div_zero = || EvaluationError::DivisionByZero { operator };
-
-    let literal = match (left, operator, right) {
+    right: Value,
+) -> Result<Value, EvaluationError> {
+    let literal: Value = match (left, operator, right) {
         // Integer
-        (Literal::Integer(a), op, Literal::Integer(b)) => match op {
+        (Value::Number(a), op, Value::Number(b)) => match op {
             Operator::Equality => (a == b).into(),
             Operator::Inequality => (a != b).into(),
             Operator::Greater => (a > b).into(),
@@ -25,39 +24,36 @@ pub fn apply_operator(
             Operator::Less => (a < b).into(),
             Operator::LessEquals => (a <= b).into(),
             // Math operations
-            Operator::Plus => (a.checked_add(b)).ok_or_else(mk_int_overflow)?.into(),
-            Operator::Minus => (a.checked_sub(b)).ok_or_else(mk_int_overflow)?.into(),
-            Operator::Multiply => (a.checked_mul(b)).ok_or_else(mk_int_overflow)?.into(),
-            Operator::Divide => (a.checked_div(b)).ok_or_else(mk_div_zero)?.into(),
-            Operator::CModulo => a.checked_rem(b).ok_or_else(mk_div_zero)?.into(),
-            Operator::EuclideanModulo => a.checked_rem_euclid(b).ok_or_else(mk_div_zero)?.into(),
-            Operator::Exponent => {
-                let exponent = u32::try_from(b)?;
-                a.checked_pow(exponent).ok_or_else(mk_int_overflow)?.into()
-            }
+            Operator::Plus => Value::Number(a + b),
+            Operator::Minus => Value::Number(a - b),
+            Operator::Multiply => Value::Number(a * b),
+            Operator::Divide => Value::Number(a / b),
+            Operator::CModulo => Value::Number(a.rem(b)),
+            Operator::EuclideanModulo => Value::Number(a.checked_rem_euclid(b)?),
+            Operator::Exponent => Value::Number(a.checked_pow(b)?),
         },
         // Boolean
-        (
-            a @ (Literal::True | Literal::False),
-            Operator::Equality,
-            b @ (Literal::True | Literal::False),
-        ) => (a == b).into(),
-        (
-            a @ (Literal::True | Literal::False),
-            Operator::Inequality,
-            b @ (Literal::True | Literal::False),
-        ) => (a != b).into(),
+        (Value::Bool(a), Operator::Equality, Value::Bool(b)) => (a == b).into(),
+        (Value::Bool(a), Operator::Inequality, Value::Bool(b)) => (a != b).into(),
 
         // Some mixed memes
-        (Literal::String(a), Operator::Multiply, Literal::Integer(b)) => {
-            Literal::String(a.repeat(usize::try_from(b)?))
+        (Value::Sequence(Sequence::String(a)), Operator::Multiply, Value::Number(b)) => {
+            Value::Sequence(Sequence::String(Rc::new(a.repeat(
+                usize::try_from(b).map_err(|_| EvaluationError::TypeError {
+                    message: String::from("Cannot convert"),
+                })?,
+            ))))
         }
-        (Literal::Integer(a), Operator::Multiply, Literal::String(b)) => {
-            Literal::String(b.repeat(usize::try_from(a)?))
+        (Value::Number(a), Operator::Multiply, Value::Sequence(Sequence::String(b))) => {
+            Value::Sequence(Sequence::String(Rc::new(b.repeat(
+                usize::try_from(a).map_err(|_| EvaluationError::TypeError {
+                    message: String::from("Cannot convert"),
+                })?,
+            ))))
         }
 
-        // String apply operators to strings
-        (Literal::String(a), op, Literal::String(b)) => {
+        // String apply operators to string
+        (Value::Sequence(Sequence::String(a)), op, Value::Sequence(Sequence::String(b))) => {
             let comp = a.cmp(&b);
             match op {
                 Operator::Equality => (comp == Ordering::Equal).into(),
@@ -66,12 +62,14 @@ pub fn apply_operator(
                 Operator::GreaterEquals => (comp != Ordering::Less).into(),
                 Operator::Less => (comp == Ordering::Less).into(),
                 Operator::LessEquals => (comp != Ordering::Greater).into(),
-                Operator::Plus => Literal::String(format!("{a}{b}").to_string()),
+                Operator::Plus => {
+                    Value::Sequence(Sequence::String(Rc::new(format!("{a}{b}").to_string())))
+                }
                 _ => {
                     return Err(EvaluationError::InvalidOperator {
                         operator,
-                        type_a: Literal::String(a),
-                        type_b: Literal::String(b),
+                        type_a: ValueType::String,
+                        type_b: ValueType::String,
                     });
                 }
             }
@@ -80,8 +78,8 @@ pub fn apply_operator(
         (a, _op, b) => {
             return Err(EvaluationError::InvalidOperator {
                 operator,
-                type_a: a,
-                type_b: b,
+                type_a: a.into(),
+                type_b: b.into(),
             });
         }
     };
@@ -95,8 +93,8 @@ pub enum EvaluationError {
     },
     InvalidOperator {
         operator: Operator,
-        type_a: Literal,
-        type_b: Literal,
+        type_a: ValueType,
+        type_b: ValueType,
     },
     IntegerOverflow {
         operator: Operator,
@@ -133,8 +131,8 @@ impl Display for EvaluationError {
                 f,
                 "unable to apply the '{:?}' operator to {} and {} on line {} column {}",
                 op,
-                type_a.type_name(),
-                type_b.type_name(),
+                type_a,
+                type_b,
                 0,
                 0 // TODO: fix this error
             ),

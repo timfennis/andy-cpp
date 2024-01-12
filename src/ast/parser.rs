@@ -1,10 +1,11 @@
 use crate::ast::expression::{
     ExpressionLocation, LogicalOperator, Lvalue, Operator, UnaryOperator,
 };
-use crate::ast::{Expression, Literal};
+use crate::ast::Expression;
 use crate::lexer::{Token, TokenLocation};
 use std::fmt;
 use std::fmt::{Formatter, Write};
+use std::rc::Rc;
 
 pub(crate) struct Parser {
     tokens: Vec<TokenLocation>,
@@ -340,10 +341,10 @@ impl Parser {
         let token_location = self.require_current_token()?;
 
         let expression = match token_location.token {
-            Token::False => Expression::Literal(Literal::False),
-            Token::True => Expression::Literal(Literal::True),
-            Token::Number(num) => Expression::Literal(Literal::Integer(num)),
-            Token::String(string) => Expression::Literal(Literal::String(string)),
+            Token::False => Expression::BoolLiteral(false),
+            Token::True => Expression::BoolLiteral(true),
+            Token::Number(num) => Expression::NumberLiteral(num),
+            Token::String(value) => Expression::StringLiteral(Rc::new(value)),
             Token::LeftParentheses => {
                 let expr = self.expression()?;
                 self.require_current_token_matches(Token::RightParentheses)?;
@@ -398,7 +399,7 @@ impl Parser {
         let start = self.require_token(&[Token::LeftCurlyBracket])?.location;
 
         let mut statements = Vec::new();
-        // let mut expression = Expression::Literal(Literal::Unit);
+        // let mut expression = Expression::Literal(Value::Unit);
 
         let end = loop {
             if let Some(token_location) = self.consume_token_if(&[Token::RightCurlyBracket]) {

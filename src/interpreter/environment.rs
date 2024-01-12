@@ -1,4 +1,4 @@
-use crate::ast::Literal;
+use crate::interpreter::Value;
 use std::collections::HashMap;
 
 #[derive(Debug)]
@@ -16,7 +16,7 @@ impl Default for Environment {
 
 #[derive(Debug)]
 struct Context {
-    values: HashMap<String, Literal>,
+    values: HashMap<String, Value>,
 }
 
 impl Default for Context {
@@ -28,7 +28,7 @@ impl Default for Context {
 }
 
 impl Environment {
-    pub fn declare(&mut self, name: &str, value: Literal) {
+    pub fn declare(&mut self, name: &str, value: Value) {
         self.contexts
             .last_mut()
             .expect("Environment should guarantee there is always at least one context")
@@ -36,7 +36,7 @@ impl Environment {
             .insert(name.into(), value);
     }
 
-    pub fn assign(&mut self, name: String, value: Literal) -> bool {
+    pub fn assign(&mut self, name: String, value: Value) -> bool {
         for ctx in &mut self.contexts {
             // The map_entry suggestion isn't helpful because entry wants to take ownership of name
             #[allow(clippy::map_entry)]
@@ -55,7 +55,7 @@ impl Environment {
             .any(|ctx| ctx.values.contains_key(name))
     }
 
-    pub fn get(&self, name: &str) -> Option<&Literal> {
+    pub fn get(&self, name: &str) -> Option<&Value> {
         for ctx in self.contexts.iter().rev() {
             if let Some(v) = ctx.values.get(name) {
                 return Some(v);
@@ -76,39 +76,38 @@ impl Environment {
 
 #[cfg(test)]
 mod test {
-    use crate::ast::Literal;
     use crate::interpreter::environment::Environment;
 
     #[test]
     fn create_and_destroy_scope() {
         let mut env = Environment::default();
-        env.declare("parent_value", Literal::Integer(123));
-        env.declare("mutated_value", Literal::Integer(69));
-        env.declare("shadowed", Literal::Integer(1));
+        env.declare("parent_value", 123.into());
+        env.declare("mutated_value", 69.into());
+        env.declare("shadowed", 1.into());
 
-        assert_eq!(env.get("parent_value"), Some(&Literal::Integer(123)));
-        assert_eq!(env.get("mutated_value"), Some(&Literal::Integer(69)));
+        assert_eq!(env.get("parent_value"), Some(&123.into()));
+        assert_eq!(env.get("mutated_value"), Some(&69.into()));
 
         env.new_scope();
-        env.declare("inner_value", Literal::Integer(234));
-        env.declare("shadowed", Literal::Integer(2));
-        assert!(env.assign("mutated_value".into(), Literal::Integer(420)));
+        env.declare("inner_value", 234.into());
+        env.declare("shadowed", 2.into());
+        assert!(env.assign("mutated_value".into(), 420.into()));
 
-        assert_eq!(env.get("parent_value"), Some(&Literal::Integer(123)));
-        assert_eq!(env.get("mutated_value"), Some(&Literal::Integer(420)));
-        assert_eq!(env.get("inner_value"), Some(&Literal::Integer(234)));
-        assert_eq!(env.get("shadowed"), Some(&Literal::Integer(2)));
+        assert_eq!(env.get("parent_value"), Some(&123.into()));
+        assert_eq!(env.get("mutated_value"), Some(&420.into()));
+        assert_eq!(env.get("inner_value"), Some(&234.into()));
+        assert_eq!(env.get("shadowed"), Some(&2.into()));
 
         env.destroy_scope();
 
         assert_eq!(
             env.get("parent_value"),
-            Some(&Literal::Integer(123)),
+            Some(&123.into()),
             "original value still exists and hasn't changed"
         );
         assert_eq!(
             env.get("mutated_value"),
-            Some(&Literal::Integer(420)),
+            Some(&420.into()),
             "value in the original scope was modified"
         );
         assert_eq!(
@@ -118,7 +117,7 @@ mod test {
         );
         assert_eq!(
             env.get("shadowed"),
-            Some(&Literal::Integer(1)),
+            Some(&1.into()),
             "a shadowed value reverts back to the value in the original scope"
         );
     }

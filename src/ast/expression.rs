@@ -1,7 +1,7 @@
-use crate::ast::literal::Literal;
 use crate::ast::parser::Error as ParseError;
 use crate::ast::Error::ExpectedToken;
 use crate::lexer::{Location, Token, TokenLocation};
+use std::rc::Rc;
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum UnaryOperator {
@@ -122,9 +122,13 @@ pub enum Lvalue {
 }
 #[derive(Debug, Eq, PartialEq)]
 pub enum Expression {
+    // Literals
+    BoolLiteral(bool),
+    StringLiteral(Rc<String>),
+    NumberLiteral(i64),
+    //
     Statement(Box<ExpressionLocation>),
     Print(Box<ExpressionLocation>),
-    Literal(Literal),
     Unary {
         operator: UnaryOperator,
         expression: Box<ExpressionLocation>,
