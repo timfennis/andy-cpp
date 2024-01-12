@@ -1,0 +1,8 @@
+--PROGRAM--
+n := v := 10;
+while { n = n - 1 } > 0 {
+    v = v * n;
+}
+print v;
+--EXPECT--
+3628800

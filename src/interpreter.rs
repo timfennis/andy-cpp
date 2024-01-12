@@ -48,7 +48,7 @@ impl<'a, W: std::io::Write> Interpreter<'a, W> {
     ) -> Result<Literal, EvaluationError> {
         let mut value = Literal::Unit;
         for expr in expressions {
-            value = self.evaluate_expression(expr)?;
+            value = self.evaluate_expression(&expr)?;
         }
         Ok(value)
     }
@@ -56,16 +56,16 @@ impl<'a, W: std::io::Write> Interpreter<'a, W> {
     #[allow(clippy::too_many_lines)]
     fn evaluate_expression(
         &mut self,
-        expression_location: ExpressionLocation,
+        expression_location: &ExpressionLocation,
     ) -> Result<Literal, EvaluationError> {
         let (start, end) = (expression_location.start, expression_location.end);
-        let literal = match expression_location.expression {
+        let literal = match &expression_location.expression {
             Expression::Literal(l) => l.clone(),
             Expression::Unary {
                 expression: expression_location,
                 operator,
             } => {
-                let value = self.evaluate_expression(*expression_location)?;
+                let value = self.evaluate_expression(expression_location)?;
                 match (value, operator) {
                     (Literal::Integer(n), UnaryOperator::Neg) => Literal::Integer(n.neg()),
                     (Literal::True, UnaryOperator::Bang) => Literal::False,
@@ -87,11 +87,11 @@ impl<'a, W: std::io::Write> Interpreter<'a, W> {
                 operator: operator_token,
                 right,
             } => {
-                let left = self.evaluate_expression(*left)?;
-                let right = self.evaluate_expression(*right)?;
-                evaluate::apply_operator(left, operator_token, right)?
+                let left = self.evaluate_expression(left)?;
+                let right = self.evaluate_expression(right)?;
+                evaluate::apply_operator(left, *operator_token, right)?
             }
-            Expression::Grouping(expr) => self.evaluate_expression(*expr)?,
+            Expression::Grouping(expr) => self.evaluate_expression(expr)?,
             Expression::Variable { ref identifier } => self
                 .environment
                 .get(identifier)
@@ -105,23 +105,23 @@ impl<'a, W: std::io::Write> Interpreter<'a, W> {
                 l_value: Lvalue::Variable { identifier },
                 value,
             } => {
-                let value = self.evaluate_expression(*value)?;
-                self.environment.declare(&identifier, value.clone());
+                let value = self.evaluate_expression(value)?;
+                self.environment.declare(identifier, value.clone());
                 value
             }
             Expression::VariableAssignment {
                 l_value: Lvalue::Variable { identifier },
                 value,
             } => {
-                if !self.environment.contains(&identifier) {
+                if !self.environment.contains(identifier) {
                     return Err(EvaluationError::UndefinedVariable {
                         identifier: identifier.clone(),
                         start,
                         end,
                     });
                 }
-                let value = self.evaluate_expression(*value)?;
-                self.environment.assign(identifier, value.clone());
+                let value = self.evaluate_expression(value)?;
+                self.environment.assign(identifier.clone(), value.clone());
                 value
             }
             Expression::BlockExpression { statements } => {
@@ -140,11 +140,11 @@ impl<'a, W: std::io::Write> Interpreter<'a, W> {
                 on_true,
                 on_false,
             } => {
-                let result = self.evaluate_expression(*expression)?;
+                let result = self.evaluate_expression(expression)?;
 
                 match (result, on_false) {
-                    (Literal::True, _) => self.evaluate_expression(*on_true)?,
-                    (Literal::False, Some(block)) => self.evaluate_expression(*block)?,
+                    (Literal::True, _) => self.evaluate_expression(on_true)?,
+                    (Literal::False, Some(block)) => self.evaluate_expression(block)?,
                     (Literal::False, None) => Literal::Unit,
                     (literal, _) => {
                         return Err(EvaluationError::TypeError {
@@ -157,11 +157,11 @@ impl<'a, W: std::io::Write> Interpreter<'a, W> {
                 }
             }
             Expression::Statement(expression) => {
-                self.evaluate_expression(*expression)?;
+                self.evaluate_expression(expression)?;
                 Literal::Unit
             }
             Expression::Print(expression) => {
-                let value = self.evaluate_expression(*expression)?;
+                let value = self.evaluate_expression(expression)?;
                 writeln!(self.destination, "{value}")?;
                 Literal::Unit
             }
@@ -170,18 +170,42 @@ impl<'a, W: std::io::Write> Interpreter<'a, W> {
                 left,
                 right,
             } => {
-                let left = self.evaluate_expression(*left)?;
+                let left = self.evaluate_expression(left)?;
                 match (operator, left) {
-                    (LogicalOperator::And, Literal::True) => self.evaluate_expression(*right)?,
+                    (LogicalOperator::And, Literal::True) => self.evaluate_expression(right)?,
                     (LogicalOperator::And, Literal::False) => Literal::False,
-                    (LogicalOperator::Or, Literal::False) => self.evaluate_expression(*right)?,
+                    (LogicalOperator::Or, Literal::False) => self.evaluate_expression(right)?,
                     (LogicalOperator::Or, Literal::True) => Literal::True,
                     (LogicalOperator::And | LogicalOperator::Or, literal) => {
                         return Err(EvaluationError::TypeError {
-                            message: "Cannot apply logical operator to non bool value".to_string(),
+                            message: format!(
+                                "Cannot apply logical operator to non bool value {}",
+                                literal.type_name()
+                            ),
                         })
                     }
                 }
+            }
+            Expression::WhileExpression {
+                expression,
+                loop_body,
+            } => {
+                self.environment.new_scope();
+                loop {
+                    let lit = self.evaluate_expression(expression)?;
+                    if lit == Literal::True {
+                        self.evaluate_expression(loop_body)?;
+                    } else if lit == Literal::False {
+                        break;
+                    } else {
+                        return Err(EvaluationError::TypeError {
+                            message: "Expression in a while structure must return a bool"
+                                .to_string(),
+                        });
+                    }
+                }
+                self.environment.destroy_scope();
+                Literal::Unit
             }
         };
 

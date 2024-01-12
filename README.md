@@ -6,22 +6,17 @@ This is the source code for the Andy C++ programming language. Not meant for any
 
 Currently, the language only has some very basic features. I'll try to update the sample below as I make more progress.
 
+### Factorial
 ```ndc
-x := 3;
-y := 5;
-
-// introduce a scope that introduces a temporary variable and evaluates to a value
-x = { 
-    val := 1;
-    x + val
-};
-
-z := x * y;
-print z; // 20
-
-print "Hello" + (2 * " hello") + ", World!"; // Hello hello hello, World!
+n := v := 10;
+while { n = n - 1 } > 0 {
+    v = v * n;
+}
+print v;
 ```
 
 ## Thanks
 
-This language and implementation was inspired by Robert Nystrom's book [Crafting Interpreters](https://craftinginterpreters.com/).
+This language and implementation was inspired by Robert Nystrom's book [Crafting Interpreters](https://craftinginterpreters.com/). I've also taken
+plagiaristic levels of inspiration from [Noulith](https://github.com/betaveros/noulith) which is the language that
+inspired me to read the book in the first place.

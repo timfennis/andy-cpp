@@ -38,8 +38,10 @@ impl Environment {
 
     pub fn assign(&mut self, name: String, value: Literal) -> bool {
         for ctx in &mut self.contexts {
+            // The map_entry suggestion isn't helpful because entry wants to take ownership of name
+            #[allow(clippy::map_entry)]
             if ctx.values.contains_key(&name) {
-                ctx.values.insert(name.into(), value);
+                ctx.values.insert(name, value);
                 return true;
             }
         }

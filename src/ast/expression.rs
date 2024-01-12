@@ -159,6 +159,10 @@ pub enum Expression {
         on_true: Box<ExpressionLocation>,
         on_false: Option<Box<ExpressionLocation>>,
     },
+    WhileExpression {
+        expression: Box<ExpressionLocation>,
+        loop_body: Box<ExpressionLocation>,
+    },
 }
 
 impl Expression {

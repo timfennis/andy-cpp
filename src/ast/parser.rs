@@ -23,7 +23,10 @@ impl Parser {
         let is_valid_statement = |expr: &Expression| -> bool {
             matches!(
                 expr,
-                Expression::BlockExpression { .. } | Expression::Statement(_)
+                Expression::BlockExpression { .. }
+                    | Expression::Statement(_)
+                    | Expression::IfExpression { .. }
+                    | Expression::WhileExpression { .. }
             )
         };
         let mut v = Vec::new();
@@ -328,9 +331,9 @@ impl Parser {
     fn primary(&mut self) -> Result<ExpressionLocation, Error> {
         if self.consume_token_if(&[Token::If]).is_some() {
             return self.if_expression();
-        }
-
-        if self.match_token(&[Token::LeftCurlyBracket]).is_some() {
+        } else if self.consume_token_if(&[Token::While]).is_some() {
+            return self.while_expression();
+        } else if self.match_token(&[Token::LeftCurlyBracket]).is_some() {
             return self.block();
         }
 
@@ -359,6 +362,7 @@ impl Parser {
         Ok(expression.to_location(token_location.location, token_location.location))
     }
 
+    //TODO: support } else if x { type structures
     fn if_expression(&mut self) -> Result<ExpressionLocation, Error> {
         let expression = self.expression()?;
         let on_true = self.block()?;
@@ -374,6 +378,18 @@ impl Parser {
             expression: Box::new(expression),
             on_true: Box::new(on_true),
             on_false,
+        }
+        .to_location(start, end))
+    }
+
+    fn while_expression(&mut self) -> Result<ExpressionLocation, Error> {
+        let expression = self.expression()?;
+        let loop_body = self.block()?;
+
+        let (start, end) = (expression.start, expression.end);
+        Ok(Expression::WhileExpression {
+            expression: Box::new(expression),
+            loop_body: Box::new(loop_body),
         }
         .to_location(start, end))
     }
