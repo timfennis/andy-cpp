@@ -65,7 +65,6 @@ fn run_test(path: PathBuf) -> Result<(), std::io::Error> {
 
     let error = interpreter_result.unwrap_or_else(|err| format!("{err}"));
 
-    // TODO: should we even require valid UTF-8 here?
     let output = String::from_utf8(b).expect("output of program was not valid UTF-8");
 
     // For now let's trim end both result and expect to ensure that any trailing line breaks don't cause issues

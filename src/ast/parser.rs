@@ -140,7 +140,6 @@ impl Parser {
             let end = right.end;
             left = Expression::Binary {
                 left: Box::new(left),
-                // TODO: maybe we can get rid of this clone if we consume the stream of tokens in a different way
                 operator,
                 right: Box::new(right),
             }
@@ -273,7 +272,6 @@ impl Parser {
             .consume_token_if(&[Token::Bang, Token::Minus])
             .is_some()
         {
-            // TODO: maybe we can get rid of this clone if we consume the token stream in a different way
             let operator: UnaryOperator = self
                 .previous_token()
                 .expect("we're guaranteed to have an operator token by the previous call to self.consume_operator_if")
@@ -396,11 +394,9 @@ impl std::error::Error for Error {}
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        // TODO: Stop using debug formatting for token types
         match self {
-            Error::UnexpectedEndOfStream { help_text } => {
-                write!(f, "Unexpected end of stream: {help_text}")
-            }
+            Error::UnexpectedEndOfStream { help_text } =>
+                write!(f, "Unexpected end of stream: {help_text}"),
             Error::ExpectedExpression {
                 actual_token: token,
             } => write!(
@@ -421,13 +417,12 @@ impl fmt::Display for Error {
                 actual_token,
                 expected_tokens: expected_symbols,
             } =>  write!(
-                    f,
-                    "Unexpected token '{}' expected symbol {} on {}",
-                    actual_token.token,
-                    tokens_to_string(expected_symbols),
-                    actual_token.location
-                    ),
-
+                f,
+                "Unexpected token '{}' expected symbol {} on {}",
+                actual_token.token,
+                tokens_to_string(expected_symbols),
+                actual_token.location
+            ),
             Error::InvalidAssignmentTarget { target } => write!(f, "Invalid variable declaration or assignment. Cannot assign a value to expression: {target:?}")
         }
     }

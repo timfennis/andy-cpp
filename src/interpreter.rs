@@ -46,13 +46,10 @@ impl<'a, W: std::io::Write> Interpreter<'a, W> {
         &mut self,
         expressions: impl Iterator<Item = ExpressionLocation>,
     ) -> Result<Literal, EvaluationError> {
-        // TODO: The interpreter defaults to returning unit if there are no statements, this makes no sense.
         let mut value = Literal::Unit;
-
         for expr in expressions {
             value = self.evaluate_expression(expr)?;
         }
-
         Ok(value)
     }
 
@@ -103,8 +100,6 @@ impl<'a, W: std::io::Write> Interpreter<'a, W> {
                     start,
                     end,
                 })?
-                // TODO: big FIXME, figure out if we can somehow return a reference instead of having to clone here
-                //       does returning a reference make sense though since we're interested in the result at this point?
                 .clone(),
             Expression::VariableDeclaration {
                 l_value: Lvalue::Variable { identifier },
@@ -115,10 +110,10 @@ impl<'a, W: std::io::Write> Interpreter<'a, W> {
                 value
             }
             Expression::VariableAssignment {
-                l_value: Lvalue::Variable { ref identifier },
+                l_value: Lvalue::Variable { identifier },
                 value,
             } => {
-                if !self.environment.contains(identifier) {
+                if !self.environment.contains(&identifier) {
                     return Err(EvaluationError::UndefinedVariable {
                         identifier: identifier.clone(),
                         start,
