@@ -1,7 +1,7 @@
 use crate::ast::parser::Error as ParseError;
 use crate::ast::Error::ExpectedToken;
 use crate::lexer::{Location, Token, TokenLocation};
-use num::BigInt;
+use num::{BigInt, Complex};
 use std::rc::Rc;
 
 #[derive(Debug, Eq, PartialEq)]
@@ -129,6 +129,8 @@ pub enum Expression {
     Int64Literal(i64),
     Float64Literal(f64),
     BigIntLiteral(BigInt),
+    ComplexLiteral(Complex<f64>),
+
     //
     Statement(Box<ExpressionLocation>),
     Print(Box<ExpressionLocation>),

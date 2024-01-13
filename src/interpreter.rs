@@ -13,7 +13,7 @@ pub use evaluate::EvaluationError;
 
 use crate::interpreter::int::Int;
 use std::fmt::{Display, Formatter};
-use std::ops::{Neg};
+use std::ops::Neg;
 
 pub struct Interpreter<'a, W> {
     destination: &'a mut W,
@@ -218,6 +218,7 @@ impl<'a, W: std::io::Write> Interpreter<'a, W> {
             Expression::Int64Literal(n) => Value::Number(Number::Int(Int::Int64(*n))),
             Expression::BigIntLiteral(n) => Value::Number(Number::Int(Int::BigInt(n.clone()))),
             Expression::Float64Literal(n) => Value::Number(Number::Float(*n)),
+            Expression::ComplexLiteral(n) => Value::Number(Number::Complex(n.clone())),
         };
 
         Ok(literal)
