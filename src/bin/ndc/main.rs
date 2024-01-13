@@ -5,6 +5,7 @@ use std::io::Read;
 use std::path::PathBuf;
 use std::process::exit;
 
+#[cfg(feature = "repl")]
 mod repl;
 
 #[derive(Parser)]
