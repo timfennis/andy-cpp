@@ -1,6 +1,6 @@
 use crate::interpreter::EvaluationError;
 use num::traits::CheckedEuclid;
-use num::{BigInt, BigRational, Complex, ToPrimitive};
+use num::{BigInt, BigRational, Complex, Signed, ToPrimitive, Zero};
 use std::fmt::{Display, Formatter};
 
 use std::ops;
@@ -64,6 +64,27 @@ impl Int {
         }
 
         None
+    }
+
+    pub fn is_negative(&self) -> bool {
+        match self {
+            Int::Int64(i) => i.is_negative(),
+            Int::BigInt(i) => i.is_negative(),
+        }
+    }
+
+    pub fn is_zero(&self) -> bool {
+        match self {
+            Int::Int64(i) => i.is_zero(),
+            Int::BigInt(i) => i.is_zero(),
+        }
+    }
+
+    pub fn is_positive(&self) -> bool {
+        match self {
+            Int::Int64(i) => i.is_positive(),
+            Int::BigInt(i) => i.is_positive(),
+        }
     }
 }
 

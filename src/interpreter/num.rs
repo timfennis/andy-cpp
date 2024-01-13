@@ -1,7 +1,7 @@
-use crate::ast::Operator;
 use crate::interpreter::int::Int;
 use crate::interpreter::{EvaluationError, Function, Value};
 
+use crate::ast::Operator;
 use num::{BigRational, Complex, ToPrimitive};
 use std::fmt::Formatter;
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
@@ -309,10 +309,14 @@ impl Number {
     pub fn checked_pow(self, rhs: Self) -> Result<Self, EvaluationError> {
         Ok(match (self, rhs) {
             (Number::Int(p1), Number::Int(p2)) => {
-                let a = p1.checked_pow(p2).ok_or(EvaluationError::IntegerOverflow {
-                    operator: Operator::Exponent,
-                })?;
-                Number::Int(a)
+                if p2.is_negative() {
+                    let p2 = i32::try_from(p2)?;
+                    Number::Rational(BigRational::from(p1).pow(p2))
+                } else {
+                    Number::Int(p1.checked_pow(p2).ok_or(EvaluationError::IntegerOverflow {
+                        operator: Operator::Exponent,
+                    })?)
+                }
             }
             (Number::Int(p1), Number::Float(p2)) => Number::Float(f64::from(p1).powf(p2)),
             (Number::Int(p1), Number::Complex(p2)) => {
