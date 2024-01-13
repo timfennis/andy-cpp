@@ -218,7 +218,7 @@ impl<'a, W: std::io::Write> Interpreter<'a, W> {
             Expression::Int64Literal(n) => Value::Number(Number::Int(Int::Int64(*n))),
             Expression::BigIntLiteral(n) => Value::Number(Number::Int(Int::BigInt(n.clone()))),
             Expression::Float64Literal(n) => Value::Number(Number::Float(*n)),
-            Expression::ComplexLiteral(n) => Value::Number(Number::Complex(n.clone())),
+            Expression::ComplexLiteral(n) => Value::Number(Number::Complex(*n)),
         };
 
         Ok(literal)
