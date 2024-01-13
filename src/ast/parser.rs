@@ -1,6 +1,6 @@
-use crate::ast::expression::{
-    ExpressionLocation, LogicalOperator, Lvalue, Operator, UnaryOperator,
-};
+use crate::ast::expression::{ExpressionLocation, Lvalue};
+use crate::ast::operator::{LogicalOperator, Operator, UnaryOperator};
+use crate::ast::Error::UnexpectedEndOfStream;
 use crate::ast::Expression;
 use crate::lexer::{Token, TokenLocation};
 use std::fmt;
@@ -326,7 +326,56 @@ impl Parser {
             .to_location(start, end));
         }
 
-        self.primary()
+        self.call()
+    }
+
+    fn call(&mut self) -> Result<ExpressionLocation, Error> {
+        let mut expr = self.primary()?;
+
+        while let Some(Token::LeftParentheses) = self.current_token().map(|it| &it.token) {
+            self.advance();
+            expr = self.finish_call(expr)?;
+        }
+
+        Ok(expr)
+    }
+
+    fn finish_call(&mut self, callee: ExpressionLocation) -> Result<ExpressionLocation, Error> {
+        let mut arguments = Vec::new();
+
+        // TODO this might not be the best place to do this check
+        let ExpressionLocation {
+            expression: Expression::Variable { identifier },
+            ..
+        } = callee
+        else {
+            return Err(Error::ExpectedIdentifier {});
+        };
+
+        loop {
+            let current_token = self.current_token().cloned();
+            match current_token.as_ref().map(|it| &it.token) {
+                Some(Token::RightParentheses) => {
+                    self.advance();
+                    return Ok(Expression::Call {
+                        function: identifier,
+                        arguments,
+                    }
+                    .to_location(callee.start, current_token.unwrap().location));
+                }
+                Some(Token::Comma) => {
+                    self.advance();
+                }
+                None => {
+                    return Err(UnexpectedEndOfStream {
+                        help_text: "unexpected end of stream while parsing method call".to_string(),
+                    })
+                }
+                _ => {
+                    arguments.push(self.expression()?);
+                }
+            }
+        }
     }
 
     fn primary(&mut self) -> Result<ExpressionLocation, Error> {
@@ -402,7 +451,6 @@ impl Parser {
         let start = self.require_token(&[Token::LeftCurlyBracket])?.location;
 
         let mut statements = Vec::new();
-        // let mut expression = Expression::Literal(Value::Unit);
 
         let end = loop {
             if let Some(token_location) = self.consume_token_if(&[Token::RightCurlyBracket]) {
@@ -432,9 +480,8 @@ pub enum Error {
     ExpectedExpression {
         actual_token: TokenLocation,
     },
-    ExpectedIdentifier {
-        actual_token: TokenLocation,
-    },
+    // TODO this type is incomplete at best
+    ExpectedIdentifier {},
     ExpectedToken {
         actual_token: TokenLocation,
         expected_tokens: Vec<Token>,
@@ -459,13 +506,10 @@ impl fmt::Display for Error {
                 token,
                 token.location
             ),
-            Error::ExpectedIdentifier {
-                actual_token,
+            Error::ExpectedIdentifier { // TODO this error case is really shoddy
             } => write!(
                 f,
-                "Unexpected token '{}' expected identifier on {}",
-                actual_token.token,
-                actual_token.location
+                "expected identifier",
             ),
             Error::ExpectedToken {
                 actual_token,

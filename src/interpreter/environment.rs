@@ -1,5 +1,8 @@
-use crate::interpreter::Value;
+use crate::interpreter::num::SingleNumberFunction;
+use crate::interpreter::{Number, Value};
+use num::ToPrimitive;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 #[derive(Debug)]
 pub struct Environment {
@@ -9,7 +12,7 @@ pub struct Environment {
 impl Default for Environment {
     fn default() -> Self {
         Self {
-            contexts: vec![Context::default()],
+            contexts: vec![Context::stdlib()],
         }
     }
 }
@@ -17,6 +20,25 @@ impl Default for Environment {
 #[derive(Debug)]
 struct Context {
     values: HashMap<String, Value>,
+}
+
+impl Context {
+    fn stdlib() -> Self {
+        let mut map = HashMap::default();
+        map.insert(
+            "sqrt".to_string(),
+            Value::Function(Rc::new(SingleNumberFunction {
+                function: |num: Number| match num {
+                    Number::Int(i) => Number::Float(f64::from(i).sqrt()),
+                    Number::Float(f) => Number::Float(f.sqrt()),
+                    Number::Rational(r) => Number::Float(r.to_f64().unwrap_or(f64::NAN).sqrt()),
+                    Number::Complex(c) => Number::Complex(c.sqrt()),
+                },
+            })),
+        );
+
+        Self { values: map }
+    }
 }
 
 impl Default for Context {

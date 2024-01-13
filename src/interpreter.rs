@@ -1,16 +1,20 @@
 mod environment;
 mod evaluate;
+mod function;
 mod int;
 mod num;
 mod value;
 
-use crate::ast::{Expression, ExpressionLocation, LogicalOperator, Lvalue, UnaryOperator};
-use crate::interpreter::environment::Environment;
 pub use crate::interpreter::num::Number;
 pub use crate::interpreter::value::{Sequence, Value, ValueType};
-use crate::lexer::{Lexer, TokenLocation};
 pub use evaluate::EvaluationError;
+pub use function::Function;
 
+use crate::ast::{Expression, ExpressionLocation, Lvalue};
+use crate::interpreter::environment::Environment;
+use crate::lexer::{Lexer, TokenLocation};
+
+use crate::ast::{LogicalOperator, UnaryOperator};
 use crate::interpreter::int::Int;
 use std::fmt::{Display, Formatter};
 use std::ops::Neg;
@@ -219,6 +223,26 @@ impl<'a, W: std::io::Write> Interpreter<'a, W> {
             Expression::BigIntLiteral(n) => Value::Number(Number::Int(Int::BigInt(n.clone()))),
             Expression::Float64Literal(n) => Value::Number(Number::Float(*n)),
             Expression::ComplexLiteral(n) => Value::Number(Number::Complex(*n)),
+            Expression::Call {
+                function,
+                arguments,
+            } => {
+                // TODO: Maybe check if the function exists before we evaluate the arguments.
+                //       the reason we're doing it in this order is to not have to fight the borrowchecker
+                let mut evaluated_args = Vec::new();
+
+                for argument in arguments {
+                    evaluated_args.push(self.evaluate_expression(&argument)?);
+                }
+
+                if let Some(Value::Function(function)) = self.environment.get(function) {
+                    function.call(&evaluated_args)
+                } else {
+                    return Err(EvaluationError::UndefinedFunction {
+                        identifier: function.clone(),
+                    });
+                }
+            }
         };
 
         Ok(literal)

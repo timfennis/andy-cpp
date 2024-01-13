@@ -1,3 +1,4 @@
+use crate::interpreter::function::Function;
 use crate::interpreter::int::Int::Int64;
 use crate::interpreter::Number;
 use std::collections::VecDeque;
@@ -6,16 +7,27 @@ use std::rc::Rc;
 
 /// Enumerates all the different types of values that exist in the language
 /// All values should be pretty cheap to clone because the bigger ones are wrapped using Rc's
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum Value {
     Unit,
     Number(Number),
     Bool(bool),
     Sequence(Sequence),
+    Function(Rc<dyn Function>),
     // TODO: add structs or classes
-    // TODO: add functions
 }
 
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Unit, Self::Unit) => true,
+            (Self::Number(n1), Self::Number(n2)) => n1.eq(n2),
+            (Self::Bool(b1), Self::Bool(b2)) => b1 == b2,
+            (Self::Sequence(s1), Self::Sequence(s2)) => s1.eq(s2),
+            _ => false,
+        }
+    }
+}
 impl From<bool> for Value {
     fn from(value: bool) -> Self {
         Value::Bool(value)
@@ -36,6 +48,7 @@ pub enum ValueType {
     Bool,
     String,
     List,
+    Function,
 }
 
 impl Display for ValueType {
@@ -49,6 +62,7 @@ impl Display for ValueType {
                 ValueType::Bool => "bool",
                 ValueType::String => "string",
                 ValueType::List => "list",
+                ValueType::Function => "function",
             }
         )
     }
@@ -62,6 +76,7 @@ impl From<Value> for ValueType {
             Value::Bool(_) => ValueType::Bool,
             Value::Sequence(Sequence::String(_)) => ValueType::String,
             Value::Sequence(Sequence::List(_)) => ValueType::List,
+            Value::Function(_) => ValueType::Function,
         }
     }
 }
