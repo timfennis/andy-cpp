@@ -1,11 +1,14 @@
+use num::BigInt;
 use std::fmt;
-use std::fmt::{Display, Formatter};
 
-#[derive(Eq, PartialEq, Clone)]
+#[derive(PartialEq, Clone)]
 pub enum Token {
     String(String),
-    Number(i64),
+    Int64(i64),
+    Float64(f64),
+    BigInt(BigInt),
     Identifier(String),
+    Unit,
 
     // Operator - Assignment
     CreateVar,
@@ -52,16 +55,22 @@ pub enum Token {
 }
 
 impl fmt::Debug for Token {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{self}")
     }
 }
 
 impl fmt::Display for Token {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s: &str = match self {
             Token::String(str) => str,
-            Token::Number(n) => {
+            Token::Int64(n) => {
+                return write!(f, "{n}");
+            }
+            Token::Float64(n) => {
+                return write!(f, "{n}");
+            }
+            Token::BigInt(n) => {
                 return write!(f, "{n}");
             }
             Token::Identifier(ident) => ident,
@@ -100,19 +109,20 @@ impl fmt::Display for Token {
             Token::Comma => ",",
             Token::LogicAnd => "&&",
             Token::LogicOr => "||",
+            Token::Unit => "()",
         };
         write!(f, "{s}")
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TokenLocation {
     pub token: Token,
     pub location: Location,
 }
 
-impl Display for TokenLocation {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+impl fmt::Display for TokenLocation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} on {}", self.token, self.location)
     }
 }
@@ -123,7 +133,7 @@ pub struct Location {
 }
 
 impl fmt::Display for Location {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "line {} column {}", self.line, self.column)
     }
 }
@@ -144,6 +154,7 @@ impl TryFrom<(char, char)> for Token {
 
     fn try_from((c1, c2): (char, char)) -> Result<Self, Self::Error> {
         match (c1, c2) {
+            ('(', ')') => Ok(Token::Unit),
             ('&', '&') => Ok(Token::LogicAnd),
             ('|', '|') => Ok(Token::LogicOr),
             ('%', '%') => Ok(Token::EuclideanModulo),
@@ -197,7 +208,6 @@ impl From<String> for Token {
             "false" => Token::False,
             "return" => Token::Return,
             "self" => Token::_Self,
-            // "null" => Token::Null,
             _ => Token::Identifier(value),
         }
     }

@@ -1,17 +1,18 @@
 use crate::ast::Operator;
 use crate::interpreter::int::Int;
 use crate::interpreter::EvaluationError;
-use num::{BigInt, BigRational};
-use ops::Sub;
+
+use num::{BigRational, ToPrimitive};
 use std::fmt::Formatter;
-use std::ops;
-use std::ops::{Add, Div, Mul, Rem};
+use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Number {
     Int(Int),
     Float(f64),
     Rational(BigRational),
+    // TODO: add Complex
+    // TODO: add more???
 }
 
 impl Number {
@@ -30,7 +31,7 @@ impl From<i32> for Number {
     }
 }
 
-impl ops::Neg for Number {
+impl Neg for Number {
     type Output = Number;
 
     fn neg(self) -> Self::Output {
@@ -52,7 +53,7 @@ impl Add for Number {
             (Number::Float(f1), Number::Float(f2)) => Number::Float(f1.add(f2)),
             (Number::Rational(r1), Number::Rational(r2)) => Number::Rational(r1 + r2),
 
-            // Float
+            // Float vs Int
             (Number::Float(p1), Number::Int(p2)) => Number::Float(p1.add(f64::from(p2))),
             (Number::Int(p1), Number::Float(p2)) => Number::Float(f64::from(p1).add(p2)),
 
@@ -63,13 +64,13 @@ impl Add for Number {
             (Number::Int(p1), Number::Rational(p2)) => {
                 Number::Rational(BigRational::from(p1).add(p2))
             }
-
-            // TODO: obviously we should implement all other cases instead of throwing an error
-            (a, b) => panic!(
-                "addition between {} and {} is not implemented",
-                a.type_name(),
-                b.type_name()
-            ),
+            // Float vs Rational
+            (Number::Float(p1), Number::Rational(p2)) => {
+                Number::Float(p1.add(rational_to_float(p2)))
+            }
+            (Number::Rational(p1), Number::Float(p2)) => {
+                Number::Float(rational_to_float(p1).add(p2))
+            }
         }
     }
 }
@@ -83,6 +84,10 @@ impl Sub for Number {
             (Number::Float(f1), Number::Float(f2)) => Number::Float(f1.add(f2)),
             (Number::Rational(r1), Number::Rational(r2)) => Number::Rational(r1 - r2),
 
+            // Float vs Int
+            (Number::Float(p1), Number::Int(p2)) => Number::Float(p1.sub(f64::from(p2))),
+            (Number::Int(p1), Number::Float(p2)) => Number::Float(f64::from(p1).sub(p2)),
+
             // Rational vs Int
             (Number::Rational(p1), Number::Int(p2)) => {
                 Number::Rational(p1.sub(BigRational::from(p2)))
@@ -90,17 +95,18 @@ impl Sub for Number {
             (Number::Int(p1), Number::Rational(p2)) => {
                 Number::Rational(BigRational::from(p1).sub(p2))
             }
-            // TODO: implement other cases
-            (a, b) => panic!(
-                "subtraction between {} and {} is not implemented",
-                a.type_name(),
-                b.type_name()
-            ),
+            // Float vs Rational
+            (Number::Float(p1), Number::Rational(p2)) => {
+                Number::Float(p1.sub(rational_to_float(p2)))
+            }
+            (Number::Rational(p1), Number::Float(p2)) => {
+                Number::Float(rational_to_float(p1).sub(p2))
+            }
         }
     }
 }
 
-impl ops::Div for Number {
+impl Div for Number {
     type Output = Number;
 
     fn div(self, rhs: Self) -> Self::Output {
@@ -114,6 +120,10 @@ impl ops::Div for Number {
             (Number::Float(p1), Number::Float(p2)) => Number::Float(p1 / p2),
             (Number::Rational(p1), Number::Rational(p2)) => Number::Rational(p1 / p2),
 
+            // Float vs Int
+            (Number::Float(p1), Number::Int(p2)) => Number::Float(p1.div(f64::from(p2))),
+            (Number::Int(p1), Number::Float(p2)) => Number::Float(f64::from(p1).div(p2)),
+
             // Rational vs Int
             (Number::Rational(p1), Number::Int(p2)) => {
                 Number::Rational(p1.div(BigRational::from(p2)))
@@ -121,17 +131,18 @@ impl ops::Div for Number {
             (Number::Int(p1), Number::Rational(p2)) => {
                 Number::Rational(BigRational::from(p1).div(p2))
             }
-            // TODO: implement other cases
-            (a, b) => panic!(
-                "division between {} and {} is not implemented",
-                a.type_name(),
-                b.type_name()
-            ),
+            // Float vs Rational
+            (Number::Float(p1), Number::Rational(p2)) => {
+                Number::Float(p1.div(rational_to_float(p2)))
+            }
+            (Number::Rational(p1), Number::Float(p2)) => {
+                Number::Float(rational_to_float(p1).div(p2))
+            }
         }
     }
 }
 
-impl ops::Mul for Number {
+impl Mul for Number {
     type Output = Number;
 
     fn mul(self, rhs: Self) -> Self::Output {
@@ -139,6 +150,11 @@ impl ops::Mul for Number {
             (Number::Int(p1), Number::Int(p2)) => Number::Int(p1 * p2),
             (Number::Float(p1), Number::Float(p2)) => Number::Float(p1 * p2),
             (Number::Rational(p1), Number::Rational(p2)) => Number::Rational(p1 * p2),
+
+            // Float vs Int
+            (Number::Float(p1), Number::Int(p2)) => Number::Float(p1.mul(f64::from(p2))),
+            (Number::Int(p1), Number::Float(p2)) => Number::Float(f64::from(p1).mul(p2)),
+
             // Rational vs Int
             (Number::Rational(p1), Number::Int(p2)) => {
                 Number::Rational(p1.mul(BigRational::from(p2)))
@@ -147,12 +163,13 @@ impl ops::Mul for Number {
                 Number::Rational(BigRational::from(p1).mul(p2))
             }
 
-            // TODO: implement other cases
-            (a, b) => panic!(
-                "multiplication between {} and {} is not implemented",
-                a.type_name(),
-                b.type_name()
-            ),
+            // Float vs Rational
+            (Number::Float(p1), Number::Rational(p2)) => {
+                Number::Float(p1.mul(rational_to_float(p2)))
+            }
+            (Number::Rational(p1), Number::Float(p2)) => {
+                Number::Float(rational_to_float(p1).mul(p2))
+            }
         }
     }
 }
@@ -184,6 +201,11 @@ impl Rem for Number {
 }
 
 impl Number {
+    /// Calculates the remainder of euclidean division.
+    /// # Errors
+    /// Returns an `EvaluationError` if the remainder of division is 0
+    /// # Panics
+    /// Panics if the evaluation between operands is not supported, this is a temporary condition
     pub fn checked_rem_euclid(self, rhs: Self) -> Result<Self, EvaluationError> {
         match (self, rhs) {
             (Number::Int(p1), Number::Int(p2)) => {
@@ -204,6 +226,12 @@ impl Number {
         }
     }
 
+    /// Performs exponentiation
+    /// # Errors
+    /// Returns an `EvaluationError::IntegerOverflow` error if the right operand cannot be converted into a 32 bit
+    /// integer
+    /// # Panics
+    /// Panics if the operation between the two number types has not yet been iplemented
     pub fn checked_pow(self, rhs: Self) -> Result<Self, EvaluationError> {
         Ok(match (self, rhs) {
             (Number::Int(p1), Number::Int(p2)) => {
@@ -211,6 +239,16 @@ impl Number {
                     operator: Operator::Exponent,
                 })?;
                 Number::Int(a)
+            }
+            (Number::Rational(p1), Number::Int(p2)) => Number::Rational(p1.pow(i32::try_from(p2)?)),
+            (Number::Rational(p1), Number::Rational(p2)) => {
+                if let Some(p2) = p2.to_i32() {
+                    Number::Rational(p1.pow(p2))
+                } else {
+                    return Err(EvaluationError::TypeError {
+                        message: "Cannot raise a rational to the power of another rational, try converting the operands to floats".to_string(),
+                    });
+                }
             }
             (a, b) => panic!(
                 "remainder between {} and {} is not implemented",
@@ -237,8 +275,13 @@ impl std::fmt::Display for Number {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Number::Int(i) => write!(f, "{i}"),
+            Number::Float(ff) if ff.fract() == 0.0 => write!(f, "{ff:.1}"),
             Number::Float(ff) => write!(f, "{ff}"),
             Number::Rational(r) => write!(f, "{r}"),
         }
     }
+}
+
+fn rational_to_float(r: BigRational) -> f64 {
+    r.to_f64().unwrap_or(f64::NAN)
 }

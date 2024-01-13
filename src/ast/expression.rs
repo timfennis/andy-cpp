@@ -1,6 +1,7 @@
 use crate::ast::parser::Error as ParseError;
 use crate::ast::Error::ExpectedToken;
 use crate::lexer::{Location, Token, TokenLocation};
+use num::BigInt;
 use std::rc::Rc;
 
 #[derive(Debug, Eq, PartialEq)]
@@ -108,7 +109,7 @@ impl TryFrom<TokenLocation> for Operator {
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, PartialEq)]
 #[allow(clippy::module_name_repetitions)]
 pub struct ExpressionLocation {
     pub expression: Expression,
@@ -120,12 +121,14 @@ pub struct ExpressionLocation {
 pub enum Lvalue {
     Variable { identifier: String },
 }
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum Expression {
     // Literals
     BoolLiteral(bool),
     StringLiteral(Rc<String>),
-    NumberLiteral(i64),
+    Int64Literal(i64),
+    Float64Literal(f64),
+    BigIntLiteral(BigInt),
     //
     Statement(Box<ExpressionLocation>),
     Print(Box<ExpressionLocation>),

@@ -1,7 +1,9 @@
+use crate::interpreter::EvaluationError;
 use num::bigint::ToBigInt;
 use num::traits::CheckedEuclid;
 use num::{BigInt, BigRational, ToPrimitive};
 use std::fmt::{Display, Formatter};
+
 use std::ops;
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
@@ -12,7 +14,7 @@ pub enum Int {
 
 impl From<i32> for Int {
     fn from(value: i32) -> Self {
-        Int::Int64(value as i64)
+        Int::Int64(i64::from(value))
     }
 }
 
@@ -152,6 +154,32 @@ impl From<&Int> for BigInt {
 impl From<Int> for BigRational {
     fn from(value: Int) -> Self {
         BigRational::from(value.to_bigint())
+    }
+}
+
+impl TryFrom<Int> for i32 {
+    type Error = EvaluationError;
+    fn try_from(value: Int) -> Result<Self, Self::Error> {
+        Ok(match value {
+            Int::Int64(p2) => {
+                if let Some(p2) = p2.to_i32() {
+                    p2
+                } else {
+                    return Err(EvaluationError::TypeError {
+                        message: format!("cannot raise rational to the power of {p2}"),
+                    });
+                }
+            }
+            Int::BigInt(p2) => {
+                if let Some(p2) = p2.to_i32() {
+                    p2
+                } else {
+                    return Err(EvaluationError::TypeError {
+                        message: format!("cannot raise rational to the power of {p2}"),
+                    });
+                }
+            }
+        })
     }
 }
 

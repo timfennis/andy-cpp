@@ -1,3 +1,4 @@
+use num::BigInt;
 use std::collections::VecDeque;
 use std::fmt::{Display, Formatter};
 use std::str::Chars;
@@ -110,6 +111,7 @@ impl Iterator for Lexer<'_> {
 
                 continue 'iterator;
             }
+
             // Check for double character tokens
             if let Ok(token) = Token::try_from((char, next)) {
                 self.source.next();
@@ -133,25 +135,40 @@ impl Iterator for Lexer<'_> {
                 }
                 ('"', _) => return Some(self.lex_string(start)),
                 (char, _) if char.is_ascii_digit() => {
-                    //TODO: support floats
-                    //TODO: support complex numbers
-                    let mut num =
-                        i64::from(char.to_digit(10).expect("has to be a digit at this point"));
+                    let mut buf = String::new();
+                    buf.push(char);
+
+                    // TODO: support complex numbers
                     while let Some(next_char) = self.source.peek_one() {
-                        match next_char.to_digit(10) {
-                            Some(digit) => {
-                                num *= 10;
-                                num += i64::from(digit);
+                        match next_char {
+                            c if c.is_ascii_digit() => {
                                 self.source.next();
+                                buf.push(c);
                             }
-                            None => {
-                                // Something we dont' want we just give back
-                                break;
+                            '_' => {
+                                self.source.next();
+                                // ignore underscore for nice number formatting
                             }
+                            '.' => {
+                                self.source.next();
+                                buf.push('.');
+                            }
+                            _ => break,
                         }
                     }
+
+                    let token = if let Ok(num) = buf.parse::<i64>() {
+                        Token::Int64(num)
+                    } else if let Ok(num) = buf.parse::<f64>() {
+                        Token::Float64(num)
+                    } else {
+                        let i = buf
+                            .parse::<BigInt>()
+                            .expect("must be a valid big int at this point");
+                        Token::BigInt(i)
+                    };
                     return Some(Ok(TokenLocation {
-                        token: Token::Number(num),
+                        token,
                         location: start,
                     }));
                 }

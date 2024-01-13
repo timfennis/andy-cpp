@@ -1,5 +1,5 @@
 use crate::ast::Operator;
-use crate::interpreter::{Number, Sequence, Value, ValueType};
+use crate::interpreter::{Sequence, Value, ValueType};
 use crate::lexer::Location;
 use std::cmp::Ordering;
 use std::error::Error;
@@ -39,14 +39,14 @@ pub fn apply_operator(
         // Some mixed memes
         (Value::Sequence(Sequence::String(a)), Operator::Multiply, Value::Number(b)) => {
             Value::Sequence(Sequence::String(Rc::new(a.repeat(
-                usize::try_from(b).map_err(|_| EvaluationError::TypeError {
+                usize::try_from(b).map_err(|()| EvaluationError::TypeError {
                     message: String::from("Cannot convert"),
                 })?,
             ))))
         }
         (Value::Number(a), Operator::Multiply, Value::Sequence(Sequence::String(b))) => {
             Value::Sequence(Sequence::String(Rc::new(b.repeat(
-                usize::try_from(a).map_err(|_| EvaluationError::TypeError {
+                usize::try_from(a).map_err(|()| EvaluationError::TypeError {
                     message: String::from("Cannot convert"),
                 })?,
             ))))
