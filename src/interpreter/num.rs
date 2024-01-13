@@ -308,21 +308,35 @@ impl Number {
     /// Panics if the operation between the two number types has not yet been implemented
     pub fn checked_pow(self, rhs: Self) -> Result<Self, EvaluationError> {
         Ok(match (self, rhs) {
+            // Int vs others
             (Number::Int(p1), Number::Int(p2)) => {
                 if p2.is_negative() {
                     let p2 = i32::try_from(p2)?;
                     Number::Rational(BigRational::from(p1).pow(p2))
                 } else {
-                    Number::Int(p1.checked_pow(p2).ok_or(EvaluationError::IntegerOverflow {
-                        operator: Operator::Exponent,
-                    })?)
+                    Number::Int(
+                        p1.checked_pow(&p2)
+                            .ok_or(EvaluationError::IntegerOverflow {
+                                operator: Operator::Exponent,
+                            })?,
+                    )
                 }
             }
             (Number::Int(p1), Number::Float(p2)) => Number::Float(f64::from(p1).powf(p2)),
             (Number::Int(p1), Number::Complex(p2)) => {
                 Number::Complex(Complex::from(f64::from(p1)).powc(p2))
             }
+            (Number::Int(p1), Number::Rational(p2)) => {
+                if p2.is_integer() {
+                    if let Some(n) = p1.checked_pow(&Int::BigInt(p2.to_integer())) {
+                        return Ok(Number::Int(n));
+                    }
+                }
 
+                Number::Float(f64::from(p1).powf(rational_to_float(p2)))
+            }
+
+            // Rational vs Others
             (Number::Rational(p1), Number::Int(p2)) => Number::Rational(p1.pow(i32::try_from(p2)?)),
             (Number::Rational(p1), Number::Rational(p2)) => {
                 if let Some(p2) = p2.to_i32() {
@@ -340,6 +354,7 @@ impl Number {
                 Number::Complex(rational_to_complex(p1).powc(p2))
             }
 
+            // Float vs others
             (Number::Float(p1), Number::Float(p2)) => Number::Float(p1.powf(p2)),
             (Number::Float(p1), Number::Complex(p2)) => Number::Complex(Complex::from(p1).powc(p2)),
             (Number::Float(p1), Number::Int(p2)) => Number::Float(p1.powf(f64::from(p2))),
@@ -355,12 +370,6 @@ impl Number {
             (Number::Complex(p1), Number::Rational(p2)) => {
                 Number::Complex(p1.powc(rational_to_complex(p2)))
             }
-
-            (a, b) => panic!(
-                "power operations between {} and {} is not implemented",
-                a.type_name(),
-                b.type_name()
-            ),
         })
     }
 }

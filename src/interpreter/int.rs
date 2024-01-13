@@ -48,7 +48,7 @@ impl Int {
             .map(Int::BigInt)
     }
 
-    pub fn checked_pow(self, rhs: Self) -> Option<Self> {
+    pub fn checked_pow(&self, rhs: &Self) -> Option<Self> {
         if let (Int::Int64(p1), Int::Int64(p2)) = (&self, &rhs) {
             if let Some(p2) = p2.to_u32() {
                 if let Some(a) = p1.checked_pow(p2) {
