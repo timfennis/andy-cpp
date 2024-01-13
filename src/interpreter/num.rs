@@ -2,7 +2,7 @@ use crate::ast::Operator;
 use crate::interpreter::int::Int;
 use crate::interpreter::EvaluationError;
 
-use num::{BigRational, ToPrimitive, Complex, rational};
+use num::{BigRational, ToPrimitive, Complex};
 use std::fmt::Formatter;
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
