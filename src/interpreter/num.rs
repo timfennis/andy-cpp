@@ -1,6 +1,6 @@
 use crate::ast::Operator;
 use crate::interpreter::int::Int;
-use crate::interpreter::EvaluationError;
+use crate::interpreter::{EvaluationError, Function, Value};
 
 use num::{BigRational, Complex, ToPrimitive};
 use std::fmt::Formatter;
@@ -390,4 +390,25 @@ fn rational_to_float(r: BigRational) -> f64 {
 }
 fn rational_to_complex(r: BigRational) -> Complex<f64> {
     Complex::from(r.to_f64().unwrap_or(f64::NAN))
+}
+
+#[derive(Debug)]
+pub struct SingleNumberFunction {
+    // pub name: &'static str,
+    pub function: fn(number: Number) -> Number,
+}
+
+impl Function for SingleNumberFunction {
+    fn call(&self, args: &[Value]) -> Value {
+        if args.len() == 1 {
+            let arg = args.get(0).expect("guaranteed to be 1");
+
+            if let Value::Number(num) = arg {
+                // TODO: is this clone wanted and cheap? Probably not
+                return Value::Number((self.function)(num.clone()));
+            }
+        }
+
+        todo!("what to do if we can't apply functions");
+    }
 }

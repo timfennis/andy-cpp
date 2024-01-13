@@ -107,6 +107,10 @@ pub enum EvaluationError {
         start: Location,
         end: Location,
     },
+    // TODO: Add locations
+    UndefinedFunction {
+        identifier: String,
+    },
     IO {
         cause: std::io::Error,
     },
@@ -154,6 +158,9 @@ impl Display for EvaluationError {
                 identifier, start, ..
             } => write!(f, "variable {identifier} is undefined on {start}",),
             EvaluationError::IO { cause } => write!(f, "IO error: {cause}"),
+            EvaluationError::UndefinedFunction { identifier } => {
+                write!(f, "undefined function '{identifier}'")
+            }
         }
     }
 }

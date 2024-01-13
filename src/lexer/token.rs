@@ -159,7 +159,6 @@ impl TryFrom<(char, char)> for Token {
 
     fn try_from((c1, c2): (char, char)) -> Result<Self, Self::Error> {
         match (c1, c2) {
-            ('(', ')') => Ok(Token::Unit),
             ('&', '&') => Ok(Token::LogicAnd),
             ('|', '|') => Ok(Token::LogicOr),
             ('%', '%') => Ok(Token::EuclideanModulo),
