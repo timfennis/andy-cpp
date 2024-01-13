@@ -1,7 +1,7 @@
 use crate::interpreter::EvaluationError;
 use num::bigint::ToBigInt;
 use num::traits::CheckedEuclid;
-use num::{BigInt, BigRational, ToPrimitive};
+use num::{BigInt, BigRational, Complex, ToPrimitive};
 use std::fmt::{Display, Formatter};
 
 use std::ops;
@@ -157,6 +157,14 @@ impl From<Int> for BigRational {
     }
 }
 
+impl From<Int> for Complex<f64> {
+    fn from(value: Int) -> Self {
+        match value{
+            Int::Int64(i) => Complex::from(i.to_f64().unwrap_or(f64::INFINITY)),
+            Int::BigInt(i) => Complex::from(i.to_f64().unwrap_or(f64::INFINITY))
+        }
+    }
+}
 impl TryFrom<Int> for i32 {
     type Error = EvaluationError;
     fn try_from(value: Int) -> Result<Self, Self::Error> {

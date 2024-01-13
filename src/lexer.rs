@@ -153,6 +153,7 @@ impl Iterator for Lexer<'_> {
                                 self.source.next();
                                 buf.push('.');
                             }
+
                             _ => break,
                         }
                     }
