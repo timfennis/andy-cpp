@@ -2,7 +2,7 @@ use crate::ast::Operator;
 use crate::interpreter::int::Int;
 use crate::interpreter::EvaluationError;
 
-use num::{BigRational, ToPrimitive, Complex};
+use num::{BigRational, Complex, ToPrimitive};
 use std::fmt::Formatter;
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
@@ -35,11 +35,11 @@ impl From<i32> for Number {
 impl PartialOrd for Number {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         match (self, other) {
-            (Number::Int(n1),Number::Int(n2)) => n1.partial_cmp(n2),
-            (Number::Float(n1),Number::Float(n2)) => n1.partial_cmp(n2),
-            (Number::Rational(n1),Number::Rational(n2)) => n1.partial_cmp(n2),
-            (Number::Complex(_),Number::Complex(_)) => None,
-            _ => panic!("Dont compare different numbers.")
+            (Number::Int(n1), Number::Int(n2)) => n1.partial_cmp(n2),
+            (Number::Float(n1), Number::Float(n2)) => n1.partial_cmp(n2),
+            (Number::Rational(n1), Number::Rational(n2)) => n1.partial_cmp(n2),
+            (Number::Complex(_), Number::Complex(_)) => None,
+            _ => panic!("Dont compare different numbers."),
         }
     }
 }
@@ -67,7 +67,7 @@ impl Add for Number {
             (Number::Float(f1), Number::Float(f2)) => Number::Float(f1.add(f2)),
             (Number::Rational(r1), Number::Rational(r2)) => Number::Rational(r1 + r2),
             (Number::Complex(c1), Number::Complex(c2)) => Number::Complex(c1 + c2),
-            
+
             // Float vs other
             (Number::Float(p1), Number::Int(p2)) => Number::Float(p1.add(f64::from(p2))),
             (Number::Float(p1), Number::Rational(p2)) => {
@@ -85,21 +85,21 @@ impl Add for Number {
             // Rational vs other
             (Number::Rational(p1), Number::Int(p2)) => {
                 Number::Rational(p1.add(BigRational::from(p2)))
-            },
+            }
             (Number::Rational(p1), Number::Float(p2)) => {
                 Number::Float(rational_to_float(p1).add(p2))
-            },
+            }
             (Number::Rational(p1), Number::Complex(p2)) => {
-                Number::Complex(Complex::from(p1.to_f64().unwrap_or(f64::NAN)).add(p2)) //TODO: Check if this is logical
-            },
+                Number::Complex(Complex::from(p1.to_f64().unwrap_or(f64::NAN)).add(p2))
+                //TODO: Check if this is logical
+            }
 
             // Complex vs other
             (Number::Complex(p1), Number::Int(p2)) => Number::Complex(Complex::from(p2).add(p1)),
             (Number::Complex(p1), Number::Rational(p2)) => {
                 Number::Complex(Complex::from(p2.to_f64().unwrap_or(f64::NAN)).add(p1))
-            },
+            }
             (Number::Complex(p1), Number::Float(p2)) => Number::Complex(Complex::from(p2).add(p1)),
-
         }
     }
 }
@@ -128,7 +128,6 @@ impl Sub for Number {
             }
             (Number::Int(p1), Number::Complex(p2)) => Number::Complex(Complex::from(p1).sub(p2)),
 
-
             // Rational vs Other
             (Number::Rational(p1), Number::Int(p2)) => {
                 Number::Rational(p1.sub(BigRational::from(p2)))
@@ -137,16 +136,16 @@ impl Sub for Number {
                 Number::Float(rational_to_float(p1).sub(p2))
             }
             (Number::Rational(p1), Number::Complex(p2)) => {
-                Number::Complex(Complex::from(p1.to_f64().unwrap_or(f64::NAN)).sub(p2)) //TODO: Check if this is logical
-            },
-            
+                Number::Complex(Complex::from(p1.to_f64().unwrap_or(f64::NAN)).sub(p2))
+                //TODO: Check if this is logical
+            }
+
             // Complex vs Other
             (Number::Complex(p1), Number::Int(p2)) => Number::Complex(Complex::from(p2).sub(p1)),
             (Number::Complex(p1), Number::Rational(p2)) => {
                 Number::Complex(Complex::from(p2.to_f64().unwrap_or(f64::NAN)).sub(p1))
-            },
+            }
             (Number::Complex(p1), Number::Float(p2)) => Number::Complex(Complex::from(p2).sub(p1)),
-            _ => todo!("not implemented"),
         }
     }
 }
@@ -186,19 +185,18 @@ impl Div for Number {
             }
             (Number::Rational(p1), Number::Float(p2)) => {
                 Number::Float(rational_to_float(p1).div(p2))
-            },
+            }
             (Number::Rational(p1), Number::Complex(p2)) => {
-                Number::Complex(Complex::from(p1.to_f64().unwrap_or(f64::NAN)).div(p2)) //TODO: Check if this is logical
-            },
+                Number::Complex(Complex::from(p1.to_f64().unwrap_or(f64::NAN)).div(p2))
+                //TODO: Check if this is logical
+            }
 
             // Complex vs Other
             (Number::Complex(p1), Number::Int(p2)) => Number::Complex(Complex::from(p2).div(p1)),
             (Number::Complex(p1), Number::Rational(p2)) => {
                 Number::Complex(Complex::from(p2.to_f64().unwrap_or(f64::NAN)).div(p1))
-            },
+            }
             (Number::Complex(p1), Number::Float(p2)) => Number::Complex(Complex::from(p2).div(p1)),
-
-            _ => todo!("not implemented"),
         }
     }
 }
@@ -220,7 +218,7 @@ impl Mul for Number {
             }
             (Number::Float(p1), Number::Complex(p2)) => Number::Complex(Complex::from(p1).mul(p2)),
 
-            // Int vs other 
+            // Int vs other
             (Number::Int(p1), Number::Rational(p2)) => {
                 Number::Rational(BigRational::from(p1).mul(p2))
             }
@@ -228,25 +226,23 @@ impl Mul for Number {
             (Number::Int(p1), Number::Complex(p2)) => Number::Complex(Complex::from(p1).mul(p2)),
 
             // Rational vs other
-            
             (Number::Rational(p1), Number::Float(p2)) => {
                 Number::Float(rational_to_float(p1).mul(p2))
-            },
+            }
             (Number::Rational(p1), Number::Int(p2)) => {
                 Number::Rational(p1.mul(BigRational::from(p2)))
             }
             (Number::Rational(p1), Number::Complex(p2)) => {
-                Number::Complex(Complex::from(p1.to_f64().unwrap_or(f64::NAN)).div(p2)) //TODO: Check if this is logical
-            },
-            
+                Number::Complex(Complex::from(p1.to_f64().unwrap_or(f64::NAN)).div(p2))
+                //TODO: Check if this is logical
+            }
+
             // Complex vs Other
             (Number::Complex(p1), Number::Int(p2)) => Number::Complex(Complex::from(p2).mul(p1)),
             (Number::Complex(p1), Number::Rational(p2)) => {
                 Number::Complex(Complex::from(p2.to_f64().unwrap_or(f64::NAN)).mul(p1))
-            },
+            }
             (Number::Complex(p1), Number::Float(p2)) => Number::Complex(Complex::from(p2).mul(p1)),
-
-            _ => todo!("not implemented"),
         }
     }
 }
@@ -260,7 +256,7 @@ impl Rem for Number {
             (Number::Float(p1), Number::Float(p2)) => Number::Float(p1.rem(p2)),
             (Number::Rational(p1), Number::Rational(p2)) => Number::Rational(p1.rem(p2)),
             (Number::Complex(p1), Number::Complex(p2)) => Number::Complex(p1.rem(p2)),
-            
+
             // Rational vs Int
             (Number::Rational(p1), Number::Int(p2)) => {
                 Number::Rational(p1.rem(BigRational::from(p2)))
@@ -274,7 +270,6 @@ impl Rem for Number {
                 a.type_name(),
                 b.type_name()
             ),
-            _ => todo!("not implemented"),
         }
     }
 }
@@ -310,7 +305,7 @@ impl Number {
     /// Returns an `EvaluationError::IntegerOverflow` error if the right operand cannot be converted into a 32 bit
     /// integer
     /// # Panics
-    /// Panics if the operation between the two number types has not yet been iplemented
+    /// Panics if the operation between the two number types has not yet been implemented
     pub fn checked_pow(self, rhs: Self) -> Result<Self, EvaluationError> {
         Ok(match (self, rhs) {
             (Number::Int(p1), Number::Int(p2)) => {
@@ -320,10 +315,10 @@ impl Number {
                 Number::Int(a)
             }
             (Number::Int(p1), Number::Float(p2)) => Number::Float(f64::from(p1).powf(p2)),
-            (Number::Int(p1), Number::Complex(p2)) => Number::Complex(Complex::from(f64::from(p1)).powc(p2)),
+            (Number::Int(p1), Number::Complex(p2)) => {
+                Number::Complex(Complex::from(f64::from(p1)).powc(p2))
+            }
 
-
-            
             (Number::Rational(p1), Number::Int(p2)) => Number::Rational(p1.pow(i32::try_from(p2)?)),
             (Number::Rational(p1), Number::Rational(p2)) => {
                 if let Some(p2) = p2.to_i32() {
@@ -333,21 +328,29 @@ impl Number {
                         message: "Cannot raise a rational to the power of another rational, try converting the operands to floats".to_string(),
                     });
                 }
-            },
-            (Number::Rational(p1), Number::Float(p2)) => Number::Float(rational_to_float(p1).powf(p2)),
-            (Number::Rational(p1), Number::Complex(p2)) => Number::Complex(rational_to_complex(p1).powc(p2)),
+            }
+            (Number::Rational(p1), Number::Float(p2)) => {
+                Number::Float(rational_to_float(p1).powf(p2))
+            }
+            (Number::Rational(p1), Number::Complex(p2)) => {
+                Number::Complex(rational_to_complex(p1).powc(p2))
+            }
 
             (Number::Float(p1), Number::Float(p2)) => Number::Float(p1.powf(p2)),
             (Number::Float(p1), Number::Complex(p2)) => Number::Complex(Complex::from(p1).powc(p2)),
             (Number::Float(p1), Number::Int(p2)) => Number::Float(p1.powf(f64::from(p2))),
-            (Number::Float(p1), Number::Rational(p2)) => Number::Float(p1.powf(rational_to_float(p2))),
+            (Number::Float(p1), Number::Rational(p2)) => {
+                Number::Float(p1.powf(rational_to_float(p2)))
+            }
 
             (Number::Complex(p1), Number::Complex(p2)) => Number::Complex(p1.powc(p2)),
             (Number::Complex(p1), Number::Float(p2)) => Number::Complex(p1.powc(Complex::from(p2))),
-            (Number::Complex(p1), Number::Int(p2)) => Number::Complex(p1.powc(Complex::from(f64::from(p2)))),
-            (Number::Complex(p1), Number::Rational(p2)) => Number::Complex(p1.powc(rational_to_complex(p2))),
-            
-            
+            (Number::Complex(p1), Number::Int(p2)) => {
+                Number::Complex(p1.powc(Complex::from(f64::from(p2))))
+            }
+            (Number::Complex(p1), Number::Rational(p2)) => {
+                Number::Complex(p1.powc(rational_to_complex(p2)))
+            }
 
             (a, b) => panic!(
                 "power operations between {} and {} is not implemented",

@@ -1,5 +1,4 @@
 use crate::interpreter::EvaluationError;
-use num::bigint::ToBigInt;
 use num::traits::CheckedEuclid;
 use num::{BigInt, BigRational, Complex, ToPrimitive};
 use std::fmt::{Display, Formatter};
@@ -159,9 +158,9 @@ impl From<Int> for BigRational {
 
 impl From<Int> for Complex<f64> {
     fn from(value: Int) -> Self {
-        match value{
+        match value {
             Int::Int64(i) => Complex::from(i.to_f64().unwrap_or(f64::INFINITY)),
-            Int::BigInt(i) => Complex::from(i.to_f64().unwrap_or(f64::INFINITY))
+            Int::BigInt(i) => Complex::from(i.to_f64().unwrap_or(f64::INFINITY)),
         }
     }
 }
