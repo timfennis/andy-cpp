@@ -1,4 +1,4 @@
-use num::BigInt;
+use num::{BigInt, Complex};
 use std::collections::VecDeque;
 use std::fmt::{Display, Formatter};
 use std::str::Chars;
@@ -152,6 +152,16 @@ impl Iterator for Lexer<'_> {
                             '.' => {
                                 self.source.next();
                                 buf.push('.');
+                            }
+                            'j' | 'i' => {
+                                self.source.next();
+
+                                let num = buf.parse::<f64>().expect("TODO, handle this");
+
+                                return Some(Ok(TokenLocation {
+                                    token: Token::Complex(Complex::new(0.0, num)),
+                                    location: start,
+                                }));
                             }
 
                             _ => break,

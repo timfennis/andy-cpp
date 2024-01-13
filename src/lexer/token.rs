@@ -1,4 +1,4 @@
-use num::BigInt;
+use num::{BigInt, Complex};
 use std::fmt;
 
 #[derive(PartialEq, Clone)]
@@ -7,6 +7,8 @@ pub enum Token {
     Int64(i64),
     Float64(f64),
     BigInt(BigInt),
+    Complex(Complex<f64>),
+
     Identifier(String),
     Unit,
 
@@ -71,6 +73,9 @@ impl fmt::Display for Token {
                 return write!(f, "{n}");
             }
             Token::BigInt(n) => {
+                return write!(f, "{n}");
+            }
+            Token::Complex(n) => {
                 return write!(f, "{n}");
             }
             Token::Identifier(ident) => ident,

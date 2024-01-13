@@ -346,6 +346,7 @@ impl Parser {
             Token::Int64(num) => Expression::Int64Literal(num),
             Token::Float64(num) => Expression::Float64Literal(num),
             Token::BigInt(num) => Expression::BigIntLiteral(num),
+            Token::Complex(num) => Expression::ComplexLiteral(num),
             Token::String(value) => Expression::StringLiteral(Rc::new(value)),
             Token::LeftParentheses => {
                 let expr = self.expression()?;
