@@ -2,16 +2,16 @@ use crate::ast::Operator;
 use crate::interpreter::int::Int;
 use crate::interpreter::EvaluationError;
 
-use num::{BigRational, ToPrimitive};
+use num::{BigRational, ToPrimitive, Complex};
 use std::fmt::Formatter;
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Number {
     Int(Int),
     Float(f64),
     Rational(BigRational),
-    // TODO: add Complex
+    Complex(Complex<f64>),
     // TODO: add more???
 }
 
@@ -21,6 +21,7 @@ impl Number {
             Number::Int(_) => "int".to_string(),
             Number::Float(_) => "float".to_string(),
             Number::Rational(_) => "rational".to_string(),
+            Number::Complex(_) => "complex".to_string(),
         }
     }
 }
@@ -28,6 +29,18 @@ impl Number {
 impl From<i32> for Number {
     fn from(value: i32) -> Self {
         Number::Int(value.into())
+    }
+}
+
+impl PartialOrd for Number {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        match (self, other) {
+            (Number::Int(n1),Number::Int(n2)) => n1.partial_cmp(n2),
+            (Number::Float(n1),Number::Float(n2)) => n1.partial_cmp(n2),
+            (Number::Rational(n1),Number::Rational(n2)) => n1.partial_cmp(n2),
+            (Number::Complex(_),Number::Complex(_)) => None,
+            _ => panic!("Dont compare different numbers.")
+        }
     }
 }
 
@@ -39,6 +52,7 @@ impl Neg for Number {
             Number::Int(i) => Number::Int(i.neg()),
             Number::Float(f) => Number::Float(f.neg()),
             Number::Rational(r) => Number::Rational(r.neg()),
+            Number::Complex(c) => Number::Complex(c.neg()),
         }
     }
 }
@@ -52,25 +66,40 @@ impl Add for Number {
             (Number::Int(i1), Number::Int(i2)) => Number::Int(i1 + i2),
             (Number::Float(f1), Number::Float(f2)) => Number::Float(f1.add(f2)),
             (Number::Rational(r1), Number::Rational(r2)) => Number::Rational(r1 + r2),
-
-            // Float vs Int
+            (Number::Complex(c1), Number::Complex(c2)) => Number::Complex(c1 + c2),
+            
+            // Float vs other
             (Number::Float(p1), Number::Int(p2)) => Number::Float(p1.add(f64::from(p2))),
-            (Number::Int(p1), Number::Float(p2)) => Number::Float(f64::from(p1).add(p2)),
-
-            // Rational vs Int
-            (Number::Rational(p1), Number::Int(p2)) => {
-                Number::Rational(p1.add(BigRational::from(p2)))
-            }
-            (Number::Int(p1), Number::Rational(p2)) => {
-                Number::Rational(BigRational::from(p1).add(p2))
-            }
-            // Float vs Rational
             (Number::Float(p1), Number::Rational(p2)) => {
                 Number::Float(p1.add(rational_to_float(p2)))
             }
+            (Number::Float(p1), Number::Complex(p2)) => Number::Complex(Complex::from(p1).add(p2)),
+
+            // Int vs other
+            (Number::Int(p1), Number::Float(p2)) => Number::Float(f64::from(p1).add(p2)),
+            (Number::Int(p1), Number::Rational(p2)) => {
+                Number::Rational(BigRational::from(p1).add(p2))
+            }
+            (Number::Int(p1), Number::Complex(p2)) => Number::Complex(Complex::from(p1).add(p2)),
+
+            // Rational vs other
+            (Number::Rational(p1), Number::Int(p2)) => {
+                Number::Rational(p1.add(BigRational::from(p2)))
+            },
             (Number::Rational(p1), Number::Float(p2)) => {
                 Number::Float(rational_to_float(p1).add(p2))
-            }
+            },
+            (Number::Rational(p1), Number::Complex(p2)) => {
+                Number::Complex(Complex::from(p1.to_f64().unwrap_or(f64::NAN)).add(p2)) //TODO: Check if this is logical
+            },
+
+            // Complex vs other
+            (Number::Complex(p1), Number::Int(p2)) => Number::Complex(Complex::from(p2).add(p1)),
+            (Number::Complex(p1), Number::Rational(p2)) => {
+                Number::Complex(Complex::from(p2.to_f64().unwrap_or(f64::NAN)).add(p1))
+            },
+            (Number::Complex(p1), Number::Float(p2)) => Number::Complex(Complex::from(p2).add(p1)),
+
         }
     }
 }
@@ -102,6 +131,8 @@ impl Sub for Number {
             (Number::Rational(p1), Number::Float(p2)) => {
                 Number::Float(rational_to_float(p1).sub(p2))
             }
+
+            _ => todo!("not implemented"),
         }
     }
 }
@@ -137,7 +168,8 @@ impl Div for Number {
             }
             (Number::Rational(p1), Number::Float(p2)) => {
                 Number::Float(rational_to_float(p1).div(p2))
-            }
+            },
+            _ => todo!("not implemented"),
         }
     }
 }
@@ -169,7 +201,8 @@ impl Mul for Number {
             }
             (Number::Rational(p1), Number::Float(p2)) => {
                 Number::Float(rational_to_float(p1).mul(p2))
-            }
+            },
+            _ => todo!("not implemented"),
         }
     }
 }
@@ -196,6 +229,7 @@ impl Rem for Number {
                 a.type_name(),
                 b.type_name()
             ),
+            _ => todo!("not implemented"),
         }
     }
 }
@@ -278,6 +312,7 @@ impl std::fmt::Display for Number {
             Number::Float(ff) if ff.fract() == 0.0 => write!(f, "{ff:.1}"),
             Number::Float(ff) => write!(f, "{ff}"),
             Number::Rational(r) => write!(f, "{r}"),
+            Number::Complex(r) => write!(f, "{r}"),
         }
     }
 }
