@@ -1,4 +1,5 @@
-use num::{BigInt, Complex};
+use num::complex::Complex64;
+use num::BigInt;
 use std::fmt;
 
 #[derive(PartialEq, Clone)]
@@ -7,7 +8,7 @@ pub enum Token {
     Int64(i64),
     Float64(f64),
     BigInt(BigInt),
-    Complex(Complex<f64>),
+    Complex(Complex64),
 
     Identifier(String),
     Unit,

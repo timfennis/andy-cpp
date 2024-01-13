@@ -1,20 +1,9 @@
-use crate::interpreter::num::SingleNumberFunction;
-use crate::interpreter::{Number, Value};
-use num::ToPrimitive;
+use crate::interpreter::{stdlib, Value};
 use std::collections::HashMap;
-use std::rc::Rc;
 
 #[derive(Debug)]
 pub struct Environment {
     contexts: Vec<Context>,
-}
-
-impl Default for Environment {
-    fn default() -> Self {
-        Self {
-            contexts: vec![Context::stdlib()],
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -22,24 +11,7 @@ struct Context {
     values: HashMap<String, Value>,
 }
 
-impl Context {
-    fn stdlib() -> Self {
-        let mut map = HashMap::default();
-        map.insert(
-            "sqrt".to_string(),
-            Value::Function(Rc::new(SingleNumberFunction {
-                function: |num: Number| match num {
-                    Number::Int(i) => Number::Float(f64::from(i).sqrt()),
-                    Number::Float(f) => Number::Float(f.sqrt()),
-                    Number::Rational(r) => Number::Float(r.to_f64().unwrap_or(f64::NAN).sqrt()),
-                    Number::Complex(c) => Number::Complex(c.sqrt()),
-                },
-            })),
-        );
-
-        Self { values: map }
-    }
-}
+impl Context {}
 
 impl Default for Context {
     fn default() -> Self {
@@ -49,7 +21,20 @@ impl Default for Context {
     }
 }
 
+impl Default for Environment {
+    fn default() -> Self {
+        Environment::new_with_stdlib()
+    }
+}
+
 impl Environment {
+    pub fn new_with_stdlib() -> Self {
+        let mut env = Self {
+            contexts: vec![Context::default()],
+        };
+        stdlib::bind_to_environment(&mut env);
+        env
+    }
     pub fn declare(&mut self, name: &str, value: Value) {
         self.contexts
             .last_mut()
@@ -102,7 +87,7 @@ mod test {
 
     #[test]
     fn create_and_destroy_scope() {
-        let mut env = Environment::default();
+        let mut env = Environment::new_with_stdlib();
         env.declare("parent_value", 123.into());
         env.declare("mutated_value", 69.into());
         env.declare("shadowed", 1.into());

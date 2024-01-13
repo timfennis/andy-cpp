@@ -1,5 +1,6 @@
 use crate::interpreter::function::Function;
 use crate::interpreter::int::Int::Int64;
+use crate::interpreter::num::NumberType;
 use crate::interpreter::Number;
 use std::collections::VecDeque;
 use std::fmt::{Display, Formatter};
@@ -44,7 +45,7 @@ pub enum Sequence {
 #[derive(Debug, Clone, Copy)]
 pub enum ValueType {
     Unit,
-    Number,
+    Number(NumberType),
     Bool,
     String,
     List,
@@ -53,18 +54,14 @@ pub enum ValueType {
 
 impl Display for ValueType {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                ValueType::Unit => "unit",
-                ValueType::Number => "number",
-                ValueType::Bool => "bool",
-                ValueType::String => "string",
-                ValueType::List => "list",
-                ValueType::Function => "function",
-            }
-        )
+        match self {
+            ValueType::Unit => write!(f, "unit"),
+            ValueType::Number(n) => write!(f, "{n}"),
+            ValueType::Bool => write!(f, "bool"),
+            ValueType::String => write!(f, "string"),
+            ValueType::List => write!(f, "list"),
+            ValueType::Function => write!(f, "function"),
+        }
     }
 }
 
@@ -72,7 +69,7 @@ impl From<Value> for ValueType {
     fn from(value: Value) -> Self {
         match value {
             Value::Unit => ValueType::Unit,
-            Value::Number(_) => ValueType::Number,
+            Value::Number(n) => ValueType::Number(n.into()),
             Value::Bool(_) => ValueType::Bool,
             Value::Sequence(Sequence::String(_)) => ValueType::String,
             Value::Sequence(Sequence::List(_)) => ValueType::List,

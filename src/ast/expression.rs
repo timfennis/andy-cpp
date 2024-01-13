@@ -1,6 +1,7 @@
 use crate::ast::operator::{LogicalOperator, Operator, UnaryOperator};
 use crate::lexer::Location;
-use num::{BigInt, Complex};
+use num::complex::Complex64;
+use num::BigInt;
 use std::rc::Rc;
 
 #[derive(Debug, PartialEq)]
@@ -23,7 +24,7 @@ pub enum Expression {
     Int64Literal(i64),
     Float64Literal(f64),
     BigIntLiteral(BigInt),
-    ComplexLiteral(Complex<f64>),
+    ComplexLiteral(Complex64),
 
     //
     Statement(Box<ExpressionLocation>),

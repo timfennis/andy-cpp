@@ -1,8 +1,9 @@
 use crate::interpreter::EvaluationError;
+use num::complex::Complex64;
 use num::traits::CheckedEuclid;
+use num::FromPrimitive;
 use num::{BigInt, BigRational, Complex, Signed, ToPrimitive, Zero};
 use std::fmt::{Display, Formatter};
-
 use std::ops;
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
@@ -16,7 +17,6 @@ impl From<i32> for Int {
         Int::Int64(i64::from(value))
     }
 }
-
 impl ops::Neg for Int {
     type Output = Int;
 
@@ -29,6 +29,23 @@ impl ops::Neg for Int {
 }
 
 impl Int {
+    pub fn from_f64(value: f64) -> Option<Self> {
+        if value.is_nan() || value.is_infinite() {
+            return None;
+        }
+
+        if value > (i64::MAX as f64) || value < (i64::MIN as f64) {
+            if let Some(n) = BigInt::from_f64(value) {
+                Some(Int::from(n))
+            } else {
+                // TODO: this can't happen?
+                unreachable!("failed conversion from float to int should never happen here");
+            }
+        } else {
+            // TODO: is this perfectly safe?
+            Some(Int::Int64(value as i64))
+        }
+    }
     fn to_bigint(&self) -> BigInt {
         match self {
             Int::Int64(i) => BigInt::from(*i),
@@ -144,6 +161,12 @@ impl_binary_operator!(Mul, mul, checked_mul);
 impl_binary_operator!(Div, div, checked_div);
 impl_binary_operator!(Rem, rem, checked_rem);
 
+impl From<BigInt> for Int {
+    fn from(value: BigInt) -> Self {
+        Int::BigInt(value)
+    }
+}
+
 impl From<Int> for f64 {
     fn from(value: Int) -> Self {
         match value {
@@ -177,7 +200,7 @@ impl From<Int> for BigRational {
     }
 }
 
-impl From<Int> for Complex<f64> {
+impl From<Int> for Complex64 {
     fn from(value: Int) -> Self {
         match value {
             Int::Int64(i) => Complex::from(i.to_f64().unwrap_or(f64::INFINITY)),
@@ -185,6 +208,7 @@ impl From<Int> for Complex<f64> {
         }
     }
 }
+
 impl TryFrom<Int> for i32 {
     type Error = EvaluationError;
     fn try_from(value: Int) -> Result<Self, Self::Error> {

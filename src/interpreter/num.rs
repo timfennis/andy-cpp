@@ -2,8 +2,9 @@ use crate::interpreter::int::Int;
 use crate::interpreter::{EvaluationError, Function, Value};
 
 use crate::ast::Operator;
+use num::complex::Complex64;
 use num::{BigRational, Complex, ToPrimitive};
-use std::fmt::Formatter;
+use std::fmt::{Display, Formatter};
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -11,8 +12,7 @@ pub enum Number {
     Int(Int),
     Float(f64),
     Rational(BigRational),
-    Complex(Complex<f64>),
-    // TODO: add more???
+    Complex(Complex64),
 }
 
 impl Number {
@@ -29,6 +29,24 @@ impl Number {
 impl From<i32> for Number {
     fn from(value: i32) -> Self {
         Number::Int(value.into())
+    }
+}
+
+impl From<f64> for Number {
+    fn from(value: f64) -> Self {
+        Number::Float(value)
+    }
+}
+
+impl From<BigRational> for Number {
+    fn from(value: BigRational) -> Self {
+        Number::Rational(value)
+    }
+}
+
+impl From<Complex64> for Number {
+    fn from(value: Complex64) -> Self {
+        Number::Complex(value)
     }
 }
 
@@ -71,7 +89,7 @@ impl Add for Number {
             // Float vs other
             (Number::Float(p1), Number::Int(p2)) => Number::Float(p1.add(f64::from(p2))),
             (Number::Float(p1), Number::Rational(p2)) => {
-                Number::Float(p1.add(rational_to_float(p2)))
+                Number::Float(p1.add(rational_to_float(&p2)))
             }
             (Number::Float(p1), Number::Complex(p2)) => Number::Complex(Complex::from(p1).add(p2)),
 
@@ -87,7 +105,7 @@ impl Add for Number {
                 Number::Rational(p1.add(BigRational::from(p2)))
             }
             (Number::Rational(p1), Number::Float(p2)) => {
-                Number::Float(rational_to_float(p1).add(p2))
+                Number::Float(rational_to_float(&p1).add(p2))
             }
             (Number::Rational(p1), Number::Complex(p2)) => {
                 Number::Complex(Complex::from(p1.to_f64().unwrap_or(f64::NAN)).add(p2))
@@ -117,7 +135,7 @@ impl Sub for Number {
             // Float vs other
             (Number::Float(p1), Number::Int(p2)) => Number::Float(p1.sub(f64::from(p2))),
             (Number::Float(p1), Number::Rational(p2)) => {
-                Number::Float(p1.sub(rational_to_float(p2)))
+                Number::Float(p1.sub(rational_to_float(&p2)))
             }
             (Number::Float(p1), Number::Complex(p2)) => Number::Complex(Complex::from(p1).sub(p2)),
 
@@ -133,7 +151,7 @@ impl Sub for Number {
                 Number::Rational(p1.sub(BigRational::from(p2)))
             }
             (Number::Rational(p1), Number::Float(p2)) => {
-                Number::Float(rational_to_float(p1).sub(p2))
+                Number::Float(rational_to_float(&p1).sub(p2))
             }
             (Number::Rational(p1), Number::Complex(p2)) => {
                 Number::Complex(Complex::from(p1.to_f64().unwrap_or(f64::NAN)).sub(p2))
@@ -156,6 +174,9 @@ impl Div for Number {
     fn div(self, rhs: Self) -> Self::Output {
         match (self, rhs) {
             (Number::Int(ref p1), Number::Int(p2)) => {
+                if p2.is_zero() {
+                    return Number::Float(f64::INFINITY);
+                }
                 if p1.rem(&p2) == 0i32.into() {
                     return Number::Int(p1.div(&p2));
                 }
@@ -168,7 +189,7 @@ impl Div for Number {
             // Float vs other
             (Number::Float(p1), Number::Int(p2)) => Number::Float(p1.div(f64::from(p2))),
             (Number::Float(p1), Number::Rational(p2)) => {
-                Number::Float(p1.div(rational_to_float(p2)))
+                Number::Float(p1.div(rational_to_float(&p2)))
             }
             (Number::Float(p1), Number::Complex(p2)) => Number::Complex(Complex::from(p1).div(p2)),
 
@@ -184,7 +205,7 @@ impl Div for Number {
                 Number::Rational(p1.div(BigRational::from(p2)))
             }
             (Number::Rational(p1), Number::Float(p2)) => {
-                Number::Float(rational_to_float(p1).div(p2))
+                Number::Float(rational_to_float(&p1).div(p2))
             }
             (Number::Rational(p1), Number::Complex(p2)) => {
                 Number::Complex(Complex::from(p1.to_f64().unwrap_or(f64::NAN)).div(p2))
@@ -214,7 +235,7 @@ impl Mul for Number {
             // Float vs other
             (Number::Float(p1), Number::Int(p2)) => Number::Float(p1.mul(f64::from(p2))),
             (Number::Float(p1), Number::Rational(p2)) => {
-                Number::Float(p1.mul(rational_to_float(p2)))
+                Number::Float(p1.mul(rational_to_float(&p2)))
             }
             (Number::Float(p1), Number::Complex(p2)) => Number::Complex(Complex::from(p1).mul(p2)),
 
@@ -227,7 +248,7 @@ impl Mul for Number {
 
             // Rational vs other
             (Number::Rational(p1), Number::Float(p2)) => {
-                Number::Float(rational_to_float(p1).mul(p2))
+                Number::Float(rational_to_float(&p1).mul(p2))
             }
             (Number::Rational(p1), Number::Int(p2)) => {
                 Number::Rational(p1.mul(BigRational::from(p2)))
@@ -333,25 +354,26 @@ impl Number {
                     }
                 }
 
-                Number::Float(f64::from(p1).powf(rational_to_float(p2)))
+                Number::Float(f64::from(p1).powf(rational_to_float(&p2)))
             }
 
             // Rational vs Others
             (Number::Rational(p1), Number::Int(p2)) => Number::Rational(p1.pow(i32::try_from(p2)?)),
             (Number::Rational(p1), Number::Rational(p2)) => {
-                if let Some(p2) = p2.to_i32() {
-                    Number::Rational(p1.pow(p2))
-                } else {
-                    return Err(EvaluationError::TypeError {
-                        message: "Cannot raise a rational to the power of another rational, try converting the operands to floats".to_string(),
-                    });
+                if p2.is_integer() {
+                    if let Some(p2) = p2.to_i32() {
+                        return Ok(Number::Rational(p1.pow(p2)));
+                    }
                 }
+                return Err(EvaluationError::TypeError {
+                    message: "Cannot raise a rational to the power of another rational, try converting the operands to floats".to_string(),
+                });
             }
             (Number::Rational(p1), Number::Float(p2)) => {
-                Number::Float(rational_to_float(p1).powf(p2))
+                Number::Float(rational_to_float(&p1).powf(p2))
             }
             (Number::Rational(p1), Number::Complex(p2)) => {
-                Number::Complex(rational_to_complex(p1).powc(p2))
+                Number::Complex(rational_to_complex(&p1).powc(p2))
             }
 
             // Float vs others
@@ -359,7 +381,7 @@ impl Number {
             (Number::Float(p1), Number::Complex(p2)) => Number::Complex(Complex::from(p1).powc(p2)),
             (Number::Float(p1), Number::Int(p2)) => Number::Float(p1.powf(f64::from(p2))),
             (Number::Float(p1), Number::Rational(p2)) => {
-                Number::Float(p1.powf(rational_to_float(p2)))
+                Number::Float(p1.powf(rational_to_float(&p2)))
             }
 
             (Number::Complex(p1), Number::Complex(p2)) => Number::Complex(p1.powc(p2)),
@@ -368,11 +390,39 @@ impl Number {
                 Number::Complex(p1.powc(Complex::from(f64::from(p2))))
             }
             (Number::Complex(p1), Number::Rational(p2)) => {
-                Number::Complex(p1.powc(rational_to_complex(p2)))
+                // TODO: add more???
+                Number::Complex(p1.powc(rational_to_complex(&p2)))
             }
         })
     }
 }
+
+macro_rules! implement_rounding {
+    ($method:ident) => {
+        impl Number {
+            #[must_use]
+            pub fn $method(&self) -> Number {
+                match self {
+                    Number::Int(i) => Number::Int(i.clone()),
+                    Number::Float(f) => {
+                        let f = f.$method();
+                        if let Some(i) = Int::from_f64(f) {
+                            Number::Int(i)
+                        } else {
+                            Number::Float(f)
+                        }
+                    }
+                    Number::Rational(r) => Number::Int(Int::BigInt(r.$method().to_integer())),
+                    Number::Complex(c) => Complex::new(c.re.$method(), c.im.$method()).into(),
+                }
+            }
+        }
+    };
+}
+
+implement_rounding!(ceil);
+implement_rounding!(floor);
+implement_rounding!(round);
 
 impl TryFrom<Number> for usize {
     type Error = ();
@@ -398,11 +448,41 @@ impl std::fmt::Display for Number {
     }
 }
 
-fn rational_to_float(r: BigRational) -> f64 {
+fn rational_to_float(r: &BigRational) -> f64 {
     r.to_f64().unwrap_or(f64::NAN)
 }
-fn rational_to_complex(r: BigRational) -> Complex<f64> {
+fn rational_to_complex(r: &BigRational) -> Complex<f64> {
     Complex::from(r.to_f64().unwrap_or(f64::NAN))
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum NumberType {
+    Int,
+    Float,
+    Rational,
+    Complex,
+}
+
+impl From<Number> for NumberType {
+    fn from(value: Number) -> Self {
+        match value {
+            Number::Int(_) => NumberType::Int,
+            Number::Float(_) => NumberType::Float,
+            Number::Rational(_) => NumberType::Rational,
+            Number::Complex(_) => NumberType::Complex,
+        }
+    }
+}
+
+impl Display for NumberType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NumberType::Int => write!(f, "int"),
+            NumberType::Float => write!(f, "float"),
+            NumberType::Rational => write!(f, "rational"),
+            NumberType::Complex => write!(f, "complex"),
+        }
+    }
 }
 
 #[derive(Debug)]

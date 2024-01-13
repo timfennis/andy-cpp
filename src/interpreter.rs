@@ -3,6 +3,7 @@ mod evaluate;
 mod function;
 mod int;
 mod num;
+pub mod stdlib;
 mod value;
 
 pub use crate::interpreter::num::Number;
@@ -28,7 +29,7 @@ impl<'a, W: std::io::Write> Interpreter<'a, W> {
     pub fn new(dest: &'a mut W) -> Self {
         Self {
             destination: dest,
-            environment: Environment::default(),
+            environment: Environment::new_with_stdlib(),
         }
     }
 
