@@ -91,7 +91,11 @@ impl Display for Value {
             Value::Number(n) => write!(f, "{n}"),
             Value::Bool(b) => write!(f, "{b}"),
             Value::Sequence(Sequence::String(s)) => write!(f, "{s}"),
-            d => write!(f, "{d:?}"),
+            Value::Function(_) => {
+                //TODO: implement function printing
+                write!(f, "function")
+            }
+            d @ Value::Sequence(_) => write!(f, "{d:?}"),
         }
     }
 }
