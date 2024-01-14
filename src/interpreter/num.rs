@@ -11,7 +11,7 @@ use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 pub enum Number {
     Int(Int),
     Float(f64),
-    Rational(BigRational),
+    Rational(Box<BigRational>),
     Complex(Complex64),
 }
 
@@ -26,6 +26,11 @@ impl Number {
     }
 }
 
+impl From<Int> for Number {
+    fn from(value: Int) -> Self {
+        Number::Int(value)
+    }
+}
 impl From<i32> for Number {
     fn from(value: i32) -> Self {
         Number::Int(value.into())
@@ -40,7 +45,7 @@ impl From<f64> for Number {
 
 impl From<BigRational> for Number {
     fn from(value: BigRational) -> Self {
-        Number::Rational(value)
+        Number::Rational(Box::new(value))
     }
 }
 
@@ -67,10 +72,10 @@ impl Neg for Number {
 
     fn neg(self) -> Self::Output {
         match self {
-            Number::Int(i) => Number::Int(i.neg()),
-            Number::Float(f) => Number::Float(f.neg()),
-            Number::Rational(r) => Number::Rational(r.neg()),
-            Number::Complex(c) => Number::Complex(c.neg()),
+            Number::Int(i) => i.neg().into(),
+            Number::Float(f) => f.neg().into(),
+            Number::Rational(r) => r.neg().into(),
+            Number::Complex(c) => c.neg().into(),
         }
     }
 }
@@ -83,7 +88,9 @@ impl Add for Number {
             // Operands are the same
             (Number::Int(i1), Number::Int(i2)) => Number::Int(i1 + i2),
             (Number::Float(f1), Number::Float(f2)) => Number::Float(f1.add(f2)),
-            (Number::Rational(r1), Number::Rational(r2)) => Number::Rational(r1 + r2),
+            (Number::Rational(r1), Number::Rational(r2)) => {
+                Number::Rational(Box::new(Add::add(*r1, *r2)))
+            }
             (Number::Complex(c1), Number::Complex(c2)) => Number::Complex(c1 + c2),
 
             // Float vs other
@@ -96,13 +103,13 @@ impl Add for Number {
             // Int vs other
             (Number::Int(p1), Number::Float(p2)) => Number::Float(f64::from(p1).add(p2)),
             (Number::Int(p1), Number::Rational(p2)) => {
-                Number::Rational(BigRational::from(p1).add(p2))
+                Number::Rational(Box::new(Add::add(BigRational::from(p1), *p2)))
             }
             (Number::Int(p1), Number::Complex(p2)) => Number::Complex(Complex::from(p1).add(p2)),
 
             // Rational vs other
             (Number::Rational(p1), Number::Int(p2)) => {
-                Number::Rational(p1.add(BigRational::from(p2)))
+                Number::Rational(Box::new(Add::add(*p1, BigRational::from(p2))))
             }
             (Number::Rational(p1), Number::Float(p2)) => {
                 Number::Float(rational_to_float(&p1).add(p2))
@@ -129,7 +136,9 @@ impl Sub for Number {
             // Operands are the same
             (Number::Int(i1), Number::Int(i2)) => Number::Int(i1 - i2),
             (Number::Float(f1), Number::Float(f2)) => Number::Float(f1.add(f2)),
-            (Number::Rational(r1), Number::Rational(r2)) => Number::Rational(r1 - r2),
+            (Number::Rational(r1), Number::Rational(r2)) => {
+                Number::Rational(Box::new(Sub::sub(*r1, *r2)))
+            }
             (Number::Complex(c1), Number::Complex(c2)) => Number::Complex(c1 - c2),
 
             // Float vs other
@@ -142,13 +151,13 @@ impl Sub for Number {
             // Int vs other
             (Number::Int(p1), Number::Float(p2)) => Number::Float(f64::from(p1).sub(p2)),
             (Number::Int(p1), Number::Rational(p2)) => {
-                Number::Rational(BigRational::from(p1).sub(p2))
+                Number::Rational(Box::new(Sub::sub(BigRational::from(p1), *p2)))
             }
             (Number::Int(p1), Number::Complex(p2)) => Number::Complex(Complex::from(p1).sub(p2)),
 
             // Rational vs Other
             (Number::Rational(p1), Number::Int(p2)) => {
-                Number::Rational(p1.sub(BigRational::from(p2)))
+                Number::Rational(Box::new(Sub::sub(*p1, BigRational::from(p2))))
             }
             (Number::Rational(p1), Number::Float(p2)) => {
                 Number::Float(rational_to_float(&p1).sub(p2))
@@ -180,10 +189,12 @@ impl Div for Number {
                 if p1.rem(&p2) == 0i32.into() {
                     return Number::Int(p1.div(&p2));
                 }
-                Number::Rational(BigRational::new(p1.into(), p2.into()))
+                BigRational::new(p1.into(), p2.into()).into()
             }
             (Number::Float(p1), Number::Float(p2)) => Number::Float(p1 / p2),
-            (Number::Rational(p1), Number::Rational(p2)) => Number::Rational(p1 / p2),
+            (Number::Rational(p1), Number::Rational(p2)) => {
+                Number::Rational(Box::new(Div::div(*p1, *p2)))
+            }
             (Number::Complex(p1), Number::Complex(p2)) => Number::Complex(p1 / p2),
 
             // Float vs other
@@ -195,14 +206,14 @@ impl Div for Number {
 
             // Int vs other
             (Number::Int(p1), Number::Rational(p2)) => {
-                Number::Rational(BigRational::from(p1).div(p2))
+                Number::Rational(Box::new(Div::div(BigRational::from(p1), *p2)))
             }
             (Number::Int(p1), Number::Float(p2)) => Number::Float(f64::from(p1).div(p2)),
             (Number::Int(p1), Number::Complex(p2)) => Number::Complex(Complex::from(p1).div(p2)),
 
             // Rational vs other
             (Number::Rational(p1), Number::Int(p2)) => {
-                Number::Rational(p1.div(BigRational::from(p2)))
+                Number::Rational(Box::new(Div::div(*p1, BigRational::from(p2))))
             }
             (Number::Rational(p1), Number::Float(p2)) => {
                 Number::Float(rational_to_float(&p1).div(p2))
@@ -229,7 +240,9 @@ impl Mul for Number {
         match (self, rhs) {
             (Number::Int(p1), Number::Int(p2)) => Number::Int(p1 * p2),
             (Number::Float(p1), Number::Float(p2)) => Number::Float(p1 * p2),
-            (Number::Rational(p1), Number::Rational(p2)) => Number::Rational(p1 * p2),
+            (Number::Rational(p1), Number::Rational(p2)) => {
+                Number::Rational(Box::new(Mul::mul(*p1, *p2)))
+            }
             (Number::Complex(p1), Number::Complex(p2)) => Number::Complex(p1 * p2),
 
             // Float vs other
@@ -241,7 +254,7 @@ impl Mul for Number {
 
             // Int vs other
             (Number::Int(p1), Number::Rational(p2)) => {
-                Number::Rational(BigRational::from(p1).mul(p2))
+                Number::Rational(Box::new(Mul::mul(BigRational::from(p1), *p2)))
             }
             (Number::Int(p1), Number::Float(p2)) => Number::Float(f64::from(p1).mul(p2)),
             (Number::Int(p1), Number::Complex(p2)) => Number::Complex(Complex::from(p1).mul(p2)),
@@ -251,7 +264,7 @@ impl Mul for Number {
                 Number::Float(rational_to_float(&p1).mul(p2))
             }
             (Number::Rational(p1), Number::Int(p2)) => {
-                Number::Rational(p1.mul(BigRational::from(p2)))
+                Number::Rational(Box::new(Mul::mul(*p1, BigRational::from(p2))))
             }
             (Number::Rational(p1), Number::Complex(p2)) => {
                 Number::Complex(Complex::from(p1.to_f64().unwrap_or(f64::NAN)).div(p2))
@@ -275,15 +288,17 @@ impl Rem for Number {
         match (self, rhs) {
             (Number::Int(p1), Number::Int(p2)) => Number::Int(p1.rem(p2)),
             (Number::Float(p1), Number::Float(p2)) => Number::Float(p1.rem(p2)),
-            (Number::Rational(p1), Number::Rational(p2)) => Number::Rational(p1.rem(p2)),
+            (Number::Rational(p1), Number::Rational(p2)) => {
+                Number::Rational(Box::new(Rem::rem(*p1, *p2)))
+            }
             (Number::Complex(p1), Number::Complex(p2)) => Number::Complex(p1.rem(p2)),
 
             // Rational vs Int
             (Number::Rational(p1), Number::Int(p2)) => {
-                Number::Rational(p1.rem(BigRational::from(p2)))
+                Number::Rational(Box::new(Rem::rem(*p1, BigRational::from(p2))))
             }
             (Number::Int(p1), Number::Rational(p2)) => {
-                Number::Rational(BigRational::from(p1).rem(p2))
+                Number::Rational(Box::new(Rem::rem(BigRational::from(p1), *p2)))
             }
             // TODO: implement other cases
             (a, b) => panic!(
@@ -333,7 +348,7 @@ impl Number {
             (Number::Int(p1), Number::Int(p2)) => {
                 if p2.is_negative() {
                     let p2 = i32::try_from(p2)?;
-                    Number::Rational(BigRational::from(p1).pow(p2))
+                    Number::Rational(Box::new(BigRational::from(p1).pow(p2)))
                 } else {
                     Number::Int(
                         p1.checked_pow(&p2)
@@ -358,11 +373,13 @@ impl Number {
             }
 
             // Rational vs Others
-            (Number::Rational(p1), Number::Int(p2)) => Number::Rational(p1.pow(i32::try_from(p2)?)),
+            (Number::Rational(p1), Number::Int(p2)) => {
+                Number::Rational(Box::new(p1.pow(i32::try_from(p2)?)))
+            }
             (Number::Rational(p1), Number::Rational(p2)) => {
                 if p2.is_integer() {
                     if let Some(p2) = p2.to_i32() {
-                        return Ok(Number::Rational(p1.pow(p2)));
+                        return Ok(Number::Rational(Box::new(p1.pow(p2))));
                     }
                 }
                 return Err(EvaluationError::TypeError {

@@ -1,5 +1,5 @@
 use clap::Parser;
-use ndc_lib::interpreter::Interpreter;
+use ndc_lib::interpreter::{Interpreter, Number, Sequence, Value};
 use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
@@ -20,6 +20,10 @@ struct Cli {
 }
 
 fn main() -> anyhow::Result<()> {
+    eprintln!("sizeof Value {}", std::mem::size_of::<Value>());
+    eprintln!("sizeof Number {}", std::mem::size_of::<Number>());
+    eprintln!("sizeof Sequence {}", std::mem::size_of::<Sequence>());
+
     let cli = Cli::parse();
     if let Some(path) = cli.file {
         let mut file = File::open(path)?;
