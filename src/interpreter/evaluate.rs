@@ -197,7 +197,7 @@ pub(crate) fn evaluate_expression(
                         end: expression_location.end,
                     });
                 };
-            function.call(&evaluated_args, environment)
+            function.call(&evaluated_args, environment)?
         }
         Expression::FunctionDeclaration {
             arguments,

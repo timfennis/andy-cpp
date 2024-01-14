@@ -1,0 +1,7 @@
+--PROGRAM--
+fn test() {
+    n + 3 // n does not exist
+}
+test();
+--EXPECT-ERROR--
+variable n is undefined

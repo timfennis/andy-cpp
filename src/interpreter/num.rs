@@ -513,13 +513,17 @@ pub struct SingleNumberFunction {
 }
 
 impl Function for SingleNumberFunction {
-    fn call(&self, args: &[Value], _env: &Rc<RefCell<Environment>>) -> Value {
+    fn call(
+        &self,
+        args: &[Value],
+        _env: &Rc<RefCell<Environment>>,
+    ) -> Result<Value, EvaluationError> {
         if args.len() == 1 {
             let arg = args.first().expect("guaranteed to be 1");
 
             if let Value::Number(num) = arg {
                 // TODO: is this clone wanted and cheap? Probably not
-                return Value::Number((self.function)(num.clone()));
+                return Ok(Value::Number((self.function)(num.clone())));
             }
         }
 
