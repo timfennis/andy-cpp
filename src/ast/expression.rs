@@ -56,7 +56,7 @@ pub enum Expression {
         name: Box<ExpressionLocation>,
         // TODO this probably not good enough
         arguments: Box<ExpressionLocation>,
-        body: Box<ExpressionLocation>,
+        body: Rc<ExpressionLocation>,
     },
     BlockExpression {
         statements: Vec<ExpressionLocation>,
@@ -105,6 +105,22 @@ impl ExpressionLocation {
             Expression::Identifier(i) => Ok(i.clone()),
             _ => Err(EvaluationError::InvalidExpression {
                 expected_type: String::from("identifier"),
+                start: self.start,
+                end: self.end,
+            }),
+        }
+    }
+
+    pub fn try_into_parameters(&self) -> Result<Vec<String>, EvaluationError> {
+        match &self.expression {
+            Expression::Tuple {
+                values: tuple_values,
+            } => tuple_values
+                .iter()
+                .map(|el| el.try_into_identifier())
+                .collect::<Result<Vec<String>, EvaluationError>>(),
+            _ => Err(EvaluationError::InvalidExpression {
+                expected_type: String::from("parameter list"),
                 start: self.start,
                 end: self.end,
             }),

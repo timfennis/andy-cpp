@@ -474,7 +474,7 @@ impl Parser {
             expression: Expression::FunctionDeclaration {
                 name: Box::new(name),
                 arguments: Box::new(argument_list),
-                body: Box::new(body),
+                body: Rc::new(body),
             },
             start,
             end,

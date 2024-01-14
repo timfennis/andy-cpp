@@ -11,6 +11,7 @@ use crate::ast::{
     Expression, ExpressionLocation, LogicalOperator, Lvalue, Operator, UnaryOperator,
 };
 use crate::interpreter::environment::Environment;
+use crate::interpreter::function::UserFunction;
 use crate::interpreter::int::Int;
 use crate::interpreter::{evaluate, Number, Sequence, Value, ValueType};
 use crate::lexer::Location;
@@ -186,27 +187,34 @@ pub(crate) fn evaluate_expression(
             }
 
             let function_name = function_identifier.try_into_identifier()?;
-            if let Some(Value::Function(function)) = environment.borrow().get(&function_name) {
-                function.call(&evaluated_args, environment)
-            } else {
-                return Err(EvaluationError::UndefinedFunction {
-                    identifier: function_name,
-                    start: expression_location.start,
-                    end: expression_location.end,
-                });
-            }
+            let function =
+                if let Some(Value::Function(function)) = environment.borrow().get(&function_name) {
+                    function.clone()
+                } else {
+                    return Err(EvaluationError::UndefinedFunction {
+                        identifier: function_name,
+                        start: expression_location.start,
+                        end: expression_location.end,
+                    });
+                };
+            function.call(&evaluated_args, environment)
         }
         Expression::FunctionDeclaration {
-            arguments: _,
-            body: _,
+            arguments,
+            body,
             name,
         } => {
-            let _name = name.try_into_identifier()?;
+            let name = name.try_into_identifier()?;
 
-            // environment.declare(&name, Value::Function())
-            todo!("implement this");
-            // TODO: function declarations are not yet implemented
-            // Value::Unit
+            let user_function = UserFunction {
+                parameters: arguments.try_into_parameters()?,
+                expression: body.clone(),
+            };
+
+            environment
+                .borrow_mut()
+                .declare(&name, Value::Function(Rc::new(user_function)));
+            Value::Unit
         }
         Expression::Tuple { .. } => todo!("tuples are not yet implemented in this position"),
         Expression::Identifier(identifier) => {

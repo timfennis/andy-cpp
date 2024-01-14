@@ -1,0 +1,7 @@
+--PROGRAM--
+fn add(a, b) {
+    a + b
+}
+print add(110, -15);
+--EXPECT--
+95

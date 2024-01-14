@@ -13,12 +13,24 @@ pub trait Function: Debug {
 
 #[derive(Debug)]
 pub struct UserFunction {
-    expression: ExpressionLocation,
+    pub parameters: Vec<String>,
+    pub expression: Rc<ExpressionLocation>,
 }
 
 impl Function for UserFunction {
-    fn call(&self, _args: &[Value], env: &Rc<RefCell<Environment>>) -> Value {
-        evaluate_expression(&self.expression, env)
-            .expect("TODO: we need to change the signature of Function::call")
+    fn call(&self, args: &[Value], env: &Rc<RefCell<Environment>>) -> Value {
+        {
+            let mut env = env.borrow_mut();
+            env.new_scope();
+            for (name, value) in self.parameters.iter().zip(args.iter()) {
+                //TODO: is this clone a good plan?
+                env.declare(name, value.clone());
+            }
+        }
+        let return_value = evaluate_expression(&self.expression, env)
+            .expect("TODO: we need to change the signature of Function::call to deal with failed expressions");
+
+        env.borrow_mut().destroy_scope();
+        return_value
     }
 }
