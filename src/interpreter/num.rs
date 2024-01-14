@@ -319,7 +319,7 @@ impl Number {
     pub fn checked_rem_euclid(self, rhs: Self) -> Result<Self, EvaluationError> {
         match (self, rhs) {
             (Number::Int(p1), Number::Int(p2)) => {
-                Ok(Number::Int(p1.checked_rem_euclid(p2).ok_or({
+                Ok(Number::Int(p1.checked_rem_euclid(&p2).ok_or({
                     EvaluationError::DivisionByZero {
                         operator: Operator::EuclideanModulo,
                     }
@@ -511,7 +511,7 @@ pub struct SingleNumberFunction {
 impl Function for SingleNumberFunction {
     fn call(&self, args: &[Value]) -> Value {
         if args.len() == 1 {
-            let arg = args.get(0).expect("guaranteed to be 1");
+            let arg = args.first().expect("guaranteed to be 1");
 
             if let Value::Number(num) = arg {
                 // TODO: is this clone wanted and cheap? Probably not

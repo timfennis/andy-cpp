@@ -34,17 +34,7 @@ impl Int {
             return None;
         }
 
-        if value > (i64::MAX as f64) || value < (i64::MIN as f64) {
-            if let Some(n) = BigInt::from_f64(value) {
-                Some(Int::from(n))
-            } else {
-                // TODO: this can't happen?
-                unreachable!("failed conversion from float to int should never happen here");
-            }
-        } else {
-            // TODO: is this perfectly safe?
-            Some(Int::Int64(value as i64))
-        }
+        BigInt::from_f64(value).map(Int::BigInt)
     }
     fn to_bigint(&self) -> BigInt {
         match self {
@@ -53,7 +43,7 @@ impl Int {
         }
     }
 
-    pub fn checked_rem_euclid(self, rhs: Self) -> Option<Self> {
+    pub fn checked_rem_euclid(self, rhs: &Self) -> Option<Self> {
         if let (Int::Int64(p1), Int::Int64(p2)) = (&self, &rhs) {
             if let Some(a) = (*p1).checked_rem_euclid(*p2) {
                 return Some(Int::Int64(a));

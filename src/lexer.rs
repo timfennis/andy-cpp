@@ -3,7 +3,6 @@ use std::collections::VecDeque;
 use std::fmt::{Display, Formatter};
 use std::str::Chars;
 
-#[allow(clippy::module_name_repetitions)]
 mod token;
 
 pub use token::{Location, Token, TokenLocation};
@@ -139,6 +138,7 @@ impl Iterator for Lexer<'_> {
                     buf.push(char);
 
                     // TODO: support complex numbers
+                    let mut float = false;
                     while let Some(next_char) = self.source.peek_one() {
                         match next_char {
                             c if c.is_ascii_digit() => {
@@ -149,7 +149,8 @@ impl Iterator for Lexer<'_> {
                                 self.source.next();
                                 // ignore underscore for nice number formatting
                             }
-                            '.' => {
+                            '.' if !float => {
+                                float = true;
                                 self.source.next();
                                 buf.push('.');
                             }
@@ -170,8 +171,15 @@ impl Iterator for Lexer<'_> {
 
                     let token = if let Ok(num) = buf.parse::<i64>() {
                         Token::Int64(num)
-                    } else if let Ok(num) = buf.parse::<f64>() {
-                        Token::Float64(num)
+                    } else if float {
+                        if let Ok(num) = buf.parse::<f64>() {
+                            Token::Float64(num)
+                        } else {
+                            return Some(Err(Error::InvalidFloat {
+                                string: buf,
+                                location: self.source.location(),
+                            }));
+                        }
                     } else {
                         let i = buf
                             .parse::<BigInt>()
@@ -274,6 +282,10 @@ impl<'a> SourceIterator<'a> {
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum Error {
+    InvalidFloat {
+        string: String,
+        location: Location,
+    },
     //TODO: refactor to location
     UnexpectedCharacter {
         char: char,
@@ -306,6 +318,10 @@ impl Display for Error {
             Error::InvalidEscapeSequence { sequence, location } => {
                 write!(f, "Invalid escape sequence '{sequence}' on {location}")
             }
+            Error::InvalidFloat { string, location } => write!(
+                f,
+                "Invalid floating point sequence '{string}' on {location}"
+            ),
         }
     }
 }

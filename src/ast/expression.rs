@@ -5,7 +5,6 @@ use num::BigInt;
 use std::rc::Rc;
 
 #[derive(Debug, PartialEq)]
-#[allow(clippy::module_name_repetitions)]
 pub struct ExpressionLocation {
     pub expression: Expression,
     pub start: Location,

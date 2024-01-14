@@ -233,7 +233,7 @@ impl<'a, W: std::io::Write> Interpreter<'a, W> {
                 let mut evaluated_args = Vec::new();
 
                 for argument in arguments {
-                    evaluated_args.push(self.evaluate_expression(&argument)?);
+                    evaluated_args.push(self.evaluate_expression(argument)?);
                 }
 
                 if let Some(Value::Function(function)) = self.environment.get(function) {
