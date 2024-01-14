@@ -13,13 +13,13 @@ use crate::ast::{
 use crate::interpreter::environment::Environment;
 use crate::interpreter::function::UserFunction;
 use crate::interpreter::int::Int;
-use crate::interpreter::{evaluate, Number, Sequence, Value, ValueType};
+use crate::interpreter::{evaluate, EnvironmentRef, Number, Sequence, Value, ValueType};
 use crate::lexer::Location;
 
 #[allow(clippy::too_many_lines)]
 pub(crate) fn evaluate_expression(
     expression_location: &ExpressionLocation,
-    environment: &Rc<RefCell<Environment>>,
+    environment: &EnvironmentRef,
 ) -> Result<Value, EvaluationError> {
     let (start, end) = (expression_location.start, expression_location.end);
     let literal: Value = match &expression_location.expression {
@@ -79,14 +79,14 @@ pub(crate) fn evaluate_expression(
             value
         }
         Expression::BlockExpression { statements } => {
-            environment.borrow_mut().new_scope();
+            let local_scope = Rc::new(RefCell::new(Environment::new_scope(environment.clone())));
 
             let mut value = Value::Unit;
             for stm in statements {
-                value = evaluate_expression(stm, environment)?;
+                value = evaluate_expression(stm, &local_scope)?;
             }
 
-            environment.borrow_mut().destroy_scope();
+            drop(local_scope);
             value
         }
         Expression::IfExpression {
@@ -116,7 +116,9 @@ pub(crate) fn evaluate_expression(
         }
         Expression::Print(expression) => {
             let value = evaluate_expression(expression, environment)?;
-            writeln!(environment.borrow_mut().output, "{value}")?;
+            let _ = environment
+                .borrow_mut()
+                .with_output(|output| writeln!(output, "{value}"));
             Value::Unit
         }
         Expression::Logical {
@@ -148,11 +150,11 @@ pub(crate) fn evaluate_expression(
             expression,
             loop_body,
         } => {
-            environment.borrow_mut().new_scope();
+            let local_scope = new_scope(environment);
             loop {
-                let lit = evaluate_expression(expression, environment)?;
+                let lit = evaluate_expression(expression, &local_scope)?;
                 if let Value::Bool(true) = lit {
-                    evaluate_expression(loop_body, environment)?;
+                    evaluate_expression(loop_body, &local_scope)?;
                 } else if let Value::Bool(false) = lit {
                     break;
                 } else {
@@ -161,7 +163,7 @@ pub(crate) fn evaluate_expression(
                     });
                 }
             }
-            environment.borrow_mut().destroy_scope();
+            drop(local_scope);
             Value::Unit
         }
         Expression::BoolLiteral(b) => Value::Bool(*b),
@@ -187,8 +189,9 @@ pub(crate) fn evaluate_expression(
             }
 
             let function_name = function_identifier.try_into_identifier()?;
-            let function =
-                if let Some(Value::Function(function)) = environment.borrow().get(&function_name) {
+            let function = if let Some(refcell) = environment.borrow().get(&function_name) {
+                let value = &*refcell.borrow();
+                if let Value::Function(function) = value {
                     function.clone()
                 } else {
                     return Err(EvaluationError::UndefinedFunction {
@@ -196,7 +199,14 @@ pub(crate) fn evaluate_expression(
                         start: expression_location.start,
                         end: expression_location.end,
                     });
-                };
+                }
+            } else {
+                return Err(EvaluationError::UndefinedFunction {
+                    identifier: function_name,
+                    start: expression_location.start,
+                    end: expression_location.end,
+                });
+            };
             function.call(&evaluated_args, environment)?
         }
         Expression::FunctionDeclaration {
@@ -219,8 +229,8 @@ pub(crate) fn evaluate_expression(
         Expression::Tuple { .. } => todo!("tuples are not yet implemented in this position"),
         Expression::Identifier(identifier) => {
             if let Some(value) = environment.borrow().get(identifier) {
-                // Is cloning here really a good idea
-                value.clone()
+                // TODO: is cloning the value a good idea here??
+                value.borrow().clone()
             } else {
                 return Err(EvaluationError::UndefinedVariable {
                     identifier: identifier.clone(),
@@ -232,6 +242,11 @@ pub(crate) fn evaluate_expression(
     };
 
     Ok(literal)
+}
+
+fn new_scope(environment: &EnvironmentRef) -> EnvironmentRef {
+    let scope = Environment::new_scope(environment.clone());
+    Rc::new(RefCell::new(scope))
 }
 
 pub fn apply_operator(

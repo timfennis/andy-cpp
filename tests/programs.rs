@@ -66,9 +66,9 @@ fn run_test(path: PathBuf) -> Result<(), std::io::Error> {
     let environment = interpreter.environment();
     let environment = environment.borrow();
     let output = environment
-        .output()
+        .get_output()
         .expect("interpreter must have output in test context");
-    let output = String::from_utf8_lossy(output);
+    let output = String::from_utf8(output).expect("test output must be valid UTF-8");
 
     // For now let's trim end both result and expect to ensure that any trailing line breaks don't cause issues
     print!("Running {path:?}...");

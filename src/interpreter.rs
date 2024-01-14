@@ -1,13 +1,12 @@
 use std::cell::RefCell;
 use std::fmt::{Display, Formatter};
-
 use std::rc::Rc;
 
 pub use evaluate::EvaluationError;
 pub use function::Function;
 
 use crate::ast::ExpressionLocation;
-use crate::interpreter::environment::{Environment, InterpreterOutput};
+pub use crate::interpreter::environment::{Environment, EnvironmentRef, InterpreterOutput};
 use crate::interpreter::evaluate::evaluate_expression;
 pub use crate::interpreter::num::Number;
 pub use crate::interpreter::value::{Sequence, Value, ValueType};
@@ -22,7 +21,7 @@ pub mod stdlib;
 mod value;
 
 pub struct Interpreter {
-    environment: Rc<RefCell<Environment>>,
+    environment: EnvironmentRef,
 }
 
 impl Interpreter {
@@ -34,7 +33,7 @@ impl Interpreter {
     }
 
     #[must_use]
-    pub fn environment(self) -> Rc<RefCell<Environment>> {
+    pub fn environment(self) -> EnvironmentRef {
         self.environment
     }
 

@@ -1,8 +1,10 @@
+use std::rc::Rc;
+
+use num::ToPrimitive;
+
 use crate::interpreter::environment::Environment;
 use crate::interpreter::num::SingleNumberFunction;
 use crate::interpreter::{Number, Value};
-use num::ToPrimitive;
-use std::rc::Rc;
 
 pub fn bind_to_environment(env: &mut Environment) {
     env.declare(

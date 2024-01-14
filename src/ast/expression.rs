@@ -100,6 +100,8 @@ impl ExpressionLocation {
         }
     }
 
+    /// # Errors
+    /// If this expression cannot be converted into an identifier an `EvaluationError::InvalidExpression` will be returned
     pub fn try_into_identifier(&self) -> Result<String, EvaluationError> {
         match &self.expression {
             Expression::Identifier(i) => Ok(i.clone()),
@@ -111,13 +113,15 @@ impl ExpressionLocation {
         }
     }
 
+    /// # Errors
+    /// If this expression cannot be converted into an identifier an `EvaluationError::InvalidExpression` will be returned
     pub fn try_into_parameters(&self) -> Result<Vec<String>, EvaluationError> {
         match &self.expression {
             Expression::Tuple {
                 values: tuple_values,
             } => tuple_values
                 .iter()
-                .map(|el| el.try_into_identifier())
+                .map(ExpressionLocation::try_into_identifier)
                 .collect::<Result<Vec<String>, EvaluationError>>(),
             _ => Err(EvaluationError::InvalidExpression {
                 expected_type: String::from("parameter list"),

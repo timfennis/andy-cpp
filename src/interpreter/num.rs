@@ -1,15 +1,12 @@
-use std::cell::RefCell;
 use std::fmt::{Display, Formatter};
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
-use std::rc::Rc;
 
 use num::complex::Complex64;
 use num::{BigRational, Complex, ToPrimitive};
 
 use crate::ast::Operator;
-use crate::interpreter::environment::Environment;
 use crate::interpreter::int::Int;
-use crate::interpreter::{EvaluationError, Function, Value};
+use crate::interpreter::{EnvironmentRef, EvaluationError, Function, Value};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Number {
@@ -513,11 +510,7 @@ pub struct SingleNumberFunction {
 }
 
 impl Function for SingleNumberFunction {
-    fn call(
-        &self,
-        args: &[Value],
-        _env: &Rc<RefCell<Environment>>,
-    ) -> Result<Value, EvaluationError> {
+    fn call(&self, args: &[Value], _env: &EnvironmentRef) -> Result<Value, EvaluationError> {
         if args.len() == 1 {
             let arg = args.first().expect("guaranteed to be 1");
 
