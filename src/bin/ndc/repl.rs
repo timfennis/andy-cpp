@@ -37,8 +37,8 @@ pub fn run(debug: bool) -> anyhow::Result<()> {
     rl.set_helper(Some(h));
     // let mut rl = DefaultEditor::with_config(Config::builder().build())?;
 
-    let mut stdout = std::io::stdout();
-    let mut interpreter = Interpreter::new(&mut stdout);
+    let stdout = std::io::stdout();
+    let mut interpreter = Interpreter::new(Box::new(stdout));
     loop {
         match rl.readline("λ ") {
             Ok(line) => {

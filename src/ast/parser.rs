@@ -1,8 +1,7 @@
 use crate::ast::expression::{ExpressionLocation, Lvalue};
 use crate::ast::operator::{LogicalOperator, Operator, UnaryOperator};
-use crate::ast::Error::UnexpectedEndOfStream;
 use crate::ast::Expression;
-use crate::lexer::{Token, TokenLocation};
+use crate::lexer::{Location, Token, TokenLocation};
 use std::fmt;
 use std::fmt::{Formatter, Write};
 use std::rc::Rc;
@@ -28,6 +27,7 @@ impl Parser {
                     | Expression::Statement(_)
                     | Expression::IfExpression { .. }
                     | Expression::WhileExpression { .. }
+                    | Expression::FunctionDeclaration { .. }
             )
         };
         let mut v = Vec::new();
@@ -223,7 +223,7 @@ impl Parser {
         // If the token we parsed is some kind of variable we can potentially assign to it. Next we'll check if the next
         // token matches either the declaration operator or the assignment operator. If neither of those matches we are
         // just returning the variable expression as is.
-        if let Expression::Variable { identifier } = maybe_identifier.expression {
+        if let Expression::Identifier(identifier) = maybe_identifier.expression {
             return if self.consume_token_if(&[Token::CreateVar]).is_some() {
                 let expression = self.expression()?;
                 let (start, end) = (maybe_identifier.start, expression.end);
@@ -241,8 +241,8 @@ impl Parser {
                 }
                 .to_location(start, end))
             } else {
-                // Does this m ake any sense???????
-                Ok(Expression::Variable { identifier }
+                // TODO: Does this m ake any sense???????
+                Ok(Expression::Identifier(identifier)
                     .to_location(maybe_identifier.start, maybe_identifier.end))
             };
         }
@@ -334,46 +334,59 @@ impl Parser {
 
         while let Some(Token::LeftParentheses) = self.current_token().map(|it| &it.token) {
             self.advance();
-            expr = self.finish_call(expr)?;
+            let arguments = self.tuple(expr.start)?;
+            let (start, end) = (expr.start, expr.end);
+            expr = ExpressionLocation {
+                expression: Expression::Call {
+                    function_identifier: Box::new(expr), //TODO: check if expr has the correct type (Expression::Identifier)
+                    arguments: Box::new(arguments),
+                },
+                start,
+                end,
+            };
         }
 
         Ok(expr)
     }
 
-    fn finish_call(&mut self, callee: ExpressionLocation) -> Result<ExpressionLocation, Error> {
-        let mut arguments = Vec::new();
-
-        // TODO this might not be the best place to do this check
-        let ExpressionLocation {
-            expression: Expression::Variable { identifier },
-            ..
-        } = callee
-        else {
-            return Err(Error::ExpectedIdentifier {});
-        };
+    fn tuple(&mut self, start: Location) -> Result<ExpressionLocation, Error> {
+        let mut values = Vec::new();
 
         loop {
             let current_token = self.current_token().cloned();
-            match current_token.as_ref().map(|it| &it.token) {
-                Some(Token::RightParentheses) => {
+            if let Some(ref token_location) = current_token {
+                if token_location.token == Token::RightParentheses {
                     self.advance();
-                    return Ok(Expression::Call {
-                        function: identifier,
-                        arguments,
+                    return Ok(Expression::Tuple { values }
+                        .to_location(start, current_token.unwrap().location));
+                }
+
+                values.push(self.expression()?);
+
+                // After we parse an expression we look ahead and see if the next token is either a ',' or ')'
+                // if it's not we can return a parse error
+                let current_token = self.current_token();
+                match current_token.map(|it| &it.token) {
+                    Some(Token::RightParentheses) => {
+                        // This case is handled by the next iteration of the loop
                     }
-                    .to_location(callee.start, current_token.unwrap().location));
+                    Some(Token::Comma) => {
+                        self.advance();
+                    }
+                    Some(_) => {
+                        return Err(Error::ExpectedToken {
+                            expected_tokens: vec![Token::Comma, Token::RightParentheses],
+                            actual_token: current_token.unwrap().clone(),
+                        });
+                    }
+                    _ => {
+                        // None case is handled by just looping again
+                    }
                 }
-                Some(Token::Comma) => {
-                    self.advance();
-                }
-                None => {
-                    return Err(UnexpectedEndOfStream {
-                        help_text: "unexpected end of stream while parsing method call".to_string(),
-                    })
-                }
-                _ => {
-                    arguments.push(self.expression()?);
-                }
+            } else {
+                return Err(Error::UnexpectedEndOfStream {
+                    help_text: "unexpected end of stream while parsing method call".to_string(),
+                });
             }
         }
     }
@@ -383,6 +396,8 @@ impl Parser {
             return self.if_expression();
         } else if self.consume_token_if(&[Token::While]).is_some() {
             return self.while_expression();
+        } else if self.consume_token_if(&[Token::Fn]).is_some() {
+            return self.function_declaration();
         } else if self.match_token(&[Token::LeftCurlyBracket]).is_some() {
             return self.block();
         }
@@ -402,7 +417,7 @@ impl Parser {
                 self.require_current_token_matches(Token::RightParentheses)?;
                 Expression::Grouping(Box::new(expr))
             }
-            Token::Identifier(identifier) => Expression::Variable { identifier },
+            Token::Identifier(identifier) => Expression::Identifier(identifier),
             _ => {
                 // TODO: this error might not be the best way to describe what's happening here
                 //       figure out if there is a better way to handle errors here.
@@ -447,6 +462,25 @@ impl Parser {
         .to_location(start, end))
     }
 
+    fn function_declaration(&mut self) -> Result<ExpressionLocation, Error> {
+        let name = self.identifier()?;
+
+        let arg_start = self.require_token(&[Token::LeftParentheses])?;
+        let argument_list = self.tuple(arg_start.location)?;
+        let body = self.block()?;
+
+        let (start, end) = (name.start, body.end);
+        Ok(ExpressionLocation {
+            expression: Expression::FunctionDeclaration {
+                name: Box::new(name),
+                arguments: Box::new(argument_list),
+                body: Box::new(body),
+            },
+            start,
+            end,
+        })
+    }
+
     fn block(&mut self) -> Result<ExpressionLocation, Error> {
         let start = self.require_token(&[Token::LeftCurlyBracket])?.location;
 
@@ -470,6 +504,25 @@ impl Parser {
 
         Ok(Expression::BlockExpression { statements }.to_location(start, end))
     }
+
+    fn identifier(&mut self) -> Result<ExpressionLocation, Error> {
+        let token_location = self.require_current_token()?;
+        if let TokenLocation {
+            token: Token::Identifier(ident),
+            location,
+        } = token_location
+        {
+            Ok(ExpressionLocation {
+                expression: Expression::Identifier(ident),
+                start: location,
+                end: location, //TODO LOC: this is incorrect
+            })
+        } else {
+            Err(Error::ExpectedIdentifier {
+                actual_token: token_location,
+            })
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -481,7 +534,9 @@ pub enum Error {
         actual_token: TokenLocation,
     },
     // TODO this type is incomplete at best
-    ExpectedIdentifier {},
+    ExpectedIdentifier {
+        actual_token: TokenLocation,
+    },
     ExpectedToken {
         actual_token: TokenLocation,
         expected_tokens: Vec<Token>,
@@ -503,20 +558,23 @@ impl fmt::Display for Error {
             } => write!(
                 f,
                 "Unexpected token '{}' expected expression on {}",
-                token,
+                token.token,
                 token.location
             ),
-            Error::ExpectedIdentifier { // TODO this error case is really shoddy
+            Error::ExpectedIdentifier {
+                actual_token // TODO this error case is really shoddy
             } => write!(
                 f,
-                "expected identifier",
+                "expected identifier got '{}' on {}",
+                actual_token.token,
+                actual_token.location
             ),
             Error::ExpectedToken {
                 actual_token,
                 expected_tokens: expected_symbols,
             } =>  write!(
                 f,
-                "Unexpected token '{}' expected symbol {} on {}",
+                "Unexpected token '{}' expected symbol '{}' on {}",
                 actual_token.token,
                 tokens_to_string(expected_symbols),
                 actual_token.location

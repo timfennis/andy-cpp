@@ -1,4 +1,5 @@
 use crate::ast::operator::{LogicalOperator, Operator, UnaryOperator};
+use crate::interpreter::EvaluationError;
 use crate::lexer::Location;
 use num::complex::Complex64;
 use num::BigInt;
@@ -24,7 +25,7 @@ pub enum Expression {
     Float64Literal(f64),
     BigIntLiteral(BigInt),
     ComplexLiteral(Complex64),
-
+    Identifier(String),
     //
     Statement(Box<ExpressionLocation>),
     Print(Box<ExpressionLocation>),
@@ -43,9 +44,6 @@ pub enum Expression {
         right: Box<ExpressionLocation>,
     },
     Grouping(Box<ExpressionLocation>),
-    Variable {
-        identifier: String,
-    },
     VariableDeclaration {
         l_value: Lvalue,
         value: Box<ExpressionLocation>,
@@ -53,6 +51,12 @@ pub enum Expression {
     VariableAssignment {
         l_value: Lvalue,
         value: Box<ExpressionLocation>,
+    },
+    FunctionDeclaration {
+        name: Box<ExpressionLocation>,
+        // TODO this probably not good enough
+        arguments: Box<ExpressionLocation>,
+        body: Box<ExpressionLocation>,
     },
     BlockExpression {
         statements: Vec<ExpressionLocation>,
@@ -67,8 +71,11 @@ pub enum Expression {
         loop_body: Box<ExpressionLocation>,
     },
     Call {
-        function: String, // Name of the function
-        arguments: Vec<ExpressionLocation>,
+        function_identifier: Box<ExpressionLocation>, // Name of the function
+        arguments: Box<ExpressionLocation>,
+    },
+    Tuple {
+        values: Vec<ExpressionLocation>,
     },
 }
 
@@ -90,6 +97,17 @@ impl ExpressionLocation {
             start: self.start,
             end: self.end,
             expression: Expression::Statement(Box::new(self)),
+        }
+    }
+
+    pub fn try_into_identifier(&self) -> Result<String, EvaluationError> {
+        match &self.expression {
+            Expression::Identifier(i) => Ok(i.clone()),
+            _ => Err(EvaluationError::InvalidExpression {
+                expected_type: String::from("identifier"),
+                start: self.start,
+                end: self.end,
+            }),
         }
     }
 }

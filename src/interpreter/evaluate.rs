@@ -1,13 +1,230 @@
-use crate::ast::Operator;
-use crate::interpreter::{Sequence, Value, ValueType};
-use crate::lexer::Location;
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::error::Error;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::num::TryFromIntError;
-use std::ops::Rem;
+use std::ops::{Neg, Rem};
 use std::rc::Rc;
+
+use crate::ast::{
+    Expression, ExpressionLocation, LogicalOperator, Lvalue, Operator, UnaryOperator,
+};
+use crate::interpreter::environment::Environment;
+use crate::interpreter::int::Int;
+use crate::interpreter::{evaluate, Number, Sequence, Value, ValueType};
+use crate::lexer::Location;
+
+#[allow(clippy::too_many_lines)]
+pub(crate) fn evaluate_expression(
+    expression_location: &ExpressionLocation,
+    environment: &Rc<RefCell<Environment>>,
+) -> Result<Value, EvaluationError> {
+    let (start, end) = (expression_location.start, expression_location.end);
+    let literal: Value = match &expression_location.expression {
+        Expression::Unary {
+            expression: expression_location,
+            operator,
+        } => {
+            let value = evaluate_expression(expression_location, environment)?;
+            match (value, operator) {
+                (Value::Number(n), UnaryOperator::Neg) => Value::Number(n.neg()),
+                (Value::Bool(b), UnaryOperator::Bang) => Value::Bool(!b),
+                (_, UnaryOperator::Bang) => {
+                    return Err(EvaluationError::TypeError {
+                        message: "the '!' operator cannot be applied to this type".to_string(),
+                    });
+                }
+                (_, UnaryOperator::Neg) => {
+                    return Err(EvaluationError::TypeError {
+                        message: "this type cannot be negated".to_string(),
+                    });
+                }
+            }
+        }
+        Expression::Binary {
+            left,
+            operator: operator_token,
+            right,
+        } => {
+            let left = evaluate_expression(left, environment)?;
+            let right = evaluate_expression(right, environment)?;
+            evaluate::apply_operator(left, *operator_token, right)?
+        }
+        Expression::Grouping(expr) => evaluate_expression(expr, environment)?,
+        Expression::VariableDeclaration {
+            l_value: Lvalue::Variable { identifier },
+            value,
+        } => {
+            let value = evaluate_expression(value, environment)?;
+            environment.borrow_mut().declare(identifier, value.clone());
+            value
+        }
+        Expression::VariableAssignment {
+            l_value: Lvalue::Variable { identifier },
+            value,
+        } => {
+            if !environment.borrow().contains(identifier) {
+                return Err(EvaluationError::UndefinedVariable {
+                    identifier: identifier.clone(),
+                    start,
+                    end,
+                });
+            }
+            let value = evaluate_expression(value, environment)?;
+            environment
+                .borrow_mut()
+                .assign(identifier.clone(), value.clone());
+            value
+        }
+        Expression::BlockExpression { statements } => {
+            environment.borrow_mut().new_scope();
+
+            let mut value = Value::Unit;
+            for stm in statements {
+                value = evaluate_expression(stm, environment)?;
+            }
+
+            environment.borrow_mut().destroy_scope();
+            value
+        }
+        Expression::IfExpression {
+            expression,
+            on_true,
+            on_false,
+        } => {
+            let result = evaluate_expression(expression, environment)?;
+
+            match (result, on_false) {
+                (Value::Bool(true), _) => evaluate_expression(on_true, environment)?,
+                (Value::Bool(false), Some(block)) => evaluate_expression(block, environment)?,
+                (Value::Bool(false), None) => Value::Unit,
+                (value, _) => {
+                    return Err(EvaluationError::TypeError {
+                        message: format!(
+                            "mismatched types: expected bool, found {}",
+                            ValueType::from(value)
+                        ),
+                    })
+                }
+            }
+        }
+        Expression::Statement(expression) => {
+            evaluate_expression(expression, environment)?;
+            Value::Unit
+        }
+        Expression::Print(expression) => {
+            let value = evaluate_expression(expression, environment)?;
+            writeln!(environment.borrow_mut().output, "{value}")?;
+            Value::Unit
+        }
+        Expression::Logical {
+            operator,
+            left,
+            right,
+        } => {
+            let left = evaluate_expression(left, environment)?;
+            match (operator, left) {
+                (LogicalOperator::And, Value::Bool(true)) => {
+                    evaluate_expression(right, environment)?
+                }
+                (LogicalOperator::And, Value::Bool(false)) => Value::Bool(false),
+                (LogicalOperator::Or, Value::Bool(false)) => {
+                    evaluate_expression(right, environment)?
+                }
+                (LogicalOperator::Or, Value::Bool(true)) => Value::Bool(true),
+                (LogicalOperator::And | LogicalOperator::Or, value) => {
+                    return Err(EvaluationError::TypeError {
+                        message: format!(
+                            "Cannot apply logical operator to non bool value {}",
+                            ValueType::from(value)
+                        ),
+                    })
+                }
+            }
+        }
+        Expression::WhileExpression {
+            expression,
+            loop_body,
+        } => {
+            environment.borrow_mut().new_scope();
+            loop {
+                let lit = evaluate_expression(expression, environment)?;
+                if let Value::Bool(true) = lit {
+                    evaluate_expression(loop_body, environment)?;
+                } else if let Value::Bool(false) = lit {
+                    break;
+                } else {
+                    return Err(EvaluationError::TypeError {
+                        message: "Expression in a while structure must return a bool".to_string(),
+                    });
+                }
+            }
+            environment.borrow_mut().destroy_scope();
+            Value::Unit
+        }
+        Expression::BoolLiteral(b) => Value::Bool(*b),
+        Expression::StringLiteral(s) => Value::Sequence(Sequence::String(s.clone())),
+        Expression::Int64Literal(n) => Value::Number(Number::Int(Int::Int64(*n))),
+        Expression::BigIntLiteral(n) => Value::Number(Number::Int(Int::BigInt(n.clone()))),
+        Expression::Float64Literal(n) => Value::Number(Number::Float(*n)),
+        Expression::ComplexLiteral(n) => Value::Number(Number::Complex(*n)),
+        Expression::Call {
+            function_identifier,
+            arguments,
+        } => {
+            // TODO: Maybe check if the function exists before we evaluate the arguments.
+            //       the reason we're doing it in this order is to not have to fight the borrowchecker
+            let mut evaluated_args = Vec::new();
+
+            let Expression::Tuple { ref values } = arguments.expression else {
+                panic!("the parser must guarantee that arguments is a tuple");
+            };
+
+            for argument in values {
+                evaluated_args.push(evaluate_expression(argument, environment)?);
+            }
+
+            let function_name = function_identifier.try_into_identifier()?;
+            if let Some(Value::Function(function)) = environment.borrow().get(&function_name) {
+                function.call(&evaluated_args, environment)
+            } else {
+                return Err(EvaluationError::UndefinedFunction {
+                    identifier: function_name,
+                    start: expression_location.start,
+                    end: expression_location.end,
+                });
+            }
+        }
+        Expression::FunctionDeclaration {
+            arguments: _,
+            body: _,
+            name,
+        } => {
+            let _name = name.try_into_identifier()?;
+
+            // environment.declare(&name, Value::Function())
+            todo!("implement this");
+            // TODO: function declarations are not yet implemented
+            // Value::Unit
+        }
+        Expression::Tuple { .. } => todo!("tuples are not yet implemented in this position"),
+        Expression::Identifier(identifier) => {
+            if let Some(value) = environment.borrow().get(identifier) {
+                // Is cloning here really a good idea
+                value.clone()
+            } else {
+                return Err(EvaluationError::UndefinedVariable {
+                    identifier: identifier.clone(),
+                    start: expression_location.start,
+                    end: expression_location.end,
+                });
+            }
+        }
+    };
+
+    Ok(literal)
+}
 
 pub fn apply_operator(
     left: Value,
@@ -107,12 +324,18 @@ pub enum EvaluationError {
         start: Location,
         end: Location,
     },
-    // TODO: Add locations
     UndefinedFunction {
         identifier: String,
+        start: Location,
+        end: Location,
     },
     IO {
         cause: std::io::Error,
+    },
+    InvalidExpression {
+        expected_type: String,
+        start: Location,
+        end: Location,
     },
 }
 
@@ -158,9 +381,18 @@ impl Display for EvaluationError {
                 identifier, start, ..
             } => write!(f, "variable {identifier} is undefined on {start}",),
             EvaluationError::IO { cause } => write!(f, "IO error: {cause}"),
-            EvaluationError::UndefinedFunction { identifier } => {
-                write!(f, "undefined function '{identifier}'")
+            EvaluationError::UndefinedFunction {
+                identifier,
+                start,
+                end: _end,
+            } => {
+                write!(f, "undefined function '{identifier}' on {start}")
             }
+            EvaluationError::InvalidExpression {
+                expected_type,
+                start,
+                end: _end,
+            } => write!(f, "invalid expression: expected {expected_type} on {start}"),
         }
     }
 }

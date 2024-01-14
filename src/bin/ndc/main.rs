@@ -30,8 +30,8 @@ fn main() -> anyhow::Result<()> {
         let mut string = String::new();
         file.read_to_string(&mut string)?;
 
-        let mut stdout = std::io::stdout();
-        let mut interpreter = Interpreter::new(&mut stdout);
+        let stdout = std::io::stdout();
+        let mut interpreter = Interpreter::new(Box::new(stdout));
         match interpreter.run_str(&string, cli.debug) {
             // we can just ignore successful runs because we have print statements
             Ok(_final_value) => {}

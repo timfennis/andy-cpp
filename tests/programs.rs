@@ -56,16 +56,19 @@ fn run_test(path: PathBuf) -> Result<(), std::io::Error> {
             },
         }
     }
-
-    let mut b = Vec::new();
-    let mut interpreter = Interpreter::new(&mut b);
+    let mut interpreter = Interpreter::new(Box::<Vec<u8>>::default());
     let interpreter_result = interpreter.run_str(&program, false);
 
     let program_had_error = interpreter_result.is_err();
 
     let error = interpreter_result.unwrap_or_else(|err| format!("{err}"));
 
-    let output = String::from_utf8(b).expect("output of program was not valid UTF-8");
+    let environment = interpreter.environment();
+    let environment = environment.borrow();
+    let output = environment
+        .output()
+        .expect("interpreter must have output in test context");
+    let output = String::from_utf8_lossy(output);
 
     // For now let's trim end both result and expect to ensure that any trailing line breaks don't cause issues
     print!("Running {path:?}...");

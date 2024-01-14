@@ -1,35 +1,20 @@
-use crate::interpreter::{stdlib, Value};
 use std::collections::HashMap;
+use std::io::{stdout, Stdout, Write};
 
-#[derive(Debug)]
+use crate::interpreter::{stdlib, Value};
+
 pub struct Environment {
+    pub output: Box<dyn InterpreterOutput>,
     contexts: Vec<Context>,
 }
 
-#[derive(Debug)]
-struct Context {
-    values: HashMap<String, Value>,
-}
-
-impl Context {}
-
-impl Default for Context {
-    fn default() -> Self {
-        Self {
-            values: HashMap::with_capacity(0),
-        }
-    }
-}
-
-impl Default for Environment {
-    fn default() -> Self {
-        Environment::new_with_stdlib()
-    }
-}
-
 impl Environment {
-    pub fn new_with_stdlib() -> Self {
+    pub fn output(&self) -> Option<&Vec<u8>> {
+        self.output.get_output()
+    }
+    pub fn new_with_stdlib(writer: Box<dyn InterpreterOutput>) -> Self {
         let mut env = Self {
+            output: writer,
             contexts: vec![Context::default()],
         };
         stdlib::bind_to_environment(&mut env);
@@ -81,13 +66,52 @@ impl Environment {
     }
 }
 
+impl Default for Environment {
+    fn default() -> Self {
+        Environment::new_with_stdlib(Box::new(stdout()))
+    }
+}
+
+#[derive(Debug)]
+struct Context {
+    values: HashMap<String, Value>,
+}
+
+impl Context {}
+
+impl Default for Context {
+    fn default() -> Self {
+        Self {
+            values: HashMap::with_capacity(0),
+        }
+    }
+}
+
+pub trait InterpreterOutput: Write {
+    fn get_output(&self) -> Option<&Vec<u8>>;
+}
+
+impl InterpreterOutput for Vec<u8> {
+    fn get_output(&self) -> Option<&Vec<u8>> {
+        Some(self)
+    }
+}
+
+impl InterpreterOutput for Stdout {
+    fn get_output(&self) -> Option<&Vec<u8>> {
+        None
+    }
+}
+
 #[cfg(test)]
 mod test {
+    use std::io::stdout;
+
     use crate::interpreter::environment::Environment;
 
     #[test]
     fn create_and_destroy_scope() {
-        let mut env = Environment::new_with_stdlib();
+        let mut env = Environment::new_with_stdlib(Box::new(stdout()));
         env.declare("parent_value", 123.into());
         env.declare("mutated_value", 69.into());
         env.declare("shadowed", 1.into());
