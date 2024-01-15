@@ -1,7 +1,6 @@
 use crate::interpreter::function::Function;
 use crate::interpreter::int::Int::Int64;
-use crate::interpreter::num::NumberType;
-use crate::interpreter::Number;
+use crate::interpreter::num::{Number, NumberType};
 use std::collections::VecDeque;
 use std::fmt::{Display, Formatter};
 use std::rc::Rc;

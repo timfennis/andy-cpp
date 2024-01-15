@@ -2,9 +2,9 @@ use std::fmt::{Debug, Formatter};
 use std::rc::Rc;
 
 use crate::ast::ExpressionLocation;
-use crate::interpreter::environment::Environment;
-use crate::interpreter::evaluate::evaluate_expression;
-use crate::interpreter::{EnvironmentRef, EvaluationError, Value};
+use crate::interpreter::environment::{Environment, EnvironmentRef};
+use crate::interpreter::evaluate::{evaluate_expression, EvaluationError};
+use crate::interpreter::value::Value;
 
 pub trait Function: Debug {
     /// # Errors

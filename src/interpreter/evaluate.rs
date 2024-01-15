@@ -10,10 +10,11 @@ use std::rc::Rc;
 use crate::ast::{
     Expression, ExpressionLocation, LogicalOperator, Lvalue, Operator, UnaryOperator,
 };
-use crate::interpreter::environment::Environment;
+use crate::interpreter::environment::{Environment, EnvironmentRef};
 use crate::interpreter::function::Closure;
 use crate::interpreter::int::Int;
-use crate::interpreter::{evaluate, EnvironmentRef, Number, Sequence, Value, ValueType};
+use crate::interpreter::num::Number;
+use crate::interpreter::value::{Sequence, Value, ValueType};
 use crate::lexer::Location;
 
 #[allow(clippy::too_many_lines)]
@@ -50,7 +51,7 @@ pub(crate) fn evaluate_expression(
         } => {
             let left = evaluate_expression(left, environment)?;
             let right = evaluate_expression(right, environment)?;
-            evaluate::apply_operator(left, *operator_token, right)?
+            apply_operator(left, *operator_token, right)?
         }
         Expression::Grouping(expr) => evaluate_expression(expr, environment)?,
         Expression::VariableDeclaration {

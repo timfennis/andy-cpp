@@ -1,5 +1,5 @@
 use crate::ast::operator::{LogicalOperator, Operator, UnaryOperator};
-use crate::interpreter::EvaluationError;
+use crate::interpreter::evaluate::EvaluationError;
 use crate::lexer::Location;
 use num::complex::Complex64;
 use num::BigInt;

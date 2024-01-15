@@ -3,8 +3,8 @@ use std::rc::Rc;
 use num::ToPrimitive;
 
 use crate::interpreter::environment::Environment;
-use crate::interpreter::num::SingleNumberFunction;
-use crate::interpreter::{Number, Value};
+use crate::interpreter::num::{Number, SingleNumberFunction};
+use crate::interpreter::value::Value;
 
 pub fn bind_to_environment(env: &mut Environment) {
     env.declare(
@@ -27,7 +27,7 @@ pub fn bind_to_environment(env: &mut Environment) {
     );
     macro_rules! delegate_to_f64 {
         ($method:ident) => {
-            let function = $crate::interpreter::Value::Function(std::rc::Rc::new(
+            let function = $crate::interpreter::value::Value::Function(std::rc::Rc::new(
                 $crate::interpreter::num::SingleNumberFunction {
                     function: |num: Number| match num {
                         Number::Int(i) => Number::Float(f64::from(i).$method()),

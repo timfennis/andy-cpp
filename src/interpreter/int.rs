@@ -1,4 +1,4 @@
-use crate::interpreter::EvaluationError;
+use crate::interpreter::evaluate::EvaluationError;
 use num::complex::Complex64;
 use num::traits::CheckedEuclid;
 use num::FromPrimitive;

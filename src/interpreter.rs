@@ -2,21 +2,17 @@ use std::cell::RefCell;
 use std::fmt::{Display, Formatter};
 use std::rc::Rc;
 
-pub use evaluate::EvaluationError;
-pub use function::Function;
-
 use crate::ast::ExpressionLocation;
-pub use crate::interpreter::environment::{Environment, EnvironmentRef, InterpreterOutput};
-use crate::interpreter::evaluate::evaluate_expression;
-pub use crate::interpreter::num::Number;
-pub use crate::interpreter::value::{Sequence, Value, ValueType};
+use crate::interpreter::environment::{Environment, EnvironmentRef, InterpreterOutput};
+use crate::interpreter::evaluate::{evaluate_expression, EvaluationError};
+use crate::interpreter::value::Value;
 use crate::lexer::{Lexer, TokenLocation};
 
-mod environment;
-mod evaluate;
-mod function;
-mod int;
-mod num;
+pub mod environment;
+pub mod evaluate;
+pub mod function;
+pub mod int;
+pub mod num;
 pub mod stdlib;
 mod value;
 

@@ -5,8 +5,11 @@ use num::complex::Complex64;
 use num::{BigRational, Complex, ToPrimitive};
 
 use crate::ast::Operator;
+use crate::interpreter::environment::EnvironmentRef;
+use crate::interpreter::evaluate::EvaluationError;
+use crate::interpreter::function::Function;
 use crate::interpreter::int::Int;
-use crate::interpreter::{EnvironmentRef, EvaluationError, Function, Value};
+use crate::interpreter::value::Value;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Number {

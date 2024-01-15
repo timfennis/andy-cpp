@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use std::io::{stdout, Stdout, Write};
 use std::rc::Rc;
 
-use crate::interpreter::{stdlib, Value};
+use crate::interpreter::stdlib;
+use crate::interpreter::value::Value;
 
 pub type EnvironmentRef = Rc<RefCell<Environment>>;
 
