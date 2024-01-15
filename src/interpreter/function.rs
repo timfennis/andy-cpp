@@ -20,7 +20,7 @@ pub struct Closure {
 
 impl Function for Closure {
     fn call(&self, args: &[Value], _env: &EnvironmentRef) -> Result<Value, EvaluationError> {
-        let local_scope = Environment::new_scope_ref(&self.environment);
+        let mut local_scope = Environment::new_scope(&self.environment);
 
         let mut env = local_scope.borrow_mut();
         for (name, value) in self.parameters.iter().zip(args.iter()) {
@@ -30,7 +30,7 @@ impl Function for Closure {
         // This drop is very important
         drop(env);
 
-        let return_value = evaluate_expression(&self.body, &local_scope)?;
+        let return_value = evaluate_expression(&self.body, &mut local_scope)?;
 
         // This explicit drops are probably not needed but who cares
         drop(local_scope);

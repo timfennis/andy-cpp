@@ -60,7 +60,7 @@ impl Interpreter {
     ) -> Result<Value, EvaluationError> {
         let mut value = Value::Unit;
         for expr in expressions {
-            value = evaluate_expression(&expr, &self.environment)?;
+            value = evaluate_expression(&expr, &mut self.environment)?;
         }
         Ok(value)
     }

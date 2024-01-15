@@ -2,21 +2,6 @@
 
 This is an attempt of keeping sort of a TODO list for stuff I still need to add or remember to fix in the future.
 
-### Fix shadowing + closure issue.
-In the following example the combination of shadowing and closing over the global scope produces a result that probably isn't wanted.
-```ndc
-x := 1;
-fn inc() {
-  x = x + 1;
-}
-inc();
-inc();
-x := 10;
-inc();
-print x; // produces 11 instead of 10
-```
-In my opinion Andy C++ should follow rust rules and the closure should contain an environment that refers to the old x not the new one.
-
 ### Trace all clones
 There are a couple of places where I wrote `.clone()` on a `Value` where I probably shouldn't have. These should be annotated with `TODO: `'s
 
