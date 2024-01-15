@@ -217,16 +217,20 @@ impl Parser {
 
     fn variable_declaration_or_assignment(&mut self) -> Result<ExpressionLocation, Error> {
         // NOTE: I think the way we implemented this method makes it right associative
-        // self.equality() is the next order of precedence at this point
-        let maybe_identifier = self.logic_or()?;
+        // NOTE: Instead of just parsing an identifier we continue to recurse down to the next level `logic_or` at the
+        //       time of writing. If whatever comes back is a valid identifier (possibly lvalue in the future) we treat
+        //       this expression as an assignment expression. Otherwise we just treat the expression as whatever we got.
+        // NOTE: When we start supporting more lvalues we should insert this step between
+        //       `variable_declaration_or_assignment` and `logic_or`
+        let maybe_lvalue = self.logic_or()?;
 
         // If the token we parsed is some kind of variable we can potentially assign to it. Next we'll check if the next
         // token matches either the declaration operator or the assignment operator. If neither of those matches we are
         // just returning the variable expression as is.
-        if let Expression::Identifier(identifier) = maybe_identifier.expression {
+        if let Expression::Identifier(identifier) = maybe_lvalue.expression {
             return if self.consume_token_if(&[Token::CreateVar]).is_some() {
                 let expression = self.expression()?;
-                let (start, end) = (maybe_identifier.start, expression.end);
+                let (start, end) = (maybe_lvalue.start, expression.end);
                 Ok(Expression::VariableDeclaration {
                     l_value: Lvalue::Variable { identifier },
                     value: Box::new(expression),
@@ -234,16 +238,15 @@ impl Parser {
                 .to_location(start, end))
             } else if self.consume_token_if(&[Token::EqualsSign]).is_some() {
                 let expression = self.expression()?;
-                let (start, end) = (maybe_identifier.start, expression.end);
+                let (start, end) = (maybe_lvalue.start, expression.end);
                 Ok(Expression::VariableAssignment {
                     l_value: Lvalue::Variable { identifier },
                     value: Box::new(expression),
                 }
                 .to_location(start, end))
             } else {
-                // TODO: Does this m ake any sense???????
                 Ok(Expression::Identifier(identifier)
-                    .to_location(maybe_identifier.start, maybe_identifier.end))
+                    .to_location(maybe_lvalue.start, maybe_lvalue.end))
             };
         }
 
@@ -252,9 +255,9 @@ impl Parser {
         // of the assignment operator and throw an appropriate error.
         match self.current_token().map(|it| &it.token) {
             Some(Token::CreateVar | Token::EqualsSign) => Err(Error::InvalidAssignmentTarget {
-                target: maybe_identifier,
+                target: maybe_lvalue,
             }),
-            _ => Ok(maybe_identifier),
+            _ => Ok(maybe_lvalue),
         }
     }
 
