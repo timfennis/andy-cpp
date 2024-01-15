@@ -11,7 +11,7 @@ use crate::ast::{
     Expression, ExpressionLocation, LogicalOperator, Lvalue, Operator, UnaryOperator,
 };
 use crate::interpreter::environment::Environment;
-use crate::interpreter::function::UserFunction;
+use crate::interpreter::function::Closure;
 use crate::interpreter::int::Int;
 use crate::interpreter::{evaluate, EnvironmentRef, Number, Sequence, Value, ValueType};
 use crate::lexer::Location;
@@ -216,9 +216,10 @@ pub(crate) fn evaluate_expression(
         } => {
             let name = name.try_into_identifier()?;
 
-            let user_function = UserFunction {
+            let user_function = Closure {
                 parameters: arguments.try_into_parameters()?,
-                expression: body.clone(),
+                body: body.clone(),
+                environment: environment.clone(),
             };
 
             environment

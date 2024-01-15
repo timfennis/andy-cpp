@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::fmt::{Debug, Formatter};
 use std::rc::Rc;
 
 use crate::ast::ExpressionLocation;
@@ -12,27 +12,34 @@ pub trait Function: Debug {
     fn call(&self, args: &[Value], env: &EnvironmentRef) -> Result<Value, EvaluationError>;
 }
 
-#[derive(Debug)]
-pub struct UserFunction {
+pub struct Closure {
     pub parameters: Vec<String>,
-    pub expression: Rc<ExpressionLocation>,
+    pub body: Rc<ExpressionLocation>,
+    pub environment: EnvironmentRef,
 }
 
-impl Function for UserFunction {
-    fn call(&self, args: &[Value], env: &EnvironmentRef) -> Result<Value, EvaluationError> {
-        let local_scope = Environment::new_scope_ref(env);
+impl Function for Closure {
+    fn call(&self, args: &[Value], _env: &EnvironmentRef) -> Result<Value, EvaluationError> {
+        let local_scope = Environment::new_scope_ref(&self.environment);
 
         let mut env = local_scope.borrow_mut();
         for (name, value) in self.parameters.iter().zip(args.iter()) {
             //TODO: is this clone a good plan?
             env.declare(name, value.clone());
         }
+        // This drop is very important
         drop(env);
 
-        let return_value = evaluate_expression(&self.expression, &local_scope)?;
+        let return_value = evaluate_expression(&self.body, &local_scope)?;
 
-        // These explicit drops are probably not needed but who cares
+        // This explicit drops are probably not needed but who cares
         drop(local_scope);
         Ok(return_value)
+    }
+}
+
+impl Debug for Closure {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.parameters)
     }
 }

@@ -6,6 +6,7 @@ use std::rc::Rc;
 use crate::interpreter::{stdlib, Value};
 
 pub type EnvironmentRef = Rc<RefCell<Environment>>;
+
 pub struct RootEnvironment {
     pub output: Box<dyn InterpreterOutput>,
     // TODO: Global functions should be declared here, allow dead code for now
