@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::error::Error;
 use std::fmt;
@@ -20,7 +19,7 @@ use crate::lexer::Location;
 #[allow(clippy::too_many_lines)]
 pub(crate) fn evaluate_expression(
     expression_location: &ExpressionLocation,
-    environment: &EnvironmentRef,
+    environment: &mut EnvironmentRef,
 ) -> Result<Value, EvaluationError> {
     let (start, end) = (expression_location.start, expression_location.end);
     let literal: Value = match &expression_location.expression {
@@ -59,7 +58,13 @@ pub(crate) fn evaluate_expression(
             value,
         } => {
             let value = evaluate_expression(value, environment)?;
+
+            if environment.borrow().contains(identifier) {
+                let new_env = Environment::new_scope(environment);
+                *environment = new_env;
+            }
             environment.borrow_mut().declare(identifier, value.clone());
+
             value
         }
         Expression::VariableAssignment {
@@ -80,11 +85,11 @@ pub(crate) fn evaluate_expression(
             value
         }
         Expression::BlockExpression { statements } => {
-            let local_scope = Rc::new(RefCell::new(Environment::new_scope(environment.clone())));
+            let mut local_scope = Environment::new_scope(environment);
 
             let mut value = Value::Unit;
             for stm in statements {
-                value = evaluate_expression(stm, &local_scope)?;
+                value = evaluate_expression(stm, &mut local_scope)?;
             }
 
             drop(local_scope);
@@ -151,11 +156,11 @@ pub(crate) fn evaluate_expression(
             expression,
             loop_body,
         } => {
-            let local_scope = new_scope(environment);
+            let mut local_scope = Environment::new_scope(environment);
             loop {
-                let lit = evaluate_expression(expression, &local_scope)?;
+                let lit = evaluate_expression(expression, &mut local_scope)?;
                 if let Value::Bool(true) = lit {
-                    evaluate_expression(loop_body, &local_scope)?;
+                    evaluate_expression(loop_body, &mut local_scope)?;
                 } else if let Value::Bool(false) = lit {
                     break;
                 } else {
@@ -244,11 +249,6 @@ pub(crate) fn evaluate_expression(
     };
 
     Ok(literal)
-}
-
-fn new_scope(environment: &EnvironmentRef) -> EnvironmentRef {
-    let scope = Environment::new_scope(environment.clone());
-    Rc::new(RefCell::new(scope))
 }
 
 pub fn apply_operator(

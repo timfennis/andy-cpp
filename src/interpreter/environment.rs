@@ -22,10 +22,6 @@ pub struct Environment {
 }
 
 impl Environment {
-    // pub fn output(&self) -> Option<&Vec<u8>> {
-    //     self.root.borrow().output.get_output()
-    // }
-
     /// # Errors
     /// see `std::io::Error`
     pub fn with_output<F>(&mut self, f: F) -> Result<(), std::io::Error>
@@ -100,17 +96,13 @@ impl Environment {
         }
     }
 
-    pub fn new_scope_ref(parent: &EnvironmentRef) -> Rc<RefCell<Self>> {
-        Rc::new(RefCell::new(Self::new_scope(parent.clone())))
-    }
-
-    pub fn new_scope(parent: EnvironmentRef) -> Self {
-        let root_ref = parent.borrow().root.clone();
-        Self {
-            parent: Some(parent),
+    pub fn new_scope(parent: &EnvironmentRef) -> EnvironmentRef {
+        let root_ref = Rc::clone(&parent.borrow().root);
+        Rc::new(RefCell::new(Self {
+            parent: Some(Rc::clone(parent)),
             root: root_ref,
             values: HashMap::default(),
-        }
+        }))
     }
 }
 
@@ -159,7 +151,7 @@ mod test {
             69.into()
         );
 
-        let scope = Environment::new_scope_ref(&env);
+        let scope = Environment::new_scope(&env);
         scope.borrow_mut().declare("inner_value", 234.into());
         scope.borrow_mut().declare("shadowed", 2.into());
         assert!(scope
