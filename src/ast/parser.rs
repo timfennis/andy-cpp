@@ -154,6 +154,30 @@ impl Parser {
         Ok(left)
     }
 
+    fn consume_binary_expression_right_associative(
+        &mut self,
+        next: fn(&mut Self) -> Result<ExpressionLocation, Error>,
+        valid_tokens: &[Token],
+    ) -> Result<ExpressionLocation, Error> {
+        let left = next(self)?;
+
+        if let Some(token_location) = self.consume_token_if(valid_tokens) {
+            let operator = Operator::try_from(token_location)
+                .expect("COMPILER ERROR: consume_token_if must guarantee the correct token");
+            let right = self.expression()?;
+
+            let (start, end) = (left.start, right.end);
+            return Ok(Expression::Binary {
+                left: Box::new(left),
+                operator,
+                right: Box::new(right),
+            }
+            .to_location(start, end));
+        }
+
+        Ok(left)
+    }
+
     fn consume_logical_expression_left_associative(
         &mut self,
         next: fn(&mut Self) -> Result<ExpressionLocation, Error>,
@@ -305,7 +329,7 @@ impl Parser {
     }
 
     fn exponent(&mut self) -> Result<ExpressionLocation, Error> {
-        self.consume_binary_expression_left_associative(Self::unary, &[Token::Exponent])
+        self.consume_binary_expression_right_associative(Self::unary, &[Token::Exponent])
     }
 
     fn unary(&mut self) -> Result<ExpressionLocation, Error> {
