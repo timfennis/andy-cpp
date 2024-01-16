@@ -2,10 +2,8 @@
 
 This is an attempt of keeping sort of a TODO list for stuff I still need to add or remember to fix in the future.
 
-### Trace all clones
-There are a couple of places where I wrote `.clone()` on a `Value` where I probably shouldn't have. These should be annotated with `TODO: `'s
+## List expressions (and destructuring apparently)
 
-### List expressions
 The following expressions should all be valid Andy C++
 
 ```ndc
@@ -30,3 +28,67 @@ a, b, c = [1, 2, 3]; // Destructure the list into the variables a, b and c
 (a:b:c:d) = [1, 2, 3]; // a == 1, b == 2, c == 3, d == []
 ```
 
+## List comprehensions
+
+```ndc
+x := [ sqrt(n) | n <- ns ]
+cartesian_product := [ x, y | x <- xs, y <- ys ]
+```
+
+## Standard library extension
+
+### Strings
+
+* [ ] abs
+* [ ] gcd
+* [ ] lcm
+* [ ] integer division `//`
+
+### Type conversion
+
+`float(), int(), string()` to convert between types (possibly others)
+
+### Strings
+
+everything
+
+### Refactorings:
+
+* Treat operators as functions instead of special expression types
+
+## Trace all clones
+
+There are a couple of places where I wrote `.clone()` on a `Value` where I probably shouldn't have. These should be
+annotated with `TODO: `'s
+
+## Return expressions
+
+Must be able to return from functions. To accomplish this the return type of the `Function` trait needs to change
+
+```ndc
+fn x(n) {
+  if n == 0 {
+    return 0;
+  }
+  return 1;
+}
+```
+
+## Else if
+
+Currently, writing `else if` is not supported, we could easily add this.A
+
+## Improved error handling
+
+The error handling right now is just good enough to be usable. We don't correctly use the `start, end` location fields
+at the moment, and we don't use them to give nice error messages.
+
+## Structs (or classes?)
+
+```ndc
+struct Foo { x, y, z };
+```
+
+## Match expressions
+
+Some real cool advanced pattern matching? Probably low prio since this is by far the most work.
