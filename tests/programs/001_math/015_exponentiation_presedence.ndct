@@ -1,0 +1,4 @@
+--PROGRAM--
+print (2^3)^4 == 2^(3*4);
+--EXPECT--
+true
