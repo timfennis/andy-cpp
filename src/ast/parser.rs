@@ -6,7 +6,7 @@ use std::fmt;
 use std::fmt::{Formatter, Write};
 use std::rc::Rc;
 
-pub(crate) struct Parser {
+pub struct Parser {
     tokens: Vec<TokenLocation>,
     current: usize,
 }
@@ -115,7 +115,7 @@ impl Parser {
         } else {
             Err(Error::ExpectedToken {
                 expected_tokens: vec![match_token],
-                actual_token: token_location.clone(),
+                actual_token: token_location,
             })
         }
     }
@@ -364,7 +364,7 @@ impl Parser {
     fn call(&mut self) -> Result<ExpressionLocation, Error> {
         let mut expr = self.primary()?;
 
-        while let Some(Token::LeftParentheses) = self.current_token().map(|it| &it.token) {
+        while Some(&Token::LeftParentheses) == self.current_token().map(|it| &it.token) {
             self.advance();
             let arguments = self.tuple(expr.start)?;
             let (start, end) = (expr.start, expr.end);

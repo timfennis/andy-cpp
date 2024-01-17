@@ -159,9 +159,9 @@ pub(crate) fn evaluate_expression(
             let mut local_scope = Environment::new_scope(environment);
             loop {
                 let lit = evaluate_expression(expression, &mut local_scope)?;
-                if let Value::Bool(true) = lit {
+                if lit == Value::Bool(true) {
                     evaluate_expression(loop_body, &mut local_scope)?;
-                } else if let Value::Bool(false) = lit {
+                } else if lit == Value::Bool(false) {
                     break;
                 } else {
                     return Err(EvaluationError::TypeError {
@@ -300,9 +300,7 @@ fn apply_operator(left: Value, operator: Operator, right: Value) -> Result<Value
                 Operator::GreaterEquals => (comp != Ordering::Less).into(),
                 Operator::Less => (comp == Ordering::Less).into(),
                 Operator::LessEquals => (comp != Ordering::Greater).into(),
-                Operator::Plus => {
-                    Value::Sequence(Sequence::String(Rc::new(format!("{a}{b}").to_string())))
-                }
+                Operator::Plus => Value::Sequence(Sequence::String(Rc::new(format!("{a}{b}")))),
                 _ => {
                     return Err(EvaluationError::InvalidOperator {
                         operator,

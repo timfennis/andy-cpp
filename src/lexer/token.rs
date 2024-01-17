@@ -148,13 +148,10 @@ impl TryFrom<(char, Option<char>)> for Token {
     type Error = ();
 
     fn try_from((c1, next): (char, Option<char>)) -> Result<Self, Self::Error> {
-        if let Some(c2) = next {
-            (c1, c2).try_into()
-        } else {
-            c1.try_into()
-        }
+        next.map_or_else(|| c1.try_into(), |c2| (c1, c2).try_into())
     }
 }
+
 impl TryFrom<(char, char)> for Token {
     type Error = ();
 
