@@ -251,11 +251,7 @@ pub(crate) fn evaluate_expression(
     Ok(literal)
 }
 
-pub fn apply_operator(
-    left: Value,
-    operator: Operator,
-    right: Value,
-) -> Result<Value, EvaluationError> {
+fn apply_operator(left: Value, operator: Operator, right: Value) -> Result<Value, EvaluationError> {
     let literal: Value = match (left, operator, right) {
         // Integer
         (Value::Number(a), op, Value::Number(b)) => match op {
@@ -374,8 +370,8 @@ impl Display for EvaluationError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         // todo write a proper implementation
         match self {
-            EvaluationError::TypeError { message } => write!(f, "{message}"),
-            EvaluationError::InvalidOperator {
+            Self::TypeError { message } => write!(f, "{message}"),
+            Self::InvalidOperator {
                 operator: op,
                 type_a,
                 type_b,
@@ -388,32 +384,32 @@ impl Display for EvaluationError {
                 0,
                 0 // TODO: fix this error
             ),
-            EvaluationError::IntegerOverflow {
+            Self::IntegerOverflow {
                 operator: operator_token,
             } => write!(
                 f,
                 "integer overflow while applying the '{:?}' operator on line {} column {}",
                 operator_token, 0, 0
             ),
-            EvaluationError::DivisionByZero {
+            Self::DivisionByZero {
                 operator: operator_token,
             } => write!(
                 f,
                 "division by zero when applying '{:?}' on line {} column {}",
                 operator_token, 0, 0
             ),
-            EvaluationError::UndefinedVariable {
+            Self::UndefinedVariable {
                 identifier, start, ..
             } => write!(f, "variable {identifier} is undefined on {start}",),
-            EvaluationError::IO { cause } => write!(f, "IO error: {cause}"),
-            EvaluationError::UndefinedFunction {
+            Self::IO { cause } => write!(f, "IO error: {cause}"),
+            Self::UndefinedFunction {
                 identifier,
                 start,
                 end: _end,
             } => {
                 write!(f, "undefined function '{identifier}' on {start}")
             }
-            EvaluationError::InvalidExpression {
+            Self::InvalidExpression {
                 expected_type,
                 start,
                 end: _end,
@@ -432,7 +428,7 @@ impl Error for EvaluationError {}
 
 impl From<TryFromIntError> for EvaluationError {
     fn from(err: TryFromIntError) -> Self {
-        EvaluationError::TypeError {
+        Self::TypeError {
             message: format!("cannot convert between integer types {err}"),
         }
     }

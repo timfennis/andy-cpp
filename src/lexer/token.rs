@@ -66,56 +66,56 @@ impl fmt::Debug for Token {
 impl fmt::Display for Token {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s: &str = match self {
-            Token::String(str) => str,
-            Token::Int64(n) => {
+            Self::String(str) => str,
+            Self::Int64(n) => {
                 return write!(f, "{n}");
             }
-            Token::Float64(n) => {
+            Self::Float64(n) => {
                 return write!(f, "{n}");
             }
-            Token::BigInt(n) => {
+            Self::BigInt(n) => {
                 return write!(f, "{n}");
             }
-            Token::Complex(n) => {
+            Self::Complex(n) => {
                 return write!(f, "{n}");
             }
-            Token::Identifier(ident) => ident,
-            Token::CreateVar => ":=",
-            Token::EqualsSign => "=",
-            Token::Equality => "==",
-            Token::Inequality => "!=",
-            Token::Greater => ">",
-            Token::GreaterEquals => ">=",
-            Token::Less => "<",
-            Token::LessEquals => "<=",
-            Token::Plus => "+",
-            Token::Minus => "-",
-            Token::Multiply => "*",
-            Token::Divide => "/",
-            Token::CModulo => "%",
-            Token::EuclideanModulo => "%%",
-            Token::Exponent => "^",
-            Token::Bang => "!",
-            Token::Fn => "fn",
-            Token::If => "if",
-            Token::Else => "else",
-            Token::Return => "return",
-            Token::For => "for",
-            Token::While => "while",
-            Token::True => "true",
-            Token::False => "false",
-            Token::_Self => "self",
-            Token::LeftParentheses => "(",
-            Token::RightParentheses => ")",
-            Token::LeftSquareBracket => "[",
-            Token::RightSquareBracket => "]",
-            Token::LeftCurlyBracket => "{",
-            Token::RightCurlyBracket => "}",
-            Token::Semicolon => ";",
-            Token::Comma => ",",
-            Token::LogicAnd => "&&",
-            Token::LogicOr => "||",
-            Token::Unit => "()",
+            Self::Identifier(ident) => ident,
+            Self::CreateVar => ":=",
+            Self::EqualsSign => "=",
+            Self::Equality => "==",
+            Self::Inequality => "!=",
+            Self::Greater => ">",
+            Self::GreaterEquals => ">=",
+            Self::Less => "<",
+            Self::LessEquals => "<=",
+            Self::Plus => "+",
+            Self::Minus => "-",
+            Self::Multiply => "*",
+            Self::Divide => "/",
+            Self::CModulo => "%",
+            Self::EuclideanModulo => "%%",
+            Self::Exponent => "^",
+            Self::Bang => "!",
+            Self::Fn => "fn",
+            Self::If => "if",
+            Self::Else => "else",
+            Self::Return => "return",
+            Self::For => "for",
+            Self::While => "while",
+            Self::True => "true",
+            Self::False => "false",
+            Self::_Self => "self",
+            Self::LeftParentheses => "(",
+            Self::RightParentheses => ")",
+            Self::LeftSquareBracket => "[",
+            Self::RightSquareBracket => "]",
+            Self::LeftCurlyBracket => "{",
+            Self::RightCurlyBracket => "}",
+            Self::Semicolon => ";",
+            Self::Comma => ",",
+            Self::LogicAnd => "&&",
+            Self::LogicOr => "||",
+            Self::Unit => "()",
         };
         write!(f, "{s}")
     }
@@ -160,14 +160,14 @@ impl TryFrom<(char, char)> for Token {
 
     fn try_from((c1, c2): (char, char)) -> Result<Self, Self::Error> {
         match (c1, c2) {
-            ('&', '&') => Ok(Token::LogicAnd),
-            ('|', '|') => Ok(Token::LogicOr),
-            ('%', '%') => Ok(Token::EuclideanModulo),
-            (':', '=') => Ok(Token::CreateVar),
-            ('=', '=') => Ok(Token::Equality),
-            ('!', '=') => Ok(Token::Inequality),
-            ('>', '=') => Ok(Token::GreaterEquals),
-            ('<', '=') => Ok(Token::LessEquals),
+            ('&', '&') => Ok(Self::LogicAnd),
+            ('|', '|') => Ok(Self::LogicOr),
+            ('%', '%') => Ok(Self::EuclideanModulo),
+            (':', '=') => Ok(Self::CreateVar),
+            ('=', '=') => Ok(Self::Equality),
+            ('!', '=') => Ok(Self::Inequality),
+            ('>', '=') => Ok(Self::GreaterEquals),
+            ('<', '=') => Ok(Self::LessEquals),
             _ => Err(()),
         }
     }
@@ -178,24 +178,24 @@ impl TryFrom<char> for Token {
 
     fn try_from(value: char) -> Result<Self, Self::Error> {
         match value {
-            '-' => Ok(Token::Minus),
-            '+' => Ok(Token::Plus),
-            '*' => Ok(Token::Multiply),
-            '^' => Ok(Token::Exponent),
-            '%' => Ok(Token::CModulo),
-            '!' => Ok(Token::Bang),
-            '=' => Ok(Token::EqualsSign),
-            '>' => Ok(Token::Greater),
-            '<' => Ok(Token::Less),
-            '/' => Ok(Token::Divide),
-            '(' => Ok(Token::LeftParentheses),
-            ')' => Ok(Token::RightParentheses),
-            '[' => Ok(Token::LeftSquareBracket),
-            ']' => Ok(Token::RightSquareBracket),
-            '{' => Ok(Token::LeftCurlyBracket),
-            '}' => Ok(Token::RightCurlyBracket),
-            ',' => Ok(Token::Comma),
-            ';' => Ok(Token::Semicolon),
+            '-' => Ok(Self::Minus),
+            '+' => Ok(Self::Plus),
+            '*' => Ok(Self::Multiply),
+            '^' => Ok(Self::Exponent),
+            '%' => Ok(Self::CModulo),
+            '!' => Ok(Self::Bang),
+            '=' => Ok(Self::EqualsSign),
+            '>' => Ok(Self::Greater),
+            '<' => Ok(Self::Less),
+            '/' => Ok(Self::Divide),
+            '(' => Ok(Self::LeftParentheses),
+            ')' => Ok(Self::RightParentheses),
+            '[' => Ok(Self::LeftSquareBracket),
+            ']' => Ok(Self::RightSquareBracket),
+            '{' => Ok(Self::LeftCurlyBracket),
+            '}' => Ok(Self::RightCurlyBracket),
+            ',' => Ok(Self::Comma),
+            ';' => Ok(Self::Semicolon),
             _ => Err(()),
         }
     }
@@ -204,16 +204,16 @@ impl TryFrom<char> for Token {
 impl From<String> for Token {
     fn from(value: String) -> Self {
         match value.as_str() {
-            "while" => Token::While,
-            "if" => Token::If,
-            "else" => Token::Else,
-            "fn" => Token::Fn,
-            "for" => Token::For,
-            "true" => Token::True,
-            "false" => Token::False,
-            "return" => Token::Return,
-            "self" => Token::_Self,
-            _ => Token::Identifier(value),
+            "while" => Self::While,
+            "if" => Self::If,
+            "else" => Self::Else,
+            "fn" => Self::Fn,
+            "for" => Self::For,
+            "true" => Self::True,
+            "false" => Self::False,
+            "return" => Self::Return,
+            "self" => Self::_Self,
+            _ => Self::Identifier(value),
         }
     }
 }

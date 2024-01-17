@@ -128,7 +128,7 @@ impl Environment {
 
 impl Default for Environment {
     fn default() -> Self {
-        Environment::new_with_stdlib(Box::new(stdout()))
+        Self::new_with_stdlib(Box::new(stdout()))
     }
 }
 

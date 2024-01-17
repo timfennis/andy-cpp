@@ -13,8 +13,8 @@ impl TryFrom<TokenLocation> for UnaryOperator {
 
     fn try_from(value: TokenLocation) -> Result<Self, Self::Error> {
         Ok(match value.token {
-            Token::Minus => UnaryOperator::Neg,
-            Token::Bang => UnaryOperator::Bang,
+            Token::Minus => Self::Neg,
+            Token::Bang => Self::Bang,
             _ => {
                 return Err(ParseError::ExpectedToken {
                     expected_tokens: vec![Token::Minus, Token::Bang],
@@ -53,8 +53,8 @@ impl TryFrom<TokenLocation> for LogicalOperator {
 
     fn try_from(value: TokenLocation) -> Result<Self, Self::Error> {
         Ok(match value.token {
-            Token::LogicAnd => LogicalOperator::And,
-            Token::LogicOr => LogicalOperator::Or,
+            Token::LogicAnd => Self::And,
+            Token::LogicOr => Self::Or,
             _ => {
                 return Err(ExpectedToken {
                     actual_token: value,
@@ -70,19 +70,19 @@ impl TryFrom<TokenLocation> for Operator {
 
     fn try_from(value: TokenLocation) -> Result<Self, Self::Error> {
         Ok(match value.token {
-            Token::Equality => Operator::Equality,
-            Token::Inequality => Operator::Inequality,
-            Token::Greater => Operator::Greater,
-            Token::GreaterEquals => Operator::GreaterEquals,
-            Token::Less => Operator::Less,
-            Token::LessEquals => Operator::LessEquals,
-            Token::Plus => Operator::Plus,
-            Token::Minus => Operator::Minus,
-            Token::Multiply => Operator::Multiply,
-            Token::Divide => Operator::Divide,
-            Token::CModulo => Operator::CModulo,
-            Token::EuclideanModulo => Operator::EuclideanModulo,
-            Token::Exponent => Operator::Exponent,
+            Token::Equality => Self::Equality,
+            Token::Inequality => Self::Inequality,
+            Token::Greater => Self::Greater,
+            Token::GreaterEquals => Self::GreaterEquals,
+            Token::Less => Self::Less,
+            Token::LessEquals => Self::LessEquals,
+            Token::Plus => Self::Plus,
+            Token::Minus => Self::Minus,
+            Token::Multiply => Self::Multiply,
+            Token::Divide => Self::Divide,
+            Token::CModulo => Self::CModulo,
+            Token::EuclideanModulo => Self::EuclideanModulo,
+            Token::Exponent => Self::Exponent,
             _ => {
                 return Err(ParseError::ExpectedToken {
                     actual_token: value,

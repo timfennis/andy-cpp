@@ -121,7 +121,7 @@ impl ExpressionLocation {
                 values: tuple_values,
             } => tuple_values
                 .iter()
-                .map(ExpressionLocation::try_into_identifier)
+                .map(Self::try_into_identifier)
                 .collect::<Result<Vec<String>, EvaluationError>>(),
             _ => Err(EvaluationError::InvalidExpression {
                 expected_type: String::from("parameter list"),

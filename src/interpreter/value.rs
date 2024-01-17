@@ -30,7 +30,7 @@ impl PartialEq for Value {
 }
 impl From<bool> for Value {
     fn from(value: bool) -> Self {
-        Value::Bool(value)
+        Self::Bool(value)
     }
 }
 
@@ -54,12 +54,12 @@ pub enum ValueType {
 impl Display for ValueType {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            ValueType::Unit => write!(f, "unit"),
-            ValueType::Number(n) => write!(f, "{n}"),
-            ValueType::Bool => write!(f, "bool"),
-            ValueType::String => write!(f, "string"),
-            ValueType::List => write!(f, "list"),
-            ValueType::Function => write!(f, "function"),
+            Self::Unit => write!(f, "unit"),
+            Self::Number(n) => write!(f, "{n}"),
+            Self::Bool => write!(f, "bool"),
+            Self::String => write!(f, "string"),
+            Self::List => write!(f, "list"),
+            Self::Function => write!(f, "function"),
         }
     }
 }
@@ -67,34 +67,34 @@ impl Display for ValueType {
 impl From<Value> for ValueType {
     fn from(value: Value) -> Self {
         match value {
-            Value::Unit => ValueType::Unit,
-            Value::Number(n) => ValueType::Number(n.into()),
-            Value::Bool(_) => ValueType::Bool,
-            Value::Sequence(Sequence::String(_)) => ValueType::String,
-            Value::Sequence(Sequence::List(_)) => ValueType::List,
-            Value::Function(_) => ValueType::Function,
+            Value::Unit => Self::Unit,
+            Value::Number(n) => Self::Number(n.into()),
+            Value::Bool(_) => Self::Bool,
+            Value::Sequence(Sequence::String(_)) => Self::String,
+            Value::Sequence(Sequence::List(_)) => Self::List,
+            Value::Function(_) => Self::Function,
         }
     }
 }
 
 impl From<i64> for Value {
     fn from(value: i64) -> Self {
-        Value::Number(Number::Int(Int64(value)))
+        Self::Number(Number::Int(Int64(value)))
     }
 }
 
 impl Display for Value {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Value::Unit => write!(f, "()"),
-            Value::Number(n) => write!(f, "{n}"),
-            Value::Bool(b) => write!(f, "{b}"),
-            Value::Sequence(Sequence::String(s)) => write!(f, "{s}"),
-            Value::Function(_) => {
+            Self::Unit => write!(f, "()"),
+            Self::Number(n) => write!(f, "{n}"),
+            Self::Bool(b) => write!(f, "{b}"),
+            Self::Sequence(Sequence::String(s)) => write!(f, "{s}"),
+            Self::Function(_) => {
                 //TODO: implement function printing
                 write!(f, "function")
             }
-            d @ Value::Sequence(_) => write!(f, "{d:?}"),
+            d @ Self::Sequence(_) => write!(f, "{d:?}"),
         }
     }
 }

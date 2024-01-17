@@ -75,28 +75,28 @@ pub enum Error {
 
 impl From<crate::lexer::Error> for Error {
     fn from(value: crate::lexer::Error) -> Self {
-        Error::Lexer { cause: value }
+        Self::Lexer { cause: value }
     }
 }
 
 impl From<crate::ast::Error> for Error {
     fn from(value: crate::ast::Error) -> Self {
-        Error::Parser { cause: value }
+        Self::Parser { cause: value }
     }
 }
 
 impl From<EvaluationError> for Error {
     fn from(value: EvaluationError) -> Self {
-        Error::Evaluation { cause: value }
+        Self::Evaluation { cause: value }
     }
 }
 
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Error::Lexer { cause } => write!(f, "Lexer error: {cause}"),
-            Error::Parser { cause } => write!(f, "Parser error: {cause}"),
-            Error::Evaluation { cause } => write!(f, "Evaluation error: {cause}"),
+            Self::Lexer { cause } => write!(f, "Lexer error: {cause}"),
+            Self::Parser { cause } => write!(f, "Parser error: {cause}"),
+            Self::Evaluation { cause } => write!(f, "Evaluation error: {cause}"),
         }
     }
 }

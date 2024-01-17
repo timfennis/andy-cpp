@@ -583,9 +583,9 @@ impl std::error::Error for Error {}
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            Error::UnexpectedEndOfStream { help_text } =>
+            Self::UnexpectedEndOfStream { help_text } =>
                 write!(f, "Unexpected end of stream: {help_text}"),
-            Error::ExpectedExpression {
+            Self::ExpectedExpression {
                 actual_token: token,
             } => write!(
                 f,
@@ -593,7 +593,7 @@ impl fmt::Display for Error {
                 token.token,
                 token.location
             ),
-            Error::ExpectedIdentifier {
+            Self::ExpectedIdentifier {
                 actual_token // TODO this error case is really shoddy
             } => write!(
                 f,
@@ -601,7 +601,7 @@ impl fmt::Display for Error {
                 actual_token.token,
                 actual_token.location
             ),
-            Error::ExpectedToken {
+            Self::ExpectedToken {
                 actual_token,
                 expected_tokens: expected_symbols,
             } =>  write!(
@@ -611,7 +611,7 @@ impl fmt::Display for Error {
                 tokens_to_string(expected_symbols),
                 actual_token.location
             ),
-            Error::InvalidAssignmentTarget { target } => write!(f, "Invalid variable declaration or assignment. Cannot assign a value to expression: {target:?}")
+            Self::InvalidAssignmentTarget { target } => write!(f, "Invalid variable declaration or assignment. Cannot assign a value to expression: {target:?}")
         }
     }
 }

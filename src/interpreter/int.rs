@@ -2,7 +2,7 @@ use crate::interpreter::evaluate::EvaluationError;
 use num::complex::Complex64;
 use num::traits::CheckedEuclid;
 use num::FromPrimitive;
-use num::{BigInt, BigRational, Complex, Signed, ToPrimitive, Zero};
+use num::{BigInt, BigRational, Signed, ToPrimitive, Zero};
 use std::fmt::{Display, Formatter};
 use std::ops;
 
@@ -14,16 +14,16 @@ pub enum Int {
 
 impl From<i32> for Int {
     fn from(value: i32) -> Self {
-        Int::Int64(i64::from(value))
+        Self::Int64(i64::from(value))
     }
 }
 impl ops::Neg for Int {
-    type Output = Int;
+    type Output = Self;
 
     fn neg(self) -> Self::Output {
         match self {
-            Int::Int64(i) => Int::Int64(i.neg()),
-            Int::BigInt(i) => Int::BigInt(i.neg()),
+            Self::Int64(i) => Self::Int64(i.neg()),
+            Self::BigInt(i) => Self::BigInt(i.neg()),
         }
     }
 }
@@ -38,15 +38,15 @@ impl Int {
     }
     fn to_bigint(&self) -> BigInt {
         match self {
-            Int::Int64(i) => BigInt::from(*i),
-            Int::BigInt(b) => b.clone(),
+            Self::Int64(i) => BigInt::from(*i),
+            Self::BigInt(b) => b.clone(),
         }
     }
 
     pub fn checked_rem_euclid(self, rhs: &Self) -> Option<Self> {
-        if let (Int::Int64(p1), Int::Int64(p2)) = (&self, &rhs) {
+        if let (Self::Int64(p1), Self::Int64(p2)) = (&self, &rhs) {
             if let Some(a) = (*p1).checked_rem_euclid(*p2) {
-                return Some(Int::Int64(a));
+                return Some(Self::Int64(a));
             }
         }
 
@@ -55,11 +55,11 @@ impl Int {
             .map(Int::BigInt)
     }
 
-    pub fn checked_pow(&self, rhs: &Self) -> Option<Self> {
-        if let (Int::Int64(p1), Int::Int64(p2)) = (&self, &rhs) {
+    #[must_use] pub fn checked_pow(&self, rhs: &Self) -> Option<Self> {
+        if let (Self::Int64(p1), Self::Int64(p2)) = (&self, &rhs) {
             if let Some(p2) = p2.to_u32() {
                 if let Some(a) = p1.checked_pow(p2) {
-                    return Some(Int::Int64(a));
+                    return Some(Self::Int64(a));
                 }
             }
         }
@@ -67,30 +67,30 @@ impl Int {
         let lhs = self.to_bigint();
         let rhs = rhs.to_bigint();
         if let Some(rhs) = rhs.to_u32() {
-            return Some(Int::BigInt(lhs.pow(rhs)));
+            return Some(Self::BigInt(lhs.pow(rhs)));
         }
 
         None
     }
 
-    pub fn is_negative(&self) -> bool {
+    #[must_use] pub fn is_negative(&self) -> bool {
         match self {
-            Int::Int64(i) => i.is_negative(),
-            Int::BigInt(i) => i.is_negative(),
+            Self::Int64(i) => i.is_negative(),
+            Self::BigInt(i) => i.is_negative(),
         }
     }
 
-    pub fn is_zero(&self) -> bool {
+    #[must_use] pub fn is_zero(&self) -> bool {
         match self {
-            Int::Int64(i) => i.is_zero(),
-            Int::BigInt(i) => i.is_zero(),
+            Self::Int64(i) => i.is_zero(),
+            Self::BigInt(i) => i.is_zero(),
         }
     }
 
-    pub fn is_positive(&self) -> bool {
+    #[must_use] pub fn is_positive(&self) -> bool {
         match self {
-            Int::Int64(i) => i.is_positive(),
-            Int::BigInt(i) => i.is_positive(),
+            Self::Int64(i) => i.is_positive(),
+            Self::BigInt(i) => i.is_positive(),
         }
     }
 }
@@ -153,15 +153,15 @@ impl_binary_operator!(Rem, rem, checked_rem);
 
 impl From<BigInt> for Int {
     fn from(value: BigInt) -> Self {
-        Int::BigInt(value)
+        Self::BigInt(value)
     }
 }
 
 impl From<Int> for f64 {
     fn from(value: Int) -> Self {
         match value {
-            Int::Int64(i) => i.to_f64().unwrap_or(f64::INFINITY),
-            Int::BigInt(i) => i.to_f64().unwrap_or(f64::INFINITY),
+            Int::Int64(i) => i.to_f64().unwrap_or(Self::INFINITY),
+            Int::BigInt(i) => i.to_f64().unwrap_or(Self::INFINITY),
         }
     }
 }
@@ -169,7 +169,7 @@ impl From<Int> for f64 {
 impl From<Int> for BigInt {
     fn from(value: Int) -> Self {
         match value {
-            Int::Int64(i) => BigInt::from(i),
+            Int::Int64(i) => Self::from(i),
             Int::BigInt(b) => b,
         }
     }
@@ -178,7 +178,7 @@ impl From<Int> for BigInt {
 impl From<&Int> for BigInt {
     fn from(value: &Int) -> Self {
         match value {
-            Int::Int64(i) => BigInt::from(*i),
+            Int::Int64(i) => Self::from(*i),
             Int::BigInt(b) => b.clone(),
         }
     }
@@ -186,15 +186,15 @@ impl From<&Int> for BigInt {
 
 impl From<Int> for BigRational {
     fn from(value: Int) -> Self {
-        BigRational::from(value.to_bigint())
+        Self::from(value.to_bigint())
     }
 }
 
 impl From<Int> for Complex64 {
     fn from(value: Int) -> Self {
         match value {
-            Int::Int64(i) => Complex::from(i.to_f64().unwrap_or(f64::INFINITY)),
-            Int::BigInt(i) => Complex::from(i.to_f64().unwrap_or(f64::INFINITY)),
+            Int::Int64(i) => Self::from(i.to_f64().unwrap_or(f64::INFINITY)),
+            Int::BigInt(i) => Self::from(i.to_f64().unwrap_or(f64::INFINITY)),
         }
     }
 }
@@ -228,8 +228,8 @@ impl TryFrom<Int> for i32 {
 impl Display for Int {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Int::Int64(i) => write!(f, "{i}"),
-            Int::BigInt(b) => write!(f, "{b}"),
+            Self::Int64(i) => write!(f, "{i}"),
+            Self::BigInt(b) => write!(f, "{b}"),
         }
     }
 }

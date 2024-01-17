@@ -306,19 +306,19 @@ pub enum Error {
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Error::UnexpectedCharacter { char, line, column } => write!(
+            Self::UnexpectedCharacter { char, line, column } => write!(
                 f,
                 "Unexpected character '{char}' at line {line} column {column}"
             ),
-            Error::UnterminatedString { line, column } => write!(
+            Self::UnterminatedString { line, column } => write!(
                 f,
                 "File ended with unterminated string starting at line {line} column {column}"
             ),
 
-            Error::InvalidEscapeSequence { sequence, location } => {
+            Self::InvalidEscapeSequence { sequence, location } => {
                 write!(f, "Invalid escape sequence '{sequence}' on {location}")
             }
-            Error::InvalidFloat { string, location } => write!(
+            Self::InvalidFloat { string, location } => write!(
                 f,
                 "Invalid floating point sequence '{string}' on {location}"
             ),
