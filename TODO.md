@@ -37,7 +37,12 @@ cartesian_product := [ x, y | x <- xs, y <- ys ]
 
 ## Standard library extension
 
-### Strings
+### General
+
+* [ ] turn `print` into a function
+* [ ] `map`, `reduce`, `foldl` all these functions
+
+### Math
 
 * [ ] abs
 * [ ] gcd
@@ -50,7 +55,13 @@ cartesian_product := [ x, y | x <- xs, y <- ys ]
 
 ### Strings
 
-everything
+* [ ] ord (convert a single character string to an int)
+
+We want to treat strings like objects for a lot of their functions (probably).
+
+```ndc
+"foo".reverse() == "oof"
+```
 
 ### Refactorings:
 
@@ -76,7 +87,17 @@ fn x(n) {
 
 ## Else if
 
-Currently, writing `else if` is not supported, we could easily add this.A
+Currently, writing `else if` is not supported, we could easily add this.
+
+```ndc
+if a == b {
+    a 
+} else if a > b {
+    a
+} else {
+    b
+}
+```
 
 ## Improved error handling
 

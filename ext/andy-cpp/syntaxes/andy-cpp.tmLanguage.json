@@ -1,0 +1,53 @@
+{
+	"$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+	"name": "Andy C++",
+	"patterns": [
+		{
+			"include": "#keywords"
+		},
+		{
+			"include": "#strings"
+		},
+		{
+			"comment": "Floating point literal (fraction)",
+			"name": "constant.numeric.float.andy-cpp",
+			"match": "\\b[0-9][0-9_]*\\.[0-9][0-9_]*([eE][+-]?[0-9_]+)?(f32|f64)?\\b"
+		},
+		{
+			"comment": "Integer literal (decimal)",
+			"name": "constant.numeric.integer.decimal.andy-cpp",
+			"match": "\\b[0-9][0-9_]*\\b"
+		}
+	],
+	"repository": {
+		"keywords": {
+			"patterns": [
+				{
+					"name": "keyword.control.andy-cpp",
+					"match": "\\b(if|else|self|while|for|return|fn)\\b"
+				},
+				{
+					"name": "keyword.other.unit.andy-cpp",
+					"match": "\\b(true|false)\\b"
+				},
+				{
+					"name": "keyword.operator.andy-cpp",
+					"match": "\\b(&&)\\b"
+				}
+
+			]
+		},
+		"strings": {
+			"name": "string.quoted.double.andy-cpp",
+			"begin": "\"",
+			"end": "\"",
+			"patterns": [
+				{
+					"name": "constant.character.escape.andy-cpp",
+					"match": "\\\\."
+				}
+			]
+		}
+	},
+	"scopeName": "source.andy-cpp"
+}

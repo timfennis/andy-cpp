@@ -1,0 +1,25 @@
+{
+  "name": "andy-cpp",
+  "displayName": "andy-cpp",
+  "description": "Andy C++ Programming Language",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [{
+      "id": "andy-cpp",
+      "aliases": ["Andy C++", "andy-cpp"],
+      "extensions": [".ndc"],
+      "configuration": "./language-configuration.json"
+    }],
+    "grammars": [{
+      "language": "andy-cpp",
+      "scopeName": "source.andy-cpp",
+      "path": "./syntaxes/andy-cpp.tmLanguage.json"
+    }]
+  }
+}

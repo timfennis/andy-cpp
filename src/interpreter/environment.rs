@@ -1,5 +1,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::fmt;
+use std::fmt::Formatter;
 use std::io::{stdout, Stdout, Write};
 use std::rc::Rc;
 
@@ -20,6 +22,24 @@ pub struct Environment {
     parent: Option<EnvironmentRef>,
     values: HashMap<String, RefCell<Value>>,
 }
+
+impl fmt::Debug for Environment {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Environment[parent: {:?}, values.len: {}]",
+            self.parent.is_some(),
+            self.values.len()
+        )
+    }
+}
+
+// NOTE: this can be used to check if certain environments are dropped
+// impl Drop for Environment {
+//     fn drop(&mut self) {
+//         println!("Dropping {self:?}");
+//     }
+// }
 
 impl Environment {
     /// # Errors

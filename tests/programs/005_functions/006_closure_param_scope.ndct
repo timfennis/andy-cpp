@@ -1,0 +1,19 @@
+--PROGRAM--
+fn create(n) {
+  fn get_n() { n }
+  n = n + 1;
+  get_n
+}
+
+x := create(5);
+y := create(6);
+
+print x();
+print y();
+print x();
+print y();
+--EXPECT--
+6
+7
+6
+7
