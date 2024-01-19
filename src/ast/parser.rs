@@ -24,10 +24,11 @@ impl Parser {
         let is_valid_statement = |expr: &Expression| -> bool {
             matches!(
                 expr,
-                Expression::BlockExpression { .. }
+                Expression::Block { .. }
                     | Expression::Statement(_)
-                    | Expression::IfExpression { .. }
-                    | Expression::WhileExpression { .. }
+                    | Expression::If { .. }
+                    | Expression::While { .. }
+                    | Expression::For { .. }
                     | Expression::FunctionDeclaration { .. }
             )
         };
@@ -434,6 +435,8 @@ impl Parser {
             return self.if_expression();
         } else if self.consume_token_if(&[Token::While]).is_some() {
             return self.while_expression();
+        } else if self.consume_token_if(&[Token::For]).is_some() {
+            return self.for_expression();
         } else if self.consume_token_if(&[Token::Fn]).is_some() {
             return self.function_declaration();
         } else if self.match_token(&[Token::LeftCurlyBracket]).is_some() {
@@ -481,7 +484,7 @@ impl Parser {
         };
 
         let (start, end) = (expression.start, expression.end);
-        Ok(Expression::IfExpression {
+        Ok(Expression::If {
             expression: Box::new(expression),
             on_true: Box::new(on_true),
             on_false,
@@ -494,9 +497,35 @@ impl Parser {
         let loop_body = self.block()?;
 
         let (start, end) = (expression.start, expression.end);
-        Ok(Expression::WhileExpression {
+        Ok(Expression::While {
             expression: Box::new(expression),
             loop_body: Box::new(loop_body),
+        }
+        .to_location(start, end))
+    }
+
+    fn for_expression(&mut self) -> Result<ExpressionLocation, Error> {
+        let ExpressionLocation {
+            expression: Expression::Identifier(identifier),
+            start,
+            end: _,
+        } = self.identifier()?
+        else {
+            //TODO: clean
+            unreachable!(
+                "cannot happen, but this code should be cleaned up because it's redundant"
+            );
+        };
+
+        self.require_current_token_matches(Token::In)?;
+        let sequence = self.expression()?;
+        let body = self.block()?;
+
+        let end = body.end;
+        Ok(Expression::For {
+            l_value: Lvalue::Variable { identifier },
+            sequence: Box::new(sequence),
+            loop_body: Box::new(body),
         }
         .to_location(start, end))
     }
@@ -541,7 +570,7 @@ impl Parser {
             }
         };
 
-        Ok(Expression::BlockExpression { statements }.to_location(start, end))
+        Ok(Expression::Block { statements }.to_location(start, end))
     }
 
     fn identifier(&mut self) -> Result<ExpressionLocation, Error> {

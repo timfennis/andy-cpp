@@ -58,16 +58,21 @@ pub enum Expression {
         arguments: Box<ExpressionLocation>,
         body: Rc<ExpressionLocation>,
     },
-    BlockExpression {
+    Block {
         statements: Vec<ExpressionLocation>,
     },
-    IfExpression {
+    If {
         expression: Box<ExpressionLocation>,
         on_true: Box<ExpressionLocation>,
         on_false: Option<Box<ExpressionLocation>>,
     },
-    WhileExpression {
+    While {
         expression: Box<ExpressionLocation>,
+        loop_body: Box<ExpressionLocation>,
+    },
+    For {
+        l_value: Lvalue,
+        sequence: Box<ExpressionLocation>,
         loop_body: Box<ExpressionLocation>,
     },
     Call {

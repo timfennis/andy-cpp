@@ -85,7 +85,7 @@ pub(crate) fn evaluate_expression(
                 .assign(identifier.clone(), value.clone());
             value
         }
-        Expression::BlockExpression { statements } => {
+        Expression::Block { statements } => {
             let mut local_scope = Environment::new_scope(environment);
 
             let mut value = Value::Unit;
@@ -96,7 +96,7 @@ pub(crate) fn evaluate_expression(
             drop(local_scope);
             value
         }
-        Expression::IfExpression {
+        Expression::If {
             expression,
             on_true,
             on_false,
@@ -153,7 +153,7 @@ pub(crate) fn evaluate_expression(
                 }
             }
         }
-        Expression::WhileExpression {
+        Expression::While {
             expression,
             loop_body,
         } => {
@@ -261,6 +261,49 @@ pub(crate) fn evaluate_expression(
                 values_out.push_back(v);
             }
             Value::Sequence(Sequence::List(Rc::new(values_out)))
+        }
+        Expression::For {
+            l_value,
+            sequence,
+            loop_body,
+        } => {
+            let Value::Sequence(sequence) = evaluate_expression(sequence, environment)? else {
+                // TODO: fix this error
+                panic!("can only iterate over sequences")
+            };
+
+            let Lvalue::Variable {
+                identifier: var_name,
+            } = l_value;
+
+            match sequence {
+                Sequence::String(str) => {
+                    for n in 0..str.len() {
+                        let mut scope = Environment::new_scope(environment);
+                        let substr = &str[n..=n];
+
+                        // TODO: allocating a new string here is probably not optimal
+                        scope.borrow_mut().declare(
+                            var_name,
+                            Value::Sequence(Sequence::String(Rc::new(String::from(substr)))),
+                        );
+
+                        evaluate_expression(loop_body, &mut scope)?;
+                    }
+                }
+                Sequence::List(xs) => {
+                    for x in xs.iter() {
+                        let mut scope = Environment::new_scope(environment);
+
+                        // TODO: this clone here is probably not what we want
+                        scope.borrow_mut().declare(var_name, x.clone());
+
+                        evaluate_expression(loop_body, &mut scope)?;
+                    }
+                }
+            }
+
+            Value::Unit
         }
     };
 

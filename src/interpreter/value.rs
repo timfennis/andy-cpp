@@ -110,7 +110,7 @@ impl Display for Value {
 impl Display for Sequence {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Sequence::String(s) => write!(f, "\"{s}\""),
+            Sequence::String(s) => write!(f, "{s}"),
             Sequence::List(vs) => {
                 write!(f, "[")?;
                 let mut vs = vs.iter().peekable();
