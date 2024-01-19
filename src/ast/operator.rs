@@ -26,7 +26,7 @@ impl TryFrom<TokenLocation> for UnaryOperator {
 }
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
-pub enum Operator {
+pub enum BinaryOperator {
     Equality,
     Inequality,
     Greater,
@@ -65,7 +65,7 @@ impl TryFrom<TokenLocation> for LogicalOperator {
     }
 }
 
-impl TryFrom<TokenLocation> for Operator {
+impl TryFrom<TokenLocation> for BinaryOperator {
     type Error = ParseError;
 
     fn try_from(value: TokenLocation) -> Result<Self, Self::Error> {

@@ -1,4 +1,4 @@
-use crate::ast::operator::{LogicalOperator, Operator, UnaryOperator};
+use crate::ast::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
 use crate::interpreter::evaluate::EvaluationError;
 use crate::lexer::Location;
 use num::complex::Complex64;
@@ -35,7 +35,7 @@ pub enum Expression {
     },
     Binary {
         left: Box<ExpressionLocation>,
-        operator: Operator,
+        operator: BinaryOperator,
         right: Box<ExpressionLocation>,
     },
     Logical {
@@ -75,6 +75,9 @@ pub enum Expression {
         arguments: Box<ExpressionLocation>,
     },
     Tuple {
+        values: Vec<ExpressionLocation>,
+    },
+    List {
         values: Vec<ExpressionLocation>,
     },
 }

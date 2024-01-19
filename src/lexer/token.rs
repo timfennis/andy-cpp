@@ -36,6 +36,8 @@ pub enum Token {
     Exponent,
     // Operator - Unary
     Bang,
+    // Operator - Other
+    DotDot, // range builder
     // Keywords
     Fn,
     If,
@@ -116,6 +118,7 @@ impl fmt::Display for Token {
             Self::LogicAnd => "&&",
             Self::LogicOr => "||",
             Self::Unit => "()",
+            Self::DotDot => "..",
         };
         write!(f, "{s}")
     }

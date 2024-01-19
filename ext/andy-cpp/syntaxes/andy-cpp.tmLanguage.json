@@ -1,53 +1,100 @@
 {
-	"$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
-	"name": "Andy C++",
-	"patterns": [
-		{
-			"include": "#keywords"
-		},
-		{
-			"include": "#strings"
-		},
-		{
-			"comment": "Floating point literal (fraction)",
-			"name": "constant.numeric.float.andy-cpp",
-			"match": "\\b[0-9][0-9_]*\\.[0-9][0-9_]*([eE][+-]?[0-9_]+)?(f32|f64)?\\b"
-		},
-		{
-			"comment": "Integer literal (decimal)",
-			"name": "constant.numeric.integer.decimal.andy-cpp",
-			"match": "\\b[0-9][0-9_]*\\b"
-		}
-	],
-	"repository": {
-		"keywords": {
-			"patterns": [
-				{
-					"name": "keyword.control.andy-cpp",
-					"match": "\\b(if|else|self|while|for|return|fn)\\b"
-				},
-				{
-					"name": "keyword.other.unit.andy-cpp",
-					"match": "\\b(true|false)\\b"
-				},
-				{
-					"name": "keyword.operator.andy-cpp",
-					"match": "\\b(&&)\\b"
-				}
-
-			]
-		},
-		"strings": {
-			"name": "string.quoted.double.andy-cpp",
-			"begin": "\"",
-			"end": "\"",
-			"patterns": [
-				{
-					"name": "constant.character.escape.andy-cpp",
-					"match": "\\\\."
-				}
-			]
-		}
-	},
-	"scopeName": "source.andy-cpp"
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Andy C++",
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#constants"
+    },
+    {
+      "include": "#variables"
+    },
+    {
+      "comment": "Floating point literal (fraction)",
+      "name": "constant.numeric.float.andy-cpp",
+      "match": "\\b[0-9][0-9_]*\\.[0-9][0-9_]*([eE][+-]?[0-9_]+)?(f32|f64)?\\b"
+    },
+    {
+      "comment": "Integer literal (decimal)",
+      "name": "constant.numeric.integer.decimal.andy-cpp",
+      "match": "\\b[0-9][0-9_]*\\b"
+    },
+    {
+      "comment": "logical operators",
+      "name": "keyword.operator.logical.andy-cpp",
+      "match": "(\\^|\\|\\||&&|!)(?!=)"
+    },
+    {
+      "comment": "assignment operators",
+      "name": "keyword.operator.assignment.andy-cpp",
+      "match": "(=|:=)"
+    },
+    {
+      "comment": "math operators",
+      "name": "keyword.operator.math.andy-cpp",
+      "match": "(([+%]|(\\*(?!\\w)))(?!=))|(-(?!>))|(/(?!/))"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "comment": "documentation comments",
+          "name": "comment.line.documentation.andy-cpp",
+          "match": "^\\s*//.*"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.andy-cpp",
+          "match": "\\b(if|else|self|while|for|return|fn)\\b"
+        }
+      ]
+    },
+    "strings": {
+      "name": "string.quoted.double.andy-cpp",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.andy-cpp",
+          "match": "\\\\."
+        }
+      ]
+    },
+    "constants": {
+      "patterns": [
+        {
+          "comment": "booleans",
+          "name": "constant.language.bool.andy-cpp",
+          "match": "\\b(true|false)\\b"
+        },
+        {
+          "comment": "decimal integers and floats",
+          "name": "constant.numeric.decimal.rust",
+          "match": "\\b\\d[\\d_]*(\\.?)[\\d_]*(?:(E|e)([+-]?)([\\d_]+))?(f32|f64|i128|i16|i32|i64|i8|isize|u128|u16|u32|u64|u8|usize)?\\b",
+        }
+      ]
+    },
+    "variables": {
+      "patterns": [
+        {
+          "comment": "variables",
+          "name": "variable.other.andy-cpp",
+          "match": "\\b(?<!(?<!\\.)\\.)(?:r#(?!(crate|[Ss]elf|super)))?[a-z0-9_]+\\b"
+        }
+      ]
+    }
+  },
+  "scopeName": "source.andy-cpp"
 }

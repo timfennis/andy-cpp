@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::collections::VecDeque;
 use std::error::Error;
 use std::fmt;
 use std::fmt::{Display, Formatter};
@@ -7,7 +8,7 @@ use std::ops::{Neg, Rem};
 use std::rc::Rc;
 
 use crate::ast::{
-    Expression, ExpressionLocation, LogicalOperator, Lvalue, Operator, UnaryOperator,
+    BinaryOperator, Expression, ExpressionLocation, LogicalOperator, Lvalue, UnaryOperator,
 };
 use crate::interpreter::environment::{Environment, EnvironmentRef};
 use crate::interpreter::function::Closure;
@@ -110,7 +111,7 @@ pub(crate) fn evaluate_expression(
                     return Err(EvaluationError::TypeError {
                         message: format!(
                             "mismatched types: expected bool, found {}",
-                            ValueType::from(value)
+                            ValueType::from(&value)
                         ),
                     })
                 }
@@ -146,7 +147,7 @@ pub(crate) fn evaluate_expression(
                     return Err(EvaluationError::TypeError {
                         message: format!(
                             "Cannot apply logical operator to non bool value {}",
-                            ValueType::from(value)
+                            ValueType::from(&value)
                         ),
                     })
                 }
@@ -246,43 +247,62 @@ pub(crate) fn evaluate_expression(
                 });
             }
         }
+        Expression::List { values } => {
+            let mut values_out = VecDeque::new();
+            let mut last_type = None;
+            for expression in values {
+                let v = evaluate_expression(expression, environment)?;
+                if last_type.is_none() {
+                    last_type = Some(ValueType::from(&v));
+                } else if last_type != Some(ValueType::from(&v)) {
+                    // TODO: create an actual error
+                    panic!("TYPE MISMATCH MAN!");
+                }
+                values_out.push_back(v);
+            }
+            Value::Sequence(Sequence::List(Rc::new(values_out)))
+        }
     };
 
     Ok(literal)
 }
 
-fn apply_operator(left: Value, operator: Operator, right: Value) -> Result<Value, EvaluationError> {
+fn apply_operator(
+    left: Value,
+    operator: BinaryOperator,
+    right: Value,
+) -> Result<Value, EvaluationError> {
     let literal: Value = match (left, operator, right) {
         // Integer
         (Value::Number(a), op, Value::Number(b)) => match op {
-            Operator::Equality => (a == b).into(),
-            Operator::Inequality => (a != b).into(),
-            Operator::Greater => (a > b).into(),
-            Operator::GreaterEquals => (a >= b).into(),
-            Operator::Less => (a < b).into(),
-            Operator::LessEquals => (a <= b).into(),
+            BinaryOperator::Equality => (a == b).into(),
+            BinaryOperator::Inequality => (a != b).into(),
+            BinaryOperator::Greater => (a > b).into(),
+            BinaryOperator::GreaterEquals => (a >= b).into(),
+            BinaryOperator::Less => (a < b).into(),
+            BinaryOperator::LessEquals => (a <= b).into(),
             // Math operations
-            Operator::Plus => Value::Number(a + b),
-            Operator::Minus => Value::Number(a - b),
-            Operator::Multiply => Value::Number(a * b),
-            Operator::Divide => Value::Number(a / b),
-            Operator::CModulo => Value::Number(a.rem(b)),
-            Operator::EuclideanModulo => Value::Number(a.checked_rem_euclid(b)?),
-            Operator::Exponent => Value::Number(a.checked_pow(b)?),
+            BinaryOperator::Plus => Value::Number(a + b),
+            BinaryOperator::Minus => Value::Number(a - b),
+            BinaryOperator::Multiply => Value::Number(a * b),
+            BinaryOperator::Divide => Value::Number(a / b),
+            BinaryOperator::CModulo => Value::Number(a.rem(b)),
+            BinaryOperator::EuclideanModulo => Value::Number(a.checked_rem_euclid(b)?),
+            BinaryOperator::Exponent => Value::Number(a.checked_pow(b)?),
         },
         // Boolean
-        (Value::Bool(a), Operator::Equality, Value::Bool(b)) => (a == b).into(),
-        (Value::Bool(a), Operator::Inequality, Value::Bool(b)) => (a != b).into(),
+        (Value::Bool(a), BinaryOperator::Equality, Value::Bool(b)) => (a == b).into(),
+        (Value::Bool(a), BinaryOperator::Inequality, Value::Bool(b)) => (a != b).into(),
 
         // Some mixed memes
-        (Value::Sequence(Sequence::String(a)), Operator::Multiply, Value::Number(b)) => {
+        (Value::Sequence(Sequence::String(a)), BinaryOperator::Multiply, Value::Number(b)) => {
             Value::Sequence(Sequence::String(Rc::new(a.repeat(
                 usize::try_from(b).map_err(|()| EvaluationError::TypeError {
                     message: String::from("Cannot convert"),
                 })?,
             ))))
         }
-        (Value::Number(a), Operator::Multiply, Value::Sequence(Sequence::String(b))) => {
+        (Value::Number(a), BinaryOperator::Multiply, Value::Sequence(Sequence::String(b))) => {
             Value::Sequence(Sequence::String(Rc::new(b.repeat(
                 usize::try_from(a).map_err(|()| EvaluationError::TypeError {
                     message: String::from("Cannot convert"),
@@ -294,13 +314,15 @@ fn apply_operator(left: Value, operator: Operator, right: Value) -> Result<Value
         (Value::Sequence(Sequence::String(a)), op, Value::Sequence(Sequence::String(b))) => {
             let comp = a.cmp(&b);
             match op {
-                Operator::Equality => (comp == Ordering::Equal).into(),
-                Operator::Inequality => (comp != Ordering::Equal).into(),
-                Operator::Greater => (comp == Ordering::Greater).into(),
-                Operator::GreaterEquals => (comp != Ordering::Less).into(),
-                Operator::Less => (comp == Ordering::Less).into(),
-                Operator::LessEquals => (comp != Ordering::Greater).into(),
-                Operator::Plus => Value::Sequence(Sequence::String(Rc::new(format!("{a}{b}")))),
+                BinaryOperator::Equality => (comp == Ordering::Equal).into(),
+                BinaryOperator::Inequality => (comp != Ordering::Equal).into(),
+                BinaryOperator::Greater => (comp == Ordering::Greater).into(),
+                BinaryOperator::GreaterEquals => (comp != Ordering::Less).into(),
+                BinaryOperator::Less => (comp == Ordering::Less).into(),
+                BinaryOperator::LessEquals => (comp != Ordering::Greater).into(),
+                BinaryOperator::Plus => {
+                    Value::Sequence(Sequence::String(Rc::new(format!("{a}{b}"))))
+                }
                 _ => {
                     return Err(EvaluationError::InvalidOperator {
                         operator,
@@ -314,8 +336,8 @@ fn apply_operator(left: Value, operator: Operator, right: Value) -> Result<Value
         (a, _op, b) => {
             return Err(EvaluationError::InvalidOperator {
                 operator,
-                type_a: a.into(),
-                type_b: b.into(),
+                type_a: (&a).into(),
+                type_b: (&b).into(),
             });
         }
     };
@@ -328,15 +350,15 @@ pub enum EvaluationError {
         message: String,
     },
     InvalidOperator {
-        operator: Operator,
+        operator: BinaryOperator,
         type_a: ValueType,
         type_b: ValueType,
     },
     IntegerOverflow {
-        operator: Operator,
+        operator: BinaryOperator,
     },
     DivisionByZero {
-        operator: Operator,
+        operator: BinaryOperator,
     },
     UndefinedVariable {
         identifier: String,

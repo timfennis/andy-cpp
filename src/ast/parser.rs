@@ -1,5 +1,5 @@
 use crate::ast::expression::{ExpressionLocation, Lvalue};
-use crate::ast::operator::{LogicalOperator, Operator, UnaryOperator};
+use crate::ast::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
 use crate::ast::Expression;
 use crate::lexer::{Location, Token, TokenLocation};
 use std::fmt;
@@ -15,6 +15,7 @@ impl Parser {
     pub(crate) fn from_tokens(tokens: Vec<TokenLocation>) -> Self {
         Self { tokens, current: 0 }
     }
+
     /// Parse a Vec of Tokens into a Vec of statements
     /// # Errors
     /// If the parsing fails which it could do for many different reasons it will return an [Error]. See the variants of
@@ -30,66 +31,65 @@ impl Parser {
                     | Expression::FunctionDeclaration { .. }
             )
         };
-        let mut v = Vec::new();
-        while self.current_token().is_some() {
+        let mut expressions = Vec::new();
+        while self.current_token_location().is_some() {
             let expr_loc = self.expression_or_statement()?;
+            let is_statement = is_valid_statement(&expr_loc.expression);
 
-            if is_valid_statement(&expr_loc.expression) {
-                // we can continue safely
-                v.push(expr_loc);
-            } else {
-                v.push(expr_loc);
+            expressions.push(expr_loc);
+
+            if !is_statement {
                 break;
             }
-            // Right now we just break when we se any error but maybe we should handle this differently
         }
 
-        if let Some(token) = self.current_token() {
+        // After consuming all statements if there are any tokens remaining we can emit an error that we expected a semicolon
+        if let Some(token) = self.current_token_location() {
             return Err(Error::ExpectedToken {
                 expected_tokens: vec![Token::Semicolon],
                 actual_token: token.clone(),
             });
         }
 
-        Ok(v)
+        Ok(expressions)
     }
 
-    fn current_token(&self) -> Option<&TokenLocation> {
+    fn peek_current_token(&self) -> Option<&Token> {
+        self.current_token_location().map(|t| &t.token)
+    }
+
+    fn current_token_location(&self) -> Option<&TokenLocation> {
         self.tokens.get(self.current)
-    }
-
-    fn previous_token(&self) -> Option<&TokenLocation> {
-        self.tokens.get(self.current - 1)
     }
 
     fn match_token(&self, tokens: &[Token]) -> Option<&TokenLocation> {
         for search_token in tokens {
-            if self.current_token().map(|it| &it.token) == Some(search_token) {
-                return self.current_token();
+            if self.peek_current_token() == Some(search_token) {
+                return self.current_token_location();
             }
         }
         None
     }
 
-    fn require_token(&mut self, tokens: &[Token]) -> Result<TokenLocation, Error> {
-        if let Some(token) = self.match_token(tokens).cloned() {
+    fn require_token(&mut self, tokens: &[Token]) -> Result<Location, Error> {
+        // If the current token matches the expected location we advance and return the matched location
+        if let Some(token) = self.match_token(tokens) {
+            let location = token.location;
             self.advance();
-            return Ok(token);
+            return Ok(location);
         }
 
-        if self.current_token().is_some() {
+        if let Some(current_token) = self.current_token_location() {
             Err(Error::ExpectedToken {
                 expected_tokens: Vec::from(tokens),
-                actual_token: self
-                    .current_token()
-                    .cloned()
-                    .expect("Guaranteed to be some"),
+                actual_token: current_token.clone(),
             })
         } else {
             Err(Error::UnexpectedEndOfStream {
                 help_text: String::new(),
             })
         }
+        // if self.current_token_location().is_some() {
     }
 
     fn consume_token_if(&mut self, tokens: &[Token]) -> Option<TokenLocation> {
@@ -123,7 +123,7 @@ impl Parser {
     // Requires that there is a valid current token, otherwise it returns Err(ParserError)
     fn require_current_token(&mut self) -> Result<TokenLocation, Error> {
         let token = self
-            .current_token()
+            .current_token_location()
             .ok_or_else(|| Error::UnexpectedEndOfStream { help_text: String::from("a token was required but an end of stream was found instead (require_current_token)")})?
             .clone();
         self.advance();
@@ -137,7 +137,7 @@ impl Parser {
     ) -> Result<ExpressionLocation, Error> {
         let mut left = next(self)?;
         while let Some(token_location) = self.consume_token_if(valid_tokens) {
-            let operator: Operator = token_location
+            let operator: BinaryOperator = token_location
                 .clone()
                 .try_into()
                 .expect("consume_operator_if guaranteed us that this is an operator");
@@ -163,7 +163,7 @@ impl Parser {
         let left = next(self)?;
 
         if let Some(token_location) = self.consume_token_if(valid_tokens) {
-            let operator = Operator::try_from(token_location)
+            let operator = BinaryOperator::try_from(token_location)
                 .expect("COMPILER ERROR: consume_token_if must guarantee the correct token");
             let right = current(self)?;
 
@@ -214,7 +214,7 @@ impl Parser {
     fn expression_or_statement(&mut self) -> Result<ExpressionLocation, Error> {
         // match print statements (which is a temporary construct until we add functions)
         let mut expression = if matches!(
-            self.current_token().map(|it| &it.token),
+            self.current_token_location().map(|it| &it.token),
             Some(Token::Identifier(name)) if name == "print"
         ) {
             self.advance();
@@ -278,7 +278,7 @@ impl Parser {
         // In this case we got some kind of expression that we can't assign to. We can just return the expression as is.
         // But to improve error handling and stuff it would be nice if we could check if the next token matches one
         // of the assignment operator and throw an appropriate error.
-        match self.current_token().map(|it| &it.token) {
+        match self.current_token_location().map(|it| &it.token) {
             Some(Token::CreateVar | Token::EqualsSign) => Err(Error::InvalidAssignmentTarget {
                 target: maybe_lvalue,
             }),
@@ -338,39 +338,34 @@ impl Parser {
     }
 
     fn unary(&mut self) -> Result<ExpressionLocation, Error> {
-        if self
-            .consume_token_if(&[Token::Bang, Token::Minus])
-            .is_some()
-        {
-            let operator: UnaryOperator = self
-                .previous_token()
-                .expect("we're guaranteed to have an operator token by the previous call to self.consume_operator_if")
-                .clone()
+        if let Some(token) = self.consume_token_if(&[Token::Bang, Token::Minus]) {
+            let operator: UnaryOperator = token
                 .try_into()
                 .expect("consume_operator_if guaranteed us that the next token is an Operator");
 
             let right = self.unary()?;
             let (start, end) = (right.start, right.end);
-            return Ok(Expression::Unary {
+
+            Ok(Expression::Unary {
                 operator,
                 expression: Box::new(right),
             }
-            .to_location(start, end));
+            .to_location(start, end))
+        } else {
+            self.call()
         }
-
-        self.call()
     }
 
     fn call(&mut self) -> Result<ExpressionLocation, Error> {
         let mut expr = self.primary()?;
 
-        while Some(&Token::LeftParentheses) == self.current_token().map(|it| &it.token) {
-            self.advance();
+        while self.consume_token_if(&[Token::LeftParentheses]).is_some() {
             let arguments = self.tuple(expr.start)?;
             let (start, end) = (expr.start, expr.end);
             expr = ExpressionLocation {
                 expression: Expression::Call {
-                    function_identifier: Box::new(expr), //TODO: check if expr has the correct type (Expression::Identifier)
+                    //TODO: check if expr has the correct type (Expression::Identifier)
+                    function_identifier: Box::new(expr),
                     arguments: Box::new(arguments),
                 },
                 start,
@@ -381,33 +376,35 @@ impl Parser {
         Ok(expr)
     }
 
-    fn tuple(&mut self, start: Location) -> Result<ExpressionLocation, Error> {
+    fn group_of_expressions(
+        &mut self,
+        terminated_by: Token,
+    ) -> Result<Vec<ExpressionLocation>, Error> {
         let mut values = Vec::new();
 
         loop {
-            let current_token = self.current_token().cloned();
+            let current_token = self.current_token_location().cloned();
             if let Some(ref token_location) = current_token {
-                if token_location.token == Token::RightParentheses {
+                if token_location.token == terminated_by {
                     self.advance();
-                    return Ok(Expression::Tuple { values }
-                        .to_location(start, current_token.unwrap().location));
+                    return Ok(values);
                 }
 
                 values.push(self.expression()?);
 
                 // After we parse an expression we look ahead and see if the next token is either a ',' or ')'
                 // if it's not we can return a parse error
-                let current_token = self.current_token();
+                let current_token = self.current_token_location();
                 match current_token.map(|it| &it.token) {
-                    Some(Token::RightParentheses) => {
-                        // This case is handled by the next iteration of the loop
+                    Some(token) if token == &terminated_by => {
+                        // Termination token is handled by the next iteration
                     }
                     Some(Token::Comma) => {
                         self.advance();
                     }
                     Some(_) => {
                         return Err(Error::ExpectedToken {
-                            expected_tokens: vec![Token::Comma, Token::RightParentheses],
+                            expected_tokens: vec![Token::Comma, terminated_by],
                             actual_token: current_token.unwrap().clone(),
                         });
                     }
@@ -421,6 +418,15 @@ impl Parser {
                 });
             }
         }
+    }
+    fn tuple(&mut self, start: Location) -> Result<ExpressionLocation, Error> {
+        let values = self.group_of_expressions(Token::RightParentheses)?;
+        Ok(Expression::Tuple { values }.to_location(start, start)) // TODO: find end
+    }
+
+    fn list(&mut self, start: Location) -> Result<ExpressionLocation, Error> {
+        let values = self.group_of_expressions(Token::RightSquareBracket)?;
+        Ok(Expression::List { values }.to_location(start, start)) // TODO: find end
     }
 
     fn primary(&mut self) -> Result<ExpressionLocation, Error> {
@@ -449,6 +455,7 @@ impl Parser {
                 self.require_current_token_matches(Token::RightParentheses)?;
                 Expression::Grouping(Box::new(expr))
             }
+            Token::LeftSquareBracket => return self.list(token_location.location),
             Token::Identifier(identifier) => Expression::Identifier(identifier),
             _ => {
                 // TODO: this error might not be the best way to describe what's happening here
@@ -498,7 +505,7 @@ impl Parser {
         let name = self.identifier()?;
 
         let arg_start = self.require_token(&[Token::LeftParentheses])?;
-        let argument_list = self.tuple(arg_start.location)?;
+        let argument_list = self.tuple(arg_start)?;
         let body = self.block()?;
 
         let (start, end) = (name.start, body.end);
@@ -514,7 +521,7 @@ impl Parser {
     }
 
     fn block(&mut self) -> Result<ExpressionLocation, Error> {
-        let start = self.require_token(&[Token::LeftCurlyBracket])?.location;
+        let start = self.require_token(&[Token::LeftCurlyBracket])?;
 
         let mut statements = Vec::new();
 
@@ -523,7 +530,7 @@ impl Parser {
                 break token_location.location;
             }
 
-            if self.current_token().is_some() {
+            if self.current_token_location().is_some() {
                 statements.push(self.expression_or_statement()?);
             } else {
                 return Err(Error::UnexpectedEndOfStream {

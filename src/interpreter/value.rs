@@ -41,13 +41,13 @@ pub enum Sequence {
     //TODO: Dict comes later because we need hashing and comparison
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum ValueType {
     Unit,
     Number(NumberType),
     Bool,
     String,
-    List,
+    List(Option<Box<ValueType>>),
     Function,
 }
 
@@ -58,20 +58,29 @@ impl Display for ValueType {
             Self::Number(n) => write!(f, "{n}"),
             Self::Bool => write!(f, "bool"),
             Self::String => write!(f, "string"),
-            Self::List => write!(f, "list"),
+            Self::List(t) => {
+                if let Some(tt) = t {
+                    write!(f, "[{tt}]")
+                } else {
+                    write!(f, "[]")
+                }
+            }
             Self::Function => write!(f, "function"),
         }
     }
 }
 
-impl From<Value> for ValueType {
-    fn from(value: Value) -> Self {
+impl From<&Value> for ValueType {
+    fn from(value: &Value) -> Self {
         match value {
             Value::Unit => Self::Unit,
             Value::Number(n) => Self::Number(n.into()),
             Value::Bool(_) => Self::Bool,
             Value::Sequence(Sequence::String(_)) => Self::String,
-            Value::Sequence(Sequence::List(_)) => Self::List,
+            Value::Sequence(Sequence::List(t)) => {
+                let t = t.front().map(|it| Box::new(ValueType::from(it)));
+                Self::List(t)
+            }
             Value::Function(_) => Self::Function,
         }
     }
@@ -89,12 +98,31 @@ impl Display for Value {
             Self::Unit => write!(f, "()"),
             Self::Number(n) => write!(f, "{n}"),
             Self::Bool(b) => write!(f, "{b}"),
-            Self::Sequence(Sequence::String(s)) => write!(f, "{s}"),
             Self::Function(_) => {
                 //TODO: implement function printing
                 write!(f, "function")
             }
-            d @ Self::Sequence(_) => write!(f, "{d:?}"),
+            Self::Sequence(s) => write!(f, "{s}"),
+        }
+    }
+}
+
+impl Display for Sequence {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Sequence::String(s) => write!(f, "\"{s}\""),
+            Sequence::List(vs) => {
+                write!(f, "[")?;
+                let mut vs = vs.iter().peekable();
+                while let Some(v) = vs.next() {
+                    if vs.peek().is_some() {
+                        write!(f, "{v},")?;
+                    } else {
+                        write!(f, "{v}")?;
+                    }
+                }
+                write!(f, "]")
+            }
         }
     }
 }

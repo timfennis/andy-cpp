@@ -4,7 +4,7 @@ use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 use num::complex::Complex64;
 use num::{BigRational, Complex, ToPrimitive};
 
-use crate::ast::Operator;
+use crate::ast::BinaryOperator;
 use crate::interpreter::environment::EnvironmentRef;
 use crate::interpreter::evaluate::EvaluationError;
 use crate::interpreter::function::Function;
@@ -17,17 +17,6 @@ pub enum Number {
     Float(f64),
     Rational(Box<BigRational>),
     Complex(Complex64),
-}
-
-impl Number {
-    fn type_name(&self) -> String {
-        match self {
-            Self::Int(_) => "int".to_string(),
-            Self::Float(_) => "float".to_string(),
-            Self::Rational(_) => "rational".to_string(),
-            Self::Complex(_) => "complex".to_string(),
-        }
-    }
 }
 
 impl From<Int> for Number {
@@ -99,9 +88,7 @@ impl Add for Number {
 
             // Float vs other
             (Self::Float(p1), Self::Int(p2)) => Self::Float(p1.add(f64::from(p2))),
-            (Self::Float(p1), Self::Rational(p2)) => {
-                Self::Float(p1.add(rational_to_float(&p2)))
-            }
+            (Self::Float(p1), Self::Rational(p2)) => Self::Float(p1.add(rational_to_float(&p2))),
             (Self::Float(p1), Self::Complex(p2)) => Self::Complex(Complex::from(p1).add(p2)),
 
             // Int vs other
@@ -115,9 +102,7 @@ impl Add for Number {
             (Self::Rational(p1), Self::Int(p2)) => {
                 Self::Rational(Box::new(Add::add(*p1, BigRational::from(p2))))
             }
-            (Self::Rational(p1), Self::Float(p2)) => {
-                Self::Float(rational_to_float(&p1).add(p2))
-            }
+            (Self::Rational(p1), Self::Float(p2)) => Self::Float(rational_to_float(&p1).add(p2)),
             (Self::Rational(p1), Self::Complex(p2)) => {
                 Self::Complex(Complex::from(p1.to_f64().unwrap_or(f64::NAN)).add(p2))
                 //TODO: Check if this is logical
@@ -147,9 +132,7 @@ impl Sub for Number {
 
             // Float vs other
             (Self::Float(p1), Self::Int(p2)) => Self::Float(p1.sub(f64::from(p2))),
-            (Self::Float(p1), Self::Rational(p2)) => {
-                Self::Float(p1.sub(rational_to_float(&p2)))
-            }
+            (Self::Float(p1), Self::Rational(p2)) => Self::Float(p1.sub(rational_to_float(&p2))),
             (Self::Float(p1), Self::Complex(p2)) => Self::Complex(Complex::from(p1).sub(p2)),
 
             // Int vs other
@@ -163,9 +146,7 @@ impl Sub for Number {
             (Self::Rational(p1), Self::Int(p2)) => {
                 Self::Rational(Box::new(Sub::sub(*p1, BigRational::from(p2))))
             }
-            (Self::Rational(p1), Self::Float(p2)) => {
-                Self::Float(rational_to_float(&p1).sub(p2))
-            }
+            (Self::Rational(p1), Self::Float(p2)) => Self::Float(rational_to_float(&p1).sub(p2)),
             (Self::Rational(p1), Self::Complex(p2)) => {
                 Self::Complex(Complex::from(p1.to_f64().unwrap_or(f64::NAN)).sub(p2))
                 //TODO: Check if this is logical
@@ -203,9 +184,7 @@ impl Div for Number {
 
             // Float vs other
             (Self::Float(p1), Self::Int(p2)) => Self::Float(p1.div(f64::from(p2))),
-            (Self::Float(p1), Self::Rational(p2)) => {
-                Self::Float(p1.div(rational_to_float(&p2)))
-            }
+            (Self::Float(p1), Self::Rational(p2)) => Self::Float(p1.div(rational_to_float(&p2))),
             (Self::Float(p1), Self::Complex(p2)) => Self::Complex(Complex::from(p1).div(p2)),
 
             // Int vs other
@@ -219,9 +198,7 @@ impl Div for Number {
             (Self::Rational(p1), Self::Int(p2)) => {
                 Self::Rational(Box::new(Div::div(*p1, BigRational::from(p2))))
             }
-            (Self::Rational(p1), Self::Float(p2)) => {
-                Self::Float(rational_to_float(&p1).div(p2))
-            }
+            (Self::Rational(p1), Self::Float(p2)) => Self::Float(rational_to_float(&p1).div(p2)),
             (Self::Rational(p1), Self::Complex(p2)) => {
                 Self::Complex(Complex::from(p1.to_f64().unwrap_or(f64::NAN)).div(p2))
                 //TODO: Check if this is logical
@@ -251,9 +228,7 @@ impl Mul for Number {
 
             // Float vs other
             (Self::Float(p1), Self::Int(p2)) => Self::Float(p1.mul(f64::from(p2))),
-            (Self::Float(p1), Self::Rational(p2)) => {
-                Self::Float(p1.mul(rational_to_float(&p2)))
-            }
+            (Self::Float(p1), Self::Rational(p2)) => Self::Float(p1.mul(rational_to_float(&p2))),
             (Self::Float(p1), Self::Complex(p2)) => Self::Complex(Complex::from(p1).mul(p2)),
 
             // Int vs other
@@ -264,9 +239,7 @@ impl Mul for Number {
             (Self::Int(p1), Self::Complex(p2)) => Self::Complex(Complex::from(p1).mul(p2)),
 
             // Rational vs other
-            (Self::Rational(p1), Self::Float(p2)) => {
-                Self::Float(rational_to_float(&p1).mul(p2))
-            }
+            (Self::Rational(p1), Self::Float(p2)) => Self::Float(rational_to_float(&p1).mul(p2)),
             (Self::Rational(p1), Self::Int(p2)) => {
                 Self::Rational(Box::new(Mul::mul(*p1, BigRational::from(p2))))
             }
@@ -315,6 +288,15 @@ impl Rem for Number {
 }
 
 impl Number {
+    fn type_name(&self) -> String {
+        match self {
+            Self::Int(_) => "int".to_string(),
+            Self::Float(_) => "float".to_string(),
+            Self::Rational(_) => "rational".to_string(),
+            Self::Complex(_) => "complex".to_string(),
+        }
+    }
+
     /// Calculates the remainder of euclidean division.
     /// # Errors
     /// Returns an `EvaluationError` if the remainder of division is 0
@@ -322,13 +304,11 @@ impl Number {
     /// Panics if the evaluation between operands is not supported, this is a temporary condition
     pub fn checked_rem_euclid(self, rhs: Self) -> Result<Self, EvaluationError> {
         match (self, rhs) {
-            (Self::Int(p1), Self::Int(p2)) => {
-                Ok(Self::Int(p1.checked_rem_euclid(&p2).ok_or({
-                    EvaluationError::DivisionByZero {
-                        operator: Operator::EuclideanModulo,
-                    }
-                })?))
-            }
+            (Self::Int(p1), Self::Int(p2)) => Ok(Self::Int(p1.checked_rem_euclid(&p2).ok_or({
+                EvaluationError::DivisionByZero {
+                    operator: BinaryOperator::EuclideanModulo,
+                }
+            })?)),
             (Self::Float(p1), Self::Float(p2)) => Ok(Self::Float(p1.rem_euclid(p2))),
             // (Number::Rational(p1), Number::Rational(p2)) => Ok(Number::Rational(p1.__(p2))),
             // TODO: implement other cases
@@ -357,7 +337,7 @@ impl Number {
                     Self::Int(
                         p1.checked_pow(&p2)
                             .ok_or(EvaluationError::IntegerOverflow {
-                                operator: Operator::Exponent,
+                                operator: BinaryOperator::Exponent,
                             })?,
                     )
                 }
@@ -390,9 +370,7 @@ impl Number {
                     message: "Cannot raise a rational to the power of another rational, try converting the operands to floats".to_string(),
                 });
             }
-            (Self::Rational(p1), Self::Float(p2)) => {
-                Self::Float(rational_to_float(&p1).powf(p2))
-            }
+            (Self::Rational(p1), Self::Float(p2)) => Self::Float(rational_to_float(&p1).powf(p2)),
             (Self::Rational(p1), Self::Complex(p2)) => {
                 Self::Complex(rational_to_complex(&p1).powc(p2))
             }
@@ -401,9 +379,7 @@ impl Number {
             (Self::Float(p1), Self::Float(p2)) => Self::Float(p1.powf(p2)),
             (Self::Float(p1), Self::Complex(p2)) => Self::Complex(Complex::from(p1).powc(p2)),
             (Self::Float(p1), Self::Int(p2)) => Self::Float(p1.powf(f64::from(p2))),
-            (Self::Float(p1), Self::Rational(p2)) => {
-                Self::Float(p1.powf(rational_to_float(&p2)))
-            }
+            (Self::Float(p1), Self::Rational(p2)) => Self::Float(p1.powf(rational_to_float(&p2))),
 
             (Self::Complex(p1), Self::Complex(p2)) => Self::Complex(p1.powc(p2)),
             (Self::Complex(p1), Self::Float(p2)) => Self::Complex(p1.powc(Complex::from(p2))),
@@ -476,7 +452,7 @@ fn rational_to_complex(r: &BigRational) -> Complex<f64> {
     Complex::from(r.to_f64().unwrap_or(f64::NAN))
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum NumberType {
     Int,
     Float,
@@ -484,8 +460,8 @@ pub enum NumberType {
     Complex,
 }
 
-impl From<Number> for NumberType {
-    fn from(value: Number) -> Self {
+impl From<&Number> for NumberType {
+    fn from(value: &Number) -> Self {
         match value {
             Number::Int(_) => Self::Int,
             Number::Float(_) => Self::Float,
