@@ -1,6 +1,6 @@
 --PROGRAM--
-print 23 %% 12;
-print -23 %% 12;
+print(23 %% 12);
+print(-23 %% 12);
 --EXPECT--
 11
 1

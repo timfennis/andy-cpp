@@ -7,6 +7,6 @@ fn factorial(n) {
   }
 }
 
-print factorial(10);
+print(factorial(10));
 --EXPECT--
 3628800

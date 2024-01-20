@@ -2,7 +2,7 @@
 xs := [1,4,9,16,25];
 
 for x in xs {
-    print sqrt(x);
+    print(sqrt(x));
 }
 --EXPECT--
 1.0

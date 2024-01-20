@@ -2,9 +2,9 @@
 a := 3;
 b := 3;
 if if a == b { a } else { b } == a {
-    print true;
+    print(true);
 } else {
-    print false;
+    print(false);
 }
 --EXPECT--
 true

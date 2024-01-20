@@ -8,10 +8,10 @@ fn create(n) {
 x := create(5);
 y := create(6);
 
-print x();
-print y();
-print x();
-print y();
+print(x());
+print(y());
+print(x());
+print(y());
 --EXPECT--
 6
 7

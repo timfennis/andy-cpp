@@ -12,13 +12,13 @@ fn counter() {
 c1 := counter();
 c2 := counter();
 invoked := 0;
-print c1();
-print c2();
-print c1();
-print c2();
-print c1();
-print c2();
-print invoked;
+print(c1());
+print(c2());
+print(c1());
+print(c2());
+print(c1());
+print(c2());
+print(invoked);
 --EXPECT--
 1
 1

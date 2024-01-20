@@ -28,9 +28,16 @@ impl PartialEq for Value {
         }
     }
 }
+
 impl From<bool> for Value {
     fn from(value: bool) -> Self {
         Self::Bool(value)
+    }
+}
+
+impl From<i64> for Value {
+    fn from(value: i64) -> Self {
+        Self::Number(Number::Int(Int64(value)))
     }
 }
 
@@ -83,12 +90,6 @@ impl From<&Value> for ValueType {
             }
             Value::Function(_) => Self::Function,
         }
-    }
-}
-
-impl From<i64> for Value {
-    fn from(value: i64) -> Self {
-        Self::Number(Number::Int(Int64(value)))
     }
 }
 

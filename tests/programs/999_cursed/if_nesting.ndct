@@ -4,9 +4,9 @@ if if {
     y := 9;
     y ^ x
 } > 12 ^ { one := 1; one + one } { ten := 10 } else { minus_ten := -10 } > 0 {
-    print true;
+    print(true);
 } else {
-    print false;
+    print(false);
 }
 --EXPECT--
 true

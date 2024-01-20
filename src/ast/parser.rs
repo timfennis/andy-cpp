@@ -214,15 +214,7 @@ impl Parser {
 
     fn expression_or_statement(&mut self) -> Result<ExpressionLocation, Error> {
         // match print statements (which is a temporary construct until we add functions)
-        let mut expression = if matches!(
-            self.current_token_location().map(|it| &it.token),
-            Some(Token::Identifier(name)) if name == "print"
-        ) {
-            self.advance();
-            self.print_expression()?
-        } else {
-            self.variable_declaration_or_assignment()?
-        };
+        let mut expression = self.variable_declaration_or_assignment()?;
 
         if self.match_token(&[Token::Semicolon]).is_some() {
             self.advance();
@@ -234,11 +226,6 @@ impl Parser {
 
     fn expression(&mut self) -> Result<ExpressionLocation, Error> {
         self.variable_declaration_or_assignment()
-    }
-    fn print_expression(&mut self) -> Result<ExpressionLocation, Error> {
-        let value = self.expression()?;
-        let (start, end) = (value.start, value.end);
-        Ok(Expression::Print(Box::new(value)).to_location(start, end))
     }
 
     fn variable_declaration_or_assignment(&mut self) -> Result<ExpressionLocation, Error> {

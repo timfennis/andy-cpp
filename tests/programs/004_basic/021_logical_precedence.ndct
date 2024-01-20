@@ -2,7 +2,7 @@
 a := true || true && false;
 b := false && true || true;
 if a && b {
-    print "correct";
+    print("correct");
 }
 --EXPECT--
 correct

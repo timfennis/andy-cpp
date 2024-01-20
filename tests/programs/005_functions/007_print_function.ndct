@@ -1,4 +1,4 @@
 --PROGRAM--
-print(!true);
+print(1,2,3);
 --EXPECT--
-false
+1 2 3

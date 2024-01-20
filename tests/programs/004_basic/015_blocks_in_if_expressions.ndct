@@ -1,6 +1,6 @@
 --PROGRAM--
 if { a := 3; a * a } == 9 {
-    print true;
+    print(true);
 }
 --EXPECT--
 true

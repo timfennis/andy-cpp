@@ -2,6 +2,6 @@
 {
     x := 5;
 }
-print x;
+print(x);
 --EXPECT-ERROR--
 variable x is undefined

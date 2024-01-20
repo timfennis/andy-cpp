@@ -1,12 +1,45 @@
+use std::fmt::Debug;
 use std::rc::Rc;
 
 use num::ToPrimitive;
 
-use crate::interpreter::environment::Environment;
+use crate::interpreter::environment::{Environment, EnvironmentRef};
+use crate::interpreter::evaluate::EvaluationError;
+use crate::interpreter::function::Function;
 use crate::interpreter::num::{Number, SingleNumberFunction};
 use crate::interpreter::value::Value;
 
+#[derive(Debug)]
+struct VariadicFunction {
+    function: fn(&[Value], &EnvironmentRef) -> Value,
+}
+
+impl Function for VariadicFunction {
+    fn call(&self, args: &[Value], env: &EnvironmentRef) -> Result<Value, EvaluationError> {
+        Ok((self.function)(args, env))
+    }
+}
+
 pub fn bind_to_environment(env: &mut Environment) {
+    env.declare(
+        "print",
+        Value::Function(Rc::new(VariadicFunction {
+            function: |args, env| {
+                let _ = env.borrow_mut().with_output(|output| {
+                    let mut iter = args.iter().peekable();
+                    while let Some(arg) = iter.next() {
+                        if iter.peek().is_some() {
+                            write!(output, "{arg} ")?;
+                        } else {
+                            writeln!(output, "{arg}")?;
+                        }
+                    }
+                    Ok(())
+                });
+                Value::Unit
+            },
+        })),
+    );
     env.declare(
         "ceil",
         Value::Function(Rc::new(SingleNumberFunction {

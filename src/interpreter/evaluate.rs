@@ -121,13 +121,6 @@ pub(crate) fn evaluate_expression(
             evaluate_expression(expression, environment)?;
             Value::Unit
         }
-        Expression::Print(expression) => {
-            let value = evaluate_expression(expression, environment)?;
-            let _ = environment
-                .borrow_mut()
-                .with_output(|output| writeln!(output, "{value}"));
-            Value::Unit
-        }
         Expression::Logical {
             operator,
             left,

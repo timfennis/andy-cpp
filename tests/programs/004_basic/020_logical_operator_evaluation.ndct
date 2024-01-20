@@ -4,6 +4,6 @@ true && { x = x + 1; false };
 false && { x = x + 1; false };
 true || { x = x + 1; false };
 false || { x = x + 1; false };
-print x;
+print(x);
 --EXPECT--
 2

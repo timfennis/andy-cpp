@@ -9,6 +9,6 @@ inc();
 inc();
 n := 10;
 inc();
-print n;
+print(n);
 --EXPECT--
 10

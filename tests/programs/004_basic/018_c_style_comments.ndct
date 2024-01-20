@@ -3,6 +3,6 @@
 init := "foo"; // we init foo!
 // let's print foo
 // print init;
-print init;
+print(init);
 --EXPECT--
 foo

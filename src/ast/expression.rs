@@ -28,7 +28,6 @@ pub enum Expression {
     Identifier(String),
     //
     Statement(Box<ExpressionLocation>),
-    Print(Box<ExpressionLocation>),
     Unary {
         operator: UnaryOperator,
         expression: Box<ExpressionLocation>,

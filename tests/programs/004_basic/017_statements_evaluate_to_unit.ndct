@@ -3,5 +3,5 @@ x := {
     y := 3;
     z := 4;
 };
-print x;
+print(x);
 --EXPECT--

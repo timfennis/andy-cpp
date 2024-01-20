@@ -1,10 +1,10 @@
 --PROGRAM--
-print (2+3j) + (4+5j);
-print (2+3j) - (4+5j);
-print (4+5j) - (2+3j);
-print (2+3j) * (4+5j);
-print (2+3j) ^ (4+5j);
-print (4+5j) ^ (2+3j);
+print((2+3j) + (4+5j));
+print((2+3j) - (4+5j));
+print((4+5j) - (2+3j));
+print((2+3j) * (4+5j));
+print((2+3j) ^ (4+5j));
+print((4+5j) ^ (2+3j));
 --EXPECT--
 6+8i
 -2-2i

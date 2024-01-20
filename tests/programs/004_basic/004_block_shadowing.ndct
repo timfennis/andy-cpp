@@ -2,9 +2,9 @@
 foo := 3;
 {
     foo := 5;
-    print foo;
+    print(foo);
 }
-print foo;
+print(foo);
 --EXPECT--
 5
 3

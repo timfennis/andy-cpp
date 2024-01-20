@@ -14,6 +14,6 @@ text := "";
     }
     text = text + "World";
 }
-print text + "!";
+print(text + "!");
 --EXPECT--
 Hello, World!
