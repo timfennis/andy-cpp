@@ -1,30 +1,34 @@
 use std::fmt::Debug;
+use std::fs::read_to_string;
+use std::path::Path;
 use std::rc::Rc;
 
-use num::ToPrimitive;
+use num::{BigInt, ToPrimitive};
 
 use crate::interpreter::environment::{Environment, EnvironmentRef};
 use crate::interpreter::evaluate::EvaluationError;
-use crate::interpreter::function::Function;
+use crate::interpreter::function::{Function, FunctionError, FunctionResult};
+use crate::interpreter::int::Int;
 use crate::interpreter::num::{Number, SingleNumberFunction};
-use crate::interpreter::value::Value;
+use crate::interpreter::value::{Sequence, Value, ValueType};
 
 #[derive(Debug)]
-struct VariadicFunction {
-    function: fn(&[Value], &EnvironmentRef) -> Value,
+struct GenericFunction {
+    function: fn(&[Value], &EnvironmentRef) -> FunctionResult,
 }
 
-impl Function for VariadicFunction {
-    fn call(&self, args: &[Value], env: &EnvironmentRef) -> Result<Value, EvaluationError> {
-        Ok((self.function)(args, env))
+impl Function for GenericFunction {
+    fn call(&self, args: &[Value], env: &EnvironmentRef) -> FunctionResult {
+        (self.function)(args, env)
     }
 }
 
 pub fn bind_to_environment(env: &mut Environment) {
     env.declare(
         "print",
-        Value::Function(Rc::new(VariadicFunction {
+        Value::Function(Rc::new(GenericFunction {
             function: |args, env| {
+                // TODO: this implementation just swallows errors
                 let _ = env.borrow_mut().with_output(|output| {
                     let mut iter = args.iter().peekable();
                     while let Some(arg) = iter.next() {
@@ -36,7 +40,42 @@ pub fn bind_to_environment(env: &mut Environment) {
                     }
                     Ok(())
                 });
-                Value::Unit
+                Ok(Value::Unit)
+            },
+        })),
+    );
+    env.declare(
+        "read_file",
+        Value::Function(Rc::new(GenericFunction {
+            function: |args, _env| match args {
+                [Value::Sequence(Sequence::String(s))] => read_to_string(Path::new(s.as_str()))
+                    .map(|contents| Value::Sequence(Sequence::String(Rc::new(contents))))
+                    .map_err(|err| {
+                        FunctionError::EvaluationError(Box::new(EvaluationError::IO { cause: err }))
+                    }),
+                [value] => Err(FunctionError::TypeError {
+                    actual_type: ValueType::from(value),
+                    expected_type: ValueType::String,
+                }),
+                args => Err(FunctionError::ArgumentCount {
+                    expected_count: 1,
+                    actual_count: args.len(),
+                }),
+            },
+        })),
+    );
+    env.declare(
+        "int",
+        Value::Function(Rc::new(GenericFunction {
+            function: |args, _env| match args {
+                [Value::Number(n)] => Ok(Value::Number(n.to_int_lossy()?)),
+                [Value::Sequence(Sequence::String(s))] => {
+                    let bi = s
+                        .parse::<BigInt>()
+                        .map_err(|err| EvaluationError::ConversionError())?;
+                    Ok(Value::Number(Number::Int(Int::BigInt(bi).simplify())))
+                }
+                _ => Err(todo!("not implemented")),
             },
         })),
     );

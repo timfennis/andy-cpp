@@ -57,7 +57,7 @@
       "patterns": [
         {
           "name": "keyword.control.andy-cpp",
-          "match": "\\b(if|else|self|while|for|return|fn)\\b"
+          "match": "\\b(if|else|while|for|return|fn)\\b"
         }
       ]
     },

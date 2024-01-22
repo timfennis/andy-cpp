@@ -12,11 +12,6 @@ pub enum Int {
     BigInt(BigInt),
 }
 
-impl From<i32> for Int {
-    fn from(value: i32) -> Self {
-        Self::Int64(i64::from(value))
-    }
-}
 impl ops::Neg for Int {
     type Output = Self;
 
@@ -42,6 +37,19 @@ impl Int {
             Self::BigInt(b) => b.clone(),
         }
     }
+    
+    pub fn simplify(self) -> Self {
+        match self {
+            i @ Int::Int64(_) => i,
+            Int::BigInt(bi) => {
+                if let Some(i) = bi.to_i64() {
+                    Int::Int64(i)
+                } else {
+                    Int::BigInt(bi)
+                }
+            }
+        }
+    }
 
     pub fn checked_rem_euclid(self, rhs: &Self) -> Option<Self> {
         if let (Self::Int64(p1), Self::Int64(p2)) = (&self, &rhs) {
@@ -55,7 +63,8 @@ impl Int {
             .map(Int::BigInt)
     }
 
-    #[must_use] pub fn checked_pow(&self, rhs: &Self) -> Option<Self> {
+    #[must_use]
+    pub fn checked_pow(&self, rhs: &Self) -> Option<Self> {
         if let (Self::Int64(p1), Self::Int64(p2)) = (&self, &rhs) {
             if let Some(p2) = p2.to_u32() {
                 if let Some(a) = p1.checked_pow(p2) {
@@ -73,21 +82,24 @@ impl Int {
         None
     }
 
-    #[must_use] pub fn is_negative(&self) -> bool {
+    #[must_use]
+    pub fn is_negative(&self) -> bool {
         match self {
             Self::Int64(i) => i.is_negative(),
             Self::BigInt(i) => i.is_negative(),
         }
     }
 
-    #[must_use] pub fn is_zero(&self) -> bool {
+    #[must_use]
+    pub fn is_zero(&self) -> bool {
         match self {
             Self::Int64(i) => i.is_zero(),
             Self::BigInt(i) => i.is_zero(),
         }
     }
 
-    #[must_use] pub fn is_positive(&self) -> bool {
+    #[must_use]
+    pub fn is_positive(&self) -> bool {
         match self {
             Self::Int64(i) => i.is_positive(),
             Self::BigInt(i) => i.is_positive(),
@@ -151,6 +163,12 @@ impl_binary_operator!(Mul, mul, checked_mul);
 impl_binary_operator!(Div, div, checked_div);
 impl_binary_operator!(Rem, rem, checked_rem);
 
+impl From<i32> for Int {
+    fn from(value: i32) -> Self {
+        Self::Int64(i64::from(value))
+    }
+}
+
 impl From<BigInt> for Int {
     fn from(value: BigInt) -> Self {
         Self::BigInt(value)
@@ -163,6 +181,14 @@ impl From<Int> for f64 {
             Int::Int64(i) => i.to_f64().unwrap_or(Self::INFINITY),
             Int::BigInt(i) => i.to_f64().unwrap_or(Self::INFINITY),
         }
+    }
+}
+
+impl TryFrom<f64> for Int {
+    type Error = EvaluationError;
+    fn try_from(value: f64) -> Result<Self, Self::Error> {
+        let bit_int = BigInt::from_f64(value).ok_or_else(|| EvaluationError::ConversionError())?;
+        Ok(Self::BigInt(bit_int))
     }
 }
 

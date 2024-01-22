@@ -11,7 +11,7 @@ use crate::ast::{
     BinaryOperator, Expression, ExpressionLocation, LogicalOperator, Lvalue, UnaryOperator,
 };
 use crate::interpreter::environment::{Environment, EnvironmentRef};
-use crate::interpreter::function::Closure;
+use crate::interpreter::function::{Closure, FunctionError};
 use crate::interpreter::int::Int;
 use crate::interpreter::num::Number;
 use crate::interpreter::value::{Sequence, Value, ValueType};
@@ -207,7 +207,11 @@ pub(crate) fn evaluate_expression(
                     end: expression_location.end,
                 });
             };
-            function.call(&evaluated_args, environment)?
+
+            match function.call(&evaluated_args, environment) {
+                Err(FunctionError::Return(value)) | Ok(value) => value,
+                Err(err) => return Err(err.into()),
+            }
         }
         Expression::FunctionDeclaration {
             arguments,
@@ -414,11 +418,26 @@ pub enum EvaluationError {
         start: Location,
         end: Location,
     },
+    FunctionError(FunctionError),
+    ConversionError(),
 }
 
 impl From<std::io::Error> for EvaluationError {
     fn from(value: std::io::Error) -> Self {
         Self::IO { cause: value }
+    }
+}
+
+impl From<FunctionError> for EvaluationError {
+    fn from(value: FunctionError) -> Self {
+        match value {
+            FunctionError::Return(_) => {
+                panic!("internal error: attempted to convert return value in to EvaluationError")
+            }
+            FunctionError::EvaluationError(e) => *e,
+            f @ FunctionError::TypeError { .. } => EvaluationError::FunctionError(f),
+            f @ FunctionError::ArgumentCount { .. } => EvaluationError::FunctionError(f),
+        }
     }
 }
 
@@ -470,6 +489,8 @@ impl Display for EvaluationError {
                 start,
                 end: _end,
             } => write!(f, "invalid expression: expected {expected_type} on {start}"),
+            EvaluationError::FunctionError(e) => write!(f, "{e}"),
+            EvaluationError::ConversionError() => write!(f, "cannot convert type"),
         }
     }
 }

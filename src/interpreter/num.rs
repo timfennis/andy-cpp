@@ -2,12 +2,12 @@ use std::fmt::{Display, Formatter};
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
 use num::complex::Complex64;
-use num::{BigRational, Complex, ToPrimitive};
+use num::{BigInt, BigRational, Complex, FromPrimitive, ToPrimitive};
 
 use crate::ast::BinaryOperator;
 use crate::interpreter::environment::EnvironmentRef;
 use crate::interpreter::evaluate::EvaluationError;
-use crate::interpreter::function::Function;
+use crate::interpreter::function::{Function, FunctionResult};
 use crate::interpreter::int::Int;
 use crate::interpreter::value::Value;
 
@@ -392,6 +392,23 @@ impl Number {
             }
         })
     }
+
+    pub fn to_int_lossy(&self) -> Result<Self, EvaluationError> {
+        let n = match self {
+            Number::Int(i) => Self::Int(i.clone()),
+            Number::Float(f) => {
+                if let Some(bi) = BigInt::from_f64(*f) {
+                    Number::Int(Int::BigInt(bi).simplify())
+                } else {
+                    //TODO maybe better to return an error
+                    return Err(EvaluationError::ConversionError())
+                }
+            }
+            Number::Rational(r) => Self::Int(Int::BigInt(r.to_integer()).simplify()),
+            Number::Complex(_) => return Err(EvaluationError::ConversionError())
+        };
+        Ok(n)
+    }
 }
 
 macro_rules! implement_rounding {
@@ -489,7 +506,7 @@ pub struct SingleNumberFunction {
 }
 
 impl Function for SingleNumberFunction {
-    fn call(&self, args: &[Value], _env: &EnvironmentRef) -> Result<Value, EvaluationError> {
+    fn call(&self, args: &[Value], _env: &EnvironmentRef) -> FunctionResult {
         if args.len() == 1 {
             let arg = args.first().expect("guaranteed to be 1");
 

@@ -17,12 +17,19 @@ pub enum Value {
     // TODO: add structs or classes
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum Sequence {
+    String(Rc<String>),
+    List(Rc<VecDeque<Value>>),
+    //TODO: Dict comes later because we need hashing and comparison
+}
+
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Unit, Self::Unit) => true,
             (Self::Number(n1), Self::Number(n2)) => n1.eq(n2),
-            (Self::Bool(b1), Self::Bool(b2)) => b1 == b2,
+            (Self::Bool(b1), Self::Bool(b2)) => b1.eq(b2),
             (Self::Sequence(s1), Self::Sequence(s2)) => s1.eq(s2),
             _ => false,
         }
@@ -39,13 +46,6 @@ impl From<i64> for Value {
     fn from(value: i64) -> Self {
         Self::Number(Number::Int(Int64(value)))
     }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Sequence {
-    String(Rc<String>),
-    List(Rc<VecDeque<Value>>),
-    //TODO: Dict comes later because we need hashing and comparison
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
