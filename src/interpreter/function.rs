@@ -56,6 +56,7 @@ pub enum FunctionError {
     Return(Value),
     EvaluationError(Box<EvaluationError>),
     ArgumentError(String),
+    IOError(std::io::Error),
 }
 
 impl FunctionError {
@@ -77,6 +78,7 @@ impl Display for FunctionError {
             FunctionError::Return(_) => write!(f, "return is not an error"),
             FunctionError::EvaluationError(e) => write!(f, "{}", *e),
             FunctionError::ArgumentError(text) => write!(f, "{text}"),
+            FunctionError::IOError(err) => write!(f, "{err}"),
         }
     }
 }

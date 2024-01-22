@@ -30,18 +30,19 @@ pub fn bind_to_environment(env: &mut Environment) {
         "print",
         Value::Function(Rc::new(GenericFunction {
             function: |args, env| {
-                // TODO: this implementation just swallows errors
-                let _ = env.borrow_mut().with_output(|output| {
-                    let mut iter = args.iter().peekable();
-                    while let Some(arg) = iter.next() {
-                        if iter.peek().is_some() {
-                            write!(output, "{arg} ")?;
-                        } else {
-                            writeln!(output, "{arg}")?;
+                env.borrow_mut()
+                    .with_output(|output| {
+                        let mut iter = args.iter().peekable();
+                        while let Some(arg) = iter.next() {
+                            if iter.peek().is_some() {
+                                write!(output, "{arg} ")?;
+                            } else {
+                                writeln!(output, "{arg}")?;
+                            }
                         }
-                    }
-                    Ok(())
-                });
+                        Ok(())
+                    })
+                    .map_err(|err| FunctionError::IOError(err))?;
                 Ok(Value::Unit)
             },
         })),
@@ -53,7 +54,7 @@ pub fn bind_to_environment(env: &mut Environment) {
                 [Value::Sequence(Sequence::String(s))] => read_to_string(Path::new(s.as_str()))
                     .map(|contents| Value::Sequence(Sequence::String(Rc::new(contents))))
                     .map_err(|err| {
-                        // TODO: fix location
+                        // FIXME: fix location
                         FunctionError::EvaluationError(Box::new(EvaluationError::io_error(
                             err,
                             Location { line: 0, column: 0 },
@@ -74,10 +75,9 @@ pub fn bind_to_environment(env: &mut Environment) {
             function: |args, _env| match args {
                 [Value::Number(n)] => Ok(Value::Number(n.to_int_lossy()?)),
                 [Value::Sequence(Sequence::String(s))] => {
-                    let bi = s.parse::<BigInt>().map_err(|_err| {
+                    let bi = s.parse::<BigInt>().map_err(|err| {
                         FunctionError::ArgumentError(format!(
-                            "{} cannot be converted into an integer",
-                            s
+                            "{s} cannot be converted into an integer because \"{err}\""
                         ))
                     })?;
                     Ok(Value::Number(Number::Int(Int::BigInt(bi).simplify())))
