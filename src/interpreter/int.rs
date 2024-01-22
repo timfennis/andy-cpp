@@ -1,4 +1,5 @@
 use crate::interpreter::evaluate::EvaluationError;
+use crate::lexer::Location;
 use num::complex::Complex64;
 use num::traits::CheckedEuclid;
 use num::FromPrimitive;
@@ -37,7 +38,7 @@ impl Int {
             Self::BigInt(b) => b.clone(),
         }
     }
-    
+
     pub fn simplify(self) -> Self {
         match self {
             i @ Int::Int64(_) => i,
@@ -187,7 +188,13 @@ impl From<Int> for f64 {
 impl TryFrom<f64> for Int {
     type Error = EvaluationError;
     fn try_from(value: f64) -> Result<Self, Self::Error> {
-        let bit_int = BigInt::from_f64(value).ok_or_else(|| EvaluationError::ConversionError())?;
+        let bit_int = BigInt::from_f64(value).ok_or_else(|| {
+            EvaluationError::type_error(
+                format!("cannot convert {value:?} to int"),
+                Location { line: 0, column: 0 },
+                Location { line: 0, column: 0 },
+            )
+        })?;
         Ok(Self::BigInt(bit_int))
     }
 }
@@ -233,18 +240,22 @@ impl TryFrom<Int> for i32 {
                 if let Some(p2) = p2.to_i32() {
                     p2
                 } else {
-                    return Err(EvaluationError::TypeError {
-                        message: format!("cannot raise rational to the power of {p2}"),
-                    });
+                    return Err(EvaluationError::type_error(
+                        format!("cannot convert {p2} to 32-bit signed integer"),
+                        Location { line: 0, column: 0 },
+                        Location { line: 0, column: 0 },
+                    ));
                 }
             }
             Int::BigInt(p2) => {
                 if let Some(p2) = p2.to_i32() {
                     p2
                 } else {
-                    return Err(EvaluationError::TypeError {
-                        message: format!("cannot raise rational to the power of {p2}"),
-                    });
+                    return Err(EvaluationError::type_error(
+                        format!("cannot convert {p2} to 32-bit signed integer"),
+                        Location { line: 0, column: 0 },
+                        Location { line: 0, column: 0 },
+                    ));
                 }
             }
         })

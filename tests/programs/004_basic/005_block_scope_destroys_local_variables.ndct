@@ -4,4 +4,4 @@
 }
 print(x);
 --EXPECT-ERROR--
-variable x is undefined
+undefined variable x

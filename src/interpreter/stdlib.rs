@@ -11,6 +11,7 @@ use crate::interpreter::function::{Function, FunctionError, FunctionResult};
 use crate::interpreter::int::Int;
 use crate::interpreter::num::{Number, SingleNumberFunction};
 use crate::interpreter::value::{Sequence, Value, ValueType};
+use crate::lexer::Location;
 
 #[derive(Debug)]
 struct GenericFunction {
@@ -23,6 +24,7 @@ impl Function for GenericFunction {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 pub fn bind_to_environment(env: &mut Environment) {
     env.declare(
         "print",
@@ -51,16 +53,18 @@ pub fn bind_to_environment(env: &mut Environment) {
                 [Value::Sequence(Sequence::String(s))] => read_to_string(Path::new(s.as_str()))
                     .map(|contents| Value::Sequence(Sequence::String(Rc::new(contents))))
                     .map_err(|err| {
-                        FunctionError::EvaluationError(Box::new(EvaluationError::IO { cause: err }))
+                        // TODO: fix location
+                        FunctionError::EvaluationError(Box::new(EvaluationError::io_error(
+                            err,
+                            Location { line: 0, column: 0 },
+                            Location { line: 0, column: 0 },
+                        )))
                     }),
-                [value] => Err(FunctionError::TypeError {
-                    actual_type: ValueType::from(value),
-                    expected_type: ValueType::String,
-                }),
-                args => Err(FunctionError::ArgumentCount {
-                    expected_count: 1,
-                    actual_count: args.len(),
-                }),
+                [value] => Err(FunctionError::argument_type_error(
+                    &ValueType::String,
+                    &ValueType::from(value),
+                )),
+                args => Err(FunctionError::argument_count_error(1, args.len())),
             },
         })),
     );
@@ -70,12 +74,18 @@ pub fn bind_to_environment(env: &mut Environment) {
             function: |args, _env| match args {
                 [Value::Number(n)] => Ok(Value::Number(n.to_int_lossy()?)),
                 [Value::Sequence(Sequence::String(s))] => {
-                    let bi = s
-                        .parse::<BigInt>()
-                        .map_err(|err| EvaluationError::ConversionError())?;
+                    let bi = s.parse::<BigInt>().map_err(|_err| {
+                        FunctionError::ArgumentError(format!(
+                            "{} cannot be converted into an integer",
+                            s
+                        ))
+                    })?;
                     Ok(Value::Number(Number::Int(Int::BigInt(bi).simplify())))
                 }
-                _ => Err(todo!("not implemented")),
+                [single_value] => Err(FunctionError::ArgumentError(format!(
+                    "cannot convert {single_value} to string"
+                ))),
+                vals => Err(FunctionError::argument_count_error(1, vals.len())),
             },
         })),
     );

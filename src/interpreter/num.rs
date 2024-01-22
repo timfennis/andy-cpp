@@ -4,12 +4,12 @@ use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 use num::complex::Complex64;
 use num::{BigInt, BigRational, Complex, FromPrimitive, ToPrimitive};
 
-use crate::ast::BinaryOperator;
 use crate::interpreter::environment::EnvironmentRef;
 use crate::interpreter::evaluate::EvaluationError;
 use crate::interpreter::function::{Function, FunctionResult};
 use crate::interpreter::int::Int;
 use crate::interpreter::value::Value;
+use crate::lexer::Location;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Number {
@@ -305,9 +305,12 @@ impl Number {
     pub fn checked_rem_euclid(self, rhs: Self) -> Result<Self, EvaluationError> {
         match (self, rhs) {
             (Self::Int(p1), Self::Int(p2)) => Ok(Self::Int(p1.checked_rem_euclid(&p2).ok_or({
-                EvaluationError::DivisionByZero {
-                    operator: BinaryOperator::EuclideanModulo,
-                }
+                //TODO move EvaluationError to caller so we can add location
+                EvaluationError::type_error(
+                    "cannot divide by zero".to_string(),
+                    Location { line: 0, column: 0 },
+                    Location { line: 0, column: 0 },
+                )
             })?)),
             (Self::Float(p1), Self::Float(p2)) => Ok(Self::Float(p1.rem_euclid(p2))),
             // (Number::Rational(p1), Number::Rational(p2)) => Ok(Number::Rational(p1.__(p2))),
@@ -334,12 +337,11 @@ impl Number {
                     let p2 = i32::try_from(p2)?;
                     Self::Rational(Box::new(BigRational::from(p1).pow(p2)))
                 } else {
-                    Self::Int(
-                        p1.checked_pow(&p2)
-                            .ok_or(EvaluationError::IntegerOverflow {
-                                operator: BinaryOperator::Exponent,
-                            })?,
-                    )
+                    Self::Int(p1.checked_pow(&p2).ok_or(EvaluationError::type_error(
+                        "integer overflow".to_string(),
+                        Location { line: 0, column: 0 },
+                        Location { line: 0, column: 0 },
+                    ))?)
                 }
             }
             (Self::Int(p1), Self::Float(p2)) => Self::Float(f64::from(p1).powf(p2)),
@@ -366,9 +368,11 @@ impl Number {
                         return Ok(Self::Rational(Box::new(p1.pow(p2))));
                     }
                 }
-                return Err(EvaluationError::TypeError {
-                    message: "Cannot raise a rational to the power of another rational, try converting the operands to floats".to_string(),
-                });
+                return Err(EvaluationError::type_error(
+                    "Cannot raise a rational to the power of another rational, try converting the operands to floats".to_string(),
+                    Location { line: 0 , column : 0 },
+                    Location { line: 0 ,column : 0 }
+                ));
             }
             (Self::Rational(p1), Self::Float(p2)) => Self::Float(rational_to_float(&p1).powf(p2)),
             (Self::Rational(p1), Self::Complex(p2)) => {
@@ -400,12 +404,22 @@ impl Number {
                 if let Some(bi) = BigInt::from_f64(*f) {
                     Number::Int(Int::BigInt(bi).simplify())
                 } else {
-                    //TODO maybe better to return an error
-                    return Err(EvaluationError::ConversionError())
+                    // TODO FIX line 0 column 0
+                    return Err(EvaluationError::type_error(
+                        format!("cannot convert {f} to int"),
+                        Location { line: 0, column: 0 },
+                        Location { line: 0, column: 0 },
+                    ));
                 }
             }
             Number::Rational(r) => Self::Int(Int::BigInt(r.to_integer()).simplify()),
-            Number::Complex(_) => return Err(EvaluationError::ConversionError())
+            Number::Complex(c) => {
+                return Err(EvaluationError::type_error(
+                    format!("cannot convert complex number {c} to int"),
+                    Location { line: 0, column: 0 },
+                    Location { line: 0, column: 0 },
+                ));
+            }
         };
         Ok(n)
     }

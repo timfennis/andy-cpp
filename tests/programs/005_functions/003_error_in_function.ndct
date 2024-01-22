@@ -4,4 +4,4 @@ fn test() {
 }
 test();
 --EXPECT-ERROR--
-variable n is undefined
+undefined variable n

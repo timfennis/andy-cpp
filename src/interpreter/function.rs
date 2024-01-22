@@ -55,35 +55,28 @@ impl From<EvaluationError> for FunctionError {
 pub enum FunctionError {
     Return(Value),
     EvaluationError(Box<EvaluationError>),
-    TypeError {
-        expected_type: ValueType,
-        actual_type: ValueType,
-    },
-    ArgumentCount {
-        expected_count: usize,
-        actual_count: usize,
-    },
+    ArgumentError(String),
 }
 
+impl FunctionError {
+    #[must_use]
+    pub fn argument_type_error(expected: &ValueType, actual: &ValueType) -> Self {
+        Self::ArgumentError(format!("argument error: expected {expected} got {actual}"))
+    }
+
+    #[must_use]
+    pub fn argument_count_error(expected: usize, actual: usize) -> Self {
+        Self::ArgumentError(format!(
+            "argument error: expected {expected} arguments got {actual}"
+        ))
+    }
+}
 impl Display for FunctionError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             FunctionError::Return(_) => write!(f, "return is not an error"),
-            FunctionError::EvaluationError(_) => write!(f, "evaluation error"),
-            FunctionError::TypeError {
-                actual_type,
-                expected_type,
-            } => write!(
-                f,
-                "unexpected type, expected {expected_type} got {actual_type}"
-            ),
-            FunctionError::ArgumentCount {
-                actual_count,
-                expected_count,
-            } => write!(
-                f,
-                "expected {expected_count} argument(s) got {actual_count}"
-            ),
+            FunctionError::EvaluationError(e) => write!(f, "{}", *e),
+            FunctionError::ArgumentError(text) => write!(f, "{text}"),
         }
     }
 }

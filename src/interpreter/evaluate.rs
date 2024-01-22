@@ -2,8 +2,6 @@ use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::error::Error;
 use std::fmt;
-use std::fmt::{Display, Formatter};
-use std::num::TryFromIntError;
 use std::ops::{Neg, Rem};
 use std::rc::Rc;
 
@@ -33,14 +31,18 @@ pub(crate) fn evaluate_expression(
                 (Value::Number(n), UnaryOperator::Neg) => Value::Number(n.neg()),
                 (Value::Bool(b), UnaryOperator::Bang) => Value::Bool(!b),
                 (_, UnaryOperator::Bang) => {
-                    return Err(EvaluationError::TypeError {
-                        message: "the '!' operator cannot be applied to this type".to_string(),
-                    });
+                    return Err(EvaluationError::type_error(
+                        "the '!' operator cannot be applied to this type".to_string(),
+                        start,
+                        end,
+                    ));
                 }
                 (_, UnaryOperator::Neg) => {
-                    return Err(EvaluationError::TypeError {
-                        message: "this type cannot be negated".to_string(),
-                    });
+                    return Err(EvaluationError::type_error(
+                        "this type cannot be negated".to_string(),
+                        start,
+                        end,
+                    ));
                 }
             }
         }
@@ -73,11 +75,11 @@ pub(crate) fn evaluate_expression(
             value,
         } => {
             if !environment.borrow().contains(identifier) {
-                return Err(EvaluationError::UndefinedVariable {
-                    identifier: identifier.clone(),
+                return Err(EvaluationError::syntax_error(
+                    format!("undefined variable {identifier}"),
                     start,
                     end,
-                });
+                ));
             }
             let value = evaluate_expression(value, environment)?;
             environment
@@ -108,12 +110,14 @@ pub(crate) fn evaluate_expression(
                 (Value::Bool(false), Some(block)) => evaluate_expression(block, environment)?,
                 (Value::Bool(false), None) => Value::Unit,
                 (value, _) => {
-                    return Err(EvaluationError::TypeError {
-                        message: format!(
+                    return Err(EvaluationError::type_error(
+                        format!(
                             "mismatched types: expected bool, found {}",
                             ValueType::from(&value)
                         ),
-                    })
+                        start,
+                        end,
+                    ))
                 }
             }
         }
@@ -137,12 +141,14 @@ pub(crate) fn evaluate_expression(
                 }
                 (LogicalOperator::Or, Value::Bool(true)) => Value::Bool(true),
                 (LogicalOperator::And | LogicalOperator::Or, value) => {
-                    return Err(EvaluationError::TypeError {
-                        message: format!(
+                    return Err(EvaluationError::type_error(
+                        format!(
                             "Cannot apply logical operator to non bool value {}",
                             ValueType::from(&value)
                         ),
-                    })
+                        start,
+                        end,
+                    ))
                 }
             }
         }
@@ -158,9 +164,11 @@ pub(crate) fn evaluate_expression(
                 } else if lit == Value::Bool(false) {
                     break;
                 } else {
-                    return Err(EvaluationError::TypeError {
-                        message: "Expression in a while structure must return a bool".to_string(),
-                    });
+                    return Err(EvaluationError::type_error(
+                        "Expression in a while structure must return a bool".to_string(),
+                        start,
+                        end,
+                    ));
                 }
             }
             drop(local_scope);
@@ -188,29 +196,30 @@ pub(crate) fn evaluate_expression(
                 evaluated_args.push(evaluate_expression(argument, environment)?);
             }
 
+            let (start, end) = (function_identifier.start, function_identifier.end);
             let function_name = function_identifier.try_into_identifier()?;
             let function = if let Some(refcell) = environment.borrow().get(&function_name) {
                 let value = &*refcell.borrow();
                 if let Value::Function(function) = value {
                     function.clone()
                 } else {
-                    return Err(EvaluationError::UndefinedFunction {
-                        identifier: function_name,
-                        start: expression_location.start,
-                        end: expression_location.end,
-                    });
+                    return Err(EvaluationError::syntax_error(
+                        format!("undefined function {function_name}"),
+                        expression_location.start,
+                        expression_location.end,
+                    ));
                 }
             } else {
-                return Err(EvaluationError::UndefinedFunction {
-                    identifier: function_name,
-                    start: expression_location.start,
-                    end: expression_location.end,
-                });
+                return Err(EvaluationError::syntax_error(
+                    format!("undefined function {function_name}"),
+                    expression_location.start,
+                    expression_location.end,
+                ));
             };
 
             match function.call(&evaluated_args, environment) {
                 Err(FunctionError::Return(value)) | Ok(value) => value,
-                Err(err) => return Err(err.into()),
+                Err(err) => return Err(into_evaluation_error(err, start, end)),
             }
         }
         Expression::FunctionDeclaration {
@@ -237,11 +246,11 @@ pub(crate) fn evaluate_expression(
                 // TODO: is cloning the value a good idea here??
                 value.borrow().clone()
             } else {
-                return Err(EvaluationError::UndefinedVariable {
-                    identifier: identifier.clone(),
-                    start: expression_location.start,
-                    end: expression_location.end,
-                });
+                return Err(EvaluationError::syntax_error(
+                    format!("undefined variable {identifier}"),
+                    expression_location.start,
+                    expression_location.end,
+                ));
             }
         }
         Expression::List { values } => {
@@ -252,8 +261,13 @@ pub(crate) fn evaluate_expression(
                 if last_type.is_none() {
                     last_type = Some(ValueType::from(&v));
                 } else if last_type != Some(ValueType::from(&v)) {
-                    // TODO: create an actual error
-                    panic!("TYPE MISMATCH MAN!");
+                    let add_type = ValueType::from(&v);
+                    let last_type = last_type.unwrap();
+                    return Err(EvaluationError::type_error(
+                        format!("cannot add {add_type} to a list of {last_type}",),
+                        expression.start,
+                        expression.end,
+                    ));
                 }
                 values_out.push_back(v);
             }
@@ -337,15 +351,25 @@ fn apply_operator(
         // Some mixed memes
         (Value::Sequence(Sequence::String(a)), BinaryOperator::Multiply, Value::Number(b)) => {
             Value::Sequence(Sequence::String(Rc::new(a.repeat(
-                usize::try_from(b).map_err(|()| EvaluationError::TypeError {
-                    message: String::from("Cannot convert"),
+                usize::try_from(b).map_err(|_err| {
+                    EvaluationError::type_error(
+                        "can't multiply a string with this value".to_string(),
+                        // TODO: somehow figure out the line number, or defer creation of this error to another location
+                        Location { line: 0, column: 0 },
+                        Location { line: 0, column: 0 },
+                    )
                 })?,
             ))))
         }
         (Value::Number(a), BinaryOperator::Multiply, Value::Sequence(Sequence::String(b))) => {
             Value::Sequence(Sequence::String(Rc::new(b.repeat(
-                usize::try_from(a).map_err(|()| EvaluationError::TypeError {
-                    message: String::from("Cannot convert"),
+                usize::try_from(a).map_err(|_| {
+                    EvaluationError::type_error(
+                        format!("can't multiply a string with this value"),
+                        // TODO: somehow figure out the line number, or defer creation of this error to another location
+                        Location { line: 0, column: 0 },
+                        Location { line: 0, column: 0 },
+                    )
                 })?,
             ))))
         }
@@ -364,149 +388,100 @@ fn apply_operator(
                     Value::Sequence(Sequence::String(Rc::new(format!("{a}{b}"))))
                 }
                 _ => {
-                    return Err(EvaluationError::InvalidOperator {
-                        operator,
-                        type_a: ValueType::String,
-                        type_b: ValueType::String,
-                    });
+                    return Err(EvaluationError::type_error(
+                        format!("cannot apply operator {operator:?} to string and string"),
+                        Location { line: 0, column: 0 },
+                        Location { line: 0, column: 0 },
+                    ));
                 }
             }
         }
 
         (a, _op, b) => {
-            return Err(EvaluationError::InvalidOperator {
-                operator,
-                type_a: (&a).into(),
-                type_b: (&b).into(),
-            });
+            return Err(EvaluationError::type_error(
+                format!(
+                    "cannot apply operator {operator:?} to {} and {}",
+                    ValueType::from(&a),
+                    ValueType::from(&b)
+                ),
+                Location { line: 0, column: 0 },
+                Location { line: 0, column: 0 },
+            ));
         }
     };
 
     Ok(literal)
 }
 
-pub enum EvaluationError {
-    TypeError {
-        message: String,
-    },
-    InvalidOperator {
-        operator: BinaryOperator,
-        type_a: ValueType,
-        type_b: ValueType,
-    },
-    IntegerOverflow {
-        operator: BinaryOperator,
-    },
-    DivisionByZero {
-        operator: BinaryOperator,
-    },
-    UndefinedVariable {
-        identifier: String,
-        start: Location,
-        end: Location,
-    },
-    UndefinedFunction {
-        identifier: String,
-        start: Location,
-        end: Location,
-    },
-    IO {
-        cause: std::io::Error,
-    },
-    InvalidExpression {
-        expected_type: String,
-        start: Location,
-        end: Location,
-    },
-    FunctionError(FunctionError),
-    ConversionError(),
+fn into_evaluation_error(
+    fun_err: FunctionError,
+    start: Location,
+    end: Location,
+) -> EvaluationError {
+    if let FunctionError::EvaluationError(e) = fun_err {
+        return *e;
+    }
+
+    EvaluationError {
+        // TODO: does it make sense to call this a function error
+        text: format!("{fun_err}"),
+        start,
+        end,
+    }
 }
 
+pub struct EvaluationError {
+    text: String,
+    start: Location,
+    #[allow(unused)]
+    end: Location,
+}
+
+impl EvaluationError {
+    pub fn type_error(message: String, start: Location, end: Location) -> Self {
+        Self {
+            text: format!("Type error: {message}"),
+            start,
+            end,
+        }
+    }
+    pub fn syntax_error(message: String, start: Location, end: Location) -> Self {
+        Self {
+            text: format!("Syntax error: {message}"),
+            start,
+            end,
+        }
+    }
+
+    pub fn io_error(err: std::io::Error, start: Location, end: Location) -> Self {
+        Self {
+            text: format!("IO error: {err}"),
+            start,
+            end,
+        }
+    }
+}
 impl From<std::io::Error> for EvaluationError {
     fn from(value: std::io::Error) -> Self {
-        Self::IO { cause: value }
-    }
-}
-
-impl From<FunctionError> for EvaluationError {
-    fn from(value: FunctionError) -> Self {
-        match value {
-            FunctionError::Return(_) => {
-                panic!("internal error: attempted to convert return value in to EvaluationError")
-            }
-            FunctionError::EvaluationError(e) => *e,
-            f @ FunctionError::TypeError { .. } => EvaluationError::FunctionError(f),
-            f @ FunctionError::ArgumentCount { .. } => EvaluationError::FunctionError(f),
+        Self {
+            text: format!("io error: {value:?}"),
+            // TODO: fix start/end
+            start: Location { line: 0, column: 0 },
+            end: Location { line: 0, column: 0 },
         }
     }
 }
 
-impl Display for EvaluationError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        // todo write a proper implementation
-        match self {
-            Self::TypeError { message } => write!(f, "{message}"),
-            Self::InvalidOperator {
-                operator: op,
-                type_a,
-                type_b,
-            } => write!(
-                f,
-                "unable to apply the '{:?}' operator to {} and {} on line {} column {}",
-                op,
-                type_a,
-                type_b,
-                0,
-                0 // TODO: fix this error
-            ),
-            Self::IntegerOverflow {
-                operator: operator_token,
-            } => write!(
-                f,
-                "integer overflow while applying the '{:?}' operator on line {} column {}",
-                operator_token, 0, 0
-            ),
-            Self::DivisionByZero {
-                operator: operator_token,
-            } => write!(
-                f,
-                "division by zero when applying '{:?}' on line {} column {}",
-                operator_token, 0, 0
-            ),
-            Self::UndefinedVariable {
-                identifier, start, ..
-            } => write!(f, "variable {identifier} is undefined on {start}",),
-            Self::IO { cause } => write!(f, "IO error: {cause}"),
-            Self::UndefinedFunction {
-                identifier,
-                start,
-                end: _end,
-            } => {
-                write!(f, "undefined function '{identifier}' on {start}")
-            }
-            Self::InvalidExpression {
-                expected_type,
-                start,
-                end: _end,
-            } => write!(f, "invalid expression: expected {expected_type} on {start}"),
-            EvaluationError::FunctionError(e) => write!(f, "{e}"),
-            EvaluationError::ConversionError() => write!(f, "cannot convert type"),
-        }
+impl fmt::Display for EvaluationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} on {}", self.text, self.start)
     }
 }
 
 impl fmt::Debug for EvaluationError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{self}")
     }
 }
 
 impl Error for EvaluationError {}
-
-impl From<TryFromIntError> for EvaluationError {
-    fn from(err: TryFromIntError) -> Self {
-        Self::TypeError {
-            message: format!("cannot convert between integer types {err}"),
-        }
-    }
-}
