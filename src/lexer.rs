@@ -1,6 +1,6 @@
 use num::{BigInt, Complex};
 use std::collections::VecDeque;
-use std::fmt::{Display, Formatter};
+use std::fmt;
 use std::str::Chars;
 
 mod token;
@@ -57,10 +57,7 @@ impl<'a> Lexer<'a> {
                         });
                     }
                     None => {
-                        return Err(Error::UnterminatedString {
-                            line: self.source.line,
-                            column: start.column,
-                        });
+                        return Err(Error::UnterminatedString { location: start });
                     }
                 },
                 '"' => {
@@ -76,10 +73,7 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        Err(Error::UnterminatedString {
-            line: self.source.line,
-            column: start.column,
-        })
+        Err(Error::UnterminatedString { location: start })
     }
 }
 
@@ -218,8 +212,7 @@ impl Iterator for Lexer<'_> {
                 (char, _) => {
                     return Some(Err(Error::UnexpectedCharacter {
                         char,
-                        line: self.source.line,
-                        column: self.source.column,
+                        location: self.source.location(),
                     }));
                 }
             };
@@ -293,13 +286,11 @@ pub enum Error {
     //TODO: refactor to location
     UnexpectedCharacter {
         char: char,
-        line: usize,
-        column: usize,
+        location: Location,
     },
     //TODO: refactor to location
     UnterminatedString {
-        line: usize,
-        column: usize,
+        location: Location,
     },
     InvalidEscapeSequence {
         sequence: String,
@@ -307,25 +298,21 @@ pub enum Error {
     },
 }
 
-impl Display for Error {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::UnexpectedCharacter { char, line, column } => write!(
-                f,
-                "Unexpected character '{char}' at line {line} column {column}"
-            ),
-            Self::UnterminatedString { line, column } => write!(
-                f,
-                "File ended with unterminated string starting at line {line} column {column}"
-            ),
-
-            Self::InvalidEscapeSequence { sequence, location } => {
-                write!(f, "Invalid escape sequence '{sequence}' on {location}")
+            Self::UnexpectedCharacter { char, location } => {
+                write!(f, "unexpected character '{char}' at {location}")
             }
-            Self::InvalidFloat { string, location } => write!(
-                f,
-                "Invalid floating point sequence '{string}' on {location}"
-            ),
+            Self::UnterminatedString { location } => {
+                write!(f, "unterminated string starting at {location}")
+            }
+            Self::InvalidEscapeSequence { sequence, location } => {
+                write!(f, "invalid escape sequence '{sequence}' at {location}")
+            }
+            Self::InvalidFloat { string, location } => {
+                write!(f, "invalid float {string} at {location}")
+            }
         }
     }
 }

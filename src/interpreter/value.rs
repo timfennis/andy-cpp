@@ -2,7 +2,7 @@ use crate::interpreter::function::Function;
 use crate::interpreter::int::Int::Int64;
 use crate::interpreter::num::{Number, NumberType};
 use std::collections::VecDeque;
-use std::fmt::{Display, Formatter};
+use std::fmt;
 use std::rc::Rc;
 
 /// Enumerates all the different types of values that exist in the language
@@ -57,8 +57,8 @@ pub enum ValueType {
     Function,
 }
 
-impl Display for ValueType {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for ValueType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Unit => write!(f, "unit"),
             Self::Number(n) => write!(f, "{n}"),
@@ -92,8 +92,8 @@ impl From<&Value> for ValueType {
     }
 }
 
-impl Display for Value {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Unit => write!(f, "()"),
             Self::Number(n) => write!(f, "{n}"),
@@ -107,8 +107,8 @@ impl Display for Value {
     }
 }
 
-impl Display for Sequence {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for Sequence {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Sequence::String(s) => write!(f, "{s}"),
             Sequence::List(vs) => {

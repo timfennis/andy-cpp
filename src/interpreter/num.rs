@@ -1,4 +1,4 @@
-use std::fmt::{Display, Formatter};
+use std::fmt;
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
 use num::complex::Complex64;
@@ -168,10 +168,11 @@ impl Div for Number {
     fn div(self, rhs: Self) -> Self::Output {
         match (self, rhs) {
             (Self::Int(ref p1), Self::Int(p2)) => {
-                if p2.is_zero() {
+                if p1.is_zero() && p2.is_zero() {
+                    return Self::Float(f64::NAN);
+                } else if p2.is_zero() {
                     return Self::Float(f64::INFINITY);
-                }
-                if p1.rem(&p2) == 0i32.into() {
+                } else if p1.rem(&p2) == 0i32.into() {
                     return Self::Int(p1.div(&p2));
                 }
                 BigRational::new(p1.into(), p2.into()).into()
@@ -307,7 +308,7 @@ impl Number {
             (Self::Int(p1), Self::Int(p2)) => Ok(Self::Int(p1.checked_rem_euclid(&p2).ok_or({
                 //TODO move EvaluationError to caller so we can add location
                 EvaluationError::type_error(
-                    "cannot divide by zero".to_string(),
+                    "cannot divide by zero",
                     Location { line: 0, column: 0 },
                     Location { line: 0, column: 0 },
                 )
@@ -338,7 +339,7 @@ impl Number {
                     Self::Rational(Box::new(BigRational::from(p1).pow(p2)))
                 } else {
                     Self::Int(p1.checked_pow(&p2).ok_or(EvaluationError::type_error(
-                        "integer overflow".to_string(),
+                        "integer overflow",
                         Location { line: 0, column: 0 },
                         Location { line: 0, column: 0 },
                     ))?)
@@ -369,7 +370,7 @@ impl Number {
                     }
                 }
                 return Err(EvaluationError::type_error(
-                    "Cannot raise a rational to the power of another rational, try converting the operands to floats".to_string(),
+                    "Cannot raise a rational to the power of another rational, try converting the operands to floats",
                     Location { line: 0 , column : 0 },
                     Location { line: 0 ,column : 0 }
                 ));
@@ -397,6 +398,8 @@ impl Number {
         })
     }
 
+    /// # Errors
+    /// Returns an `EvaluationError` (for now) if you try to convert Inf or NaN to an int
     pub fn to_int_lossy(&self) -> Result<Self, EvaluationError> {
         let n = match self {
             Number::Int(i) => Self::Int(i.clone()),
@@ -406,7 +409,7 @@ impl Number {
                 } else {
                     // TODO FIX line 0 column 0
                     return Err(EvaluationError::type_error(
-                        format!("cannot convert {f} to int"),
+                        &format!("cannot convert {f} to int"),
                         Location { line: 0, column: 0 },
                         Location { line: 0, column: 0 },
                     ));
@@ -415,7 +418,7 @@ impl Number {
             Number::Rational(r) => Self::Int(Int::BigInt(r.to_integer()).simplify()),
             Number::Complex(c) => {
                 return Err(EvaluationError::type_error(
-                    format!("cannot convert complex number {c} to int"),
+                    &format!("cannot convert complex number {c} to int"),
                     Location { line: 0, column: 0 },
                     Location { line: 0, column: 0 },
                 ));
@@ -464,8 +467,8 @@ impl TryFrom<Number> for usize {
     }
 }
 
-impl Display for Number {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for Number {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Int(i) => write!(f, "{i}"),
             Self::Float(ff) if ff.fract() == 0.0 => write!(f, "{ff:.1}"),
@@ -502,8 +505,8 @@ impl From<&Number> for NumberType {
     }
 }
 
-impl Display for NumberType {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for NumberType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Int => write!(f, "int"),
             Self::Float => write!(f, "float"),

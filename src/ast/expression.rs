@@ -115,7 +115,7 @@ impl ExpressionLocation {
         match &self.expression {
             Expression::Identifier(i) => Ok(i.clone()),
             _ => Err(EvaluationError::syntax_error(
-                String::from("expected identifier"),
+                "expected identifier",
                 self.start,
                 self.end,
             )),
@@ -133,7 +133,7 @@ impl ExpressionLocation {
                 .map(Self::try_into_identifier)
                 .collect::<Result<Vec<String>, EvaluationError>>(),
             _ => Err(EvaluationError::syntax_error(
-                String::from("expected a parameter list"),
+                "expected a parameter list",
                 self.start,
                 self.end,
             )),

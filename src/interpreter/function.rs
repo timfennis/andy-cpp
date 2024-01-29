@@ -1,4 +1,4 @@
-use std::fmt::{Debug, Display, Formatter};
+use std::fmt;
 use std::rc::Rc;
 
 use crate::ast::ExpressionLocation;
@@ -8,7 +8,7 @@ use crate::interpreter::value::{Value, ValueType};
 
 pub type FunctionResult = Result<Value, FunctionError>;
 
-pub trait Function: Debug {
+pub trait Function: fmt::Debug {
     /// # Errors
     /// For now it'll return evaluation errors if the there are any during the execution of the function body
     fn call(&self, args: &[Value], env: &EnvironmentRef) -> FunctionResult;
@@ -40,8 +40,8 @@ impl Function for Closure {
     }
 }
 
-impl Debug for Closure {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for Closure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self.parameters)
     }
 }
@@ -72,8 +72,8 @@ impl FunctionError {
         ))
     }
 }
-impl Display for FunctionError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for FunctionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             FunctionError::Return(_) => write!(f, "return is not an error"),
             FunctionError::EvaluationError(e) => write!(f, "{}", *e),

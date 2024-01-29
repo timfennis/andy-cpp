@@ -4,7 +4,7 @@ use num::complex::Complex64;
 use num::traits::CheckedEuclid;
 use num::FromPrimitive;
 use num::{BigInt, BigRational, Signed, ToPrimitive, Zero};
-use std::fmt::{Display, Formatter};
+use std::fmt;
 use std::ops;
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
@@ -39,6 +39,7 @@ impl Int {
         }
     }
 
+    #[must_use]
     pub fn simplify(self) -> Self {
         match self {
             i @ Int::Int64(_) => i,
@@ -190,7 +191,7 @@ impl TryFrom<f64> for Int {
     fn try_from(value: f64) -> Result<Self, Self::Error> {
         let bit_int = BigInt::from_f64(value).ok_or_else(|| {
             EvaluationError::type_error(
-                format!("cannot convert {value:?} to int"),
+                &format!("cannot convert {value:?} to int"),
                 Location { line: 0, column: 0 },
                 Location { line: 0, column: 0 },
             )
@@ -241,7 +242,7 @@ impl TryFrom<Int> for i32 {
                     p2
                 } else {
                     return Err(EvaluationError::type_error(
-                        format!("cannot convert {p2} to 32-bit signed integer"),
+                        &format!("cannot convert {p2} to 32-bit signed integer"),
                         Location { line: 0, column: 0 },
                         Location { line: 0, column: 0 },
                     ));
@@ -252,7 +253,7 @@ impl TryFrom<Int> for i32 {
                     p2
                 } else {
                     return Err(EvaluationError::type_error(
-                        format!("cannot convert {p2} to 32-bit signed integer"),
+                        &format!("cannot convert {p2} to 32-bit signed integer"),
                         Location { line: 0, column: 0 },
                         Location { line: 0, column: 0 },
                     ));
@@ -262,8 +263,8 @@ impl TryFrom<Int> for i32 {
     }
 }
 
-impl Display for Int {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for Int {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Int64(i) => write!(f, "{i}"),
             Self::BigInt(b) => write!(f, "{b}"),

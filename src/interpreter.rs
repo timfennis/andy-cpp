@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::fmt::{Display, Formatter};
+use std::fmt;
 use std::rc::Rc;
 
 use crate::ast::ExpressionLocation;
@@ -91,8 +91,8 @@ impl From<EvaluationError> for Error {
     }
 }
 
-impl Display for Error {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Lexer { cause } => write!(f, "Lexer error: {cause}"),
             Self::Parser { cause } => write!(f, "Parser error: {cause}"),

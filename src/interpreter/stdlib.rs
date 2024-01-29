@@ -42,7 +42,7 @@ pub fn bind_to_environment(env: &mut Environment) {
                         }
                         Ok(())
                     })
-                    .map_err(|err| FunctionError::IOError(err))?;
+                    .map_err(FunctionError::IOError)?;
                 Ok(Value::Unit)
             },
         })),
@@ -56,7 +56,7 @@ pub fn bind_to_environment(env: &mut Environment) {
                     .map_err(|err| {
                         // FIXME: fix location
                         FunctionError::EvaluationError(Box::new(EvaluationError::io_error(
-                            err,
+                            &err,
                             Location { line: 0, column: 0 },
                             Location { line: 0, column: 0 },
                         )))

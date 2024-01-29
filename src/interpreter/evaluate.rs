@@ -32,14 +32,14 @@ pub(crate) fn evaluate_expression(
                 (Value::Bool(b), UnaryOperator::Bang) => Value::Bool(!b),
                 (_, UnaryOperator::Bang) => {
                     return Err(EvaluationError::type_error(
-                        "the '!' operator cannot be applied to this type".to_string(),
+                        "the '!' operator cannot be applied to this type",
                         start,
                         end,
                     ));
                 }
                 (_, UnaryOperator::Neg) => {
                     return Err(EvaluationError::type_error(
-                        "this type cannot be negated".to_string(),
+                        "this type cannot be negated",
                         start,
                         end,
                     ));
@@ -76,7 +76,7 @@ pub(crate) fn evaluate_expression(
         } => {
             if !environment.borrow().contains(identifier) {
                 return Err(EvaluationError::syntax_error(
-                    format!("undefined variable {identifier}"),
+                    &format!("undefined variable {identifier}"),
                     start,
                     end,
                 ));
@@ -111,7 +111,7 @@ pub(crate) fn evaluate_expression(
                 (Value::Bool(false), None) => Value::Unit,
                 (value, _) => {
                     return Err(EvaluationError::type_error(
-                        format!(
+                        &format!(
                             "mismatched types: expected bool, found {}",
                             ValueType::from(&value)
                         ),
@@ -142,7 +142,7 @@ pub(crate) fn evaluate_expression(
                 (LogicalOperator::Or, Value::Bool(true)) => Value::Bool(true),
                 (LogicalOperator::And | LogicalOperator::Or, value) => {
                     return Err(EvaluationError::type_error(
-                        format!(
+                        &format!(
                             "Cannot apply logical operator to non bool value {}",
                             ValueType::from(&value)
                         ),
@@ -165,7 +165,7 @@ pub(crate) fn evaluate_expression(
                     break;
                 } else {
                     return Err(EvaluationError::type_error(
-                        "Expression in a while structure must return a bool".to_string(),
+                        "Expression in a while structure must return a bool",
                         start,
                         end,
                     ));
@@ -195,14 +195,14 @@ pub(crate) fn evaluate_expression(
                         function.clone()
                     } else {
                         return Err(EvaluationError::syntax_error(
-                            format!("{name} is not a function"),
+                            &format!("{name} is not a function"),
                             expression_location.start,
                             expression_location.end,
                         ));
                     }
                 } else {
                     return Err(EvaluationError::syntax_error(
-                        format!("undefined function {name}"),
+                        &format!("undefined function {name}"),
                         expression_location.start,
                         expression_location.end,
                     ));
@@ -213,7 +213,7 @@ pub(crate) fn evaluate_expression(
                     function.clone()
                 } else {
                     return Err(EvaluationError::syntax_error(
-                        format!("{} is not callable", ValueType::from(&value)),
+                        &format!("{} is not callable", ValueType::from(&value)),
                         // FIXME: this is the location of the expression and not the parentheses that make this a function call
                         expression_location.start,
                         expression_location.end,
@@ -257,7 +257,7 @@ pub(crate) fn evaluate_expression(
                 value.borrow().clone()
             } else {
                 return Err(EvaluationError::syntax_error(
-                    format!("undefined variable {identifier}"),
+                    &format!("undefined variable {identifier}"),
                     expression_location.start,
                     expression_location.end,
                 ));
@@ -274,7 +274,7 @@ pub(crate) fn evaluate_expression(
                     let add_type = ValueType::from(&v);
                     let last_type = last_type.unwrap();
                     return Err(EvaluationError::type_error(
-                        format!("cannot add {add_type} to a list of {last_type}",),
+                        &format!("cannot add {add_type} to a list of {last_type}",),
                         expression.start,
                         expression.end,
                     ));
@@ -363,7 +363,7 @@ fn apply_operator(
             Value::Sequence(Sequence::String(Rc::new(a.repeat(
                 usize::try_from(b).map_err(|_err| {
                     EvaluationError::type_error(
-                        "can't multiply a string with this value".to_string(),
+                        "can't multiply a string with this value",
                         // TODO: somehow figure out the line number, or defer creation of this error to another location
                         Location { line: 0, column: 0 },
                         Location { line: 0, column: 0 },
@@ -373,9 +373,9 @@ fn apply_operator(
         }
         (Value::Number(a), BinaryOperator::Multiply, Value::Sequence(Sequence::String(b))) => {
             Value::Sequence(Sequence::String(Rc::new(b.repeat(
-                usize::try_from(a).map_err(|_| {
+                usize::try_from(a).map_err(|()| {
                     EvaluationError::type_error(
-                        format!("can't multiply a string with this value"),
+                        "can't multiply a string with this value",
                         // TODO: somehow figure out the line number, or defer creation of this error to another location
                         Location { line: 0, column: 0 },
                         Location { line: 0, column: 0 },
@@ -399,7 +399,7 @@ fn apply_operator(
                 }
                 _ => {
                     return Err(EvaluationError::type_error(
-                        format!("cannot apply operator {operator:?} to string and string"),
+                        &format!("cannot apply operator {operator:?} to string and string"),
                         Location { line: 0, column: 0 },
                         Location { line: 0, column: 0 },
                     ));
@@ -409,7 +409,7 @@ fn apply_operator(
 
         (a, _op, b) => {
             return Err(EvaluationError::type_error(
-                format!(
+                &format!(
                     "cannot apply operator {operator:?} to {} and {}",
                     ValueType::from(&a),
                     ValueType::from(&b)
@@ -448,14 +448,16 @@ pub struct EvaluationError {
 }
 
 impl EvaluationError {
-    pub fn type_error(message: String, start: Location, end: Location) -> Self {
+    #[must_use]
+    pub fn type_error(message: &str, start: Location, end: Location) -> Self {
         Self {
             text: format!("Type error: {message}"),
             start,
             end,
         }
     }
-    pub fn syntax_error(message: String, start: Location, end: Location) -> Self {
+    #[must_use]
+    pub fn syntax_error(message: &str, start: Location, end: Location) -> Self {
         Self {
             text: format!("Syntax error: {message}"),
             start,
@@ -463,7 +465,8 @@ impl EvaluationError {
         }
     }
 
-    pub fn io_error(err: std::io::Error, start: Location, end: Location) -> Self {
+    #[must_use]
+    pub fn io_error(err: &std::io::Error, start: Location, end: Location) -> Self {
         Self {
             text: format!("IO error: {err}"),
             start,
