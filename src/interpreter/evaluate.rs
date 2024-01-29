@@ -181,43 +181,51 @@ pub(crate) fn evaluate_expression(
         Expression::Float64Literal(n) => Value::Number(Number::Float(*n)),
         Expression::ComplexLiteral(n) => Value::Number(Number::Complex(*n)),
         Expression::Call {
-            function: function_identifier,
+            function,
             arguments,
         } => {
-            // TODO: Maybe check if the function exists before we evaluate the arguments.
-            //       the reason we're doing it in this order is to not have to fight the borrow checker
-            let mut evaluated_args = Vec::new();
+            let (start, end) = (function.start, function.end);
 
-            let Expression::Tuple { ref values } = arguments.expression else {
-                unreachable!(
-                    "the parser must guarantee that argument to a function call is a tuple"
-                );
-            };
-
-            for argument in values {
-                evaluated_args.push(evaluate_expression(argument, environment)?);
-            }
-
-            let (start, end) = (function_identifier.start, function_identifier.end);
-            let function_name = function_identifier.try_into_identifier()?;
-            let function = if let Some(refcell) = environment.borrow().get(&function_name) {
-                let value = &*refcell.borrow();
-                if let Value::Function(function) = value {
-                    function.clone()
+            // The Expression in `function` must either be an identifier in which case it will be looked up in the
+            // environment, or it must be some expression that evaluates to a function.
+            let function = if let Expression::Identifier(name) = &function.expression {
+                if let Some(refcell) = environment.borrow().get(name) {
+                    let value = &*refcell.borrow();
+                    if let Value::Function(function) = value {
+                        function.clone()
+                    } else {
+                        return Err(EvaluationError::syntax_error(
+                            format!("{name} is not a function"),
+                            expression_location.start,
+                            expression_location.end,
+                        ));
+                    }
                 } else {
                     return Err(EvaluationError::syntax_error(
-                        format!("undefined function {function_name}"),
+                        format!("undefined function {name}"),
                         expression_location.start,
                         expression_location.end,
                     ));
                 }
             } else {
-                return Err(EvaluationError::syntax_error(
-                    format!("undefined function {function_name}"),
-                    expression_location.start,
-                    expression_location.end,
-                ));
+                let value = evaluate_expression(function, environment)?;
+                if let Value::Function(function) = value {
+                    function.clone()
+                } else {
+                    return Err(EvaluationError::syntax_error(
+                        format!("{} is not callable", ValueType::from(&value)),
+                        // FIXME: this is the location of the expression and not the parentheses that make this a function call
+                        expression_location.start,
+                        expression_location.end,
+                    ));
+                }
             };
+
+            let mut evaluated_args = Vec::new();
+
+            for argument in arguments {
+                evaluated_args.push(evaluate_expression(argument, environment)?);
+            }
 
             match function.call(&evaluated_args, environment) {
                 Err(FunctionError::Return(value)) | Ok(value) => value,

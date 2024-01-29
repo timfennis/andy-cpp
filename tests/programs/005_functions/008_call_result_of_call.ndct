@@ -1,0 +1,12 @@
+--PROGRAM--
+fn say_hi() {
+    print("hi");
+}
+
+fn create_hi() {
+    say_hi
+};
+
+create_hi()();
+--EXPECT--
+hi

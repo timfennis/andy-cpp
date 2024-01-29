@@ -347,12 +347,16 @@ impl Parser {
         let mut expr = self.primary()?;
 
         while self.consume_token_if(&[Token::LeftParentheses]).is_some() {
-            let arguments = self.tuple(expr.start)?;
+            let Expression::Tuple { values: arguments } = self.tuple(expr.start)?.expression else {
+                unreachable!("self.tuple() must always produce a tuple");
+            };
+
             let (start, end) = (expr.start, expr.end);
+
             expr = ExpressionLocation {
                 expression: Expression::Call {
                     function: Box::new(expr),
-                    arguments: Box::new(arguments),
+                    arguments,
                 },
                 start,
                 end,

@@ -76,8 +76,9 @@ pub enum Expression {
         loop_body: Box<ExpressionLocation>,
     },
     Call {
-        function: Box<ExpressionLocation>, // Name of the function
-        arguments: Box<ExpressionLocation>,
+        /// The function to call, could be an identifier, or any expression that produces a function as its value
+        function: Box<ExpressionLocation>,
+        arguments: Vec<ExpressionLocation>,
     },
     Tuple {
         values: Vec<ExpressionLocation>,
