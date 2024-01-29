@@ -213,7 +213,6 @@ impl Parser {
     /************************************************* PARSER *************************************************/
 
     fn expression_or_statement(&mut self) -> Result<ExpressionLocation, Error> {
-        // match print statements (which is a temporary construct until we add functions)
         let mut expression = self.variable_declaration_or_assignment()?;
 
         if self.match_token(&[Token::Semicolon]).is_some() {
@@ -352,8 +351,7 @@ impl Parser {
             let (start, end) = (expr.start, expr.end);
             expr = ExpressionLocation {
                 expression: Expression::Call {
-                    //TODO: check if expr has the correct type (Expression::Identifier)
-                    function_identifier: Box::new(expr),
+                    function: Box::new(expr),
                     arguments: Box::new(arguments),
                 },
                 start,

@@ -3,9 +3,11 @@ use crate::interpreter::evaluate::EvaluationError;
 use crate::lexer::Location;
 use num::complex::Complex64;
 use num::BigInt;
+use std::fmt;
+use std::fmt::Formatter;
 use std::rc::Rc;
 
-#[derive(Debug, PartialEq)]
+#[derive(PartialEq)]
 pub struct ExpressionLocation {
     pub expression: Expression,
     pub start: Location,
@@ -53,9 +55,8 @@ pub enum Expression {
     },
     FunctionDeclaration {
         name: Box<ExpressionLocation>,
-        // TODO this probably not good enough
         arguments: Box<ExpressionLocation>,
-        body: Rc<ExpressionLocation>,
+        body: Rc<ExpressionLocation>, //TODO: we probably made body an rc because Noulith does this, but why?
     },
     Block {
         statements: Vec<ExpressionLocation>,
@@ -75,7 +76,7 @@ pub enum Expression {
         loop_body: Box<ExpressionLocation>,
     },
     Call {
-        function_identifier: Box<ExpressionLocation>, // Name of the function
+        function: Box<ExpressionLocation>, // Name of the function
         arguments: Box<ExpressionLocation>,
     },
     Tuple {
@@ -121,7 +122,7 @@ impl ExpressionLocation {
     }
 
     /// # Errors
-    /// If this expression cannot be converted into an identifier an `EvaluationError::InvalidExpression` will be returned
+    /// If this expression cannot be converted into a tuple (or possibly another type that can be a valid parameter list) an `EvaluationError::InvalidExpression` will be returned
     pub fn try_into_parameters(&self) -> Result<Vec<String>, EvaluationError> {
         match &self.expression {
             Expression::Tuple {
@@ -136,5 +137,11 @@ impl ExpressionLocation {
                 self.end,
             )),
         }
+    }
+}
+
+impl fmt::Debug for ExpressionLocation {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "[{:?} on {}]", self.expression, self.start)
     }
 }

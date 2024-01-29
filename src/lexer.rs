@@ -137,7 +137,6 @@ impl Iterator for Lexer<'_> {
                     let mut buf = String::new();
                     buf.push(char);
 
-                    // TODO: support complex numbers
                     let mut float = false;
                     while let Some(next_char) = self.source.peek_one() {
                         match next_char {
@@ -157,7 +156,12 @@ impl Iterator for Lexer<'_> {
                             'j' | 'i' => {
                                 self.source.next();
 
-                                let num = buf.parse::<f64>().expect("TODO, handle this");
+                                let Ok(num) = buf.parse::<f64>() else {
+                                    return Some(Err(Error::InvalidFloat {
+                                        string: buf,
+                                        location: start,
+                                    }));
+                                };
 
                                 return Some(Ok(TokenLocation {
                                     token: Token::Complex(Complex::new(0.0, num)),
@@ -177,7 +181,7 @@ impl Iterator for Lexer<'_> {
                         } else {
                             return Some(Err(Error::InvalidFloat {
                                 string: buf,
-                                location: self.source.location(),
+                                location: start,
                             }));
                         }
                     } else {

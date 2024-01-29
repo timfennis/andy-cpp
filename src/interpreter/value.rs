@@ -14,7 +14,6 @@ pub enum Value {
     Bool(bool),
     Sequence(Sequence),
     Function(Rc<dyn Function>),
-    // TODO: add structs or classes
 }
 
 #[derive(Debug, Clone, PartialEq)]

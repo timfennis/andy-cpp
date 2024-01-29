@@ -12,9 +12,6 @@ pub type EnvironmentRef = Rc<RefCell<Environment>>;
 
 pub struct RootEnvironment {
     pub output: Box<dyn InterpreterOutput>,
-    // TODO: Global functions should be declared here, allow dead code for now
-    #[allow(dead_code)]
-    values: HashMap<String, Value>,
 }
 
 pub struct Environment {
@@ -27,19 +24,19 @@ impl fmt::Debug for Environment {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "Environment[parent: {:?}, values.len: {}]",
+            "Environment[has_parent: {:?}, values.len(): {}]",
             self.parent.is_some(),
             self.values.len()
         )
     }
 }
 
-// NOTE: this can be used to check if certain environments are dropped
-// impl Drop for Environment {
-//     fn drop(&mut self) {
-//         println!("Dropping {self:?}");
-//     }
-// }
+#[cfg(debug_assertions)]
+impl Drop for Environment {
+    fn drop(&mut self) {
+        eprintln!("dropping {self:?}");
+    }
+}
 
 impl Environment {
     /// # Errors
@@ -64,10 +61,7 @@ impl Environment {
 
     #[must_use]
     pub fn new_with_stdlib(writer: Box<dyn InterpreterOutput>) -> Self {
-        let root = RootEnvironment {
-            output: writer,
-            values: HashMap::default(),
-        };
+        let root = RootEnvironment { output: writer };
 
         let mut env = Self {
             root: Rc::new(RefCell::new(root)),

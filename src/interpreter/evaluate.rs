@@ -181,15 +181,17 @@ pub(crate) fn evaluate_expression(
         Expression::Float64Literal(n) => Value::Number(Number::Float(*n)),
         Expression::ComplexLiteral(n) => Value::Number(Number::Complex(*n)),
         Expression::Call {
-            function_identifier,
+            function: function_identifier,
             arguments,
         } => {
             // TODO: Maybe check if the function exists before we evaluate the arguments.
-            //       the reason we're doing it in this order is to not have to fight the borrowchecker
+            //       the reason we're doing it in this order is to not have to fight the borrow checker
             let mut evaluated_args = Vec::new();
 
             let Expression::Tuple { ref values } = arguments.expression else {
-                panic!("the parser must guarantee that arguments is a tuple");
+                unreachable!(
+                    "the parser must guarantee that argument to a function call is a tuple"
+                );
             };
 
             for argument in values {
