@@ -1,0 +1,4 @@
+--PROGRAM--
+return 5;
+--EXPECT-ERROR--
+unexpected return statement outside of function body

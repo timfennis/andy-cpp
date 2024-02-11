@@ -39,7 +39,7 @@ cartesian_product := [ x, y | x <- xs, y <- ys ]
 
 ### General
 
-* [ ] turn `print` into a function
+* [x] turn `print` into a function
 * [ ] `map`, `reduce`, `foldl` all these functions
 
 ### Math

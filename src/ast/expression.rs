@@ -21,6 +21,7 @@ pub enum Lvalue {
 #[derive(Debug, PartialEq)]
 pub enum Expression {
     // Literals
+    UnitLiteral,
     BoolLiteral(bool),
     StringLiteral(Rc<String>),
     Int64Literal(i64),
@@ -85,6 +86,9 @@ pub enum Expression {
     },
     List {
         values: Vec<ExpressionLocation>,
+    },
+    Return {
+        value: Box<ExpressionLocation>,
     },
 }
 

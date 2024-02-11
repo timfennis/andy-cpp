@@ -5,8 +5,8 @@ use num::complex::Complex64;
 use num::{BigInt, BigRational, Complex, FromPrimitive, ToPrimitive};
 
 use crate::interpreter::environment::EnvironmentRef;
-use crate::interpreter::evaluate::EvaluationError;
-use crate::interpreter::function::{Function, FunctionResult};
+use crate::interpreter::evaluate::{EvaluationError, EvaluationResult};
+use crate::interpreter::function::Function;
 use crate::interpreter::int::Int;
 use crate::interpreter::value::Value;
 use crate::lexer::Location;
@@ -246,7 +246,6 @@ impl Mul for Number {
             }
             (Self::Rational(p1), Self::Complex(p2)) => {
                 Self::Complex(Complex::from(p1.to_f64().unwrap_or(f64::NAN)).div(p2))
-                //TODO: Check if this is logical
             }
 
             // Complex vs Other
@@ -369,6 +368,7 @@ impl Number {
                         return Ok(Self::Rational(Box::new(p1.pow(p2))));
                     }
                 }
+
                 return Err(EvaluationError::type_error(
                     "Cannot raise a rational to the power of another rational, try converting the operands to floats",
                     Location { line: 0 , column : 0 },
@@ -386,6 +386,7 @@ impl Number {
             (Self::Float(p1), Self::Int(p2)) => Self::Float(p1.powf(f64::from(p2))),
             (Self::Float(p1), Self::Rational(p2)) => Self::Float(p1.powf(rational_to_float(&p2))),
 
+            // Complex vs others
             (Self::Complex(p1), Self::Complex(p2)) => Self::Complex(p1.powc(p2)),
             (Self::Complex(p1), Self::Float(p2)) => Self::Complex(p1.powc(Complex::from(p2))),
             (Self::Complex(p1), Self::Int(p2)) => {
@@ -523,7 +524,7 @@ pub struct SingleNumberFunction {
 }
 
 impl Function for SingleNumberFunction {
-    fn call(&self, args: &[Value], _env: &EnvironmentRef) -> FunctionResult {
+    fn call(&self, args: &[Value], _env: &EnvironmentRef) -> EvaluationResult {
         if args.len() == 1 {
             let arg = args.first().expect("guaranteed to be 1");
 

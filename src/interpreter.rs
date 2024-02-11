@@ -5,6 +5,7 @@ use std::rc::Rc;
 use crate::ast::ExpressionLocation;
 use crate::interpreter::environment::{Environment, EnvironmentRef, InterpreterOutput};
 use crate::interpreter::evaluate::{evaluate_expression, EvaluationError};
+use crate::interpreter::function::FunctionCarrier;
 use crate::interpreter::value::Value;
 use crate::lexer::{Lexer, TokenLocation};
 
@@ -48,7 +49,13 @@ impl Interpreter {
         }
 
         let mut parser = crate::ast::Parser::from_tokens(tokens);
+
         let statements = parser.parse()?;
+        if debug {
+            for s in &statements {
+                dbg!(s);
+            }
+        }
 
         let final_value = self.interpret(statements.into_iter())?;
 
@@ -60,7 +67,18 @@ impl Interpreter {
     ) -> Result<Value, EvaluationError> {
         let mut value = Value::Unit;
         for expr in expressions {
-            value = evaluate_expression(&expr, &mut self.environment)?;
+            match evaluate_expression(&expr, &mut self.environment) {
+                Ok(val) => value = val,
+                Err(FunctionCarrier::Return(_)) => {
+                    return Err(EvaluationError::syntax_error(
+                        "unexpected return statement outside of function body",
+                        expr.start,
+                        expr.end,
+                    ))
+                }
+                Err(FunctionCarrier::EvaluationError(e)) => return Err(e),
+                Err(_) => todo!("not implemented yet, or unreachable"),
+            }
         }
         Ok(value)
     }

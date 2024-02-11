@@ -31,12 +31,12 @@ impl fmt::Debug for Environment {
     }
 }
 
-#[cfg(debug_assertions)]
-impl Drop for Environment {
-    fn drop(&mut self) {
-        eprintln!("dropping {self:?}");
-    }
-}
+// #[cfg(debug_assertions)]
+// impl Drop for Environment {
+//     fn drop(&mut self) {
+//         eprintln!("dropping {self:?}");
+//     }
+// }
 
 impl Environment {
     /// # Errors
@@ -55,7 +55,6 @@ impl Environment {
         let root = self.root.clone();
         let root = root.borrow();
         let output = root.output.get_output();
-        //TODO this clone is probably a very bad idea and should be removed but CBA right now
         output.cloned()
     }
 

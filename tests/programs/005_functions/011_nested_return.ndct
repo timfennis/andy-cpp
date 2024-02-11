@@ -1,0 +1,12 @@
+--PROGRAM--
+fn foo(n) {
+    fn bar() {
+        return 6;
+    }
+    x := bar();
+    return x + 1;
+    false
+}
+print(foo(10));
+--EXPECT--
+7

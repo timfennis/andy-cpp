@@ -1,0 +1,15 @@
+--PROGRAM--
+// NOTE: this is definitely a weird one that should probably generate a type error in the future
+fn is_positive(n) {
+    return if n >= 0 {
+        true
+    };
+}
+
+print(is_positive(3));
+print(is_positive(0));
+print(is_positive(-5));
+--EXPECT--
+true
+true
+()

@@ -9,17 +9,19 @@ use crate::ast::{
     BinaryOperator, Expression, ExpressionLocation, LogicalOperator, Lvalue, UnaryOperator,
 };
 use crate::interpreter::environment::{Environment, EnvironmentRef};
-use crate::interpreter::function::{Closure, FunctionError};
+use crate::interpreter::function::{Closure, FunctionCarrier};
 use crate::interpreter::int::Int;
 use crate::interpreter::num::Number;
 use crate::interpreter::value::{Sequence, Value, ValueType};
 use crate::lexer::Location;
 
+pub type EvaluationResult = Result<Value, FunctionCarrier>;
+
 #[allow(clippy::too_many_lines)]
 pub(crate) fn evaluate_expression(
     expression_location: &ExpressionLocation,
     environment: &mut EnvironmentRef,
-) -> Result<Value, EvaluationError> {
+) -> EvaluationResult {
     let (start, end) = (expression_location.start, expression_location.end);
     let literal: Value = match &expression_location.expression {
         Expression::Unary {
@@ -35,14 +37,16 @@ pub(crate) fn evaluate_expression(
                         "the '!' operator cannot be applied to this type",
                         start,
                         end,
-                    ));
+                    )
+                    .into());
                 }
                 (_, UnaryOperator::Neg) => {
                     return Err(EvaluationError::type_error(
                         "this type cannot be negated",
                         start,
                         end,
-                    ));
+                    )
+                    .into());
                 }
             }
         }
@@ -79,7 +83,8 @@ pub(crate) fn evaluate_expression(
                     &format!("undefined variable {identifier}"),
                     start,
                     end,
-                ));
+                )
+                .into());
             }
             let value = evaluate_expression(value, environment)?;
             environment
@@ -117,7 +122,8 @@ pub(crate) fn evaluate_expression(
                         ),
                         start,
                         end,
-                    ))
+                    )
+                    .into())
                 }
             }
         }
@@ -148,7 +154,8 @@ pub(crate) fn evaluate_expression(
                         ),
                         start,
                         end,
-                    ))
+                    )
+                    .into())
                 }
             }
         }
@@ -168,7 +175,8 @@ pub(crate) fn evaluate_expression(
                         "Expression in a while structure must return a bool",
                         start,
                         end,
-                    ));
+                    )
+                    .into());
                 }
             }
             drop(local_scope);
@@ -180,12 +188,11 @@ pub(crate) fn evaluate_expression(
         Expression::BigIntLiteral(n) => Value::Number(Number::Int(Int::BigInt(n.clone()))),
         Expression::Float64Literal(n) => Value::Number(Number::Float(*n)),
         Expression::ComplexLiteral(n) => Value::Number(Number::Complex(*n)),
+        Expression::UnitLiteral => Value::Unit,
         Expression::Call {
             function,
             arguments,
         } => {
-            let (start, end) = (function.start, function.end);
-
             // The Expression in `function` must either be an identifier in which case it will be looked up in the
             // environment, or it must be some expression that evaluates to a function.
             let function = if let Expression::Identifier(name) = &function.expression {
@@ -198,14 +205,16 @@ pub(crate) fn evaluate_expression(
                             &format!("{name} is not a function"),
                             expression_location.start,
                             expression_location.end,
-                        ));
+                        )
+                        .into());
                     }
                 } else {
                     return Err(EvaluationError::syntax_error(
                         &format!("undefined function {name}"),
                         expression_location.start,
                         expression_location.end,
-                    ));
+                    )
+                    .into());
                 }
             } else {
                 let value = evaluate_expression(function, environment)?;
@@ -217,7 +226,8 @@ pub(crate) fn evaluate_expression(
                         // FIXME: this is the location of the expression and not the parentheses that make this a function call
                         expression_location.start,
                         expression_location.end,
-                    ));
+                    )
+                    .into());
                 }
             };
 
@@ -227,10 +237,7 @@ pub(crate) fn evaluate_expression(
                 evaluated_args.push(evaluate_expression(argument, environment)?);
             }
 
-            match function.call(&evaluated_args, environment) {
-                Err(FunctionError::Return(value)) | Ok(value) => value,
-                Err(err) => return Err(into_evaluation_error(err, start, end)),
-            }
+            return function.call(&evaluated_args, environment);
         }
         Expression::FunctionDeclaration {
             arguments,
@@ -260,7 +267,8 @@ pub(crate) fn evaluate_expression(
                     &format!("undefined variable {identifier}"),
                     expression_location.start,
                     expression_location.end,
-                ));
+                )
+                .into());
             }
         }
         Expression::List { values } => {
@@ -277,7 +285,8 @@ pub(crate) fn evaluate_expression(
                         &format!("cannot add {add_type} to a list of {last_type}",),
                         expression.start,
                         expression.end,
-                    ));
+                    )
+                    .into());
                 }
                 values_out.push_back(v);
             }
@@ -325,6 +334,12 @@ pub(crate) fn evaluate_expression(
             }
 
             Value::Unit
+        }
+        Expression::Return { value } => {
+            return Err(FunctionCarrier::Return(evaluate_expression(
+                value,
+                environment,
+            )?));
         }
     };
 
@@ -421,23 +436,6 @@ fn apply_operator(
     };
 
     Ok(literal)
-}
-
-fn into_evaluation_error(
-    fun_err: FunctionError,
-    start: Location,
-    end: Location,
-) -> EvaluationError {
-    if let FunctionError::EvaluationError(e) = fun_err {
-        return *e;
-    }
-
-    EvaluationError {
-        // TODO: does it make sense to call this a function error
-        text: format!("{fun_err}"),
-        start,
-        end,
-    }
 }
 
 pub struct EvaluationError {

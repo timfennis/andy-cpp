@@ -6,8 +6,8 @@ use std::rc::Rc;
 use num::{BigInt, ToPrimitive};
 
 use crate::interpreter::environment::{Environment, EnvironmentRef};
-use crate::interpreter::evaluate::EvaluationError;
-use crate::interpreter::function::{Function, FunctionError, FunctionResult};
+use crate::interpreter::evaluate::{EvaluationError, EvaluationResult};
+use crate::interpreter::function::{Function, FunctionCarrier};
 use crate::interpreter::int::Int;
 use crate::interpreter::num::{Number, SingleNumberFunction};
 use crate::interpreter::value::{Sequence, Value, ValueType};
@@ -15,11 +15,11 @@ use crate::lexer::Location;
 
 #[derive(Debug)]
 struct GenericFunction {
-    function: fn(&[Value], &EnvironmentRef) -> FunctionResult,
+    function: fn(&[Value], &EnvironmentRef) -> EvaluationResult,
 }
 
 impl Function for GenericFunction {
-    fn call(&self, args: &[Value], env: &EnvironmentRef) -> FunctionResult {
+    fn call(&self, args: &[Value], env: &EnvironmentRef) -> EvaluationResult {
         (self.function)(args, env)
     }
 }
@@ -42,7 +42,7 @@ pub fn bind_to_environment(env: &mut Environment) {
                         }
                         Ok(())
                     })
-                    .map_err(FunctionError::IOError)?;
+                    .map_err(FunctionCarrier::IOError)?;
                 Ok(Value::Unit)
             },
         })),
@@ -55,17 +55,17 @@ pub fn bind_to_environment(env: &mut Environment) {
                     .map(|contents| Value::Sequence(Sequence::String(Rc::new(contents))))
                     .map_err(|err| {
                         // FIXME: fix location
-                        FunctionError::EvaluationError(Box::new(EvaluationError::io_error(
+                        FunctionCarrier::EvaluationError(EvaluationError::io_error(
                             &err,
                             Location { line: 0, column: 0 },
                             Location { line: 0, column: 0 },
-                        )))
+                        ))
                     }),
-                [value] => Err(FunctionError::argument_type_error(
+                [value] => Err(FunctionCarrier::argument_type_error(
                     &ValueType::String,
                     &ValueType::from(value),
                 )),
-                args => Err(FunctionError::argument_count_error(1, args.len())),
+                args => Err(FunctionCarrier::argument_count_error(1, args.len())),
             },
         })),
     );
@@ -76,16 +76,16 @@ pub fn bind_to_environment(env: &mut Environment) {
                 [Value::Number(n)] => Ok(Value::Number(n.to_int_lossy()?)),
                 [Value::Sequence(Sequence::String(s))] => {
                     let bi = s.parse::<BigInt>().map_err(|err| {
-                        FunctionError::ArgumentError(format!(
+                        FunctionCarrier::ArgumentError(format!(
                             "{s} cannot be converted into an integer because \"{err}\""
                         ))
                     })?;
                     Ok(Value::Number(Number::Int(Int::BigInt(bi).simplify())))
                 }
-                [single_value] => Err(FunctionError::ArgumentError(format!(
+                [single_value] => Err(FunctionCarrier::ArgumentError(format!(
                     "cannot convert {single_value} to string"
                 ))),
-                vals => Err(FunctionError::argument_count_error(1, vals.len())),
+                vals => Err(FunctionCarrier::argument_count_error(1, vals.len())),
             },
         })),
     );

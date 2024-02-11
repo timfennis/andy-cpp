@@ -68,6 +68,7 @@ fn run_test(path: PathBuf) -> Result<(), std::io::Error> {
     let output = environment
         .get_output()
         .expect("interpreter must have output in test context");
+
     let output = String::from_utf8(output).expect("test output must be valid UTF-8");
 
     // For now let's trim end both result and expect to ensure that any trailing line breaks don't cause issues

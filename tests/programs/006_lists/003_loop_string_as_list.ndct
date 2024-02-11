@@ -1,0 +1,11 @@
+--PROGRAM--
+text := "hello";
+for char in text {
+    print(char);
+}
+--EXPECT--
+h
+e
+l
+l
+o

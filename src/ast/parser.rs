@@ -63,6 +63,8 @@ impl Parser {
         self.tokens.get(self.current)
     }
 
+    /// Returns the current `TokenLocation` if it matches the given `Token` or returns `None` if it does not match.
+    /// It does not consume the current token however, if that's the purpose you can use `consume_token_if`.
     fn match_token(&self, tokens: &[Token]) -> Option<&TokenLocation> {
         for search_token in tokens {
             if self.peek_current_token() == Some(search_token) {
@@ -125,7 +127,7 @@ impl Parser {
     fn require_current_token(&mut self) -> Result<TokenLocation, Error> {
         let token = self
             .current_token_location()
-            .ok_or_else(|| Error::UnexpectedEndOfStream { help_text: String::from("a token was required but an end of stream was found instead (require_current_token)")})?
+            .ok_or_else(|| Error::UnexpectedEndOfStream { help_text: String::from("a token was required but an end of stream was found instead (require_current_token)") })?
             .clone();
         self.advance();
         Ok(token)
@@ -210,7 +212,7 @@ impl Parser {
         }
     }
 
-    /************************************************* PARSER *************************************************/
+    // ---------------------------------------- Recursive Descent Parser ----------------------------------------
 
     fn expression_or_statement(&mut self) -> Result<ExpressionLocation, Error> {
         let mut expression = self.variable_declaration_or_assignment()?;
@@ -428,6 +430,24 @@ impl Parser {
             return self.for_expression();
         } else if self.consume_token_if(&[Token::Fn]).is_some() {
             return self.function_declaration();
+        } else if let Some(return_token_location) = self.consume_token_if(&[Token::Return]) {
+            let expr_loc = if self.match_token(&[Token::Semicolon]).is_some() {
+                Expression::UnitLiteral.to_location(
+                    return_token_location.location,
+                    return_token_location.location,
+                )
+            } else {
+                self.expression()?
+            };
+
+            let end = expr_loc.end;
+
+            let return_expression = Expression::Return {
+                value: Box::new(expr_loc),
+            }
+            .to_location(return_token_location.location, end);
+
+            return Ok(return_expression);
         } else if self.match_token(&[Token::LeftCurlyBracket]).is_some() {
             return self.block();
         }
@@ -629,7 +649,7 @@ impl fmt::Display for Error {
             Self::ExpectedToken {
                 actual_token,
                 expected_tokens: expected_symbols,
-            } =>  write!(
+            } => write!(
                 f,
                 "Unexpected token '{}' expected symbol '{}' on {}",
                 actual_token.token,
