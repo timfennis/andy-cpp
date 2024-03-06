@@ -7,7 +7,7 @@ use crate::interpreter::environment::{Environment, EnvironmentRef, InterpreterOu
 use crate::interpreter::evaluate::{evaluate_expression, EvaluationError};
 use crate::interpreter::function::FunctionCarrier;
 use crate::interpreter::value::Value;
-use crate::lexer::{Lexer, TokenLocation};
+use crate::lexer::{Lexer, Location, TokenLocation};
 
 pub mod environment;
 pub mod evaluate;
@@ -74,10 +74,18 @@ impl Interpreter {
                         "unexpected return statement outside of function body",
                         expr.start,
                         expr.end,
-                    ))
+                    ));
                 }
                 Err(FunctionCarrier::EvaluationError(e)) => return Err(e),
-                Err(_) => todo!("not implemented yet, or unreachable"),
+                Err(FunctionCarrier::ArgumentError(msg)) => {
+                    // TODO: coercing ArgumentError into a EvaluationError in this way is pretty cringe
+                    return Err(EvaluationError::type_error(
+                        &msg,
+                        Location { line: 0, column: 0 },
+                        Location { line: 0, column: 0 },
+                    ));
+                }
+                _ => todo!("unimplemented"),
             }
         }
         Ok(value)
@@ -110,7 +118,7 @@ impl From<EvaluationError> for Error {
 }
 
 impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Lexer { cause } => write!(f, "Lexer error: {cause}"),
             Self::Parser { cause } => write!(f, "Parser error: {cause}"),

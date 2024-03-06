@@ -6,9 +6,9 @@ use num::{BigInt, BigRational, Complex, FromPrimitive, ToPrimitive};
 
 use crate::interpreter::environment::EnvironmentRef;
 use crate::interpreter::evaluate::{EvaluationError, EvaluationResult};
-use crate::interpreter::function::Function;
+use crate::interpreter::function::{Function, FunctionCarrier};
 use crate::interpreter::int::Int;
-use crate::interpreter::value::Value;
+use crate::interpreter::value::{Value, ValueType};
 use crate::lexer::Location;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -24,6 +24,7 @@ impl From<Int> for Number {
         Self::Int(value)
     }
 }
+
 impl From<i32> for Number {
     fn from(value: i32) -> Self {
         Self::Int(value.into())
@@ -371,8 +372,8 @@ impl Number {
 
                 return Err(EvaluationError::type_error(
                     "Cannot raise a rational to the power of another rational, try converting the operands to floats",
-                    Location { line: 0 , column : 0 },
-                    Location { line: 0 ,column : 0 }
+                    Location { line: 0, column: 0 },
+                    Location { line: 0, column: 0 },
                 ));
             }
             (Self::Rational(p1), Self::Float(p2)) => Self::Float(rational_to_float(&p1).powf(p2)),
@@ -483,6 +484,7 @@ impl fmt::Display for Number {
 fn rational_to_float(r: &BigRational) -> f64 {
     r.to_f64().unwrap_or(f64::NAN)
 }
+
 fn rational_to_complex(r: &BigRational) -> Complex<f64> {
     Complex::from(r.to_f64().unwrap_or(f64::NAN))
 }
@@ -524,16 +526,15 @@ pub struct SingleNumberFunction {
 }
 
 impl Function for SingleNumberFunction {
+    // TODO: Noulith takes ownership of a Vec<Value> instead of &[Value] which removes the need to clone but possibly introduces other issues, figure out what we want here.
     fn call(&self, args: &[Value], _env: &EnvironmentRef) -> EvaluationResult {
-        if args.len() == 1 {
-            let arg = args.first().expect("guaranteed to be 1");
-
-            if let Value::Number(num) = arg {
-                // TODO: is this clone wanted and cheap? Probably not
-                return Ok(Value::Number((self.function)(num.clone())));
-            }
+        match args {
+            [Value::Number(num)] => Ok(Value::Number((self.function)(num.clone()))),
+            [v] => Err(FunctionCarrier::argument_type_error(
+                &ValueType::Number(NumberType::Float),
+                &v.value_type(),
+            )),
+            _ => Err(FunctionCarrier::argument_count_error(1, 0)),
         }
-
-        todo!("what to do if we can't apply functions");
     }
 }

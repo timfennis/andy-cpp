@@ -16,6 +16,22 @@ pub enum Value {
     Function(Rc<dyn Function>),
 }
 
+impl Value {
+    pub fn value_type(&self) -> ValueType {
+        match self {
+            Value::Unit => ValueType::Unit,
+            Value::Number(n) => ValueType::Number(n.into()),
+            Value::Bool(_) => ValueType::Bool,
+            Value::Sequence(Sequence::String(_)) => ValueType::String,
+            Value::Sequence(Sequence::List(t)) => {
+                let t = t.front().map(|it| Box::new(ValueType::from(it)));
+                ValueType::List(t)
+            }
+            Value::Function(_) => ValueType::Function,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Sequence {
     String(Rc<String>),
@@ -78,17 +94,7 @@ impl fmt::Display for ValueType {
 
 impl From<&Value> for ValueType {
     fn from(value: &Value) -> Self {
-        match value {
-            Value::Unit => Self::Unit,
-            Value::Number(n) => Self::Number(n.into()),
-            Value::Bool(_) => Self::Bool,
-            Value::Sequence(Sequence::String(_)) => Self::String,
-            Value::Sequence(Sequence::List(t)) => {
-                let t = t.front().map(|it| Box::new(ValueType::from(it)));
-                Self::List(t)
-            }
-            Value::Function(_) => Self::Function,
-        }
+        value.value_type()
     }
 }
 
