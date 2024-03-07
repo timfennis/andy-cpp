@@ -473,8 +473,12 @@ impl fmt::Display for Number {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Int(i) => write!(f, "{i}"),
-            Self::Float(ff) if ff.fract() == 0.0 => write!(f, "{ff:.1}"),
-            Self::Float(ff) => write!(f, "{ff}"),
+            Self::Float(ff) => {
+                let mut buffer = ryu::Buffer::new();
+                write!(f, "{}", buffer.format(*ff))
+            }
+            // Self::Float(ff) if ff.fract() == 0.0 => write!(f, "{ff:.1}"),
+            // Self::Float(ff) => write!(f, "{ff}"),
             Self::Rational(r) => write!(f, "{r}"),
             Self::Complex(r) => write!(f, "{r}"),
         }
