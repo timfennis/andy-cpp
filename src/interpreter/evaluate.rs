@@ -346,24 +346,13 @@ pub(crate) fn evaluate_expression(
             index: index_expr,
         } => {
             let value = evaluate_expression(value_expr, environment)?;
-            let value_type = value.value_type();
+            // let value_type = value.value_type();
             match value {
                 Value::Sequence(sequence) => {
-                    let Value::Number(Number::Int(Int::Int64(index))) =
-                        evaluate_expression(index_expr, environment)?
-                    else {
+                    let index = evaluate_expression(index_expr, environment)?;
+                    let Value::Number(Number::Int(Int::Int64(index))) = index else {
                         return Err(EvaluationError::syntax_error(
-                            &format!("Index must a number but was {value_type}"),
-                            index_expr.start,
-                            index_expr.end,
-                        )
-                        .into());
-                    };
-
-                    let Ok(index) = usize::try_from(index) else {
-                        // TODO: remove this when we start supporting negative indexes
-                        return Err(EvaluationError::syntax_error(
-                            "index must be a valid usize",
+                            &format!("Index must be a int but was {}", index.value_type()),
                             index_expr.start,
                             index_expr.end,
                         )
@@ -372,6 +361,14 @@ pub(crate) fn evaluate_expression(
 
                     match sequence {
                         Sequence::String(string) => {
+                            let index = convert_index(index, string.len()).ok_or_else(|| {
+                                EvaluationError::type_error(
+                                    "cannot convert index to usable offset",
+                                    index_expr.start,
+                                    index_expr.end,
+                                )
+                            })?;
+
                             let Some(char) = string.chars().nth(index) else {
                                 return Err(EvaluationError::out_of_bounds(
                                     index,
@@ -383,6 +380,14 @@ pub(crate) fn evaluate_expression(
                             Value::Sequence(Sequence::String(Rc::new(String::from(char))))
                         }
                         Sequence::List(list) => {
+                            let index = convert_index(index, list.len()).ok_or_else(|| {
+                                EvaluationError::type_error(
+                                    "cannot convert index to usable offset",
+                                    index_expr.start,
+                                    index_expr.end,
+                                )
+                            })?;
+
                             let Some(value) = list.get(index) else {
                                 return Err(EvaluationError::out_of_bounds(
                                     index,
@@ -540,7 +545,7 @@ impl EvaluationError {
     #[must_use]
     pub fn out_of_bounds(index: usize, start: Location, end: Location) -> Self {
         Self {
-            text: format!("Index out of bounds: {index}"),
+            text: format!("Index ({index}) out of bounds"),
             start,
             end,
         }
@@ -570,3 +575,13 @@ impl fmt::Debug for EvaluationError {
 }
 
 impl Error for EvaluationError {}
+
+fn convert_index(index: i64, size: usize) -> Option<usize> {
+    if index.is_negative() {
+        usize::try_from(index.abs())
+            .ok()
+            .and_then(|i| size.checked_sub(i))
+    } else {
+        usize::try_from(index).ok()
+    }
+}

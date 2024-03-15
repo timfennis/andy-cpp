@@ -27,7 +27,7 @@ impl From<Int> for Number {
 
 impl From<i32> for Number {
     fn from(value: i32) -> Self {
-        Self::Int(value.into())
+        Self::Int(Int::from(value))
     }
 }
 
@@ -338,6 +338,7 @@ impl Number {
                     let p2 = i32::try_from(p2)?;
                     Self::Rational(Box::new(BigRational::from(p1).pow(p2)))
                 } else {
+                    //TODO: this error is wrong, if checked_pow fails the number is too large and we should use BigInt instead
                     Self::Int(p1.checked_pow(&p2).ok_or(EvaluationError::type_error(
                         "integer overflow",
                         Location { line: 0, column: 0 },
