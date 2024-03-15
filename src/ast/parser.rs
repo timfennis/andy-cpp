@@ -514,42 +514,54 @@ impl Parser {
     }
 
     fn for_expression(&mut self) -> Result<ExpressionLocation, Error> {
-        let ExpressionLocation {
-            expression: Expression::Identifier(identifier),
-            start,
-            end: _,
-        } = self.identifier()?
-        else {
-            //TODO: clean
-            unreachable!(
-                "cannot happen, but this code should be cleaned up because it's redundant"
-            );
-        };
-
+        let (l_value, l_value_start, _l_value_end) = self.require_lvalue()?;
         self.require_current_token_matches(Token::In)?;
         let sequence = self.expression()?;
         let body = self.block()?;
 
         let end = body.end;
         Ok(Expression::For {
-            l_value: Lvalue::Variable { identifier },
+            l_value,
             sequence: Box::new(sequence),
             loop_body: Box::new(body),
         }
-        .to_location(start, end))
+        .to_location(l_value_start, end))
+    }
+
+    fn require_identifier(&mut self) -> Result<(String, Location, Location), Error> {
+        let identifier_expression = self.primary()?;
+
+        match identifier_expression.expression {
+            Expression::Identifier(identifier) => Ok((
+                identifier,
+                identifier_expression.start,
+                identifier_expression.end,
+            )),
+            _ => Err(Error::ExpectedIdentifier {
+                actual: identifier_expression,
+            }),
+        }
+    }
+
+    fn require_lvalue(&mut self) -> Result<(Lvalue, Location, Location), Error> {
+        let (identifier, start, end) = self.require_identifier()?;
+        Ok((Lvalue::Variable { identifier }, start, end))
     }
 
     fn function_declaration(&mut self) -> Result<ExpressionLocation, Error> {
-        let name = self.identifier()?;
+        let identifier = self.primary()?;
+        let Expression::Identifier(_) = identifier.expression else {
+            return Err(Error::ExpectedIdentifier { actual: identifier });
+        };
 
         let arg_start = self.require_token(&[Token::LeftParentheses])?;
         let argument_list = self.tuple(arg_start)?;
         let body = self.block()?;
 
-        let (start, end) = (name.start, body.end);
+        let (start, end) = (identifier.start, body.end);
         Ok(ExpressionLocation {
             expression: Expression::FunctionDeclaration {
-                name: Box::new(name),
+                name: Box::new(identifier),
                 arguments: Box::new(argument_list),
                 body: Rc::new(body),
             },
@@ -581,25 +593,6 @@ impl Parser {
 
         Ok(Expression::Block { statements }.to_location(start, end))
     }
-
-    fn identifier(&mut self) -> Result<ExpressionLocation, Error> {
-        let token_location = self.require_current_token()?;
-        if let TokenLocation {
-            token: Token::Identifier(ident),
-            location,
-        } = token_location
-        {
-            Ok(ExpressionLocation {
-                expression: Expression::Identifier(ident),
-                start: location,
-                end: location, //TODO LOC: this is incorrect
-            })
-        } else {
-            Err(Error::ExpectedIdentifier {
-                actual_token: token_location,
-            })
-        }
-    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -612,7 +605,7 @@ pub enum Error {
     },
     // TODO this type is incomplete at best
     ExpectedIdentifier {
-        actual_token: TokenLocation,
+        actual: ExpressionLocation,
     },
     ExpectedToken {
         actual_token: TokenLocation,
@@ -639,12 +632,12 @@ impl fmt::Display for Error {
                 token.location
             ),
             Self::ExpectedIdentifier {
-                actual_token // TODO this error case is really shoddy
+                actual
             } => write!(
                 f,
-                "expected identifier got '{}' on {}",
-                actual_token.token,
-                actual_token.location
+                "expected identifier got '{:?}' on {}",
+                actual,
+                actual.start
             ),
             Self::ExpectedToken {
                 actual_token,
