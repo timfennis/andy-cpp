@@ -341,6 +341,71 @@ pub(crate) fn evaluate_expression(
                 environment,
             )?));
         }
+        Expression::Index {
+            value: value_expr,
+            index: index_expr,
+        } => {
+            let value = evaluate_expression(value_expr, environment)?;
+            let value_type = value.value_type();
+            match value {
+                Value::Sequence(sequence) => {
+                    let Value::Number(Number::Int(Int::Int64(index))) =
+                        evaluate_expression(index_expr, environment)?
+                    else {
+                        return Err(EvaluationError::syntax_error(
+                            &format!("Index must a number but was {value_type}"),
+                            index_expr.start,
+                            index_expr.end,
+                        )
+                        .into());
+                    };
+
+                    let Ok(index) = usize::try_from(index) else {
+                        // TODO: remove this when we start supporting negative indexes
+                        return Err(EvaluationError::syntax_error(
+                            "index must be a valid usize",
+                            index_expr.start,
+                            index_expr.end,
+                        )
+                        .into());
+                    };
+
+                    match sequence {
+                        Sequence::String(string) => {
+                            let Some(char) = string.chars().nth(index) else {
+                                return Err(EvaluationError::out_of_bounds(
+                                    index,
+                                    index_expr.start,
+                                    index_expr.end,
+                                )
+                                .into());
+                            };
+                            Value::Sequence(Sequence::String(Rc::new(String::from(char))))
+                        }
+                        Sequence::List(list) => {
+                            let Some(value) = list.get(index) else {
+                                return Err(EvaluationError::out_of_bounds(
+                                    index,
+                                    index_expr.start,
+                                    index_expr.end,
+                                )
+                                .into());
+                            };
+                            value.clone() //TODO remove clone?
+                        }
+                    }
+                }
+                // TODO: improve error handling
+                _ => {
+                    return Err(EvaluationError::type_error(
+                        "cannot index into this type",
+                        value_expr.start,
+                        value_expr.end,
+                    )
+                    .into())
+                }
+            }
+        }
     };
 
     Ok(literal)
@@ -467,6 +532,15 @@ impl EvaluationError {
     pub fn io_error(err: &std::io::Error, start: Location, end: Location) -> Self {
         Self {
             text: format!("IO error: {err}"),
+            start,
+            end,
+        }
+    }
+
+    #[must_use]
+    pub fn out_of_bounds(index: usize, start: Location, end: Location) -> Self {
+        Self {
+            text: format!("Index out of bounds: {index}"),
             start,
             end,
         }

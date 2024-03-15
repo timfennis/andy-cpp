@@ -81,6 +81,10 @@ pub enum Expression {
         function: Box<ExpressionLocation>,
         arguments: Vec<ExpressionLocation>,
     },
+    Index {
+        value: Box<ExpressionLocation>,
+        index: Box<ExpressionLocation>,
+    },
     Tuple {
         values: Vec<ExpressionLocation>,
     },

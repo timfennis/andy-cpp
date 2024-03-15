@@ -341,28 +341,53 @@ impl Parser {
             }
             .to_location(start, end))
         } else {
-            self.call()
+            self.operand()
         }
     }
 
-    fn call(&mut self) -> Result<ExpressionLocation, Error> {
+    fn operand(&mut self) -> Result<ExpressionLocation, Error> {
         let mut expr = self.primary()?;
 
-        while self.consume_token_if(&[Token::LeftParentheses]).is_some() {
-            let Expression::Tuple { values: arguments } = self.tuple(expr.start)?.expression else {
-                unreachable!("self.tuple() must always produce a tuple");
-            };
+        while let Some(current) =
+            self.consume_token_if(&[Token::LeftParentheses, Token::LeftSquareBracket])
+        {
+            match current.token {
+                Token::LeftParentheses => {
+                    let Expression::Tuple { values: arguments } =
+                        self.tuple(expr.start)?.expression
+                    else {
+                        unreachable!("self.tuple() must always produce a tuple");
+                    };
 
-            let (start, end) = (expr.start, expr.end);
+                    let (start, end) = (expr.start, expr.end);
 
-            expr = ExpressionLocation {
-                expression: Expression::Call {
-                    function: Box::new(expr),
-                    arguments,
-                },
-                start,
-                end,
-            };
+                    expr = ExpressionLocation {
+                        expression: Expression::Call {
+                            function: Box::new(expr),
+                            arguments,
+                        },
+                        start,
+                        end,
+                    };
+                }
+                Token::LeftSquareBracket => {
+                    let index_expression = self.expression()?;
+                    let end_token =
+                        self.require_current_token_matches(Token::RightSquareBracket)?;
+
+                    let (start, end) = (expr.start, end_token.location);
+
+                    expr = ExpressionLocation {
+                        expression: Expression::Index {
+                            value: Box::new(expr),
+                            index: Box::new(index_expression),
+                        },
+                        start,
+                        end,
+                    };
+                }
+                _ => unreachable!("guaranteed to match"),
+            }
         }
 
         Ok(expr)

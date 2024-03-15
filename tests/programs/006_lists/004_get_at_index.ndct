@@ -1,0 +1,3 @@
+--PROGRAM--
+l := ["foo", "bar", "baz"];
+print(l[1]);
