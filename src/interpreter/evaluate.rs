@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::error::Error;
@@ -60,10 +61,11 @@ pub(crate) fn evaluate_expression(
             apply_operator(left, *operator_token, right)?
         }
         Expression::Grouping(expr) => evaluate_expression(expr, environment)?,
-        Expression::VariableDeclaration {
-            l_value: Lvalue::Variable { identifier },
-            value,
-        } => {
+        Expression::VariableDeclaration { l_value, value } => {
+            let Lvalue::Variable { identifier } = l_value else {
+                todo!("other lvalues are not implemented in declaration");
+            };
+
             let value = evaluate_expression(value, environment)?;
 
             if environment.borrow().contains(identifier) {
@@ -74,24 +76,45 @@ pub(crate) fn evaluate_expression(
 
             value
         }
-        Expression::VariableAssignment {
-            l_value: Lvalue::Variable { identifier },
-            value,
-        } => {
-            if !environment.borrow().contains(identifier) {
-                return Err(EvaluationError::syntax_error(
-                    &format!("undefined variable {identifier}"),
-                    start,
-                    end,
-                )
-                .into());
+        Expression::VariableAssignment { l_value, value } => match l_value {
+            Lvalue::Variable { identifier } => {
+                if !environment.borrow().contains(identifier) {
+                    Err(EvaluationError::syntax_error(
+                        &format!("undefined variable {identifier}"),
+                        start,
+                        end,
+                    ))?;
+                }
+
+                let value = evaluate_expression(value, environment)?;
+                environment
+                    .borrow_mut()
+                    .assign(identifier.clone(), value.clone());
+                value
             }
-            let value = evaluate_expression(value, environment)?;
-            environment
-                .borrow_mut()
-                .assign(identifier.clone(), value.clone());
-            value
-        }
+            Lvalue::Index { identifier, index } => {
+                let mut maybe_list = environment.borrow().get(identifier).ok_or_else(|| {
+                    EvaluationError::syntax_error(
+                        &format!("undefined variable {identifier}"),
+                        start,
+                        end,
+                    )
+                })?;
+
+                let maybe_list = maybe_list.get_mut();
+
+                match maybe_list {
+                    Value::Sequence(Sequence::List(list)) => {}
+                    _ => {
+                        return Err(EvaluationError::syntax_error("je oma", start, end).into());
+                    }
+                }
+
+                let value = evaluate_expression(value, environment)?;
+
+                Value::Unit
+            }
+        },
         Expression::Block { statements } => {
             let mut local_scope = Environment::new_scope(environment);
 
@@ -304,7 +327,16 @@ pub(crate) fn evaluate_expression(
 
             let Lvalue::Variable {
                 identifier: var_name,
-            } = l_value;
+            } = l_value
+            else {
+                // TODO: fix the location of this error
+                return Err(EvaluationError::syntax_error(
+                    "cannot use this expression in for loop",
+                    Location { line: 0, column: 0 },
+                    Location { line: 0, column: 0 },
+                )
+                .into());
+            };
 
             match sequence {
                 Sequence::String(str) => {

@@ -7,7 +7,7 @@ use std::fmt;
 use std::fmt::Formatter;
 use std::rc::Rc;
 
-#[derive(PartialEq)]
+#[derive(Eq, PartialEq)]
 pub struct ExpressionLocation {
     pub expression: Expression,
     pub start: Location,
@@ -16,7 +16,13 @@ pub struct ExpressionLocation {
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum Lvalue {
-    Variable { identifier: String },
+    Variable {
+        identifier: String,
+    },
+    Index {
+        identifier: String,
+        index: Box<ExpressionLocation>,
+    },
 }
 #[derive(Debug, PartialEq)]
 pub enum Expression {
@@ -95,6 +101,8 @@ pub enum Expression {
         value: Box<ExpressionLocation>,
     },
 }
+
+impl Eq for Expression {}
 
 impl Expression {
     #[must_use]

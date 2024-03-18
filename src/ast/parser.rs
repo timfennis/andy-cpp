@@ -33,7 +33,7 @@ impl Parser {
             )
         };
         let mut expressions = Vec::new();
-        while self.current_token_location().is_some() {
+        while self.peek_current_token_location().is_some() {
             let expr_loc = self.expression_or_statement()?;
             let is_statement = is_valid_statement(&expr_loc.expression);
 
@@ -45,7 +45,7 @@ impl Parser {
         }
 
         // After consuming all statements if there are any tokens remaining we can emit an error that we expected a semicolon
-        if let Some(token) = self.current_token_location() {
+        if let Some(token) = self.peek_current_token_location() {
             return Err(Error::ExpectedToken {
                 expected_tokens: vec![Token::Semicolon],
                 actual_token: token.clone(),
@@ -56,10 +56,10 @@ impl Parser {
     }
 
     fn peek_current_token(&self) -> Option<&Token> {
-        self.current_token_location().map(|t| &t.token)
+        self.peek_current_token_location().map(|t| &t.token)
     }
 
-    fn current_token_location(&self) -> Option<&TokenLocation> {
+    fn peek_current_token_location(&self) -> Option<&TokenLocation> {
         self.tokens.get(self.current)
     }
 
@@ -68,7 +68,7 @@ impl Parser {
     fn match_token(&self, tokens: &[Token]) -> Option<&TokenLocation> {
         for search_token in tokens {
             if self.peek_current_token() == Some(search_token) {
-                return self.current_token_location();
+                return self.peek_current_token_location();
             }
         }
         None
@@ -82,7 +82,7 @@ impl Parser {
             return Ok(location);
         }
 
-        if let Some(current_token) = self.current_token_location() {
+        if let Some(current_token) = self.peek_current_token_location() {
             Err(Error::ExpectedToken {
                 expected_tokens: Vec::from(tokens),
                 actual_token: current_token.clone(),
@@ -126,7 +126,7 @@ impl Parser {
     // Requires that there is a valid current token, otherwise it returns Err(ParserError)
     fn require_current_token(&mut self) -> Result<TokenLocation, Error> {
         let token = self
-            .current_token_location()
+            .peek_current_token_location()
             .ok_or_else(|| Error::UnexpectedEndOfStream { help_text: String::from("a token was required but an end of stream was found instead (require_current_token)") })?
             .clone();
         self.advance();
@@ -233,7 +233,7 @@ impl Parser {
         // NOTE: I think the way we implemented this method makes it right associative
         // NOTE: Instead of just parsing an identifier we continue to recurse down to the next level `logic_or` at the
         //       time of writing. If whatever comes back is a valid identifier (possibly lvalue in the future) we treat
-        //       this expression as an assignment expression. Otherwise we just treat the expression as whatever we got.
+        //       this expression as an assignment expression. Otherwise, we just treat the expression as whatever we got.
         // NOTE: When we start supporting more lvalues we should insert this step between
         //       `variable_declaration_or_assignment` and `logic_or`
         let maybe_lvalue = self.logic_or()?;
@@ -241,37 +241,54 @@ impl Parser {
         // If the token we parsed is some kind of variable we can potentially assign to it. Next we'll check if the next
         // token matches either the declaration operator or the assignment operator. If neither of those matches we are
         // just returning the variable expression as is.
-        if let Expression::Identifier(identifier) = maybe_lvalue.expression {
-            return if self.consume_token_if(&[Token::CreateVar]).is_some() {
-                let expression = self.expression()?;
-                let (start, end) = (maybe_lvalue.start, expression.end);
-                Ok(Expression::VariableDeclaration {
-                    l_value: Lvalue::Variable { identifier },
-                    value: Box::new(expression),
+        match maybe_lvalue.expression {
+            Expression::Identifier(ref identifier) => {
+                if self.consume_token_if(&[Token::CreateVar]).is_some() {
+                    let expression = self.expression()?;
+                    let (start, end) = (maybe_lvalue.start, expression.end);
+                    Ok(Expression::VariableDeclaration {
+                        l_value: Lvalue::Variable {
+                            identifier: identifier.to_string(),
+                        },
+                        value: Box::new(expression),
+                    }
+                    .to_location(start, end))
+                } else if self.consume_token_if(&[Token::EqualsSign]).is_some() {
+                    let expression = self.expression()?;
+                    let (start, end) = (maybe_lvalue.start, expression.end);
+                    Ok(Expression::VariableAssignment {
+                        l_value: Lvalue::Variable {
+                            identifier: identifier.to_string(),
+                        },
+                        value: Box::new(expression),
+                    }
+                    .to_location(start, end))
+                } else {
+                    Ok(maybe_lvalue)
                 }
-                .to_location(start, end))
-            } else if self.consume_token_if(&[Token::EqualsSign]).is_some() {
-                let expression = self.expression()?;
-                let (start, end) = (maybe_lvalue.start, expression.end);
-                Ok(Expression::VariableAssignment {
-                    l_value: Lvalue::Variable { identifier },
-                    value: Box::new(expression),
+            }
+            Expression::Index { index: _, value: _ } => {
+                if self.consume_token_if(&[Token::CreateVar]).is_some() {
+                    todo!("TODO: err: can't assign to index expression");
+                } else if self.consume_token_if(&[Token::EqualsSign]).is_some() {
+                    todo!("TODO: implement assigning to index");
+                } else {
+                    Ok(maybe_lvalue)
                 }
-                .to_location(start, end))
-            } else {
-                Ok(Expression::Identifier(identifier)
-                    .to_location(maybe_lvalue.start, maybe_lvalue.end))
-            };
-        }
-
-        // In this case we got some kind of expression that we can't assign to. We can just return the expression as is.
-        // But to improve error handling and stuff it would be nice if we could check if the next token matches one
-        // of the assignment operator and throw an appropriate error.
-        match self.current_token_location().map(|it| &it.token) {
-            Some(Token::CreateVar | Token::EqualsSign) => Err(Error::InvalidAssignmentTarget {
-                target: maybe_lvalue,
-            }),
-            _ => Ok(maybe_lvalue),
+            }
+            _ => {
+                // In this case we got some kind of expression that we can't assign to. We can just return the expression as is.
+                // But to improve error handling and stuff it would be nice if we could check if the next token matches one
+                // of the assignment operator and throw an appropriate error.
+                match self.peek_current_token() {
+                    Some(Token::CreateVar | Token::EqualsSign) => {
+                        Err(Error::InvalidAssignmentTarget {
+                            target: maybe_lvalue,
+                        })
+                    }
+                    _ => Ok(maybe_lvalue),
+                }
+            }
         }
     }
 
@@ -400,7 +417,7 @@ impl Parser {
         let mut values = Vec::new();
 
         loop {
-            let current_token = self.current_token_location().cloned();
+            let current_token = self.peek_current_token_location().cloned();
             if let Some(ref token_location) = current_token {
                 if token_location.token == terminated_by {
                     self.advance();
@@ -411,7 +428,7 @@ impl Parser {
 
                 // After we parse an expression we look ahead and see if the next token is either a ',' or ')'
                 // if it's not we can return a parse error
-                let current_token = self.current_token_location();
+                let current_token = self.peek_current_token_location();
                 match current_token.map(|it| &it.token) {
                     Some(token) if token == &terminated_by => {
                         // Termination token is handled by the next iteration
@@ -605,7 +622,7 @@ impl Parser {
                 break token_location.location;
             }
 
-            if self.current_token_location().is_some() {
+            if self.peek_current_token_location().is_some() {
                 statements.push(self.expression_or_statement()?);
             } else {
                 return Err(Error::UnexpectedEndOfStream {
