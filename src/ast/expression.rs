@@ -20,7 +20,7 @@ pub enum Lvalue {
         identifier: String,
     },
     Index {
-        identifier: String,
+        value: Box<ExpressionLocation>,
         index: Box<ExpressionLocation>,
     },
 }

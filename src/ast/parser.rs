@@ -267,13 +267,23 @@ impl Parser {
                     Ok(maybe_lvalue)
                 }
             }
-            Expression::Index { index: _, value: _ } => {
+            Expression::Index { value, index } => {
                 if self.consume_token_if(&[Token::CreateVar]).is_some() {
                     todo!("TODO: err: can't assign to index expression");
                 } else if self.consume_token_if(&[Token::EqualsSign]).is_some() {
-                    todo!("TODO: implement assigning to index");
+                    let expression = self.expression()?;
+                    let (start, end) = (value.start, expression.end);
+                    Ok(Expression::VariableAssignment {
+                        l_value: Lvalue::Index {
+                            value: value,
+                            index,
+                        },
+                        value: Box::new(expression),
+                    }
+                    .to_location(start, end))
                 } else {
-                    Ok(maybe_lvalue)
+                    Ok(Expression::Index { index, value }
+                        .to_location(maybe_lvalue.start, maybe_lvalue.end))
                 }
             }
             _ => {

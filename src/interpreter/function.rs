@@ -42,23 +42,22 @@ impl Function for Closure {
 }
 
 impl fmt::Debug for Closure {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self.parameters)
     }
 }
 
-impl From<EvaluationError> for FunctionCarrier {
-    fn from(value: EvaluationError) -> Self {
-        FunctionCarrier::EvaluationError(value)
-    }
-}
-
 // Named after the Carrier trait
+#[derive(thiserror::Error, Debug)]
 pub enum FunctionCarrier {
+    #[error("not an error")]
     Return(Value),
-    EvaluationError(EvaluationError),
+    #[error("evaluation error {0}")]
+    EvaluationError(#[from] EvaluationError),
+    #[error("argument error {0}")]
     ArgumentError(String),
-    IOError(std::io::Error),
+    #[error("IO Error: {0}")]
+    IOError(#[from] std::io::Error),
 }
 
 impl FunctionCarrier {
@@ -72,15 +71,5 @@ impl FunctionCarrier {
         Self::ArgumentError(format!(
             "argument error: expected {expected} arguments got {actual}"
         ))
-    }
-}
-impl fmt::Display for FunctionCarrier {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            FunctionCarrier::Return(_) => write!(f, "return is not an error"),
-            FunctionCarrier::EvaluationError(e) => write!(f, "{}", *e),
-            FunctionCarrier::ArgumentError(text) => write!(f, "{text}"),
-            FunctionCarrier::IOError(err) => write!(f, "{err}"),
-        }
     }
 }

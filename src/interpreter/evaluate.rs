@@ -3,7 +3,7 @@ use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::error::Error;
 use std::fmt;
-use std::ops::{Neg, Rem};
+use std::ops::{IndexMut, Neg, Rem};
 use std::rc::Rc;
 
 use crate::ast::{
@@ -92,27 +92,37 @@ pub(crate) fn evaluate_expression(
                     .assign(identifier.clone(), value.clone());
                 value
             }
-            Lvalue::Index { identifier, index } => {
-                let mut maybe_list = environment.borrow().get(identifier).ok_or_else(|| {
-                    EvaluationError::syntax_error(
-                        &format!("undefined variable {identifier}"),
-                        start,
-                        end,
-                    )
-                })?;
+            Lvalue::Index { value, index } => {
+                let maybe_list = evaluate_expression(value, environment)?;
 
-                let maybe_list = maybe_list.get_mut();
+                // let maybe_list = maybe_list.get_mut();
 
                 match maybe_list {
-                    Value::Sequence(Sequence::List(list)) => {}
+                    Value::Sequence(Sequence::List(mut list)) => {
+                        let index_value = evaluate_expression(index, environment)?;
+                        let value = evaluate_expression(value, environment)?;
+
+                        let index = usize::try_from(index_value).map_err(|e| {
+                            FunctionCarrier::from(EvaluationError::syntax_error(
+                                &format!("invalid index {e}"),
+                                start,
+                                end,
+                            ))
+                        })?;
+
+                        //TODO I don't understand
+                        let list = Rc::make_mut(&mut list);
+
+                        let x = list.index_mut(index);
+
+                        *x = value.clone();
+
+                        value
+                    }
                     _ => {
                         return Err(EvaluationError::syntax_error("je oma", start, end).into());
                     }
                 }
-
-                let value = evaluate_expression(value, environment)?;
-
-                Value::Unit
             }
         },
         Expression::Block { statements } => {
@@ -490,7 +500,7 @@ fn apply_operator(
         }
         (Value::Number(a), BinaryOperator::Multiply, Value::Sequence(Sequence::String(b))) => {
             Value::Sequence(Sequence::String(Rc::new(b.repeat(
-                usize::try_from(a).map_err(|()| {
+                usize::try_from(a).map_err(|_| {
                     EvaluationError::type_error(
                         "can't multiply a string with this value",
                         // TODO: somehow figure out the line number, or defer creation of this error to another location

@@ -1,6 +1,8 @@
 use std::fmt;
+use std::num::TryFromIntError;
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
+use num::bigint::TryFromBigIntError;
 use num::complex::Complex64;
 use num::{BigInt, BigRational, Complex, FromPrimitive, ToPrimitive};
 
@@ -458,14 +460,24 @@ implement_rounding!(ceil);
 implement_rounding!(floor);
 implement_rounding!(round);
 
+#[derive(thiserror::Error, Debug)]
+pub enum NumberToUsizeError {
+    #[error("cannot convert from {0} to usize")]
+    UnsupportedVariant(String),
+    #[error("failed to convert from int to because of {0}")]
+    FromIntError(#[from] TryFromIntError),
+    #[error("failed to convert from bigint to number because of {0}")]
+    FromBigIntError(#[from] TryFromBigIntError<BigInt>),
+}
+
 impl TryFrom<Number> for usize {
-    type Error = ();
+    type Error = NumberToUsizeError;
 
     fn try_from(value: Number) -> Result<Self, Self::Error> {
         match value {
-            Number::Int(Int::Int64(i)) => i.try_into().map_err(|_| ()),
-            Number::Int(Int::BigInt(b)) => b.try_into().map_err(|_| ()),
-            _ => Err(()),
+            Number::Int(Int::Int64(i)) => Ok(usize::try_from(i)?),
+            Number::Int(Int::BigInt(b)) => Ok(usize::try_from(b)?),
+            n => Err(NumberToUsizeError::UnsupportedVariant(n.type_name())),
         }
     }
 }

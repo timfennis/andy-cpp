@@ -1,6 +1,8 @@
+use crate::interpreter::evaluate::EvaluationError;
 use crate::interpreter::function::Function;
 use crate::interpreter::int::Int::Int64;
-use crate::interpreter::num::{Number, NumberType};
+use crate::interpreter::num::{Number, NumberToUsizeError, NumberType};
+use crate::interpreter::value::ValueToUsizeError::UnsupportedVariant;
 use std::collections::VecDeque;
 use std::fmt;
 use std::rc::Rc;
@@ -63,6 +65,26 @@ impl From<i64> for Value {
     }
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum ValueToUsizeError {
+    #[error("{0}")]
+    NumberToUsize(#[from] NumberToUsizeError),
+
+    #[error("cannot convert from {0} to usize")]
+    UnsupportedVariant(ValueType),
+}
+
+impl TryFrom<Value> for usize {
+    type Error = ValueToUsizeError;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Number(n) => Ok(usize::try_from(n)?),
+            v => Err(UnsupportedVariant(v.value_type())),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum ValueType {
     Unit,
@@ -71,6 +93,12 @@ pub enum ValueType {
     String,
     List(Option<Box<ValueType>>),
     Function,
+}
+
+impl From<&Value> for ValueType {
+    fn from(value: &Value) -> Self {
+        value.value_type()
+    }
 }
 
 impl fmt::Display for ValueType {
@@ -89,12 +117,6 @@ impl fmt::Display for ValueType {
             }
             Self::Function => write!(f, "function"),
         }
-    }
-}
-
-impl From<&Value> for ValueType {
-    fn from(value: &Value) -> Self {
-        value.value_type()
     }
 }
 
