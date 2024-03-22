@@ -65,7 +65,7 @@ fn run_test(path: PathBuf) -> Result<(), std::io::Error> {
 
     let program_had_error = interpreter_result.is_err();
 
-    let error = interpreter_result.unwrap_or_else(|err| format!("{err}"));
+    let actual_error = interpreter_result.unwrap_or_else(|err| format!("{err}"));
 
     let environment = interpreter.environment();
     let environment = environment.borrow();
@@ -77,16 +77,19 @@ fn run_test(path: PathBuf) -> Result<(), std::io::Error> {
 
     assert!(
         !expect_error.is_empty() || !program_had_error,
-        "Unexpected error when running program: {error}"
+        "Unexpected error when running program: {actual_error}"
     );
 
-    if !expect_output.is_empty() {
-        assert_eq!(output.trim_end(), expect_output.trim_end(), "There was a problem running {path:?}, actual output '{}' did not match expected output '{}'", output.trim_end(), expect_output.trim_end());
+    if !expect_output.is_empty() && output.trim_end() != expect_output.trim_end() {
+        println!(" {}", "ERR".red().bold());
+        panic!("\n\tThere was a problem running {path:?}, actual output '{}' did not match expected output '{}'\n", output.trim_end(), expect_output.trim_end());
     }
 
-    if !expect_error.is_empty() {
-        assert!(error.contains(&expect_error), "There was a problem running {path:?}, actual error '{}' did not match expected error '{}'", error.trim_end(), expect_error.trim_end());
+    if !expect_error.is_empty() && !actual_error.contains(&expect_error) {
+        println!(" {}", "ERR".red().bold());
+        panic!("\n\tThere was a problem running {path:?}\n\tExpected error was expected to contain actual error but didn't\n\tExpected error:\t{}\n\tActual error:\t{}\n",  expect_error.trim_end(), actual_error.trim_end());
     }
+
     println!(" {}", "OK".green().bold());
 
     Ok(())

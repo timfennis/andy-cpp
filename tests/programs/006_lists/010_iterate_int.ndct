@@ -1,0 +1,6 @@
+--PROGRAM--
+for i in 1 {
+    print(i);
+}
+--EXPECT-ERROR--
+cannot iterate over int

@@ -96,12 +96,8 @@ pub(crate) fn evaluate_expression(
                 value: assign_to,
                 index,
             } => {
-                let assign_to = evaluate_expression(assign_to, environment)?;
-
-                let index_value = evaluate_expression(index, environment)?;
-                let value = evaluate_expression(value, environment)?;
-
-                let index = usize::try_from(index_value).map_err(|e| {
+                let index = evaluate_expression(index, environment)?;
+                let index = usize::try_from(index).map_err(|e| {
                     FunctionCarrier::from(EvaluationError::syntax_error(
                         &format!("invalid index {e}"),
                         start,
@@ -111,20 +107,37 @@ pub(crate) fn evaluate_expression(
 
                 // TODO: it's a little wasteful that we're first evaluating all the expressions
                 //       before we check if we can even assign to the thing
+                let assign_to = evaluate_expression(assign_to, environment)?;
                 match &assign_to {
                     Value::Sequence(Sequence::List(list)) => {
                         let mut list = list.borrow_mut();
                         let x = list.index_mut(index);
+                        let value = evaluate_expression(value, environment)?;
                         *x = value;
                     }
                     Value::Sequence(Sequence::String(string)) => {
                         let mut string = string.borrow_mut();
-                        let value = value.to_string(); // TODO: this is almost certainly wrong
-                        string.replace_range(index..=index, &value);
+                        let value = evaluate_expression(value, environment)?;
+
+                        if let Value::Sequence(Sequence::String(target_string)) = value {
+                            let target_string = target_string.borrow();
+                            string.replace_range(index..=index, target_string.as_str());
+                        } else {
+                            return Err(EvaluationError::syntax_error(
+                                &format!("cannot insert {} at index", value.value_type()),
+                                start,
+                                end,
+                            )
+                            .into());
+                        }
                     }
                     _ => {
-                        todo!("cannot assign index on this type");
-                        // return Err(EvaluationError::syntax_error("", start, end).into());
+                        return Err(EvaluationError::syntax_error(
+                            &format!("cannot index into {} at index", assign_to.value_type()),
+                            start,
+                            end,
+                        )
+                        .into());
                     }
                 }
 
@@ -317,21 +330,8 @@ pub(crate) fn evaluate_expression(
         }
         Expression::List { values } => {
             let mut values_out = VecDeque::with_capacity(values.len());
-            let mut last_type = None;
             for expression in values {
                 let v = evaluate_expression(expression, environment)?;
-                if last_type.is_none() {
-                    last_type = Some(ValueType::from(&v));
-                } else if last_type != Some(ValueType::from(&v)) {
-                    let add_type = ValueType::from(&v);
-                    let last_type = last_type.unwrap();
-                    return Err(EvaluationError::type_error(
-                        &format!("cannot add {add_type} to a list of {last_type}",),
-                        expression.start,
-                        expression.end,
-                    )
-                    .into());
-                }
                 values_out.push_back(v);
             }
             Value::Sequence(Sequence::List(Rc::new(RefCell::new(values_out))))
@@ -341,20 +341,24 @@ pub(crate) fn evaluate_expression(
             sequence,
             loop_body,
         } => {
-            let Value::Sequence(sequence) = evaluate_expression(sequence, environment)? else {
-                // TODO: fix this error
-                panic!("can only iterate over sequences")
+            let sequence = evaluate_expression(sequence, environment)?;
+            let Value::Sequence(sequence) = sequence else {
+                return Err(EvaluationError::syntax_error(
+                    &format!("cannot iterate over {}", sequence.value_type()),
+                    start,
+                    end,
+                )
+                .into());
             };
 
             let Lvalue::Variable {
                 identifier: var_name,
             } = l_value
             else {
-                // TODO: fix the location of this error
                 return Err(EvaluationError::syntax_error(
                     "cannot use this expression in for loop",
-                    Location { line: 0, column: 0 },
-                    Location { line: 0, column: 0 },
+                    start,
+                    end,
                 )
                 .into());
             };
