@@ -274,10 +274,7 @@ impl Parser {
                     let expression = self.expression()?;
                     let (start, end) = (value.start, expression.end);
                     Ok(Expression::VariableAssignment {
-                        l_value: Lvalue::Index {
-                            value: value,
-                            index,
-                        },
+                        l_value: Lvalue::Index { value, index },
                         value: Box::new(expression),
                     }
                     .to_location(start, end))
