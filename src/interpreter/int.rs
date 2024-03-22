@@ -1,5 +1,4 @@
 use crate::interpreter::evaluate::EvaluationError;
-use crate::interpreter::num::Number;
 use crate::lexer::Location;
 use num::complex::Complex64;
 use num::traits::CheckedEuclid;

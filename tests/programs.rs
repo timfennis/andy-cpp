@@ -1,3 +1,4 @@
+use colored::Colorize;
 use ndc_lib::interpreter::Interpreter;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -56,6 +57,9 @@ fn run_test(path: PathBuf) -> Result<(), std::io::Error> {
             },
         }
     }
+    // For now let's trim end both result and expect to ensure that any trailing line breaks don't cause issues
+    print!("Running {path:?}...");
+
     let mut interpreter = Interpreter::new(Box::<Vec<u8>>::default());
     let interpreter_result = interpreter.run_str(&program, false);
 
@@ -71,9 +75,6 @@ fn run_test(path: PathBuf) -> Result<(), std::io::Error> {
 
     let output = String::from_utf8(output).expect("test output must be valid UTF-8");
 
-    // For now let's trim end both result and expect to ensure that any trailing line breaks don't cause issues
-    print!("Running {path:?}...");
-
     assert!(
         !expect_error.is_empty() || !program_had_error,
         "Unexpected error when running program: {error}"
@@ -86,7 +87,7 @@ fn run_test(path: PathBuf) -> Result<(), std::io::Error> {
     if !expect_error.is_empty() {
         assert!(error.contains(&expect_error), "There was a problem running {path:?}, actual error '{}' did not match expected error '{}'", error.trim_end(), expect_error.trim_end());
     }
-    println!(" OK");
+    println!(" {}", "OK".green().bold());
 
     Ok(())
 }

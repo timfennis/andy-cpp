@@ -1,0 +1,6 @@
+--PROGRAM--
+str := "foobar";
+str[0] = "w";
+print(str);
+--EXPECT--
+woobar

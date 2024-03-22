@@ -15,6 +15,7 @@ lto = true
 [dependencies]
 anyhow = "1.0.80"
 clap = { version = "4.5.1", features = ["derive"] }
+colored = "2.1.0"
 num = "0.4.1"
 rustyline = {  version = "13.0.0", optional = true, features = ["derive"] }
 ryu = "1.0.17"

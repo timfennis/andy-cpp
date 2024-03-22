@@ -61,6 +61,8 @@ impl Interpreter {
 
         Ok(format!("{final_value}"))
     }
+
+    // TODO: use thiserror to convert FunctionCarrier into InterpreterError
     fn interpret(
         &mut self,
         expressions: impl Iterator<Item = ExpressionLocation>,
@@ -76,7 +78,9 @@ impl Interpreter {
                         expr.end,
                     ));
                 }
-                Err(FunctionCarrier::EvaluationError(e)) => return Err(e),
+                Err(FunctionCarrier::EvaluationError(e)) => {
+                    return Err(e);
+                }
                 Err(FunctionCarrier::ArgumentError(msg)) => {
                     // TODO: coercing ArgumentError into a EvaluationError in this way is pretty cringe
                     return Err(EvaluationError::type_error(
