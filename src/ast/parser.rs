@@ -256,7 +256,7 @@ impl Parser {
                 } else if self.consume_token_if(&[Token::EqualsSign]).is_some() {
                     let expression = self.expression()?;
                     let (start, end) = (maybe_lvalue.start, expression.end);
-                    Ok(Expression::VariableAssignment {
+                    Ok(Expression::Assignment {
                         l_value: Lvalue::Variable {
                             identifier: identifier.to_string(),
                         },
@@ -273,7 +273,7 @@ impl Parser {
                 } else if self.consume_token_if(&[Token::EqualsSign]).is_some() {
                     let expression = self.expression()?;
                     let (start, end) = (value.start, expression.end);
-                    Ok(Expression::VariableAssignment {
+                    Ok(Expression::Assignment {
                         l_value: Lvalue::Index { value, index },
                         value: Box::new(expression),
                     }

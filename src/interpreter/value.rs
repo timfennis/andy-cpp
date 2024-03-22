@@ -1,7 +1,6 @@
 use crate::interpreter::function::Function;
-use crate::interpreter::int::Int::Int64;
+use crate::interpreter::int::Int;
 use crate::interpreter::num::{Number, NumberToUsizeError, NumberType};
-use crate::interpreter::value::ValueToUsizeError::UnsupportedVariant;
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::fmt;
@@ -61,13 +60,30 @@ impl From<bool> for Value {
 
 impl From<i64> for Value {
     fn from(value: i64) -> Self {
-        Self::Number(Number::Int(Int64(value)))
+        Self::Number(Number::Int(Int::Int64(value)))
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum ValueToIntError {
+    #[error("Cannot convert {0} to int")]
+    UnsupportedVariant(ValueType),
+}
+
+impl TryFrom<Value> for i64 {
+    type Error = ValueToIntError;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Number(Number::Int(Int::Int64(i))) => Ok(i),
+            v => Err(Self::Error::UnsupportedVariant(v.value_type())),
+        }
     }
 }
 
 #[derive(thiserror::Error, Debug)]
 pub enum ValueToUsizeError {
-    #[error("{0}")]
+    #[error(transparent)]
     NumberToUsize(#[from] NumberToUsizeError),
 
     #[error("cannot convert from {0} to usize")]
@@ -80,7 +96,7 @@ impl TryFrom<Value> for usize {
     fn try_from(value: Value) -> Result<Self, Self::Error> {
         match value {
             Value::Number(n) => Ok(usize::try_from(n)?),
-            v => Err(UnsupportedVariant(v.value_type())),
+            v => Err(Self::Error::UnsupportedVariant(v.value_type())),
         }
     }
 }

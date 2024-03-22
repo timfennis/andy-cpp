@@ -56,7 +56,7 @@ pub enum Expression {
         l_value: Lvalue,
         value: Box<ExpressionLocation>,
     },
-    VariableAssignment {
+    Assignment {
         l_value: Lvalue,
         value: Box<ExpressionLocation>,
     },

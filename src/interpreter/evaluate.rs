@@ -76,7 +76,7 @@ pub(crate) fn evaluate_expression(
 
             value
         }
-        Expression::VariableAssignment { l_value, value } => match l_value {
+        Expression::Assignment { l_value, value } => match l_value {
             Lvalue::Variable { identifier } => {
                 if !environment.borrow().contains(identifier) {
                     Err(EvaluationError::syntax_error(
@@ -97,31 +97,28 @@ pub(crate) fn evaluate_expression(
                 index,
             } => {
                 let index = evaluate_expression(index, environment)?;
-                let index = usize::try_from(index).map_err(|e| {
-                    FunctionCarrier::from(EvaluationError::syntax_error(
-                        &format!("invalid index {e}"),
-                        start,
-                        end,
-                    ))
-                })?;
+                let index = i64::try_from(index).unwrap();
 
                 // TODO: it's a little wasteful that we're first evaluating all the expressions
                 //       before we check if we can even assign to the thing
                 let assign_to = evaluate_expression(assign_to, environment)?;
                 match &assign_to {
                     Value::Sequence(Sequence::List(list)) => {
+                        let list_size = list.borrow().len();
                         let mut list = list.borrow_mut();
-                        let x = list.index_mut(index);
+                        let x = list.index_mut(convert_index(index, list_size).unwrap());
                         let value = evaluate_expression(value, environment)?;
                         *x = value;
                     }
-                    Value::Sequence(Sequence::String(string)) => {
-                        let mut string = string.borrow_mut();
+                    Value::Sequence(Sequence::String(insertion_target)) => {
+                        let mut insertion_target = insertion_target.borrow_mut();
                         let value = evaluate_expression(value, environment)?;
 
-                        if let Value::Sequence(Sequence::String(target_string)) = value {
-                            let target_string = target_string.borrow();
-                            string.replace_range(index..=index, target_string.as_str());
+                        if let Value::Sequence(Sequence::String(string_to_insert)) = value {
+                            let target_string = string_to_insert.borrow();
+                            // TODO: string length might not be correct, chars().count() might not be better
+                            let index = convert_index(index, insertion_target.len()).unwrap(); // TODO fix unwrap
+                            insertion_target.replace_range(index..=index, target_string.as_str());
                         } else {
                             return Err(EvaluationError::syntax_error(
                                 &format!("cannot insert {} at index", value.value_type()),
