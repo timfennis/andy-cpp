@@ -1,8 +1,8 @@
-use crate::interpreter::evaluate::EvaluationError;
 use crate::interpreter::function::Function;
 use crate::interpreter::int::Int::Int64;
 use crate::interpreter::num::{Number, NumberToUsizeError, NumberType};
 use crate::interpreter::value::ValueToUsizeError::UnsupportedVariant;
+use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::fmt;
 use std::rc::Rc;
@@ -26,7 +26,7 @@ impl Value {
             Value::Bool(_) => ValueType::Bool,
             Value::Sequence(Sequence::String(_)) => ValueType::String,
             Value::Sequence(Sequence::List(t)) => {
-                let t = t.front().map(|it| Box::new(ValueType::from(it)));
+                let t = t.borrow().front().map(|it| Box::new(ValueType::from(it)));
                 ValueType::List(t)
             }
             Value::Function(_) => ValueType::Function,
@@ -36,8 +36,8 @@ impl Value {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Sequence {
-    String(Rc<String>),
-    List(Rc<VecDeque<Value>>),
+    String(Rc<RefCell<String>>),
+    List(Rc<RefCell<VecDeque<Value>>>),
     //TODO: Dict comes later because we need hashing and comparison
 }
 
@@ -138,9 +138,10 @@ impl fmt::Display for Value {
 impl fmt::Display for Sequence {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Sequence::String(s) => write!(f, "{s}"),
+            Sequence::String(s) => write!(f, "{}", s.borrow()),
             Sequence::List(vs) => {
                 write!(f, "[")?;
+                let vs = vs.borrow();
                 let mut vs = vs.iter().peekable();
                 while let Some(v) = vs.next() {
                     if vs.peek().is_some() {

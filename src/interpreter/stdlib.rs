@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::fmt::Debug;
 use std::fs::read_to_string;
 use std::path::Path;
@@ -51,16 +52,20 @@ pub fn bind_to_environment(env: &mut Environment) {
         "read_file",
         Value::Function(Rc::new(GenericFunction {
             function: |args, _env| match args {
-                [Value::Sequence(Sequence::String(s))] => read_to_string(Path::new(s.as_str()))
-                    .map(|contents| Value::Sequence(Sequence::String(Rc::new(contents))))
-                    .map_err(|err| {
-                        // FIXME: fix location
-                        FunctionCarrier::EvaluationError(EvaluationError::io_error(
-                            &err,
-                            Location { line: 0, column: 0 },
-                            Location { line: 0, column: 0 },
-                        ))
-                    }),
+                [Value::Sequence(Sequence::String(s))] => {
+                    read_to_string(Path::new(s.borrow().as_str()))
+                        .map(|contents| {
+                            Value::Sequence(Sequence::String(Rc::new(RefCell::new(contents))))
+                        })
+                        .map_err(|err| {
+                            // FIXME: fix location
+                            FunctionCarrier::EvaluationError(EvaluationError::io_error(
+                                &err,
+                                Location { line: 0, column: 0 },
+                                Location { line: 0, column: 0 },
+                            ))
+                        })
+                }
                 [value] => Err(FunctionCarrier::argument_type_error(
                     &ValueType::String,
                     &ValueType::from(value),
@@ -75,6 +80,7 @@ pub fn bind_to_environment(env: &mut Environment) {
             function: |args, _env| match args {
                 [Value::Number(n)] => Ok(Value::Number(n.to_int_lossy()?)),
                 [Value::Sequence(Sequence::String(s))] => {
+                    let s = s.borrow();
                     let bi = s.parse::<BigInt>().map_err(|err| {
                         FunctionCarrier::ArgumentError(format!(
                             "{s} cannot be converted into an integer because \"{err}\""

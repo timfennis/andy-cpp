@@ -92,37 +92,43 @@ pub(crate) fn evaluate_expression(
                     .assign(identifier.clone(), value.clone());
                 value
             }
-            Lvalue::Index { value, index } => {
-                let maybe_list = evaluate_expression(value, environment)?;
+            Lvalue::Index {
+                value: assign_to,
+                index,
+            } => {
+                let assign_to = evaluate_expression(assign_to, environment)?;
 
-                // let maybe_list = maybe_list.get_mut();
+                let index_value = evaluate_expression(index, environment)?;
+                let value = evaluate_expression(value, environment)?;
 
-                match maybe_list {
-                    Value::Sequence(Sequence::List(mut list)) => {
-                        let index_value = evaluate_expression(index, environment)?;
-                        let value = evaluate_expression(value, environment)?;
+                let index = usize::try_from(index_value).map_err(|e| {
+                    FunctionCarrier::from(EvaluationError::syntax_error(
+                        &format!("invalid index {e}"),
+                        start,
+                        end,
+                    ))
+                })?;
 
-                        let index = usize::try_from(index_value).map_err(|e| {
-                            FunctionCarrier::from(EvaluationError::syntax_error(
-                                &format!("invalid index {e}"),
-                                start,
-                                end,
-                            ))
-                        })?;
-
-                        //TODO I don't understand
-                        let list = Rc::make_mut(&mut list);
-
+                // TODO: it's a little wasteful that we're first evaluating all the expressions
+                //       before we check if we can even assign to the thing
+                match &assign_to {
+                    Value::Sequence(Sequence::List(list)) => {
+                        let mut list = list.borrow_mut();
                         let x = list.index_mut(index);
-
-                        *x = value.clone();
-
-                        value
+                        *x = value;
+                    }
+                    Value::Sequence(Sequence::String(string)) => {
+                        let mut string = string.borrow_mut();
+                        let value = value.to_string(); // TODO: this is almost certainly wrong
+                        string.replace_range(index..=index, &value);
                     }
                     _ => {
-                        return Err(EvaluationError::syntax_error("je oma", start, end).into());
+                        todo!("cannot assign index on this type");
+                        // return Err(EvaluationError::syntax_error("", start, end).into());
                     }
                 }
+
+                assign_to
             }
         },
         Expression::Block { statements } => {
@@ -216,7 +222,12 @@ pub(crate) fn evaluate_expression(
             Value::Unit
         }
         Expression::BoolLiteral(b) => Value::Bool(*b),
-        Expression::StringLiteral(s) => Value::Sequence(Sequence::String(s.clone())),
+        Expression::StringLiteral(s) => {
+            // TODO: to_string will make a copy, is this the best way to handle these types
+            //       or should we reconsider having String in an Rc for Expression because that
+            //       was probably only convenient when the our values used just Rcs
+            Value::Sequence(Sequence::String(Rc::new(RefCell::new(s.to_string()))))
+        }
         Expression::Int64Literal(n) => Value::Number(Number::Int(Int::Int64(*n))),
         Expression::BigIntLiteral(n) => Value::Number(Number::Int(Int::BigInt(n.clone()))),
         Expression::Float64Literal(n) => Value::Number(Number::Float(*n)),
@@ -305,7 +316,7 @@ pub(crate) fn evaluate_expression(
             }
         }
         Expression::List { values } => {
-            let mut values_out = VecDeque::new();
+            let mut values_out = VecDeque::with_capacity(values.len());
             let mut last_type = None;
             for expression in values {
                 let v = evaluate_expression(expression, environment)?;
@@ -323,7 +334,7 @@ pub(crate) fn evaluate_expression(
                 }
                 values_out.push_back(v);
             }
-            Value::Sequence(Sequence::List(Rc::new(values_out)))
+            Value::Sequence(Sequence::List(Rc::new(RefCell::new(values_out))))
         }
         Expression::For {
             l_value,
@@ -350,6 +361,7 @@ pub(crate) fn evaluate_expression(
 
             match sequence {
                 Sequence::String(str) => {
+                    let str = str.borrow();
                     for n in 0..str.len() {
                         let mut scope = Environment::new_scope(environment);
                         let substr = &str[n..=n];
@@ -357,17 +369,21 @@ pub(crate) fn evaluate_expression(
                         // TODO: allocating a new string here is probably not optimal
                         scope.borrow_mut().declare(
                             var_name,
-                            Value::Sequence(Sequence::String(Rc::new(String::from(substr)))),
+                            Value::Sequence(Sequence::String(Rc::new(RefCell::new(String::from(
+                                substr,
+                            ))))),
                         );
 
                         evaluate_expression(loop_body, &mut scope)?;
                     }
+                    drop(str);
                 }
                 Sequence::List(xs) => {
+                    let xs = xs.borrow();
                     for x in xs.iter() {
                         let mut scope = Environment::new_scope(environment);
 
-                        // TODO: this clone here is probably not what we want
+                        // TODO: is this clone here reasonable or should we look into getting an owned value
                         scope.borrow_mut().declare(var_name, x.clone());
 
                         evaluate_expression(loop_body, &mut scope)?;
@@ -403,6 +419,7 @@ pub(crate) fn evaluate_expression(
 
                     match sequence {
                         Sequence::String(string) => {
+                            let string = string.borrow();
                             let index = convert_index(index, string.len()).ok_or_else(|| {
                                 EvaluationError::type_error(
                                     "cannot convert index to usable offset",
@@ -419,9 +436,12 @@ pub(crate) fn evaluate_expression(
                                 )
                                 .into());
                             };
-                            Value::Sequence(Sequence::String(Rc::new(String::from(char))))
+                            Value::Sequence(Sequence::String(Rc::new(RefCell::new(String::from(
+                                char,
+                            )))))
                         }
                         Sequence::List(list) => {
+                            let list = list.borrow();
                             let index = convert_index(index, list.len()).ok_or_else(|| {
                                 EvaluationError::type_error(
                                     "cannot convert index to usable offset",
@@ -487,7 +507,8 @@ fn apply_operator(
 
         // Some mixed memes
         (Value::Sequence(Sequence::String(a)), BinaryOperator::Multiply, Value::Number(b)) => {
-            Value::Sequence(Sequence::String(Rc::new(a.repeat(
+            let a = a.borrow();
+            Value::Sequence(Sequence::String(Rc::new(RefCell::new(a.repeat(
                 usize::try_from(b).map_err(|_err| {
                     EvaluationError::type_error(
                         "can't multiply a string with this value",
@@ -496,10 +517,11 @@ fn apply_operator(
                         Location { line: 0, column: 0 },
                     )
                 })?,
-            ))))
+            )))))
         }
         (Value::Number(a), BinaryOperator::Multiply, Value::Sequence(Sequence::String(b))) => {
-            Value::Sequence(Sequence::String(Rc::new(b.repeat(
+            let b = b.borrow();
+            Value::Sequence(Sequence::String(Rc::new(RefCell::new(b.repeat(
                 usize::try_from(a).map_err(|_| {
                     EvaluationError::type_error(
                         "can't multiply a string with this value",
@@ -508,7 +530,7 @@ fn apply_operator(
                         Location { line: 0, column: 0 },
                     )
                 })?,
-            ))))
+            )))))
         }
 
         // String apply operators to string
@@ -521,9 +543,9 @@ fn apply_operator(
                 BinaryOperator::GreaterEquals => (comp != Ordering::Less).into(),
                 BinaryOperator::Less => (comp == Ordering::Less).into(),
                 BinaryOperator::LessEquals => (comp != Ordering::Greater).into(),
-                BinaryOperator::Plus => {
-                    Value::Sequence(Sequence::String(Rc::new(format!("{a}{b}"))))
-                }
+                BinaryOperator::Plus => Value::Sequence(Sequence::String(Rc::new(RefCell::new(
+                    format!("{}{}", a.borrow(), b.borrow()),
+                )))),
                 _ => {
                     return Err(EvaluationError::type_error(
                         &format!("cannot apply operator {operator:?} to string and string"),
