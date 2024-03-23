@@ -647,17 +647,20 @@ impl Parser {
 pub enum Error {
     #[error("unexpected end of stream: {help_text}")]
     UnexpectedEndOfStream { help_text: String },
-    #[error("Unexpected token '{}' expected expression on {}", .actual_token.token, .actual_token.location)]
+
+    #[error("unexpected token '{}' expected expression on {}", .actual_token.token, .actual_token.location)]
     ExpectedExpression { actual_token: TokenLocation },
-    // TODO this type is incomplete at best
+
     #[error("expected identifier got '{:?}' on {}", .actual, .actual.start)]
     ExpectedIdentifier { actual: ExpressionLocation },
-    #[error("Unexpected token '{}' expected symbol '{}' on {}", .actual_token.token, tokens_to_string(.expected_tokens), .actual_token.location)]
+
+    #[error("unexpected token '{}' expected symbol '{}' on {}", .actual_token.token, tokens_to_string(.expected_tokens), .actual_token.location)]
     ExpectedToken {
         actual_token: TokenLocation,
         expected_tokens: Vec<Token>,
     },
-    #[error("Invalid variable declaration or assignment. Cannot assign a value to expression: {target:?}")]
+
+    #[error("invalid variable declaration or assignment. Cannot assign a value to expression: {target:?}")]
     InvalidAssignmentTarget { target: ExpressionLocation },
 }
 
