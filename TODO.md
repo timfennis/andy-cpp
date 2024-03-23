@@ -7,8 +7,8 @@ This is an attempt of keeping sort of a TODO list for stuff I still need to add 
 The following expressions should all be valid Andy C++
 
 ```ndc
-a := []; // a is an empty list
-a := [1,2,3]; // a is a list of 1, 2 and 3
+a := []; // a is an empty list (DONE? NEEDS TEST)
+a := [1,2,3]; // a is a list of 1, 2 and 3 (DONE)
 a := [1..10]; // a is a (lazy) list of the numbers 1 up to 10
 
 // QUESTION about ranges, does the following expression mean anything?
@@ -37,10 +37,23 @@ cartesian_product := [ x, y | x <- xs, y <- ys ]
 
 ## Standard library extension
 
+### Proc macro's
+
+We probably need procedural macro's to make it much easier to define the standard library in rust
+
+```rust
+#[ndc::function(name = "abs")]
+fn abs_i64(n: i64) -> i64 { n.abs() }
+
+#[ndc::function(name = "abs")]
+fn abs_f64(n: f64) -> f64 { n.abs() }
+```
+
 ### General
 
 * [x] turn `print` into a function
-* [ ] `map`, `reduce`, `foldl` all these functions
+* [ ] change `print` to `dbg` and use a library to get rust's `println!` behavior
+* [ ] sequence functions like `map`, `reduce`, and `foldl`
 
 ### Math
 
@@ -72,19 +85,6 @@ We want to treat strings like objects for a lot of their functions (probably).
 There are a couple of places where I wrote `.clone()` on a `Value` where I probably shouldn't have. These should be
 annotated with `TODO: `'s
 
-## Return expressions
-
-Must be able to return from functions. To accomplish this the return type of the `Function` trait needs to change
-
-```ndc
-fn x(n) {
-  if n == 0 {
-    return 0;
-  }
-  return 1;
-}
-```
-
 ## Else if
 
 Currently, writing `else if` is not supported, we could easily add this.
@@ -108,6 +108,12 @@ at the moment, and we don't use them to give nice error messages.
 
 ```ndc
 struct Foo { x, y, z };
+```
+
+## Type annotations
+
+```ndc
+fn math_baby(f: Float) { ... }
 ```
 
 ## Match expressions

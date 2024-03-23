@@ -27,8 +27,7 @@ fn factorial(n) {
     }
 }
 
-// Easily prints 100! because we use num::BigInt 
-// under the hood
+// Easily prints 100! because we use num::BigInt under the hood
 print factorial(100);
 
 ```
@@ -52,9 +51,21 @@ while { i = i + 1 } < 30 {
 }
 ```
 
+### Overloading
+
+The interpreter looks for a function using the types and the number of values.
+
+```ndc
+fn add(n) { n + 1 }
+fn add(a, b) { a + b }
+
+print(add(add(5), add(4))); // prints 11
+```
+
 ## Thanks
 
 This language and implementation was inspired by Robert Nystrom's
 book [Crafting Interpreters](https://craftinginterpreters.com/). I've also taken
 plagiaristic levels of inspiration from [Noulith](https://github.com/betaveros/noulith) which is the language that
-inspired me to read the book in the first place.
+inspired me to read the book in the
+first place.
