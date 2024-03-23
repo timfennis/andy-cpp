@@ -1,35 +1,23 @@
 use std::cell::RefCell;
-use std::fmt::Debug;
 use std::fs::read_to_string;
 use std::path::Path;
 use std::rc::Rc;
 
 use num::{BigInt, ToPrimitive};
 
-use crate::interpreter::environment::{Environment, EnvironmentRef};
-use crate::interpreter::evaluate::{EvaluationError, EvaluationResult};
+use crate::interpreter::environment::Environment;
+use crate::interpreter::evaluate::EvaluationError;
 use crate::interpreter::function::{Function, FunctionCarrier};
 use crate::interpreter::int::Int;
-use crate::interpreter::num::{Number, SingleNumberFunction};
+use crate::interpreter::num::Number;
 use crate::interpreter::value::{Sequence, Value, ValueType};
 use crate::lexer::Location;
-
-#[derive(Debug)]
-struct GenericFunction {
-    function: fn(&[Value], &EnvironmentRef) -> EvaluationResult,
-}
-
-impl Function for GenericFunction {
-    fn call(&self, args: &[Value], env: &EnvironmentRef) -> EvaluationResult {
-        (self.function)(args, env)
-    }
-}
 
 #[allow(clippy::too_many_lines)]
 pub fn bind_to_environment(env: &mut Environment) {
     env.declare(
         "print",
-        Value::Function(Rc::new(GenericFunction {
+        Value::from(Function::GenericFunction {
             function: |args, env| {
                 env.borrow_mut()
                     .with_output(|output| {
@@ -46,11 +34,11 @@ pub fn bind_to_environment(env: &mut Environment) {
                     .map_err(FunctionCarrier::IOError)?;
                 Ok(Value::Unit)
             },
-        })),
+        }),
     );
     env.declare(
         "read_file",
-        Value::Function(Rc::new(GenericFunction {
+        Value::from(Function::GenericFunction {
             function: |args, _env| match args {
                 [Value::Sequence(Sequence::String(s))] => {
                     read_to_string(Path::new(s.borrow().as_str()))
@@ -72,11 +60,11 @@ pub fn bind_to_environment(env: &mut Environment) {
                 )),
                 args => Err(FunctionCarrier::argument_count_error(1, args.len())),
             },
-        })),
+        }),
     );
     env.declare(
         "int",
-        Value::Function(Rc::new(GenericFunction {
+        Value::from(Function::GenericFunction {
             function: |args, _env| match args {
                 [Value::Number(n)] => Ok(Value::Number(n.to_int_lossy()?)),
                 [Value::Sequence(Sequence::String(s))] => {
@@ -93,31 +81,31 @@ pub fn bind_to_environment(env: &mut Environment) {
                 ))),
                 vals => Err(FunctionCarrier::argument_count_error(1, vals.len())),
             },
-        })),
+        }),
     );
     env.declare(
         "ceil",
-        Value::Function(Rc::new(SingleNumberFunction {
-            function: |num: Number| num.ceil(),
-        })),
+        Value::from(Function::SingleNumberFunction {
+            body: |num: Number| num.ceil(),
+        }),
     );
     env.declare(
         "round",
-        Value::Function(Rc::new(SingleNumberFunction {
-            function: |num: Number| num.round(),
-        })),
+        Value::from(Function::SingleNumberFunction {
+            body: |num: Number| num.round(),
+        }),
     );
     env.declare(
         "floor",
-        Value::Function(Rc::new(SingleNumberFunction {
-            function: |num: Number| num.floor(),
-        })),
+        Value::from(Function::SingleNumberFunction {
+            body: |num: Number| num.floor(),
+        }),
     );
     macro_rules! delegate_to_f64 {
         ($method:ident) => {
-            let function = $crate::interpreter::value::Value::Function(std::rc::Rc::new(
-                $crate::interpreter::num::SingleNumberFunction {
-                    function: |num: Number| match num {
+            let function = $crate::interpreter::value::Value::from(
+                $crate::interpreter::function::Function::SingleNumberFunction {
+                    body: |num: Number| match num {
                         Number::Int(i) => Number::Float(f64::from(i).$method()),
                         Number::Float(f) => Number::Float(f.$method()),
                         Number::Rational(r) => {
@@ -126,7 +114,7 @@ pub fn bind_to_environment(env: &mut Environment) {
                         Number::Complex(c) => Number::Complex(c.$method()),
                     },
                 },
-            ));
+            );
             env.declare(stringify!($method), function);
         };
     }

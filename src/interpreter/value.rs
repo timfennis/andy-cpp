@@ -14,7 +14,7 @@ pub enum Value {
     Number(Number),
     Bool(bool),
     Sequence(Sequence),
-    Function(Rc<dyn Function>),
+    Function(Rc<Function>),
 }
 
 impl Value {
@@ -61,6 +61,12 @@ impl From<bool> for Value {
 impl From<i64> for Value {
     fn from(value: i64) -> Self {
         Self::Number(Number::Int(Int::Int64(value)))
+    }
+}
+
+impl From<Function> for Value {
+    fn from(value: Function) -> Self {
+        Value::Function(Rc::new(value))
     }
 }
 

@@ -6,11 +6,8 @@ use num::bigint::TryFromBigIntError;
 use num::complex::Complex64;
 use num::{BigInt, BigRational, Complex, FromPrimitive, ToPrimitive};
 
-use crate::interpreter::environment::EnvironmentRef;
-use crate::interpreter::evaluate::{EvaluationError, EvaluationResult};
-use crate::interpreter::function::{Function, FunctionCarrier};
+use crate::interpreter::evaluate::EvaluationError;
 use crate::interpreter::int::Int;
-use crate::interpreter::value::{Value, ValueType};
 use crate::lexer::Location;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -532,26 +529,6 @@ impl fmt::Display for NumberType {
             Self::Float => write!(f, "float"),
             Self::Rational => write!(f, "rational"),
             Self::Complex => write!(f, "complex"),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct SingleNumberFunction {
-    // pub name: &'static str,
-    pub function: fn(number: Number) -> Number,
-}
-
-impl Function for SingleNumberFunction {
-    // TODO: Noulith takes ownership of a Vec<Value> instead of &[Value] which removes the need to clone but possibly introduces other issues, figure out what we want here.
-    fn call(&self, args: &[Value], _env: &EnvironmentRef) -> EvaluationResult {
-        match args {
-            [Value::Number(num)] => Ok(Value::Number((self.function)(num.clone()))),
-            [v] => Err(FunctionCarrier::argument_type_error(
-                &ValueType::Number(NumberType::Float),
-                &v.value_type(),
-            )),
-            _ => Err(FunctionCarrier::argument_count_error(1, 0)),
         }
     }
 }

@@ -1,47 +1,72 @@
-use std::fmt;
 use std::rc::Rc;
 
 use crate::ast::ExpressionLocation;
 use crate::interpreter::environment::{Environment, EnvironmentRef};
 use crate::interpreter::evaluate::{evaluate_expression, EvaluationError, EvaluationResult};
+use crate::interpreter::num::{Number, NumberType};
 use crate::interpreter::value::{Value, ValueType};
+use std::fmt;
+use std::fmt::Formatter;
 
-pub trait Function: fmt::Debug {
-    fn call(&self, args: &[Value], env: &EnvironmentRef) -> EvaluationResult;
+#[derive(Clone)]
+pub enum Function {
+    Closure {
+        parameters: Vec<String>,
+        body: Rc<ExpressionLocation>,
+        environment: EnvironmentRef,
+    },
+    SingleNumberFunction {
+        // pub name: &'static str,
+        body: fn(number: Number) -> Number,
+    },
+    GenericFunction {
+        function: fn(&[Value], &EnvironmentRef) -> EvaluationResult,
+    },
 }
 
-pub struct Closure {
-    pub parameters: Vec<String>,
-    pub body: Rc<ExpressionLocation>,
-    pub environment: EnvironmentRef,
-}
-
-impl Function for Closure {
-    fn call(&self, args: &[Value], _env: &EnvironmentRef) -> EvaluationResult {
-        let mut local_scope = Environment::new_scope(&self.environment);
-
-        let mut env = local_scope.borrow_mut();
-        for (name, value) in self.parameters.iter().zip(args.iter()) {
-            //TODO: is this clone a good plan?
-            env.declare(name, value.clone());
-        }
-        // This drop is very important
-        drop(env);
-
-        let return_value = match evaluate_expression(&self.body, &mut local_scope) {
-            Err(FunctionCarrier::Return(v)) | Ok(v) => v,
-            e => return e,
-        };
-
-        // This explicit drops are probably not needed but who cares
-        drop(local_scope);
-        Ok(return_value)
+impl fmt::Debug for Function {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "function")
     }
 }
 
-impl fmt::Debug for Closure {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self.parameters)
+impl Function {
+    pub fn call(&self, args: &[Value], env: &EnvironmentRef) -> EvaluationResult {
+        match self {
+            Function::Closure {
+                body,
+                environment,
+                parameters,
+            } => {
+                let mut local_scope = Environment::new_scope(environment);
+
+                let mut env = local_scope.borrow_mut();
+                for (name, value) in parameters.iter().zip(args.iter()) {
+                    //TODO: is this clone a good plan?
+                    env.declare(name, value.clone());
+                }
+                // This drop is very important
+                drop(env);
+
+                let return_value = match evaluate_expression(body, &mut local_scope) {
+                    Err(FunctionCarrier::Return(v)) | Ok(v) => v,
+                    e => return e,
+                };
+
+                // This explicit drops are probably not needed but who cares
+                drop(local_scope);
+                Ok(return_value)
+            }
+            Function::SingleNumberFunction { body } => match args {
+                [Value::Number(num)] => Ok(Value::Number((body)(num.clone()))),
+                [v] => Err(FunctionCarrier::argument_type_error(
+                    &ValueType::Number(NumberType::Float),
+                    &v.value_type(),
+                )),
+                _ => Err(FunctionCarrier::argument_count_error(1, 0)),
+            },
+            Function::GenericFunction { function } => function(args, env),
+        }
     }
 }
 

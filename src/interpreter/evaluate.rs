@@ -10,7 +10,7 @@ use crate::ast::{
     BinaryOperator, Expression, ExpressionLocation, LogicalOperator, Lvalue, UnaryOperator,
 };
 use crate::interpreter::environment::{Environment, EnvironmentRef};
-use crate::interpreter::function::{Closure, FunctionCarrier};
+use crate::interpreter::function::{Function, FunctionCarrier};
 use crate::interpreter::int::Int;
 use crate::interpreter::num::Number;
 use crate::interpreter::value::{Sequence, Value, ValueType};
@@ -291,7 +291,7 @@ pub(crate) fn evaluate_expression(
                 evaluated_args.push(evaluate_expression(argument, environment)?);
             }
 
-            return function.call(&evaluated_args, environment);
+            function.call(&evaluated_args, environment)?
         }
         Expression::FunctionDeclaration {
             arguments,
@@ -300,7 +300,7 @@ pub(crate) fn evaluate_expression(
         } => {
             let name = name.try_into_identifier()?;
 
-            let user_function = Closure {
+            let user_function = Function::Closure {
                 parameters: arguments.try_into_parameters()?,
                 body: body.clone(),
                 environment: environment.clone(),
@@ -308,7 +308,7 @@ pub(crate) fn evaluate_expression(
 
             environment
                 .borrow_mut()
-                .declare(&name, Value::Function(Rc::new(user_function)));
+                .declare(&name, Value::from(user_function));
             Value::Unit
         }
         Expression::Tuple { .. } => todo!("tuples are not yet implemented in this position"),
