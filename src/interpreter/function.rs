@@ -20,26 +20,12 @@ pub struct OverloadedFunction {
     implementations: HashMap<TypeSignature, Function>,
 }
 
-fn match_types_to_signature(types: &[ValueType], signature: &TypeSignature) -> Option<u32> {
-    match signature {
-        TypeSignature::Variadic => Some(0),
-        TypeSignature::Exact(signature) => {
-            if types.len() == signature.len() {
-                let mut acc = 0;
-                for (a, b) in types.iter().zip(signature.iter()) {
-                    let dist = b.distance(a)?;
-                    acc += dist;
-                }
-
-                return Some(acc);
-            }
-
-            None
-        }
-    }
-}
-
 impl OverloadedFunction {
+    pub fn add(&mut self, function: Function) {
+        self.implementations
+            .insert(function.type_signature(), function);
+    }
+
     pub fn call(&self, args: &[Value], env: &EnvironmentRef) -> EvaluationResult {
         let types: Vec<ValueType> = args.iter().map(ValueType::from).collect();
 
@@ -56,7 +42,30 @@ impl OverloadedFunction {
             }
         }
 
-        best.expect("TODO: handle this error").call(args, env)
+        if let Some(function) = best {
+            function.call(args, env)
+        } else {
+            Err(FunctionCarrier::FunctionNotFound)
+        }
+    }
+}
+
+fn match_types_to_signature(types: &[ValueType], signature: &TypeSignature) -> Option<u32> {
+    match signature {
+        TypeSignature::Variadic => Some(0),
+        TypeSignature::Exact(signature) => {
+            if types.len() == signature.len() {
+                let mut acc = 0;
+                for (a, b) in types.iter().zip(signature.iter()) {
+                    let dist = b.distance(a)?;
+                    acc += dist;
+                }
+
+                return Some(acc);
+            }
+
+            None
+        }
     }
 }
 
@@ -214,6 +223,8 @@ pub enum FunctionCarrier {
     ArgumentError(String),
     #[error("IO Error: {0}")]
     IOError(#[from] std::io::Error),
+    #[error("function not found")] // TODO: look at this error message
+    FunctionNotFound,
 }
 
 impl FunctionCarrier {

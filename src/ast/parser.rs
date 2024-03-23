@@ -267,8 +267,8 @@ impl Parser {
                 }
             }
             Expression::Index { value, index } => {
-                if self.consume_token_if(&[Token::CreateVar]).is_some() {
-                    todo!("TODO: err: can't assign to index expression");
+                if let Some(actual_token) = self.consume_token_if(&[Token::CreateVar]) {
+                    Err(Error::UnexpectedToken { actual_token })
                 } else if self.consume_token_if(&[Token::EqualsSign]).is_some() {
                     let expression = self.expression()?;
                     let (start, end) = (value.start, expression.end);
@@ -662,6 +662,9 @@ pub enum Error {
 
     #[error("invalid variable declaration or assignment. Cannot assign a value to expression: {target:?}")]
     InvalidAssignmentTarget { target: ExpressionLocation },
+
+    #[error("unexpected token {} on {}", .actual_token.token, .actual_token.location)]
+    UnexpectedToken { actual_token: TokenLocation },
 }
 
 fn tokens_to_string(tokens: &[Token]) -> String {

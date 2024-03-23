@@ -1,3 +1,4 @@
+use crate::interpreter::function::Function;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
@@ -71,6 +72,36 @@ impl Environment {
         env
     }
 
+    #[must_use]
+    pub fn get_all(&self, name: &str) -> Vec<RefCell<Value>> {
+        let mut values: Vec<RefCell<Value>> = Vec::new();
+
+        if let Some(value) = self.values.get(name) {
+            values.push(value.clone());
+        }
+
+        // TODO: there is probably a much faster implementation possible
+        if let Some(parent) = &self.parent {
+            values.extend(parent.borrow().get_all(name));
+        }
+
+        values
+    }
+
+    pub fn declare_function(&mut self, name: &str, function: Function) {
+        if let Some(existing) = self.values.get(name) {
+            // Overload existing function
+            let existing = &*existing.borrow();
+            if let Value::Function(existing_function) = existing {
+                let mut existing_function = existing_function.borrow_mut();
+                existing_function.add(function);
+                return;
+            }
+        }
+
+        // Fallback
+        self.declare(name, Value::from(function));
+    }
     pub fn declare(&mut self, name: &str, value: Value) {
         self.values.insert(name.into(), RefCell::new(value));
     }

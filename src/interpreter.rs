@@ -6,7 +6,7 @@ use crate::interpreter::environment::{Environment, EnvironmentRef, InterpreterOu
 use crate::interpreter::evaluate::{evaluate_expression, EvaluationError};
 use crate::interpreter::function::FunctionCarrier;
 use crate::interpreter::value::Value;
-use crate::lexer::{Lexer, Location, TokenLocation};
+use crate::lexer::{Lexer, TokenLocation};
 
 pub mod environment;
 pub mod evaluate;
@@ -76,15 +76,7 @@ impl Interpreter {
                 Err(FunctionCarrier::EvaluationError(e)) => {
                     return Err(e);
                 }
-                Err(FunctionCarrier::ArgumentError(msg)) => {
-                    // TODO: coercing ArgumentError into a EvaluationError in this way is pretty cringe
-                    return Err(EvaluationError::type_error(
-                        &msg,
-                        Location { line: 0, column: 0 },
-                        Location { line: 0, column: 0 },
-                    ));
-                }
-                _ => todo!("unimplemented"),
+                Err(err) => panic!("unexpected error: {err}",),
             }
         }
         Ok(value)

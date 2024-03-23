@@ -25,6 +25,18 @@ pub(crate) fn evaluate_expression(
 ) -> EvaluationResult {
     let (start, end) = (expression_location.start, expression_location.end);
     let literal: Value = match &expression_location.expression {
+        Expression::BoolLiteral(b) => Value::Bool(*b),
+        Expression::StringLiteral(s) => {
+            // TODO: to_string will make a copy, is this the best way to handle these types
+            //       or should we reconsider having String in an Rc for Expression because that
+            //       was probably only convenient when the our values used just Rcs
+            Value::Sequence(Sequence::String(Rc::new(RefCell::new(s.to_string()))))
+        }
+        Expression::Int64Literal(n) => Value::Number(Number::Int(Int::Int64(*n))),
+        Expression::BigIntLiteral(n) => Value::Number(Number::Int(Int::BigInt(n.clone()))),
+        Expression::Float64Literal(n) => Value::Number(Number::Float(*n)),
+        Expression::ComplexLiteral(n) => Value::Number(Number::Complex(*n)),
+        Expression::UnitLiteral => Value::Unit,
         Expression::Unary {
             expression: expression_location,
             operator,
@@ -63,7 +75,7 @@ pub(crate) fn evaluate_expression(
         Expression::Grouping(expr) => evaluate_expression(expr, environment)?,
         Expression::VariableDeclaration { l_value, value } => {
             let Lvalue::Variable { identifier } = l_value else {
-                todo!("other lvalues are not implemented in declaration");
+                todo!("other lvalues are not implemented or even invalid in declarations");
             };
 
             let value = evaluate_expression(value, environment)?;
@@ -231,33 +243,19 @@ pub(crate) fn evaluate_expression(
             drop(local_scope);
             Value::Unit
         }
-        Expression::BoolLiteral(b) => Value::Bool(*b),
-        Expression::StringLiteral(s) => {
-            // TODO: to_string will make a copy, is this the best way to handle these types
-            //       or should we reconsider having String in an Rc for Expression because that
-            //       was probably only convenient when the our values used just Rcs
-            Value::Sequence(Sequence::String(Rc::new(RefCell::new(s.to_string()))))
-        }
-        Expression::Int64Literal(n) => Value::Number(Number::Int(Int::Int64(*n))),
-        Expression::BigIntLiteral(n) => Value::Number(Number::Int(Int::BigInt(n.clone()))),
-        Expression::Float64Literal(n) => Value::Number(Number::Float(*n)),
-        Expression::ComplexLiteral(n) => Value::Number(Number::Complex(*n)),
-        Expression::UnitLiteral => Value::Unit,
         Expression::Call {
             function,
             arguments,
         } => {
             // The Expression in `function` must either be an identifier in which case it will be looked up in the
             // environment, or it must be some expression that evaluates to a function.
-            let value = evaluate_expression(function, environment)?;
-            let Value::Function(function) = value else {
-                return Err(EvaluationError::syntax_error(
-                    &format!("{} is not callable", ValueType::from(&value)),
-                    // FIXME: this is the location of the expression and not the parentheses that make this a function call
-                    expression_location.start,
-                    expression_location.end,
-                )
-                .into());
+            // In case the expression is an identifier we get ALL the values that match the identifier
+            // ordered by the distance is the scope-hierarchy.
+            let values: Vec<RefCell<Value>> = match &function.expression {
+                Expression::Identifier(identifier) => {
+                    environment.borrow().get_all(identifier).clone()
+                }
+                _ => vec![RefCell::new(evaluate_expression(function, environment)?)],
             };
 
             let mut evaluated_args = Vec::new();
@@ -266,9 +264,30 @@ pub(crate) fn evaluate_expression(
                 evaluated_args.push(evaluate_expression(argument, environment)?);
             }
 
-            let return_value = function.borrow().call(&evaluated_args, environment)?;
-            #[allow(clippy::let_and_return)]
-            return_value
+            // We evaluate all potential function values by first checking if they're a function and
+            // then attempting to call them. If the `OverloadedFunction` returns that there are no
+            // matches we defer to the next value and see if there is a match.
+            //
+            // This implies that a less specific function can shadow a more specific function
+            //
+            // fn sqrt(n: Float);
+            // {
+            //      fn sqrt(n: Number); // Shadows the sqrt in the parent scope completely
+            // }
+            //
+            // This behavior is subject to change in future versions of the language
+            for value in values {
+                let value = &*value.borrow();
+                if let Value::Function(function) = value {
+                    let result = function.borrow().call(&evaluated_args, environment);
+                    if let Err(FunctionCarrier::FunctionNotFound) = result {
+                        continue;
+                    }
+                    return result;
+                }
+            }
+
+            return Err(FunctionCarrier::FunctionNotFound);
         }
         Expression::FunctionDeclaration {
             arguments,
@@ -285,9 +304,11 @@ pub(crate) fn evaluate_expression(
 
             environment
                 .borrow_mut()
-                .declare(&name, Value::from(user_function));
+                .declare_function(&name, user_function);
+
             Value::Unit
         }
+
         Expression::Tuple { .. } => todo!("tuples are not yet implemented in this position"),
         Expression::Identifier(identifier) => {
             if let Some(value) = environment.borrow().get(identifier) {
