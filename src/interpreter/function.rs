@@ -4,35 +4,68 @@ use crate::ast::ExpressionLocation;
 use crate::interpreter::environment::{Environment, EnvironmentRef};
 use crate::interpreter::evaluate::{evaluate_expression, EvaluationError, EvaluationResult};
 use crate::interpreter::num::{Number, NumberType};
-use crate::interpreter::value::{Value, ValueType};
+use crate::interpreter::value::{Sequence, Value, ValueType};
 use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Formatter;
 
-#[derive(Debug)] // TODO: create a sane implementation
+#[derive(Debug, Eq, PartialEq, Hash)]
+enum TypeSignature {
+    Variadic,
+    Exact(Vec<ParamType>),
+}
+
+#[derive(Debug)] // TODO: create a sane implementation for Debug
 pub struct OverloadedFunction {
-    implementations: HashMap<Vec<ValueType>, Function>,
+    implementations: HashMap<TypeSignature, Function>,
+}
+
+fn match_types_to_signature(types: &[ValueType], signature: &TypeSignature) -> Option<u32> {
+    match signature {
+        TypeSignature::Variadic => Some(0),
+        TypeSignature::Exact(signature) => {
+            if types.len() == signature.len() {
+                let mut acc = 0;
+                for (a, b) in types.iter().zip(signature.iter()) {
+                    let dist = b.distance(a)?;
+                    acc += dist;
+                }
+
+                return Some(acc);
+            }
+
+            None
+        }
+    }
 }
 
 impl OverloadedFunction {
     pub fn call(&self, args: &[Value], env: &EnvironmentRef) -> EvaluationResult {
-        let types = args.iter().map(Value::value_type).collect::<Vec<_>>();
+        let types: Vec<ValueType> = args.iter().map(ValueType::from).collect();
 
-        if self.implementations.len() == 1 {
-            let imp = self.implementations.iter().next().unwrap().1;
-            imp.call(args, env)
-        } else {
-            todo!()
+        // TODO: this only supports exact matching we should add subtypes
+        let mut best = None;
+        let mut best_distance = u32::MAX;
+        for (signature, function) in &self.implementations {
+            let Some(cur) = match_types_to_signature(&types, signature) else {
+                continue;
+            };
+            if cur < best_distance {
+                best_distance = cur;
+                best = Some(function);
+            }
         }
+
+        best.expect("TODO: handle this error").call(args, env)
     }
 }
 
 // TODO: does it make sense to have this since we need to have merge logic somehwere
 impl From<Function> for OverloadedFunction {
-    fn from(value: Function) -> Self {
+    fn from(function: Function) -> Self {
+        let type_signature = function.type_signature();
         Self {
-            // TODO: actually bind the implementation correctly
-            implementations: HashMap::from([(vec![], value)]),
+            implementations: HashMap::from([(type_signature, function)]),
         }
     }
 }
@@ -51,7 +84,80 @@ pub enum Function {
     },
 }
 
+#[derive(Debug, Eq, PartialEq, Hash)]
+enum ParamType {
+    Any,
+    Unit,
+    Bool,
+    Function,
+
+    // Numbers
+    Number,
+    Float,
+    Int,
+    Rational,
+    Complex,
+
+    // Sequences
+    #[allow(dead_code)] // TODO: this can probably be removed in the future
+    Sequence,
+    List,
+    String,
+}
+
+impl ParamType {
+    fn distance(&self, other: &ValueType) -> Option<u32> {
+        #[allow(clippy::match_same_arms)]
+        match (self, other) {
+            (ParamType::Bool, ValueType::Bool) => Some(0),
+            (ParamType::Unit, ValueType::Unit) => Some(0),
+            (ParamType::Int, ValueType::Number(NumberType::Int)) => Some(0),
+            (ParamType::Float, ValueType::Number(NumberType::Float)) => Some(0),
+            (ParamType::Rational, ValueType::Number(NumberType::Rational)) => Some(0),
+            (ParamType::Complex, ValueType::Number(NumberType::Complex)) => Some(0),
+            (ParamType::String, ValueType::String) => Some(0),
+            (ParamType::List, ValueType::List) => Some(0),
+            (ParamType::Function, ValueType::Function) => Some(0),
+            (ParamType::Any, _) => Some(2),
+            (ParamType::Number, ValueType::Number(_)) => Some(1),
+            (ParamType::Sequence, ValueType::List | ValueType::String) => Some(1),
+            _ => None,
+        }
+    }
+}
+
+/// Converts the concrete type of a value to the specific `ParamType`
+impl From<&Value> for ParamType {
+    fn from(value: &Value) -> Self {
+        match value {
+            Value::Unit => ParamType::Unit,
+            Value::Number(Number::Rational(_)) => ParamType::Rational,
+            Value::Number(Number::Complex(_)) => ParamType::Complex,
+            Value::Number(Number::Int(_)) => ParamType::Int,
+            Value::Number(Number::Float(_)) => ParamType::Float,
+            Value::Bool(_) => ParamType::Bool,
+            Value::Sequence(Sequence::String(_)) => ParamType::String,
+            Value::Sequence(Sequence::List(_)) => ParamType::List,
+            Value::Function(_) => ParamType::Function,
+        }
+    }
+}
+
 impl Function {
+    fn type_signature(&self) -> TypeSignature {
+        match self {
+            Function::Closure {
+                parameter_names, ..
+            } => TypeSignature::Exact(parameter_names.iter().map(|_| ParamType::Any).collect()),
+            Function::SingleNumberFunction { .. } => TypeSignature::Exact(vec![ParamType::Number]),
+            Function::GenericFunction { .. } => {
+                // TODO: not all generic functions are Variadic but this should fix tests for now
+                //       since they'll match everything
+                TypeSignature::Variadic
+            }
+        }
+    }
+
     pub fn call(&self, args: &[Value], env: &EnvironmentRef) -> EvaluationResult {
         match self {
             Function::Closure {

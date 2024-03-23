@@ -24,7 +24,7 @@ impl Value {
             Value::Number(n) => ValueType::Number(n.into()),
             Value::Bool(_) => ValueType::Bool,
             Value::Sequence(Sequence::String(_)) => ValueType::String,
-            Value::Sequence(Sequence::List(t)) => ValueType::List,
+            Value::Sequence(Sequence::List(_)) => ValueType::List,
             Value::Function(_) => ValueType::Function,
         }
     }
@@ -104,7 +104,7 @@ impl TryFrom<Value> for usize {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum ValueType {
     Unit,
     Number(NumberType),
