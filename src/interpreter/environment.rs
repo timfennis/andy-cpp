@@ -39,8 +39,6 @@ impl fmt::Debug for Environment {
 // }
 
 impl Environment {
-    /// # Errors
-    /// see `std::io::Error`
     pub fn with_output<F>(&mut self, f: F) -> Result<(), std::io::Error>
     where
         F: FnOnce(&mut Box<dyn InterpreterOutput>) -> Result<(), std::io::Error>,
@@ -72,6 +70,7 @@ impl Environment {
 
         env
     }
+
     pub fn declare(&mut self, name: &str, value: Value) {
         self.values.insert(name.into(), RefCell::new(value));
     }

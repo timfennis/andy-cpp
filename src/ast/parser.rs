@@ -2,8 +2,7 @@ use crate::ast::expression::{ExpressionLocation, Lvalue};
 use crate::ast::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
 use crate::ast::Expression;
 use crate::lexer::{Location, Token, TokenLocation};
-use std::fmt;
-use std::fmt::{Formatter, Write};
+use std::fmt::Write;
 use std::rc::Rc;
 
 pub struct Parser {
@@ -644,63 +643,22 @@ impl Parser {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(thiserror::Error, Debug, PartialEq)]
 pub enum Error {
-    UnexpectedEndOfStream {
-        help_text: String,
-    },
-    ExpectedExpression {
-        actual_token: TokenLocation,
-    },
+    #[error("unexpected end of stream: {help_text}")]
+    UnexpectedEndOfStream { help_text: String },
+    #[error("Unexpected token '{}' expected expression on {}", .actual_token.token, .actual_token.location)]
+    ExpectedExpression { actual_token: TokenLocation },
     // TODO this type is incomplete at best
-    ExpectedIdentifier {
-        actual: ExpressionLocation,
-    },
+    #[error("expected identifier got '{:?}' on {}", .actual, .actual.start)]
+    ExpectedIdentifier { actual: ExpressionLocation },
+    #[error("Unexpected token '{}' expected symbol '{}' on {}", .actual_token.token, tokens_to_string(.expected_tokens), .actual_token.location)]
     ExpectedToken {
         actual_token: TokenLocation,
         expected_tokens: Vec<Token>,
     },
-    InvalidAssignmentTarget {
-        target: ExpressionLocation,
-    },
-}
-
-impl std::error::Error for Error {}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::UnexpectedEndOfStream { help_text } =>
-                write!(f, "Unexpected end of stream: {help_text}"),
-            Self::ExpectedExpression {
-                actual_token: token,
-            } => write!(
-                f,
-                "Unexpected token '{}' expected expression on {}",
-                token.token,
-                token.location
-            ),
-            Self::ExpectedIdentifier {
-                actual
-            } => write!(
-                f,
-                "expected identifier got '{:?}' on {}",
-                actual,
-                actual.start
-            ),
-            Self::ExpectedToken {
-                actual_token,
-                expected_tokens: expected_symbols,
-            } => write!(
-                f,
-                "Unexpected token '{}' expected symbol '{}' on {}",
-                actual_token.token,
-                tokens_to_string(expected_symbols),
-                actual_token.location
-            ),
-            Self::InvalidAssignmentTarget { target } => write!(f, "Invalid variable declaration or assignment. Cannot assign a value to expression: {target:?}")
-        }
-    }
+    #[error("Invalid variable declaration or assignment. Cannot assign a value to expression: {target:?}")]
+    InvalidAssignmentTarget { target: ExpressionLocation },
 }
 
 fn tokens_to_string(tokens: &[Token]) -> String {

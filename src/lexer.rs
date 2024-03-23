@@ -1,6 +1,5 @@
 use num::{BigInt, Complex};
 use std::collections::VecDeque;
-use std::fmt;
 use std::str::Chars;
 
 mod token;
@@ -277,42 +276,17 @@ impl<'a> SourceIterator<'a> {
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(thiserror::Error, Debug, Eq, PartialEq)]
 pub enum Error {
-    InvalidFloat {
-        string: String,
-        location: Location,
-    },
-    //TODO: refactor to location
-    UnexpectedCharacter {
-        char: char,
-        location: Location,
-    },
-    //TODO: refactor to location
-    UnterminatedString {
-        location: Location,
-    },
+    #[error("invalid float '{string}' at {location}")]
+    InvalidFloat { string: String, location: Location },
+    #[error("unexpected character '{char}' at {location}")]
+    UnexpectedCharacter { char: char, location: Location },
+    #[error("unterminated string starting at {location}")]
+    UnterminatedString { location: Location },
+    #[error("invalid escape sequence '{sequence}' at {location}")]
     InvalidEscapeSequence {
         sequence: String,
         location: Location,
     },
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::UnexpectedCharacter { char, location } => {
-                write!(f, "unexpected character '{char}' at {location}")
-            }
-            Self::UnterminatedString { location } => {
-                write!(f, "unterminated string starting at {location}")
-            }
-            Self::InvalidEscapeSequence { sequence, location } => {
-                write!(f, "invalid escape sequence '{sequence}' at {location}")
-            }
-            Self::InvalidFloat { string, location } => {
-                write!(f, "invalid float {string} at {location}")
-            }
-        }
-    }
 }

@@ -1,5 +1,4 @@
 use std::cell::RefCell;
-use std::fmt;
 use std::rc::Rc;
 
 use crate::ast::ExpressionLocation;
@@ -34,10 +33,6 @@ impl Interpreter {
         self.environment
     }
 
-    /// Parse and execute the string
-    /// # Errors
-    ///
-    /// Will return an Interpreter error if Lexing, Parsing or Evaluation of the code failed. See [Error].
     pub fn run_str(&mut self, input: &str, debug: bool) -> Result<String, Error> {
         let scanner = Lexer::new(input);
         let tokens = scanner.collect::<Result<Vec<TokenLocation>, _>>()?;
@@ -96,39 +91,21 @@ impl Interpreter {
     }
 }
 
-#[derive(Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum Error {
-    Lexer { cause: crate::lexer::Error },
-    Parser { cause: crate::ast::Error },
-    Evaluation { cause: EvaluationError },
+    #[error("Lexer error: {cause}")]
+    Lexer {
+        #[from]
+        cause: crate::lexer::Error,
+    },
+    #[error("Parser error: {cause}")]
+    Parser {
+        #[from]
+        cause: crate::ast::Error,
+    },
+    #[error("Evaluation error: {cause}")]
+    Evaluation {
+        #[from]
+        cause: EvaluationError,
+    },
 }
-
-impl From<crate::lexer::Error> for Error {
-    fn from(value: crate::lexer::Error) -> Self {
-        Self::Lexer { cause: value }
-    }
-}
-
-impl From<crate::ast::Error> for Error {
-    fn from(value: crate::ast::Error) -> Self {
-        Self::Parser { cause: value }
-    }
-}
-
-impl From<EvaluationError> for Error {
-    fn from(value: EvaluationError) -> Self {
-        Self::Evaluation { cause: value }
-    }
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Lexer { cause } => write!(f, "Lexer error: {cause}"),
-            Self::Parser { cause } => write!(f, "Parser error: {cause}"),
-            Self::Evaluation { cause } => write!(f, "Evaluation error: {cause}"),
-        }
-    }
-}
-
-impl std::error::Error for Error {}
