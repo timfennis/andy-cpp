@@ -7,8 +7,6 @@ use crate::interpreter::evaluate::{evaluate_expression, EvaluationError, Evaluat
 use crate::interpreter::value::{Value, ValueType};
 
 pub trait Function: fmt::Debug {
-    /// # Errors
-    /// For now it'll return evaluation errors if the there are any during the execution of the function body
     fn call(&self, args: &[Value], env: &EnvironmentRef) -> EvaluationResult;
 }
 
