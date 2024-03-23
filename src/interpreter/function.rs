@@ -5,29 +5,50 @@ use crate::interpreter::environment::{Environment, EnvironmentRef};
 use crate::interpreter::evaluate::{evaluate_expression, EvaluationError, EvaluationResult};
 use crate::interpreter::num::{Number, NumberType};
 use crate::interpreter::value::{Value, ValueType};
+use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Formatter;
 
+#[derive(Debug)] // TODO: create a sane implementation
+pub struct OverloadedFunction {
+    implementations: HashMap<Vec<ValueType>, Function>,
+}
+
+impl OverloadedFunction {
+    pub fn call(&self, args: &[Value], env: &EnvironmentRef) -> EvaluationResult {
+        let types = args.iter().map(Value::value_type).collect::<Vec<_>>();
+
+        if self.implementations.len() == 1 {
+            let imp = self.implementations.iter().next().unwrap().1;
+            imp.call(args, env)
+        } else {
+            todo!()
+        }
+    }
+}
+
+// TODO: does it make sense to have this since we need to have merge logic somehwere
+impl From<Function> for OverloadedFunction {
+    fn from(value: Function) -> Self {
+        Self {
+            // TODO: actually bind the implementation correctly
+            implementations: HashMap::from([(vec![], value)]),
+        }
+    }
+}
 #[derive(Clone)]
 pub enum Function {
     Closure {
-        parameters: Vec<String>,
+        parameter_names: Vec<String>,
         body: Rc<ExpressionLocation>,
         environment: EnvironmentRef,
     },
     SingleNumberFunction {
-        // pub name: &'static str,
         body: fn(number: Number) -> Number,
     },
     GenericFunction {
         function: fn(&[Value], &EnvironmentRef) -> EvaluationResult,
     },
-}
-
-impl fmt::Debug for Function {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "function")
-    }
 }
 
 impl Function {
@@ -36,7 +57,7 @@ impl Function {
             Function::Closure {
                 body,
                 environment,
-                parameters,
+                parameter_names: parameters,
             } => {
                 let mut local_scope = Environment::new_scope(environment);
 
@@ -67,6 +88,12 @@ impl Function {
             },
             Function::GenericFunction { function } => function(args, env),
         }
+    }
+}
+
+impl fmt::Debug for Function {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "function")
     }
 }
 

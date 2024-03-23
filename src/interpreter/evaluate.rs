@@ -250,9 +250,7 @@ pub(crate) fn evaluate_expression(
             // The Expression in `function` must either be an identifier in which case it will be looked up in the
             // environment, or it must be some expression that evaluates to a function.
             let value = evaluate_expression(function, environment)?;
-            let function = if let Value::Function(function) = value {
-                function.clone()
-            } else {
+            let Value::Function(function) = value else {
                 return Err(EvaluationError::syntax_error(
                     &format!("{} is not callable", ValueType::from(&value)),
                     // FIXME: this is the location of the expression and not the parentheses that make this a function call
@@ -268,7 +266,9 @@ pub(crate) fn evaluate_expression(
                 evaluated_args.push(evaluate_expression(argument, environment)?);
             }
 
-            function.call(&evaluated_args, environment)?
+            let return_value = function.borrow().call(&evaluated_args, environment)?;
+            #[allow(clippy::let_and_return)]
+            return_value
         }
         Expression::FunctionDeclaration {
             arguments,
@@ -278,7 +278,7 @@ pub(crate) fn evaluate_expression(
             let name = name.try_into_identifier()?;
 
             let user_function = Function::Closure {
-                parameters: arguments.try_into_parameters()?,
+                parameter_names: arguments.try_into_parameters()?,
                 body: body.clone(),
                 environment: environment.clone(),
             };

@@ -1,4 +1,4 @@
-use crate::interpreter::function::Function;
+use crate::interpreter::function::{Function, OverloadedFunction};
 use crate::interpreter::int::Int;
 use crate::interpreter::num::{Number, NumberToUsizeError, NumberType};
 use std::cell::RefCell;
@@ -14,7 +14,7 @@ pub enum Value {
     Number(Number),
     Bool(bool),
     Sequence(Sequence),
-    Function(Rc<Function>),
+    Function(Rc<RefCell<OverloadedFunction>>),
 }
 
 impl Value {
@@ -24,10 +24,7 @@ impl Value {
             Value::Number(n) => ValueType::Number(n.into()),
             Value::Bool(_) => ValueType::Bool,
             Value::Sequence(Sequence::String(_)) => ValueType::String,
-            Value::Sequence(Sequence::List(t)) => {
-                let t = t.borrow().front().map(|it| Box::new(ValueType::from(it)));
-                ValueType::List(t)
-            }
+            Value::Sequence(Sequence::List(t)) => ValueType::List,
             Value::Function(_) => ValueType::Function,
         }
     }
@@ -66,7 +63,7 @@ impl From<i64> for Value {
 
 impl From<Function> for Value {
     fn from(value: Function) -> Self {
-        Value::Function(Rc::new(value))
+        Value::Function(Rc::new(RefCell::new(OverloadedFunction::from(value))))
     }
 }
 
@@ -107,13 +104,13 @@ impl TryFrom<Value> for usize {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum ValueType {
     Unit,
     Number(NumberType),
     Bool,
     String,
-    List(Option<Box<ValueType>>),
+    List,
     Function,
 }
 
@@ -130,13 +127,7 @@ impl fmt::Display for ValueType {
             Self::Number(n) => write!(f, "{n}"),
             Self::Bool => write!(f, "bool"),
             Self::String => write!(f, "string"),
-            Self::List(t) => {
-                if let Some(tt) = t {
-                    write!(f, "[{tt}]")
-                } else {
-                    write!(f, "[]")
-                }
-            }
+            Self::List => write!(f, "list"),
             Self::Function => write!(f, "function"),
         }
     }
