@@ -249,40 +249,17 @@ pub(crate) fn evaluate_expression(
         } => {
             // The Expression in `function` must either be an identifier in which case it will be looked up in the
             // environment, or it must be some expression that evaluates to a function.
-            let function = if let Expression::Identifier(name) = &function.expression {
-                if let Some(refcell) = environment.borrow().get(name) {
-                    let value = &*refcell.borrow();
-                    if let Value::Function(function) = value {
-                        function.clone()
-                    } else {
-                        return Err(EvaluationError::syntax_error(
-                            &format!("{name} is not a function"),
-                            expression_location.start,
-                            expression_location.end,
-                        )
-                        .into());
-                    }
-                } else {
-                    return Err(EvaluationError::syntax_error(
-                        &format!("undefined function {name}"),
-                        expression_location.start,
-                        expression_location.end,
-                    )
-                    .into());
-                }
+            let value = evaluate_expression(function, environment)?;
+            let function = if let Value::Function(function) = value {
+                function.clone()
             } else {
-                let value = evaluate_expression(function, environment)?;
-                if let Value::Function(function) = value {
-                    function.clone()
-                } else {
-                    return Err(EvaluationError::syntax_error(
-                        &format!("{} is not callable", ValueType::from(&value)),
-                        // FIXME: this is the location of the expression and not the parentheses that make this a function call
-                        expression_location.start,
-                        expression_location.end,
-                    )
-                    .into());
-                }
+                return Err(EvaluationError::syntax_error(
+                    &format!("{} is not callable", ValueType::from(&value)),
+                    // FIXME: this is the location of the expression and not the parentheses that make this a function call
+                    expression_location.start,
+                    expression_location.end,
+                )
+                .into());
             };
 
             let mut evaluated_args = Vec::new();

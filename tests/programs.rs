@@ -10,6 +10,10 @@ fn example_programs() {
 
 fn run_dir<P: AsRef<Path>>(dir: P) {
     if let Ok(files) = fs::read_dir(dir) {
+        // Sort the files in to ensure the tests are executed in the intended order
+        let mut files = files.collect::<Vec<_>>();
+        files.sort_unstable_by_key(|r| r.as_ref().map(|e| e.path()).ok());
+
         for file in files {
             match file {
                 Ok(file) if file.path().extension() == Some("ndct".as_ref()) => {
