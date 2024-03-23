@@ -80,6 +80,8 @@ pub(crate) fn evaluate_expression(
 
             let value = evaluate_expression(value, environment)?;
 
+            // TODO: we should probably remove this check because every declaration should create a
+            //       new scope in order to fix the weird shadowing bug. Check page 177 of the book.
             if environment.borrow().contains(identifier) {
                 let new_env = Environment::new_scope(environment);
                 *environment = new_env;
@@ -116,10 +118,16 @@ pub(crate) fn evaluate_expression(
                 let assign_to = evaluate_expression(assign_to, environment)?;
                 match &assign_to {
                     Value::Sequence(Sequence::List(list)) => {
-                        let list_size = list.borrow().len();
-                        let mut list = list.borrow_mut();
-                        let x = list.index_mut(convert_index(index, list_size).unwrap());
+                        // the computation of this value may need the list that we assign to,
+                        // therefore the value needs to be computed before we mutably borrow the list
+                        // see: `bug0001_in_place_map.ndct`
                         let value = evaluate_expression(value, environment)?;
+
+                        let mut list = list
+                            .try_borrow_mut()
+                            .map_err(|_| EvaluationError::mutation_error("you cannot mutate a value in a list while you're iterating over this list", start, end))?;
+                        let list_size = list.len();
+                        let x = list.index_mut(convert_index(index, list_size).unwrap());
                         *x = value;
                     }
                     Value::Sequence(Sequence::String(insertion_target)) => {
@@ -247,12 +255,14 @@ pub(crate) fn evaluate_expression(
             function,
             arguments,
         } => {
+            let mut display_identifier = "unknown".to_string();
             // The Expression in `function` must either be an identifier in which case it will be looked up in the
             // environment, or it must be some expression that evaluates to a function.
             // In case the expression is an identifier we get ALL the values that match the identifier
             // ordered by the distance is the scope-hierarchy.
             let values: Vec<RefCell<Value>> = match &function.expression {
                 Expression::Identifier(identifier) => {
+                    display_identifier = identifier.to_string();
                     environment.borrow().get_all(identifier).clone()
                 }
                 _ => vec![RefCell::new(evaluate_expression(function, environment)?)],
@@ -287,7 +297,12 @@ pub(crate) fn evaluate_expression(
                 }
             }
 
-            return Err(FunctionCarrier::FunctionNotFound);
+            return Err(EvaluationError::syntax_error(
+                &format!("invalid function name: {display_identifier}"),
+                start,
+                end,
+            )
+            .into());
         }
         Expression::FunctionDeclaration {
             arguments,
@@ -580,6 +595,14 @@ pub struct EvaluationError {
 
 impl EvaluationError {
     #[must_use]
+    pub fn mutation_error(message: &str, start: Location, end: Location) -> Self {
+        Self {
+            text: format!("Mutation error: {message}"),
+            start,
+            end,
+        }
+    }
+    #[must_use]
     pub fn type_error(message: &str, start: Location, end: Location) -> Self {
         Self {
             text: format!("Type error: {message}"),
@@ -627,7 +650,7 @@ impl From<std::io::Error> for EvaluationError {
 
 impl fmt::Display for EvaluationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} on {}", self.text, self.start)
+        write!(f, "{} on line {}", self.text, self.start.line)
     }
 }
 

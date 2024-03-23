@@ -372,7 +372,7 @@ impl Parser {
         let mut expr = self.primary()?;
 
         while let Some(current) =
-            self.consume_token_if(&[Token::LeftParentheses, Token::LeftSquareBracket])
+            self.consume_token_if(&[Token::LeftParentheses, Token::LeftSquareBracket, Token::Dot])
         {
             match current.token {
                 Token::LeftParentheses => {
@@ -392,6 +392,33 @@ impl Parser {
                         start,
                         end,
                     };
+                }
+                Token::Dot => {
+                    // TODO: figure out if we can reuse code from the previous match arm
+                    let (identifier, identifier_start, identifier_end) =
+                        self.require_identifier()?;
+                    let left_paren = self.require_token(&[Token::LeftParentheses])?;
+                    let Expression::Tuple {
+                        values: mut arguments,
+                    } = self.tuple(left_paren)?.expression
+                    else {
+                        unreachable!("self.tuple() must always produce a tuple");
+                    };
+                    arguments.insert(0, expr);
+
+                    expr = ExpressionLocation {
+                        expression: Expression::Call {
+                            function: Box::new(
+                                Expression::Identifier(identifier)
+                                    .to_location(identifier_start, identifier_end),
+                            ),
+                            arguments,
+                        },
+                        start: identifier_start,
+                        end: identifier_end, // TODO: figure out the real end
+                    }
+
+                    // for now we require parentheses
                 }
                 Token::LeftSquareBracket => {
                     let index_expression = self.expression()?;

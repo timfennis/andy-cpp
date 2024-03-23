@@ -1,0 +1,5 @@
+--PROGRAM--
+fn add(a, b) { a + b }
+print(1.add(2));
+--EXPECT--
+3

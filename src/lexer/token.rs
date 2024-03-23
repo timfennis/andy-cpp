@@ -36,6 +36,8 @@ pub enum Token {
     Exponent,
     // Operator - Unary
     Bang,
+    // Operator - Call
+    Dot,
     // Operator - Other
     DotDot, // range builder
     // Keywords
@@ -121,6 +123,7 @@ impl fmt::Display for Token {
             Self::LogicOr => "||",
             Self::Unit => "()",
             Self::DotDot => "..",
+            Self::Dot => ".",
         };
         write!(f, "{s}")
     }
@@ -198,6 +201,7 @@ impl TryFrom<char> for Token {
             '}' => Ok(Self::RightCurlyBracket),
             ',' => Ok(Self::Comma),
             ';' => Ok(Self::Semicolon),
+            '.' => Ok(Self::Dot),
             _ => Err(()),
         }
     }

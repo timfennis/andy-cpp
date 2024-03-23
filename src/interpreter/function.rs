@@ -223,7 +223,7 @@ pub enum FunctionCarrier {
     ArgumentError(String),
     #[error("IO Error: {0}")]
     IOError(#[from] std::io::Error),
-    #[error("function not found")] // TODO: look at this error message
+    #[error("function does not exist")]
     FunctionNotFound,
 }
 

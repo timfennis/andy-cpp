@@ -1,0 +1,21 @@
+--PROGRAM--
+// This is a very strange implementation of a map function that changes the list in place
+fn mut_map(list, function) {
+  len := 0;
+  for item in list { len = len + 1 };
+
+  index := 0;
+  while index < len {
+    new := function(list[index]);
+    list[index] = new;
+    index = index + 1;
+  }
+}
+
+list := [1,2,3,4];
+fn add_one(n) { n + 1 };
+
+list.mut_map(add_one);
+print(list);
+--EXPECT--
+[2,3,4,5]

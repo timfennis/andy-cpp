@@ -142,9 +142,23 @@ impl Iterator for Lexer<'_> {
                                 // ignore underscore for nice number formatting
                             }
                             '.' if !float => {
-                                float = true;
-                                self.source.next();
-                                buf.push('.');
+                                // if we find a dot we're likely dealing with a float, but it could
+                                // also be an integer followed by a method call eg: 1.add(2)
+                                // in this match we look ahead one step further to figure out if the
+                                // dot is followed by a number in which case it's a float, otherwise
+                                // we stop and just return the int and leave the dot for later
+                                match self.source.peek_next() {
+                                    // it's truly a num
+                                    Some(n) if n.is_ascii_digit() => {
+                                        float = true;
+                                        self.source.next();
+                                        buf.push('.');
+                                    }
+                                    // It's actually an int followed by dot or some weird error
+                                    _ => {
+                                        break;
+                                    }
+                                }
                             }
                             'j' | 'i' => {
                                 self.source.next();

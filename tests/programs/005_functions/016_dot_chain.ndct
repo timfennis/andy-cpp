@@ -1,0 +1,6 @@
+--PROGRAM--
+fn sub(a, b) { a - b }
+n := 10.sub(1).sub(2);
+print(n)
+--EXPECT--
+7
