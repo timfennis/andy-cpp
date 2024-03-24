@@ -5,26 +5,30 @@ use std::path::{Path, PathBuf};
 
 #[test]
 fn example_programs() {
-    run_dir(Path::new("/programs/"));
+    run_dir(Path::new("tests/programs/"));
 }
 
 fn run_dir<P: AsRef<Path>>(dir: P) {
-    if let Ok(files) = fs::read_dir(dir) {
-        // Sort the files in to ensure the tests are executed in the intended order
-        let mut files = files.collect::<Vec<_>>();
-        files.sort_unstable_by_key(|r| r.as_ref().map(|e| e.path()).ok());
+    match fs::read_dir(dir) {
+        Ok(files) => {
+            // Sort the files in to ensure the tests are executed in the intended order
+            let mut files = files.collect::<Vec<_>>();
+            assert_ne!(files.len(), 0, "no files were found at all");
+            files.sort_unstable_by_key(|r| r.as_ref().map(|e| e.path()).ok());
 
-        for file in files {
-            match file {
-                Ok(file) if file.path().extension() == Some("ndct".as_ref()) => {
-                    run_test(file.path()).expect("something went wrong while running the test")
+            for file in files {
+                match file {
+                    Ok(file) if file.path().extension() == Some("ndct".as_ref()) => {
+                        run_test(file.path()).expect("something went wrong while running the test")
+                    }
+                    Ok(file) if file.path().is_dir() => {
+                        run_dir(file.path());
+                    }
+                    _ => panic!("invalid test file: {file:?}"),
                 }
-                Ok(file) if file.path().is_dir() => {
-                    run_dir(file.path());
-                }
-                _ => panic!("invalid test file: {file:?}"),
             }
         }
+        Err(err) => panic!("Error reading test programs {err}"),
     }
 }
 

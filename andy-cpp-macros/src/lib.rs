@@ -16,7 +16,6 @@ pub fn andycpp_function(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let inner_ident = Ident::new(&format!("{}_inner", identifier), identifier.span());
     inner.sig.ident = inner_ident.clone();
 
-    // dbg!(&input.sig.inputs);
     let params = input
         .sig
         .inputs
@@ -28,6 +27,10 @@ pub fn andycpp_function(_attr: TokenStream, item: TokenStream) -> TokenStream {
                     return Some(quote! {
                         #path :: try_from(&values[#position]).map_err(|err| crate::interpreter::function::FunctionCarrier::ArgumentError(format!("{err}")))?
                     });
+                } else if let syn::Type::Reference(type_ref) = &*pat_type.ty {
+                    return Some(quote! {
+                        <#type_ref as TryFrom<&Value>> :: try_from(&values[#position]).map_err(|err| crate::interpreter::function::FunctionCarrier::ArgumentError(format!("{err}")))?
+                    })
                 }
             }
 

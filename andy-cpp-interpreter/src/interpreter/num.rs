@@ -297,11 +297,6 @@ impl Number {
         }
     }
 
-    /// Calculates the remainder of euclidean division.
-    /// # Errors
-    /// Returns an `EvaluationError` if the remainder of division is 0
-    /// # Panics
-    /// Panics if the evaluation between operands is not supported, this is a temporary condition
     pub fn checked_rem_euclid(self, rhs: Self) -> Result<Self, EvaluationError> {
         match (self, rhs) {
             (Self::Int(p1), Self::Int(p2)) => Ok(Self::Int(p1.checked_rem_euclid(&p2).ok_or({
@@ -322,13 +317,6 @@ impl Number {
             ),
         }
     }
-
-    /// Performs exponentiation
-    /// # Errors
-    /// Returns an `EvaluationError::IntegerOverflow` error if the right operand cannot be converted into a 32 bit
-    /// integer
-    /// # Panics
-    /// Panics if the operation between the two number types has not yet been implemented
     pub fn checked_pow(self, rhs: Self) -> Result<Self, EvaluationError> {
         Ok(match (self, rhs) {
             // Int vs others

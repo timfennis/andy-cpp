@@ -5,7 +5,7 @@ use std::fs::read_to_string;
 use std::path::Path;
 use std::rc::Rc;
 
-use num::{BigInt, ToPrimitive};
+use num::{BigInt, Integer, ToPrimitive};
 
 use andy_cpp_macros::andycpp_function;
 
@@ -18,13 +18,32 @@ use crate::interpreter::value::{Sequence, Value, ValueType};
 use crate::lexer::Location;
 
 #[andycpp_function]
-pub fn lcm(a: i64, b: i64) -> i64 {
-    num::integer::lcm(a, b)
+pub fn lcm(a: BigInt, b: BigInt) -> BigInt {
+    a.lcm(&b)
+}
+
+#[andycpp_function]
+pub fn ceil(number: &Number) -> Number {
+    number.ceil()
+}
+
+#[andycpp_function]
+pub fn round(number: &Number) -> Number {
+    number.round()
+}
+
+#[andycpp_function]
+pub fn floor(number: &Number) -> Number {
+    number.floor()
 }
 
 #[allow(clippy::too_many_lines)]
 pub fn bind_to_environment(env: &mut Environment) {
     env.declare("lcm", Value::from(Function::generic(lcm)));
+
+    env.declare("ceil", Value::from(Function::generic(ceil)));
+    env.declare("round", Value::from(Function::generic(round)));
+    env.declare("floor", Value::from(Function::generic(floor)));
 
     env.declare(
         "print",
@@ -93,24 +112,6 @@ pub fn bind_to_environment(env: &mut Environment) {
                 ))),
                 vals => Err(FunctionCarrier::argument_count_error(1, vals.len())),
             },
-        }),
-    );
-    env.declare(
-        "ceil",
-        Value::from(Function::SingleNumberFunction {
-            body: |num: Number| num.ceil(),
-        }),
-    );
-    env.declare(
-        "round",
-        Value::from(Function::SingleNumberFunction {
-            body: |num: Number| num.round(),
-        }),
-    );
-    env.declare(
-        "floor",
-        Value::from(Function::SingleNumberFunction {
-            body: |num: Number| num.floor(),
         }),
     );
     macro_rules! delegate_to_f64 {
