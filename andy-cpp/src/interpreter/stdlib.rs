@@ -1,9 +1,13 @@
+#![allow(clippy::must_use_candidate)]
+
 use std::cell::RefCell;
 use std::fs::read_to_string;
 use std::path::Path;
 use std::rc::Rc;
 
 use num::{BigInt, ToPrimitive};
+
+use andy_cpp_macros::andycpp_function;
 
 use crate::interpreter::environment::Environment;
 use crate::interpreter::evaluate::EvaluationError;
@@ -13,8 +17,15 @@ use crate::interpreter::num::Number;
 use crate::interpreter::value::{Sequence, Value, ValueType};
 use crate::lexer::Location;
 
+#[andycpp_function]
+pub fn lcm(a: i64, b: i64) -> i64 {
+    num::integer::lcm(a, b)
+}
+
 #[allow(clippy::too_many_lines)]
 pub fn bind_to_environment(env: &mut Environment) {
+    env.declare("lcm", Value::from(Function::generic(lcm)));
+
     env.declare(
         "print",
         Value::from(Function::GenericFunction {
@@ -36,6 +47,7 @@ pub fn bind_to_environment(env: &mut Environment) {
             },
         }),
     );
+
     env.declare(
         "read_file",
         Value::from(Function::GenericFunction {

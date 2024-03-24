@@ -76,7 +76,7 @@ impl Interpreter {
                 Err(FunctionCarrier::EvaluationError(e)) => {
                     return Err(e);
                 }
-                Err(err) => panic!("unexpected error: {err}",),
+                Err(err) => panic!("unexpected error: {err:?}",),
             }
         }
         Ok(value)

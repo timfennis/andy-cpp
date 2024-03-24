@@ -93,6 +93,12 @@ pub enum Function {
     },
 }
 
+impl Function {
+    pub fn generic(function: fn(&[Value], &EnvironmentRef) -> EvaluationResult) -> Self {
+        Self::GenericFunction { function }
+    }
+}
+
 #[derive(Debug, Eq, PartialEq, Hash)]
 enum ParamType {
     Any,

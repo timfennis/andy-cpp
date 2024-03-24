@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 #[test]
 fn example_programs() {
-    run_dir(Path::new("tests/programs/"));
+    run_dir(Path::new("/programs/"));
 }
 
 fn run_dir<P: AsRef<Path>>(dir: P) {

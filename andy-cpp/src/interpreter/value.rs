@@ -1,3 +1,5 @@
+use crate::interpreter::environment::EnvironmentRef;
+use crate::interpreter::evaluate::EvaluationResult;
 use crate::interpreter::function::{Function, OverloadedFunction};
 use crate::interpreter::int::Int;
 use crate::interpreter::num::{Number, NumberToUsizeError, NumberType};
@@ -73,12 +75,25 @@ pub enum ValueToIntError {
     UnsupportedVariant(ValueType),
 }
 
+type AndyFunction = fn(&[Value], &EnvironmentRef) -> EvaluationResult;
+
 impl TryFrom<Value> for i64 {
     type Error = ValueToIntError;
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
         match value {
             Value::Number(Number::Int(Int::Int64(i))) => Ok(i),
+            v => Err(Self::Error::UnsupportedVariant(v.value_type())),
+        }
+    }
+}
+
+impl TryFrom<&Value> for i64 {
+    type Error = ValueToIntError;
+
+    fn try_from(value: &Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Number(Number::Int(Int::Int64(i))) => Ok(*i),
             v => Err(Self::Error::UnsupportedVariant(v.value_type())),
         }
     }
