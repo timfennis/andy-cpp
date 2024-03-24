@@ -29,7 +29,7 @@ pub fn andycpp_function(_attr: TokenStream, item: TokenStream) -> TokenStream {
                     });
                 } else if let syn::Type::Reference(type_ref) = &*pat_type.ty {
                     return Some(quote! {
-                        <#type_ref as TryFrom<&Value>> :: try_from(&values[#position]).map_err(|err| crate::interpreter::function::FunctionCarrier::ArgumentError(format!("{err}")))?
+                        <#type_ref as TryFrom<&crate::interpreter::value::Value>> :: try_from(&values[#position]).map_err(|err| crate::interpreter::function::FunctionCarrier::ArgumentError(format!("{err}")))?
                     })
                 }
             }

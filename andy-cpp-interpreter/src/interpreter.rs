@@ -13,8 +13,7 @@ pub mod evaluate;
 pub mod function;
 pub mod int;
 pub mod num;
-pub mod stdlib;
-mod value;
+pub mod value;
 
 pub struct Interpreter {
     environment: EnvironmentRef,

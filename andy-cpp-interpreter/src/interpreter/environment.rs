@@ -6,7 +6,6 @@ use std::fmt::Formatter;
 use std::io::{stdout, Stdout, Write};
 use std::rc::Rc;
 
-use crate::interpreter::stdlib;
 use crate::interpreter::value::Value;
 
 pub type EnvironmentRef = Rc<RefCell<Environment>>;
@@ -67,7 +66,8 @@ impl Environment {
             values: HashMap::default(),
         };
 
-        stdlib::bind_to_environment(&mut env);
+        crate::stdlib::math::register(&mut env);
+        crate::stdlib::file::register(&mut env);
 
         env
     }
