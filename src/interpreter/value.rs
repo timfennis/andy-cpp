@@ -99,14 +99,6 @@ impl<T: Into<Value>> From<Vec<T>> for Value {
     }
 }
 
-// impl<T: Into<Value>> From<dyn Iterator<Item = T>> for Value {
-//     fn from(value: dyn Iterator<Item = T>) -> Self {
-//         Self::Sequence(Sequence::List(Rc::new(RefCell::new(
-//             value.into_iter().map(Into::into).collect(),
-//         ))))
-//     }
-// }
-
 impl From<Number> for Value {
     fn from(value: Number) -> Self {
         Self::Number(value)

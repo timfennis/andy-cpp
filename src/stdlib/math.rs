@@ -2,15 +2,35 @@ use crate::interpreter::environment::Environment;
 use crate::interpreter::function::Function;
 use crate::interpreter::num::Number;
 use crate::interpreter::value::Value;
+use crate::register_fn;
 use andy_cpp_macros::export_function;
 use num::{BigInt, Integer, ToPrimitive};
 
-pub fn register(env: &mut Environment) {
-    env.declare("lcm", Value::from(Function::generic(lcm)));
+#[export_function]
+fn lcm(a: BigInt, b: BigInt) -> BigInt {
+    a.lcm(&b)
+}
 
-    env.declare("ceil", Value::from(Function::generic(ceil)));
-    env.declare("round", Value::from(Function::generic(round)));
-    env.declare("floor", Value::from(Function::generic(floor)));
+#[export_function]
+fn ceil(number: &Number) -> Number {
+    number.ceil()
+}
+
+#[export_function]
+fn round(number: &Number) -> Number {
+    number.round()
+}
+
+#[export_function]
+fn floor(number: &Number) -> Number {
+    number.floor()
+}
+
+pub fn register(env: &mut Environment) {
+    register_fn!(env, lcm);
+    register_fn!(env, ceil);
+    register_fn!(env, round);
+    register_fn!(env, floor);
 
     macro_rules! delegate_to_f64 {
         ($method:ident) => {
@@ -45,24 +65,4 @@ pub fn register(env: &mut Environment) {
     delegate_to_f64!(sin);
     delegate_to_f64!(sqrt);
     delegate_to_f64!(tan);
-}
-
-#[export_function]
-fn lcm(a: BigInt, b: BigInt) -> BigInt {
-    a.lcm(&b)
-}
-
-#[export_function]
-fn ceil(number: &Number) -> Number {
-    number.ceil()
-}
-
-#[export_function]
-fn round(number: &Number) -> Number {
-    number.round()
-}
-
-#[export_function]
-fn floor(number: &Number) -> Number {
-    number.floor()
 }
