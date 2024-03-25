@@ -2,7 +2,7 @@ use crate::interpreter::environment::Environment;
 use crate::interpreter::function::Function;
 use crate::interpreter::num::Number;
 use crate::interpreter::value::Value;
-use andy_cpp_macros::andycpp_function;
+use andy_cpp_macros::export_function;
 use num::{BigInt, Integer, ToPrimitive};
 
 pub fn register(env: &mut Environment) {
@@ -47,22 +47,22 @@ pub fn register(env: &mut Environment) {
     delegate_to_f64!(tan);
 }
 
-#[andycpp_function]
+#[export_function]
 fn lcm(a: BigInt, b: BigInt) -> BigInt {
     a.lcm(&b)
 }
 
-#[andycpp_function]
+#[export_function]
 fn ceil(number: &Number) -> Number {
     number.ceil()
 }
 
-#[andycpp_function]
+#[export_function]
 fn round(number: &Number) -> Number {
     number.round()
 }
 
-#[andycpp_function]
+#[export_function]
 fn floor(number: &Number) -> Number {
     number.floor()
 }

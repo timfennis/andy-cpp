@@ -99,6 +99,14 @@ impl<T: Into<Value>> From<Vec<T>> for Value {
     }
 }
 
+// impl<T: Into<Value>> From<dyn Iterator<Item = T>> for Value {
+//     fn from(value: dyn Iterator<Item = T>) -> Self {
+//         Self::Sequence(Sequence::List(Rc::new(RefCell::new(
+//             value.into_iter().map(Into::into).collect(),
+//         ))))
+//     }
+// }
+
 impl From<Number> for Value {
     fn from(value: Number) -> Self {
         Self::Number(value)
@@ -221,6 +229,21 @@ impl<'a> TryFrom<&'a Value> for &'a Number {
             v => Err(ConversionError::UnsupportedVariant(
                 v.value_type(),
                 "&Number",
+            )),
+        }
+    }
+}
+
+// TODO: This implementation is trash
+impl TryFrom<&Value> for String {
+    type Error = ConversionError;
+
+    fn try_from(value: &Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Sequence(Sequence::String(string)) => Ok(string.borrow().clone()), // TODO: no clonerino pls, just take ref
+            v => Err(ConversionError::UnsupportedVariant(
+                v.value_type(),
+                "String",
             )),
         }
     }

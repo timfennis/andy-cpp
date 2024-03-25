@@ -8,7 +8,7 @@ use quote::quote;
 use syn::parse_macro_input;
 
 #[proc_macro_attribute]
-pub fn andycpp_function(_attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn export_function(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as syn::ItemFn);
     let identifier = input.sig.ident.clone();
 
@@ -48,8 +48,6 @@ pub fn andycpp_function(_attr: TokenStream, item: TokenStream) -> TokenStream {
             let result = #inner_ident (#(#params, )*);
             let result = crate::interpreter::value::Value::from(result);
             return Ok(result);
-            // Ok(result?)
-            // Ok(crate::interpreter::value::Value::Unit)
         }
 
     };

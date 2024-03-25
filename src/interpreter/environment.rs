@@ -66,8 +66,10 @@ impl Environment {
             values: HashMap::default(),
         };
 
+        // TODO: move this out of this module to a more general location
         crate::stdlib::math::register(&mut env);
         crate::stdlib::file::register(&mut env);
+        crate::stdlib::string::register(&mut env);
 
         env
     }
