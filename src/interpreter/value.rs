@@ -84,6 +84,12 @@ impl From<String> for Value {
     }
 }
 
+impl From<&str> for Value {
+    fn from(value: &str) -> Self {
+        Self::Sequence(Sequence::String(Rc::new(RefCell::new(value.to_string()))))
+    }
+}
+
 impl From<Function> for Value {
     fn from(value: Function) -> Self {
         Self::Function(Rc::new(RefCell::new(OverloadedFunction::from(value))))
