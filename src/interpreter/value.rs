@@ -18,6 +18,7 @@ pub enum Value {
 }
 
 impl Value {
+    #[must_use]
     pub fn value_type(&self) -> ValueType {
         match self {
             Value::Unit => ValueType::Unit,
@@ -79,9 +80,7 @@ impl From<i32> for Value {
 
 impl From<usize> for Value {
     fn from(value: usize) -> Self {
-        i64::try_from(value)
-            .map(|v| Value::from(v))
-            .unwrap_or_else(|_| Value::from(BigInt::from(value)))
+        i64::try_from(value).map_or_else(|_| Value::from(BigInt::from(value)), Value::from)
     }
 }
 

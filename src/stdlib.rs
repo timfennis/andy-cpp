@@ -12,6 +12,7 @@ macro_rules! register_fn {
             $crate::interpreter::value::Value::from(
                 $crate::interpreter::function::Function::GenericFunction {
                     function: $function,
+                    type_signature: $crate::interpreter::function::TypeSignature::Variadic, // TODO: NOOOOOOOOOOOOOOOOOOOO!!!
                 },
             ),
         );

@@ -289,15 +289,28 @@ pub(crate) fn evaluate_expression(
                 let value = &*value.borrow();
                 if let Value::Function(function) = value {
                     let result = function.borrow().call(&evaluated_args, environment);
-                    if let Err(FunctionCarrier::FunctionNotFound) = result {
-                        continue;
+
+                    match result {
+                        Err(FunctionCarrier::Return(value)) | Ok(value) => return Ok(value),
+                        e @ Err(FunctionCarrier::EvaluationError(_)) => return e,
+                        Err(FunctionCarrier::ArgumentError(err)) => {
+                            return Err(EvaluationError::argument_error(&err, start, end).into());
+                        }
+                        Err(FunctionCarrier::IOError(err)) => {
+                            return Err(EvaluationError::io_error(&err, start, end).into())
+                        }
+                        Err(FunctionCarrier::FunctionNotFound) => continue,
                     }
-                    return result;
+
+                    // if let Err(FunctionCarrier::FunctionNotFound) = result {
+                    //     continue;
+                    // }
+                    // return result;
                 }
             }
 
             return Err(EvaluationError::syntax_error(
-                &format!("invalid function name: {display_identifier}"),
+                &format!("no function named '{display_identifier}' in environment that matches the types"),
                 start,
                 end,
             )
@@ -631,6 +644,15 @@ impl EvaluationError {
     pub fn out_of_bounds(index: usize, start: Location, end: Location) -> Self {
         Self {
             text: format!("Index ({index}) out of bounds"),
+            start,
+            end,
+        }
+    }
+
+    #[must_use]
+    pub fn argument_error(message: &str, start: Location, end: Location) -> Self {
+        Self {
+            text: message.to_string(),
             start,
             end,
         }

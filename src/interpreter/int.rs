@@ -32,6 +32,8 @@ impl Int {
 
         BigInt::from_f64(value).map(Int::BigInt)
     }
+
+    #[must_use]
     pub fn to_bigint(&self) -> BigInt {
         match self {
             Self::Int64(i) => BigInt::from(*i),

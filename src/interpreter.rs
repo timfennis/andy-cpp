@@ -60,22 +60,23 @@ impl Interpreter {
     fn interpret(
         &mut self,
         expressions: impl Iterator<Item = ExpressionLocation>,
-    ) -> Result<Value, EvaluationError> {
+    ) -> Result<Value, Error> {
         let mut value = Value::Unit;
         for expr in expressions {
             match evaluate_expression(&expr, &mut self.environment) {
                 Ok(val) => value = val,
                 Err(FunctionCarrier::Return(_)) => {
-                    return Err(EvaluationError::syntax_error(
+                    Err(EvaluationError::syntax_error(
                         "unexpected return statement outside of function body",
                         expr.start,
                         expr.end,
-                    ));
+                    ))?;
                 }
-                Err(FunctionCarrier::EvaluationError(e)) => {
-                    return Err(e);
-                }
-                Err(err) => panic!("unexpected error: {err:?}",),
+                Err(e) => Err(e)?,
+                // Err(FunctionCarrier::EvaluationError(e)) => {
+                //     Err(e)?;
+                // }
+                // Err(err) => panic!("unexpected error: {err:?}",),
             }
         }
         Ok(value)
@@ -99,4 +100,16 @@ pub enum Error {
         #[from]
         cause: EvaluationError,
     },
+}
+
+impl From<FunctionCarrier> for Error {
+    fn from(value: FunctionCarrier) -> Self {
+        match value {
+            FunctionCarrier::Return(_) => panic!("attempted to convert return value to Error"),
+            FunctionCarrier::EvaluationError(e) => e.into(),
+            FunctionCarrier::ArgumentError(_) => todo!(),
+            FunctionCarrier::IOError(_) => todo!(),
+            FunctionCarrier::FunctionNotFound => todo!(),
+        }
+    }
 }

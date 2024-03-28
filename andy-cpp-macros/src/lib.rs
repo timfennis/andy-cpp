@@ -52,8 +52,27 @@ pub fn export_function(_attr: TokenStream, item: TokenStream) -> TokenStream {
                         let #temp_var = #rc_temp_var.as_ref();
                     });
                 }
+                // The pattern is &BigInt
+                else if is_ref_of_bigint(ty) {
+                    let big_int = Ident::new(&format!("temp_{temp_var}"), identifier.span());
+                    return Some(quote! {
+
+                        let #big_int = if let crate::interpreter::value::Value::Number(crate::interpreter::num::Number::Int(crate::interpreter::int::Int::Int64(smol))) = &values[#position] {
+                            Some(num::BigInt::from(*smol))
+                        } else {
+                            None
+                        };
+
+                        let #temp_var = match &values[#position] {
+                            crate::interpreter::value::Value::Number(crate::interpreter::num::Number::Int(crate::interpreter::int::Int::BigInt(big))) => big,
+                            crate::interpreter::value::Value::Number(crate::interpreter::num::Number::Int(crate::interpreter::int::Int::Int64(smoll))) => #big_int.as_ref().unwrap(),
+                            _ => panic!("Value #position need to be an Int but wasn't"),
+                        }
+                    })
+
+                }
                 // The pattern is &[Value]
-                else if is_ref_of_slice_with_value(ty) {
+                else if is_ref_of_slice_of_value(ty) {
                     let rc_temp_var = Ident::new(&format!("temp_{temp_var}"), identifier.span());
                     return Some(quote! {
                         let crate::interpreter::value::Value::Sequence(crate::interpreter::value::Sequence::List(#rc_temp_var)) = &values[#position] else {

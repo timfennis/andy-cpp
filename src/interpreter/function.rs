@@ -9,8 +9,8 @@ use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Formatter;
 
-#[derive(Debug, Eq, PartialEq, Hash)]
-enum TypeSignature {
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub enum TypeSignature {
     Variadic,
     Exact(Vec<ParamType>),
 }
@@ -50,6 +50,9 @@ impl OverloadedFunction {
     }
 }
 
+/// Matches a list of `ValueTypes` to a type signature. It can return `None` if there is no match or
+/// `Some(num)` where num is the sum of the distances of the types. The type `Int`, is distance 1
+/// away from `Number`, and `Number` is 1 distance from `Any`, then `Int` is distance 2 from `Any`.
 fn match_types_to_signature(types: &[ValueType], signature: &TypeSignature) -> Option<u32> {
     match signature {
         TypeSignature::Variadic => Some(0),
@@ -89,18 +92,25 @@ pub enum Function {
         body: fn(number: Number) -> Number,
     },
     GenericFunction {
+        type_signature: TypeSignature,
         function: fn(&[Value], &EnvironmentRef) -> EvaluationResult,
     },
 }
 
 impl Function {
-    pub fn generic(function: fn(&[Value], &EnvironmentRef) -> EvaluationResult) -> Self {
-        Self::GenericFunction { function }
+    pub fn generic(
+        type_signature: TypeSignature,
+        function: fn(&[Value], &EnvironmentRef) -> EvaluationResult,
+    ) -> Self {
+        Self::GenericFunction {
+            function,
+            type_signature,
+        }
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Hash)]
-enum ParamType {
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub enum ParamType {
     Any,
     Unit,
     Bool,
@@ -165,11 +175,7 @@ impl Function {
                 parameter_names, ..
             } => TypeSignature::Exact(parameter_names.iter().map(|_| ParamType::Any).collect()),
             Function::SingleNumberFunction { .. } => TypeSignature::Exact(vec![ParamType::Number]),
-            Function::GenericFunction { .. } => {
-                // TODO: not all generic functions are Variadic but this should fix tests for now
-                //       since they'll match everything
-                TypeSignature::Variadic
-            }
+            Function::GenericFunction { type_signature, .. } => type_signature.clone(),
         }
     }
 
@@ -195,7 +201,7 @@ impl Function {
                     e => return e,
                 };
 
-                // This explicit drops are probably not needed but who cares
+                // This explicit drop is probably not needed but who cares
                 drop(local_scope);
                 Ok(return_value)
             }
@@ -207,7 +213,7 @@ impl Function {
                 )),
                 _ => Err(FunctionCarrier::argument_count_error(1, 0)),
             },
-            Function::GenericFunction { function } => function(args, env),
+            Function::GenericFunction { function, .. } => function(args, env),
         }
     }
 }
