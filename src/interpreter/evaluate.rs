@@ -262,7 +262,7 @@ pub(crate) fn evaluate_expression(
             let values: Vec<RefCell<Value>> = match &function.expression {
                 Expression::Identifier(identifier) => {
                     display_identifier = identifier.to_string();
-                    environment.borrow().get_all(identifier).clone()
+                    environment.borrow().get_all_by_name(identifier).clone()
                 }
                 _ => vec![RefCell::new(evaluate_expression(function, environment)?)],
             };
