@@ -1,12 +1,15 @@
 use crate::interpreter::environment::Environment;
-use crate::interpreter::function::Function;
-use crate::interpreter::value::Value;
 use crate::register_fn;
 use andy_cpp_macros::export_function;
 
 #[export_function]
 fn reversed(string: &str) -> String {
     string.chars().rev().collect()
+}
+
+#[export_function]
+fn reverse(string: &mut String) {
+    *string = string.chars().rev().collect();
 }
 
 #[export_function]
@@ -35,6 +38,7 @@ fn trim(string: &str) -> &str {
 pub fn register(env: &mut Environment) {
     register_fn!(env, lines);
     register_fn!(env, reversed);
+    register_fn!(env, reverse);
     register_fn!(env, split);
     register_fn!(env, trim);
 }

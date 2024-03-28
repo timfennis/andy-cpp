@@ -1,6 +1,5 @@
 use std::cell::RefCell;
 use std::cmp::Ordering;
-use std::collections::VecDeque;
 use std::error::Error;
 use std::fmt;
 use std::ops::{IndexMut, Neg, Rem};
@@ -339,10 +338,10 @@ pub(crate) fn evaluate_expression(
             }
         }
         Expression::List { values } => {
-            let mut values_out = VecDeque::with_capacity(values.len());
+            let mut values_out = Vec::with_capacity(values.len());
             for expression in values {
                 let v = evaluate_expression(expression, environment)?;
-                values_out.push_back(v);
+                values_out.push(v);
             }
             Value::Sequence(Sequence::List(Rc::new(RefCell::new(values_out))))
         }

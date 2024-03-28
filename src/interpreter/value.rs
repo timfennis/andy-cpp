@@ -3,7 +3,6 @@ use crate::interpreter::int::Int;
 use crate::interpreter::num::{Number, NumberToUsizeError, NumberType};
 use num::BigInt;
 use std::cell::RefCell;
-use std::collections::VecDeque;
 use std::fmt;
 use std::rc::Rc;
 
@@ -46,7 +45,7 @@ impl PartialEq for Value {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Sequence {
     String(Rc<RefCell<String>>),
-    List(Rc<RefCell<VecDeque<Value>>>),
+    List(Rc<RefCell<Vec<Value>>>),
     //TODO: Dict comes later because we need hashing and comparison
 }
 
@@ -69,6 +68,20 @@ impl From<bool> for Value {
 impl From<i64> for Value {
     fn from(value: i64) -> Self {
         Self::Number(Number::Int(Int::Int64(value)))
+    }
+}
+
+impl From<i32> for Value {
+    fn from(value: i32) -> Self {
+        Self::Number(Number::Int(Int::Int64(i64::from(value))))
+    }
+}
+
+impl From<usize> for Value {
+    fn from(value: usize) -> Self {
+        i64::try_from(value)
+            .map(|v| Value::from(v))
+            .unwrap_or_else(|_| Value::from(BigInt::from(value)))
     }
 }
 
@@ -199,6 +212,33 @@ impl TryFrom<Value> for BigInt {
         }
     }
 }
+
+impl<'a> TryFrom<&'a Value> for &'a Sequence {
+    type Error = ConversionError;
+
+    fn try_from(value: &'a Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Sequence(seq) => Ok(seq),
+            v => Err(ConversionError::UnsupportedVariant(
+                v.value_type(),
+                stringify!(&Sequence),
+            )),
+        }
+    }
+}
+
+// impl TryFrom<&Value> for &[Value] {
+//     type Error = ();
+//
+//     fn try_from(value: &Value) -> Result<Self, Self::Error> {
+//         match value {
+//             Value::Sequence(Sequence::List(list)) => {
+//                 let list = &*list.borrow();
+//
+//             }
+//         }
+//     }
+// }
 
 // FIXME: We should not need to convert `&Value` into `BigInt`, we should use `&BigInt` instead.
 //        But we can't return references to BigInt in case the source type is i64. A possible

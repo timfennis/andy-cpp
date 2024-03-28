@@ -1,7 +1,5 @@
 use crate::interpreter::environment::Environment;
-use crate::interpreter::function::Function;
 use crate::interpreter::num::Number;
-use crate::interpreter::value::Value;
 use crate::register_fn;
 use andy_cpp_macros::export_function;
 use num::{BigInt, Integer, ToPrimitive};

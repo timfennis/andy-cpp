@@ -30,7 +30,19 @@ pub fn export_function(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
                 let ty = &*pat_type.ty;
                 // Special case for &str because we need to create a temporary binding for the borrow
-                if is_str_ref(ty) {
+
+                if is_ref_mut(ty) && is_owned_string(ty) {
+                    let rc_temp_var = Ident::new(&format!("temp_{temp_var}"), identifier.span());
+                    return Some(quote! {
+                        let crate::interpreter::value::Value::Sequence(crate::interpreter::value::Sequence::String(#rc_temp_var)) = &values[#position] else {
+                            panic!("Value #position needed to be a Sequence::String but wasn't");
+                        };
+                        let #temp_var = &mut *#rc_temp_var.borrow_mut();
+                        // let #temp_var = #rc_temp_var.as_ref();
+                    })
+                }
+                // The pattern is exactly &str
+                else if is_str_ref(ty) {
                     let rc_temp_var = Ident::new(&format!("temp_{temp_var}"), identifier.span());
                     return Some(quote! {
                         let crate::interpreter::value::Value::Sequence(crate::interpreter::value::Sequence::String(#rc_temp_var)) = &values[#position] else {
@@ -38,6 +50,16 @@ pub fn export_function(_attr: TokenStream, item: TokenStream) -> TokenStream {
                         };
                         let #rc_temp_var = #rc_temp_var.borrow();
                         let #temp_var = #rc_temp_var.as_ref();
+                    });
+                }
+                // The pattern is &[Value]
+                else if is_ref_of_slice_with_value(ty) {
+                    let rc_temp_var = Ident::new(&format!("temp_{temp_var}"), identifier.span());
+                    return Some(quote! {
+                        let crate::interpreter::value::Value::Sequence(crate::interpreter::value::Sequence::List(#rc_temp_var)) = &values[#position] else {
+                            panic!("Value #position needed to be a Sequence::List but wasn't");
+                        };
+                        let #temp_var = &*#rc_temp_var.borrow();
                     });
                 }
                 // The pattern is something like `i64`
