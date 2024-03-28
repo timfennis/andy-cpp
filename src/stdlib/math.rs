@@ -5,8 +5,8 @@ use andy_cpp_macros::export_function;
 use num::{BigInt, Integer, ToPrimitive};
 
 #[export_function]
-fn lcm(a: BigInt, b: BigInt) -> BigInt {
-    a.lcm(&b)
+fn lcm(a: &BigInt, b: &BigInt) -> BigInt {
+    a.lcm(b)
 }
 
 #[export_function]

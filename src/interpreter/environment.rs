@@ -26,18 +26,19 @@ impl fmt::Debug for Environment {
             f,
             "Environment[has_parent: {:?}, values.len(): {}]",
             self.parent.is_some(),
-            self.values.len()
+            self.values.len(),
         )
     }
 }
 
-// #[cfg(debug_assertions)]
-// impl Drop for Environment {
-//     fn drop(&mut self) {
-//         eprintln!("dropping {self:?}");
-//     }
-// }
+impl IntoIterator for Environment {
+    type Item = (String, Value);
+    type IntoIter = std::collections::hash_map::IntoIter<String, Value>;
 
+    fn into_iter(self) -> Self::IntoIter {
+        self.values.into_iter()
+    }
+}
 impl Environment {
     pub fn with_output<F>(&mut self, f: F) -> Result<(), std::io::Error>
     where
@@ -77,7 +78,7 @@ impl Environment {
     }
 
     #[must_use]
-    pub fn get_all(&self, name: &str) -> Vec<RefCell<Value>> {
+    pub fn get_all_by_name(&self, name: &str) -> Vec<RefCell<Value>> {
         let mut values: Vec<RefCell<Value>> = Vec::new();
 
         if let Some(value) = self.values.get(name) {
@@ -86,7 +87,7 @@ impl Environment {
 
         // TODO: there is probably a much faster implementation possible
         if let Some(parent) = &self.parent {
-            values.extend(parent.borrow().get_all(name));
+            values.extend(parent.borrow().get_all_by_name(name));
         }
 
         values

@@ -6,12 +6,10 @@ use std::rc::Rc;
 use num::BigInt;
 
 use crate::interpreter::environment::Environment;
-use crate::interpreter::evaluate::EvaluationError;
-use crate::interpreter::function::{Function, FunctionCarrier};
+use crate::interpreter::function::{Function, FunctionCarrier, ParamType, TypeSignature};
 use crate::interpreter::int::Int;
 use crate::interpreter::num::Number;
 use crate::interpreter::value::{Sequence, Value, ValueType};
-use crate::lexer::Location;
 
 pub fn register(env: &mut Environment) {
     env.declare(
@@ -33,6 +31,7 @@ pub fn register(env: &mut Environment) {
                     .map_err(FunctionCarrier::IOError)?;
                 Ok(Value::Unit)
             },
+            type_signature: TypeSignature::Variadic,
         }),
     );
 
@@ -45,14 +44,7 @@ pub fn register(env: &mut Environment) {
                         .map(|contents| {
                             Value::Sequence(Sequence::String(Rc::new(RefCell::new(contents))))
                         })
-                        .map_err(|err| {
-                            // FIXME: fix location
-                            FunctionCarrier::EvaluationError(EvaluationError::io_error(
-                                &err,
-                                Location { line: 0, column: 0 },
-                                Location { line: 0, column: 0 },
-                            ))
-                        })
+                        .map_err(FunctionCarrier::IOError)
                 }
                 [value] => Err(FunctionCarrier::argument_type_error(
                     &ValueType::String,
@@ -60,6 +52,7 @@ pub fn register(env: &mut Environment) {
                 )),
                 args => Err(FunctionCarrier::argument_count_error(1, args.len())),
             },
+            type_signature: TypeSignature::Exact(vec![ParamType::String]),
         }),
     );
     env.declare(
@@ -71,7 +64,7 @@ pub fn register(env: &mut Environment) {
                     let s = s.borrow();
                     let bi = s.parse::<BigInt>().map_err(|err| {
                         FunctionCarrier::ArgumentError(format!(
-                            "{s} cannot be converted into an integer because \"{err}\""
+                            "string \"{s}\" cannot be converted into an integer because \"{err}\""
                         ))
                     })?;
                     Ok(Value::Number(Number::Int(Int::BigInt(bi).simplify())))
@@ -81,6 +74,7 @@ pub fn register(env: &mut Environment) {
                 ))),
                 vals => Err(FunctionCarrier::argument_count_error(1, vals.len())),
             },
+            type_signature: TypeSignature::Exact(vec![ParamType::Any]),
         }),
     );
 }
