@@ -56,7 +56,11 @@ impl Interpreter {
         Ok(format!("{final_value}"))
     }
 
-    // TODO: use thiserror to convert FunctionCarrier into InterpreterError
+    fn functions(&self) {
+        let env = *self.environment.borrow();
+        env.get_all_by_name()
+    }
+
     fn interpret(
         &mut self,
         expressions: impl Iterator<Item = ExpressionLocation>,
@@ -73,10 +77,6 @@ impl Interpreter {
                     ))?;
                 }
                 Err(e) => Err(e)?,
-                // Err(FunctionCarrier::EvaluationError(e)) => {
-                //     Err(e)?;
-                // }
-                // Err(err) => panic!("unexpected error: {err:?}",),
             }
         }
         Ok(value)
