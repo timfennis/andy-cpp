@@ -1,6 +1,5 @@
 use crate::interpreter::environment::Environment;
 use crate::interpreter::num::Number;
-use crate::register_fn;
 use andy_cpp_macros::export_module;
 use num::ToPrimitive;
 
@@ -24,43 +23,42 @@ mod inner {
     }
 }
 
-pub fn register_others(env: &mut Environment) {
-    register_fn!(env, lcm);
-    register_fn!(env, ceil);
-    register_fn!(env, round);
-    register_fn!(env, floor);
+pub mod f64 {
+    use super::*;
 
-    macro_rules! delegate_to_f64 {
-        ($method:ident) => {
-            let function = $crate::interpreter::value::Value::from(
-                $crate::interpreter::function::Function::SingleNumberFunction {
-                    body: |num: Number| match num {
-                        Number::Int(i) => Number::Float(f64::from(i).$method()),
-                        Number::Float(f) => Number::Float(f.$method()),
-                        Number::Rational(r) => {
-                            Number::Float(r.to_f64().unwrap_or(f64::NAN).$method())
-                        }
-                        Number::Complex(c) => Number::Complex(c.$method()),
+    pub fn register(env: &mut Environment) {
+        macro_rules! delegate_to_f64 {
+            ($method:ident) => {
+                let function = $crate::interpreter::value::Value::from(
+                    $crate::interpreter::function::Function::SingleNumberFunction {
+                        body: |num: Number| match num {
+                            Number::Int(i) => Number::Float(f64::from(i).$method()),
+                            Number::Float(f) => Number::Float(f.$method()),
+                            Number::Rational(r) => {
+                                Number::Float(r.to_f64().unwrap_or(f64::NAN).$method())
+                            }
+                            Number::Complex(c) => Number::Complex(c.$method()),
+                        },
                     },
-                },
-            );
-            env.declare(stringify!($method), function);
-        };
-    }
+                );
+                env.declare(stringify!($method), function);
+            };
+        }
 
-    delegate_to_f64!(acos);
-    delegate_to_f64!(acosh);
-    delegate_to_f64!(asin);
-    delegate_to_f64!(asinh);
-    delegate_to_f64!(atan);
-    delegate_to_f64!(atanh);
-    delegate_to_f64!(cbrt);
-    delegate_to_f64!(cos);
-    delegate_to_f64!(exp);
-    delegate_to_f64!(ln);
-    delegate_to_f64!(log2);
-    delegate_to_f64!(log10);
-    delegate_to_f64!(sin);
-    delegate_to_f64!(sqrt);
-    delegate_to_f64!(tan);
+        delegate_to_f64!(acos);
+        delegate_to_f64!(acosh);
+        delegate_to_f64!(asin);
+        delegate_to_f64!(asinh);
+        delegate_to_f64!(atan);
+        delegate_to_f64!(atanh);
+        delegate_to_f64!(cbrt);
+        delegate_to_f64!(cos);
+        delegate_to_f64!(exp);
+        delegate_to_f64!(ln);
+        delegate_to_f64!(log2);
+        delegate_to_f64!(log10);
+        delegate_to_f64!(sin);
+        delegate_to_f64!(sqrt);
+        delegate_to_f64!(tan);
+    }
 }

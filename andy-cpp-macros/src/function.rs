@@ -1,5 +1,6 @@
 use crate::r#match::{
     is_owned_string, is_ref_mut, is_ref_of_bigint, is_ref_of_slice_of_value, is_str_ref,
+    path_ends_with,
 };
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
@@ -97,6 +98,10 @@ struct TempVar {
 // TODO this style of path matching only works if types are just identifiers which is a weakness I'd
 //      like to fix
 fn into_param_type(ty: &syn::Type) -> TokenStream {
+    if path_ends_with(ty, "Vec") {
+        return quote! { crate::interpreter::function::ParamType::List };
+    }
+
     match ty {
         syn::Type::Reference(syn::TypeReference { elem, .. }) => into_param_type(elem),
         syn::Type::Path(syn::TypePath { path, .. }) => match path {
@@ -111,7 +116,7 @@ fn into_param_type(ty: &syn::Type) -> TokenStream {
             _ if path.is_ident("Sequence") => {
                 quote! { crate::interpreter::function::ParamType::Sequence }
             }
-            _ => panic!("Don't know how to convert {path:?} into ParamType"),
+            _ => panic!("Don't know how to convert PATH into ParamType\n\n{path:?}"),
         },
         x => panic!("Don't know how to convert {x:?} into ParamType"),
     }
@@ -127,6 +132,7 @@ fn create_temp_variable(
         let ty = &*pat_type.ty;
         // Special case for &str because we need to create a temporary binding for the borrow
 
+        // The pattern is exactly &mut String
         if is_ref_mut(ty) && is_owned_string(ty) {
             let rc_temp_var = syn::Ident::new(&format!("temp_{temp_var}"), identifier.span());
             return Some(TempVar {

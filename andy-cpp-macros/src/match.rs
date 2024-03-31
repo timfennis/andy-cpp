@@ -1,3 +1,30 @@
+pub fn path_ends_with(ty: &syn::Type, ident: &str) -> bool {
+    match ty {
+        syn::Type::Path(syn::TypePath {
+            path: syn::Path { segments, .. },
+            ..
+        }) => {
+            let Some(last_segment) = segments.last() else {
+                return false;
+            };
+
+            last_segment.ident == ident
+        }
+        syn::Type::Reference(syn::TypeReference { elem, .. }) => path_ends_with(elem, ident),
+        _ => panic!("path_ends_with cannot handle the given syn::Type"),
+    }
+}
+pub fn is_mut_ref_of(ty: &syn::Type, f: fn(&syn::Type) -> bool) -> bool {
+    match ty {
+        syn::Type::Reference(syn::TypeReference {
+            elem,
+            mutability: Some(_),
+            ..
+        }) => f(elem.as_ref()),
+        _ => false,
+    }
+}
+
 pub fn is_ref_of(ty: &syn::Type, f: fn(&syn::Type) -> bool) -> bool {
     match ty {
         syn::Type::Reference(syn::TypeReference { elem, .. }) => f(elem.as_ref()),

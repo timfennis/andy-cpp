@@ -78,7 +78,7 @@ impl Environment {
 
         // TODO: move this out of this module to a more general location
         crate::stdlib::math::register(&mut env);
-        crate::stdlib::math::register_others(&mut env); // TODO: clean this one up
+        crate::stdlib::math::f64::register(&mut env);
         crate::stdlib::file::register(&mut env);
         crate::stdlib::string::register(&mut env);
         crate::stdlib::list::register(&mut env);
