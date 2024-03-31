@@ -31,15 +31,24 @@ impl fmt::Debug for Environment {
     }
 }
 
-impl IntoIterator for Environment {
-    type Item = (String, Value);
-    type IntoIter = std::collections::hash_map::IntoIter<String, Value>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.values.into_iter()
-    }
-}
 impl Environment {
+    pub fn print_functions(&self) {
+        let _ = self
+            .values
+            .iter()
+            .filter_map(|(name, value)| {
+                let value = &*value.borrow();
+                match value {
+                    Value::Function(fun) => {
+                        let over = &*fun.borrow();
+                        println!("{name}: {over:?}");
+                        Some(fun.clone())
+                    }
+                    _ => None,
+                }
+            })
+            .collect::<Vec<_>>();
+    }
     pub fn with_output<F>(&mut self, f: F) -> Result<(), std::io::Error>
     where
         F: FnOnce(&mut Box<dyn InterpreterOutput>) -> Result<(), std::io::Error>,
@@ -69,6 +78,7 @@ impl Environment {
 
         // TODO: move this out of this module to a more general location
         crate::stdlib::math::register(&mut env);
+        crate::stdlib::math::register_others(&mut env); // TODO: clean this one up
         crate::stdlib::file::register(&mut env);
         crate::stdlib::string::register(&mut env);
         crate::stdlib::list::register(&mut env);

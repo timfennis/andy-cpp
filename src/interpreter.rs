@@ -56,9 +56,10 @@ impl Interpreter {
         Ok(format!("{final_value}"))
     }
 
-    fn functions(&self) {
-        let env = *self.environment.borrow();
-        env.get_all_by_name()
+    /// This function is dumb, but I want to have it for now
+    #[allow(unused)]
+    fn print_functions(&self) {
+        self.environment.borrow().print_functions();
     }
 
     fn interpret(

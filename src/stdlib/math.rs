@@ -1,30 +1,30 @@
 use crate::interpreter::environment::Environment;
 use crate::interpreter::num::Number;
 use crate::register_fn;
-use andy_cpp_macros::export_function;
-use num::{BigInt, Integer, ToPrimitive};
+use andy_cpp_macros::export_module;
+use num::ToPrimitive;
 
-#[export_function]
-fn lcm(a: &BigInt, b: &BigInt) -> BigInt {
-    a.lcm(b)
+#[export_module]
+mod inner {
+    use crate::interpreter::num::Number;
+    use num::{BigInt, Integer};
+    pub fn lcm(a: &BigInt, b: &BigInt) -> BigInt {
+        a.lcm(b)
+    }
+    pub fn ceil(number: &Number) -> Number {
+        number.ceil()
+    }
+
+    pub fn round(number: &Number) -> Number {
+        number.round()
+    }
+
+    pub fn floor(number: &Number) -> Number {
+        number.floor()
+    }
 }
 
-#[export_function]
-fn ceil(number: &Number) -> Number {
-    number.ceil()
-}
-
-#[export_function]
-fn round(number: &Number) -> Number {
-    number.round()
-}
-
-#[export_function]
-fn floor(number: &Number) -> Number {
-    number.floor()
-}
-
-pub fn register(env: &mut Environment) {
+pub fn register_others(env: &mut Environment) {
     register_fn!(env, lcm);
     register_fn!(env, ceil);
     register_fn!(env, round);

@@ -7,7 +7,6 @@ use crate::interpreter::num::{Number, NumberType};
 use crate::interpreter::value::{Sequence, Value, ValueType};
 use std::collections::HashMap;
 use std::fmt;
-use std::fmt::Formatter;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum TypeSignature {
@@ -15,7 +14,6 @@ pub enum TypeSignature {
     Exact(Vec<ParamType>),
 }
 
-#[derive(Debug)] // TODO: create a sane implementation for Debug
 pub struct OverloadedFunction {
     implementations: HashMap<TypeSignature, Function>,
 }
@@ -81,6 +79,16 @@ impl From<Function> for OverloadedFunction {
         }
     }
 }
+
+impl fmt::Debug for OverloadedFunction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for type_signature in self.implementations.keys() {
+            write!(f, "fn({type_signature:?})")?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone)]
 pub enum Function {
     Closure {
@@ -218,11 +226,11 @@ impl Function {
     }
 }
 
-impl fmt::Debug for Function {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "function")
-    }
-}
+// impl fmt::Debug for Function {
+//     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+//         write!(f, "function")
+//     }
+// }
 
 // Named after the Carrier trait
 #[derive(thiserror::Error, Debug)]
