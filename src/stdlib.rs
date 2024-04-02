@@ -3,6 +3,7 @@ pub mod list;
 pub mod math;
 pub mod sequence;
 pub mod string;
+pub mod value;
 
 #[macro_export]
 macro_rules! register_fn {

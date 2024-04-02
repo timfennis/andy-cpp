@@ -1,0 +1,5 @@
+--PROGRAM--
+s := "Foobar";
+print(s.reversed())
+--EXPECT--
+rabooF

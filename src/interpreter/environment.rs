@@ -83,6 +83,7 @@ impl Environment {
         crate::stdlib::string::register(&mut env);
         crate::stdlib::list::register(&mut env);
         crate::stdlib::sequence::register(&mut env);
+        crate::stdlib::value::register(&mut env);
 
         env
     }

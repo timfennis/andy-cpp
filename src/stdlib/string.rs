@@ -10,6 +10,10 @@ mod inner {
         *string = string.chars().rev().collect();
     }
 
+    pub fn append(string: &mut String, value: &str) {
+        string.push_str(value);
+    }
+
     pub fn lines(string: &str) -> Vec<String> {
         string.lines().map(ToString::to_string).collect()
     }

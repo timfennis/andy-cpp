@@ -1,0 +1,4 @@
+--PROGRAM--
+print("1\n2\n3".lines())
+--EXPECT--
+[1,2,3]

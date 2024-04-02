@@ -14,6 +14,7 @@ pub enum TypeSignature {
     Exact(Vec<ParamType>),
 }
 
+#[derive(Clone)]
 pub struct OverloadedFunction {
     implementations: HashMap<TypeSignature, Function>,
 }

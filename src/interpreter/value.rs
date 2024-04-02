@@ -129,6 +129,12 @@ impl From<Sequence> for Value {
     }
 }
 
+impl From<OverloadedFunction> for Value {
+    fn from(value: OverloadedFunction) -> Self {
+        Self::Function(Rc::new(RefCell::new(value)))
+    }
+}
+
 // -----------------------------------------------------
 // Out of value
 // -----------------------------------------------------

@@ -14,6 +14,7 @@ pub fn path_ends_with(ty: &syn::Type, ident: &str) -> bool {
         _ => panic!("path_ends_with cannot handle the given syn::Type"),
     }
 }
+#[allow(unused)]
 pub fn is_mut_ref_of(ty: &syn::Type, f: fn(&syn::Type) -> bool) -> bool {
     match ty {
         syn::Type::Reference(syn::TypeReference {

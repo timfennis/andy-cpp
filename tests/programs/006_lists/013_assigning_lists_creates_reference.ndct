@@ -1,0 +1,7 @@
+--PROGRAM--
+list := [1,2,3];
+list2 := list;
+list2[0] = 999;
+print(list, list2);
+--EXPECT--
+[999,2,3] [999,2,3]
