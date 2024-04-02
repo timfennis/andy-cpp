@@ -71,10 +71,10 @@ fn has_path_match(ty: &syn::Type, ident: &str) -> bool {
     }
 }
 
-pub fn is_owned_string(ty: &syn::Type) -> bool {
+pub fn is_string(ty: &syn::Type) -> bool {
     match ty {
         // If ref just recurse :haha:
-        syn::Type::Reference(syn::TypeReference { elem: ty, .. }) => is_owned_string(ty),
+        syn::Type::Reference(syn::TypeReference { elem: ty, .. }) => is_string(ty),
         syn::Type::Path(syn::TypePath {
             path: syn::Path { segments, .. },
             ..

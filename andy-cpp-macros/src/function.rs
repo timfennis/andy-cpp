@@ -1,6 +1,5 @@
 use crate::r#match::{
-    is_owned_string, is_ref_mut, is_ref_of_bigint, is_ref_of_slice_of_value, is_str_ref,
-    path_ends_with,
+    is_ref_mut, is_ref_of_bigint, is_ref_of_slice_of_value, is_str_ref, is_string, path_ends_with,
 };
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
@@ -133,7 +132,7 @@ fn create_temp_variable(
         // Special case for &str because we need to create a temporary binding for the borrow
 
         // The pattern is exactly &mut String
-        if is_ref_mut(ty) && is_owned_string(ty) {
+        if is_ref_mut(ty) && is_string(ty) {
             let rc_temp_var = syn::Ident::new(&format!("temp_{temp_var}"), identifier.span());
             return Some(TempVar {
                 param_type: quote! { crate::interpreter::function::ParamType::String },
@@ -143,7 +142,20 @@ fn create_temp_variable(
                         panic!("Value #position needed to be a Sequence::String but wasn't");
                     };
                     let #temp_var = &mut *#rc_temp_var.borrow_mut();
-                    // let #temp_var = #rc_temp_var.as_ref();
+                },
+            });
+        }
+        // The pattern is exactly &mut Vec
+        else if is_ref_mut(ty) && path_ends_with(ty, "Vec") {
+            let rc_temp_var = syn::Ident::new(&format!("temp_{temp_var}"), identifier.span());
+            return Some(TempVar {
+                param_type: quote! { crate::interpreter::function::ParamType::List },
+                temp_var: quote! { #temp_var },
+                initialize_code: quote! {
+                    let crate::interpreter::value::Value::Sequence(crate::interpreter::value::Sequence::List(#rc_temp_var)) = &values[#position] else {
+                        panic!("Value #position needed to be a Sequence::List but wasn't");
+                    };
+                    let #temp_var = &mut *#rc_temp_var.borrow_mut();
                 },
             });
         }
