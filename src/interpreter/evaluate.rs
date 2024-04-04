@@ -336,7 +336,14 @@ pub(crate) fn evaluate_expression(
             Value::Unit
         }
 
-        Expression::Tuple { .. } => todo!("tuples are not yet implemented in this position"),
+        Expression::Tuple { values } => {
+            let mut out_values = Vec::with_capacity(values.len());
+            for value in values {
+                out_values.push(evaluate_expression(value, environment)?);
+            }
+
+            Value::Sequence(Sequence::Tuple(out_values))
+        }
         Expression::Identifier(identifier) => {
             if let Some(value) = environment.borrow().get(identifier) {
                 // TODO: is cloning the value a good idea here??
@@ -415,6 +422,16 @@ pub(crate) fn evaluate_expression(
                         evaluate_expression(loop_body, &mut scope)?;
                     }
                 }
+                Sequence::Tuple(values) => {
+                    for x in &values {
+                        let mut scope = Environment::new_scope(environment);
+
+                        // TODO: is this clone here reasonable or should we look into getting an owned value
+                        scope.borrow_mut().declare(var_name, x.clone());
+
+                        evaluate_expression(loop_body, &mut scope)?;
+                    }
+                }
             }
 
             Value::Unit
@@ -485,6 +502,27 @@ pub(crate) fn evaluate_expression(
                                 .into());
                             };
                             value.clone() //TODO remove clone?
+                        }
+                        // TODO: this implementation is 99% the same as the one above
+                        Sequence::Tuple(tuple) => {
+                            let index = convert_index(index, tuple.len()).ok_or_else(|| {
+                                EvaluationError::type_error(
+                                    "cannot convert index to usable offset",
+                                    index_expr.start,
+                                    index_expr.end,
+                                )
+                            })?;
+
+                            let Some(value) = tuple.get(index) else {
+                                return Err(EvaluationError::out_of_bounds(
+                                    index,
+                                    index_expr.start,
+                                    index_expr.end,
+                                )
+                                .into());
+                            };
+
+                            value.clone()
                         }
                     }
                 }

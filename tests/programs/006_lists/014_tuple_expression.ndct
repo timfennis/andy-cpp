@@ -1,0 +1,9 @@
+--PROGRAM--
+tuple := (1,1+1,1+1+1);
+sum := 0;
+for v in tuple {
+    sum = sum + v;
+}
+print(sum)
+--EXPECT--
+6

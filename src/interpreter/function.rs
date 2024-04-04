@@ -137,6 +137,7 @@ pub enum ParamType {
     Sequence,
     List,
     String,
+    Tuple,
 }
 
 impl ParamType {
@@ -172,6 +173,7 @@ impl From<&Value> for ParamType {
             Value::Bool(_) => ParamType::Bool,
             Value::Sequence(Sequence::String(_)) => ParamType::String,
             Value::Sequence(Sequence::List(_)) => ParamType::List,
+            Value::Sequence(Sequence::Tuple(_)) => ParamType::Tuple,
             Value::Function(_) => ParamType::Function,
         }
     }

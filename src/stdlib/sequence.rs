@@ -8,6 +8,8 @@ mod inner {
         match seq {
             Sequence::String(s) => s.borrow().len(),
             Sequence::List(l) => l.borrow().len(),
+
+            Sequence::Tuple(t) => t.len(),
         }
     }
 }

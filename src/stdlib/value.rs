@@ -12,6 +12,9 @@ mod inner {
             Value::Bool(b) => Value::Bool(*b),
             Value::Sequence(Sequence::String(string)) => Value::from(string.borrow().to_owned()),
             Value::Sequence(Sequence::List(list)) => Value::from(list.borrow().to_owned()),
+            Value::Sequence(Sequence::Tuple(tuple)) => {
+                Value::Sequence(Sequence::Tuple(tuple.clone()))
+            }
             Value::Function(f) => Value::from(f.borrow().to_owned()),
         }
     }

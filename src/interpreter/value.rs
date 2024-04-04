@@ -26,6 +26,7 @@ impl Value {
             Value::Bool(_) => ValueType::Bool,
             Value::Sequence(Sequence::String(_)) => ValueType::String,
             Value::Sequence(Sequence::List(_)) => ValueType::List,
+            Value::Sequence(Sequence::Tuple(_)) => ValueType::Tuple,
             Value::Function(_) => ValueType::Function,
         }
     }
@@ -47,6 +48,9 @@ impl PartialEq for Value {
 pub enum Sequence {
     String(Rc<RefCell<String>>),
     List(Rc<RefCell<Vec<Value>>>),
+
+    // TODO: if we do wrap the values inside tuple in an Rc we can get really cheap clones
+    Tuple(Vec<Value>),
     //TODO: Dict comes later because we need hashing and comparison
 }
 
@@ -301,6 +305,7 @@ pub enum ValueType {
     Bool,
     String,
     List,
+    Tuple,
     Function,
 }
 
@@ -318,6 +323,7 @@ impl fmt::Display for ValueType {
             Self::Bool => write!(f, "bool"),
             Self::String => write!(f, "string"),
             Self::List => write!(f, "list"),
+            Self::Tuple => write!(f, "tuple"),
             Self::Function => write!(f, "function"),
         }
     }
@@ -354,6 +360,18 @@ impl fmt::Display for Sequence {
                     }
                 }
                 write!(f, "]")
+            }
+            Sequence::Tuple(vs) => {
+                write!(f, "(")?;
+                let mut vs = vs.iter().peekable();
+                while let Some(v) = vs.next() {
+                    if vs.peek().is_some() {
+                        write!(f, "{v},")?;
+                    } else {
+                        write!(f, "{v}")?;
+                    }
+                }
+                write!(f, ")")
             }
         }
     }
