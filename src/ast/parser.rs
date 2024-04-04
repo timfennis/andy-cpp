@@ -486,6 +486,8 @@ impl Parser {
             }
         }
     }
+
+    // Parses a tuple NOT including the opening parentheses
     fn tuple(&mut self, start: Location) -> Result<ExpressionLocation, Error> {
         let values = self.group_of_expressions(Token::RightParentheses)?;
         Ok(Expression::Tuple { values }.to_location(start, start)) // TODO: find end
@@ -496,16 +498,26 @@ impl Parser {
         Ok(Expression::List { values }.to_location(start, start)) // TODO: find end
     }
 
+    #[allow(clippy::too_many_lines)] // WERE BUILDING A PROGRAMMING LANGUAGE CLIPPY WHAT DO YOU WANT?
     fn primary(&mut self) -> Result<ExpressionLocation, Error> {
+        // matches if expression like `if a < b { } else { }`
         if self.consume_token_if(&[Token::If]).is_some() {
             return self.if_expression();
-        } else if self.consume_token_if(&[Token::While]).is_some() {
+        }
+        // matches while loops like `while foo < bar { }`
+        else if self.consume_token_if(&[Token::While]).is_some() {
             return self.while_expression();
-        } else if self.consume_token_if(&[Token::For]).is_some() {
+        }
+        // matches for loops like `for x in xs { }`
+        else if self.consume_token_if(&[Token::For]).is_some() {
             return self.for_expression();
-        } else if self.consume_token_if(&[Token::Fn]).is_some() {
+        }
+        // matches function declarations like `fn function_name(arg1, arg2) { }`
+        else if self.consume_token_if(&[Token::Fn]).is_some() {
             return self.function_declaration();
-        } else if let Some(return_token_location) = self.consume_token_if(&[Token::Return]) {
+        }
+        // matches `return;` and `return (expression);`
+        else if let Some(return_token_location) = self.consume_token_if(&[Token::Return]) {
             let expr_loc = if self.match_token(&[Token::Semicolon]).is_some() {
                 Expression::UnitLiteral.to_location(
                     return_token_location.location,
@@ -523,8 +535,84 @@ impl Parser {
             .to_location(return_token_location.location, end);
 
             return Ok(return_expression);
-        } else if self.match_token(&[Token::LeftCurlyBracket]).is_some() {
+        }
+        // matches curly bracketed block expression `{ }`
+        else if self.match_token(&[Token::LeftCurlyBracket]).is_some() {
             return self.block();
+        }
+        // matches either a grouped expression `(1+1)` or a tuple `(1,1)`
+        else if let Some(start_parentheses) = self.consume_token_if(&[Token::LeftParentheses]) {
+            // If an opening parentheses is immediately followed by a closing parentheses we're dealing with a Unit expression
+            if let Some(end_parentheses) = self.consume_token_if(&[Token::RightParentheses]) {
+                return Ok(Expression::UnitLiteral
+                    .to_location(start_parentheses.location, end_parentheses.location));
+            }
+
+            // After a `(` we can always expect an expression
+            let first_expression = self.expression()?;
+
+            // After the first expression we have to figure out if this is a tuple `(1,2,3)` or a grouping `(5 - 1)`
+            return match self.peek_current_token_location() {
+                // An expression followed by a comma indicates that we're dealing with a tuple
+                Some(TokenLocation {
+                         token: Token::Comma,
+                         location: _comma_location,
+                     }) => {
+                    self.advance();
+
+                    // TODO: could we just call self.tuple() instead? we would have to add first_expression if we want to 
+                    let mut expressions = vec![first_expression];
+                    while self.peek_current_token().is_some() {
+                        expressions.push(self.expression()?);
+
+                        if let Some(end_parentheses) =
+                            self.consume_token_if(&[Token::RightParentheses])
+                        {
+                            let tuple_expression = Expression::Tuple {
+                                values: expressions,
+                            };
+
+                            return Ok(tuple_expression.to_location(
+                                start_parentheses.location,
+                                end_parentheses.location,
+                            ));
+                        }
+
+                        self.require_token(&[Token::Comma])?;
+                    }
+
+                    Err(Error::UnexpectedEndOfStream {
+                        help_text:
+                        "expected a comma to be followed by an expression but got end of stream"
+                            .to_string(),
+                    })
+                }
+                // If after the expression we get a closing right parentheses we know we're dealing with a grouping
+                Some(TokenLocation {
+                         token: Token::RightParentheses,
+                         location: expression_end,
+                     }) => {
+                    let expression_end = *expression_end;
+                    self.advance();
+
+                    Ok(Expression::Grouping(Box::new(first_expression))
+                        .to_location(start_parentheses.location, expression_end))
+                }
+                // If we match some other token inside parentheses we throw an error
+                Some(_) => {
+                    // use require_current_token because the previous call to peek_current_token_location hasn't consumed this invalid token yet
+                    let token = self.require_current_token()?;
+                    Err(Error::UnexpectedToken {
+                        actual_token: token,
+                    })
+                }
+
+                None => {
+                    Err(Error::UnexpectedEndOfStream {
+                        help_text: "expected a ',' or ')' inside this grouping or tuple but got an end of stream instead".to_string(),
+                    })
+                }
+            };
         }
 
         let token_location = self.require_current_token()?;
@@ -537,11 +625,6 @@ impl Parser {
             Token::BigInt(num) => Expression::BigIntLiteral(num),
             Token::Complex(num) => Expression::ComplexLiteral(num),
             Token::String(value) => Expression::StringLiteral(Rc::new(value)),
-            Token::LeftParentheses => {
-                let expr = self.expression()?;
-                self.require_current_token_matches(Token::RightParentheses)?;
-                Expression::Grouping(Box::new(expr))
-            }
             Token::LeftSquareBracket => return self.list(token_location.location),
             Token::Identifier(identifier) => Expression::Identifier(identifier),
             _ => {
@@ -645,6 +728,7 @@ impl Parser {
         })
     }
 
+    /// Parses a block expression including the block delimiters `{` and `}`
     fn block(&mut self) -> Result<ExpressionLocation, Error> {
         let start = self.require_token(&[Token::LeftCurlyBracket])?;
 

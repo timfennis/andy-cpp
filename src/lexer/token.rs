@@ -129,7 +129,7 @@ impl fmt::Display for Token {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct TokenLocation {
     pub token: Token,
     pub location: Location,
@@ -140,6 +140,13 @@ impl fmt::Display for TokenLocation {
         write!(f, "{} on {}", self.token, self.location)
     }
 }
+
+impl fmt::Debug for TokenLocation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "token={} on {}", self.token, self.location)
+    }
+}
+
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct Location {
     pub line: usize,
