@@ -342,7 +342,7 @@ pub(crate) fn evaluate_expression(
                 out_values.push(evaluate_expression(value, environment)?);
             }
 
-            Value::Sequence(Sequence::Tuple(out_values))
+            Value::Sequence(Sequence::Tuple(Rc::new(out_values)))
         }
         Expression::Identifier(identifier) => {
             if let Some(value) = environment.borrow().get(identifier) {
@@ -416,17 +416,15 @@ pub(crate) fn evaluate_expression(
                     for x in xs.iter() {
                         let mut scope = Environment::new_scope(environment);
 
-                        // TODO: is this clone here reasonable or should we look into getting an owned value
                         scope.borrow_mut().declare(var_name, x.clone());
 
                         evaluate_expression(loop_body, &mut scope)?;
                     }
                 }
                 Sequence::Tuple(values) => {
-                    for x in &values {
+                    for x in &*values {
                         let mut scope = Environment::new_scope(environment);
 
-                        // TODO: is this clone here reasonable or should we look into getting an owned value
                         scope.borrow_mut().declare(var_name, x.clone());
 
                         evaluate_expression(loop_body, &mut scope)?;
@@ -501,7 +499,7 @@ pub(crate) fn evaluate_expression(
                                 )
                                 .into());
                             };
-                            value.clone() //TODO remove clone?
+                            value.clone()
                         }
                         // TODO: this implementation is 99% the same as the one above
                         Sequence::Tuple(tuple) => {

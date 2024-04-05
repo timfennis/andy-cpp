@@ -48,9 +48,7 @@ impl PartialEq for Value {
 pub enum Sequence {
     String(Rc<RefCell<String>>),
     List(Rc<RefCell<Vec<Value>>>),
-
-    // TODO: if we do wrap the values inside tuple in an Rc we can get really cheap clones
-    Tuple(Vec<Value>),
+    Tuple(Rc<Vec<Value>>),
     //TODO: Dict comes later because we need hashing and comparison
 }
 
