@@ -69,7 +69,7 @@ pub enum Expression {
         statements: Vec<ExpressionLocation>,
     },
     If {
-        expression: Box<ExpressionLocation>,
+        condition: Box<ExpressionLocation>,
         on_true: Box<ExpressionLocation>,
         on_false: Option<Box<ExpressionLocation>>,
     },

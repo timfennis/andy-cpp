@@ -1,0 +1,14 @@
+--PROGRAM--
+x := 10;
+
+if x > 100 {
+    print(false);
+} else if x > 10 {
+    print(false);
+} else if x == 10 {
+    print(true);
+} else {
+    print(false);
+}
+--EXPECT--
+true

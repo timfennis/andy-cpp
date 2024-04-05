@@ -640,19 +640,33 @@ impl Parser {
     }
 
     //TODO: support } else if x { type structures
+    /// Parses if expression without the `if` token
+    /// Example:
+    /// ```ndc
+    /// if foo == bar {
+    ///
+    /// } else {
+    ///
+    /// }
+    /// ```
     fn if_expression(&mut self) -> Result<ExpressionLocation, Error> {
         let expression = self.expression()?;
         let on_true = self.block()?;
 
         let on_false = if self.consume_token_if(&[Token::Else]).is_some() {
-            Some(Box::new(self.block()?))
+            if self.consume_token_if(&[Token::If]).is_some() {
+                let expression = self.if_expression()?;
+                Some(Box::new(expression))
+            } else {
+                Some(Box::new(self.block()?))
+            }
         } else {
             None
         };
 
         let (start, end) = (expression.start, expression.end);
         Ok(Expression::If {
-            expression: Box::new(expression),
+            condition: Box::new(expression),
             on_true: Box::new(on_true),
             on_false,
         }
@@ -729,6 +743,14 @@ impl Parser {
     }
 
     /// Parses a block expression including the block delimiters `{` and `}`
+    /// example:
+    /// ```ndc
+    /// {
+    ///     func();
+    ///     x := 1 + 1;
+    ///     x
+    /// }
+    /// ```
     fn block(&mut self) -> Result<ExpressionLocation, Error> {
         let start = self.require_token(&[Token::LeftCurlyBracket])?;
 

@@ -172,11 +172,11 @@ pub(crate) fn evaluate_expression(
             value
         }
         Expression::If {
-            expression,
+            condition,
             on_true,
             on_false,
         } => {
-            let result = evaluate_expression(expression, environment)?;
+            let result = evaluate_expression(condition, environment)?;
 
             match (result, on_false) {
                 (Value::Bool(true), _) => evaluate_expression(on_true, environment)?,
