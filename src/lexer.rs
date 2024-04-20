@@ -90,7 +90,7 @@ impl Iterator for Lexer<'_> {
 
             // Exclude // docs
             if matches!((char, next), ('/', Some('/'))) {
-                // We ran into a doc comment and we just keep consuming characters as long as we
+                // We ran into a doc comment, and we just keep consuming characters as long as we
                 // don't encounter a linebreak
                 while let Some(ch) = self.source.peek_one() {
                     if ch == '\n' {

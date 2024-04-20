@@ -11,5 +11,4 @@ if x > 100 {
     print(false);
 }
 --EXPECT--
-
 true
