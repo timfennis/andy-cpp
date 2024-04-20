@@ -645,6 +645,8 @@ impl Parser {
     /// ```ndc
     /// if foo == bar {
     ///
+    /// } else if bar == baz {
+    ///
     /// } else {
     ///
     /// }
