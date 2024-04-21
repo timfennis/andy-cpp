@@ -74,7 +74,15 @@ pub(crate) fn evaluate_expression(
         Expression::Grouping(expr) => evaluate_expression(expr, environment)?,
         Expression::VariableDeclaration { l_value, value } => {
             let Lvalue::Variable { identifier } = l_value else {
-                todo!("other lvalues are not implemented or even invalid in declarations");
+                return Err(EvaluationError::syntax_error(
+                    &format!(
+                        "Can't declare values into {}",
+                        l_value.expression_type_name()
+                    ),
+                    start,
+                    end,
+                )
+                .into());
             };
 
             let value = evaluate_expression(value, environment)?;
@@ -112,8 +120,6 @@ pub(crate) fn evaluate_expression(
                 let index = evaluate_expression(index, environment)?;
                 let index = i64::try_from(index).unwrap();
 
-                // TODO: it's a little wasteful that we're first evaluating all the expressions
-                //       before we check if we can even assign to the thing
                 let assign_to = evaluate_expression(assign_to, environment)?;
                 match &assign_to {
                     Value::Sequence(Sequence::List(list)) => {
@@ -146,6 +152,71 @@ pub(crate) fn evaluate_expression(
                             )
                             .into());
                         }
+                    }
+                    _ => {
+                        return Err(EvaluationError::syntax_error(
+                            &format!("cannot index into {} at index", assign_to.value_type()),
+                            start,
+                            end,
+                        )
+                        .into());
+                    }
+                }
+
+                assign_to
+            }
+        },
+        Expression::OpAssignment {
+            l_value,
+            value,
+            operation,
+        } => match l_value {
+            Lvalue::Variable { identifier } => {
+                let Some(existing_value) = environment.borrow().get(identifier) else {
+                    return Err(EvaluationError::syntax_error(
+                        &format!("undefined variable {identifier}"),
+                        start,
+                        end,
+                    )
+                    .into());
+                };
+
+                let existing_value = existing_value.into_inner();
+                let operand = evaluate_expression(value, environment)?;
+                let new_value = apply_operator(existing_value, *operation, operand)?;
+
+                environment
+                    .borrow_mut()
+                    .assign(identifier.clone(), new_value.clone());
+                new_value
+            }
+            Lvalue::Index {
+                value: assign_to,
+                index,
+            } => {
+                let index = evaluate_expression(index, environment)?;
+                let index = i64::try_from(index).unwrap();
+
+                let assign_to = evaluate_expression(assign_to, environment)?;
+                match &assign_to {
+                    Value::Sequence(Sequence::List(list)) => {
+                        // the computation of this value may need the list that we assign to,
+                        // therefore the value needs to be computed before we mutably borrow the list
+                        // see: `bug0001_in_place_map.ndct`
+                        let right_hand_value = evaluate_expression(value, environment)?;
+
+                        let mut list = list
+                            .try_borrow_mut()
+                            .map_err(|_| EvaluationError::mutation_error("you cannot mutate a value in a list while you're iterating over this list", start, end))?;
+                        let list_size = list.len();
+                        let list_item = list.index_mut(
+                            convert_index(index, list_size).expect("TODO: why is this okay"),
+                        );
+                        let old_value = std::mem::replace(list_item, Value::Unit);
+                        *list_item = apply_operator(old_value, *operation, right_hand_value)?;
+                    }
+                    Value::Sequence(Sequence::String(_)) => {
+                        todo!("is there a valid use case for this?")
                     }
                     _ => {
                         return Err(EvaluationError::syntax_error(

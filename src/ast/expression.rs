@@ -24,6 +24,7 @@ pub enum Lvalue {
         index: Box<ExpressionLocation>,
     },
 }
+
 #[derive(Debug, PartialEq)]
 pub enum Expression {
     // Literals
@@ -59,6 +60,11 @@ pub enum Expression {
     Assignment {
         l_value: Lvalue,
         value: Box<ExpressionLocation>,
+    },
+    OpAssignment {
+        l_value: Lvalue,
+        value: Box<ExpressionLocation>,
+        operation: BinaryOperator,
     },
     FunctionDeclaration {
         name: Box<ExpressionLocation>,
@@ -153,6 +159,22 @@ impl ExpressionLocation {
                 self.start,
                 self.end,
             )),
+        }
+    }
+}
+
+impl Lvalue {
+    /// Returns the type name for this Lvalue, this can be used to serialize expression in error messages
+    /// ```
+    /// use ndc_lib::ast::Lvalue;
+    /// let l = Lvalue::Variable { identifier: "foo".to_string() };
+    /// assert_eq!(l.expression_type_name(), "variable");
+    /// ```
+    #[must_use]
+    pub fn expression_type_name(&self) -> &str {
+        match self {
+            Lvalue::Variable { .. } => "variable",
+            Lvalue::Index { .. } => "index expression",
         }
     }
 }

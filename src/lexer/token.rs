@@ -11,10 +11,11 @@ pub enum Token {
     Complex(Complex64),
 
     Identifier(String),
+    OpAssign(Box<TokenLocation>),
     Unit,
 
     // Operator - Assignment
-    CreateVar,
+    DeclareVar,
     EqualsSign,
     // Operator - Logic
     LogicAnd,
@@ -85,7 +86,7 @@ impl fmt::Display for Token {
                 return write!(f, "{n}");
             }
             Self::Identifier(ident) => ident,
-            Self::CreateVar => ":=",
+            Self::DeclareVar => ":=",
             Self::EqualsSign => "=",
             Self::Equality => "==",
             Self::Inequality => "!=",
@@ -124,8 +125,31 @@ impl fmt::Display for Token {
             Self::Unit => "()",
             Self::DotDot => "..",
             Self::Dot => ".",
+            Self::OpAssign(inner) => {
+                return write!(f, "{}=", inner.token);
+            }
         };
         write!(f, "{s}")
+    }
+}
+
+impl Token {
+    /// Returns true if this token can be augmented into an OpAssign token
+    #[must_use]
+    pub fn is_augmentable(&self) -> bool {
+        matches!(
+            self,
+            Self::Plus
+                | Self::Minus
+                | Self::Multiply
+                | Self::Divide
+                | Self::EuclideanModulo
+                | Self::CModulo
+                | Self::Identifier(_)
+                | Self::Exponent
+                | Self::LogicAnd
+                | Self::LogicOr
+        )
     }
 }
 
@@ -175,7 +199,7 @@ impl TryFrom<(char, char)> for Token {
             ('&', '&') => Ok(Self::LogicAnd),
             ('|', '|') => Ok(Self::LogicOr),
             ('%', '%') => Ok(Self::EuclideanModulo),
-            (':', '=') => Ok(Self::CreateVar),
+            (':', '=') => Ok(Self::DeclareVar),
             ('=', '=') => Ok(Self::Equality),
             ('!', '=') => Ok(Self::Inequality),
             ('>', '=') => Ok(Self::GreaterEquals),

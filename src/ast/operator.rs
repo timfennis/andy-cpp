@@ -1,5 +1,4 @@
 use crate::ast::Error as ParseError;
-use crate::ast::Error::ExpectedToken;
 use crate::lexer::{Token, TokenLocation};
 
 #[derive(Debug, Eq, PartialEq)]
@@ -56,7 +55,7 @@ impl TryFrom<TokenLocation> for LogicalOperator {
             Token::LogicAnd => Self::And,
             Token::LogicOr => Self::Or,
             _ => {
-                return Err(ExpectedToken {
+                return Err(ParseError::ExpectedToken {
                     actual_token: value,
                     expected_tokens: vec![Token::LogicAnd, Token::LogicOr],
                 })

@@ -1,6 +1,5 @@
 --PROGRAM--
-text := "foo\nbar\\\"";
-print(text);
+print("foo\nbar\\\"");
 --EXPECT--
 foo
 bar\"

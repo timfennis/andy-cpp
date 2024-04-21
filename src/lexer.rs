@@ -106,19 +106,48 @@ impl Iterator for Lexer<'_> {
 
             // Check for double character tokens
             if let Ok(token) = Token::try_from((char, next)) {
-                self.source.next();
-                return Some(Ok(TokenLocation {
+                let operation_token = TokenLocation {
                     token,
-                    location: start,
-                }));
+                    location: self.source.location(),
+                };
+
+                self.source.next();
+
+                // if the operator is followed by an `=` we wrap the token in an `OpAssign` token
+                // example:
+                // ```ndc
+                // foo := false
+                // foo &&= true
+                // ```
+                return match self.source.peek_one() {
+                    Some('=') if operation_token.token.is_augmentable() => {
+                        self.source.next();
+                        Some(Ok(TokenLocation {
+                            token: Token::OpAssign(Box::new(operation_token)),
+                            location: self.source.location(),
+                        }))
+                    }
+                    _ => Some(Ok(operation_token)),
+                };
             }
 
             // Check for single character tokens
             if let Ok(token) = Token::try_from(char) {
-                return Some(Ok(TokenLocation {
+                let operation_token = TokenLocation {
                     token,
-                    location: start,
-                }));
+                    location: self.source.location(),
+                };
+
+                return match self.source.peek_one() {
+                    Some('=') if operation_token.token.is_augmentable() => {
+                        self.source.next();
+                        Some(Ok(TokenLocation {
+                            token: Token::OpAssign(Box::new(operation_token)),
+                            location: start,
+                        }))
+                    }
+                    _ => Some(Ok(operation_token)),
+                };
             }
 
             match (char, next) {

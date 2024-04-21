@@ -124,6 +124,7 @@ impl Environment {
 
     pub fn assign(&mut self, name: String, value: Value) -> bool {
         // Clippy wants us to use self.values.entry(name) but that moves name and breaks the recursive case
+        // TODO: we should take a reference to the name instead (I think)
         #[allow(clippy::map_entry)]
         return if self.values.contains_key(&name) {
             self.values.insert(name, RefCell::new(value));

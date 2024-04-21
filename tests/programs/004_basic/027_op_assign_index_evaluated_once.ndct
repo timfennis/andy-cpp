@@ -1,0 +1,13 @@
+--PROGRAM--
+i := 0;
+fn idx() {
+    r := i;
+    i += 1;
+    r
+}
+
+foo := [0];
+foo[idx()] += 10;
+print(foo[0], i)
+--EXPECT--
+10 1

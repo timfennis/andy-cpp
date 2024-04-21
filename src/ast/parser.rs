@@ -236,65 +236,84 @@ impl Parser {
         // NOTE: When we start supporting more lvalues we should insert this step between
         //       `variable_declaration_or_assignment` and `logic_or`
         let maybe_lvalue = self.logic_or()?;
+        let (start, end) = (maybe_lvalue.start, maybe_lvalue.end);
 
-        // If the token we parsed is some kind of variable we can potentially assign to it. Next we'll check if the next
-        // token matches either the declaration operator or the assignment operator. If neither of those matches we are
-        // just returning the variable expression as is.
-        match maybe_lvalue.expression {
-            Expression::Identifier(ref identifier) => {
-                if self.consume_token_if(&[Token::CreateVar]).is_some() {
-                    let expression = self.expression()?;
-                    let (start, end) = (maybe_lvalue.start, expression.end);
-                    Ok(Expression::VariableDeclaration {
-                        l_value: Lvalue::Variable {
-                            identifier: identifier.to_string(),
-                        },
-                        value: Box::new(expression),
-                    }
-                    .to_location(start, end))
-                } else if self.consume_token_if(&[Token::EqualsSign]).is_some() {
-                    let expression = self.expression()?;
-                    let (start, end) = (maybe_lvalue.start, expression.end);
-                    Ok(Expression::Assignment {
-                        l_value: Lvalue::Variable {
-                            identifier: identifier.to_string(),
-                        },
-                        value: Box::new(expression),
-                    }
-                    .to_location(start, end))
-                } else {
-                    Ok(maybe_lvalue)
-                }
-            }
-            Expression::Index { value, index } => {
-                if let Some(actual_token) = self.consume_token_if(&[Token::CreateVar]) {
-                    Err(Error::UnexpectedToken { actual_token })
-                } else if self.consume_token_if(&[Token::EqualsSign]).is_some() {
-                    let expression = self.expression()?;
-                    let (start, end) = (value.start, expression.end);
-                    Ok(Expression::Assignment {
-                        l_value: Lvalue::Index { value, index },
-                        value: Box::new(expression),
-                    }
-                    .to_location(start, end))
-                } else {
-                    Ok(Expression::Index { index, value }
-                        .to_location(maybe_lvalue.start, maybe_lvalue.end))
-                }
-            }
+        let l_value = match maybe_lvalue.expression {
+            Expression::Identifier(identifier) => Lvalue::Variable { identifier },
+            Expression::Index { value, index } => Lvalue::Index { value, index },
             _ => {
                 // In this case we got some kind of expression that we can't assign to. We can just return the expression as is.
                 // But to improve error handling and stuff it would be nice if we could check if the next token matches one
                 // of the assignment operator and throw an appropriate error.
-                match self.peek_current_token() {
-                    Some(Token::CreateVar | Token::EqualsSign) => {
+                return match self.peek_current_token() {
+                    Some(Token::DeclareVar | Token::EqualsSign) => {
                         Err(Error::InvalidAssignmentTarget {
                             target: maybe_lvalue,
                         })
                     }
                     _ => Ok(maybe_lvalue),
-                }
+                };
             }
+        };
+
+        return match self.peek_current_token() {
+            // NOTE: the parser supports every LValue but some might cause an error when declaring vars
+            Some(Token::DeclareVar) => {
+                self.advance();
+                let expression = self.expression()?;
+                let end = expression.end;
+                let declaration = Expression::VariableDeclaration {
+                    l_value,
+                    value: Box::new(expression),
+                };
+
+                Ok(declaration.to_location(start, end))
+            }
+            Some(Token::EqualsSign) => {
+                self.advance();
+                let expression = self.expression()?;
+                let end = expression.end;
+                let assignment_expression = Expression::Assignment {
+                    l_value,
+                    value: Box::new(expression),
+                };
+
+                Ok(assignment_expression.to_location(start, end))
+            }
+            Some(Token::OpAssign(inner)) => {
+                let inner = *inner.clone();
+                self.advance();
+                let expression = self.expression()?;
+                let end = expression.end;
+                let op_assign = Expression::OpAssignment {
+                    l_value,
+                    value: Box::new(expression),
+                    operation: inner.try_into()?,
+                };
+
+                Ok(op_assign.to_location(start, end))
+            }
+            // Repacking these into expression is not nice
+            _ => Ok(Self::l_value_into_expression(l_value, start, end)),
+        };
+    }
+
+    fn l_value_into_expression(
+        l_value: Lvalue,
+        start: Location,
+        end: Location,
+    ) -> ExpressionLocation {
+        match l_value {
+            Lvalue::Variable { identifier } => ExpressionLocation {
+                expression: Expression::Identifier(identifier),
+                start,
+                end,
+            },
+            Lvalue::Index { index, value } => ExpressionLocation {
+                expression: Expression::Index { index, value },
+                start,
+                end,
+            },
         }
     }
 
@@ -804,8 +823,13 @@ pub enum Error {
 
 fn tokens_to_string(tokens: &[Token]) -> String {
     let mut buf = String::new();
-    for sym in tokens {
-        write!(buf, "{sym}").expect("serializing symbols must succeed");
+    let mut iter = tokens.iter().peekable();
+    while let Some(token) = iter.next() {
+        if iter.peek().is_none() {
+            write!(buf, "{token}").expect("serializing symbols must succeed");
+        } else {
+            write!(buf, "{token}, ").expect("serializing symbols must succeed");
+        }
     }
     buf
 }

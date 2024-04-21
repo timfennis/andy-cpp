@@ -1,0 +1,5 @@
+--PROGRAM--
+x += 3;
+print(x);
+--EXPECT-ERROR--
+undefined variable x
