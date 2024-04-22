@@ -1,6 +1,8 @@
+use crate::interpreter::evaluate::{EvaluationError, IntoEvaluationError};
 use crate::interpreter::function::{Function, OverloadedFunction};
 use crate::interpreter::int::Int;
 use crate::interpreter::num::{Number, NumberToUsizeError, NumberType};
+use crate::lexer::Location;
 use num::BigInt;
 use std::cell::RefCell;
 use std::fmt;
@@ -148,6 +150,12 @@ pub enum ConversionError {
 
     #[error("{0}")]
     NumberToUsizeError(#[from] NumberToUsizeError),
+}
+
+impl IntoEvaluationError for ConversionError {
+    fn into_evaluation_error(self, start: Location, end: Location) -> EvaluationError {
+        EvaluationError::type_error(&format!("{self}"), start, end)
+    }
 }
 
 impl TryFrom<Value> for i64 {

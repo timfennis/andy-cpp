@@ -117,15 +117,11 @@ pub(crate) fn evaluate_expression(
                 value: assign_to,
                 index,
             } => {
-                let index = evaluate_expression(index, environment)?;
-                let index_type = index.value_type();
-                let index = i64::try_from(index).map_err(|_| {
-                    EvaluationError::type_error(
-                        &format!("cannot use a {index_type} to index into a sequence"),
-                        start,
-                        end,
-                    )
-                })?;
+                let index = value_to_bidirectional_index(
+                    evaluate_expression(index, environment)?,
+                    start,
+                    end,
+                )?;
 
                 let assign_to = evaluate_expression(assign_to, environment)?;
                 match &assign_to {
@@ -204,15 +200,11 @@ pub(crate) fn evaluate_expression(
                 value: assign_to,
                 index,
             } => {
-                let index = evaluate_expression(index, environment)?;
-                let index_type = index.value_type();
-                let index = i64::try_from(index).map_err(|_| {
-                    EvaluationError::type_error(
-                        &format!("cannot use a {index_type} to index into a sequence"),
-                        start,
-                        end,
-                    )
-                })?;
+                let index = value_to_bidirectional_index(
+                    evaluate_expression(index, environment)?,
+                    start,
+                    end,
+                )?;
 
                 let assign_to = evaluate_expression(assign_to, environment)?;
                 match &assign_to {
@@ -538,18 +530,14 @@ pub(crate) fn evaluate_expression(
             index: index_expr,
         } => {
             let value = evaluate_expression(value_expr, environment)?;
-            // let value_type = value.value_type();
+
             match value {
                 Value::Sequence(sequence) => {
-                    let index = evaluate_expression(index_expr, environment)?;
-                    let Value::Number(Number::Int(Int::Int64(index))) = index else {
-                        return Err(EvaluationError::syntax_error(
-                            &format!("Index must be a int but was {}", index.value_type()),
-                            index_expr.start,
-                            index_expr.end,
-                        )
-                        .into());
-                    };
+                    let index = value_to_bidirectional_index(
+                        evaluate_expression(index_expr, environment)?,
+                        index_expr.start,
+                        index_expr.end,
+                    )?;
 
                     match sequence {
                         Sequence::String(string) => {
@@ -618,9 +606,9 @@ pub(crate) fn evaluate_expression(
                     }
                 }
                 // TODO: improve error handling
-                _ => {
+                value => {
                     return Err(EvaluationError::type_error(
-                        "cannot index into this type",
+                        &format!("cannot index into {}", value.value_type()),
                         value_expr.start,
                         value_expr.end,
                     )
@@ -788,14 +776,16 @@ impl EvaluationError {
     }
 }
 
-// TODO: remove this, this is cringe
-impl From<std::io::Error> for EvaluationError {
-    fn from(value: std::io::Error) -> Self {
-        Self {
-            text: format!("io error: {value:?}"),
-            // TODO: fix start/end
-            start: Location { line: 0, column: 0 },
-            end: Location { line: 0, column: 0 },
+pub trait IntoEvaluationError {
+    fn into_evaluation_error(self, start: Location, end: Location) -> EvaluationError;
+}
+
+impl IntoEvaluationError for std::io::Error {
+    fn into_evaluation_error(self, start: Location, end: Location) -> EvaluationError {
+        EvaluationError {
+            text: format!("io error: {self:?}"),
+            start,
+            end,
         }
     }
 }
@@ -814,6 +804,7 @@ impl fmt::Debug for EvaluationError {
 
 impl Error for EvaluationError {}
 
+/// Convert a bidirectional index into a forwards index or returns None if this conversion is not possible
 fn convert_index(index: i64, size: usize) -> Option<usize> {
     if index.is_negative() {
         usize::try_from(index.abs())
@@ -822,4 +813,21 @@ fn convert_index(index: i64, size: usize) -> Option<usize> {
     } else {
         usize::try_from(index).ok()
     }
+}
+
+/// Converts an Andy C Value into a bidirectional index (i64) or returns a neat evaluation error
+/// that can be returned to the user
+fn value_to_bidirectional_index(
+    value: Value,
+    start: Location,
+    end: Location,
+) -> Result<i64, EvaluationError> {
+    let typ = value.value_type();
+    i64::try_from(value).map_err(|_| {
+        EvaluationError::type_error(
+            &format!("cannot use a {typ} to index into a sequence"),
+            start,
+            end,
+        )
+    })
 }
