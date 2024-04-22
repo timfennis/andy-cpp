@@ -117,12 +117,6 @@ pub(crate) fn evaluate_expression(
                 value: assign_to,
                 index,
             } => {
-                let index = value_to_bidirectional_index(
-                    evaluate_expression(index, environment)?,
-                    start,
-                    end,
-                )?;
-
                 let assign_to = evaluate_expression(assign_to, environment)?;
                 match &assign_to {
                     Value::Sequence(Sequence::List(list)) => {
@@ -134,21 +128,33 @@ pub(crate) fn evaluate_expression(
                         let mut list = list
                             .try_borrow_mut()
                             .map_err(|_| EvaluationError::mutation_error("you cannot mutate a value in a list while you're iterating over this list", start, end))?;
-                        let list_size = list.len();
-                        let x = list.index_mut(
-                            convert_index(index, list_size).expect("TODO: handle this error"),
-                        );
+
+                        let index = value_to_forward_index(
+                            evaluate_expression(index, environment)?,
+                            list.len(),
+                            start,
+                            end,
+                        )?;
+
+                        let x = list.index_mut(index);
                         *x = value;
                     }
                     Value::Sequence(Sequence::String(insertion_target)) => {
                         let mut insertion_target = insertion_target.borrow_mut();
                         let value = evaluate_expression(value, environment)?;
 
-                        if let Value::Sequence(Sequence::String(string_to_insert)) = value {
-                            let target_string = string_to_insert.borrow();
-                            // TODO: string length might not be correct, chars().count() might not be better
-                            let index = convert_index(index, insertion_target.len())
-                                .expect("TODO: handle this error"); // TODO fix unwrap
+                        if let Value::Sequence(Sequence::String(target_string)) = value {
+                            let target_string = target_string.borrow();
+                            let index = value_to_forward_index(
+                                evaluate_expression(index, environment)?,
+                                // TODO: string length might not be correct, chars().count() might not be better
+                                insertion_target.len(),
+                                start,
+                                end,
+                            )?;
+
+                            dbg!(index);
+
                             insertion_target.replace_range(index..=index, target_string.as_str());
                         } else {
                             return Err(EvaluationError::syntax_error(
@@ -200,12 +206,6 @@ pub(crate) fn evaluate_expression(
                 value: assign_to,
                 index,
             } => {
-                let index = value_to_bidirectional_index(
-                    evaluate_expression(index, environment)?,
-                    start,
-                    end,
-                )?;
-
                 let assign_to = evaluate_expression(assign_to, environment)?;
                 match &assign_to {
                     Value::Sequence(Sequence::List(list)) => {
@@ -217,10 +217,16 @@ pub(crate) fn evaluate_expression(
                         let mut list = list
                             .try_borrow_mut()
                             .map_err(|_| EvaluationError::mutation_error("you cannot mutate a value in a list while you're iterating over this list", start, end))?;
-                        let list_size = list.len();
-                        let list_item = list.index_mut(
-                            convert_index(index, list_size).expect("TODO: why is this okay"),
-                        );
+
+                        let index = value_to_forward_index(
+                            evaluate_expression(index, environment)?,
+                            list.len(),
+                            start,
+                            end,
+                        )?;
+
+                        let list_item = list.index_mut(index);
+
                         let old_value = std::mem::replace(list_item, Value::Unit);
                         *list_item = apply_operator(old_value, *operation, right_hand_value)?;
                     }
@@ -533,22 +539,16 @@ pub(crate) fn evaluate_expression(
 
             match value {
                 Value::Sequence(sequence) => {
-                    let index = value_to_bidirectional_index(
-                        evaluate_expression(index_expr, environment)?,
-                        index_expr.start,
-                        index_expr.end,
-                    )?;
-
                     match sequence {
                         Sequence::String(string) => {
                             let string = string.borrow();
-                            let index = convert_index(index, string.len()).ok_or_else(|| {
-                                EvaluationError::type_error(
-                                    "cannot convert index to usable offset",
-                                    index_expr.start,
-                                    index_expr.end,
-                                )
-                            })?;
+
+                            let index = value_to_forward_index(
+                                evaluate_expression(index_expr, environment)?,
+                                string.len(), // TODO is strlen correct here?
+                                index_expr.start,
+                                index_expr.end,
+                            )?;
 
                             let Some(char) = string.chars().nth(index) else {
                                 return Err(EvaluationError::out_of_bounds(
@@ -564,13 +564,13 @@ pub(crate) fn evaluate_expression(
                         }
                         Sequence::List(list) => {
                             let list = list.borrow();
-                            let index = convert_index(index, list.len()).ok_or_else(|| {
-                                EvaluationError::type_error(
-                                    "cannot convert index to usable offset",
-                                    index_expr.start,
-                                    index_expr.end,
-                                )
-                            })?;
+
+                            let index = value_to_forward_index(
+                                evaluate_expression(index_expr, environment)?,
+                                list.len(),
+                                index_expr.start,
+                                index_expr.end,
+                            )?;
 
                             let Some(value) = list.get(index) else {
                                 return Err(EvaluationError::out_of_bounds(
@@ -584,13 +584,12 @@ pub(crate) fn evaluate_expression(
                         }
                         // TODO: this implementation is 99% the same as the one above
                         Sequence::Tuple(tuple) => {
-                            let index = convert_index(index, tuple.len()).ok_or_else(|| {
-                                EvaluationError::type_error(
-                                    "cannot convert index to usable offset",
-                                    index_expr.start,
-                                    index_expr.end,
-                                )
-                            })?;
+                            let index = value_to_forward_index(
+                                evaluate_expression(index_expr, environment)?,
+                                tuple.len(),
+                                index_expr.start,
+                                index_expr.end,
+                            )?;
 
                             let Some(value) = tuple.get(index) else {
                                 return Err(EvaluationError::out_of_bounds(
@@ -804,30 +803,28 @@ impl fmt::Debug for EvaluationError {
 
 impl Error for EvaluationError {}
 
-/// Convert a bidirectional index into a forwards index or returns None if this conversion is not possible
-fn convert_index(index: i64, size: usize) -> Option<usize> {
-    if index.is_negative() {
-        usize::try_from(index.abs())
-            .ok()
-            .and_then(|i| size.checked_sub(i))
-    } else {
-        usize::try_from(index).ok()
-    }
-}
-
-/// Converts an Andy C Value into a bidirectional index (i64) or returns a neat evaluation error
-/// that can be returned to the user
-fn value_to_bidirectional_index(
+fn value_to_forward_index(
     value: Value,
+    size: usize,
     start: Location,
     end: Location,
-) -> Result<i64, EvaluationError> {
+) -> Result<usize, EvaluationError> {
     let typ = value.value_type();
-    i64::try_from(value).map_err(|_| {
+    let index = i64::try_from(value).map_err(|_| {
         EvaluationError::type_error(
-            &format!("cannot use a {typ} to index into a sequence"),
+            &format!("cannot use {typ} to index into a sequence, possibly because it's too big"),
             start,
             end,
         )
-    })
+    })?;
+
+    if index.is_negative() {
+        let index = usize::try_from(index.abs())
+            .map_err(|_err| EvaluationError::syntax_error("invalid index too large", start, end))?;
+
+        size.checked_sub(index)
+            .ok_or_else(|| EvaluationError::syntax_error("index out of bounds", start, end))
+    } else {
+        usize::try_from(index).map_err(|_| EvaluationError::syntax_error("kapot", start, end))
+    }
 }
