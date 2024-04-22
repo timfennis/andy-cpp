@@ -125,22 +125,21 @@ pub(crate) fn evaluate_expression(
                         // see: `bug0001_in_place_map.ndct`
                         let value = evaluate_expression(value, environment)?;
 
-                        let mut list = list
-                            .try_borrow_mut()
-                            .map_err(|_| EvaluationError::mutation_error("you cannot mutate a value in a list while you're iterating over this list", start, end))?;
-
                         let index = value_to_forward_index(
                             evaluate_expression(index, environment)?,
-                            list.len(),
+                            list.borrow().len(),
                             start,
                             end,
                         )?;
+
+                        let mut list = list
+                            .try_borrow_mut()
+                            .map_err(|_| EvaluationError::mutation_error("you cannot mutate a value in a list while you're iterating over this list", start, end))?;
 
                         let x = list.index_mut(index);
                         *x = value;
                     }
                     Value::Sequence(Sequence::String(insertion_target)) => {
-                        let mut insertion_target = insertion_target.borrow_mut();
                         let value = evaluate_expression(value, environment)?;
 
                         if let Value::Sequence(Sequence::String(target_string)) = value {
@@ -148,13 +147,12 @@ pub(crate) fn evaluate_expression(
                             let index = value_to_forward_index(
                                 evaluate_expression(index, environment)?,
                                 // TODO: string length might not be correct, chars().count() might not be better
-                                insertion_target.len(),
+                                insertion_target.borrow().len(),
                                 start,
                                 end,
                             )?;
 
-                            dbg!(index);
-
+                            let mut insertion_target = insertion_target.borrow_mut();
                             insertion_target.replace_range(index..=index, target_string.as_str());
                         } else {
                             return Err(EvaluationError::syntax_error(
@@ -563,15 +561,14 @@ pub(crate) fn evaluate_expression(
                             )))))
                         }
                         Sequence::List(list) => {
-                            let list = list.borrow();
-
                             let index = value_to_forward_index(
                                 evaluate_expression(index_expr, environment)?,
-                                list.len(),
+                                list.borrow().len(),
                                 index_expr.start,
                                 index_expr.end,
                             )?;
 
+                            let list = list.borrow();
                             let Some(value) = list.get(index) else {
                                 return Err(EvaluationError::out_of_bounds(
                                     index,
