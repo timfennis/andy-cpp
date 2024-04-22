@@ -1,0 +1,5 @@
+--PROGRAM--
+x := [1,2,3];
+x["foo"] = 69; // ERROR
+--EXPECT-ERROR--
+cannot use a string to index into a sequence

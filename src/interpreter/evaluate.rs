@@ -118,7 +118,14 @@ pub(crate) fn evaluate_expression(
                 index,
             } => {
                 let index = evaluate_expression(index, environment)?;
-                let index = i64::try_from(index).unwrap();
+                let index_type = index.value_type();
+                let index = i64::try_from(index).map_err(|_| {
+                    EvaluationError::type_error(
+                        &format!("cannot use a {index_type} to index into a sequence"),
+                        start,
+                        end,
+                    )
+                })?;
 
                 let assign_to = evaluate_expression(assign_to, environment)?;
                 match &assign_to {
@@ -132,7 +139,9 @@ pub(crate) fn evaluate_expression(
                             .try_borrow_mut()
                             .map_err(|_| EvaluationError::mutation_error("you cannot mutate a value in a list while you're iterating over this list", start, end))?;
                         let list_size = list.len();
-                        let x = list.index_mut(convert_index(index, list_size).unwrap());
+                        let x = list.index_mut(
+                            convert_index(index, list_size).expect("TODO: handle this error"),
+                        );
                         *x = value;
                     }
                     Value::Sequence(Sequence::String(insertion_target)) => {
@@ -142,7 +151,8 @@ pub(crate) fn evaluate_expression(
                         if let Value::Sequence(Sequence::String(string_to_insert)) = value {
                             let target_string = string_to_insert.borrow();
                             // TODO: string length might not be correct, chars().count() might not be better
-                            let index = convert_index(index, insertion_target.len()).unwrap(); // TODO fix unwrap
+                            let index = convert_index(index, insertion_target.len())
+                                .expect("TODO: handle this error"); // TODO fix unwrap
                             insertion_target.replace_range(index..=index, target_string.as_str());
                         } else {
                             return Err(EvaluationError::syntax_error(
@@ -195,7 +205,14 @@ pub(crate) fn evaluate_expression(
                 index,
             } => {
                 let index = evaluate_expression(index, environment)?;
-                let index = i64::try_from(index).unwrap();
+                let index_type = index.value_type();
+                let index = i64::try_from(index).map_err(|_| {
+                    EvaluationError::type_error(
+                        &format!("cannot use a {index_type} to index into a sequence"),
+                        start,
+                        end,
+                    )
+                })?;
 
                 let assign_to = evaluate_expression(assign_to, environment)?;
                 match &assign_to {
@@ -216,7 +233,12 @@ pub(crate) fn evaluate_expression(
                         *list_item = apply_operator(old_value, *operation, right_hand_value)?;
                     }
                     Value::Sequence(Sequence::String(_)) => {
-                        todo!("is there a valid use case for this?")
+                        return Err(EvaluationError::type_error(
+                            &format!("{operation:?} is undefined for string",),
+                            start,
+                            end,
+                        )
+                        .into());
                     }
                     _ => {
                         return Err(EvaluationError::syntax_error(
@@ -765,6 +787,8 @@ impl EvaluationError {
         }
     }
 }
+
+// TODO: remove this, this is cringe
 impl From<std::io::Error> for EvaluationError {
     fn from(value: std::io::Error) -> Self {
         Self {
