@@ -3,7 +3,6 @@ use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::error::Error;
 use std::fmt;
-use std::fs::create_dir;
 use std::ops::{IndexMut, Neg, Rem};
 use std::rc::Rc;
 
@@ -11,7 +10,7 @@ use crate::ast::{
     BinaryOperator, Expression, ExpressionLocation, LogicalOperator, Lvalue, UnaryOperator,
 };
 use crate::interpreter::environment::{Environment, EnvironmentRef};
-use crate::interpreter::function::{Function, FunctionCarrier};
+use crate::interpreter::function::{Function, FunctionCarrier, OverloadedFunction};
 use crate::interpreter::int::Int;
 use crate::interpreter::num::Number;
 use crate::interpreter::value::{Sequence, Value, ValueType};
@@ -199,7 +198,13 @@ pub(crate) fn evaluate_expression(
                     Either::Left(binary_operator) => {
                         apply_operator(existing_value, *binary_operator, operand)?
                     }
-                    Either::Right(identifier) => todo!("implement calling functions"),
+                    Either::Right(identifier) => call_function_by_name(
+                        identifier,
+                        &[existing_value, operand],
+                        environment,
+                        start,
+                        end,
+                    )?,
                 };
 
                 environment
@@ -239,7 +244,13 @@ pub(crate) fn evaluate_expression(
                                     apply_operator(old_value, *binary_operator, right_hand_value)?;
                             }
                             Either::Right(_identifier) => {
-                                todo!("function calling not yet implemented");
+                                *list_item = call_function_by_name(
+                                    _identifier,
+                                    &[old_value, right_hand_value],
+                                    environment,
+                                    start,
+                                    end,
+                                )?;
                             }
                         }
                     }
@@ -358,15 +369,13 @@ pub(crate) fn evaluate_expression(
             function,
             arguments,
         } => {
-            let mut display_identifier = "unknown".to_string();
             // The Expression in `function` must either be an identifier in which case it will be looked up in the
             // environment, or it must be some expression that evaluates to a function.
             // In case the expression is an identifier we get ALL the values that match the identifier
             // ordered by the distance is the scope-hierarchy.
             let values: Vec<RefCell<Value>> = match &function.expression {
                 Expression::Identifier(identifier) => {
-                    display_identifier = identifier.to_string();
-                    environment.borrow().get_all_by_name(identifier).clone()
+                    environment.borrow().get_all_by_name(identifier)
                 }
                 _ => vec![RefCell::new(evaluate_expression(function, environment)?)],
             };
@@ -377,48 +386,7 @@ pub(crate) fn evaluate_expression(
                 evaluated_args.push(evaluate_expression(argument, environment)?);
             }
 
-            // We evaluate all potential function values by first checking if they're a function and
-            // then attempting to call them. If the `OverloadedFunction` returns that there are no
-            // matches we defer to the next value and see if there is a match.
-            //
-            // This implies that a less specific function can shadow a more specific function
-            //
-            // fn sqrt(n: Float);
-            // {
-            //      fn sqrt(n: Number); // Shadows the sqrt in the parent scope completely
-            // }
-            //
-            // This behavior is subject to change in future versions of the language
-            for value in values {
-                let value = &*value.borrow();
-                if let Value::Function(function) = value {
-                    let result = function.borrow().call(&evaluated_args, environment);
-
-                    match result {
-                        Err(FunctionCarrier::Return(value)) | Ok(value) => return Ok(value),
-                        e @ Err(FunctionCarrier::EvaluationError(_)) => return e,
-                        Err(FunctionCarrier::ArgumentError(err)) => {
-                            return Err(EvaluationError::argument_error(&err, start, end).into());
-                        }
-                        Err(FunctionCarrier::IOError(err)) => {
-                            return Err(EvaluationError::io_error(&err, start, end).into())
-                        }
-                        Err(FunctionCarrier::FunctionNotFound) => continue,
-                    }
-
-                    // if let Err(FunctionCarrier::FunctionNotFound) = result {
-                    //     continue;
-                    // }
-                    // return result;
-                }
-            }
-
-            return Err(EvaluationError::syntax_error(
-                &format!("no function named '{display_identifier}' in environment that matches the types"),
-                start,
-                end,
-            )
-            .into());
+            return try_call_function(&values, &evaluated_args, environment, start, end);
         }
         Expression::FunctionDeclaration {
             arguments,
@@ -870,4 +838,80 @@ fn value_to_forward_index(
     } else {
         usize::try_from(index).map_err(|_| EvaluationError::syntax_error("kapot", start, end))
     }
+}
+
+fn call_function_by_name(
+    name: &str,
+    evaluated_args: &[Value],
+    environment: &EnvironmentRef,
+    start: Location,
+    end: Location,
+) -> EvaluationResult {
+    let values = environment.borrow().get_all_by_name(name);
+    try_call_function(&values, evaluated_args, environment, start, end)
+}
+
+/// Executes a function with some extra steps
+///     * `values`: a list of values that are attempted to be executed in the order they appear in
+///     * `evaluated_args`: a slice of values passed as arguments to the function
+///     * `environment`: the execution environment for the function
+///     * `start`: beginning of the expression (for error reporting)
+///     * `end`: end of the expression (for error reporting)
+fn try_call_function(
+    values: &[RefCell<Value>],
+    evaluated_args: &[Value],
+    environment: &EnvironmentRef,
+    start: Location,
+    end: Location,
+) -> EvaluationResult {
+    // We evaluate all potential function values by first checking if they're a function and
+    // then attempting to call them. If the `OverloadedFunction` returns that there are no
+    // matches we defer to the next value and see if there is a match.
+    //
+    // This implies that a less specific function can shadow a more specific function
+    //
+    // fn sqrt(n: Float);
+    // {
+    //      fn sqrt(n: Number); // Shadows the sqrt in the parent scope completely
+    // }
+    for value in values {
+        let value = &*value.borrow();
+
+        // Skip all values that aren't functions
+        if let Value::Function(function) = value {
+            let result = call_function(function, evaluated_args, environment, start, end);
+
+            if let Err(FunctionCarrier::FunctionNotFound) = result {
+                continue;
+            }
+
+            return result;
+        }
+    }
+
+    let function_not_found =
+        EvaluationError::syntax_error("no function found that matches the types", start, end);
+
+    return Err(function_not_found.into());
+}
+
+fn call_function(
+    function: &Rc<RefCell<OverloadedFunction>>,
+    evaluated_args: &[Value],
+    environment: &EnvironmentRef,
+    start: Location,
+    end: Location,
+) -> EvaluationResult {
+    let result = function.borrow().call(&evaluated_args, environment);
+
+    return match result {
+        Err(FunctionCarrier::Return(value)) | Ok(value) => Ok(value),
+        e @ Err(FunctionCarrier::EvaluationError(_) | FunctionCarrier::FunctionNotFound) => e,
+        Err(FunctionCarrier::ArgumentError(err)) => {
+            Err(EvaluationError::argument_error(&err, start, end).into())
+        }
+        Err(FunctionCarrier::IOError(err)) => {
+            Err(EvaluationError::io_error(&err, start, end).into())
+        }
+    };
 }

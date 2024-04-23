@@ -4,7 +4,7 @@ use std::num::TryFromIntError;
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
 use num::bigint::TryFromBigIntError;
-use num::complex::{Complex64, ComplexFloat};
+use num::complex::Complex64;
 use num::{BigInt, BigRational, Complex, FromPrimitive, ToPrimitive};
 
 use crate::interpreter::evaluate::EvaluationError;
@@ -61,7 +61,7 @@ impl PartialOrd for Number {
 }
 
 impl<'a> PartialEq for RealNumber<'a> {
-    fn eq(&self, other: &Self) -> bool {
+    fn eq(&self, _other: &Self) -> bool {
         todo!()
     }
 }
@@ -77,7 +77,7 @@ impl<'a> PartialOrd for RealNumber<'a> {
                 }
             } else {
                 // TODO: deal with this expect/unwrap?
-                let x = BigInt::from_f64(b.trunc()).expect("this fails if none??");
+                let x = BigInt::from_f64(b.trunc()).expect("this fails if NaN");
                 a.to_bigint().partial_cmp(&x)
             }
         }

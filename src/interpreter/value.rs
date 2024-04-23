@@ -1,4 +1,3 @@
-use crate::ast::LogicalOperator::Or;
 use crate::interpreter::evaluate::{EvaluationError, IntoEvaluationError};
 use crate::interpreter::function::{Function, OverloadedFunction};
 use crate::interpreter::int::Int;
