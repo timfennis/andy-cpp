@@ -39,6 +39,7 @@ pub enum BinaryOperator {
     CModulo,
     EuclideanModulo,
     Exponent,
+    In,
 }
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
@@ -82,6 +83,7 @@ impl TryFrom<TokenLocation> for BinaryOperator {
             Token::CModulo => Self::CModulo,
             Token::EuclideanModulo => Self::EuclideanModulo,
             Token::Exponent => Self::Exponent,
+            Token::In => Self::In,
             _ => {
                 return Err(ParseError::ExpectedToken {
                     actual_token: value,

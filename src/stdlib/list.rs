@@ -1,7 +1,9 @@
 use itertools::Itertools;
+use std::rc::Rc;
+
 #[andy_cpp_macros::export_module]
 mod inner {
-    use crate::interpreter::value::Value;
+    use crate::interpreter::value::{Sequence, Value};
     pub fn contains(list: &[Value], elem: &Value) -> bool {
         list.contains(elem)
     }
@@ -14,7 +16,7 @@ mod inner {
         list_a
             .iter()
             .cartesian_product(list_b)
-            .map(|(a, b)| Value::from(vec![a.clone(), b.clone()]))
+            .map(|(a, b)| Value::Sequence(Sequence::Tuple(Rc::new(vec![a.clone(), b.clone()]))))
             .collect_vec()
     }
 }

@@ -327,24 +327,20 @@ impl Parser {
     }
 
     fn logic_and(&mut self) -> Result<ExpressionLocation, Error> {
-        self.consume_logical_expression_left_associative(Self::equality, &[Token::LogicAnd])
-    }
-
-    fn equality(&mut self) -> Result<ExpressionLocation, Error> {
-        self.consume_binary_expression_left_associative(
-            Self::comparison,
-            &[Token::Equality, Token::Inequality],
-        )
+        self.consume_logical_expression_left_associative(Self::comparison, &[Token::LogicAnd])
     }
 
     fn comparison(&mut self) -> Result<ExpressionLocation, Error> {
         self.consume_binary_expression_left_associative(
             Self::term,
             &[
+                Token::Equality,
+                Token::Inequality,
                 Token::Greater,
                 Token::GreaterEquals,
                 Token::Less,
                 Token::LessEquals,
+                Token::In,
             ],
         )
     }

@@ -635,6 +635,16 @@ fn apply_operator(
         (left, BinaryOperator::Greater, right) => {
             (left.partial_cmp(&right).ok_or_else(create_type_error)? == Ordering::Greater).into()
         }
+        (left, BinaryOperator::In, Value::Sequence(seq)) => match seq {
+            Sequence::String(haystack) => match left {
+                Value::Sequence(Sequence::String(needle)) => {
+                    haystack.borrow().contains(&*needle.borrow()).into()
+                }
+                _ => Value::Bool(false),
+            },
+            Sequence::List(l) => l.borrow().contains(&left).into(),
+            Sequence::Tuple(t) => t.contains(&left).into(),
+        },
         // Integer
         (Value::Number(a), op, Value::Number(b)) => match op {
             BinaryOperator::Equality => (a == b).into(),
@@ -651,6 +661,7 @@ fn apply_operator(
             BinaryOperator::CModulo => Value::Number(a.rem(b)),
             BinaryOperator::EuclideanModulo => Value::Number(a.checked_rem_euclid(b)?),
             BinaryOperator::Exponent => Value::Number(a.checked_pow(b)?),
+            BinaryOperator::In => panic!("todo: fix error handling"),
         },
         // Boolean
         // (Value::Bool(a), BinaryOperator::Equality, Value::Bool(b)) => (a == b).into(),

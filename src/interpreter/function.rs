@@ -5,7 +5,7 @@ use crate::interpreter::environment::{Environment, EnvironmentRef};
 use crate::interpreter::evaluate::{evaluate_expression, EvaluationError, EvaluationResult};
 use crate::interpreter::num::{Number, NumberType};
 use crate::interpreter::value::{Sequence, Value, ValueType};
-use std::collections::HashMap;
+use ahash::AHashMap;
 use std::fmt;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -16,7 +16,7 @@ pub enum TypeSignature {
 
 #[derive(Clone)]
 pub struct OverloadedFunction {
-    implementations: HashMap<TypeSignature, Function>,
+    implementations: AHashMap<TypeSignature, Function>,
 }
 
 impl OverloadedFunction {
@@ -76,7 +76,7 @@ impl From<Function> for OverloadedFunction {
     fn from(function: Function) -> Self {
         let type_signature = function.type_signature();
         Self {
-            implementations: HashMap::from([(type_signature, function)]),
+            implementations: AHashMap::from([(type_signature, function)]),
         }
     }
 }
