@@ -4,13 +4,31 @@ use num::complex::Complex64;
 use num::traits::CheckedEuclid;
 use num::FromPrimitive;
 use num::{BigInt, BigRational, Signed, ToPrimitive, Zero};
+use std::cmp::Ordering;
 use std::fmt;
 use std::ops;
 
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Int {
     Int64(i64),
     BigInt(BigInt),
+}
+
+impl Ord for Int {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (Int::Int64(l), Int::BigInt(r)) => BigInt::from(*l).cmp(r),
+            (Int::BigInt(l), Int::Int64(r)) => l.cmp(&BigInt::from(*r)),
+            (Int::Int64(l), Int::Int64(r)) => l.cmp(r),
+            (Int::BigInt(l), Int::BigInt(r)) => l.cmp(r),
+        }
+    }
+}
+
+impl PartialOrd for Int {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 impl ops::Neg for Int {
@@ -181,6 +199,12 @@ impl From<BigInt> for Int {
 
 impl From<Int> for f64 {
     fn from(value: Int) -> Self {
+        f64::from(&value)
+    }
+}
+
+impl From<&Int> for f64 {
+    fn from(value: &Int) -> Self {
         match value {
             Int::Int64(i) => i.to_f64().unwrap_or(Self::INFINITY),
             Int::BigInt(i) => i.to_f64().unwrap_or(Self::INFINITY),

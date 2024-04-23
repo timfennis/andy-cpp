@@ -1,9 +1,10 @@
+use std::cmp::Ordering;
 use std::fmt;
 use std::num::TryFromIntError;
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
 use num::bigint::TryFromBigIntError;
-use num::complex::Complex64;
+use num::complex::{Complex64, ComplexFloat};
 use num::{BigInt, BigRational, Complex, FromPrimitive, ToPrimitive};
 
 use crate::interpreter::evaluate::EvaluationError;
@@ -16,6 +17,11 @@ pub enum Number {
     Float(f64),
     Rational(Box<BigRational>),
     Complex(Complex64),
+}
+
+pub enum RealNumber<'a> {
+    Int(&'a Int),
+    Float(f64),
 }
 
 impl From<Int> for Number {
@@ -49,13 +55,40 @@ impl From<Complex64> for Number {
 }
 
 impl PartialOrd for Number {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.to_real().partial_cmp(&other.to_real())
+    }
+}
+
+impl<'a> PartialEq for RealNumber<'a> {
+    fn eq(&self, other: &Self) -> bool {
+        todo!()
+    }
+}
+
+impl<'a> PartialOrd for RealNumber<'a> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        fn compare_int_to_float(a: &Int, b: f64) -> Option<Ordering> {
+            if b.is_infinite() {
+                if b.is_sign_positive() {
+                    Some(Ordering::Less)
+                } else {
+                    Some(Ordering::Greater)
+                }
+            } else {
+                // TODO: deal with this expect/unwrap?
+                let x = BigInt::from_f64(b.trunc()).expect("this fails if none??");
+                a.to_bigint().partial_cmp(&x)
+            }
+        }
+
         match (self, other) {
-            (Self::Int(n1), Self::Int(n2)) => n1.partial_cmp(n2),
-            (Self::Float(n1), Self::Float(n2)) => n1.partial_cmp(n2),
-            (Self::Rational(n1), Self::Rational(n2)) => n1.partial_cmp(n2),
-            (Self::Complex(_), Self::Complex(_)) => None,
-            _ => panic!("Dont compare different numbers."),
+            (RealNumber::Int(a), RealNumber::Int(b)) => a.partial_cmp(b),
+            (RealNumber::Int(a), RealNumber::Float(b)) => compare_int_to_float(a, *b),
+            (RealNumber::Float(a), RealNumber::Int(b)) => {
+                compare_int_to_float(b, *a).map(Ordering::reverse)
+            }
+            (RealNumber::Float(a), RealNumber::Float(b)) => a.partial_cmp(b),
         }
     }
 }
@@ -415,6 +448,24 @@ impl Number {
             }
         };
         Ok(n)
+    }
+
+    /// Converts this number into a real (complex) number with the imaginary part set to 0.0
+    /// which makes it esy to do partial comparison on all numbers (and possibly other things)
+    ///
+    /// TODO: in the future we might want to create a new Real type which is the sum of Int and Float
+    ///       in order to better handle BigInts which now lose tons of precision and will yield incorrect results
+    #[must_use]
+    pub fn to_real(&self) -> (RealNumber, RealNumber) {
+        match self {
+            Number::Int(i) => (RealNumber::Int(i), RealNumber::Float(0.0)),
+            Number::Float(f) => (RealNumber::Float(*f), RealNumber::Float(0.0)),
+            Number::Rational(r) => (
+                RealNumber::Float(rational_to_float(r)),
+                RealNumber::Float(0.0),
+            ),
+            Number::Complex(c) => (RealNumber::Float(c.re), RealNumber::Float(c.im)),
+        }
     }
 }
 

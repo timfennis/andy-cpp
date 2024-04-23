@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::error::Error;
 use std::fmt;
+use std::fs::create_dir;
 use std::ops::{IndexMut, Neg, Rem};
 use std::rc::Rc;
 
@@ -617,12 +618,39 @@ pub(crate) fn evaluate_expression(
     Ok(literal)
 }
 
+#[allow(clippy::too_many_lines)]
 fn apply_operator(
     left: Value,
     operator: BinaryOperator,
     right: Value,
 ) -> Result<Value, EvaluationError> {
+    fn create_type_error(
+        operator: BinaryOperator,
+        left: ValueType,
+        right: ValueType,
+    ) -> EvaluationError {
+        EvaluationError::type_error(
+            &format!("cannot apply operator {operator:?} to {left} and {right}"),
+            Location { line: 0, column: 0 },
+            Location { line: 0, column: 0 },
+        )
+    }
+    let (left_type, right_type) = (left.value_type(), right.value_type());
+    let create_type_error = { || create_type_error(operator, left_type, right_type) };
+
     let literal: Value = match (left, operator, right) {
+        (left, BinaryOperator::Less, right) => {
+            (left.partial_cmp(&right).ok_or_else(create_type_error)? == Ordering::Less).into()
+        }
+        (left, BinaryOperator::Equality, right) => {
+            (left.partial_cmp(&right).ok_or_else(create_type_error)? == Ordering::Equal).into()
+        }
+        (left, BinaryOperator::Inequality, right) => {
+            (left.partial_cmp(&right).ok_or_else(create_type_error)? != Ordering::Equal).into()
+        }
+        (left, BinaryOperator::Greater, right) => {
+            (left.partial_cmp(&right).ok_or_else(create_type_error)? == Ordering::Greater).into()
+        }
         // Integer
         (Value::Number(a), op, Value::Number(b)) => match op {
             BinaryOperator::Equality => (a == b).into(),
@@ -641,8 +669,8 @@ fn apply_operator(
             BinaryOperator::Exponent => Value::Number(a.checked_pow(b)?),
         },
         // Boolean
-        (Value::Bool(a), BinaryOperator::Equality, Value::Bool(b)) => (a == b).into(),
-        (Value::Bool(a), BinaryOperator::Inequality, Value::Bool(b)) => (a != b).into(),
+        // (Value::Bool(a), BinaryOperator::Equality, Value::Bool(b)) => (a == b).into(),
+        // (Value::Bool(a), BinaryOperator::Inequality, Value::Bool(b)) => (a != b).into(),
 
         // Some mixed memes
         (Value::Sequence(Sequence::String(a)), BinaryOperator::Multiply, Value::Number(b)) => {
@@ -800,6 +828,8 @@ impl fmt::Debug for EvaluationError {
 
 impl Error for EvaluationError {}
 
+/// Takes a value from the Andy C runtime and converts it to a forward index respecting bi-directional
+/// indexing rules.
 fn value_to_forward_index(
     value: Value,
     size: usize,

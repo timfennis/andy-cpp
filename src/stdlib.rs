@@ -1,3 +1,4 @@
+pub mod cmp;
 pub mod file;
 pub mod list;
 pub mod math;

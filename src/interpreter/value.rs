@@ -1,3 +1,4 @@
+use crate::ast::LogicalOperator::Or;
 use crate::interpreter::evaluate::{EvaluationError, IntoEvaluationError};
 use crate::interpreter::function::{Function, OverloadedFunction};
 use crate::interpreter::int::Int;
@@ -5,6 +6,7 @@ use crate::interpreter::num::{Number, NumberToUsizeError, NumberType};
 use crate::lexer::Location;
 use num::BigInt;
 use std::cell::RefCell;
+use std::cmp::Ordering;
 use std::fmt;
 use std::rc::Rc;
 
@@ -46,12 +48,37 @@ impl PartialEq for Value {
     }
 }
 
+impl PartialOrd for Value {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        match (self, other) {
+            (Value::Unit, Value::Unit) => Some(Ordering::Equal),
+            (Value::Number(left), Value::Number(right)) => left.partial_cmp(right),
+            (Value::Sequence(left), Value::Sequence(right)) => left.partial_cmp(right),
+            (Value::Bool(left), Value::Bool(right)) => left.partial_cmp(right),
+            // Functions definitely don't have an order
+            // Things that are different don't have an order either
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Sequence {
     String(Rc<RefCell<String>>),
     List(Rc<RefCell<Vec<Value>>>),
     Tuple(Rc<Vec<Value>>),
     //TODO: Dict comes later because we need hashing and comparison
+}
+
+impl PartialOrd for Sequence {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        match (self, other) {
+            (Sequence::String(left), Sequence::String(right)) => left.partial_cmp(right),
+            (Sequence::List(left), Sequence::List(right)) => left.partial_cmp(right),
+            (Sequence::Tuple(left), Sequence::Tuple(right)) => left.partial_cmp(right),
+            _ => None,
+        }
+    }
 }
 
 // -----------------------------------------------------
@@ -304,7 +331,7 @@ impl TryFrom<&Value> for String {
 
 // ValueType
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum ValueType {
     Unit,
     Number(NumberType),

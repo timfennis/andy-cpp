@@ -7,9 +7,11 @@ use num::ToPrimitive;
 mod inner {
     use crate::interpreter::num::Number;
     use num::{BigInt, Integer};
+
     pub fn lcm(a: &BigInt, b: &BigInt) -> BigInt {
         a.lcm(b)
     }
+
     pub fn ceil(number: &Number) -> Number {
         number.ceil()
     }
@@ -24,7 +26,7 @@ mod inner {
 }
 
 pub mod f64 {
-    use super::*;
+    use super::{f64, Environment, Number, ToPrimitive};
 
     pub fn register(env: &mut Environment) {
         macro_rules! delegate_to_f64 {
