@@ -28,6 +28,7 @@ ryu = "1.0.17"
 thiserror = "1.0.58"
 andy-cpp-macros = { path = "andy-cpp-macros" }
 itertools = "0.12.1"
+either = "1.11.0"
 
 [features]
 default = ["repl"]

@@ -2,6 +2,7 @@ use crate::ast::expression::{ExpressionLocation, Lvalue};
 use crate::ast::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
 use crate::ast::Expression;
 use crate::lexer::{Location, Token, TokenLocation};
+use either::Either;
 use std::fmt::Write;
 use std::rc::Rc;
 
@@ -281,14 +282,18 @@ impl Parser {
                 Ok(assignment_expression.to_location(start, end))
             }
             Some(Token::OpAssign(inner)) => {
-                let inner = *inner.clone();
+                let thing = match &inner.token {
+                    Token::Identifier(identifier) => Either::Right(identifier.to_string()),
+                    _ => Either::Left((*inner.clone()).try_into()?),
+                };
+
                 self.advance();
                 let expression = self.expression()?;
                 let end = expression.end;
                 let op_assign = Expression::OpAssignment {
                     l_value,
                     value: Box::new(expression),
-                    operation: inner.try_into()?,
+                    operation: thing,
                 };
 
                 Ok(op_assign.to_location(start, end))
@@ -437,7 +442,7 @@ impl Parser {
                         end: identifier_end, // TODO: figure out the real end
                     }
 
-                    // for now we require parentheses
+                    // for now, we require parentheses
                 }
                 Token::LeftSquareBracket => {
                     let index_expression = self.expression()?;

@@ -167,7 +167,7 @@ impl fmt::Display for TokenLocation {
 
 impl fmt::Debug for TokenLocation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "token={} on {}", self.token, self.location)
+        write!(f, "token='{}' on {}", self.token, self.location)
     }
 }
 

@@ -246,6 +246,18 @@ impl Iterator for Lexer<'_> {
                             break;
                         }
                     }
+
+                    // If the identifier is followed by a single `=` we construct an OpAssign
+                    if self.source.peek_one() == Some('=') && self.source.peek_next() != Some('=') {
+                        self.source.next();
+                        return Some(Ok(TokenLocation {
+                            token: Token::OpAssign(Box::new(TokenLocation {
+                                token: buf.into(),
+                                location: start,
+                            })),
+                            location: start,
+                        }));
+                    }
                     return Some(Ok(TokenLocation {
                         token: buf.into(),
                         location: start,

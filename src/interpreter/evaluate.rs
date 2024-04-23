@@ -1,3 +1,4 @@
+use either::Either;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::error::Error;
@@ -194,7 +195,12 @@ pub(crate) fn evaluate_expression(
 
                 let existing_value = existing_value.into_inner();
                 let operand = evaluate_expression(value, environment)?;
-                let new_value = apply_operator(existing_value, *operation, operand)?;
+                let new_value = match operation {
+                    Either::Left(binary_operator) => {
+                        apply_operator(existing_value, *binary_operator, operand)?
+                    }
+                    Either::Right(identifier) => todo!("implement calling functions"),
+                };
 
                 environment
                     .borrow_mut()
@@ -227,7 +233,15 @@ pub(crate) fn evaluate_expression(
                         let list_item = list.index_mut(index);
 
                         let old_value = std::mem::replace(list_item, Value::Unit);
-                        *list_item = apply_operator(old_value, *operation, right_hand_value)?;
+                        match operation {
+                            Either::Left(binary_operator) => {
+                                *list_item =
+                                    apply_operator(old_value, *binary_operator, right_hand_value)?;
+                            }
+                            Either::Right(_identifier) => {
+                                todo!("function calling not yet implemented");
+                            }
+                        }
                     }
                     Value::Sequence(Sequence::String(_)) => {
                         return Err(EvaluationError::type_error(
@@ -631,6 +645,8 @@ fn apply_operator(
     ) -> EvaluationError {
         EvaluationError::type_error(
             &format!("cannot apply operator {operator:?} to {left} and {right}"),
+            // TODO: fix error handling, possibly by changing the function signature to return a
+            //       special kind of error that does not require line numbers
             Location { line: 0, column: 0 },
             Location { line: 0, column: 0 },
         )

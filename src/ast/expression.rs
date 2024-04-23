@@ -1,6 +1,7 @@
 use crate::ast::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
 use crate::interpreter::evaluate::EvaluationError;
 use crate::lexer::Location;
+use either::Either;
 use num::complex::Complex64;
 use num::BigInt;
 use std::fmt;
@@ -64,7 +65,7 @@ pub enum Expression {
     OpAssignment {
         l_value: Lvalue,
         value: Box<ExpressionLocation>,
-        operation: BinaryOperator,
+        operation: Either<BinaryOperator, String>,
     },
     FunctionDeclaration {
         name: Box<ExpressionLocation>,
