@@ -31,22 +31,8 @@ a, b, c = [1, 2, 3]; // Destructure the list into the variables a, b and c
 ## List comprehensions
 
 ```ndc
-x := [ sqrt(n) | n <- ns ]
-cartesian_product := [ x, y | x <- xs, y <- ys ]
-```
-
-## Standard library extension
-
-### Proc macro's
-
-We probably need procedural macro's to make it much easier to define the standard library in rust
-
-```rust
-#[ndc::function(name = "abs")]
-fn abs_i64(n: i64) -> i64 { n.abs() }
-
-#[ndc::function(name = "abs")]
-fn abs_f64(n: f64) -> f64 { n.abs() }
+x := [ sqrt(n) | n in ns ]
+cartesian_product := [ x, y | x in xs, y in ys ]
 ```
 
 ### General
@@ -59,7 +45,7 @@ fn abs_f64(n: f64) -> f64 { n.abs() }
 
 * [ ] abs
 * [ ] gcd
-* [ ] lcm
+* [x] lcm
 * [ ] integer division `//`
 
 ### Type conversion
@@ -70,12 +56,6 @@ fn abs_f64(n: f64) -> f64 { n.abs() }
 
 * [ ] ord (convert a single character string to an int)
 
-We want to treat strings like objects for a lot of their functions (probably).
-
-```ndc
-"foo".reverse() == "oof"
-```
-
 ### Refactorings:
 
 * Treat operators as functions instead of special expression types
@@ -84,20 +64,6 @@ We want to treat strings like objects for a lot of their functions (probably).
 
 There are a couple of places where I wrote `.clone()` on a `Value` where I probably shouldn't have. These should be
 annotated with `TODO: `'s
-
-## Else if
-
-Currently, writing `else if` is not supported, we could easily add this.
-
-```ndc
-if a == b {
-    a 
-} else if a > b {
-    a
-} else {
-    b
-}
-```
 
 ## Improved error handling
 

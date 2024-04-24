@@ -5,7 +5,7 @@ fn mut_map(list, function) {
   for item in list {
     new := function(item);
     list[index] = new; // Borrows list as mutable while it's still borrowed for item
-    index = index + 1;
+    index += 1;
   }
 }
 

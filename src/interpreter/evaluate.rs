@@ -261,7 +261,7 @@ pub(crate) fn evaluate_expression(
                         // the computation of this value may need the list that we assign to,
                         // therefore the value needs to be computed before we mutably borrow the list
                         // see: `bug0001_in_place_map.ndct`
-                        let right_hand_value = evaluate_expression(value, environment)?;
+                        let right_value = evaluate_expression(value, environment)?;
 
                         let mut list = list
                             .try_borrow_mut()
@@ -280,12 +280,12 @@ pub(crate) fn evaluate_expression(
                         match operation {
                             Either::Left(binary_operator) => {
                                 *list_item =
-                                    apply_operator(old_value, *binary_operator, right_hand_value)?;
+                                    apply_operator(old_value, *binary_operator, right_value)?;
                             }
                             Either::Right(identifier) => {
                                 *list_item = call_function_by_name(
                                     identifier,
-                                    &[old_value, right_hand_value],
+                                    &[old_value, right_value],
                                     environment,
                                     start,
                                     end,

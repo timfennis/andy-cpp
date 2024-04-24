@@ -1,14 +1,12 @@
 --PROGRAM--
 // This is a very strange implementation of a map function that changes the list in place
 fn mut_map(list, function) {
-  len := 0;
-  for item in list { len = len + 1 };
+  len := list.len();
 
   index := 0;
   while index < len {
-    new := function(list[index]);
-    list[index] = new;
-    index = index + 1;
+    list[index] = function(list[index]);
+    index += 1;
   }
 }
 

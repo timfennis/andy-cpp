@@ -10,8 +10,8 @@ Currently, the language only has some very basic features. I'll try to update th
 
 ```ndc
 n := v := 10;
-while { n = n - 1 } > 0 {
-    v = v * n;
+while { n -= 1 } > 0 {
+    v *= n;
 }
 print v;
 ```
@@ -21,14 +21,16 @@ print v;
 ```ndc
 fn factorial(n) {
     if n == 1 {
-        1
-    } else {
-        n * factorial(n - 1)
-    }
+        return 1
+    } 
+    
+    n * factorial(n - 1)
 }
 
 // Easily prints 100! because we use num::BigInt under the hood
-print factorial(100);
+print(factorial(100));
+// Or call functions as if they are methods on an object
+print(100.factorial());
 
 ```
 
@@ -39,15 +41,16 @@ Does not yet enjoy the benefits of memoization.
 ```ndc
 fn fib(n) {
     if n <= 1 {
-        n
-    } else {
-        fib(n - 1) + fib(n - 2)
-    }
+        return n
+    } 
+
+    fib(n - 1) + fib(n - 2)
 }
 
 i := 0;
-while { i = i + 1 } < 30 {
-    print fib(i);
+while i < 30 {
+    print(fib(i));
+    i += 1;
 }
 ```
 
@@ -60,6 +63,23 @@ fn add(n) { n + 1 }
 fn add(a, b) { a + b }
 
 print(add(add(5), add(4))); // prints 11
+print(add(5).add(4.add())); // prints 11 as well
+```
+
+### Use functions as augmented assignment operators
+
+Many functions can be used to
+create [augmented assignment operators](https://blog.vero.site/post/noulith#augmented-assignment).
+
+```ndc
+i := r := 0;
+
+while { i += 1 } < 100 {
+    // translates to r = max(r, i * 8333446703 % 94608103)
+    r max= i * 8333446703 % 94608103;
+}
+
+print(r);
 ```
 
 ## Thanks
