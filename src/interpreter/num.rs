@@ -454,7 +454,7 @@ impl Number {
     /// which makes it esy to do partial comparison on all numbers (and possibly other things)
     ///
     /// TODO: in the future we might want to create a new Real type which is the sum of Int and Float
-    ///       in order to better handle BigInts which now lose tons of precision and will yield incorrect results
+    ///       in order to better handle `BigInt`s which now lose tons of precision and will yield incorrect results
     #[must_use]
     pub fn to_real(&self) -> (RealNumber, RealNumber) {
         match self {

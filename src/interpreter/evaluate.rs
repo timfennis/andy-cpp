@@ -109,9 +109,7 @@ pub(crate) fn evaluate_expression(
                 }
 
                 let value = evaluate_expression(value, environment)?;
-                environment
-                    .borrow_mut()
-                    .assign(identifier.clone(), value.clone());
+                environment.borrow_mut().assign(identifier, value.clone());
                 value
             }
             Lvalue::Index {
@@ -209,7 +207,7 @@ pub(crate) fn evaluate_expression(
 
                 environment
                     .borrow_mut()
-                    .assign(identifier.clone(), new_value.clone());
+                    .assign(identifier, new_value.clone());
                 new_value
             }
             Lvalue::Index {
@@ -243,9 +241,9 @@ pub(crate) fn evaluate_expression(
                                 *list_item =
                                     apply_operator(old_value, *binary_operator, right_hand_value)?;
                             }
-                            Either::Right(_identifier) => {
+                            Either::Right(identifier) => {
                                 *list_item = call_function_by_name(
-                                    _identifier,
+                                    identifier,
                                     &[old_value, right_hand_value],
                                     environment,
                                     start,
@@ -346,11 +344,10 @@ pub(crate) fn evaluate_expression(
             expression,
             loop_body,
         } => {
-            let mut local_scope = Environment::new_scope(environment);
             loop {
-                let lit = evaluate_expression(expression, &mut local_scope)?;
+                let lit = evaluate_expression(expression, environment)?;
                 if lit == Value::Bool(true) {
-                    evaluate_expression(loop_body, &mut local_scope)?;
+                    evaluate_expression(loop_body, environment)?;
                 } else if lit == Value::Bool(false) {
                     break;
                 } else {
@@ -362,7 +359,7 @@ pub(crate) fn evaluate_expression(
                     .into());
                 }
             }
-            drop(local_scope);
+            // drop(local_scope);
             Value::Unit
         }
         Expression::Call {
@@ -903,7 +900,7 @@ fn try_call_function(
     let function_not_found =
         EvaluationError::syntax_error("no function found that matches the types", start, end);
 
-    return Err(function_not_found.into());
+    Err(function_not_found.into())
 }
 
 fn call_function(
@@ -913,9 +910,9 @@ fn call_function(
     start: Location,
     end: Location,
 ) -> EvaluationResult {
-    let result = function.borrow().call(&evaluated_args, environment);
+    let result = function.borrow().call(evaluated_args, environment);
 
-    return match result {
+    match result {
         Err(FunctionCarrier::Return(value)) | Ok(value) => Ok(value),
         e @ Err(FunctionCarrier::EvaluationError(_) | FunctionCarrier::FunctionNotFound) => e,
         Err(FunctionCarrier::ArgumentError(err)) => {
@@ -924,5 +921,5 @@ fn call_function(
         Err(FunctionCarrier::IOError(err)) => {
             Err(EvaluationError::io_error(&err, start, end).into())
         }
-    };
+    }
 }

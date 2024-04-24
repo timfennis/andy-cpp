@@ -59,7 +59,7 @@ fn match_types_to_signature(types: &[ValueType], signature: &TypeSignature) -> O
             if types.len() == signature.len() {
                 let mut acc = 0;
                 for (a, b) in types.iter().zip(signature.iter()) {
-                    let dist = b.distance(a)?;
+                    let dist = b.distance(*a)?;
                     acc += dist;
                 }
 
@@ -141,7 +141,7 @@ pub enum ParamType {
 }
 
 impl ParamType {
-    fn distance(&self, other: &ValueType) -> Option<u32> {
+    fn distance(&self, other: ValueType) -> Option<u32> {
         #[allow(clippy::match_same_arms)]
         match (self, other) {
             (ParamType::Bool, ValueType::Bool) => Some(0),

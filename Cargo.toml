@@ -15,7 +15,8 @@ name = "ndc_lib"
 path = "src/lib.rs"
 
 [profile.release]
-strip = true
+debug = true # enabled for flamegraph
+strip = false # disabled for flamegraph
 lto = true
 
 [dependencies]

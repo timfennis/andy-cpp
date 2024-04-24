@@ -123,12 +123,12 @@ impl Environment {
         self.values.insert(name.into(), RefCell::new(value));
     }
 
-    pub fn assign(&mut self, name: String, value: Value) -> bool {
+    pub fn assign(&mut self, name: &str, value: Value) -> bool {
         // Clippy wants us to use self.values.entry(name) but that moves name and breaks the recursive case
         // TODO: we should take a reference to the name instead (I think)
         #[allow(clippy::map_entry)]
-        return if self.values.contains_key(&name) {
-            self.values.insert(name, RefCell::new(value));
+        return if self.values.contains_key(name) {
+            self.values.insert(name.to_string(), RefCell::new(value));
             true
         } else if let Some(parent) = &self.parent {
             parent.borrow_mut().assign(name, value)
@@ -215,9 +215,7 @@ mod test {
         let scope = Environment::new_scope(&env);
         scope.borrow_mut().declare("inner_value", 234.into());
         scope.borrow_mut().declare("shadowed", 2.into());
-        assert!(scope
-            .borrow_mut()
-            .assign("mutated_value".into(), 420.into()));
+        assert!(scope.borrow_mut().assign("mutated_value", 420.into()));
 
         assert_eq!(
             *scope.borrow().get("parent_value").unwrap().borrow(),

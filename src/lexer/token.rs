@@ -134,7 +134,7 @@ impl fmt::Display for Token {
 }
 
 impl Token {
-    /// Returns true if this token can be augmented into an OpAssign token
+    /// Returns true if this token can be augmented into an `OpAssign` token
     #[must_use]
     pub fn is_augmentable(&self) -> bool {
         matches!(
