@@ -1,4 +1,5 @@
 use either::Either;
+use itertools::Itertools;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::error::Error;
@@ -181,34 +182,74 @@ pub(crate) fn evaluate_expression(
             operation,
         } => match l_value {
             Lvalue::Variable { identifier } => {
-                let Some(existing_value) = environment.borrow().get(identifier) else {
-                    return Err(EvaluationError::syntax_error(
-                        &format!("undefined variable {identifier}"),
-                        start,
-                        end,
-                    )
-                    .into());
-                };
+                let right_value = evaluate_expression(value, environment)?;
 
-                let existing_value = existing_value.into_inner();
-                let operand = evaluate_expression(value, environment)?;
-                let new_value = match operation {
-                    Either::Left(binary_operator) => {
-                        apply_operator(existing_value, *binary_operator, operand)?
-                    }
-                    Either::Right(identifier) => call_function_by_name(
-                        identifier,
-                        &[existing_value, operand],
-                        environment,
-                        start,
-                        end,
-                    )?,
-                };
-
+                // We need to use with_existing in this situation to ensure the refcount doesn't
+                // increase which does happen when we `get` something from the environment because
+                // `get` clones the value it returns.
                 environment
-                    .borrow_mut()
-                    .assign(identifier, new_value.clone());
-                new_value
+                    .borrow()
+                    .with_existing::<EvaluationResult>(identifier, |existing_value| {
+                        let existing_value = &mut *existing_value.borrow_mut();
+
+                        if let Either::Left(BinaryOperator::Concat) = operation {
+                            match (existing_value, right_value) {
+                                (
+                                    Value::Sequence(Sequence::String(left)),
+                                    Value::Sequence(Sequence::String(right)),
+                                ) => {
+                                    left.borrow_mut().push_str(&right.borrow());
+                                    Ok(Value::Sequence(Sequence::String(left.clone())))
+                                }
+                                (
+                                    Value::Sequence(Sequence::List(left)),
+                                    Value::Sequence(Sequence::List(right)),
+                                ) => {
+                                    left.borrow_mut().extend_from_slice(&right.borrow());
+                                    Ok(Value::Sequence(Sequence::List(left.clone())))
+                                }
+                                (
+                                    Value::Sequence(Sequence::Tuple(ref mut left)),
+                                    Value::Sequence(Sequence::Tuple(right)),
+                                ) => {
+                                    //
+                                    Rc::make_mut(left).extend_from_slice(&right);
+                                    Ok(Value::Sequence(Sequence::Tuple(left.clone())))
+                                }
+                                _ => Err(EvaluationError::type_error(
+                                    "cannot apply the ++ operator between these types",
+                                    start,
+                                    end,
+                                )
+                                .into()),
+                            }
+                        } else {
+                            let new_value = match operation {
+                                Either::Left(binary_operator) => apply_operator(
+                                    existing_value.clone(),
+                                    *binary_operator,
+                                    right_value,
+                                )?,
+                                Either::Right(identifier) => call_function_by_name(
+                                    identifier,
+                                    &[existing_value.clone(), right_value],
+                                    environment,
+                                    start,
+                                    end,
+                                )?,
+                            };
+
+                            *existing_value = new_value.clone();
+                            Ok(new_value)
+                        }
+                    })
+                    .ok_or_else(|| {
+                        EvaluationError::syntax_error(
+                            &format!("undefined variable {identifier}"),
+                            start,
+                            end,
+                        )
+                    })??
             }
             Lvalue::Index {
                 value: assign_to,
@@ -619,116 +660,77 @@ fn apply_operator(
     let (left_type, right_type) = (left.value_type(), right.value_type());
     let create_type_error = { || create_type_error(operator, left_type, right_type) };
 
-    let literal: Value = match (left, operator, right) {
-        (left, BinaryOperator::Less, right) => {
-            (left.partial_cmp(&right).ok_or_else(create_type_error)? == Ordering::Less).into()
-        }
-        (left, BinaryOperator::Equality, right) => {
+    let val: Value = match operator {
+        BinaryOperator::Equality => {
             (left.partial_cmp(&right).ok_or_else(create_type_error)? == Ordering::Equal).into()
         }
-        (left, BinaryOperator::Inequality, right) => {
+        BinaryOperator::Inequality => {
             (left.partial_cmp(&right).ok_or_else(create_type_error)? != Ordering::Equal).into()
         }
-        (left, BinaryOperator::Greater, right) => {
+        BinaryOperator::Greater => {
             (left.partial_cmp(&right).ok_or_else(create_type_error)? == Ordering::Greater).into()
         }
-        (left, BinaryOperator::In, Value::Sequence(seq)) => match seq {
-            Sequence::String(haystack) => match left {
-                Value::Sequence(Sequence::String(needle)) => {
-                    haystack.borrow().contains(&*needle.borrow()).into()
-                }
-                _ => Value::Bool(false),
-            },
-            Sequence::List(l) => l.borrow().contains(&left).into(),
-            Sequence::Tuple(t) => t.contains(&left).into(),
-        },
-        // Integer
-        (Value::Number(a), op, Value::Number(b)) => match op {
-            BinaryOperator::Equality => (a == b).into(),
-            BinaryOperator::Inequality => (a != b).into(),
-            BinaryOperator::Greater => (a > b).into(),
-            BinaryOperator::GreaterEquals => (a >= b).into(),
-            BinaryOperator::Less => (a < b).into(),
-            BinaryOperator::LessEquals => (a <= b).into(),
-            // Math operations
-            BinaryOperator::Plus => Value::Number(a + b),
-            BinaryOperator::Minus => Value::Number(a - b),
-            BinaryOperator::Multiply => Value::Number(a * b),
-            BinaryOperator::Divide => Value::Number(a / b),
-            BinaryOperator::CModulo => Value::Number(a.rem(b)),
-            BinaryOperator::EuclideanModulo => Value::Number(a.checked_rem_euclid(b)?),
-            BinaryOperator::Exponent => Value::Number(a.checked_pow(b)?),
-            BinaryOperator::In => panic!("todo: fix error handling"),
-        },
-        // Boolean
-        // (Value::Bool(a), BinaryOperator::Equality, Value::Bool(b)) => (a == b).into(),
-        // (Value::Bool(a), BinaryOperator::Inequality, Value::Bool(b)) => (a != b).into(),
-
-        // Some mixed memes
-        (Value::Sequence(Sequence::String(a)), BinaryOperator::Multiply, Value::Number(b)) => {
-            let a = a.borrow();
-            Value::Sequence(Sequence::String(Rc::new(RefCell::new(a.repeat(
-                usize::try_from(b).map_err(|_err| {
-                    EvaluationError::type_error(
-                        "can't multiply a string with this value",
-                        // TODO: somehow figure out the line number, or defer creation of this error to another location
-                        Location { line: 0, column: 0 },
-                        Location { line: 0, column: 0 },
-                    )
-                })?,
-            )))))
+        BinaryOperator::GreaterEquals => {
+            (left.partial_cmp(&right).ok_or_else(create_type_error)? != Ordering::Less).into()
         }
-        (Value::Number(a), BinaryOperator::Multiply, Value::Sequence(Sequence::String(b))) => {
-            let b = b.borrow();
-            Value::Sequence(Sequence::String(Rc::new(RefCell::new(b.repeat(
-                usize::try_from(a).map_err(|_| {
-                    EvaluationError::type_error(
-                        "can't multiply a string with this value",
-                        // TODO: somehow figure out the line number, or defer creation of this error to another location
-                        Location { line: 0, column: 0 },
-                        Location { line: 0, column: 0 },
-                    )
-                })?,
-            )))))
+        BinaryOperator::Less => {
+            (left.partial_cmp(&right).ok_or_else(create_type_error)? == Ordering::Less).into()
         }
-
-        // String apply operators to string
-        (Value::Sequence(Sequence::String(a)), op, Value::Sequence(Sequence::String(b))) => {
-            let comp = a.cmp(&b);
-            match op {
-                BinaryOperator::Equality => (comp == Ordering::Equal).into(),
-                BinaryOperator::Inequality => (comp != Ordering::Equal).into(),
-                BinaryOperator::Greater => (comp == Ordering::Greater).into(),
-                BinaryOperator::GreaterEquals => (comp != Ordering::Less).into(),
-                BinaryOperator::Less => (comp == Ordering::Less).into(),
-                BinaryOperator::LessEquals => (comp != Ordering::Greater).into(),
-                BinaryOperator::Plus => Value::Sequence(Sequence::String(Rc::new(RefCell::new(
-                    format!("{}{}", a.borrow(), b.borrow()),
-                )))),
-                _ => {
-                    return Err(EvaluationError::type_error(
-                        &format!("cannot apply operator {operator:?} to string and string"),
-                        Location { line: 0, column: 0 },
-                        Location { line: 0, column: 0 },
-                    ));
-                }
+        BinaryOperator::LessEquals => {
+            (left.partial_cmp(&right).ok_or_else(create_type_error)? != Ordering::Greater).into()
+        }
+        BinaryOperator::Plus => match (left, right) {
+            (Value::Number(a), Value::Number(b)) => Value::Number(a + b),
+            _ => todo!("implement + for these types"),
+        },
+        BinaryOperator::Minus => match (left, right) {
+            (Value::Number(a), Value::Number(b)) => Value::Number(a - b),
+            _ => todo!("implement - for these types"),
+        },
+        BinaryOperator::Multiply => match (left, right) {
+            (Value::Number(a), Value::Number(b)) => Value::Number(a * b),
+            _ => todo!("implement * for these types"),
+        },
+        BinaryOperator::Divide => match (left, right) {
+            (Value::Number(a), Value::Number(b)) => Value::Number(a / b),
+            _ => todo!("implement / for these types"),
+        },
+        BinaryOperator::CModulo => match (left, right) {
+            (Value::Number(a), Value::Number(b)) => Value::Number(a.rem(b)),
+            _ => todo!("implement % for these types"),
+        },
+        BinaryOperator::EuclideanModulo => match (left, right) {
+            (Value::Number(a), Value::Number(b)) => Value::Number(a.checked_rem_euclid(b)?),
+            _ => todo!("implement %% for these types"),
+        },
+        BinaryOperator::Exponent => match (left, right) {
+            (Value::Number(a), Value::Number(b)) => Value::Number(a.checked_pow(b)?),
+            _ => todo!("implement ^ for these types"),
+        },
+        BinaryOperator::In => match (left, right) {
+            (
+                Value::Sequence(Sequence::String(needle)),
+                Value::Sequence(Sequence::String(haystack)),
+            ) => haystack.borrow().contains(&*needle.borrow()).into(),
+            (needle, Value::Sequence(Sequence::List(haystack))) => {
+                haystack.borrow().contains(&needle).into()
             }
-        }
-
-        (a, _op, b) => {
-            return Err(EvaluationError::type_error(
-                &format!(
-                    "cannot apply operator {operator:?} to {} and {}",
-                    ValueType::from(&a),
-                    ValueType::from(&b)
-                ),
-                Location { line: 0, column: 0 },
-                Location { line: 0, column: 0 },
-            ));
-        }
+            (needle, Value::Sequence(Sequence::Tuple(haystack))) => {
+                haystack.contains(&needle).into()
+            }
+            _ => Value::Bool(false),
+        },
+        BinaryOperator::Concat => match (left, right) {
+            (Value::Sequence(Sequence::String(left)), Value::Sequence(Sequence::String(right))) => {
+                let mut new_string = left.borrow().clone();
+                new_string.push_str(&right.borrow());
+                Value::from(new_string)
+            }
+            _ => todo!("handle errors"),
+        },
     };
 
-    Ok(literal)
+    Ok(val)
 }
 
 pub struct EvaluationError {
@@ -897,8 +899,13 @@ fn try_call_function(
         }
     }
 
-    let function_not_found =
-        EvaluationError::syntax_error("no function found that matches the types", start, end);
+    let types = evaluated_args.iter().map(Value::value_type).join(", ");
+
+    let function_not_found = EvaluationError::syntax_error(
+        &format!("no function found that matches the types {types}"),
+        start,
+        end,
+    );
 
     Err(function_not_found.into())
 }

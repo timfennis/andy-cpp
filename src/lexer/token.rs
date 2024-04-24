@@ -41,6 +41,7 @@ pub enum Token {
     Dot,
     // Operator - Other
     DotDot, // range builder
+    Concat, // ++ operator will be for concatenation
     // Keywords
     Fn,
     If,
@@ -124,6 +125,7 @@ impl fmt::Display for Token {
             Self::LogicOr => "||",
             Self::Unit => "()",
             Self::DotDot => "..",
+            Self::Concat => "++",
             Self::Dot => ".",
             Self::OpAssign(inner) => {
                 return write!(f, "{}=", inner.token);
@@ -147,8 +149,7 @@ impl Token {
                 | Self::CModulo
                 | Self::Identifier(_)
                 | Self::Exponent
-                | Self::LogicAnd
-                | Self::LogicOr
+                | Self::Concat
         )
     }
 }
@@ -196,6 +197,7 @@ impl TryFrom<(char, char)> for Token {
 
     fn try_from((c1, c2): (char, char)) -> Result<Self, Self::Error> {
         match (c1, c2) {
+            ('+', '+') => Ok(Self::Concat),
             ('&', '&') => Ok(Self::LogicAnd),
             ('|', '|') => Ok(Self::LogicOr),
             ('%', '%') => Ok(Self::EuclideanModulo),

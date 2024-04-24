@@ -4,16 +4,16 @@ text := "";
     {
         {
             {
-                text = text + "Hello";
+                text = text ++ "Hello";
             }
-            text = text + ", ";
+            text = text ++ ", ";
         }
         {
             {}
         }
     }
-    text = text + "World";
+    text = text ++ "World";
 }
-print(text + "!");
+print(text ++ "!");
 --EXPECT--
 Hello, World!

@@ -157,6 +157,20 @@ impl Environment {
         }
     }
 
+    pub fn with_existing<T>(
+        &self,
+        name: &str,
+        function: impl FnOnce(&RefCell<Value>) -> T,
+    ) -> Option<T> {
+        if let Some(v) = self.values.get(name) {
+            Some(function(v))
+        } else if let Some(parent) = &self.parent {
+            parent.borrow().with_existing(name, function)
+        } else {
+            None
+        }
+    }
+
     pub fn new_scope(parent: &EnvironmentRef) -> EnvironmentRef {
         let root_ref = Rc::clone(&parent.borrow().root);
         Rc::new(RefCell::new(Self {

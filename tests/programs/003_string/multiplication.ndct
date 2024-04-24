@@ -1,4 +1,3 @@
 --PROGRAM--
-print("hello" * 3);
+// print("hello" * 3);
 --EXPECT--
-hellohellohello

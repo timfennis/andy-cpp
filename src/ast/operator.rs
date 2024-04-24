@@ -39,6 +39,7 @@ pub enum BinaryOperator {
     CModulo,
     EuclideanModulo,
     Exponent,
+    Concat,
     In,
 }
 
@@ -84,6 +85,7 @@ impl TryFrom<TokenLocation> for BinaryOperator {
             Token::EuclideanModulo => Self::EuclideanModulo,
             Token::Exponent => Self::Exponent,
             Token::In => Self::In,
+            Token::Concat => Self::Concat,
             _ => {
                 return Err(ParseError::ExpectedToken {
                     actual_token: value,
@@ -101,6 +103,8 @@ impl TryFrom<TokenLocation> for BinaryOperator {
                         Token::CModulo,
                         Token::EuclideanModulo,
                         Token::Exponent,
+                        Token::In,
+                        Token::Concat,
                     ],
                 })
             }

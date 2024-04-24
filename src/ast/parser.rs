@@ -346,7 +346,10 @@ impl Parser {
     }
 
     fn term(&mut self) -> Result<ExpressionLocation, Error> {
-        self.consume_binary_expression_left_associative(Self::factor, &[Token::Plus, Token::Minus])
+        self.consume_binary_expression_left_associative(
+            Self::factor,
+            &[Token::Plus, Token::Minus, Token::Concat],
+        )
     }
 
     fn factor(&mut self) -> Result<ExpressionLocation, Error> {
