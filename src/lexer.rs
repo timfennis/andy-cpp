@@ -124,7 +124,7 @@ impl Iterator for Lexer<'_> {
                         self.source.next();
                         Some(Ok(TokenLocation {
                             token: Token::OpAssign(Box::new(operation_token)),
-                            location: self.source.location(),
+                            location: start,
                         }))
                     }
                     _ => Some(Ok(operation_token)),

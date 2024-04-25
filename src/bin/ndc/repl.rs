@@ -1,14 +1,84 @@
+use colored::Colorize;
 use ndc_lib::interpreter::Interpreter;
+use ndc_lib::lexer::{Lexer, Token};
 use rustyline::config::Configurer;
 use rustyline::error::ReadlineError;
-use rustyline::highlight::MatchingBracketHighlighter;
 use rustyline::{ColorMode, Completer, Editor, Hinter, Validator};
 use rustyline::{Helper, Highlighter};
+use std::borrow::Cow;
+use std::fmt::Write as _;
 
-#[derive(Helper, Completer, Highlighter, Hinter, Validator)]
-struct RustlylineHelper {
-    #[rustyline(Highlighter)]
-    highlighter: MatchingBracketHighlighter,
+#[derive(Helper, Completer, Hinter, Validator)]
+struct RustlylineHelper {}
+
+impl rustyline::highlight::Highlighter for RustlylineHelper {
+    fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
+        let lexer = Lexer::new(line);
+        let mut it = line.chars().enumerate().peekable();
+
+        // println!("{}", "black".bright_black());
+        // println!("{}", "blue".bright_blue());
+        // println!("{}", "cyan".bright_cyan());
+        // println!("{}", "green".bright_green());
+        // println!("{}", "purple".bright_purple());
+        // println!("{}", "red".bright_red());
+        // println!("{}", "white".bright_white());
+        // println!("{}", "yellow".bright_yellow());
+        //
+        // println!("{}", "black".black());
+        // println!("{}", "blue".blue());
+        // println!("{}", "cyan".cyan());
+        // println!("{}", "green".green());
+        // println!("{}", "purple".purple());
+        // println!("{}", "red".red());
+        // println!("{}", "white".white());
+        // println!("{}", "yellow".yellow());
+
+        if let Ok(tokens) = lexer.collect::<Result<Vec<_>, _>>() {
+            let mut out = String::new();
+            for token in tokens {
+                while it
+                    .peek()
+                    .map_or(false, |(i, _)| i < &(token.location.column - 1))
+                {
+                    out.push(it.next().unwrap().1);
+                }
+                // dbg!(&token);
+
+                let colored_token = match &token.token {
+                    Token::String(s) => format!("{s:?}").bright_green(),
+                    Token::BigInt(n) => format!("{n}").truecolor(253, 151, 31),
+                    Token::Int64(n) => format!("{n}").truecolor(253, 151, 31),
+                    t @ (Token::True | Token::False) => format!("{t}").truecolor(253, 151, 31),
+                    t @ (Token::LeftSquareBracket
+                    | Token::RightSquareBracket
+                    | Token::LeftCurlyBracket
+                    | Token::RightCurlyBracket
+                    | Token::LeftParentheses
+                    | Token::RightParentheses) => format!("{t}").truecolor(229, 181, 103),
+                    Token::Identifier(ident) => ident.bright_cyan(),
+                    t => format!("{t:?}").bright_blue().bold(),
+                };
+
+                // println!("{} {}", colored_token, colored_token.len());
+
+                let skip = colored_token.len();
+                write!(out, "{}", colored_token).expect("write must succeed");
+
+                for _ in 0..skip {
+                    it.next();
+                }
+            }
+            Cow::Owned(out)
+        } else {
+            // There is probably an easier way to do this?
+            Cow::Owned(line.red().to_string())
+        }
+    }
+
+    fn highlight_char(&self, _line: &str, _pos: usize, _forced: bool) -> bool {
+        true
+    }
 }
 
 pub fn run(debug: bool) -> anyhow::Result<()> {
@@ -28,9 +98,7 @@ pub fn run(debug: bool) -> anyhow::Result<()> {
     //     }
     // }
 
-    let h = RustlylineHelper {
-        highlighter: MatchingBracketHighlighter::new(),
-    };
+    let h = RustlylineHelper {};
 
     let mut rl = Editor::new()?;
     rl.set_color_mode(ColorMode::Enabled);
