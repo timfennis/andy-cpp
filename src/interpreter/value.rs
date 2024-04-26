@@ -1,8 +1,10 @@
 use crate::interpreter::evaluate::{EvaluationError, IntoEvaluationError};
 use crate::interpreter::function::{Function, OverloadedFunction};
 use crate::interpreter::int::Int;
+use crate::interpreter::key::Key;
 use crate::interpreter::num::{Number, NumberToUsizeError, NumberType};
 use crate::lexer::Location;
+use ahash::HashMap;
 use num::BigInt;
 use std::cell::RefCell;
 use std::cmp::Ordering;
@@ -31,6 +33,7 @@ impl Value {
             Value::Sequence(Sequence::List(_)) => ValueType::List,
             Value::Sequence(Sequence::Tuple(_)) => ValueType::Tuple,
             Value::Function(_) => ValueType::Function,
+            Value::Sequence(Sequence::Dictionary(_)) => ValueType::Dictionary,
         }
     }
 }
@@ -66,7 +69,7 @@ pub enum Sequence {
     String(Rc<RefCell<String>>),
     List(Rc<RefCell<Vec<Value>>>),
     Tuple(Rc<Vec<Value>>),
-    //TODO: Dict comes later because we need hashing and comparison
+    Dictionary(Rc<RefCell<HashMap<Key, Value>>>), //TODO: Dict comes later because we need hashing and comparison
 }
 
 impl PartialOrd for Sequence {
@@ -339,6 +342,7 @@ pub enum ValueType {
     List,
     Tuple,
     Function,
+    Dictionary,
 }
 
 impl From<&Value> for ValueType {
@@ -357,6 +361,7 @@ impl fmt::Display for ValueType {
             Self::List => write!(f, "list"),
             Self::Tuple => write!(f, "tuple"),
             Self::Function => write!(f, "function"),
+            ValueType::Dictionary => write!(f, "dictionary"),
         }
     }
 }
@@ -404,6 +409,19 @@ impl fmt::Display for Sequence {
                     }
                 }
                 write!(f, ")")
+            }
+            Sequence::Dictionary(dict) => {
+                write!(f, "{{")?;
+                let dict = dict.borrow();
+                let mut iter = dict.iter().peekable();
+                while let Some((key, value)) = iter.next() {
+                    if iter.peek().is_some() {
+                        write!(f, "{key}: {value},")?;
+                    } else {
+                        write!(f, "{key}: {value}")?;
+                    }
+                }
+                write!(f, "}}")
             }
         }
     }

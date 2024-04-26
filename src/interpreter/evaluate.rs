@@ -1,3 +1,4 @@
+use ahash::{HashMap, HashMapExt};
 use either::Either;
 use itertools::Itertools;
 use std::cell::RefCell;
@@ -13,6 +14,7 @@ use crate::ast::{
 use crate::interpreter::environment::{Environment, EnvironmentRef};
 use crate::interpreter::function::{Function, FunctionCarrier, OverloadedFunction};
 use crate::interpreter::int::Int;
+use crate::interpreter::key::Key;
 use crate::interpreter::num::Number;
 use crate::interpreter::value::{Sequence, Value, ValueType};
 use crate::lexer::Location;
@@ -475,6 +477,21 @@ pub(crate) fn evaluate_expression(
             }
             Value::Sequence(Sequence::List(Rc::new(RefCell::new(values_out))))
         }
+        Expression::Dictionary { values } => {
+            let mut hashmap: HashMap<Key, Value> = HashMap::with_capacity(values.len());
+            for (key, value) in values {
+                let key = evaluate_expression(key, environment)?;
+                let value = if let Some(value) = value {
+                    evaluate_expression(value, environment)?
+                } else {
+                    Value::Unit
+                };
+
+                hashmap.insert(Key::try_from(key).expect("TODO: Handle this error"), value);
+            }
+
+            Value::Sequence(Sequence::Dictionary(Rc::new(RefCell::new(hashmap))))
+        }
         Expression::For {
             l_value,
             sequence,
@@ -537,6 +554,21 @@ pub(crate) fn evaluate_expression(
 
                         scope.borrow_mut().declare(var_name, x.clone());
 
+                        evaluate_expression(loop_body, &mut scope)?;
+                    }
+                }
+                Sequence::Dictionary(dictionary) => {
+                    let xs = dictionary.borrow();
+                    for (key, value) in xs.iter() {
+                        // TODO: support pattern matching tuples in var name
+                        let mut scope = Environment::new_scope(environment);
+                        scope.borrow_mut().declare(
+                            var_name,
+                            Value::Sequence(Sequence::Tuple(Rc::new(vec![
+                                Value::from(key),
+                                value.clone(),
+                            ]))),
+                        );
                         evaluate_expression(loop_body, &mut scope)?;
                     }
                 }
@@ -620,6 +652,7 @@ pub(crate) fn evaluate_expression(
 
                             value.clone()
                         }
+                        Sequence::Dictionary(_) => todo!("implement indexing into dictionary"),
                     }
                 }
                 // TODO: improve error handling

@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 use std::fmt;
+use std::hash::{Hash, Hasher};
 use std::num::TryFromIntError;
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
@@ -57,6 +58,30 @@ impl From<Complex64> for Number {
 impl PartialOrd for Number {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         self.to_real().partial_cmp(&other.to_real())
+    }
+}
+
+impl Hash for Number {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        match self {
+            Number::Int(i) => {
+                state.write_u8(1);
+                i.hash(state);
+            }
+            Number::Float(f) => {
+                state.write_u8(2);
+                state.write(&f.to_le_bytes());
+            }
+            Number::Rational(r) => {
+                state.write_u8(3);
+                r.hash(state);
+            }
+            Number::Complex(c) => {
+                state.write_u8(4);
+                state.write(&c.re.to_le_bytes());
+                state.write(&c.im.to_le_bytes());
+            }
+        }
     }
 }
 

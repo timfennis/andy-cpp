@@ -563,6 +563,10 @@ impl Parser {
         else if self.match_token(&[Token::LeftCurlyBracket]).is_some() {
             return self.block();
         }
+        // matches dictionary expression %{1,2,3}
+        else if self.match_token(&[Token::MapOpen]).is_some() {
+            return self.map_expression();
+        }
         // matches either a grouped expression `(1+1)` or a tuple `(1,1)`
         else if let Some(start_parentheses) = self.consume_token_if(&[Token::LeftParentheses]) {
             // If an opening parentheses is immediately followed by a closing parentheses we're dealing with a Unit expression
@@ -798,6 +802,50 @@ impl Parser {
         };
 
         Ok(Expression::Block { statements }.to_location(start, end))
+    }
+
+    fn map_expression(&mut self) -> Result<ExpressionLocation, Error> {
+        // This should have been checked before this method is called;
+        let start = self.require_token(&[Token::MapOpen])?;
+        let mut is_map = None;
+
+        let mut values = Vec::new();
+
+        let end = loop {
+            // End parsing if we see a RightCurlyBracket, this one only happens if the expression is
+            // empty `%{}` or if there is a trailing comma `%{1,2,3,}`
+            if let Some(token_location) = self.consume_token_if(&[Token::RightCurlyBracket]) {
+                break token_location.location;
+            }
+
+            let key = self.expression()?;
+
+            if is_map == Some(true)
+                || (is_map.is_none() && self.peek_current_token() == Some(&Token::Colon))
+            {
+                self.require_token(&[Token::Colon])?;
+                let value = self.expression()?;
+                values.push((key, Some(value)));
+                is_map = Some(true);
+            } else if is_map == Some(false) || is_map.is_none() {
+                is_map = Some(false);
+                values.push((key, None));
+            } else {
+                unreachable!("RIGHT?");
+            }
+
+            if self.peek_current_token() == Some(&Token::Comma) {
+                self.advance();
+                continue;
+            } else if let Some(token_location) = self.consume_token_if(&[Token::RightCurlyBracket])
+            {
+                break token_location.location;
+            }
+
+            // If we get here the list expression didn't end properly and we return an error
+            todo!("PARSER ERROR RIGHT?");
+        };
+        Ok(Expression::Dictionary { values }.to_location(start, end))
     }
 }
 

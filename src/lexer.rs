@@ -11,6 +11,20 @@ pub struct Lexer<'a> {
 }
 
 impl<'a> Lexer<'a> {
+    /// Takes a `TokenLocation` and tries to upgrade it's inner `Token` into a `Token::OpAssign` token.
+    fn lex_op_assign(&mut self, operation_token: TokenLocation, start: Location) -> TokenLocation {
+        match self.source.peek_one() {
+            Some('=') if operation_token.token.is_augmentable() => {
+                self.source.next();
+                TokenLocation {
+                    token: Token::OpAssign(Box::new(operation_token)),
+                    location: start,
+                }
+            }
+            _ => operation_token,
+        }
+    }
+
     #[must_use]
     pub fn new(source: &'a str) -> Self {
         Self {
@@ -119,16 +133,7 @@ impl Iterator for Lexer<'_> {
                 // foo := false
                 // foo &&= true
                 // ```
-                return match self.source.peek_one() {
-                    Some('=') if operation_token.token.is_augmentable() => {
-                        self.source.next();
-                        Some(Ok(TokenLocation {
-                            token: Token::OpAssign(Box::new(operation_token)),
-                            location: start,
-                        }))
-                    }
-                    _ => Some(Ok(operation_token)),
-                };
+                return Some(Ok(self.lex_op_assign(operation_token, start)));
             }
 
             // Check for single character tokens
@@ -138,16 +143,7 @@ impl Iterator for Lexer<'_> {
                     location: self.source.location(),
                 };
 
-                return match self.source.peek_one() {
-                    Some('=') if operation_token.token.is_augmentable() => {
-                        self.source.next();
-                        Some(Ok(TokenLocation {
-                            token: Token::OpAssign(Box::new(operation_token)),
-                            location: start,
-                        }))
-                    }
-                    _ => Some(Ok(operation_token)),
-                };
+                return Some(Ok(self.lex_op_assign(operation_token, start)));
             }
 
             match (char, next) {
@@ -275,6 +271,7 @@ impl Iterator for Lexer<'_> {
         None
     }
 }
+
 struct SourceIterator<'a> {
     inner: Chars<'a>,
     buffer: VecDeque<char>,
