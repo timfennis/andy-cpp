@@ -3,8 +3,8 @@ use ndc_lib::interpreter::Interpreter;
 use ndc_lib::lexer::{Lexer, Token};
 use rustyline::config::Configurer;
 use rustyline::error::ReadlineError;
+use rustyline::Helper;
 use rustyline::{ColorMode, Completer, Editor, Hinter, Validator};
-use rustyline::{Helper, Highlighter};
 use std::borrow::Cow;
 use std::fmt::Write as _;
 
@@ -15,24 +15,6 @@ impl rustyline::highlight::Highlighter for RustlylineHelper {
     fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
         let lexer = Lexer::new(line);
         let mut it = line.chars().enumerate().peekable();
-
-        // println!("{}", "black".bright_black());
-        // println!("{}", "blue".bright_blue());
-        // println!("{}", "cyan".bright_cyan());
-        // println!("{}", "green".bright_green());
-        // println!("{}", "purple".bright_purple());
-        // println!("{}", "red".bright_red());
-        // println!("{}", "white".bright_white());
-        // println!("{}", "yellow".bright_yellow());
-        //
-        // println!("{}", "black".black());
-        // println!("{}", "blue".blue());
-        // println!("{}", "cyan".cyan());
-        // println!("{}", "green".green());
-        // println!("{}", "purple".purple());
-        // println!("{}", "red".red());
-        // println!("{}", "white".white());
-        // println!("{}", "yellow".yellow());
 
         if let Ok(tokens) = lexer.collect::<Result<Vec<_>, _>>() {
             let mut out = String::new();
