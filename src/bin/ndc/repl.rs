@@ -37,7 +37,8 @@ impl rustyline::highlight::Highlighter for RustlylineHelper {
                     | Token::LeftCurlyBracket
                     | Token::RightCurlyBracket
                     | Token::LeftParentheses
-                    | Token::RightParentheses) => format!("{t}").truecolor(229, 181, 103),
+                    | Token::RightParentheses
+                    | Token::MapOpen) => format!("{t}").truecolor(229, 181, 103),
                     Token::Identifier(ident) => ident.bright_cyan(),
                     t => format!("{t:?}").bright_blue().bold(),
                 };

@@ -138,6 +138,7 @@ pub enum ParamType {
     List,
     String,
     Tuple,
+    Dictionary,
 }
 
 impl ParamType {
@@ -175,6 +176,7 @@ impl From<&Value> for ParamType {
             Value::Sequence(Sequence::List(_)) => ParamType::List,
             Value::Sequence(Sequence::Tuple(_)) => ParamType::Tuple,
             Value::Function(_) => ParamType::Function,
+            Value::Sequence(Sequence::Dictionary(_)) => ParamType::Dictionary,
         }
     }
 }

@@ -8,7 +8,7 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::ops;
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum Int {
     Int64(i64),
     BigInt(BigInt),

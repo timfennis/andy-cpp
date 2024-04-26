@@ -12,6 +12,7 @@ mod inner {
             Value::Bool(b) => Value::Bool(*b),
             Value::Sequence(Sequence::String(string)) => Value::from(string.borrow().to_owned()),
             Value::Sequence(Sequence::List(list)) => Value::from(list.borrow().to_owned()),
+            Value::Sequence(Sequence::Dictionary(_dict)) => todo!("implement this"), // Value::from(dict.borrow().to_owned()),
             Value::Sequence(Sequence::Tuple(tuple)) => {
                 Value::Sequence(Sequence::Tuple(tuple.clone()))
             }

@@ -62,6 +62,9 @@ pub enum Token {
     RightCurlyBracket,
     Semicolon,
     Comma,
+    Colon, // : operator is used in building dictionaries and specifying type hints (in the future)
+    // Lmao syntax
+    MapOpen, // %{ operator stolen from elixir
 }
 
 impl fmt::Debug for Token {
@@ -130,6 +133,8 @@ impl fmt::Display for Token {
             Self::OpAssign(inner) => {
                 return write!(f, "{}=", inner.token);
             }
+            Token::Colon => ":",
+            Token::MapOpen => "%{",
         };
         write!(f, "{s}")
     }
@@ -197,6 +202,7 @@ impl TryFrom<(char, char)> for Token {
 
     fn try_from((c1, c2): (char, char)) -> Result<Self, Self::Error> {
         match (c1, c2) {
+            ('%', '{') => Ok(Self::MapOpen),
             ('+', '+') => Ok(Self::Concat),
             ('&', '&') => Ok(Self::LogicAnd),
             ('|', '|') => Ok(Self::LogicOr),
@@ -234,6 +240,7 @@ impl TryFrom<char> for Token {
             '}' => Ok(Self::RightCurlyBracket),
             ',' => Ok(Self::Comma),
             ';' => Ok(Self::Semicolon),
+            ':' => Ok(Self::Colon),
             '.' => Ok(Self::Dot),
             _ => Err(()),
         }
