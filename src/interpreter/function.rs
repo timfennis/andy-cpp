@@ -153,10 +153,15 @@ impl ParamType {
             (ParamType::Complex, ValueType::Number(NumberType::Complex)) => Some(0),
             (ParamType::String, ValueType::String) => Some(0),
             (ParamType::List, ValueType::List) => Some(0),
+            (ParamType::Tuple, ValueType::Tuple) => Some(0),
+            (ParamType::Dictionary, ValueType::Dictionary) => Some(0),
             (ParamType::Function, ValueType::Function) => Some(0),
             (ParamType::Any, _) => Some(2),
             (ParamType::Number, ValueType::Number(_)) => Some(1),
-            (ParamType::Sequence, ValueType::List | ValueType::String) => Some(1),
+            (
+                ParamType::Sequence,
+                ValueType::List | ValueType::String | ValueType::Dictionary | ValueType::Tuple,
+            ) => Some(1),
             _ => None,
         }
     }

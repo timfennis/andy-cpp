@@ -1,0 +1,5 @@
+--PROGRAM--
+x := %{"foo": "bar"};
+print("ok");
+--EXPECT--
+ok

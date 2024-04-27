@@ -1,7 +1,6 @@
 use crate::interpreter::evaluate::{EvaluationError, IntoEvaluationError};
 use crate::interpreter::function::{Function, OverloadedFunction};
 use crate::interpreter::int::Int;
-use crate::interpreter::key::Key;
 use crate::interpreter::num::{Number, NumberToUsizeError, NumberType};
 use crate::lexer::Location;
 use ahash::HashMap;
@@ -9,11 +8,12 @@ use num::BigInt;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::fmt;
+use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 /// Enumerates all the different types of values that exist in the language
 /// All values should be pretty cheap to clone because the bigger ones are wrapped using Rc's
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum Value {
     Unit,
     Number(Number),
@@ -38,6 +38,49 @@ impl Value {
     }
 }
 
+impl Hash for Value {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        match self {
+            Value::Unit => state.write_u8(1),
+            Value::Number(number) => {
+                state.write_u8(2);
+                number.hash(state);
+            }
+            Value::Bool(true) => state.write_u8(3),
+            Value::Bool(false) => state.write_u8(4),
+            Value::Sequence(seq) => match seq {
+                Sequence::String(string) => {
+                    state.write_u8(5);
+                    string.borrow().hash(state);
+                }
+                Sequence::List(list) => {
+                    state.write_u8(6);
+                    for item in list.borrow().iter() {
+                        item.hash(state);
+                    }
+                }
+                Sequence::Tuple(list) => {
+                    state.write_u8(7);
+                    for item in list.iter() {
+                        item.hash(state);
+                    }
+                }
+                Sequence::Dictionary(dict) => {
+                    state.write_u8(8);
+                    for (key, value) in dict.borrow().iter() {
+                        key.hash(state);
+                        value.hash(state);
+                    }
+                }
+            },
+            Value::Function(f) => {
+                state.write_u8(9);
+                Rc::as_ptr(f).hash(state);
+            }
+        }
+    }
+}
+
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -45,10 +88,13 @@ impl PartialEq for Value {
             (Self::Number(n1), Self::Number(n2)) => n1.eq(n2),
             (Self::Bool(b1), Self::Bool(b2)) => b1.eq(b2),
             (Self::Sequence(s1), Self::Sequence(s2)) => s1.eq(s2),
+            (Self::Function(f1), Self::Function(f2)) => Rc::as_ptr(f1) == Rc::as_ptr(f2),
             _ => false,
         }
     }
 }
+
+impl Eq for Value {}
 
 impl PartialOrd for Value {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
@@ -69,8 +115,10 @@ pub enum Sequence {
     String(Rc<RefCell<String>>),
     List(Rc<RefCell<Vec<Value>>>),
     Tuple(Rc<Vec<Value>>),
-    Dictionary(Rc<RefCell<HashMap<Key, Value>>>), //TODO: Dict comes later because we need hashing and comparison
+    Dictionary(Rc<RefCell<HashMap<Value, Value>>>), //TODO: Dict comes later because we need hashing and comparison
 }
+
+impl Eq for Sequence {}
 
 impl PartialOrd for Sequence {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
@@ -366,10 +414,24 @@ impl fmt::Display for ValueType {
     }
 }
 
-impl fmt::Display for Value {
+impl fmt::Debug for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Unit => write!(f, "()"),
+            Self::Number(n) => write!(f, "{n:?}"),
+            Self::Bool(b) => write!(f, "{b:?}"),
+            Self::Function(_) => {
+                write!(f, "function")
+            }
+            Self::Sequence(s) => write!(f, "{s:?}"),
+        }
+    }
+}
+
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unit => write!(f, ""),
             Self::Number(n) => write!(f, "{n}"),
             Self::Bool(b) => write!(f, "{b}"),
             Self::Function(_) => {
@@ -400,12 +462,11 @@ impl fmt::Display for Sequence {
             }
             Sequence::Tuple(vs) => {
                 write!(f, "(")?;
-                let mut vs = vs.iter().peekable();
-                while let Some(v) = vs.next() {
-                    if vs.peek().is_some() {
-                        write!(f, "{v},")?;
-                    } else {
-                        write!(f, "{v}")?;
+                let mut iter = vs.iter().peekable();
+                while let Some(v) = iter.next() {
+                    write!(f, "{v}")?;
+                    if iter.peek().is_some() {
+                        write!(f, ",")?;
                     }
                 }
                 write!(f, ")")
@@ -415,10 +476,14 @@ impl fmt::Display for Sequence {
                 let dict = dict.borrow();
                 let mut iter = dict.iter().peekable();
                 while let Some((key, value)) = iter.next() {
-                    if iter.peek().is_some() {
-                        write!(f, "{key}: {value},")?;
+                    if value == &Value::Unit {
+                        write!(f, "{key}")?;
                     } else {
                         write!(f, "{key}: {value}")?;
+                    }
+
+                    if iter.peek().is_some() {
+                        write!(f, ",")?;
                     }
                 }
                 write!(f, "}}")

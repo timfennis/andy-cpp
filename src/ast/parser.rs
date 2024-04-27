@@ -807,7 +807,6 @@ impl Parser {
     fn map_expression(&mut self) -> Result<ExpressionLocation, Error> {
         // This should have been checked before this method is called;
         let start = self.require_token(&[Token::MapOpen])?;
-        let mut is_map = None;
 
         let mut values = Vec::new();
 
@@ -820,18 +819,11 @@ impl Parser {
 
             let key = self.expression()?;
 
-            if is_map == Some(true)
-                || (is_map.is_none() && self.peek_current_token() == Some(&Token::Colon))
-            {
-                self.require_token(&[Token::Colon])?;
+            if self.consume_token_if(&[Token::Colon]).is_some() {
                 let value = self.expression()?;
                 values.push((key, Some(value)));
-                is_map = Some(true);
-            } else if is_map == Some(false) || is_map.is_none() {
-                is_map = Some(false);
-                values.push((key, None));
             } else {
-                unreachable!("RIGHT?");
+                values.push((key, None));
             }
 
             if self.peek_current_token() == Some(&Token::Comma) {
@@ -842,7 +834,7 @@ impl Parser {
                 break token_location.location;
             }
 
-            // If we get here the list expression didn't end properly and we return an error
+            // If we get here the list expression didn't end properly, and we return an error
             todo!("PARSER ERROR RIGHT?");
         };
         Ok(Expression::Dictionary { values }.to_location(start, end))

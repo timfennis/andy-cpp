@@ -1,0 +1,20 @@
+--PROGRAM--
+fn foo() { 123 }
+hashmap := %{
+    "foo": "bar",
+    123: "bar",
+    123.0: "bar",
+    123/23: "bar",
+    123 + 0j: "bar",
+    foo: "bar",
+    true: "bar",
+    false: "bar",
+    (): "bar",
+    %{1,2,3}: "bar",
+    [1,2,3]: "bar",
+    %{"foo": "bar"}: "bar",
+    (1,2,3): "bar",
+};
+print(hashmap.len());
+--EXPECT--
+13

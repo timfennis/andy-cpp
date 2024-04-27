@@ -14,7 +14,6 @@ use crate::ast::{
 use crate::interpreter::environment::{Environment, EnvironmentRef};
 use crate::interpreter::function::{Function, FunctionCarrier, OverloadedFunction};
 use crate::interpreter::int::Int;
-use crate::interpreter::key::Key;
 use crate::interpreter::num::Number;
 use crate::interpreter::value::{Sequence, Value, ValueType};
 use crate::lexer::Location;
@@ -478,7 +477,7 @@ pub(crate) fn evaluate_expression(
             Value::Sequence(Sequence::List(Rc::new(RefCell::new(values_out))))
         }
         Expression::Dictionary { values } => {
-            let mut hashmap: HashMap<Key, Value> = HashMap::with_capacity(values.len());
+            let mut hashmap: HashMap<Value, Value> = HashMap::with_capacity(values.len());
             for (key, value) in values {
                 let key = evaluate_expression(key, environment)?;
                 let value = if let Some(value) = value {
@@ -487,7 +486,7 @@ pub(crate) fn evaluate_expression(
                     Value::Unit
                 };
 
-                hashmap.insert(Key::try_from(key).expect("TODO: Handle this error"), value);
+                hashmap.insert(key, value);
             }
 
             Value::Sequence(Sequence::Dictionary(Rc::new(RefCell::new(hashmap))))
@@ -565,7 +564,7 @@ pub(crate) fn evaluate_expression(
                         scope.borrow_mut().declare(
                             var_name,
                             Value::Sequence(Sequence::Tuple(Rc::new(vec![
-                                Value::from(key),
+                                key.clone(),
                                 value.clone(),
                             ]))),
                         );
@@ -694,12 +693,8 @@ fn apply_operator(
     let create_type_error = { || create_type_error(operator, left_type, right_type) };
 
     let val: Value = match operator {
-        BinaryOperator::Equality => {
-            (left.partial_cmp(&right).ok_or_else(create_type_error)? == Ordering::Equal).into()
-        }
-        BinaryOperator::Inequality => {
-            (left.partial_cmp(&right).ok_or_else(create_type_error)? != Ordering::Equal).into()
-        }
+        BinaryOperator::Equality => left.eq(&right).into(),
+        BinaryOperator::Inequality => left.ne(&right).into(),
         BinaryOperator::Greater => {
             (left.partial_cmp(&right).ok_or_else(create_type_error)? == Ordering::Greater).into()
         }
