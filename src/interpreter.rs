@@ -12,7 +12,6 @@ pub mod environment;
 pub mod evaluate;
 pub mod function;
 pub mod int;
-mod key;
 pub mod num;
 pub mod value;
 

@@ -98,7 +98,11 @@ pub fn run(debug: bool) -> anyhow::Result<()> {
 
                 // Run the line we just read through the interpreter
                 match interpreter.run_str(line.as_str(), debug) {
-                    Ok(output) => println!("{output}"),
+                    Ok(output) => {
+                        if !output.is_empty() {
+                            println!("{output}")
+                        }
+                    }
                     Err(err) => eprintln!("{err}"),
                 }
             }
