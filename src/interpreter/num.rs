@@ -64,7 +64,17 @@ impl PartialOrd for Number {
 
 impl PartialEq for Number {
     fn eq(&self, other: &Self) -> bool {
-        self.to_reals().eq(&other.to_reals())
+        // NOTE: Noulith has a flexible implementation where 123 = 123.0 but implementing that for Number makes it impossible to store these values in a HashSet
+        // self.to_reals().eq(&other.to_reals())
+        match (self, other) {
+            (Number::Int(left), Number::Int(right)) => left.eq(right),
+            (Number::Float(left), Number::Float(right)) => {
+                OrderedFloat(*left).eq(&OrderedFloat(*right))
+            }
+            (Number::Rational(left), Number::Rational(right)) => left.eq(right),
+            (Number::Complex(left), Number::Complex(right)) => left.eq(right),
+            _ => false,
+        }
     }
 }
 

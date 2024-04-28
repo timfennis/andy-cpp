@@ -1,8 +1,13 @@
-use ahash::{HashMap, HashMapExt};
 use either::Either;
 use itertools::Itertools;
 use std::cell::RefCell;
 use std::cmp::Ordering;
+
+#[cfg(feature = "ahash")]
+use ahash::AHashMap as HashMap;
+#[cfg(not(feature = "ahash"))]
+use std::collections::HashMap;
+
 use std::error::Error;
 use std::fmt;
 use std::ops::{IndexMut, Neg, Rem};
@@ -477,7 +482,7 @@ pub(crate) fn evaluate_expression(
             Value::Sequence(Sequence::List(Rc::new(RefCell::new(values_out))))
         }
         Expression::Dictionary { values } => {
-            let mut hashmap: HashMap<Value, Value> = HashMap::with_capacity(values.len());
+            let mut hashmap = HashMap::with_capacity(values.len());
             for (key, value) in values {
                 let key = evaluate_expression(key, environment)?;
                 let value = if let Some(value) = value {
@@ -651,7 +656,19 @@ pub(crate) fn evaluate_expression(
 
                             value.clone()
                         }
-                        Sequence::Dictionary(_) => todo!("implement indexing into dictionary"),
+                        Sequence::Dictionary(dict) => {
+                            let key = evaluate_expression(index_expr, environment)?;
+                            let dict = dict.borrow();
+                            let Some(value) = dict.get(&key) else {
+                                return Err(EvaluationError::key_not_found(
+                                    &key,
+                                    index_expr.start,
+                                    index_expr.end,
+                                )
+                                .into());
+                            };
+                            value.clone()
+                        }
                     }
                 }
                 // TODO: improve error handling
@@ -807,6 +824,15 @@ impl EvaluationError {
     pub fn out_of_bounds(index: usize, start: Location, end: Location) -> Self {
         Self {
             text: format!("Index ({index}) out of bounds"),
+            start,
+            end,
+        }
+    }
+
+    #[must_use]
+    pub fn key_not_found(key: &Value, start: Location, end: Location) -> Self {
+        Self {
+            text: format!("Key not found in map: {key}"),
             start,
             end,
         }

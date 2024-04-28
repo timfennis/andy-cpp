@@ -1,20 +1,40 @@
 --PROGRAM--
 fn foo() { 123 }
 hashmap := %{
-    "foo": "bar",
-    123: "bar",
-    123.0: "bar",
-    123/23: "bar",
-    123 + 0j: "bar",
-    foo: "bar",
-    true: "bar",
-    false: "bar",
-    (): "bar",
-    %{1,2,3}: "bar",
-    [1,2,3]: "bar",
-    %{"foo": "bar"}: "bar",
-    (1,2,3): "bar",
+    "foo": 1,
+    123: 2,
+    123.0: 3,
+    123/23: 4,
+    123 + 0j: 5,
+    foo: 6,
+    true: 7,
+    false: 8,
+    (): 9,
+    %{1,2,3}: 10,
+    [1,2,3]: 11,
+    %{"foo": "bar"}: 12,
+    (1,2,3): 13,
 };
-print(hashmap.len());
+
+fn expect(key, value) {
+    if hashmap[key] != value {
+        print(value, "expected but was", hashmap[key]);
+    }
+}
+
+expect("foo", 1);
+expect(123, 2);
+expect(123.0, 3);
+expect(123/23, 4);
+expect(123 + 0j, 5);
+expect(foo, 6);
+expect(true, 7);
+expect(false, 8);
+expect((), 9);
+expect(%{1,2,3}, 10);
+expect([1,2,3], 11);
+expect(%{"foo": "bar"}, 12);
+expect((1,2,3), 13);
+print("ok");
 --EXPECT--
-13
+ok
