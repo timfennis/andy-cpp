@@ -130,7 +130,7 @@ pub enum Sequence {
     String(Rc<RefCell<String>>),
     List(Rc<RefCell<Vec<Value>>>),
     Tuple(Rc<Vec<Value>>),
-    Dictionary(Rc<RefCell<HashMap<Value, Value>>>), //TODO: Dict comes later because we need hashing and comparison
+    Dictionary(Rc<RefCell<HashMap<Value, Value>>>),
 }
 
 impl Eq for Sequence {}
