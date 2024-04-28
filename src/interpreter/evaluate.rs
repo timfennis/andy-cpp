@@ -11,6 +11,7 @@ use itertools::Itertools;
 use crate::ast::{
     BinaryOperator, Expression, ExpressionLocation, LogicalOperator, Lvalue, UnaryOperator,
 };
+use crate::hashmap;
 use crate::hashmap::HashMap;
 use crate::interpreter::environment::{Environment, EnvironmentRef};
 use crate::interpreter::function::{Function, FunctionCarrier, OverloadedFunction};
@@ -747,6 +748,33 @@ fn apply_operator(
         BinaryOperator::Exponent => match (left, right) {
             (Value::Number(a), Value::Number(b)) => Value::Number(a.checked_pow(b)?),
             _ => todo!("implement ^ for these types"),
+        },
+        BinaryOperator::And => match (left, right) {
+            (
+                Value::Number(Number::Int(Int::Int64(a))),
+                Value::Number(Number::Int(Int::Int64(b))),
+            ) => Value::from(a & b),
+            (
+                Value::Sequence(Sequence::Dictionary(left)),
+                Value::Sequence(Sequence::Dictionary(right)),
+            ) => Value::Sequence(Sequence::Dictionary(Rc::new(RefCell::new(
+                hashmap::intersection(&*left.borrow(), &*right.borrow()),
+            )))),
+            _ => todo!("implement & for these types"),
+        },
+        BinaryOperator::Or => match (left, right) {
+            (
+                Value::Number(Number::Int(Int::Int64(a))),
+                Value::Number(Number::Int(Int::Int64(b))),
+            ) => Value::from(a | b),
+            (
+                Value::Sequence(Sequence::Dictionary(left)),
+                Value::Sequence(Sequence::Dictionary(right)),
+            ) => Value::Sequence(Sequence::Dictionary(Rc::new(RefCell::new(hashmap::union(
+                &*left.borrow(),
+                &*right.borrow(),
+            ))))),
+            _ => todo!("implement & for these types"),
         },
         BinaryOperator::In => match (left, right) {
             (

@@ -35,6 +35,8 @@ pub enum Token {
     CModulo,
     EuclideanModulo,
     Exponent,
+    And, // &
+    Or,  // |
     // Operator - Unary
     Bang,
     // Operator - Call
@@ -106,6 +108,8 @@ impl fmt::Display for Token {
             Self::CModulo => "%",
             Self::EuclideanModulo => "%%",
             Self::Exponent => "^",
+            Self::And => "&",
+            Self::Or => "|",
             Self::Bang => "!",
             Self::Fn => "fn",
             Self::If => "if",
@@ -156,6 +160,8 @@ impl Token {
                 | Self::Identifier(_)
                 | Self::Exponent
                 | Self::Concat
+                | Self::And
+                | Self::Or
         )
     }
 }
@@ -228,6 +234,8 @@ impl TryFrom<char> for Token {
             '*' => Ok(Self::Multiply),
             '^' => Ok(Self::Exponent),
             '%' => Ok(Self::CModulo),
+            '&' => Ok(Self::And),
+            '|' => Ok(Self::Or),
             '!' => Ok(Self::Bang),
             '=' => Ok(Self::EqualsSign),
             '>' => Ok(Self::Greater),

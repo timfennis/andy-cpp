@@ -1,9 +1,9 @@
 pub mod cmp;
 pub mod file;
 pub mod list;
+pub mod map;
 pub mod math;
 pub mod sequence;
-pub mod set;
 pub mod string;
 pub mod value;
 

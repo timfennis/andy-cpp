@@ -1,0 +1,9 @@
+--PROGRAM--
+sum := 0;
+for x in %{1,2,3,4,5,6}.keys() {
+    sum += x;
+}
+assert(sum == 21);
+print("ok");
+--EXPECT--
+ok

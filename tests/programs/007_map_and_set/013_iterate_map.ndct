@@ -1,0 +1,20 @@
+--PROGRAM--
+map := %{
+    1: 100,
+    2: 200,
+    3: 300,
+};
+
+ksum := 0;
+vsum := 0;
+for tuple in map {
+    key := tuple[0];
+    value := tuple[1];
+    ksum += key;
+    vsum += value;
+}
+assert(ksum == 6);
+assert(vsum == 600);
+print("ok");
+--EXPECT--
+ok

@@ -39,6 +39,8 @@ pub enum BinaryOperator {
     CModulo,
     EuclideanModulo,
     Exponent,
+    And,
+    Or,
     Concat,
     In,
 }
@@ -84,6 +86,8 @@ impl TryFrom<TokenLocation> for BinaryOperator {
             Token::CModulo => Self::CModulo,
             Token::EuclideanModulo => Self::EuclideanModulo,
             Token::Exponent => Self::Exponent,
+            Token::And => Self::And,
+            Token::Or => Self::Or,
             Token::In => Self::In,
             Token::Concat => Self::Concat,
             _ => {
@@ -103,6 +107,8 @@ impl TryFrom<TokenLocation> for BinaryOperator {
                         Token::CModulo,
                         Token::EuclideanModulo,
                         Token::Exponent,
+                        Token::And,
+                        Token::Or,
                         Token::In,
                         Token::Concat,
                     ],
