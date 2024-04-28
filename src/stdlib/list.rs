@@ -8,8 +8,8 @@ mod inner {
         list.contains(elem)
     }
 
-    pub fn push(list: &mut Vec<Value>, elem: &Value) {
-        list.push(elem.clone());
+    pub fn push(list: &mut Vec<Value>, elem: Value) {
+        list.push(elem);
     }
 
     pub fn cartesian_product(list_a: &[Value], list_b: &[Value]) -> Vec<Value> {
