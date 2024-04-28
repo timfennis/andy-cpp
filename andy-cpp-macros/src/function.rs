@@ -1,5 +1,6 @@
 use crate::r#match::{
-    is_ref_mut, is_ref_of_bigint, is_ref_of_slice_of_value, is_str_ref, is_string, path_ends_with,
+    is_ref, is_ref_mut, is_ref_of_bigint, is_ref_of_slice_of_value, is_str_ref, is_string,
+    path_ends_with,
 };
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
@@ -101,6 +102,10 @@ fn into_param_type(ty: &syn::Type) -> TokenStream {
         return quote! { crate::interpreter::function::ParamType::List };
     }
 
+    if path_ends_with(ty, "HashMap") {
+        return quote! { crate::interpreter::function::ParamType::Dictionary };
+    }
+
     match ty {
         syn::Type::Reference(syn::TypeReference { elem, .. }) => into_param_type(elem),
         syn::Type::Path(syn::TypePath { path, .. }) => match path {
@@ -141,6 +146,34 @@ fn create_temp_variable(
                 initialize_code: quote! {
                     let crate::interpreter::value::Value::Sequence(crate::interpreter::value::Sequence::String(#rc_temp_var)) = &values[#position] else {
                         panic!("Value #position needed to be a Sequence::String but wasn't");
+                    };
+                    let #temp_var = &mut *#rc_temp_var.borrow_mut();
+                },
+            });
+        }
+        // The pattern is &HashMap<Value, Value>
+        else if is_ref(ty) && path_ends_with(ty, "HashMap") {
+            let rc_temp_var = syn::Ident::new(&format!("temp_{temp_var}"), identifier.span());
+            return Some(TempVar {
+                param_type: quote! { crate::interpreter::function::ParamType::Dictionary },
+                temp_var: quote! { #temp_var },
+                initialize_code: quote! {
+                    let crate::interpreter::value::Value::Sequence(crate::interpreter::value::Sequence::Dictionary(#rc_temp_var)) = &values[#position] else {
+                        panic!("Value #position needed to be a Sequence::Dictionary but wasn't");
+                    };
+                    let #temp_var = &*#rc_temp_var.borrow();
+                },
+            });
+        }
+        // The pattern is &mut HashMap<Value, Value>
+        else if is_ref_mut(ty) && path_ends_with(ty, "HashMap") {
+            let rc_temp_var = syn::Ident::new(&format!("temp_{temp_var}"), identifier.span());
+            return Some(TempVar {
+                param_type: quote! { crate::interpreter::function::ParamType::Dictionary },
+                temp_var: quote! { #temp_var },
+                initialize_code: quote! {
+                    let crate::interpreter::value::Value::Sequence(crate::interpreter::value::Sequence::Dictionary(#rc_temp_var)) = &values[#position] else {
+                        panic!("Value #position needed to be a Sequence::Dictionary but wasn't");
                     };
                     let #temp_var = &mut *#rc_temp_var.borrow_mut();
                 },
@@ -193,6 +226,16 @@ fn create_temp_variable(
                         crate::interpreter::value::Value::Number(crate::interpreter::num::Number::Int(crate::interpreter::int::Int::Int64(smoll))) => #big_int.as_ref().unwrap(),
                         _ => panic!("Value #position need to be an Int but wasn't"),
                     }
+                },
+            });
+        }
+        // If we need an owned Value
+        else if path_ends_with(ty, "Value") && !is_ref(ty) {
+            return Some(TempVar {
+                param_type: quote! { crate::interpreter::function::ParamType::Any },
+                temp_var: quote! { #temp_var },
+                initialize_code: quote! {
+                    let #temp_var = values[#position].clone();
                 },
             });
         }

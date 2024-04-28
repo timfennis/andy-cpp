@@ -1,3 +1,4 @@
+/// Checks if a type ends with a string, returns false for slices
 pub fn path_ends_with(ty: &syn::Type, ident: &str) -> bool {
     match ty {
         syn::Type::Path(syn::TypePath {
@@ -11,7 +12,7 @@ pub fn path_ends_with(ty: &syn::Type, ident: &str) -> bool {
             last_segment.ident == ident
         }
         syn::Type::Reference(syn::TypeReference { elem, .. }) => path_ends_with(elem, ident),
-        _ => panic!("path_ends_with cannot handle the given syn::Type"),
+        _ => false,
     }
 }
 #[allow(unused)]
@@ -26,6 +27,15 @@ pub fn is_mut_ref_of(ty: &syn::Type, f: fn(&syn::Type) -> bool) -> bool {
     }
 }
 
+pub fn is_ref(ty: &syn::Type) -> bool {
+    matches!(
+        ty,
+        syn::Type::Reference(syn::TypeReference {
+            mutability: None,
+            ..
+        })
+    )
+}
 pub fn is_ref_of(ty: &syn::Type, f: fn(&syn::Type) -> bool) -> bool {
     match ty {
         syn::Type::Reference(syn::TypeReference { elem, .. }) => f(elem.as_ref()),

@@ -763,6 +763,9 @@ fn apply_operator(
             (needle, Value::Sequence(Sequence::Tuple(haystack))) => {
                 haystack.contains(&needle).into()
             }
+            (needle, Value::Sequence(Sequence::Dictionary(dictionary))) => {
+                dictionary.borrow().keys().contains(&needle).into()
+            }
             _ => Value::Bool(false),
         },
         BinaryOperator::Concat => match (left, right) {
