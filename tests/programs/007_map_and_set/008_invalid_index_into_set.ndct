@@ -1,0 +1,5 @@
+--PROGRAM--
+set := %{1,2,3};
+val := set[4]; // not found
+--EXPECT-ERROR--
+Key not found in map: 4

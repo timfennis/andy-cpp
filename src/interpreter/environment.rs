@@ -1,5 +1,10 @@
 use crate::interpreter::function::Function;
-use ahash::AHashMap;
+
+#[cfg(feature = "ahash")]
+use ahash::AHashMap as HashMap;
+#[cfg(not(feature = "ahash"))]
+use std::collections::HashMap;
+
 use std::cell::RefCell;
 use std::fmt;
 use std::fmt::Formatter;
@@ -17,7 +22,7 @@ pub struct RootEnvironment {
 pub struct Environment {
     root: Rc<RefCell<RootEnvironment>>,
     parent: Option<EnvironmentRef>,
-    values: AHashMap<String, RefCell<Value>>,
+    values: HashMap<String, RefCell<Value>>,
 }
 
 impl fmt::Debug for Environment {
@@ -73,7 +78,7 @@ impl Environment {
         let mut env = Self {
             root: Rc::new(RefCell::new(root)),
             parent: None,
-            values: AHashMap::default(),
+            values: HashMap::default(),
         };
 
         // TODO: move this out of this module to a more general location
@@ -176,7 +181,7 @@ impl Environment {
         Rc::new(RefCell::new(Self {
             parent: Some(Rc::clone(parent)),
             root: root_ref,
-            values: AHashMap::default(),
+            values: HashMap::default(),
         }))
     }
 }

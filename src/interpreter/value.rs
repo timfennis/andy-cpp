@@ -3,10 +3,15 @@ use crate::interpreter::function::{Function, OverloadedFunction};
 use crate::interpreter::int::Int;
 use crate::interpreter::num::{Number, NumberToUsizeError, NumberType};
 use crate::lexer::Location;
-use ahash::HashMap;
 use num::BigInt;
 use std::cell::RefCell;
 use std::cmp::Ordering;
+
+#[cfg(feature = "ahash")]
+use ahash::AHashMap as HashMap;
+#[cfg(not(feature = "ahash"))]
+use std::collections::HashMap;
+
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
@@ -67,10 +72,23 @@ impl Hash for Value {
                 }
                 Sequence::Dictionary(dict) => {
                     state.write_u8(8);
+                    // This is 1 to 1 ripped from Noulith, and it's meant to ensure that if sets
+                    // are equal {1,2,3} == {3,2,1} they produce the same hash regardless of the
+                    // order the element appear in
+
+                    let mut acc = 0u64;
+                    let mut cube_acc = 0u64;
                     for (key, value) in dict.borrow().iter() {
-                        key.hash(state);
-                        value.hash(state);
+                        let mut hasher = std::hash::DefaultHasher::default();
+                        key.hash(&mut hasher);
+                        value.hash(&mut hasher);
+
+                        let f = hasher.finish();
+                        acc = acc.wrapping_add(f);
+                        cube_acc = cube_acc.wrapping_add(f.wrapping_mul(f));
                     }
+                    state.write_u64(acc);
+                    state.write_u64(cube_acc);
                 }
             },
             Value::Function(f) => {
