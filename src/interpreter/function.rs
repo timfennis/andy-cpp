@@ -1,16 +1,12 @@
+use std::fmt;
 use std::rc::Rc;
 
 use crate::ast::ExpressionLocation;
+use crate::hashmap::HashMap;
 use crate::interpreter::environment::{Environment, EnvironmentRef};
 use crate::interpreter::evaluate::{evaluate_expression, EvaluationError, EvaluationResult};
 use crate::interpreter::num::{Number, NumberType};
 use crate::interpreter::value::{Sequence, Value, ValueType};
-#[cfg(feature = "ahash")]
-use ahash::AHashMap as HashMap;
-#[cfg(not(feature = "ahash"))]
-use std::collections::HashMap;
-
-use std::fmt;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum TypeSignature {

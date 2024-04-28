@@ -1,9 +1,6 @@
 use crate::interpreter::function::Function;
 
-#[cfg(feature = "ahash")]
-use ahash::AHashMap as HashMap;
-#[cfg(not(feature = "ahash"))]
-use std::collections::HashMap;
+use crate::hashmap::HashMap;
 
 use std::cell::RefCell;
 use std::fmt;
