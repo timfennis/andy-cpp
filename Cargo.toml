@@ -31,6 +31,7 @@ andy-cpp-macros = { path = "andy-cpp-macros" }
 itertools = "0.12.1"
 either = "1.11.0"
 ahash = "0.8.11"
+ordered-float = "4.2.0"
 
 [features]
 default = ["repl"]

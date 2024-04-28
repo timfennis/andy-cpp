@@ -31,6 +31,12 @@ impl rustyline::highlight::Highlighter for RustlylineHelper {
                     Token::String(s) => format!("{s:?}").bright_green(),
                     Token::BigInt(n) => format!("{n}").truecolor(253, 151, 31),
                     Token::Int64(n) => format!("{n}").truecolor(253, 151, 31),
+                    Token::Float64(f) => {
+                        let mut buffer = ryu::Buffer::new();
+                        buffer.format(*f).to_string().truecolor(253, 151, 31)
+                    }
+                    // TODO: rendering of this token is completely broken, probably because this token should be multiple tokens instead
+                    Token::Complex(c) => format!("{c}").truecolor(253, 151, 31),
                     t @ (Token::True | Token::False) => format!("{t}").truecolor(253, 151, 31),
                     t @ (Token::LeftSquareBracket
                     | Token::RightSquareBracket
