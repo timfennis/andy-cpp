@@ -332,7 +332,7 @@ impl Parser {
 
     fn comparison(&mut self) -> Result<ExpressionLocation, Error> {
         self.consume_binary_expression_left_associative(
-            Self::term,
+            Self::boolean_or,
             &[
                 Token::Equality,
                 Token::Inequality,
@@ -343,6 +343,16 @@ impl Parser {
                 Token::In,
             ],
         )
+    }
+
+    fn boolean_or(&mut self) -> Result<ExpressionLocation, Error> {
+        self.consume_binary_expression_left_associative(Self::boolean_and, &[Token::Or])
+    }
+
+    // TODO: We don't have a boolean XOR at the moment because ^ is taken
+
+    fn boolean_and(&mut self) -> Result<ExpressionLocation, Error> {
+        self.consume_binary_expression_left_associative(Self::term, &[Token::And])
     }
 
     fn term(&mut self) -> Result<ExpressionLocation, Error> {
