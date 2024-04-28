@@ -1,21 +1,17 @@
-use either::Either;
-use itertools::Itertools;
 use std::cell::RefCell;
 use std::cmp::Ordering;
-
-#[cfg(feature = "ahash")]
-use ahash::AHashMap as HashMap;
-#[cfg(not(feature = "ahash"))]
-use std::collections::HashMap;
-
 use std::error::Error;
 use std::fmt;
 use std::ops::{IndexMut, Neg, Rem};
 use std::rc::Rc;
 
+use either::Either;
+use itertools::Itertools;
+
 use crate::ast::{
     BinaryOperator, Expression, ExpressionLocation, LogicalOperator, Lvalue, UnaryOperator,
 };
+use crate::hashmap::HashMap;
 use crate::interpreter::environment::{Environment, EnvironmentRef};
 use crate::interpreter::function::{Function, FunctionCarrier, OverloadedFunction};
 use crate::interpreter::int::Int;

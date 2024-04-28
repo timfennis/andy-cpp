@@ -7,10 +7,7 @@ use num::BigInt;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 
-#[cfg(feature = "ahash")]
-use ahash::AHashMap as HashMap;
-#[cfg(not(feature = "ahash"))]
-use std::collections::HashMap;
+use crate::hashmap::HashMap;
 
 use std::fmt;
 use std::hash::{Hash, Hasher};
