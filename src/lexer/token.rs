@@ -81,7 +81,8 @@ impl fmt::Display for Token {
                 return write!(f, "{n}");
             }
             Self::Float64(n) => {
-                return write!(f, "{n}");
+                let mut buffer = ryu::Buffer::new();
+                return write!(f, "{}", buffer.format(*n));
             }
             Self::BigInt(n) => {
                 return write!(f, "{n}");

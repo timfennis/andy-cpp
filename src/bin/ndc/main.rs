@@ -1,9 +1,11 @@
-use clap::Parser;
-use ndc_lib::interpreter::Interpreter;
 use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
 use std::process::exit;
+
+use clap::Parser;
+
+use ndc_lib::interpreter::Interpreter;
 
 #[cfg(feature = "repl")]
 mod repl;
@@ -48,8 +50,9 @@ fn main() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod test {
-    use crate::Cli;
     use clap::CommandFactory;
+
+    use crate::Cli;
 
     #[test]
     fn test_clap() {

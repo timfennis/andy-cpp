@@ -7,12 +7,13 @@ use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 use num::bigint::TryFromBigIntError;
 use num::complex::Complex64;
 use num::{BigInt, BigRational, Complex, FromPrimitive, ToPrimitive};
+use ordered_float::OrderedFloat;
 
 use crate::interpreter::evaluate::EvaluationError;
 use crate::interpreter::int::Int;
 use crate::lexer::Location;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum Number {
     Int(Int),
     Float(f64),
@@ -22,7 +23,7 @@ pub enum Number {
 
 pub enum RealNumber<'a> {
     Int(&'a Int),
-    Float(f64),
+    Float(OrderedFloat<f64>),
 }
 
 impl From<Int> for Number {
@@ -57,7 +58,13 @@ impl From<Complex64> for Number {
 
 impl PartialOrd for Number {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.to_real().partial_cmp(&other.to_real())
+        self.to_reals().partial_cmp(&other.to_reals())
+    }
+}
+
+impl PartialEq for Number {
+    fn eq(&self, other: &Self) -> bool {
+        self.to_reals().eq(&other.to_reals())
     }
 }
 
@@ -70,7 +77,7 @@ impl Hash for Number {
             }
             Number::Float(f) => {
                 state.write_u8(2);
-                state.write(&f.to_le_bytes());
+                OrderedFloat(*f).hash(state);
             }
             Number::Rational(r) => {
                 state.write_u8(3);
@@ -78,42 +85,55 @@ impl Hash for Number {
             }
             Number::Complex(c) => {
                 state.write_u8(4);
-                state.write(&c.re.to_le_bytes());
-                state.write(&c.im.to_le_bytes());
+                OrderedFloat(c.re).hash(state);
+                OrderedFloat(c.im).hash(state);
             }
         }
     }
 }
 
 impl<'a> PartialEq for RealNumber<'a> {
-    fn eq(&self, _other: &Self) -> bool {
-        todo!()
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Int(left), Self::Int(right)) => left.eq(right),
+            (Self::Float(left), Self::Float(right)) => left.eq(right),
+            (Self::Int(left), Self::Float(right)) => {
+                compare_int_to_float(left, *right) == Some(Ordering::Equal)
+            }
+            (Self::Float(left), Self::Int(right)) => {
+                compare_int_to_float(right, *left) == Some(Ordering::Equal)
+            }
+        }
+    }
+}
+
+fn compare_int_to_float(a: &Int, b: OrderedFloat<f64>) -> Option<Ordering> {
+    if b.is_infinite() {
+        if b.is_sign_positive() {
+            Some(Ordering::Less)
+        } else {
+            Some(Ordering::Greater)
+        }
+    } else if b.is_nan() {
+        Some(OrderedFloat(f64::from(a)).cmp(&b))
+    } else {
+        // TODO: deal with this expect/unwrap?
+        let x = BigInt::from_f64(b.trunc()).expect("this fails if NaN");
+        a.to_bigint().partial_cmp(&x)
     }
 }
 
 impl<'a> PartialOrd for RealNumber<'a> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        fn compare_int_to_float(a: &Int, b: f64) -> Option<Ordering> {
-            if b.is_infinite() {
-                if b.is_sign_positive() {
-                    Some(Ordering::Less)
-                } else {
-                    Some(Ordering::Greater)
-                }
-            } else {
-                // TODO: deal with this expect/unwrap?
-                let x = BigInt::from_f64(b.trunc()).expect("this fails if NaN");
-                a.to_bigint().partial_cmp(&x)
-            }
-        }
-
         match (self, other) {
-            (RealNumber::Int(a), RealNumber::Int(b)) => a.partial_cmp(b),
+            (RealNumber::Int(a), RealNumber::Int(b)) => Some(a.cmp(b)),
             (RealNumber::Int(a), RealNumber::Float(b)) => compare_int_to_float(a, *b),
             (RealNumber::Float(a), RealNumber::Int(b)) => {
                 compare_int_to_float(b, *a).map(Ordering::reverse)
             }
-            (RealNumber::Float(a), RealNumber::Float(b)) => a.partial_cmp(b),
+            (RealNumber::Float(a), RealNumber::Float(b)) => {
+                Some(OrderedFloat(*a).cmp(&OrderedFloat(*b)))
+            }
         }
     }
 }
@@ -182,7 +202,7 @@ impl Sub for Number {
         match (self, rhs) {
             // Operands are the same
             (Self::Int(i1), Self::Int(i2)) => Self::Int(i1 - i2),
-            (Self::Float(f1), Self::Float(f2)) => Self::Float(f1.add(f2)),
+            (Self::Float(f1), Self::Float(f2)) => Self::Float(f1.sub(f2)),
             (Self::Rational(r1), Self::Rational(r2)) => {
                 Self::Rational(Box::new(Sub::sub(*r1, *r2)))
             }
@@ -476,20 +496,26 @@ impl Number {
     }
 
     /// Converts this number into a real (complex) number with the imaginary part set to 0.0
-    /// which makes it esy to do partial comparison on all numbers (and possibly other things)
+    /// which makes it esy to do comparison on all numbers (and possibly other things)
     ///
     /// TODO: in the future we might want to create a new Real type which is the sum of Int and Float
     ///       in order to better handle `BigInt`s which now lose tons of precision and will yield incorrect results
     #[must_use]
-    pub fn to_real(&self) -> (RealNumber, RealNumber) {
+    pub fn to_reals(&self) -> (RealNumber, RealNumber) {
         match self {
-            Number::Int(i) => (RealNumber::Int(i), RealNumber::Float(0.0)),
-            Number::Float(f) => (RealNumber::Float(*f), RealNumber::Float(0.0)),
-            Number::Rational(r) => (
-                RealNumber::Float(rational_to_float(r)),
-                RealNumber::Float(0.0),
+            Number::Int(i) => (RealNumber::Int(i), RealNumber::Float(OrderedFloat(0.0))),
+            Number::Float(f) => (
+                RealNumber::Float(OrderedFloat(*f)),
+                RealNumber::Float(OrderedFloat(0.0)),
             ),
-            Number::Complex(c) => (RealNumber::Float(c.re), RealNumber::Float(c.im)),
+            Number::Rational(r) => (
+                RealNumber::Float(OrderedFloat(rational_to_float(r))),
+                RealNumber::Float(OrderedFloat(0.0)),
+            ),
+            Number::Complex(c) => (
+                RealNumber::Float(OrderedFloat(c.re)),
+                RealNumber::Float(OrderedFloat(c.im)),
+            ),
         }
     }
 }
@@ -551,8 +577,6 @@ impl fmt::Display for Number {
                 let mut buffer = ryu::Buffer::new();
                 write!(f, "{}", buffer.format(*ff))
             }
-            // Self::Float(ff) if ff.fract() == 0.0 => write!(f, "{ff:.1}"),
-            // Self::Float(ff) => write!(f, "{ff}"),
             Self::Rational(r) => write!(f, "{r}"),
             Self::Complex(r) => write!(f, "{r}"),
         }

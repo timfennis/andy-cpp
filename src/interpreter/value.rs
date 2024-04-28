@@ -263,6 +263,20 @@ impl TryFrom<&Value> for i64 {
     }
 }
 
+impl TryFrom<&Value> for bool {
+    type Error = ConversionError;
+
+    fn try_from(value: &Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Bool(bool) => Ok(*bool),
+            v => Err(Self::Error::UnsupportedVariant(
+                v.value_type(),
+                stringify!(bool),
+            )),
+        }
+    }
+}
+
 impl TryFrom<Value> for usize {
     type Error = ConversionError;
 
