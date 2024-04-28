@@ -836,16 +836,12 @@ impl Parser {
                 values.push((key, None));
             }
 
-            if self.peek_current_token() == Some(&Token::Comma) {
-                self.advance();
-                continue;
-            } else if let Some(token_location) = self.consume_token_if(&[Token::RightCurlyBracket])
-            {
+            if let Some(token_location) = self.consume_token_if(&[Token::RightCurlyBracket]) {
                 break token_location.location;
             }
 
-            // If we get here the list expression didn't end properly, and we return an error
-            todo!("PARSER ERROR RIGHT?");
+            // TODO: maybe have require_current_token accept multiple tokens including the RightCurlyBracket for a better error
+            self.require_current_token_matches(Token::Comma)?;
         };
         Ok(Expression::Dictionary { values }.to_location(start, end))
     }

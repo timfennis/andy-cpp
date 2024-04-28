@@ -127,8 +127,7 @@ fn compare_int_to_float(a: &Int, b: OrderedFloat<f64>) -> Option<Ordering> {
     } else if b.is_nan() {
         Some(OrderedFloat(f64::from(a)).cmp(&b))
     } else {
-        // TODO: deal with this expect/unwrap?
-        let x = BigInt::from_f64(b.trunc()).expect("this fails if NaN");
+        let x = BigInt::from_f64(b.trunc()).expect("b can't be NaN");
         a.to_bigint().partial_cmp(&x)
     }
 }
