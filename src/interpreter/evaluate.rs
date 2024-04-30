@@ -166,9 +166,17 @@ pub(crate) fn evaluate_expression(
                             .into());
                         }
                     }
+                    Value::Sequence(Sequence::Dictionary(dictionary)) => {
+                        let value = evaluate_expression(value, environment)?;
+                        let key = evaluate_expression(index, environment)?;
+
+                        let mut dictionary = dictionary.try_borrow_mut()
+                            .map_err(|_| EvaluationError::mutation_error("cannot mutate this dictionary because it's already being read from somewhere else", start, end))?;
+                        dictionary.insert(key, value);
+                    }
                     _ => {
                         return Err(EvaluationError::syntax_error(
-                            &format!("cannot index into {} at index", assign_to.value_type()),
+                            &format!("cannot insert into {} at index", assign_to.value_type()),
                             start,
                             end,
                         )

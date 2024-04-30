@@ -147,7 +147,7 @@ fn create_temp_variable(
                     let crate::interpreter::value::Value::Sequence(crate::interpreter::value::Sequence::String(#rc_temp_var)) = &values[#position] else {
                         panic!("Value #position needed to be a Sequence::String but wasn't");
                     };
-                    let #temp_var = &mut *#rc_temp_var.borrow_mut();
+                    let #temp_var = &mut *#rc_temp_var.borrow_mut(); // TODO: change to try_borrow_mut()
                 },
             });
         }
@@ -175,7 +175,7 @@ fn create_temp_variable(
                     let crate::interpreter::value::Value::Sequence(crate::interpreter::value::Sequence::Dictionary(#rc_temp_var)) = &values[#position] else {
                         panic!("Value #position needed to be a Sequence::Dictionary but wasn't");
                     };
-                    let #temp_var = &mut *#rc_temp_var.borrow_mut();
+                    let #temp_var = &mut *#rc_temp_var.borrow_mut(); // TODO: change to try_borrow_mut()
                 },
             });
         }
@@ -189,7 +189,7 @@ fn create_temp_variable(
                     let crate::interpreter::value::Value::Sequence(crate::interpreter::value::Sequence::List(#rc_temp_var)) = &values[#position] else {
                         panic!("Value #position needed to be a Sequence::List but wasn't");
                     };
-                    let #temp_var = &mut *#rc_temp_var.borrow_mut();
+                    let #temp_var = &mut *#rc_temp_var.borrow_mut(); // TODO: change to try_borrow_mut()
                 },
             });
         }
