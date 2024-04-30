@@ -36,6 +36,28 @@ pub fn register(env: &mut Environment) {
     );
 
     env.declare(
+        "dbg",
+        Value::from(Function::GenericFunction {
+            function: |args, env| {
+                env.borrow_mut()
+                    .with_output(|output| {
+                        let mut iter = args.iter().peekable();
+                        while let Some(arg) = iter.next() {
+                            if iter.peek().is_some() {
+                                write!(output, "{arg:?} ")?;
+                            } else {
+                                writeln!(output, "{arg:?}")?;
+                            }
+                        }
+                        Ok(())
+                    })
+                    .map_err(FunctionCarrier::IOError)?;
+                Ok(Value::Unit)
+            },
+            type_signature: TypeSignature::Variadic,
+        }),
+    );
+    env.declare(
         "read_file",
         Value::from(Function::GenericFunction {
             function: |args, _env| match args {
