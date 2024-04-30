@@ -15,8 +15,8 @@ name = "ndc_lib"
 path = "src/lib.rs"
 
 [profile.release]
-debug = false
-strip = true
+debug = true
+strip = false
 lto = true
 
 [dependencies]

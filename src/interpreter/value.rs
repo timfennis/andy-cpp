@@ -125,7 +125,7 @@ impl PartialOrd for Value {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub enum Sequence {
     String(Rc<RefCell<String>>),
     List(Rc<RefCell<Vec<Value>>>),
@@ -348,19 +348,6 @@ impl<'a> TryFrom<&'a Value> for &'a Sequence {
     }
 }
 
-// impl TryFrom<&Value> for &[Value] {
-//     type Error = ();
-//
-//     fn try_from(value: &Value) -> Result<Self, Self::Error> {
-//         match value {
-//             Value::Sequence(Sequence::List(list)) => {
-//                 let list = &*list.borrow();
-//
-//             }
-//         }
-//     }
-// }
-
 // FIXME: We should not need to convert `&Value` into `BigInt`, we should use `&BigInt` instead.
 //        But we can't return references to BigInt in case the source type is i64. A possible
 //        solution could be to create the BigInt instance from the i64 as part of the attribute
@@ -447,8 +434,8 @@ impl fmt::Debug for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Unit => write!(f, "()"),
-            Self::Number(n) => write!(f, "{n:?}"),
-            Self::Bool(b) => write!(f, "{b:?}"),
+            Self::Number(n) => write!(f, "{n}"),
+            Self::Bool(b) => write!(f, "{b}"),
             Self::Function(_) => {
                 write!(f, "function")
             }
@@ -468,6 +455,55 @@ impl fmt::Display for Value {
                 write!(f, "function")
             }
             Self::Sequence(s) => write!(f, "{s}"),
+        }
+    }
+}
+
+impl fmt::Debug for Sequence {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Sequence::String(s) => write!(f, "\"{}\"", s.borrow()),
+            Sequence::List(vs) => {
+                write!(f, "[")?;
+                let vs = vs.borrow();
+                let mut vs = vs.iter().peekable();
+                while let Some(v) = vs.next() {
+                    if vs.peek().is_some() {
+                        write!(f, "{v:?},")?;
+                    } else {
+                        write!(f, "{v:?}")?;
+                    }
+                }
+                write!(f, "]")
+            }
+            Sequence::Tuple(vs) => {
+                write!(f, "(")?;
+                let mut iter = vs.iter().peekable();
+                while let Some(v) = iter.next() {
+                    write!(f, "{v:?}")?;
+                    if iter.peek().is_some() {
+                        write!(f, ",")?;
+                    }
+                }
+                write!(f, ")")
+            }
+            Sequence::Dictionary(dict) => {
+                write!(f, "{{")?;
+                let dict = dict.borrow();
+                let mut iter = dict.iter().peekable();
+                while let Some((key, value)) = iter.next() {
+                    if value == &Value::Unit {
+                        write!(f, "{key:?}")?;
+                    } else {
+                        write!(f, "{key:?}: {value:?}")?;
+                    }
+
+                    if iter.peek().is_some() {
+                        write!(f, ",")?;
+                    }
+                }
+                write!(f, "}}")
+            }
         }
     }
 }

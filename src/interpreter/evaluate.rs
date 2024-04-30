@@ -796,7 +796,7 @@ fn apply_operator(
                 haystack.contains(&needle).into()
             }
             (needle, Value::Sequence(Sequence::Dictionary(dictionary))) => {
-                dictionary.borrow().keys().contains(&needle).into()
+                dictionary.borrow().contains_key(&needle).into()
             }
             _ => Value::Bool(false),
         },
