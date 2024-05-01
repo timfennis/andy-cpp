@@ -216,6 +216,7 @@ pub(crate) fn evaluate_expression(
                                     Value::Sequence(Sequence::List(left)),
                                     Value::Sequence(Sequence::List(right)),
                                 ) => {
+                                    // TODO if left == right this will panic
                                     left.borrow_mut().extend_from_slice(&right.borrow());
                                     Ok(Value::Sequence(Sequence::List(left.clone())))
                                 }
@@ -229,6 +230,40 @@ pub(crate) fn evaluate_expression(
                                 }
                                 _ => Err(EvaluationError::type_error(
                                     "cannot apply the ++ operator between these types",
+                                    start,
+                                    end,
+                                )
+                                .into()),
+                            }
+                        } else if let Either::Left(BinaryOperator::Or) = operation {
+                            match (existing_value, right_value) {
+                                (
+                                    Value::Sequence(Sequence::Dictionary(left)),
+                                    Value::Sequence(Sequence::Dictionary(right)),
+                                ) => {
+                                    // If right and left are the same we can just do nothing and prevent a borrow checker arrow later
+                                    if Rc::ptr_eq(left, &right) {
+                                        return Ok(Value::Sequence(Sequence::Dictionary(
+                                            left.clone(),
+                                        )));
+                                    }
+                                    match Rc::try_unwrap(right) {
+                                        Ok(right) => {
+                                            left.borrow_mut().extend(right.take().into_iter());
+                                        }
+                                        Err(right) => {
+                                            left.borrow_mut().extend(
+                                                right
+                                                    .borrow() // TODO: change to try borrow in case something i
+                                                    .iter()
+                                                    .map(|(a, b)| (a.clone(), b.clone())),
+                                            );
+                                        }
+                                    }
+                                    Ok(Value::Sequence(Sequence::Dictionary(left.clone())))
+                                }
+                                _ => Err(EvaluationError::type_error(
+                                    "cannot apply the | operator between these types",
                                     start,
                                     end,
                                 )
