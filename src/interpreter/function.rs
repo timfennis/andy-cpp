@@ -236,12 +236,6 @@ impl Function {
     }
 }
 
-// impl fmt::Debug for Function {
-//     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-//         write!(f, "function")
-//     }
-// }
-
 // Named after the Carrier trait
 #[derive(thiserror::Error, Debug)]
 pub enum FunctionCarrier {

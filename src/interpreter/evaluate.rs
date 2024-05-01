@@ -235,23 +235,14 @@ pub(crate) fn evaluate_expression(
                                 .into()),
                             }
                         } else {
-                            let new_value = match operation {
-                                Either::Left(binary_operator) => apply_operator(
-                                    existing_value.clone(),
-                                    *binary_operator,
-                                    right_value,
-                                )?,
-                                Either::Right(identifier) => call_function_by_name(
-                                    identifier,
-                                    &[existing_value.clone(), right_value],
-                                    environment,
-                                    start,
-                                    end,
-                                )?,
-                            };
-
-                            *existing_value = new_value.clone();
-                            Ok(new_value)
+                            apply_operation_to_value(
+                                environment,
+                                existing_value,
+                                operation,
+                                right_value,
+                                start,
+                                end,
+                            )
                         }
                     })
                     .ok_or_else(|| {
@@ -269,40 +260,46 @@ pub(crate) fn evaluate_expression(
                 let assign_to = evaluate_expression(assign_to, environment)?;
                 match &assign_to {
                     Value::Sequence(Sequence::List(list)) => {
-                        // the computation of this value may need the list that we assign to,
-                        // therefore the value needs to be computed before we mutably borrow the list
-                        // see: `bug0001_in_place_map.ndct`
+                        // It's important that index and right_value are computed before the list is borrowed
                         let right_value = evaluate_expression(value, environment)?;
-
-                        let mut list = list
-                            .try_borrow_mut()
-                            .map_err(|_| EvaluationError::mutation_error("you cannot mutate a value in a list while you're iterating over this list", start, end))?;
-
                         let index = value_to_forward_index(
                             evaluate_expression(index, environment)?,
-                            list.len(),
+                            list.try_borrow().into_evaluation_result(start, end)?.len(),
                             start,
                             end,
                         )?;
 
+                        let mut list = list.try_borrow_mut().into_evaluation_result(start, end)?;
+
                         let list_item = list.index_mut(index);
 
-                        let old_value = std::mem::replace(list_item, Value::Unit);
-                        match operation {
-                            Either::Left(binary_operator) => {
-                                *list_item =
-                                    apply_operator(old_value, *binary_operator, right_value)?;
-                            }
-                            Either::Right(identifier) => {
-                                *list_item = call_function_by_name(
-                                    identifier,
-                                    &[old_value, right_value],
-                                    environment,
-                                    start,
-                                    end,
-                                )?;
-                            }
-                        }
+                        apply_operation_to_value(
+                            environment,
+                            list_item,
+                            operation,
+                            right_value,
+                            start,
+                            end,
+                        )?;
+                    }
+                    Value::Sequence(Sequence::Dictionary(dict)) => {
+                        let right_value = evaluate_expression(value, environment)?;
+                        let index = evaluate_expression(index, environment)?;
+
+                        let mut dict = dict.try_borrow_mut().into_evaluation_result(start, end)?;
+
+                        let dictionary_entry = dict
+                            .get_mut(&index)
+                            .ok_or_else(|| EvaluationError::key_not_found(&index, start, end))?;
+
+                        apply_operation_to_value(
+                            environment,
+                            dictionary_entry,
+                            operation,
+                            right_value,
+                            start,
+                            end,
+                        )?;
                     }
                     Value::Sequence(Sequence::String(_)) => {
                         return Err(EvaluationError::type_error(
@@ -692,6 +689,32 @@ pub(crate) fn evaluate_expression(
     Ok(literal)
 }
 
+fn apply_operation_to_value(
+    environment: &EnvironmentRef,
+    value: &mut Value,
+    operation: &Either<BinaryOperator, String>,
+    right_value: Value,
+    start: Location,
+    end: Location,
+) -> Result<Value, FunctionCarrier> {
+    let old_value = std::mem::replace(value, Value::Unit);
+    match operation {
+        Either::Left(binary_operator) => {
+            *value = apply_operator(old_value, *binary_operator, right_value)?;
+        }
+        Either::Right(identifier) => {
+            *value = call_function_by_name(
+                identifier,
+                &[old_value, right_value],
+                environment,
+                start,
+                end,
+            )?;
+        }
+    }
+    Ok(value.clone())
+}
+
 #[allow(clippy::too_many_lines)]
 fn apply_operator(
     left: Value,
@@ -806,6 +829,28 @@ fn apply_operator(
                 new_string.push_str(&right.borrow());
                 Value::from(new_string)
             }
+            (Value::Sequence(Sequence::List(left)), Value::Sequence(Sequence::List(right))) => {
+                // TODO: NOTE: this first branch is an experiment, I'm not sure if it'll always work correctly
+                // If we can take ownership of right which is possible if it's used as a literal expression
+                // we borrow right as mutable and copy the elements over to the new list which I guess is maybe faster?
+                // Case where this might work is the following: `[1] ++ [2]`
+                // Case where this might not work is: `l := [1]; [1] ++ l`
+                match Rc::try_unwrap(right) {
+                    Ok(right) => {
+                        // TODO: if there is no benefit to this branch we might as wel remove it
+                        let mut new_list = left.borrow().clone();
+                        new_list.append(&mut right.borrow_mut());
+                        Value::from(new_list)
+                    }
+                    Err(right) => Value::from(
+                        left.borrow()
+                            .iter()
+                            .chain(right.borrow().iter())
+                            .cloned()
+                            .collect::<Vec<_>>(),
+                    ),
+                }
+            }
             _ => todo!("handle errors"),
         },
     };
@@ -883,6 +928,20 @@ impl EvaluationError {
     }
 }
 
+impl fmt::Display for EvaluationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} on line {}", self.text, self.start.line)
+    }
+}
+
+impl fmt::Debug for EvaluationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{self}")
+    }
+}
+
+impl Error for EvaluationError {}
+
 pub trait IntoEvaluationError {
     fn into_evaluation_error(self, start: Location, end: Location) -> EvaluationError;
 }
@@ -897,19 +956,40 @@ impl IntoEvaluationError for std::io::Error {
     }
 }
 
-impl fmt::Display for EvaluationError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} on line {}", self.text, self.start.line)
+impl IntoEvaluationError for std::cell::BorrowError {
+    fn into_evaluation_error(self, start: Location, end: Location) -> EvaluationError {
+        EvaluationError {
+            text: "cannot read from the value because it is already being written to".to_string(),
+            start,
+            end,
+        }
+    }
+}
+impl IntoEvaluationError for std::cell::BorrowMutError {
+    fn into_evaluation_error(self, start: Location, end: Location) -> EvaluationError {
+        EvaluationError {
+            text: "you cannot mutate a value in a list while you're iterating over this list"
+                .to_string(),
+            start,
+            end,
+        }
     }
 }
 
-impl fmt::Debug for EvaluationError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{self}")
-    }
+// NOTE: this is called `IntoEvaluationResult` but it actually only takes care of the error part of an evaluation result.
+// `EvaluationResult` always wants the `Ok` type to be `Value` but this converter doesn't care.
+pub trait IntoEvaluationResult<R> {
+    fn into_evaluation_result(self, start: Location, end: Location) -> Result<R, FunctionCarrier>;
 }
 
-impl Error for EvaluationError {}
+impl<E, R> IntoEvaluationResult<R> for Result<R, E>
+where
+    E: IntoEvaluationError,
+{
+    fn into_evaluation_result(self, start: Location, end: Location) -> Result<R, FunctionCarrier> {
+        self.map_err(|err| FunctionCarrier::EvaluationError(err.into_evaluation_error(start, end)))
+    }
+}
 
 /// Takes a value from the Andy C runtime and converts it to a forward index respecting bi-directional
 /// indexing rules.
