@@ -13,6 +13,6 @@ list := [1,2,3,4];
 fn add_one(n) { n + 1 };
 
 list.mut_map(add_one);
-println(list);
+print(list);
 --EXPECT-ERROR--
 cannot mutate a value in a list while you're iterating over this list
