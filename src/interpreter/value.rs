@@ -35,7 +35,7 @@ impl Value {
             Value::Sequence(Sequence::List(_)) => ValueType::List,
             Value::Sequence(Sequence::Tuple(_)) => ValueType::Tuple,
             Value::Function(_) => ValueType::Function,
-            Value::Sequence(Sequence::Dictionary(_)) => ValueType::Dictionary,
+            Value::Sequence(Sequence::Dictionary(_, _)) => ValueType::Dictionary,
         }
     }
 }
@@ -67,7 +67,8 @@ impl Hash for Value {
                         item.hash(state);
                     }
                 }
-                Sequence::Dictionary(dict) => {
+                // NOTE: the default value is not party of the identity of the dictionary so %{1,2,3} == {:0,1,2,3}
+                Sequence::Dictionary(dict, _) => {
                     state.write_u8(8);
                     // This is 1 to 1 ripped from Noulith, and it's meant to ensure that if sets
                     // are equal {1,2,3} == {3,2,1} they produce the same hash regardless of the
@@ -130,7 +131,7 @@ pub enum Sequence {
     String(Rc<RefCell<String>>),
     List(Rc<RefCell<Vec<Value>>>),
     Tuple(Rc<Vec<Value>>),
-    Dictionary(Rc<RefCell<HashMap<Value, Value>>>),
+    Dictionary(Rc<RefCell<HashMap<Value, Value>>>, Option<Box<Value>>),
 }
 
 impl Eq for Sequence {}
@@ -487,10 +488,17 @@ impl fmt::Debug for Sequence {
                 }
                 write!(f, ")")
             }
-            Sequence::Dictionary(dict) => {
-                write!(f, "{{")?;
+            Sequence::Dictionary(dict, default) => {
                 let dict = dict.borrow();
                 let mut iter = dict.iter().peekable();
+                if let Some(default) = default {
+                    write!(f, "{{default: {default:?}")?;
+                    if iter.peek().is_some() {
+                        write!(f, ",")?;
+                    }
+                } else {
+                    write!(f, "{{")?;
+                }
                 while let Some((key, value)) = iter.next() {
                     if value == &Value::Unit {
                         write!(f, "{key:?}")?;
@@ -512,47 +520,7 @@ impl fmt::Display for Sequence {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Sequence::String(s) => write!(f, "{}", s.borrow()),
-            Sequence::List(vs) => {
-                write!(f, "[")?;
-                let vs = vs.borrow();
-                let mut vs = vs.iter().peekable();
-                while let Some(v) = vs.next() {
-                    if vs.peek().is_some() {
-                        write!(f, "{v},")?;
-                    } else {
-                        write!(f, "{v}")?;
-                    }
-                }
-                write!(f, "]")
-            }
-            Sequence::Tuple(vs) => {
-                write!(f, "(")?;
-                let mut iter = vs.iter().peekable();
-                while let Some(v) = iter.next() {
-                    write!(f, "{v}")?;
-                    if iter.peek().is_some() {
-                        write!(f, ",")?;
-                    }
-                }
-                write!(f, ")")
-            }
-            Sequence::Dictionary(dict) => {
-                write!(f, "{{")?;
-                let dict = dict.borrow();
-                let mut iter = dict.iter().peekable();
-                while let Some((key, value)) = iter.next() {
-                    if value == &Value::Unit {
-                        write!(f, "{key}")?;
-                    } else {
-                        write!(f, "{key}: {value}")?;
-                    }
-
-                    if iter.peek().is_some() {
-                        write!(f, ",")?;
-                    }
-                }
-                write!(f, "}}")
-            }
+            otherwise => write!(f, "{otherwise:?}"),
         }
     }
 }

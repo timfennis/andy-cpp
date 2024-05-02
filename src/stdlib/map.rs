@@ -1,11 +1,8 @@
 #[andy_cpp_macros::export_module]
 mod inner {
-    use crate::hashmap;
     use crate::hashmap::HashMap;
-    use std::cell::RefCell;
-    use std::rc::Rc;
 
-    use crate::interpreter::value::{Sequence, Value};
+    use crate::interpreter::value::Value;
 
     // TODO: this function makes a copy when returning some kind of iterator would be better
     pub fn keys(map: &HashMap<Value, Value>) -> Value {
@@ -24,24 +21,25 @@ mod inner {
         map.insert(key, Value::Unit);
     }
 
-    pub fn union(left: &HashMap<Value, Value>, right: &HashMap<Value, Value>) -> Value {
-        Value::Sequence(Sequence::Dictionary(Rc::new(RefCell::new(hashmap::union(
-            left, right,
-        )))))
-    }
-
-    pub fn intersection(left: &HashMap<Value, Value>, right: &HashMap<Value, Value>) -> Value {
-        Value::Sequence(Sequence::Dictionary(Rc::new(RefCell::new(
-            hashmap::intersection(left, right),
-        ))))
-    }
-
-    pub fn symmetric_difference(
-        left: &HashMap<Value, Value>,
-        right: &HashMap<Value, Value>,
-    ) -> Value {
-        Value::Sequence(Sequence::Dictionary(Rc::new(RefCell::new(
-            hashmap::symmetric_difference(left, right),
-        ))))
-    }
+    // Removed these (unused) functions for now because they can't deal with default values
+    // pub fn union(left: &HashMap<Value, Value>, right: &HashMap<Value, Value>) -> Value {
+    //     Value::Sequence(Sequence::Dictionary(Rc::new(RefCell::new(hashmap::union(
+    //         left, right,
+    //     )))))
+    // }
+    //
+    // pub fn intersection(left: &HashMap<Value, Value>, right: &HashMap<Value, Value>) -> Value {
+    //     Value::Sequence(Sequence::Dictionary(Rc::new(RefCell::new(
+    //         hashmap::intersection(left, right),
+    //     ))))
+    // }
+    //
+    // pub fn symmetric_difference(
+    //     left: &HashMap<Value, Value>,
+    //     right: &HashMap<Value, Value>,
+    // ) -> Value {
+    //     Value::Sequence(Sequence::Dictionary(Rc::new(RefCell::new(
+    //         hashmap::symmetric_difference(left, right),
+    //     ))))
+    // }
 }

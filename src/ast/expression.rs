@@ -106,6 +106,7 @@ pub enum Expression {
     },
     Dictionary {
         values: Vec<(ExpressionLocation, Option<ExpressionLocation>)>,
+        default: Option<Box<ExpressionLocation>>,
     },
     Return {
         value: Box<ExpressionLocation>,
