@@ -203,82 +203,14 @@ pub(crate) fn evaluate_expression(
                     .with_existing::<EvaluationResult>(identifier, |existing_value| {
                         let existing_value = &mut *existing_value.borrow_mut();
 
-                        if let Either::Left(BinaryOperator::Concat) = operation {
-                            match (existing_value, right_value) {
-                                (
-                                    Value::Sequence(Sequence::String(left)),
-                                    Value::Sequence(Sequence::String(right)),
-                                ) => {
-                                    left.borrow_mut().push_str(&right.borrow());
-                                    Ok(Value::Sequence(Sequence::String(left.clone())))
-                                }
-                                (
-                                    Value::Sequence(Sequence::List(left)),
-                                    Value::Sequence(Sequence::List(right)),
-                                ) => {
-                                    // TODO if left == right this will panic
-                                    left.borrow_mut().extend_from_slice(&right.borrow());
-                                    Ok(Value::Sequence(Sequence::List(left.clone())))
-                                }
-                                (
-                                    Value::Sequence(Sequence::Tuple(ref mut left)),
-                                    Value::Sequence(Sequence::Tuple(right)),
-                                ) => {
-                                    //
-                                    Rc::make_mut(left).extend_from_slice(&right);
-                                    Ok(Value::Sequence(Sequence::Tuple(left.clone())))
-                                }
-                                _ => Err(EvaluationError::type_error(
-                                    "cannot apply the ++ operator between these types",
-                                    start,
-                                    end,
-                                )
-                                .into()),
-                            }
-                        } else if let Either::Left(BinaryOperator::Or) = operation {
-                            match (existing_value, right_value) {
-                                (
-                                    Value::Sequence(Sequence::Dictionary(left)),
-                                    Value::Sequence(Sequence::Dictionary(right)),
-                                ) => {
-                                    // If right and left are the same we can just do nothing and prevent a borrow checker arrow later
-                                    if Rc::ptr_eq(left, &right) {
-                                        return Ok(Value::Sequence(Sequence::Dictionary(
-                                            left.clone(),
-                                        )));
-                                    }
-                                    match Rc::try_unwrap(right) {
-                                        Ok(right) => {
-                                            left.borrow_mut().extend(right.take().into_iter());
-                                        }
-                                        Err(right) => {
-                                            left.borrow_mut().extend(
-                                                right
-                                                    .borrow() // TODO: change to try borrow in case something i
-                                                    .iter()
-                                                    .map(|(a, b)| (a.clone(), b.clone())),
-                                            );
-                                        }
-                                    }
-                                    Ok(Value::Sequence(Sequence::Dictionary(left.clone())))
-                                }
-                                _ => Err(EvaluationError::type_error(
-                                    "cannot apply the | operator between these types",
-                                    start,
-                                    end,
-                                )
-                                .into()),
-                            }
-                        } else {
-                            apply_operation_to_value(
-                                environment,
-                                existing_value,
-                                operation,
-                                right_value,
-                                start,
-                                end,
-                            )
-                        }
+                        apply_operation_to_value(
+                            environment,
+                            existing_value,
+                            operation,
+                            right_value,
+                            start,
+                            end,
+                        )
                     })
                     .ok_or_else(|| {
                         EvaluationError::syntax_error(
@@ -338,7 +270,7 @@ pub(crate) fn evaluate_expression(
                     }
                     Value::Sequence(Sequence::String(_)) => {
                         return Err(EvaluationError::type_error(
-                            &format!("{operation:?} is undefined for string",),
+                            "cannot OpAssign into a string",
                             start,
                             end,
                         )
@@ -346,7 +278,7 @@ pub(crate) fn evaluate_expression(
                     }
                     _ => {
                         return Err(EvaluationError::syntax_error(
-                            &format!("cannot index into {} at index", assign_to.value_type()),
+                            &format!("cannot OpAssign an index into a {}", assign_to.value_type()),
                             start,
                             end,
                         )
@@ -724,6 +656,15 @@ pub(crate) fn evaluate_expression(
     Ok(literal)
 }
 
+// Applies operations like `+` or functions like `max(x, y)` to mutable pointers to values. This is
+// used to optimize various OpAssign expressions that would otherwise create copies.
+// ```
+// x ++= [1,2,3]
+// // becomes
+// x.append([1,2,3]);
+// // instead of
+// x = x ++ [1,2,3]
+// ``
 fn apply_operation_to_value(
     environment: &EnvironmentRef,
     value: &mut Value,
@@ -732,22 +673,82 @@ fn apply_operation_to_value(
     start: Location,
     end: Location,
 ) -> Result<Value, FunctionCarrier> {
-    let old_value = std::mem::replace(value, Value::Unit);
-    match operation {
-        Either::Left(binary_operator) => {
-            *value = apply_operator(old_value, *binary_operator, right_value)?;
-        }
-        Either::Right(identifier) => {
-            *value = call_function_by_name(
-                identifier,
-                &[old_value, right_value],
-                environment,
+    return if let Either::Left(BinaryOperator::Concat) = operation {
+        match (value, right_value) {
+            (Value::Sequence(Sequence::String(left)), Value::Sequence(Sequence::String(right))) => {
+                left.borrow_mut().push_str(&right.borrow());
+                Ok(Value::Sequence(Sequence::String(left.clone())))
+            }
+            (Value::Sequence(Sequence::List(left)), Value::Sequence(Sequence::List(right))) => {
+                // TODO if left == right this will panic
+                left.borrow_mut().extend_from_slice(&right.borrow());
+                Ok(Value::Sequence(Sequence::List(left.clone())))
+            }
+            (
+                Value::Sequence(Sequence::Tuple(ref mut left)),
+                Value::Sequence(Sequence::Tuple(right)),
+            ) => {
+                //
+                Rc::make_mut(left).extend_from_slice(&right);
+                Ok(Value::Sequence(Sequence::Tuple(left.clone())))
+            }
+            _ => Err(EvaluationError::type_error(
+                "cannot apply the ++ operator between these types",
                 start,
                 end,
-            )?;
+            )
+            .into()),
         }
-    }
-    Ok(value.clone())
+    } else if let Either::Left(BinaryOperator::Or) = operation {
+        match (value, right_value) {
+            (
+                Value::Sequence(Sequence::Dictionary(left)),
+                Value::Sequence(Sequence::Dictionary(right)),
+            ) => {
+                // If right and left are the same we can just do nothing and prevent a borrow checker arrow later
+                if Rc::ptr_eq(left, &right) {
+                    return Ok(Value::Sequence(Sequence::Dictionary(left.clone())));
+                }
+                match Rc::try_unwrap(right) {
+                    Ok(right) => {
+                        left.borrow_mut().extend(right.take());
+                    }
+                    Err(right) => {
+                        left.borrow_mut().extend(
+                            right
+                                .borrow() // TODO: change to try borrow in case something i
+                                .iter()
+                                .map(|(a, b)| (a.clone(), b.clone())),
+                        );
+                    }
+                }
+                Ok(Value::Sequence(Sequence::Dictionary(left.clone())))
+            }
+            _ => Err(EvaluationError::type_error(
+                "cannot apply the | operator between these types",
+                start,
+                end,
+            )
+            .into()),
+        }
+    } else {
+        let old_value = std::mem::replace(value, Value::Unit);
+        match operation {
+            Either::Left(binary_operator) => {
+                *value = apply_operator(old_value, *binary_operator, right_value)?;
+            }
+            Either::Right(identifier) => {
+                *value = call_function_by_name(
+                    identifier,
+                    &[old_value, right_value],
+                    environment,
+                    start,
+                    end,
+                )?;
+            }
+        }
+        Ok(value.clone())
+    };
 }
 
 #[allow(clippy::too_many_lines)]
