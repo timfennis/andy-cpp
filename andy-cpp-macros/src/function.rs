@@ -158,7 +158,7 @@ fn create_temp_variable(
                 param_type: quote! { crate::interpreter::function::ParamType::Dictionary },
                 temp_var: quote! { #temp_var },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Sequence(crate::interpreter::value::Sequence::Dictionary(#rc_temp_var)) = &values[#position] else {
+                    let crate::interpreter::value::Value::Sequence(crate::interpreter::value::Sequence::Dictionary(#rc_temp_var, _default)) = &values[#position] else {
                         panic!("Value #position needed to be a Sequence::Dictionary but wasn't");
                     };
                     let #temp_var = &*#rc_temp_var.borrow();
@@ -172,7 +172,7 @@ fn create_temp_variable(
                 param_type: quote! { crate::interpreter::function::ParamType::Dictionary },
                 temp_var: quote! { #temp_var },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Sequence(crate::interpreter::value::Sequence::Dictionary(#rc_temp_var)) = &values[#position] else {
+                    let crate::interpreter::value::Value::Sequence(crate::interpreter::value::Sequence::Dictionary(#rc_temp_var, _default)) = &values[#position] else {
                         panic!("Value #position needed to be a Sequence::Dictionary but wasn't");
                     };
                     let #temp_var = &mut *#rc_temp_var.borrow_mut(); // TODO: change to try_borrow_mut()

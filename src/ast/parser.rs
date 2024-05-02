@@ -818,6 +818,20 @@ impl Parser {
         // This should have been checked before this method is called;
         let start = self.require_token(&[Token::MapOpen])?;
 
+        // Optional default value
+        let default = if self.consume_token_if(&[Token::Colon]).is_some() {
+            let default = self.expression()?;
+            if self.match_token(&[Token::RightCurlyBracket]).is_some() {
+                // If the list ends without any values we just do nothing and let the loop below handle the rest
+            } else {
+                // If there isn't a } to close the map there must be a comma otherwise we error out
+                self.require_current_token_matches(Token::Comma)?;
+            }
+            Some(Box::new(default))
+        } else {
+            None
+        };
+
         let mut values = Vec::new();
 
         let end = loop {
@@ -843,7 +857,7 @@ impl Parser {
             // TODO: maybe have require_current_token accept multiple tokens including the RightCurlyBracket for a better error
             self.require_current_token_matches(Token::Comma)?;
         };
-        Ok(Expression::Dictionary { values }.to_location(start, end))
+        Ok(Expression::Dictionary { values, default }.to_location(start, end))
     }
 }
 

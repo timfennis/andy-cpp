@@ -2,4 +2,4 @@
 list := ["foobar", 123];
 print(list)
 --EXPECT--
-[foobar,123]
+["foobar",123]
