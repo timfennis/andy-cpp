@@ -1,7 +1,7 @@
 pub mod cmp;
 pub mod file;
+pub mod hash_map;
 pub mod list;
-pub mod map;
 pub mod math;
 pub mod sequence;
 pub mod string;

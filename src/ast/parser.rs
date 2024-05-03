@@ -573,7 +573,7 @@ impl Parser {
         else if self.match_token(&[Token::LeftCurlyBracket]).is_some() {
             return self.block();
         }
-        // matches dictionary expression %{1,2,3}
+        // matches map expression %{1,2,3}
         else if self.match_token(&[Token::MapOpen]).is_some() {
             return self.map_expression();
         }
@@ -857,7 +857,7 @@ impl Parser {
             // TODO: maybe have require_current_token accept multiple tokens including the RightCurlyBracket for a better error
             self.require_current_token_matches(Token::Comma)?;
         };
-        Ok(Expression::Dictionary { values, default }.to_location(start, end))
+        Ok(Expression::Map { values, default }.to_location(start, end))
     }
 }
 

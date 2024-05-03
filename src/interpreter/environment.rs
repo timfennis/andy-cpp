@@ -1,6 +1,6 @@
 use crate::interpreter::function::Function;
 
-use crate::hashmap::HashMap;
+use crate::hash_map::HashMap;
 
 use std::cell::RefCell;
 use std::fmt;
@@ -85,7 +85,7 @@ impl Environment {
         crate::stdlib::math::f64::register(&mut env);
         crate::stdlib::math::register(&mut env);
         crate::stdlib::sequence::register(&mut env);
-        crate::stdlib::map::register(&mut env);
+        crate::stdlib::hash_map::register(&mut env);
         crate::stdlib::string::register(&mut env);
         crate::stdlib::value::register(&mut env);
 

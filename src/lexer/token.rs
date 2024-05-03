@@ -64,7 +64,7 @@ pub enum Token {
     RightCurlyBracket,
     Semicolon,
     Comma,
-    Colon, // : operator is used in building dictionaries and specifying type hints (in the future)
+    Colon, // : operator is used in building maps and specifying type hints (in the future)
     // Lmao syntax
     MapOpen, // %{ operator stolen from elixir
 }
