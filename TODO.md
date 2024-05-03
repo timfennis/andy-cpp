@@ -28,13 +28,6 @@ a, b, c = [1, 2, 3]; // Destructure the list into the variables a, b and c
 (a:b:c:d) = [1, 2, 3]; // a == 1, b == 2, c == 3, d == []
 ```
 
-## List comprehensions
-
-```ndc
-x := [ sqrt(n) | n in ns ]
-cartesian_product := [ x, y | x in xs, y in ys ]
-```
-
 ### General
 
 * [x] turn `print` into a function

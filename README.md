@@ -8,6 +8,9 @@ Currently, the language only has some very basic features. I'll try to update th
 
 ### Factorial
 
+You can produce very large numbers quite quickly because we use the [num](https://docs.rs/num/latest/num/) crate under
+the hood.
+
 ```ndc
 n := v := 10;
 while { n -= 1 } > 0 {
@@ -27,31 +30,11 @@ fn factorial(n) {
     n * factorial(n - 1)
 }
 
-// Easily prints 100! because we use num::BigInt under the hood
 print(factorial(100));
-// Or call functions as if they are methods on an object
+
+// You can call all functions as if they are methods on an object
 print(100.factorial());
 
-```
-
-### Recursive fibonacci
-
-Does not yet enjoy the benefits of memoization.
-
-```ndc
-fn fib(n) {
-    if n <= 1 {
-        return n
-    } 
-
-    fib(n - 1) + fib(n - 2)
-}
-
-i := 0;
-while i < 30 {
-    print(fib(i));
-    i += 1;
-}
 ```
 
 ### Overloading
@@ -75,11 +58,39 @@ create [augmented assignment operators](https://blog.vero.site/post/noulith#augm
 i := r := 0;
 
 while { i += 1 } < 100 {
-    // translates to r = max(r, i * 8333446703 % 94608103)
+    // roughly translates to r = max(r, i * 8333446703 % 94608103)
     r max= i * 8333446703 % 94608103;
 }
 
 print(r);
+```
+
+### Maps and Sets
+
+Maps and sets are the same type and have their own special syntax
+
+```ndc
+map := %{"foo": "bar"};
+
+set := %{1,2,3,4};
+```
+
+Something like the `defaultdict` in python is natively supported using this syntax (stolen from Noulith)
+
+```ndc
+default_map := %{:1, 0: 10};
+default_map[0] == 10
+default_map[1] == 1 // default value
+
+// supports augmented asignment
+default_map[5] += 4; // puts 4 in the map
+
+// pitfall: lists are copied by reference
+uhm := %{:[]};
+uhm[0] ++= [1];
+
+// true because the default value was changed in the line above
+uhm[1] == [1] 
 ```
 
 ## Thanks
