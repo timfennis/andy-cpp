@@ -11,8 +11,8 @@ use itertools::Itertools;
 use crate::ast::{
     BinaryOperator, Expression, ExpressionLocation, LogicalOperator, Lvalue, UnaryOperator,
 };
-use crate::hashmap;
-use crate::hashmap::HashMap;
+use crate::hash_map;
+use crate::hash_map::HashMap;
 use crate::interpreter::environment::{Environment, EnvironmentRef};
 use crate::interpreter::function::{Function, FunctionCarrier, OverloadedFunction};
 use crate::interpreter::int::Int;
@@ -166,15 +166,13 @@ pub(crate) fn evaluate_expression(
                             .into());
                         }
                     }
-                    Value::Sequence(Sequence::Dictionary(dictionary, _)) => {
+                    Value::Sequence(Sequence::Map(map, _)) => {
                         let value = evaluate_expression(value, environment)?;
                         let key = evaluate_expression(index, environment)?;
 
-                        let mut dictionary = dictionary
-                            .try_borrow_mut()
-                            .into_evaluation_result(start, end)?;
+                        let mut map = map.try_borrow_mut().into_evaluation_result(start, end)?;
 
-                        dictionary.insert(key, value);
+                        map.insert(key, value);
                     }
                     _ => {
                         return Err(EvaluationError::syntax_error(
@@ -251,13 +249,13 @@ pub(crate) fn evaluate_expression(
                             end,
                         )?;
                     }
-                    Value::Sequence(Sequence::Dictionary(dict, default)) => {
+                    Value::Sequence(Sequence::Map(dict, default)) => {
                         let right_value = evaluate_expression(value, environment)?;
                         let index = evaluate_expression(index, environment)?;
 
                         let mut dict = dict.try_borrow_mut().into_evaluation_result(start, end)?;
 
-                        let dictionary_entry = if let Some(default) = default {
+                        let map_entry = if let Some(default) = default {
                             dict.entry(index).or_insert(Value::clone(default))
                         } else {
                             dict.get_mut(&index)
@@ -266,7 +264,7 @@ pub(crate) fn evaluate_expression(
 
                         apply_operation_to_value(
                             environment,
-                            dictionary_entry,
+                            map_entry,
                             operation,
                             right_value,
                             start,
@@ -455,7 +453,7 @@ pub(crate) fn evaluate_expression(
             }
             Value::Sequence(Sequence::List(Rc::new(RefCell::new(values_out))))
         }
-        Expression::Dictionary { values, default } => {
+        Expression::Map { values, default } => {
             let mut hashmap = HashMap::with_capacity(values.len());
             for (key, value) in values {
                 let key = evaluate_expression(key, environment)?;
@@ -474,10 +472,7 @@ pub(crate) fn evaluate_expression(
                 None
             };
 
-            Value::Sequence(Sequence::Dictionary(
-                Rc::new(RefCell::new(hashmap)),
-                default,
-            ))
+            Value::Sequence(Sequence::Map(Rc::new(RefCell::new(hashmap)), default))
         }
         Expression::For {
             l_value,
@@ -544,8 +539,8 @@ pub(crate) fn evaluate_expression(
                         evaluate_expression(loop_body, &mut scope)?;
                     }
                 }
-                Sequence::Dictionary(dictionary, _) => {
-                    let xs = dictionary.borrow();
+                Sequence::Map(map, _) => {
+                    let xs = map.borrow();
                     for (key, value) in xs.iter() {
                         // TODO: support pattern matching tuples in var name
                         let mut scope = Environment::new_scope(environment);
@@ -639,7 +634,7 @@ pub(crate) fn evaluate_expression(
 
                             value.clone()
                         }
-                        Sequence::Dictionary(dict, default) => {
+                        Sequence::Map(dict, default) => {
                             let key = evaluate_expression(index_expr, environment)?;
                             let dict = dict.borrow();
 
@@ -720,8 +715,8 @@ fn apply_operation_to_value(
     } else if let Either::Left(BinaryOperator::Or) = operation {
         match (value, right_value) {
             (
-                Value::Sequence(Sequence::Dictionary(left, default)),
-                Value::Sequence(Sequence::Dictionary(right, _)),
+                Value::Sequence(Sequence::Map(left, default)),
+                Value::Sequence(Sequence::Map(right, _)),
             ) => {
                 // If right and left are the same we can just do nothing and prevent a borrow checker error later
                 if !Rc::ptr_eq(left, &right) {
@@ -740,7 +735,7 @@ fn apply_operation_to_value(
                     }
                 }
 
-                return Ok(Value::Sequence(Sequence::Dictionary(
+                return Ok(Value::Sequence(Sequence::Map(
                     left.clone(),
                     default.to_owned(),
                 )));
@@ -844,10 +839,10 @@ fn apply_operator(
             ) => Value::from(a & b),
             // Note that when using & on two dictionaries with a default values the default value from left is kept
             (
-                Value::Sequence(Sequence::Dictionary(left, default)),
-                Value::Sequence(Sequence::Dictionary(right, _)),
-            ) => Value::Sequence(Sequence::Dictionary(
-                Rc::new(RefCell::new(hashmap::intersection(
+                Value::Sequence(Sequence::Map(left, default)),
+                Value::Sequence(Sequence::Map(right, _)),
+            ) => Value::Sequence(Sequence::Map(
+                Rc::new(RefCell::new(hash_map::intersection(
                     &*left.borrow(),
                     &*right.borrow(),
                 ))),
@@ -861,10 +856,10 @@ fn apply_operator(
                 Value::Number(Number::Int(Int::Int64(b))),
             ) => Value::from(a | b),
             (
-                Value::Sequence(Sequence::Dictionary(left, default)),
-                Value::Sequence(Sequence::Dictionary(right, _)),
-            ) => Value::Sequence(Sequence::Dictionary(
-                Rc::new(RefCell::new(hashmap::union(
+                Value::Sequence(Sequence::Map(left, default)),
+                Value::Sequence(Sequence::Map(right, _)),
+            ) => Value::Sequence(Sequence::Map(
+                Rc::new(RefCell::new(hash_map::union(
                     &*left.borrow(),
                     &*right.borrow(),
                 ))),
@@ -883,8 +878,8 @@ fn apply_operator(
             (needle, Value::Sequence(Sequence::Tuple(haystack))) => {
                 haystack.contains(&needle).into()
             }
-            (needle, Value::Sequence(Sequence::Dictionary(dictionary, _))) => {
-                dictionary.borrow().contains_key(&needle).into()
+            (needle, Value::Sequence(Sequence::Map(map, _))) => {
+                map.borrow().contains_key(&needle).into()
             }
             _ => Value::Bool(false),
         },

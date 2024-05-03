@@ -3,6 +3,11 @@ pub use ahash::AHashMap as HashMap;
 #[cfg(not(feature = "ahash"))]
 pub use std::collections::HashMap;
 
+#[cfg(feature = "ahash")]
+pub use ahash::AHasher as DefaultHasher;
+#[cfg(not(feature = "ahash"))]
+pub use std::hash::DefaultHasher;
+
 use std::hash::Hash;
 
 pub trait HashMapExt<K, V> {

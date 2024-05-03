@@ -102,8 +102,11 @@ fn into_param_type(ty: &syn::Type) -> TokenStream {
         return quote! { crate::interpreter::function::ParamType::List };
     }
 
-    if path_ends_with(ty, "HashMap") {
-        return quote! { crate::interpreter::function::ParamType::Dictionary };
+    if path_ends_with(ty, "DefaultMap")
+        || path_ends_with(ty, "DefaultMapMut")
+        || path_ends_with(ty, "HashMap")
+    {
+        return quote! { crate::interpreter::function::ParamType::Map };
     }
 
     match ty {
@@ -155,11 +158,11 @@ fn create_temp_variable(
         else if is_ref(ty) && path_ends_with(ty, "HashMap") {
             let rc_temp_var = syn::Ident::new(&format!("temp_{temp_var}"), identifier.span());
             return Some(TempVar {
-                param_type: quote! { crate::interpreter::function::ParamType::Dictionary },
+                param_type: quote! { crate::interpreter::function::ParamType::Map },
                 temp_var: quote! { #temp_var },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Sequence(crate::interpreter::value::Sequence::Dictionary(#rc_temp_var, _default)) = &values[#position] else {
-                        panic!("Value #position needed to be a Sequence::Dictionary but wasn't");
+                    let crate::interpreter::value::Value::Sequence(crate::interpreter::value::Sequence::Map(#rc_temp_var, _default)) = &values[#position] else {
+                        panic!("Value #position needed to be a Sequence::Map but wasn't");
                     };
                     let #temp_var = &*#rc_temp_var.borrow();
                 },
@@ -169,13 +172,39 @@ fn create_temp_variable(
         else if is_ref_mut(ty) && path_ends_with(ty, "HashMap") {
             let rc_temp_var = syn::Ident::new(&format!("temp_{temp_var}"), identifier.span());
             return Some(TempVar {
-                param_type: quote! { crate::interpreter::function::ParamType::Dictionary },
+                param_type: quote! { crate::interpreter::function::ParamType::Map },
                 temp_var: quote! { #temp_var },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Sequence(crate::interpreter::value::Sequence::Dictionary(#rc_temp_var, _default)) = &values[#position] else {
-                        panic!("Value #position needed to be a Sequence::Dictionary but wasn't");
+                    let crate::interpreter::value::Value::Sequence(crate::interpreter::value::Sequence::Map(#rc_temp_var, _default)) = &values[#position] else {
+                        panic!("Value #position needed to be a Sequence::Map but wasn't");
                     };
                     let #temp_var = &mut *#rc_temp_var.borrow_mut(); // TODO: change to try_borrow_mut()
+                },
+            });
+        } else if path_ends_with(ty, "DefaultMap") {
+            let rc_temp_var = syn::Ident::new(&format!("temp_{temp_var}"), identifier.span());
+            return Some(TempVar {
+                param_type: quote! { crate::interpreter::function::ParamType::Map },
+                temp_var: quote! { #temp_var },
+                initialize_code: quote! {
+                    let crate::interpreter::value::Value::Sequence(crate::interpreter::value::Sequence::Map(#rc_temp_var, default)) = &values[#position] else {
+                        panic!("Value #position needed to be a Sequence::Map but wasn't");
+                    };
+                    let #temp_var = (&*#rc_temp_var.borrow(), default.to_owned());
+                },
+            });
+        }
+        // The pattern is &mut HashMap<Value, Value>
+        else if path_ends_with(ty, "DefaultMapMut") {
+            let rc_temp_var = syn::Ident::new(&format!("temp_{temp_var}"), identifier.span());
+            return Some(TempVar {
+                param_type: quote! { crate::interpreter::function::ParamType::Map },
+                temp_var: quote! { #temp_var },
+                initialize_code: quote! {
+                    let crate::interpreter::value::Value::Sequence(crate::interpreter::value::Sequence::Map(#rc_temp_var, default)) = &values[#position] else {
+                        panic!("Value #position needed to be a Sequence::Map but wasn't");
+                    };
+                    let #temp_var = (&mut *#rc_temp_var.borrow_mut(), default.to_owned()); // TODO: change to try_borrow_mut()
                 },
             });
         }

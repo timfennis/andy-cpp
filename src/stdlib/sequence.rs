@@ -9,7 +9,7 @@ mod inner {
             Sequence::String(s) => s.borrow().len(),
             Sequence::List(l) => l.borrow().len(),
             Sequence::Tuple(t) => t.len(),
-            Sequence::Dictionary(d, _) => d.borrow().len(),
+            Sequence::Map(d, _) => d.borrow().len(),
         }
     }
 }

@@ -1,3 +1,4 @@
+use crate::hash_map::{DefaultHasher, HashMap};
 use crate::interpreter::evaluate::{EvaluationError, IntoEvaluationError};
 use crate::interpreter::function::{Function, OverloadedFunction};
 use crate::interpreter::int::Int;
@@ -6,11 +7,9 @@ use crate::lexer::Location;
 use num::BigInt;
 use std::cell::RefCell;
 use std::cmp::Ordering;
-
-use crate::hashmap::HashMap;
+use std::hash::{Hash, Hasher};
 
 use std::fmt;
-use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 /// Enumerates all the different types of values that exist in the language
@@ -35,7 +34,7 @@ impl Value {
             Value::Sequence(Sequence::List(_)) => ValueType::List,
             Value::Sequence(Sequence::Tuple(_)) => ValueType::Tuple,
             Value::Function(_) => ValueType::Function,
-            Value::Sequence(Sequence::Dictionary(_, _)) => ValueType::Dictionary,
+            Value::Sequence(Sequence::Map(_, _)) => ValueType::Map,
         }
     }
 }
@@ -67,8 +66,8 @@ impl Hash for Value {
                         item.hash(state);
                     }
                 }
-                // NOTE: the default value is not party of the identity of the dictionary so %{1,2,3} == {:0,1,2,3}
-                Sequence::Dictionary(dict, _) => {
+                // NOTE: the default value is not party of the identity of the map so %{1,2,3} == {:0,1,2,3}
+                Sequence::Map(dict, _) => {
                     state.write_u8(8);
                     // This is 1 to 1 ripped from Noulith, and it's meant to ensure that if sets
                     // are equal {1,2,3} == {3,2,1} they produce the same hash regardless of the
@@ -77,7 +76,7 @@ impl Hash for Value {
                     let mut acc = 0u64;
                     let mut cube_acc = 0u64;
                     for (key, value) in dict.borrow().iter() {
-                        let mut hasher = std::hash::DefaultHasher::default();
+                        let mut hasher = DefaultHasher::default();
                         key.hash(&mut hasher);
                         value.hash(&mut hasher);
 
@@ -126,12 +125,15 @@ impl PartialOrd for Value {
     }
 }
 
+pub type DefaultMapMut<'a> = (&'a mut HashMap<Value, Value>, Option<Box<Value>>);
+pub type DefaultMap<'a> = (&'a HashMap<Value, Value>, Option<Box<Value>>);
+
 #[derive(Clone, PartialEq)]
 pub enum Sequence {
     String(Rc<RefCell<String>>),
     List(Rc<RefCell<Vec<Value>>>),
     Tuple(Rc<Vec<Value>>),
-    Dictionary(Rc<RefCell<HashMap<Value, Value>>>, Option<Box<Value>>),
+    Map(Rc<RefCell<HashMap<Value, Value>>>, Option<Box<Value>>),
 }
 
 impl Eq for Sequence {}
@@ -407,7 +409,7 @@ pub enum ValueType {
     List,
     Tuple,
     Function,
-    Dictionary,
+    Map,
 }
 
 impl From<&Value> for ValueType {
@@ -426,7 +428,7 @@ impl fmt::Display for ValueType {
             Self::List => write!(f, "list"),
             Self::Tuple => write!(f, "tuple"),
             Self::Function => write!(f, "function"),
-            ValueType::Dictionary => write!(f, "dictionary"),
+            ValueType::Map => write!(f, "map"),
         }
     }
 }
@@ -488,7 +490,7 @@ impl fmt::Debug for Sequence {
                 }
                 write!(f, ")")
             }
-            Sequence::Dictionary(dict, default) => {
+            Sequence::Map(dict, default) => {
                 let dict = dict.borrow();
                 let mut iter = dict.iter().peekable();
                 if let Some(default) = default {

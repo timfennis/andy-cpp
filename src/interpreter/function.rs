@@ -2,7 +2,7 @@ use std::fmt;
 use std::rc::Rc;
 
 use crate::ast::ExpressionLocation;
-use crate::hashmap::HashMap;
+use crate::hash_map::HashMap;
 use crate::interpreter::environment::{Environment, EnvironmentRef};
 use crate::interpreter::evaluate::{evaluate_expression, EvaluationError, EvaluationResult};
 use crate::interpreter::num::{Number, NumberType};
@@ -138,7 +138,7 @@ pub enum ParamType {
     List,
     String,
     Tuple,
-    Dictionary,
+    Map,
 }
 
 impl ParamType {
@@ -154,13 +154,13 @@ impl ParamType {
             (ParamType::String, ValueType::String) => Some(0),
             (ParamType::List, ValueType::List) => Some(0),
             (ParamType::Tuple, ValueType::Tuple) => Some(0),
-            (ParamType::Dictionary, ValueType::Dictionary) => Some(0),
+            (ParamType::Map, ValueType::Map) => Some(0),
             (ParamType::Function, ValueType::Function) => Some(0),
             (ParamType::Any, _) => Some(2),
             (ParamType::Number, ValueType::Number(_)) => Some(1),
             (
                 ParamType::Sequence,
-                ValueType::List | ValueType::String | ValueType::Dictionary | ValueType::Tuple,
+                ValueType::List | ValueType::String | ValueType::Map | ValueType::Tuple,
             ) => Some(1),
             _ => None,
         }
@@ -181,7 +181,7 @@ impl From<&Value> for ParamType {
             Value::Sequence(Sequence::List(_)) => ParamType::List,
             Value::Sequence(Sequence::Tuple(_)) => ParamType::Tuple,
             Value::Function(_) => ParamType::Function,
-            Value::Sequence(Sequence::Dictionary(_, _)) => ParamType::Dictionary,
+            Value::Sequence(Sequence::Map(_, _)) => ParamType::Map,
         }
     }
 }

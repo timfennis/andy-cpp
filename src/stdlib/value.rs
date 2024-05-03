@@ -14,12 +14,10 @@ mod inner {
             Value::Bool(b) => Value::Bool(*b),
             Value::Sequence(Sequence::String(string)) => Value::from(string.borrow().to_owned()),
             Value::Sequence(Sequence::List(list)) => Value::from(list.borrow().to_owned()),
-            Value::Sequence(Sequence::Dictionary(dict, default)) => {
-                Value::Sequence(Sequence::Dictionary(
-                    Rc::new(RefCell::new(dict.borrow().clone())),
-                    default.to_owned(),
-                ))
-            }
+            Value::Sequence(Sequence::Map(map, default)) => Value::Sequence(Sequence::Map(
+                Rc::new(RefCell::new(map.borrow().clone())),
+                default.to_owned(),
+            )),
             Value::Sequence(Sequence::Tuple(tuple)) => {
                 Value::Sequence(Sequence::Tuple(tuple.clone()))
             }
