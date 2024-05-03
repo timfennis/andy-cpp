@@ -83,7 +83,7 @@ default_map[0] == 10
 default_map[1] == 1 // default value
 
 // supports augmented asignment
-default_map[5] += 4; // puts 4 in the map
+default_map[5] += 3; // puts 4 in the map
 
 // pitfall: lists are copied by reference
 uhm := %{:[]};
