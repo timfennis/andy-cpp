@@ -12,6 +12,12 @@ pub struct Lexer<'a> {
 
 impl<'a> Lexer<'a> {
     /// Takes a `TokenLocation` and tries to upgrade it's inner `Token` into a `Token::OpAssign` token.
+    /// if the operator is followed by an `=` we wrap the token in an `OpAssign` token
+    /// example:
+    /// ```ndc
+    /// foo := false
+    /// foo &&= true
+    /// ```
     fn lex_op_assign(&mut self, operation_token: TokenLocation, start: Location) -> TokenLocation {
         match self.source.peek_one() {
             Some('=') if operation_token.token.is_augmentable() => {
@@ -100,7 +106,9 @@ impl Iterator for Lexer<'_> {
                 column: self.source.column,
                 line: self.source.line,
             };
+
             let next = self.source.peek_one();
+            let next2 = self.source.peek_n(1);
 
             // Exclude // docs
             if matches!((char, next), ('/', Some('/'))) {
@@ -118,32 +126,37 @@ impl Iterator for Lexer<'_> {
                 continue 'iterator;
             }
 
+            if let Ok(token) = Token::try_from((char, next, next2)) {
+                let operator_token = TokenLocation {
+                    token,
+                    location: self.source.location(),
+                };
+
+                self.source.next();
+                self.source.next();
+
+                return Some(Ok(self.lex_op_assign(operator_token, start)));
+            }
             // Check for double character tokens
             if let Ok(token) = Token::try_from((char, next)) {
-                let operation_token = TokenLocation {
+                let operator_token = TokenLocation {
                     token,
                     location: self.source.location(),
                 };
 
                 self.source.next();
 
-                // if the operator is followed by an `=` we wrap the token in an `OpAssign` token
-                // example:
-                // ```ndc
-                // foo := false
-                // foo &&= true
-                // ```
-                return Some(Ok(self.lex_op_assign(operation_token, start)));
+                return Some(Ok(self.lex_op_assign(operator_token, start)));
             }
 
             // Check for single character tokens
             if let Ok(token) = Token::try_from(char) {
-                let operation_token = TokenLocation {
+                let operator_token = TokenLocation {
                     token,
                     location: self.source.location(),
                 };
 
-                return Some(Ok(self.lex_op_assign(operation_token, start)));
+                return Some(Ok(self.lex_op_assign(operator_token, start)));
             }
 
             match (char, next) {
@@ -172,7 +185,7 @@ impl Iterator for Lexer<'_> {
                                 // in this match we look ahead one step further to figure out if the
                                 // dot is followed by a number in which case it's a float, otherwise
                                 // we stop and just return the int and leave the dot for later
-                                match self.source.peek_next() {
+                                match self.source.peek_n(1) {
                                     // it's truly a num
                                     Some(n) if n.is_ascii_digit() => {
                                         float = true;
@@ -244,7 +257,7 @@ impl Iterator for Lexer<'_> {
                     }
 
                     // If the identifier is followed by a single `=` we construct an OpAssign
-                    if self.source.peek_one() == Some('=') && self.source.peek_next() != Some('=') {
+                    if self.source.peek_one() == Some('=') && self.source.peek_n(1) != Some('=') {
                         self.source.next();
                         return Some(Ok(TokenLocation {
                             token: Token::OpAssign(Box::new(TokenLocation {
@@ -313,18 +326,16 @@ impl<'a> Iterator for SourceIterator<'a> {
 }
 
 impl<'a> SourceIterator<'a> {
-    pub fn peek_next(&mut self) -> Option<char> {
-        let next = self.inner.next()?;
-        self.buffer.push_back(next);
-        Some(next)
+    pub fn peek_n(&mut self, n: usize) -> Option<char> {
+        while self.buffer.get(n).is_none() {
+            self.buffer.push_back(self.inner.next()?);
+        }
+
+        self.buffer.get(n).copied()
     }
 
     pub fn peek_one(&mut self) -> Option<char> {
-        return if let Some(head) = self.buffer.front() {
-            Some(*head)
-        } else {
-            self.peek_next()
-        };
+        self.peek_n(0)
     }
 }
 

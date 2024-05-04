@@ -70,7 +70,7 @@ pub enum Expression {
     FunctionDeclaration {
         name: Box<ExpressionLocation>,
         arguments: Box<ExpressionLocation>,
-        body: Rc<ExpressionLocation>, //TODO: we probably made body an rc because Noulith does this, but why?
+        body: Rc<ExpressionLocation>, //TODO what happens if we remove the Rc?
     },
     Block {
         statements: Vec<ExpressionLocation>,
@@ -110,6 +110,14 @@ pub enum Expression {
     },
     Return {
         value: Box<ExpressionLocation>,
+    },
+    RangeInclusive {
+        start: Option<Box<ExpressionLocation>>,
+        end: Option<Box<ExpressionLocation>>,
+    },
+    RangeExclusive {
+        start: Option<Box<ExpressionLocation>>,
+        end: Option<Box<ExpressionLocation>>,
     },
 }
 

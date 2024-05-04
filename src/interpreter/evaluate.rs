@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::error::Error;
 use std::fmt;
-use std::ops::{IndexMut, Neg, Rem};
+use std::ops::{IndexMut, Neg, Range, RangeInclusive, Rem};
 use std::rc::Rc;
 
 use either::Either;
@@ -663,6 +663,57 @@ pub(crate) fn evaluate_expression(
                     .into())
                 }
             }
+        }
+        Expression::RangeInclusive {
+            start: range_start,
+            end: range_end,
+        } => {
+            let range_start = evaluate_expression(
+                range_start
+                    .as_deref()
+                    .expect("TODO: deal with missing start"),
+                environment,
+            )?;
+            let range_end = evaluate_expression(
+                range_end.as_deref().expect("TODO: deal with missing end"),
+                environment,
+            )?;
+
+            let range_start = i64::try_from(range_start).into_evaluation_result(start, end)?;
+            let range_end = i64::try_from(range_end).into_evaluation_result(start, end)?;
+            let range = RangeInclusive::new(range_start, range_end)
+                .map(Value::from)
+                // TODO: get rid of this collect once we support iterators
+                .collect::<Vec<Value>>();
+
+            Value::from(range)
+        }
+        Expression::RangeExclusive {
+            start: range_start,
+            end: range_end,
+        } => {
+            let range_start = evaluate_expression(
+                range_start
+                    .as_deref()
+                    .expect("TODO: deal with missing start"),
+                environment,
+            )?;
+            let range_end = evaluate_expression(
+                range_end.as_deref().expect("TODO: deal with missing end"),
+                environment,
+            )?;
+
+            let range_start = i64::try_from(range_start).into_evaluation_result(start, end)?;
+            let range_end = i64::try_from(range_end).into_evaluation_result(start, end)?;
+            let range = Range {
+                start: range_start,
+                end: range_end,
+            }
+            .map(Value::from)
+            // TODO: get rid of this collect once we support iterators
+            .collect::<Vec<Value>>();
+
+            Value::from(range)
         }
     };
 

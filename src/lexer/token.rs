@@ -42,8 +42,9 @@ pub enum Token {
     // Operator - Call
     Dot,
     // Operator - Other
-    DotDot, // range builder
-    Concat, // ++ operator will be for concatenation
+    DotDot,       // range builder
+    DotDotEquals, // inclusive range builder
+    Concat,       // ++ operator will be for concatenation
     // Keywords
     Fn,
     If,
@@ -133,6 +134,7 @@ impl fmt::Display for Token {
             Self::LogicOr => "||",
             Self::Unit => "()",
             Self::DotDot => "..",
+            Self::DotDotEquals => "..=",
             Self::Concat => "++",
             Self::Dot => ".",
             Self::OpAssign(inner) => {
@@ -196,6 +198,28 @@ impl fmt::Display for Location {
     }
 }
 
+impl TryFrom<(char, Option<char>, Option<char>)> for Token {
+    type Error = ();
+
+    fn try_from((c1, c2, c3): (char, Option<char>, Option<char>)) -> Result<Self, Self::Error> {
+        let options = || Some((c1, c2?, c3?));
+        if let Some(three_tup) = options() {
+            Token::try_from(three_tup)
+        } else {
+            Err(())
+        }
+    }
+}
+impl TryFrom<(char, char, char)> for Token {
+    type Error = ();
+
+    fn try_from((c1, c2, c3): (char, char, char)) -> Result<Self, Self::Error> {
+        match (c1, c2, c3) {
+            ('.', '.', '=') => Ok(Self::DotDotEquals),
+            _ => Err(()),
+        }
+    }
+}
 impl TryFrom<(char, Option<char>)> for Token {
     type Error = ();
 
@@ -209,6 +233,7 @@ impl TryFrom<(char, char)> for Token {
 
     fn try_from((c1, c2): (char, char)) -> Result<Self, Self::Error> {
         match (c1, c2) {
+            ('.', '.') => Ok(Self::DotDot),
             ('%', '{') => Ok(Self::MapOpen),
             ('+', '+') => Ok(Self::Concat),
             ('&', '&') => Ok(Self::LogicAnd),

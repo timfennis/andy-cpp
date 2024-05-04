@@ -55,9 +55,9 @@ Many functions can be used to
 create [augmented assignment operators](https://blog.vero.site/post/noulith#augmented-assignment).
 
 ```ndc
-i := r := 0;
+r := 0;
 
-while { i += 1 } < 100 {
+for i in 0..100 {
     // roughly translates to r = max(r, i * 8333446703 % 94608103)
     r max= i * 8333446703 % 94608103;
 }
