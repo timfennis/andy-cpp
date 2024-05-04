@@ -56,7 +56,6 @@ impl<'a> Lexer<'a> {
             buf.push(char);
 
             if buf.ends_with(&end_pattern) {
-                eprintln!("IT HAPPNED");
                 buf.truncate(buf.len() - end_pattern.len());
                 return Ok(TokenLocation {
                     token: Token::String(buf),
@@ -194,10 +193,21 @@ impl Iterator for Lexer<'_> {
                 ('r', Some('#')) => {
                     self.source.next();
                     let mut cnt = 1;
-                    while let Some('#') = self.source.next() {
-                        cnt += 1;
+                    loop {
+                        match self.source.next() {
+                            Some('#') => cnt += 1,
+                            Some('"') => return Some(self.lex_string_literal(start, cnt)),
+                            Some(char) => {
+                                return Some(Err(Error::UnexpectedCharacter {
+                                    char,
+                                    location: self.source.location(),
+                                }))
+                            }
+                            None => {
+                                return Some(Err(Error::UnterminatedString { location: start }))
+                            }
+                        }
                     }
-                    Some(self.lex_string_literal(start, cnt))
                 }
                 ('"', _) => return Some(self.lex_string(start)),
                 (char, _) if char.is_ascii_digit() => {

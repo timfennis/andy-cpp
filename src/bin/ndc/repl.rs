@@ -1,4 +1,5 @@
-use colored::Colorize;
+use colored::{Color, ColoredString, Colorize};
+use itertools::Itertools;
 use ndc_lib::interpreter::Interpreter;
 use ndc_lib::lexer::{Lexer, Token};
 use rustyline::config::Configurer;
@@ -11,58 +12,67 @@ use std::fmt::Write as _;
 #[derive(Helper, Completer, Hinter, Validator)]
 struct RustlylineHelper {}
 
+const NUMBER_LITERAL_COLOR: Color = Color::TrueColor {
+    r: 253,
+    g: 151,
+    b: 31,
+};
+
+const PARENTHESES_COLOR: Color = Color::TrueColor {
+    r: 229,
+    g: 181,
+    b: 103,
+};
+
+const STRING_LITERAL_COLOR: Color = Color::BrightGreen;
+const IDENTIFIER_COLOR: Color = Color::BrightCyan;
+
 impl rustyline::highlight::Highlighter for RustlylineHelper {
     fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
-        let lexer = Lexer::new(line);
-        let mut it = line.chars().enumerate().peekable();
+        let Ok(tokens) = Lexer::new(line).collect::<Result<Vec<_>, _>>() else {
+            return Cow::Owned(line.red().to_string());
+        };
 
-        if let Ok(tokens) = lexer.collect::<Result<Vec<_>, _>>() {
-            let mut out = String::new();
-            for token in tokens {
-                while it
-                    .peek()
-                    .map_or(false, |(i, _)| i < &(token.location.column - 1))
-                {
-                    out.push(it.next().unwrap().1);
-                }
-                // dbg!(&token);
-
-                let colored_token = match &token.token {
-                    Token::String(s) => format!("{s:?}").bright_green(),
-                    Token::BigInt(n) => format!("{n}").truecolor(253, 151, 31),
-                    Token::Int64(n) => format!("{n}").truecolor(253, 151, 31),
-                    Token::Float64(f) => {
-                        let mut buffer = ryu::Buffer::new();
-                        buffer.format(*f).to_string().truecolor(253, 151, 31)
-                    }
-                    // TODO: rendering of this token is completely broken, probably because this token should be multiple tokens instead
-                    Token::Complex(c) => format!("{c}").truecolor(253, 151, 31),
-                    t @ (Token::True | Token::False) => format!("{t}").truecolor(253, 151, 31),
-                    t @ (Token::LeftSquareBracket
-                    | Token::RightSquareBracket
-                    | Token::LeftCurlyBracket
-                    | Token::RightCurlyBracket
-                    | Token::LeftParentheses
-                    | Token::RightParentheses
-                    | Token::MapOpen) => format!("{t}").truecolor(229, 181, 103),
-                    Token::Identifier(ident) => ident.bright_cyan(),
-                    t => format!("{t:?}").bright_blue().bold(),
-                };
-
-                // println!("{} {}", colored_token, colored_token.len());
-
-                let skip = colored_token.len();
-                write!(out, "{}", colored_token).expect("write must succeed");
-
-                for _ in 0..skip {
-                    it.next();
-                }
-            }
-            Cow::Owned(out)
-        } else {
-            // There is probably an easier way to do this?
-            Cow::Owned(line.red().to_string())
+        if tokens.is_empty() {
+            return Cow::Owned(line.red().to_string());
         }
+
+        let mut start = 0;
+        let mut ranges = vec![];
+        for token in tokens.iter().dropping(1) {
+            let end = token.location.column - 1;
+            ranges.push(start..end);
+            start = end;
+        }
+        if !line.is_empty() {
+            ranges.push(start..line.len());
+        }
+
+        let mut buf = String::new();
+        for (range, token) in ranges.into_iter().zip(tokens.into_iter()) {
+            let sub = &line[range];
+
+            let colored = match &token.token {
+                Token::String(_) => sub.color(STRING_LITERAL_COLOR),
+                Token::BigInt(_) | Token::Int64(_) | Token::Float64(_) | Token::Complex(_) => {
+                    sub.color(NUMBER_LITERAL_COLOR)
+                }
+                Token::True | Token::False => sub.color(NUMBER_LITERAL_COLOR),
+                Token::LeftSquareBracket
+                | Token::RightSquareBracket
+                | Token::LeftCurlyBracket
+                | Token::RightCurlyBracket
+                | Token::LeftParentheses
+                | Token::RightParentheses
+                | Token::MapOpen => sub.color(PARENTHESES_COLOR),
+                Token::Identifier(_) => sub.color(IDENTIFIER_COLOR),
+                _ => sub.bright_blue().bold(), // BOLD
+            };
+
+            buf.push_str(&colored.to_string());
+        }
+
+        Cow::Owned(buf)
     }
 
     fn highlight_char(&self, _line: &str, _pos: usize, _forced: bool) -> bool {
