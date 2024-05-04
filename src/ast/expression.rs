@@ -31,7 +31,7 @@ pub enum Expression {
     // Literals
     UnitLiteral,
     BoolLiteral(bool),
-    StringLiteral(Rc<String>),
+    StringLiteral(String),
     Int64Literal(i64),
     Float64Literal(f64),
     BigIntLiteral(BigInt),

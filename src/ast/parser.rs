@@ -326,7 +326,7 @@ impl Parser {
 
     fn range(&mut self) -> Result<ExpressionLocation, Error> {
         let left = self.logic_or()?;
-        return if let Some(token) = self.consume_token_if(&[Token::DotDot, Token::DotDotEquals]) {
+        if let Some(token) = self.consume_token_if(&[Token::DotDot, Token::DotDotEquals]) {
             // TODO: right should be optional
             let right = self.logic_or()?;
             let (start, end) = (left.start, right.end);
@@ -349,7 +349,7 @@ impl Parser {
             })
         } else {
             Ok(left)
-        };
+        }
     }
     fn logic_or(&mut self) -> Result<ExpressionLocation, Error> {
         self.consume_logical_expression_left_associative(Self::logic_and, &[Token::LogicOr])
@@ -690,7 +690,7 @@ impl Parser {
             Token::Float64(num) => Expression::Float64Literal(num),
             Token::BigInt(num) => Expression::BigIntLiteral(num),
             Token::Complex(num) => Expression::ComplexLiteral(num),
-            Token::String(value) => Expression::StringLiteral(Rc::new(value)),
+            Token::String(value) => Expression::StringLiteral(value),
             Token::LeftSquareBracket => return self.list(token_location.location),
             Token::Identifier(identifier) => Expression::Identifier(identifier),
             _ => {

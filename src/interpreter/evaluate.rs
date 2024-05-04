@@ -31,9 +31,6 @@ pub(crate) fn evaluate_expression(
     let literal: Value = match &expression_location.expression {
         Expression::BoolLiteral(b) => Value::Bool(*b),
         Expression::StringLiteral(s) => {
-            // TODO: to_string will make a copy, is this the best way to handle these types
-            //       or should we reconsider having String in an Rc for Expression because that
-            //       was probably only convenient when the our values used just Rcs
             Value::Sequence(Sequence::String(Rc::new(RefCell::new(s.to_string()))))
         }
         Expression::Int64Literal(n) => Value::Number(Number::Int(Int::Int64(*n))),
