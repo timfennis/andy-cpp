@@ -140,10 +140,12 @@ impl Parser {
     ) -> Result<ExpressionLocation, Error> {
         let mut left = next(self)?;
         while let Some(token_location) = self.consume_token_if(valid_tokens) {
-            let operator: BinaryOperator = token_location
-                .clone()
-                .try_into()
-                .expect("consume_operator_if guaranteed us that this is an operator");
+            let operator: BinaryOperator = token_location.clone().try_into().unwrap_or_else(|_| {
+                panic!(
+                    "cannot convert '{}' into a binary operator",
+                    token_location.token
+                )
+            });
             let right = next(self)?;
             let start = left.start;
             let end = right.end;
@@ -236,7 +238,7 @@ impl Parser {
         //       this expression as an assignment expression. Otherwise, we just treat the expression as whatever we got.
         // NOTE: When we start supporting more lvalues we should insert this step between
         //       `variable_declaration_or_assignment` and `logic_or`
-        let maybe_lvalue = self.logic_or()?;
+        let maybe_lvalue = self.range()?;
         let (start, end) = (maybe_lvalue.start, maybe_lvalue.end);
 
         let l_value = match maybe_lvalue.expression {
@@ -322,6 +324,33 @@ impl Parser {
         }
     }
 
+    fn range(&mut self) -> Result<ExpressionLocation, Error> {
+        let left = self.logic_or()?;
+        return if let Some(token) = self.consume_token_if(&[Token::DotDot, Token::DotDotEquals]) {
+            // TODO: right should be optional
+            let right = self.logic_or()?;
+            let (start, end) = (left.start, right.end);
+            let expression = if token.token == Token::DotDot {
+                Expression::RangeExclusive {
+                    start: Some(Box::new(left)),
+                    end: Some(Box::new(right)),
+                }
+            } else {
+                Expression::RangeInclusive {
+                    start: Some(Box::new(left)),
+                    end: Some(Box::new(right)),
+                }
+            };
+
+            Ok(ExpressionLocation {
+                expression,
+                start,
+                end,
+            })
+        } else {
+            Ok(left)
+        };
+    }
     fn logic_or(&mut self) -> Result<ExpressionLocation, Error> {
         self.consume_logical_expression_left_associative(Self::logic_and, &[Token::LogicOr])
     }
