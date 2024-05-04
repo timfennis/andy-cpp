@@ -3,6 +3,7 @@ pub mod file;
 pub mod hash_map;
 pub mod list;
 pub mod math;
+pub mod regex;
 pub mod sequence;
 pub mod string;
 pub mod value;

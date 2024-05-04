@@ -1,5 +1,6 @@
 use num::{BigInt, Complex};
 use std::collections::VecDeque;
+use std::iter::repeat;
 use std::str::Chars;
 
 mod token;
@@ -43,6 +44,29 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    fn lex_string_literal(
+        &mut self,
+        start: Location,
+        pounds: usize,
+    ) -> Result<TokenLocation, Error> {
+        let mut buf = String::new();
+        let end_pattern = format!("{}{}", '"', "#".repeat(pounds));
+        // eprintln!("end pattern: {end_pattern}");
+        for char in self.source.by_ref() {
+            buf.push(char);
+
+            if buf.ends_with(&end_pattern) {
+                eprintln!("IT HAPPNED");
+                buf.truncate(buf.len() - end_pattern.len());
+                return Ok(TokenLocation {
+                    token: Token::String(buf),
+                    location: start,
+                });
+            }
+        }
+
+        Err(Error::UnterminatedString { location: start })
+    }
     fn lex_string(&mut self, start: Location) -> Result<TokenLocation, Error> {
         // TODO: support \u8080 type escape sequences
         // TODO: should we handle bytes like \xFF? Probably not for strings because they aren't valid UTF-8
@@ -162,6 +186,18 @@ impl Iterator for Lexer<'_> {
             match (char, next) {
                 (' ' | '\t' | '\r' | '\n', _) => {
                     continue 'iterator;
+                }
+                ('r', Some('"')) => {
+                    self.source.next();
+                    return Some(self.lex_string_literal(start, 0));
+                }
+                ('r', Some('#')) => {
+                    self.source.next();
+                    let mut cnt = 1;
+                    while let Some('#') = self.source.next() {
+                        cnt += 1;
+                    }
+                    Some(self.lex_string_literal(start, cnt))
                 }
                 ('"', _) => return Some(self.lex_string(start)),
                 (char, _) if char.is_ascii_digit() => {
