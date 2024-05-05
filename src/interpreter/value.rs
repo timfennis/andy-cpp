@@ -37,6 +37,11 @@ impl Value {
             Value::Sequence(Sequence::Map(_, _)) => ValueType::Map,
         }
     }
+
+    #[must_use]
+    pub fn empty_list() -> Value {
+        Value::Sequence(Sequence::List(Rc::new(RefCell::new(vec![]))))
+    }
 }
 
 impl Hash for Value {
