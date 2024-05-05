@@ -13,6 +13,16 @@ mod inner {
             .collect()
     }
 
+    pub fn signed_nums(haystack: &str) -> Vec<i64> {
+        let re = Regex::new(r"-?\d+").expect("TODO: fix error handling");
+        re.captures_iter(haystack)
+            .filter_map(|cap| {
+                let (full, []) = cap.extract();
+                full.parse::<i64>().ok()
+            })
+            .collect()
+    }
+
     pub fn matches(haystack: &str, regex: &str) -> bool {
         let r = Regex::new(regex).expect("TODO: fix error handling");
         r.is_match(haystack)
