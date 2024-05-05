@@ -59,6 +59,22 @@ pub fn wrap_function(function: syn::ItemFn) -> WrappedFunction {
         }
     }
 
+    let return_expr = match function.sig.output {
+        syn::ReturnType::Default => quote! {
+            return Ok(crate::interpreter::value::Value::Unit);
+        },
+        // TODO: we added this but it doesn't work well enough. We need a location to construct an EvaluationResult so that part should probably be handled outside
+        syn::ReturnType::Type(_, typ) => match &*typ {
+            ty @ syn::Type::Path(_) if path_ends_with(ty, "EvaluationResult") => quote! {
+                return result;
+            },
+            _ => quote! {
+                let result = crate::interpreter::value::Value::from(result);
+                return Ok(result);
+            },
+        },
+    };
+
     let function_declaration = quote! {
         pub fn #identifier (
             values: &[crate::interpreter::value::Value],
@@ -69,8 +85,7 @@ pub fn wrap_function(function: syn::ItemFn) -> WrappedFunction {
             #(#temp_var_init; )*
 
             let result = #inner_ident (#(#temp_vars, )*);
-            let result = crate::interpreter::value::Value::from(result);
-            return Ok(result);
+            #return_expr
         }
     };
 

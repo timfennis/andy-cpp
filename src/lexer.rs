@@ -1,6 +1,5 @@
 use num::{BigInt, Complex};
 use std::collections::VecDeque;
-use std::iter::repeat;
 use std::str::Chars;
 
 mod token;

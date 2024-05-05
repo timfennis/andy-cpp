@@ -1,4 +1,4 @@
-use colored::{Color, ColoredString, Colorize};
+use colored::{Color, Colorize};
 use itertools::Itertools;
 use ndc_lib::interpreter::Interpreter;
 use ndc_lib::lexer::{Lexer, Token};
@@ -7,7 +7,6 @@ use rustyline::error::ReadlineError;
 use rustyline::Helper;
 use rustyline::{ColorMode, Completer, Editor, Hinter, Validator};
 use std::borrow::Cow;
-use std::fmt::Write as _;
 
 #[derive(Helper, Completer, Hinter, Validator)]
 struct RustlylineHelper {}
