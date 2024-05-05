@@ -1,5 +1,6 @@
 use crate::interpreter::environment::Environment;
 use crate::interpreter::num::Number;
+use crate::interpreter::value::Value;
 use andy_cpp_macros::export_module;
 use num::ToPrimitive;
 
@@ -7,6 +8,15 @@ use num::ToPrimitive;
 mod inner {
     use crate::interpreter::num::Number;
     use num::{BigInt, Integer};
+
+    pub fn sum(nums: &[Value]) -> Number {
+        nums.iter().fold(Number::from(0), |acc, cur| {
+            acc + match cur {
+                Value::Number(n) => n.clone(),
+                _ => todo!("appropriate type error not implemented"),
+            }
+        })
+    }
 
     pub fn lcm(a: &BigInt, b: &BigInt) -> BigInt {
         a.lcm(b)

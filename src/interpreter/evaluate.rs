@@ -222,7 +222,7 @@ pub(crate) fn evaluate_expression(
                 index,
             } => {
                 let assign_to = evaluate_expression(assign_to, environment)?;
-                match &assign_to {
+                let new_value = match &assign_to {
                     Value::Sequence(Sequence::List(list)) => {
                         // It's important that index and right_value are computed before the list is borrowed
                         let right_value = evaluate_expression(value, environment)?;
@@ -244,7 +244,7 @@ pub(crate) fn evaluate_expression(
                             right_value,
                             start,
                             end,
-                        )?;
+                        )?
                     }
                     Value::Sequence(Sequence::Map(dict, default)) => {
                         let right_value = evaluate_expression(value, environment)?;
@@ -266,7 +266,7 @@ pub(crate) fn evaluate_expression(
                             right_value,
                             start,
                             end,
-                        )?;
+                        )?
                     }
                     Value::Sequence(Sequence::String(_)) => {
                         return Err(EvaluationError::type_error(
@@ -284,9 +284,9 @@ pub(crate) fn evaluate_expression(
                         )
                         .into());
                     }
-                }
+                };
 
-                assign_to
+                new_value
             }
         },
         Expression::Block { statements } => {
