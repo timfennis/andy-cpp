@@ -342,6 +342,7 @@ impl TryFrom<Value> for BigInt {
     }
 }
 
+// TODO: Should we implement `Deref` or something?
 impl<'a> TryFrom<&'a Value> for &'a Sequence {
     type Error = ConversionError;
 

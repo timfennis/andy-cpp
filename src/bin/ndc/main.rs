@@ -1,10 +1,13 @@
+use std::cell::RefCell;
 use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
 use std::process::exit;
+use std::rc::Rc;
 
 use clap::Parser;
 
+use ndc_lib::interpreter::value::{Sequence, Value};
 use ndc_lib::interpreter::Interpreter;
 
 #[cfg(feature = "repl")]
