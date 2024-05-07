@@ -1,6 +1,6 @@
 use crate::interpreter::environment::Environment;
 use crate::interpreter::num::Number;
-use crate::interpreter::value::Value;
+use crate::interpreter::value::{Sequence, Value};
 use andy_cpp_macros::export_module;
 use num::ToPrimitive;
 
@@ -9,13 +9,28 @@ mod inner {
     use crate::interpreter::num::Number;
     use num::{BigInt, Integer};
 
-    pub fn sum(nums: &[Value]) -> Number {
-        nums.iter().fold(Number::from(0), |acc, cur| {
-            acc + match cur {
-                Value::Number(n) => n.clone(),
-                _ => todo!("appropriate type error not implemented"),
-            }
-        })
+    pub fn sum(seq: &Sequence) -> Number {
+        match seq {
+            Sequence::String(_s) => todo!("TODO: error not implemented, also cannot sum string!!"),
+            Sequence::List(list) => list.borrow().iter().fold(Number::from(0), |acc, cur| {
+                acc + match cur {
+                    Value::Number(n) => n.clone(),
+                    _ => todo!("appropriate type error not implemented"),
+                }
+            }),
+            Sequence::Tuple(tup) => tup.iter().fold(Number::from(0), |acc, cur| {
+                acc + match cur {
+                    Value::Number(n) => n.clone(),
+                    _ => todo!("appropriate type error not implemented"),
+                }
+            }),
+            Sequence::Map(map, _) => map.borrow().keys().fold(Number::from(0), |acc, cur| {
+                acc + match cur {
+                    Value::Number(n) => n.clone(),
+                    _ => todo!("appropriate type error not implemented"),
+                }
+            }),
+        }
     }
 
     pub fn lcm(a: &BigInt, b: &BigInt) -> BigInt {
@@ -32,6 +47,10 @@ mod inner {
 
     pub fn floor(number: &Number) -> Number {
         number.floor()
+    }
+
+    pub fn abs(number: &Number) -> Number {
+        number.abs()
     }
 }
 

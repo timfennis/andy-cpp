@@ -7,6 +7,71 @@ mod inner {
     use std::cell::RefCell;
     use std::rc::Rc;
 
+    pub fn max(seq: &Sequence) -> Value {
+        match seq {
+            Sequence::String(s) => {
+                let item =
+                    String::from(s.borrow().chars().max().expect("TODO: fix error handling"));
+                Value::from(item)
+            }
+            Sequence::List(l) => {
+                let l = l.borrow();
+                let item = l
+                    .iter()
+                    .max_by(|a, b| a.partial_cmp(b).expect("TODO: fix error handling"))
+                    .expect("TODO: fix error handling");
+                item.clone()
+            }
+            Sequence::Tuple(l) => {
+                let item = l
+                    .iter()
+                    .max_by(|a, b| a.partial_cmp(b).expect("TODO: fix error handling"))
+                    .expect("TODO: fix error handling");
+                item.clone()
+            }
+            Sequence::Map(map, _) => {
+                let map = map.borrow();
+                let item = map
+                    .keys()
+                    .max_by(|a, b| a.partial_cmp(b).expect("TODO: fix error handling"))
+                    .expect("TODO: fix error handling");
+                item.clone()
+            }
+        }
+    }
+    pub fn min(seq: &Sequence) -> Value {
+        match seq {
+            Sequence::String(s) => {
+                let item =
+                    String::from(s.borrow().chars().min().expect("TODO: fix error handling"));
+                Value::from(item)
+            }
+            Sequence::List(l) => {
+                let l = l.borrow();
+                let item = l
+                    .iter()
+                    .min_by(|a, b| a.partial_cmp(b).expect("TODO: fix error handling"))
+                    .expect("TODO: fix error handling");
+                item.clone()
+            }
+            Sequence::Tuple(l) => {
+                let item = l
+                    .iter()
+                    .min_by(|a, b| a.partial_cmp(b).expect("TODO: fix error handling"))
+                    .expect("TODO: fix error handling");
+                item.clone()
+            }
+            Sequence::Map(map, _) => {
+                let map = map.borrow();
+                let item = map
+                    .keys()
+                    .min_by(|a, b| a.partial_cmp(b).expect("TODO: fix error handling"))
+                    .expect("TODO: fix error handling");
+                item.clone()
+            }
+        }
+    }
+
     pub fn sorted(seq: &Sequence) -> Sequence {
         let cmp = |a: &&Value, b: &&Value| {
             a.partial_cmp(b).expect(

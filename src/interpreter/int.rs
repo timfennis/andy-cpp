@@ -14,34 +14,6 @@ pub enum Int {
     BigInt(BigInt),
 }
 
-impl Ord for Int {
-    fn cmp(&self, other: &Self) -> Ordering {
-        match (self, other) {
-            (Int::Int64(l), Int::BigInt(r)) => BigInt::from(*l).cmp(r),
-            (Int::BigInt(l), Int::Int64(r)) => l.cmp(&BigInt::from(*r)),
-            (Int::Int64(l), Int::Int64(r)) => l.cmp(r),
-            (Int::BigInt(l), Int::BigInt(r)) => l.cmp(r),
-        }
-    }
-}
-
-impl PartialOrd for Int {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl ops::Neg for Int {
-    type Output = Self;
-
-    fn neg(self) -> Self::Output {
-        match self {
-            Self::Int64(i) => Self::Int64(i.neg()),
-            Self::BigInt(i) => Self::BigInt(i.neg()),
-        }
-    }
-}
-
 impl Int {
     pub fn from_f64(value: f64) -> Option<Self> {
         if value.is_nan() || value.is_infinite() {
@@ -127,6 +99,42 @@ impl Int {
             Self::BigInt(i) => i.is_positive(),
         }
     }
+
+    #[must_use]
+    pub fn abs(&self) -> Int {
+        match self {
+            Int::Int64(i) => Self::from(i.abs()),
+            Int::BigInt(b) => Self::from(b.abs()),
+        }
+    }
+}
+
+impl Ord for Int {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (Int::Int64(l), Int::BigInt(r)) => BigInt::from(*l).cmp(r),
+            (Int::BigInt(l), Int::Int64(r)) => l.cmp(&BigInt::from(*r)),
+            (Int::Int64(l), Int::Int64(r)) => l.cmp(r),
+            (Int::BigInt(l), Int::BigInt(r)) => l.cmp(r),
+        }
+    }
+}
+
+impl PartialOrd for Int {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl ops::Neg for Int {
+    type Output = Self;
+
+    fn neg(self) -> Self::Output {
+        match self {
+            Self::Int64(i) => Self::Int64(i.neg()),
+            Self::BigInt(i) => Self::BigInt(i.neg()),
+        }
+    }
 }
 
 macro_rules! impl_binary_operator {
@@ -188,6 +196,12 @@ impl_binary_operator!(Rem, rem, checked_rem);
 impl From<i32> for Int {
     fn from(value: i32) -> Self {
         Self::Int64(i64::from(value))
+    }
+}
+
+impl From<i64> for Int {
+    fn from(value: i64) -> Self {
+        Self::Int64(value)
     }
 }
 

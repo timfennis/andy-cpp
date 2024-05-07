@@ -5,8 +5,8 @@ use std::num::TryFromIntError;
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
 use num::bigint::TryFromBigIntError;
-use num::complex::Complex64;
-use num::{BigInt, BigRational, Complex, FromPrimitive, ToPrimitive};
+use num::complex::{Complex64, ComplexFloat};
+use num::{BigInt, BigRational, Complex, FromPrimitive, Signed, ToPrimitive};
 use ordered_float::OrderedFloat;
 
 use crate::interpreter::evaluate::EvaluationError;
@@ -525,6 +525,15 @@ impl Number {
                 RealNumber::Float(OrderedFloat(c.re)),
                 RealNumber::Float(OrderedFloat(c.im)),
             ),
+        }
+    }
+
+    pub fn abs(&self) -> Number {
+        match self {
+            Number::Int(i) => Number::Int(i.abs()),
+            Number::Float(f) => Number::Float(f.abs()),
+            Number::Rational(r) => Number::Rational(Box::new(r.abs())),
+            Number::Complex(c) => Number::Float(c.abs()),
         }
     }
 }
