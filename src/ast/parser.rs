@@ -554,12 +554,14 @@ impl Parser {
     // Parses a tuple NOT including the opening parentheses
     fn tuple(&mut self, start: Location) -> Result<ExpressionLocation, Error> {
         let values = self.group_of_expressions(Token::RightParentheses)?;
-        Ok(Expression::Tuple { values }.to_location(start, start)) // TODO: find end
+        let end = values.last().map_or(start, |e| e.end);
+        Ok(Expression::Tuple { values }.to_location(start, end))
     }
 
     fn list(&mut self, start: Location) -> Result<ExpressionLocation, Error> {
         let values = self.group_of_expressions(Token::RightSquareBracket)?;
-        Ok(Expression::List { values }.to_location(start, start)) // TODO: find end
+        let end = values.last().map_or(start, |e| e.end);
+        Ok(Expression::List { values }.to_location(start, end))
     }
 
     #[allow(clippy::too_many_lines)] // WERE BUILDING A PROGRAMMING LANGUAGE CLIPPY WHAT DO YOU WANT?
@@ -707,7 +709,6 @@ impl Parser {
         Ok(expression.to_location(token_location.location, token_location.location))
     }
 
-    //TODO: support } else if x { type structures
     /// Parses if expression without the `if` token
     /// Example:
     /// ```ndc
@@ -885,7 +886,6 @@ impl Parser {
                 break token_location.location;
             }
 
-            // TODO: maybe have require_current_token accept multiple tokens including the RightCurlyBracket for a better error
             self.require_current_token_matches(Token::Comma)?;
         };
         Ok(Expression::Map { values, default }.to_location(start, end))

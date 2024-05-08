@@ -427,7 +427,6 @@ pub(crate) fn evaluate_expression(
         }
         Expression::Identifier(identifier) => {
             if let Some(value) = environment.borrow().get(identifier) {
-                // TODO: is cloning the value a good idea here??
                 value.borrow().clone()
             } else {
                 return Err(EvaluationError::undefined_variable(identifier, start, end).into());
