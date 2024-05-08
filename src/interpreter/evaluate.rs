@@ -101,11 +101,7 @@ pub(crate) fn evaluate_expression(
         Expression::Assignment { l_value, value } => match l_value {
             Lvalue::Variable { identifier } => {
                 if !environment.borrow().contains(identifier) {
-                    Err(EvaluationError::syntax_error(
-                        &format!("undefined variable {identifier}"),
-                        start,
-                        end,
-                    ))?;
+                    Err(EvaluationError::undefined_variable(identifier, start, end))?;
                 }
 
                 let value = evaluate_expression(value, environment)?;
@@ -208,13 +204,7 @@ pub(crate) fn evaluate_expression(
                             end,
                         )
                     })
-                    .ok_or_else(|| {
-                        EvaluationError::syntax_error(
-                            &format!("undefined variable {identifier}"),
-                            start,
-                            end,
-                        )
-                    })??
+                    .ok_or_else(|| EvaluationError::undefined_variable(identifier, start, end))??
             }
             Lvalue::Index {
                 value: assign_to,
@@ -438,12 +428,7 @@ pub(crate) fn evaluate_expression(
                 // TODO: is cloning the value a good idea here??
                 value.borrow().clone()
             } else {
-                return Err(EvaluationError::syntax_error(
-                    &format!("undefined variable {identifier}"),
-                    expression_location.start,
-                    expression_location.end,
-                )
-                .into());
+                return Err(EvaluationError::undefined_variable(identifier, start, end).into());
             }
         }
         Expression::List { values } => {
@@ -978,6 +963,15 @@ pub struct EvaluationError {
 }
 
 impl EvaluationError {
+    #[must_use]
+    pub fn undefined_variable(identifier: &str, start: Location, end: Location) -> Self {
+        Self {
+            text: format!("Undefined variable '{identifier}'"),
+            start,
+            end,
+        }
+    }
+
     #[must_use]
     pub fn new(message: String, start: Location, end: Location) -> Self {
         Self {
