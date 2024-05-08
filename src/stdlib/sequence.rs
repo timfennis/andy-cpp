@@ -61,6 +61,7 @@ fn try_sort(v: &mut [Value]) -> anyhow::Result<()> {
 #[export_module]
 mod inner {
     use crate::interpreter::value::{Sequence, Value};
+    use anyhow::anyhow;
     use itertools::Itertools;
     use std::cell::RefCell;
     use std::rc::Rc;
@@ -89,6 +90,23 @@ mod inner {
             Sequence::List(l) => l.try_borrow()?.iter().try_min(),
             Sequence::Tuple(l) => l.iter().try_min(),
             Sequence::Map(map, _) => map.borrow().keys().try_min(),
+        }
+    }
+
+    pub fn sort(seq: &Sequence) -> anyhow::Result<Value> {
+        match seq {
+            Sequence::String(str) => {
+                let r = &mut *str.borrow_mut();
+                *r = r.chars().sorted().collect::<String>();
+                Ok(Value::Unit)
+            }
+            Sequence::List(list) => {
+                let mut m = list.borrow_mut();
+                try_sort(&mut m)?;
+                Ok(Value::Unit)
+            }
+            Sequence::Tuple(_) => Err(anyhow!("tuple cannot be sorted in place")),
+            Sequence::Map(_, _) => Err(anyhow!("map cannot be sorted in place")),
         }
     }
 
