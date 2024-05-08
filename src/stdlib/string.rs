@@ -2,16 +2,20 @@ use andy_cpp_macros::export_module;
 
 #[export_module]
 mod inner {
-    pub fn ord(string: &str) -> i64 {
-        if string.len() != 1 {
-            todo!("TODO: support proper error handling");
+    use crate::interpreter::value::Value;
+    use anyhow::anyhow;
+
+    pub fn ord(string: &str) -> anyhow::Result<i64> {
+        let mut iterator = string.chars().map(|ch| ch as i64);
+        let res = iterator
+            .next()
+            .ok_or_else(|| anyhow!("argument to ord cannot be an empty string"))?;
+
+        if iterator.next().is_some() {
+            return Err(anyhow!("argument to ord must be length 1"));
         }
 
-        string
-            .chars()
-            .map(|ch| ch as i64)
-            .next()
-            .expect("TODO: support proper error handling")
+        Ok(res)
     }
 
     // TODO: remove this function once actual slicing is supported
