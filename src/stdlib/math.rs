@@ -70,6 +70,9 @@ mod inner {
             Value::Number(Number::Int(Int::Int64(i))) => i
                 .to_f64()
                 .ok_or_else(|| anyhow::anyhow!("failed to convert int to float (overflow?)")),
+            Value::Number(Number::Rational(r)) => r
+                .to_f64()
+                .ok_or_else(|| anyhow::anyhow!("failed to convert rational to float (overflow?)")),
             Value::Number(Number::Float(f)) => Ok(*f),
             Value::Bool(true) => Ok(1.0),
             Value::Bool(false) => Ok(0.0),
