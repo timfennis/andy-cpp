@@ -327,8 +327,6 @@ impl Parser {
     fn range(&mut self) -> Result<ExpressionLocation, Error> {
         let left = self.logic_or()?;
         if let Some(token) = self.consume_token_if(&[Token::DotDot, Token::DotDotEquals]) {
-            // TODO: right should be optional
-
             let (start, end, right) = if self.peek_range_end() {
                 (left.start, token.location, None)
             } else {
@@ -383,8 +381,6 @@ impl Parser {
     fn boolean_or(&mut self) -> Result<ExpressionLocation, Error> {
         self.consume_binary_expression_left_associative(Self::boolean_and, &[Token::Or])
     }
-
-    // TODO: We don't have a boolean XOR at the moment because ^ is taken
 
     fn boolean_and(&mut self) -> Result<ExpressionLocation, Error> {
         self.consume_binary_expression_left_associative(Self::term, &[Token::And])

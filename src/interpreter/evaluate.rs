@@ -144,8 +144,7 @@ pub(crate) fn evaluate_expression(
                             let target_string = target_string.borrow();
                             let index = value_to_forward_index(
                                 evaluate_expression(index, environment)?,
-                                // TODO: string length might not be correct, chars().count() might not be better
-                                insertion_target.borrow().len(),
+                                insertion_target.borrow().chars().count(),
                                 start,
                                 end,
                             )?;
@@ -493,15 +492,14 @@ pub(crate) fn evaluate_expression(
             match sequence {
                 Sequence::String(str) => {
                     let str = str.borrow();
-                    for n in 0..str.len() {
+                    for char in str.chars() {
                         let mut scope = Environment::new_scope(environment);
-                        let substr = &str[n..=n];
 
                         // TODO: allocating a new string here is probably not optimal
                         scope.borrow_mut().declare(
                             var_name,
                             Value::Sequence(Sequence::String(Rc::new(RefCell::new(String::from(
-                                substr,
+                                char,
                             ))))),
                         );
 
@@ -567,7 +565,7 @@ pub(crate) fn evaluate_expression(
 
                             let index = value_to_forward_index(
                                 evaluate_expression(index_expr, environment)?,
-                                string.len(), // TODO is strlen correct here?
+                                string.chars().count(),
                                 index_expr.start,
                                 index_expr.end,
                             )?;
