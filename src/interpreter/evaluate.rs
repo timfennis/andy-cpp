@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::error::Error;
 use std::fmt;
-use std::ops::{IndexMut, Neg, Range, RangeInclusive, Rem};
+use std::ops::{IndexMut, Neg, Not, Range, RangeInclusive, Rem};
 use std::rc::Rc;
 
 use either::Either;
@@ -45,7 +45,7 @@ pub(crate) fn evaluate_expression(
             let value = evaluate_expression(expression_location, environment)?;
             match (value, operator) {
                 (Value::Number(n), UnaryOperator::Neg) => Value::Number(n.neg()),
-                (Value::Bool(b), UnaryOperator::Bang) => Value::Bool(!b),
+                (Value::Bool(b), UnaryOperator::Bang) => Value::Bool(b.not()),
                 (_, UnaryOperator::Bang) => {
                     return Err(EvaluationError::type_error(
                         "the '!' operator cannot be applied to this type",
@@ -1050,12 +1050,18 @@ impl fmt::Debug for EvaluationError {
 
 impl Error for EvaluationError {}
 
-pub trait IntoEvaluationError {
-    fn into_evaluation_error(self, start: Location, end: Location) -> EvaluationError;
+pub trait ErrorConverter: fmt::Debug {
+    fn as_evaluation_error(&self, start: Location, end: Location) -> EvaluationError {
+        EvaluationError {
+            text: format!("{self:?}"),
+            start,
+            end,
+        }
+    }
 }
 
-impl IntoEvaluationError for std::io::Error {
-    fn into_evaluation_error(self, start: Location, end: Location) -> EvaluationError {
+impl ErrorConverter for std::io::Error {
+    fn as_evaluation_error(&self, start: Location, end: Location) -> EvaluationError {
         EvaluationError {
             text: format!("io error: {self:?}"),
             start,
@@ -1064,8 +1070,8 @@ impl IntoEvaluationError for std::io::Error {
     }
 }
 
-impl IntoEvaluationError for std::cell::BorrowError {
-    fn into_evaluation_error(self, start: Location, end: Location) -> EvaluationError {
+impl ErrorConverter for std::cell::BorrowError {
+    fn as_evaluation_error(&self, start: Location, end: Location) -> EvaluationError {
         EvaluationError {
             text: "cannot read from the value because it is already being written to".to_string(),
             start,
@@ -1073,8 +1079,8 @@ impl IntoEvaluationError for std::cell::BorrowError {
         }
     }
 }
-impl IntoEvaluationError for std::cell::BorrowMutError {
-    fn into_evaluation_error(self, start: Location, end: Location) -> EvaluationError {
+impl ErrorConverter for std::cell::BorrowMutError {
+    fn as_evaluation_error(&self, start: Location, end: Location) -> EvaluationError {
         EvaluationError {
             text: "you cannot mutate a value in a list while you're iterating over this list"
                 .to_string(),
@@ -1092,10 +1098,10 @@ pub trait IntoEvaluationResult<R> {
 
 impl<E, R> IntoEvaluationResult<R> for Result<R, E>
 where
-    E: IntoEvaluationError,
+    E: ErrorConverter,
 {
     fn into_evaluation_result(self, start: Location, end: Location) -> Result<R, FunctionCarrier> {
-        self.map_err(|err| FunctionCarrier::EvaluationError(err.into_evaluation_error(start, end)))
+        self.map_err(|err| FunctionCarrier::EvaluationError(err.as_evaluation_error(start, end)))
     }
 }
 
@@ -1205,5 +1211,6 @@ fn call_function(
         Err(FunctionCarrier::IOError(err)) => {
             Err(EvaluationError::io_error(&err, start, end).into())
         }
+        Err(carrier @ FunctionCarrier::IntoEvaluationError(_)) => Err(carrier.lift(start, end)),
     }
 }

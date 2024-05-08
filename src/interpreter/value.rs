@@ -1,5 +1,5 @@
 use crate::hash_map::{DefaultHasher, HashMap};
-use crate::interpreter::evaluate::{EvaluationError, IntoEvaluationError};
+use crate::interpreter::evaluate::{ErrorConverter, EvaluationError};
 use crate::interpreter::function::{Function, OverloadedFunction};
 use crate::interpreter::int::Int;
 use crate::interpreter::num::{Number, NumberToUsizeError, NumberType};
@@ -252,8 +252,8 @@ pub enum ConversionError {
     NumberToUsizeError(#[from] NumberToUsizeError),
 }
 
-impl IntoEvaluationError for ConversionError {
-    fn into_evaluation_error(self, start: Location, end: Location) -> EvaluationError {
+impl ErrorConverter for ConversionError {
+    fn as_evaluation_error(&self, start: Location, end: Location) -> EvaluationError {
         EvaluationError::type_error(&format!("{self}"), start, end)
     }
 }

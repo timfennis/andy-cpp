@@ -4,9 +4,12 @@ use std::rc::Rc;
 use crate::ast::ExpressionLocation;
 use crate::hash_map::HashMap;
 use crate::interpreter::environment::{Environment, EnvironmentRef};
-use crate::interpreter::evaluate::{evaluate_expression, EvaluationError, EvaluationResult};
+use crate::interpreter::evaluate::{
+    evaluate_expression, ErrorConverter, EvaluationError, EvaluationResult,
+};
 use crate::interpreter::num::{Number, NumberType};
 use crate::interpreter::value::{Sequence, Value, ValueType};
+use crate::lexer::Location;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum TypeSignature {
@@ -244,11 +247,13 @@ pub enum FunctionCarrier {
     #[error("evaluation error {0}")]
     EvaluationError(#[from] EvaluationError),
     #[error("argument error {0}")]
-    ArgumentError(String),
+    ArgumentError(String), // TODO can this be removed?
     #[error("IO Error: {0}")]
-    IOError(#[from] std::io::Error),
+    IOError(#[from] std::io::Error), // TODO can this be removed?
     #[error("function does not exist")]
     FunctionNotFound,
+    #[error("unconverted evaluation error")]
+    IntoEvaluationError(Box<dyn ErrorConverter>),
 }
 
 impl FunctionCarrier {
@@ -262,5 +267,14 @@ impl FunctionCarrier {
         Self::ArgumentError(format!(
             "argument error: expected {expected} arguments got {actual}"
         ))
+    }
+
+    pub fn lift(self, start: Location, end: Location) -> Self {
+        match self {
+            FunctionCarrier::IntoEvaluationError(into) => {
+                Self::EvaluationError(into.as_evaluation_error(start, end))
+            }
+            e => e,
+        }
     }
 }

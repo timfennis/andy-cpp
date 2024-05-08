@@ -32,7 +32,7 @@ impl Interpreter {
         self.environment
     }
 
-    pub fn run_str(&mut self, input: &str, debug: bool) -> Result<String, Error> {
+    pub fn run_str(&mut self, input: &str, debug: bool) -> Result<String, InterpreterError> {
         let scanner = Lexer::new(input);
         let tokens = scanner.collect::<Result<Vec<TokenLocation>, _>>()?;
 
@@ -65,7 +65,7 @@ impl Interpreter {
     fn interpret(
         &mut self,
         expressions: impl Iterator<Item = ExpressionLocation>,
-    ) -> Result<Value, Error> {
+    ) -> Result<Value, InterpreterError> {
         let mut value = Value::Unit;
         for expr in expressions {
             match evaluate_expression(&expr, &mut self.environment) {
@@ -85,7 +85,7 @@ impl Interpreter {
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum Error {
+pub enum InterpreterError {
     #[error("Lexer error: {cause}")]
     Lexer {
         #[from]
@@ -103,14 +103,17 @@ pub enum Error {
     },
 }
 
-impl From<FunctionCarrier> for Error {
+/// This trait converts a `FunctionError` into an `InterpreterError` but the callee needs to ensure the variant is already `FunctionCarrier::EvaluationError`
+/// TODO: maybe we can change this into a TryFrom that can fail en replace all the calls to make the interpreter not panic if there is a bug
+impl From<FunctionCarrier> for InterpreterError {
     fn from(value: FunctionCarrier) -> Self {
         match value {
             FunctionCarrier::Return(_) => panic!("attempted to convert return value to Error"),
             FunctionCarrier::EvaluationError(e) => e.into(),
-            FunctionCarrier::ArgumentError(_) => todo!(),
-            FunctionCarrier::IOError(_) => todo!(),
-            FunctionCarrier::FunctionNotFound => todo!(),
+            FunctionCarrier::ArgumentError(_) => panic!("attempted to convert ArgumentError to Error without line number info"),
+            FunctionCarrier::IOError(_) => panic!("attempted to convert IOError to Error without line number info"),
+            FunctionCarrier::FunctionNotFound => panic!("attempted to convert FunctionNotFound to Error without line number info"),
+            FunctionCarrier::IntoEvaluationError(_) => panic!("attempted to convert incomplete EvaluationError into Error without line number info"),
         }
     }
 }
