@@ -179,6 +179,11 @@ impl From<bool> for Value {
     }
 }
 
+impl From<f64> for Value {
+    fn from(value: f64) -> Self {
+        Self::Number(Number::Float(value))
+    }
+}
 impl From<i64> for Value {
     fn from(value: i64) -> Self {
         Self::Number(Number::Int(Int::Int64(value)))

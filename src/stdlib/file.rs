@@ -3,14 +3,10 @@ use std::fs::read_to_string;
 use std::path::Path;
 use std::rc::Rc;
 
-use num::BigInt;
-
 use crate::interpreter::environment::Environment;
 use crate::interpreter::function::{
     Function, FunctionCallError, FunctionCarrier, ParamType, TypeSignature,
 };
-use crate::interpreter::int::Int;
-use crate::interpreter::num::Number;
 use crate::interpreter::value::{Sequence, Value, ValueType};
 
 pub fn register(env: &mut Environment) {
@@ -82,33 +78,6 @@ pub fn register(env: &mut Environment) {
                 .into()),
             },
             type_signature: TypeSignature::Exact(vec![ParamType::String]),
-        }),
-    );
-    env.declare(
-        "int",
-        Value::from(Function::GenericFunction {
-            function: |args, _env| match args {
-                [Value::Number(n)] => Ok(Value::Number(n.to_int_lossy()?)),
-                [Value::Sequence(Sequence::String(s))] => {
-                    let s = s.borrow();
-                    let bi = s.parse::<BigInt>().map_err(|err| {
-                        FunctionCallError::ConvertToNativeTypeError(format!(
-                            "string \"{s}\" cannot be converted into an integer because \"{err}\""
-                        ))
-                    })?;
-                    Ok(Value::Number(Number::Int(Int::BigInt(bi).simplify())))
-                }
-                [single_value] => Err(FunctionCallError::ConvertToNativeTypeError(format!(
-                    "cannot convert {single_value} to string"
-                ))
-                .into()),
-                vals => Err(FunctionCallError::ArgumentCountError {
-                    expected: 1,
-                    actual: vals.len(),
-                }
-                .into()),
-            },
-            type_signature: TypeSignature::Exact(vec![ParamType::Any]),
         }),
     );
 }

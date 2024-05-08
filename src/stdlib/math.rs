@@ -27,6 +27,7 @@ where
 mod inner {
     use super::FallibleSum;
     use crate::interpreter::evaluate::ErrorMessage;
+    use crate::interpreter::int::Int;
     use crate::interpreter::num::Number;
     use num::{BigInt, Integer};
 
@@ -60,10 +61,52 @@ mod inner {
     pub fn abs(number: &Number) -> Number {
         number.abs()
     }
+
+    pub fn float(value: &Value) -> anyhow::Result<f64> {
+        match value {
+            Value::Number(Number::Int(Int::BigInt(i))) => i
+                .to_f64()
+                .ok_or_else(|| anyhow::anyhow!("failed to convert int to float (overflow?)")),
+            Value::Number(Number::Int(Int::Int64(i))) => i
+                .to_f64()
+                .ok_or_else(|| anyhow::anyhow!("failed to convert int to float (overflow?)")),
+            Value::Number(Number::Float(f)) => Ok(*f),
+            Value::Bool(true) => Ok(1.0),
+            Value::Bool(false) => Ok(0.0),
+            Value::Sequence(Sequence::String(string)) => {
+                let string = string.borrow();
+                Ok(string.parse::<f64>()?)
+            }
+            value => Err(anyhow::anyhow!(
+                "cannot convert {} to float",
+                value.value_type()
+            )),
+        }
+    }
+    pub fn int(value: &Value) -> anyhow::Result<Number> {
+        match value {
+            Value::Number(number) => Ok(number.to_int_lossy()?),
+            Value::Bool(true) => Ok(Number::from(1)),
+            Value::Bool(false) => Ok(Number::from(0)),
+            Value::Sequence(Sequence::String(string)) => {
+                let string = string.borrow();
+                let bi = string.parse::<BigInt>()?;
+                Ok(Number::Int(Int::BigInt(bi).simplify()))
+            }
+            value => Err(anyhow::anyhow!(
+                "cannot convert {} to int",
+                value.value_type()
+            )),
+        }
+    }
 }
 
 pub mod f64 {
     use super::{f64, Environment, Number, ToPrimitive};
+    use crate::interpreter::function::{Function, FunctionCallError, ParamType, TypeSignature};
+    use crate::interpreter::int::Int;
+    use crate::interpreter::value::{Sequence, Value};
+    use num::BigInt;
 
     pub fn register(env: &mut Environment) {
         macro_rules! delegate_to_f64 {
@@ -99,5 +142,33 @@ pub mod f64 {
         delegate_to_f64!(sin);
         delegate_to_f64!(sqrt);
         delegate_to_f64!(tan);
+
+        env.declare(
+            "int",
+            Value::from(Function::GenericFunction {
+                function: |args, _env| match args {
+                    [Value::Number(n)] => Ok(Value::Number(n.to_int_lossy()?)),
+                    [Value::Sequence(Sequence::String(s))] => {
+                        let s = s.borrow();
+                        let bi = s.parse::<BigInt>().map_err(|err| {
+                            FunctionCallError::ConvertToNativeTypeError(format!(
+                                "string \"{s}\" cannot be converted into an integer because \"{err}\""
+                            ))
+                        })?;
+                        Ok(Value::Number(Number::Int(Int::BigInt(bi).simplify())))
+                    }
+                    [single_value] => Err(FunctionCallError::ConvertToNativeTypeError(format!(
+                        "cannot convert {single_value} to string"
+                    ))
+                        .into()),
+                    vals => Err(FunctionCallError::ArgumentCountError {
+                        expected: 1,
+                        actual: vals.len(),
+                    }
+                        .into()),
+                },
+                type_signature: TypeSignature::Exact(vec![ParamType::Any]),
+            }),
+        );
     }
 }

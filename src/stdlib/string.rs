@@ -28,9 +28,11 @@ mod inner {
         }
         Ok(string.chars().dropping(i).take(j).collect::<String>())
     }
+
     pub fn to_lower(string: &str) -> String {
         string.to_lowercase()
     }
+
     pub fn to_upper(string: &str) -> String {
         string.to_uppercase()
     }

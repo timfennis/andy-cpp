@@ -3,8 +3,7 @@
 
 assert(4.20 == 4.20);
 
-// TODO: this function has not yet been implemented
-// print(float(420) == 420.0);
+assert(float(420) == 420.0);
 
 assert(1.0 + 2.0 == 3.0);
 assert(3.0 - 2.0 == 1.0);
@@ -13,7 +12,6 @@ assert(10.0 / 2.0 == 5.0);
 
 // Modulo stuff
 assert(-1.0 % 1.0 == -0.0);
-// TODO: add more at some point but getting good valid tests cases is extremely frustrating
 
 // Total ordering
 assert(NaN == NaN);
