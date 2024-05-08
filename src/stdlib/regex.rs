@@ -4,7 +4,7 @@ mod inner {
     use regex::Regex;
 
     pub fn nums(haystack: &str) -> Vec<i64> {
-        let re = Regex::new(r"\d+").expect("TODO: fix error handling");
+        let re = Regex::new(r"\d+").expect("we know the regex is valid");
         re.captures_iter(haystack)
             .filter_map(|cap| {
                 let (full, []) = cap.extract();
@@ -14,7 +14,7 @@ mod inner {
     }
 
     pub fn signed_nums(haystack: &str) -> Vec<i64> {
-        let re = Regex::new(r"-?\d+").expect("TODO: fix error handling");
+        let re = Regex::new(r"-?\d+").expect("we know this regex is valid");
         re.captures_iter(haystack)
             .filter_map(|cap| {
                 let (full, []) = cap.extract();
@@ -23,13 +23,13 @@ mod inner {
             .collect()
     }
 
-    pub fn matches(haystack: &str, regex: &str) -> bool {
-        let r = Regex::new(regex).expect("TODO: fix error handling");
-        r.is_match(haystack)
+    pub fn matches(haystack: &str, regex: &str) -> Result<bool, regex::Error> {
+        let r = Regex::new(regex)?;
+        Ok(r.is_match(haystack))
     }
 
-    pub fn captures(haystack: &str, regex: &str) -> Value {
-        let r = Regex::new(regex).expect("TODO: fix error handling");
+    pub fn captures(haystack: &str, regex: &str) -> Result<Value, regex::Error> {
+        let r = Regex::new(regex)?;
 
         let list = r
             .captures_iter(haystack)
@@ -42,20 +42,22 @@ mod inner {
             })
             .collect::<Vec<Value>>();
 
-        Value::from(list)
+        Ok(Value::from(list))
     }
 
-    pub fn capture_once(haystack: &str, regex: &str) -> Value {
-        let r = Regex::new(regex).expect("TODO: fix error handling");
+    pub fn capture_once(haystack: &str, regex: &str) -> Result<Value, regex::Error> {
+        let r = Regex::new(regex)?;
 
         let Some(captures) = r.captures(haystack) else {
-            return Value::empty_list();
+            return Ok(Value::empty_list());
         };
 
-        captures
+        let list = captures
             .iter()
             .filter_map(|x| x.map(|x| Value::from(x.as_str())))
             .collect::<Vec<_>>()
-            .into()
+            .into();
+
+        Ok(list)
     }
 }

@@ -65,8 +65,9 @@ pub fn wrap_function(function: syn::ItemFn) -> WrappedFunction {
         },
         // TODO: we added this but it doesn't work well enough. We need a location to construct an EvaluationResult so that part should probably be handled outside
         syn::ReturnType::Type(_, typ) => match &*typ {
-            ty @ syn::Type::Path(_) if path_ends_with(ty, "EvaluationResult") => quote! {
-                return result;
+            ty @ syn::Type::Path(_) if path_ends_with(ty, "Result") => quote! {
+                let value = result.map_err(|err| crate::interpreter::function::FunctionCarrier::IntoEvaluationError(Box::new(err)))?;
+                return Ok(Value::from(value));
             },
             _ => quote! {
                 let result = crate::interpreter::value::Value::from(result);

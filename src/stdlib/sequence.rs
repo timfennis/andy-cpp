@@ -1,4 +1,43 @@
+use crate::interpreter::value::Value;
 use andy_cpp_macros::export_module;
+use std::cmp::Ordering;
+
+trait TryCompare {
+    type Error;
+    fn try_min(&mut self) -> Result<Value, Self::Error>;
+    fn try_max(&mut self) -> Result<Value, Self::Error>;
+}
+
+impl<'a, T> TryCompare for T
+where
+    T: Iterator<Item = &'a Value>,
+{
+    type Error = anyhow::Error;
+
+    fn try_min(&mut self) -> Result<Value, Self::Error> {
+        self.try_fold(None, |a: Option<&Value>, b| match a {
+            None => Ok(Some(b)),
+            Some(a) => a.try_cmp(b).map(|o| match o {
+                Ordering::Greater => Some(b),
+                Ordering::Equal | Ordering::Less => Some(a),
+            }),
+        })
+        .and_then(|x| x.ok_or_else(|| anyhow::anyhow!("empty input to min")))
+        .cloned()
+    }
+
+    fn try_max(&mut self) -> Result<Value, Self::Error> {
+        self.try_fold(None, |a: Option<&Value>, b| match a {
+            None => Ok(Some(b)),
+            Some(a) => a.try_cmp(b).map(|o| match o {
+                Ordering::Less => Some(b),
+                Ordering::Equal | Ordering::Greater => Some(a),
+            }),
+        })
+        .and_then(|x| x.ok_or_else(|| anyhow::anyhow!("empty input to max")))
+        .cloned()
+    }
+}
 
 #[export_module]
 mod inner {
@@ -7,68 +46,30 @@ mod inner {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    pub fn max(seq: &Sequence) -> Value {
+    pub fn max(seq: &Sequence) -> anyhow::Result<Value> {
         match seq {
-            Sequence::String(s) => {
-                let item =
-                    String::from(s.borrow().chars().max().expect("TODO: fix error handling"));
-                Value::from(item)
-            }
-            Sequence::List(l) => {
-                let l = l.borrow();
-                let item = l
-                    .iter()
-                    .max_by(|a, b| a.partial_cmp(b).expect("TODO: fix error handling"))
-                    .expect("TODO: fix error handling");
-                item.clone()
-            }
-            Sequence::Tuple(l) => {
-                let item = l
-                    .iter()
-                    .max_by(|a, b| a.partial_cmp(b).expect("TODO: fix error handling"))
-                    .expect("TODO: fix error handling");
-                item.clone()
-            }
-            Sequence::Map(map, _) => {
-                let map = map.borrow();
-                let item = map
-                    .keys()
-                    .max_by(|a, b| a.partial_cmp(b).expect("TODO: fix error handling"))
-                    .expect("TODO: fix error handling");
-                item.clone()
-            }
+            Sequence::String(s) => s
+                .try_borrow()?
+                .chars()
+                .max()
+                .ok_or_else(|| anyhow::anyhow!("empty input to max"))
+                .map(|v| Value::from(String::from(v))),
+            Sequence::List(l) => l.try_borrow()?.iter().try_max(),
+            Sequence::Tuple(l) => l.iter().try_max(),
+            Sequence::Map(map, _) => map.borrow().keys().try_max(),
         }
     }
-    pub fn min(seq: &Sequence) -> Value {
+    pub fn min(seq: &Sequence) -> anyhow::Result<Value> {
         match seq {
-            Sequence::String(s) => {
-                let item =
-                    String::from(s.borrow().chars().min().expect("TODO: fix error handling"));
-                Value::from(item)
-            }
-            Sequence::List(l) => {
-                let l = l.borrow();
-                let item = l
-                    .iter()
-                    .min_by(|a, b| a.partial_cmp(b).expect("TODO: fix error handling"))
-                    .expect("TODO: fix error handling");
-                item.clone()
-            }
-            Sequence::Tuple(l) => {
-                let item = l
-                    .iter()
-                    .min_by(|a, b| a.partial_cmp(b).expect("TODO: fix error handling"))
-                    .expect("TODO: fix error handling");
-                item.clone()
-            }
-            Sequence::Map(map, _) => {
-                let map = map.borrow();
-                let item = map
-                    .keys()
-                    .min_by(|a, b| a.partial_cmp(b).expect("TODO: fix error handling"))
-                    .expect("TODO: fix error handling");
-                item.clone()
-            }
+            Sequence::String(s) => s
+                .try_borrow()?
+                .chars()
+                .min()
+                .ok_or_else(|| anyhow::anyhow!("empty input to min"))
+                .map(|v| Value::from(String::from(v))),
+            Sequence::List(l) => l.try_borrow()?.iter().try_min(),
+            Sequence::Tuple(l) => l.iter().try_min(),
+            Sequence::Map(map, _) => map.borrow().keys().try_min(),
         }
     }
 
@@ -87,7 +88,7 @@ mod inner {
                 let sorted = list
                     .borrow()
                     .iter()
-                    .sorted_unstable_by(cmp)
+                    .sorted_by(cmp)
                     .cloned()
                     .collect::<Vec<Value>>();
                 Sequence::List(Rc::new(RefCell::new(sorted)))

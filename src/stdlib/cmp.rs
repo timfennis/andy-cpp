@@ -3,7 +3,6 @@ use std::cmp::Ordering;
 
 #[andy_cpp_macros::export_module]
 mod inner {
-
     pub fn assert(value: bool) -> Value {
         assert!(value, "failed asserting that argument is true");
         Value::Unit
@@ -15,22 +14,17 @@ mod inner {
         Value::Unit
     }
 
-    //TODO: Make min and max variadic?
-    pub fn max(left: &Value, right: &Value) -> Value {
-        match left.partial_cmp(right) {
-            Some(Ordering::Equal | Ordering::Greater) => left.clone(),
-            Some(Ordering::Less) => right.clone(),
-            //TODO: support returning Results from functions exposed to the runtime
-            None => panic!("these types cannot be compared"),
+    pub fn max(left: &Value, right: &Value) -> Result<Value, anyhow::Error> {
+        match left.try_cmp(right)? {
+            Ordering::Equal | Ordering::Greater => Ok(left.clone()),
+            Ordering::Less => Ok(right.clone()),
         }
     }
 
-    pub fn min(left: &Value, right: &Value) -> Value {
-        match left.partial_cmp(right) {
-            Some(Ordering::Equal | Ordering::Less) => left.clone(),
-            Some(Ordering::Greater) => right.clone(),
-            //TODO: support returning Results from functions exposed to the runtime
-            None => panic!("these types cannot be compared"),
+    pub fn min(left: &Value, right: &Value) -> Result<Value, anyhow::Error> {
+        match left.try_cmp(right)? {
+            Ordering::Equal | Ordering::Less => Ok(left.clone()),
+            Ordering::Greater => Ok(right.clone()),
         }
     }
 }

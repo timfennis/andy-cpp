@@ -1,35 +1,43 @@
 use crate::interpreter::environment::Environment;
+use crate::interpreter::evaluate::ErrorMessage;
 use crate::interpreter::num::Number;
 use crate::interpreter::value::{Sequence, Value};
 use andy_cpp_macros::export_module;
 use num::ToPrimitive;
 
+trait FallibleSum {
+    fn try_sum(&mut self) -> Result<Number, ErrorMessage>;
+}
+
+impl<'a, T> FallibleSum for T
+where
+    T: Iterator<Item = &'a Value> + Sized,
+{
+    fn try_sum(&mut self) -> Result<Number, ErrorMessage> {
+        self.try_fold(Number::from(0), |acc, cur| match cur {
+            Value::Number(n) => Ok(acc + n.clone()),
+            value => Err(ErrorMessage {
+                message: format!("cannot sum {} and number", value.value_type()),
+            }),
+        })
+    }
+}
+
 #[export_module]
 mod inner {
+    use super::FallibleSum;
+    use crate::interpreter::evaluate::ErrorMessage;
     use crate::interpreter::num::Number;
     use num::{BigInt, Integer};
 
-    pub fn sum(seq: &Sequence) -> Number {
+    pub fn sum(seq: &Sequence) -> Result<Number, ErrorMessage> {
         match seq {
-            Sequence::String(_s) => todo!("TODO: error not implemented, also cannot sum string!!"),
-            Sequence::List(list) => list.borrow().iter().fold(Number::from(0), |acc, cur| {
-                acc + match cur {
-                    Value::Number(n) => n.clone(),
-                    _ => todo!("appropriate type error not implemented"),
-                }
+            Sequence::String(_s) => Err(ErrorMessage {
+                message: "string cannot be summed".to_string(),
             }),
-            Sequence::Tuple(tup) => tup.iter().fold(Number::from(0), |acc, cur| {
-                acc + match cur {
-                    Value::Number(n) => n.clone(),
-                    _ => todo!("appropriate type error not implemented"),
-                }
-            }),
-            Sequence::Map(map, _) => map.borrow().keys().fold(Number::from(0), |acc, cur| {
-                acc + match cur {
-                    Value::Number(n) => n.clone(),
-                    _ => todo!("appropriate type error not implemented"),
-                }
-            }),
+            Sequence::List(list) => list.borrow().iter().try_sum(),
+            Sequence::Tuple(tup) => tup.iter().try_sum(),
+            Sequence::Map(map, _) => map.borrow().keys().try_sum(),
         }
     }
 

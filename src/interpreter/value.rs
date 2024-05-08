@@ -41,6 +41,17 @@ impl Value {
     pub fn empty_list() -> Value {
         Value::Sequence(Sequence::List(Rc::new(RefCell::new(vec![]))))
     }
+
+    // TODO: don't use anyhow here
+    pub fn try_cmp(&self, other: &Value) -> Result<Ordering, anyhow::Error> {
+        self.partial_cmp(other).ok_or_else(|| {
+            anyhow::anyhow!(
+                "{} cannot be compared to {}",
+                self.value_type(),
+                other.value_type()
+            )
+        })
+    }
 }
 
 impl Hash for Value {

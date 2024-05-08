@@ -955,6 +955,13 @@ fn apply_operator(
     Ok(val)
 }
 
+// TODO: nice generic error for now?
+#[derive(thiserror::Error, Debug)]
+#[error("{message}")]
+pub struct ErrorMessage {
+    pub message: String,
+}
+
 pub struct EvaluationError {
     text: String,
     start: Location,
@@ -1057,17 +1064,17 @@ impl fmt::Debug for EvaluationError {
 
 impl Error for EvaluationError {}
 
-pub trait ErrorConverter: fmt::Debug {
+pub trait ErrorConverter: fmt::Debug + fmt::Display {
     fn as_evaluation_error(&self, start: Location, end: Location) -> EvaluationError;
 }
 
 impl<E> ErrorConverter for E
 where
-    E: fmt::Debug,
+    E: fmt::Debug + fmt::Display,
 {
     fn as_evaluation_error(&self, start: Location, end: Location) -> EvaluationError {
         EvaluationError {
-            text: format!("{self:?}"),
+            text: format!("{self}"),
             start,
             end,
         }
