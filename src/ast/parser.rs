@@ -328,17 +328,23 @@ impl Parser {
         let left = self.logic_or()?;
         if let Some(token) = self.consume_token_if(&[Token::DotDot, Token::DotDotEquals]) {
             // TODO: right should be optional
-            let right = self.logic_or()?;
-            let (start, end) = (left.start, right.end);
+
+            let (start, end, right) = if self.peek_range_end() {
+                (left.start, token.location, None)
+            } else {
+                let right = self.logic_or()?;
+                (left.start, right.end, Some(Box::new(right)))
+            };
+
             let expression = if token.token == Token::DotDot {
                 Expression::RangeExclusive {
                     start: Some(Box::new(left)),
-                    end: Some(Box::new(right)),
+                    end: right,
                 }
             } else {
                 Expression::RangeInclusive {
                     start: Some(Box::new(left)),
-                    end: Some(Box::new(right)),
+                    end: right,
                 }
             };
 
@@ -887,6 +893,18 @@ impl Parser {
             self.require_current_token_matches(Token::Comma)?;
         };
         Ok(Expression::Map { values, default }.to_location(start, end))
+    }
+    fn peek_range_end(&self) -> bool {
+        matches!(
+            self.peek_current_token(),
+            Some(
+                Token::Semicolon
+                    | Token::Comma
+                    | Token::RightCurlyBracket
+                    | Token::RightParentheses
+                    | Token::RightSquareBracket
+            ) | None
+        )
     }
 }
 

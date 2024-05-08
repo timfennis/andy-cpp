@@ -660,11 +660,13 @@ pub(crate) fn evaluate_expression(
             let range_start = evaluate_expression(
                 range_start
                     .as_deref()
-                    .expect("TODO: deal with missing start"),
+                    .expect("Unbound ranges are not yet implemented"),
                 environment,
             )?;
             let range_end = evaluate_expression(
-                range_end.as_deref().expect("TODO: deal with missing end"),
+                range_end
+                    .as_deref()
+                    .expect("Unbound ranges are not yet implemented"),
                 environment,
             )?;
 
@@ -672,7 +674,6 @@ pub(crate) fn evaluate_expression(
             let range_end = i64::try_from(range_end).into_evaluation_result(start, end)?;
             let range = RangeInclusive::new(range_start, range_end)
                 .map(Value::from)
-                // TODO: get rid of this collect once we support iterators
                 .collect::<Vec<Value>>();
 
             Value::from(range)
@@ -684,11 +685,13 @@ pub(crate) fn evaluate_expression(
             let range_start = evaluate_expression(
                 range_start
                     .as_deref()
-                    .expect("TODO: deal with missing start"),
+                    .expect("Unbound ranges are not yet implemented"),
                 environment,
             )?;
             let range_end = evaluate_expression(
-                range_end.as_deref().expect("TODO: deal with missing end"),
+                range_end
+                    .as_deref()
+                    .expect("Unbound ranges are not yet implemented"),
                 environment,
             )?;
 
@@ -699,7 +702,6 @@ pub(crate) fn evaluate_expression(
                 end: range_end,
             }
             .map(Value::from)
-            // TODO: get rid of this collect once we support iterators
             .collect::<Vec<Value>>();
 
             Value::from(range)
