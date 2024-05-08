@@ -1,4 +1,6 @@
 --PROGRAM--
+invoked := 0;
+
 fn counter() {
   n := 0;
   fn add_one() {
@@ -11,7 +13,7 @@ fn counter() {
 
 c1 := counter();
 c2 := counter();
-invoked := 0;
+
 print(c1());
 print(c2());
 print(c1());

@@ -90,10 +90,10 @@ pub(crate) fn evaluate_expression(
 
             // TODO: we should probably remove this check because every declaration should create a
             //       new scope in order to fix the weird shadowing bug. Check page 177 of the book.
-            if environment.borrow().contains(identifier) {
-                let new_env = Environment::new_scope(environment);
-                *environment = new_env;
-            }
+            // if environment.borrow().contains(identifier) {
+            let new_env = Environment::new_scope(environment);
+            *environment = new_env;
+            // }
             environment.borrow_mut().declare(identifier, value.clone());
 
             value
