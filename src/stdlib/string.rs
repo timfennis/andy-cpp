@@ -2,9 +2,10 @@ use andy_cpp_macros::export_module;
 
 #[export_module]
 mod inner {
-    use crate::interpreter::value::Value;
+    use crate::interpreter::value::{Sequence, Value};
     use anyhow::anyhow;
     use itertools::Itertools;
+    use std::rc::Rc;
 
     pub fn ord(string: &str) -> anyhow::Result<i64> {
         let mut iterator = string.chars().map(|ch| ch as i64);
@@ -51,15 +52,22 @@ mod inner {
     }
 
     pub fn split(string: &str) -> Vec<String> {
-        string
-            .split_whitespace() // TODO: or split_ascii_whitespace?
-            .map(ToString::to_string)
-            .collect()
+        string.split_whitespace().map(ToString::to_string).collect()
     }
 
     #[function(name = "split")]
     pub fn split_with_pattern(string: &str, pattern: &str) -> Vec<String> {
         string.split(pattern).map(ToString::to_string).collect()
+    }
+
+    pub fn split_once(string: &str, pattern: &str) -> Value {
+        match string.split_once(pattern) {
+            Some((fst, snd)) => Value::Sequence(Sequence::Tuple(Rc::new(vec![
+                Value::from(fst),
+                Value::from(snd),
+            ]))),
+            None => Value::Unit,
+        }
     }
 
     pub fn trim(string: &str) -> &str {
