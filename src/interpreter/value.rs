@@ -1,16 +1,15 @@
+use std::cell::RefCell;
+use std::cmp::Ordering;
+use std::fmt;
+use std::hash::{Hash, Hasher};
+use std::rc::Rc;
+
+use num::BigInt;
+
 use crate::hash_map::{DefaultHasher, HashMap};
-use crate::interpreter::evaluate::{ErrorConverter, EvaluationError};
 use crate::interpreter::function::{Function, OverloadedFunction};
 use crate::interpreter::int::Int;
 use crate::interpreter::num::{Number, NumberToUsizeError, NumberType};
-use crate::lexer::Location;
-use num::BigInt;
-use std::cell::RefCell;
-use std::cmp::Ordering;
-use std::hash::{Hash, Hasher};
-
-use std::fmt;
-use std::rc::Rc;
 
 /// Enumerates all the different types of values that exist in the language
 /// All values should be pretty cheap to clone because the bigger ones are wrapped using Rc's
@@ -250,12 +249,6 @@ pub enum ConversionError {
 
     #[error("{0}")]
     NumberToUsizeError(#[from] NumberToUsizeError),
-}
-
-impl ErrorConverter for ConversionError {
-    fn as_evaluation_error(&self, start: Location, end: Location) -> EvaluationError {
-        EvaluationError::type_error(&format!("{self}"), start, end)
-    }
 }
 
 impl TryFrom<Value> for i64 {

@@ -1051,39 +1051,16 @@ impl fmt::Debug for EvaluationError {
 impl Error for EvaluationError {}
 
 pub trait ErrorConverter: fmt::Debug {
+    fn as_evaluation_error(&self, start: Location, end: Location) -> EvaluationError;
+}
+
+impl<E> ErrorConverter for E
+where
+    E: fmt::Debug,
+{
     fn as_evaluation_error(&self, start: Location, end: Location) -> EvaluationError {
         EvaluationError {
             text: format!("{self:?}"),
-            start,
-            end,
-        }
-    }
-}
-
-impl ErrorConverter for std::io::Error {
-    fn as_evaluation_error(&self, start: Location, end: Location) -> EvaluationError {
-        EvaluationError {
-            text: format!("io error: {self:?}"),
-            start,
-            end,
-        }
-    }
-}
-
-impl ErrorConverter for std::cell::BorrowError {
-    fn as_evaluation_error(&self, start: Location, end: Location) -> EvaluationError {
-        EvaluationError {
-            text: "cannot read from the value because it is already being written to".to_string(),
-            start,
-            end,
-        }
-    }
-}
-impl ErrorConverter for std::cell::BorrowMutError {
-    fn as_evaluation_error(&self, start: Location, end: Location) -> EvaluationError {
-        EvaluationError {
-            text: "you cannot mutate a value in a list while you're iterating over this list"
-                .to_string(),
             start,
             end,
         }
@@ -1205,9 +1182,6 @@ fn call_function(
     match result {
         Err(FunctionCarrier::Return(value)) | Ok(value) => Ok(value),
         e @ Err(FunctionCarrier::EvaluationError(_) | FunctionCarrier::FunctionNotFound) => e,
-        Err(FunctionCarrier::ArgumentError(err)) => {
-            Err(EvaluationError::argument_error(&err, start, end).into())
-        }
         Err(carrier @ FunctionCarrier::IntoEvaluationError(_)) => Err(carrier.lift(start, end)),
     }
 }

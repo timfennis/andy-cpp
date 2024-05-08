@@ -6,7 +6,9 @@ use std::rc::Rc;
 use num::BigInt;
 
 use crate::interpreter::environment::Environment;
-use crate::interpreter::function::{Function, FunctionCarrier, ParamType, TypeSignature};
+use crate::interpreter::function::{
+    Function, FunctionCallError, FunctionCarrier, ParamType, TypeSignature,
+};
 use crate::interpreter::int::Int;
 use crate::interpreter::num::Number;
 use crate::interpreter::value::{Sequence, Value, ValueType};
@@ -68,11 +70,16 @@ pub fn register(env: &mut Environment) {
                         })
                         .map_err(|err| FunctionCarrier::IntoEvaluationError(Box::new(err)))
                 }
-                [value] => Err(FunctionCarrier::argument_type_error(
-                    &ValueType::String,
-                    &ValueType::from(value),
-                )),
-                args => Err(FunctionCarrier::argument_count_error(1, args.len())),
+                [value] => Err(FunctionCallError::ArgumentTypeError {
+                    expected: ValueType::String,
+                    actual: ValueType::from(value),
+                }
+                .into()),
+                args => Err(FunctionCallError::ArgumentCountError {
+                    expected: 1,
+                    actual: args.len(),
+                }
+                .into()),
             },
             type_signature: TypeSignature::Exact(vec![ParamType::String]),
         }),
@@ -85,16 +92,21 @@ pub fn register(env: &mut Environment) {
                 [Value::Sequence(Sequence::String(s))] => {
                     let s = s.borrow();
                     let bi = s.parse::<BigInt>().map_err(|err| {
-                        FunctionCarrier::ArgumentError(format!(
+                        FunctionCallError::ConvertToNativeTypeError(format!(
                             "string \"{s}\" cannot be converted into an integer because \"{err}\""
                         ))
                     })?;
                     Ok(Value::Number(Number::Int(Int::BigInt(bi).simplify())))
                 }
-                [single_value] => Err(FunctionCarrier::ArgumentError(format!(
+                [single_value] => Err(FunctionCallError::ConvertToNativeTypeError(format!(
                     "cannot convert {single_value} to string"
-                ))),
-                vals => Err(FunctionCarrier::argument_count_error(1, vals.len())),
+                ))
+                .into()),
+                vals => Err(FunctionCallError::ArgumentCountError {
+                    expected: 1,
+                    actual: vals.len(),
+                }
+                .into()),
             },
             type_signature: TypeSignature::Exact(vec![ParamType::Any]),
         }),

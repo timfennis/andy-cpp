@@ -303,7 +303,7 @@ fn create_temp_variable(
                 param_type: into_param_type(ty),
                 temp_var: quote! { #temp_var },
                 initialize_code: quote! {
-                    let #temp_var = #path :: try_from(&values[#position]).map_err(|err| crate::interpreter::function::FunctionCarrier::ArgumentError(format!("{err}")))?
+                    let #temp_var = #path :: try_from(&values[#position]).map_err(|err| crate::interpreter::function::FunctionCallError::ConvertToNativeTypeError(format!("{err}")))?
                 },
             });
         }
@@ -313,7 +313,7 @@ fn create_temp_variable(
                 param_type: into_param_type(ty),
                 temp_var: quote! { #temp_var },
                 initialize_code: quote! {
-                    let #temp_var = <#type_ref as TryFrom<&crate::interpreter::value::Value>> :: try_from(&values[#position]).map_err(|err| crate::interpreter::function::FunctionCarrier::ArgumentError(format!("{err}")))?
+                    let #temp_var = <#type_ref as TryFrom<&crate::interpreter::value::Value>> :: try_from(&values[#position]).map_err(|err| crate::interpreter::function::FunctionCallError::ConvertToNativeTypeError(format!("{err}")))?
                 },
             });
         } else {

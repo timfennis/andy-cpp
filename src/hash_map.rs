@@ -10,6 +10,7 @@ pub use std::hash::DefaultHasher;
 
 use std::hash::Hash;
 
+#[allow(dead_code)]
 pub trait HashMapExt<K, V> {
     fn union(&mut self, right: HashMap<K, V>)
     where

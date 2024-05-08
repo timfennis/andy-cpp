@@ -228,14 +228,40 @@ impl Function {
             }
             Function::SingleNumberFunction { body } => match args {
                 [Value::Number(num)] => Ok(Value::Number((body)(num.clone()))),
-                [v] => Err(FunctionCarrier::argument_type_error(
-                    &ValueType::Number(NumberType::Float),
-                    &v.value_type(),
-                )),
-                _ => Err(FunctionCarrier::argument_count_error(1, 0)),
+                [v] => Err(FunctionCallError::ArgumentTypeError {
+                    expected: ValueType::Number(NumberType::Float),
+                    actual: v.value_type(),
+                }
+                .into()),
+                _ => Err(FunctionCallError::ArgumentCountError {
+                    expected: 1,
+                    actual: 0,
+                }
+                .into()),
             },
             Function::GenericFunction { function, .. } => function(args, env),
         }
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum FunctionCallError {
+    #[error("invalid argument, expected {expected} got {actual}")]
+    ArgumentTypeError {
+        expected: ValueType,
+        actual: ValueType,
+    },
+
+    #[error("invalid argument count, expected {expected} arguments got {actual}")]
+    ArgumentCountError { expected: usize, actual: usize },
+
+    #[error("cannot convert argument to native type: {0}")]
+    ConvertToNativeTypeError(String),
+}
+
+impl From<FunctionCallError> for FunctionCarrier {
+    fn from(value: FunctionCallError) -> Self {
+        Self::IntoEvaluationError(Box::new(value))
     }
 }
 
@@ -246,27 +272,13 @@ pub enum FunctionCarrier {
     Return(Value),
     #[error("evaluation error {0}")]
     EvaluationError(#[from] EvaluationError),
-    #[error("argument error {0}")]
-    ArgumentError(String), // TODO can this be removed?
     #[error("function does not exist")]
-    FunctionNotFound,
+    FunctionNotFound, // This error has specific handling behavior and needs its own variant
     #[error("unconverted evaluation error")]
     IntoEvaluationError(Box<dyn ErrorConverter>),
 }
 
 impl FunctionCarrier {
-    #[must_use]
-    pub fn argument_type_error(expected: &ValueType, actual: &ValueType) -> Self {
-        Self::ArgumentError(format!("argument error: expected {expected} got {actual}"))
-    }
-
-    #[must_use]
-    pub fn argument_count_error(expected: usize, actual: usize) -> Self {
-        Self::ArgumentError(format!(
-            "argument error: expected {expected} arguments got {actual}"
-        ))
-    }
-
     pub fn lift(self, start: Location, end: Location) -> Self {
         match self {
             FunctionCarrier::IntoEvaluationError(into) => {
