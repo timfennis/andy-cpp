@@ -1,3 +1,4 @@
+use std::cell::BorrowMutError;
 use std::fmt;
 use std::rc::Rc;
 
@@ -287,5 +288,12 @@ impl FunctionCarrier {
             }
             e => e,
         }
+    }
+}
+
+impl From<BorrowMutError> for FunctionCarrier {
+    fn from(value: BorrowMutError) -> Self {
+        // TODO: maybe this needs a better message
+        Self::IntoEvaluationError(Box::new(value))
     }
 }
