@@ -361,24 +361,6 @@ impl<'a> TryFrom<&'a Value> for &'a Sequence {
     }
 }
 
-// FIXME: We should not need to convert `&Value` into `BigInt`, we should use `&BigInt` instead.
-//        But we can't return references to BigInt in case the source type is i64. A possible
-//        solution could be to create the BigInt instance from the i64 as part of the attribute
-//        macro
-impl TryFrom<&Value> for BigInt {
-    type Error = ConversionError;
-    fn try_from(value: &Value) -> Result<Self, Self::Error> {
-        match value {
-            Value::Number(Number::Int(Int::BigInt(b))) => Ok(b.clone()),
-            Value::Number(Number::Int(Int::Int64(i))) => Ok(BigInt::from(*i)),
-            v => Err(ConversionError::UnsupportedVariant(
-                v.value_type(),
-                stringify!(BigInt),
-            )),
-        }
-    }
-}
-
 impl<'a> TryFrom<&'a Value> for &'a Number {
     type Error = ConversionError;
 
@@ -392,23 +374,6 @@ impl<'a> TryFrom<&'a Value> for &'a Number {
         }
     }
 }
-
-// TODO: This implementation is trash
-impl TryFrom<&Value> for String {
-    type Error = ConversionError;
-
-    fn try_from(value: &Value) -> Result<Self, Self::Error> {
-        match value {
-            Value::Sequence(Sequence::String(string)) => Ok(string.borrow().clone()), // TODO: no clonerino pls, just take ref
-            v => Err(ConversionError::UnsupportedVariant(
-                v.value_type(),
-                "String",
-            )),
-        }
-    }
-}
-
-// ValueType
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum ValueType {

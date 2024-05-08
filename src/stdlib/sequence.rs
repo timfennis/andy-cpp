@@ -135,7 +135,7 @@ mod inner {
     }
     pub fn len(seq: &Sequence) -> usize {
         match seq {
-            Sequence::String(s) => s.borrow().len(),
+            Sequence::String(s) => s.borrow().chars().count(),
             Sequence::List(l) => l.borrow().len(),
             Sequence::Tuple(t) => t.len(),
             Sequence::Map(d, _) => d.borrow().len(),
