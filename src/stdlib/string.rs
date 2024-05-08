@@ -4,6 +4,7 @@ use andy_cpp_macros::export_module;
 mod inner {
     use crate::interpreter::value::Value;
     use anyhow::anyhow;
+    use itertools::Itertools;
 
     pub fn ord(string: &str) -> anyhow::Result<i64> {
         let mut iterator = string.chars().map(|ch| ch as i64);
@@ -19,10 +20,12 @@ mod inner {
     }
 
     // TODO: remove this function once actual slicing is supported
-    pub fn slice(string: &str, i: i64, j: i64) -> String {
-        let i = usize::try_from(i).expect("TODO: support usize arguments");
-        let j = usize::try_from(j).expect("TODO: support usize arguments");
-        String::from(&string[i..j])
+    pub fn slice(string: &str, i: usize, j: usize) -> anyhow::Result<String> {
+        let len = string.chars().count();
+        if i + j > len {
+            return Err(anyhow::anyhow!("slice offset out of bounds"));
+        }
+        Ok(string.chars().dropping(i).take(j).collect::<String>())
     }
     pub fn to_lower(string: &str) -> String {
         string.to_lowercase()

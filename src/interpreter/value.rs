@@ -346,6 +346,20 @@ impl TryFrom<Value> for BigInt {
     }
 }
 
+impl TryFrom<&Value> for usize {
+    type Error = ConversionError;
+
+    fn try_from(value: &Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Number(number) => Ok(usize::try_from(number.clone())?),
+            v => Err(ConversionError::UnsupportedVariant(
+                v.value_type(),
+                stringify!(usize),
+            )),
+        }
+    }
+}
+
 // TODO: Should we implement `Deref` or something?
 impl<'a> TryFrom<&'a Value> for &'a Sequence {
     type Error = ConversionError;
