@@ -411,10 +411,6 @@ pub(crate) fn evaluate_expression(
                 environment: environment.clone(),
             };
 
-            // We always create a new environment to ensure the function only closes over variables
-            // that have been declared previously.
-            let new_env = Environment::new_scope(environment);
-            *environment = new_env;
             environment
                 .borrow_mut()
                 .declare_function(&name, user_function);

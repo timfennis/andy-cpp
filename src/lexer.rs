@@ -208,7 +208,9 @@ impl Iterator for Lexer<'_> {
                         }
                     }
                 }
+                // lex string
                 ('"', _) => return Some(self.lex_string(start)),
+                // lex float
                 (char, _) if char.is_ascii_digit() => {
                     let mut buf = String::new();
                     buf.push(char);
@@ -287,6 +289,7 @@ impl Iterator for Lexer<'_> {
                 }
                 //TODO: For now we just support boring c-style identifiers but maybe allowing Emoji or other characters
                 //      could be cool too
+                // Lex identifiers and keywords
                 (char, _) if char.is_alphabetic() || char == '_' => {
                     // Parse an identifier, or not
                     let mut buf = String::new();

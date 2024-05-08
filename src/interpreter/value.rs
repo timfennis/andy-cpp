@@ -42,8 +42,7 @@ impl Value {
         Value::Sequence(Sequence::List(Rc::new(RefCell::new(vec![]))))
     }
 
-    // TODO: don't use anyhow here
-    pub fn try_cmp(&self, other: &Value) -> Result<Ordering, anyhow::Error> {
+    pub fn try_cmp(&self, other: &Value) -> anyhow::Result<Ordering> {
         self.partial_cmp(other).ok_or_else(|| {
             anyhow::anyhow!(
                 "{} cannot be compared to {}",

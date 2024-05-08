@@ -9,6 +9,7 @@ pub enum Token {
     Float64(f64),
     BigInt(BigInt),
     Complex(Complex64),
+    Infinity,
 
     Identifier(String),
     OpAssign(Box<TokenLocation>),
@@ -93,6 +94,7 @@ impl fmt::Display for Token {
             Self::Complex(n) => {
                 return write!(f, "{n}");
             }
+            Self::Infinity => "Inf",
             Self::Identifier(ident) => ident,
             Self::DeclareVar => ":=",
             Self::EqualsSign => "=",
@@ -284,6 +286,10 @@ impl TryFrom<char> for Token {
 impl From<String> for Token {
     fn from(value: String) -> Self {
         match value.as_str() {
+            // YOLO for now just have Inf and NaN here
+            "Inf" => Self::Float64(f64::INFINITY),
+            "NaN" => Self::Float64(f64::NAN),
+            // Normal keywords
             "while" => Self::While,
             "if" => Self::If,
             "else" => Self::Else,
@@ -293,7 +299,6 @@ impl From<String> for Token {
             "true" => Self::True,
             "false" => Self::False,
             "return" => Self::Return,
-            "self" => Self::_Self,
             _ => Self::Identifier(value),
         }
     }

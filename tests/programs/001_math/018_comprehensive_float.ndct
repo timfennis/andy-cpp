@@ -1,11 +1,6 @@
 --PROGRAM--
 // Some inspiration was taken from: https://github.com/python/cpython/blob/main/Lib/test/test_float.py
 
-// TODO: we should have a native way to generate these values
-inf := 10.0/0.0;
-ninf := 10.0/-0.0;
-nan := 0.0/0.0;
-
 assert(4.20 == 4.20);
 
 // TODO: this function has not yet been implemented
@@ -21,11 +16,11 @@ assert(-1.0 % 1.0 == -0.0);
 // TODO: add more at some point but getting good valid tests cases is extremely frustrating
 
 // Total ordering
-assert(nan == nan);
-assert(ninf + inf == nan);
-assert(nan > inf);
-assert(inf > ninf);
-assert(nan == -nan, "nan equals negative nan");
+assert(NaN == NaN);
+assert(-Inf + Inf == NaN);
+assert(NaN > Inf);
+assert(Inf > -Inf);
+assert(NaN == -NaN, "nan equals negative nan");
 
 print("ok");
 --EXPECT--
