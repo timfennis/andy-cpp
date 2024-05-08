@@ -111,7 +111,6 @@ impl From<FunctionCarrier> for InterpreterError {
             FunctionCarrier::Return(_) => panic!("attempted to convert return value to Error"),
             FunctionCarrier::EvaluationError(e) => e.into(),
             FunctionCarrier::ArgumentError(_) => panic!("attempted to convert ArgumentError to Error without line number info"),
-            FunctionCarrier::IOError(_) => panic!("attempted to convert IOError to Error without line number info"),
             FunctionCarrier::FunctionNotFound => panic!("attempted to convert FunctionNotFound to Error without line number info"),
             FunctionCarrier::IntoEvaluationError(_) => panic!("attempted to convert incomplete EvaluationError into Error without line number info"),
         }

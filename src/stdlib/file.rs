@@ -28,7 +28,7 @@ pub fn register(env: &mut Environment) {
                         }
                         Ok(())
                     })
-                    .map_err(FunctionCarrier::IOError)?;
+                    .map_err(|err| FunctionCarrier::IntoEvaluationError(Box::new(err)))?;
                 Ok(Value::Unit)
             },
             type_signature: TypeSignature::Variadic,
@@ -51,7 +51,7 @@ pub fn register(env: &mut Environment) {
                         }
                         Ok(())
                     })
-                    .map_err(FunctionCarrier::IOError)?;
+                    .map_err(|err| FunctionCarrier::IntoEvaluationError(Box::new(err)))?;
                 Ok(Value::Unit)
             },
             type_signature: TypeSignature::Variadic,
@@ -66,7 +66,7 @@ pub fn register(env: &mut Environment) {
                         .map(|contents| {
                             Value::Sequence(Sequence::String(Rc::new(RefCell::new(contents))))
                         })
-                        .map_err(FunctionCarrier::IOError)
+                        .map_err(|err| FunctionCarrier::IntoEvaluationError(Box::new(err)))
                 }
                 [value] => Err(FunctionCarrier::argument_type_error(
                     &ValueType::String,

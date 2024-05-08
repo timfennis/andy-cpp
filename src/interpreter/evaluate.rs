@@ -1208,9 +1208,6 @@ fn call_function(
         Err(FunctionCarrier::ArgumentError(err)) => {
             Err(EvaluationError::argument_error(&err, start, end).into())
         }
-        Err(FunctionCarrier::IOError(err)) => {
-            Err(EvaluationError::io_error(&err, start, end).into())
-        }
         Err(carrier @ FunctionCarrier::IntoEvaluationError(_)) => Err(carrier.lift(start, end)),
     }
 }

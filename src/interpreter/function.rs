@@ -248,8 +248,6 @@ pub enum FunctionCarrier {
     EvaluationError(#[from] EvaluationError),
     #[error("argument error {0}")]
     ArgumentError(String), // TODO can this be removed?
-    #[error("IO Error: {0}")]
-    IOError(#[from] std::io::Error), // TODO can this be removed?
     #[error("function does not exist")]
     FunctionNotFound,
     #[error("unconverted evaluation error")]
