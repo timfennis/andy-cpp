@@ -88,12 +88,15 @@ pub(crate) fn evaluate_expression(
 
             let value = evaluate_expression(value, environment)?;
 
-            // TODO: we should probably remove this check because every declaration should create a
-            //       new scope in order to fix the weird shadowing bug. Check page 177 of the book.
-            // if environment.borrow().contains(identifier) {
-            let new_env = Environment::new_scope(environment);
-            *environment = new_env;
-            // }
+            // If we enable this check we can reuse environments a little bit better and gain some
+            // performance but the downside is that closures behave weirdly. We could probably enable
+            // it if we ensure that closures always close over the previously defined environment
+            // instead of resolving at runtime. Check page 177 of the book for more info.
+            if environment.borrow().contains(identifier) {
+                let new_env = Environment::new_scope(environment);
+                *environment = new_env;
+            }
+
             environment.borrow_mut().declare(identifier, value.clone());
 
             value
@@ -408,6 +411,10 @@ pub(crate) fn evaluate_expression(
                 environment: environment.clone(),
             };
 
+            // We always create a new environment to ensure the function only closes over variables
+            // that have been declared previously.
+            let new_env = Environment::new_scope(environment);
+            *environment = new_env;
             environment
                 .borrow_mut()
                 .declare_function(&name, user_function);
