@@ -975,6 +975,15 @@ pub struct EvaluationError {
 
 impl EvaluationError {
     #[must_use]
+    pub fn new(message: String, start: Location, end: Location) -> Self {
+        Self {
+            text: message,
+            start,
+            end,
+        }
+    }
+
+    #[must_use]
     pub fn mutation_error(message: &str, start: Location, end: Location) -> Self {
         Self {
             text: format!("Mutation error: {message}"),
@@ -1161,8 +1170,8 @@ fn try_call_function(
 
     let types = evaluated_args.iter().map(Value::value_type).join(", ");
 
-    let function_not_found = EvaluationError::syntax_error(
-        &format!("no function found that matches the types {types}"),
+    let function_not_found = EvaluationError::new(
+        format!("no function found that matches the types {types}"),
         start,
         end,
     );
