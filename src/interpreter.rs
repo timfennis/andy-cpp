@@ -104,7 +104,7 @@ pub enum InterpreterError {
 }
 
 /// This trait converts a `FunctionError` into an `InterpreterError` but the callee needs to ensure the variant is already `FunctionCarrier::EvaluationError`
-/// TODO: maybe we can change this into a TryFrom that can fail en replace all the calls to make the interpreter not panic if there is a bug
+// TODO: maybe we can change this into a `TryFrom` that can fail en replace all the calls to make the interpreter not panic if there is a bug
 impl From<FunctionCarrier> for InterpreterError {
     fn from(value: FunctionCarrier) -> Self {
         match value {

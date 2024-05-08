@@ -528,6 +528,7 @@ impl Number {
         }
     }
 
+    #[must_use]
     pub fn abs(&self) -> Number {
         match self {
             Number::Int(i) => Number::Int(i.abs()),

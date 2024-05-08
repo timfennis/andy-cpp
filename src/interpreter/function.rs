@@ -279,6 +279,7 @@ pub enum FunctionCarrier {
 }
 
 impl FunctionCarrier {
+    #[must_use]
     pub fn lift(self, start: Location, end: Location) -> Self {
         match self {
             FunctionCarrier::IntoEvaluationError(into) => {

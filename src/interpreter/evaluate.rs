@@ -6,7 +6,6 @@ use std::ops::{IndexMut, Neg, Not, Range, RangeInclusive, Rem};
 use std::rc::Rc;
 
 use either::Either;
-use itertools::Itertools;
 
 use crate::ast::{
     BinaryOperator, Expression, ExpressionLocation, LogicalOperator, Lvalue, UnaryOperator,
@@ -382,24 +381,29 @@ pub(crate) fn evaluate_expression(
             function,
             arguments,
         } => {
-            // The Expression in `function` must either be an identifier in which case it will be looked up in the
-            // environment, or it must be some expression that evaluates to a function.
-            // In case the expression is an identifier we get ALL the values that match the identifier
-            // ordered by the distance is the scope-hierarchy.
-            let values: Vec<RefCell<Value>> = match &function.expression {
-                Expression::Identifier(identifier) => {
-                    environment.borrow().get_all_by_name(identifier)
-                }
-                _ => vec![RefCell::new(evaluate_expression(function, environment)?)],
-            };
-
             let mut evaluated_args = Vec::new();
 
             for argument in arguments {
                 evaluated_args.push(evaluate_expression(argument, environment)?);
             }
 
-            return try_call_function(&values, &evaluated_args, environment, start, end);
+            // The Expression in `function` must either be an identifier in which case it will be looked up in the
+            // environment, or it must be some expression that evaluates to a function.
+            // In case the expression is an identifier we get ALL the values that match the identifier
+            // ordered by the distance is the scope-hierarchy.
+            return if let Expression::Identifier(identifier) = &function.expression {
+                call_function_by_name(identifier, &evaluated_args, environment, start, end)
+            } else {
+                let function_as_value = evaluate_expression(function, environment)?;
+
+                try_call_function(
+                    &[RefCell::new(function_as_value)],
+                    &evaluated_args,
+                    environment,
+                    start,
+                    end,
+                )
+            };
         }
         Expression::FunctionDeclaration {
             arguments,
@@ -1127,7 +1131,16 @@ fn call_function_by_name(
     end: Location,
 ) -> EvaluationResult {
     let values = environment.borrow().get_all_by_name(name);
-    try_call_function(&values, evaluated_args, environment, start, end)
+    let result = try_call_function(&values, evaluated_args, environment, start, end);
+    if let Err(FunctionCarrier::FunctionNotFound) = result {
+        return Err(FunctionCarrier::EvaluationError(EvaluationError::new(
+            format!("no function called '{name}' found matches the arguments"),
+            start,
+            end,
+        )));
+    }
+
+    result
 }
 
 /// Executes a function with some extra steps
@@ -1168,15 +1181,7 @@ fn try_call_function(
         }
     }
 
-    let types = evaluated_args.iter().map(Value::value_type).join(", ");
-
-    let function_not_found = EvaluationError::new(
-        format!("no function found that matches the types {types}"),
-        start,
-        end,
-    );
-
-    Err(function_not_found.into())
+    Err(FunctionCarrier::FunctionNotFound)
 }
 
 fn call_function(
