@@ -360,7 +360,6 @@ impl TryFrom<&Value> for usize {
     }
 }
 
-// TODO: Should we implement `Deref` or something?
 impl<'a> TryFrom<&'a Value> for &'a Sequence {
     type Error = ConversionError;
 

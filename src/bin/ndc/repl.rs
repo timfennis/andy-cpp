@@ -54,7 +54,6 @@ impl rustyline::highlight::Highlighter for RustlylineHelper {
                 .dropping(range.start)
                 .take(range.len())
                 .collect::<String>();
-            // let sub = &line[range]; // TODO: this can't deal with emoji
 
             let colored = match &token.token {
                 Token::String(_) => sub.color(STRING_LITERAL_COLOR),
