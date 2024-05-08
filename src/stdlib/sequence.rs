@@ -39,6 +39,25 @@ where
     }
 }
 
+fn try_sort(v: &mut [Value]) -> anyhow::Result<()> {
+    let mut ret = Ok(());
+    v.sort_by(|left, right| {
+        if ret.is_err() {
+            return Ordering::Equal;
+        }
+
+        match left.try_cmp(right) {
+            Ok(ordering) => ordering,
+            Err(err) => {
+                ret = Err(err);
+                Ordering::Equal
+            }
+        }
+    });
+    ret?;
+    Ok(())
+}
+
 #[export_module]
 mod inner {
     use crate::interpreter::value::{Sequence, Value};
@@ -73,42 +92,26 @@ mod inner {
         }
     }
 
-    pub fn sorted(seq: &Sequence) -> Sequence {
-        let cmp = |a: &&Value, b: &&Value| {
-            a.partial_cmp(b).expect(
-                "TODO: implement proper error handling in native functions (type cannot be sorted)",
-            )
-        };
+    pub fn sorted(seq: &Sequence) -> anyhow::Result<Sequence> {
         match seq {
             Sequence::String(str) => {
                 let sorted = str.borrow().chars().sorted().collect::<String>();
-                Sequence::String(Rc::new(RefCell::new(sorted)))
+                Ok(Sequence::String(Rc::new(RefCell::new(sorted))))
             }
             Sequence::List(list) => {
-                let sorted = list
-                    .borrow()
-                    .iter()
-                    .sorted_by(cmp)
-                    .cloned()
-                    .collect::<Vec<Value>>();
-                Sequence::List(Rc::new(RefCell::new(sorted)))
+                let mut out = Vec::clone(&*list.borrow());
+                try_sort(&mut out)?;
+                Ok(Sequence::List(Rc::new(RefCell::new(out))))
             }
             Sequence::Tuple(list) => {
-                let sorted = list
-                    .iter()
-                    .sorted_unstable_by(cmp)
-                    .cloned()
-                    .collect::<Vec<Value>>();
-                Sequence::Tuple(Rc::new(sorted))
+                let mut out = list.iter().cloned().collect::<Vec<Value>>();
+                try_sort(&mut out)?;
+                Ok(Sequence::Tuple(Rc::new(out)))
             }
             Sequence::Map(map, _) => {
-                let sorted = map
-                    .borrow()
-                    .keys()
-                    .sorted_unstable_by(cmp)
-                    .cloned()
-                    .collect::<Vec<Value>>();
-                Sequence::List(Rc::new(RefCell::new(sorted)))
+                let mut out = map.borrow().keys().cloned().collect::<Vec<Value>>();
+                try_sort(&mut out)?;
+                Ok(Sequence::List(Rc::new(RefCell::new(out))))
             }
         }
     }
