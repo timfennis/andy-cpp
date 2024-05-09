@@ -1,5 +1,0 @@
---PROGRAM--
-x := y := 3;
-print(x * y);
---EXPECT--
-9

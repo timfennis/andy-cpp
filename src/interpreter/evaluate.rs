@@ -449,29 +449,33 @@ pub(crate) fn evaluate_expression(
                 .into());
             };
 
-            let Lvalue::Variable {
-                identifier: var_name,
-            } = l_value
-            else {
-                return Err(EvaluationError::syntax_error(
-                    "cannot use this expression in for loop",
-                    start,
-                    end,
-                )
-                .into());
-            };
+            // let Lvalue::Variable {
+            //     identifier: var_name,
+            // } = l_value
+            // else {
+            //     return Err(EvaluationError::syntax_error(
+            //         "cannot use this expression in for loop",
+            //         start,
+            //         end,
+            //     )
+            //     .into());
+            // };
 
             match sequence {
                 Sequence::String(str) => {
                     let str = str.borrow();
-                    for char in str.chars() {
-                        let mut scope = Environment::new_scope(environment);
-                        {
-                            let mut scope = scope.borrow_mut();
-                            scope.reset();
-                            scope.declare(var_name, Value::from(String::from(char)));
-                        }
 
+                    let mut scope = Environment::new_scope(environment);
+                    for char in str.chars() {
+                        scope.borrow_mut().reset();
+                        declare_or_assign_variable(
+                            l_value,
+                            Value::from(String::from(char)),
+                            true,
+                            &mut scope,
+                            start,
+                            end,
+                        )?;
                         evaluate_expression(loop_body, &mut scope)?;
                     }
                     drop(str);
@@ -480,11 +484,15 @@ pub(crate) fn evaluate_expression(
                     let xs = xs.borrow();
                     let mut scope = Environment::new_scope(environment);
                     for x in xs.iter() {
-                        {
-                            let mut scope = scope.borrow_mut();
-                            scope.reset();
-                            scope.declare(var_name, x.clone());
-                        }
+                        scope.borrow_mut().reset();
+                        declare_or_assign_variable(
+                            l_value,
+                            x.clone(),
+                            true,
+                            &mut scope,
+                            start,
+                            end,
+                        )?;
 
                         evaluate_expression(loop_body, &mut scope)?;
                     }
@@ -492,11 +500,15 @@ pub(crate) fn evaluate_expression(
                 Sequence::Tuple(values) => {
                     let mut scope = Environment::new_scope(environment);
                     for x in &*values {
-                        {
-                            let mut scope = scope.borrow_mut();
-                            scope.reset();
-                            scope.declare(var_name, x.clone());
-                        }
+                        scope.borrow_mut().reset();
+                        declare_or_assign_variable(
+                            l_value,
+                            x.clone(),
+                            true,
+                            &mut scope,
+                            start,
+                            end,
+                        )?;
 
                         evaluate_expression(loop_body, &mut scope)?;
                     }
@@ -506,17 +518,18 @@ pub(crate) fn evaluate_expression(
 
                     let mut scope = Environment::new_scope(environment);
                     for (key, value) in xs.iter() {
-                        {
-                            let mut scope = scope.borrow_mut();
-                            scope.reset();
-                            scope.declare(
-                                var_name,
-                                Value::Sequence(Sequence::Tuple(Rc::new(vec![
-                                    key.clone(),
-                                    value.clone(),
-                                ]))),
-                            );
-                        }
+                        scope.borrow_mut().reset();
+                        declare_or_assign_variable(
+                            l_value,
+                            Value::Sequence(Sequence::Tuple(Rc::new(vec![
+                                key.clone(),
+                                value.clone(),
+                            ]))),
+                            true,
+                            &mut scope,
+                            start,
+                            end,
+                        )?;
                         evaluate_expression(loop_body, &mut scope)?;
                     }
                 }
