@@ -12,6 +12,14 @@ mod inner {
         list.push(elem);
     }
 
+    pub fn pop(list: &mut Vec<Value>) -> Value {
+        list.pop().unwrap_or(Value::Unit)
+    }
+
+    pub fn reversed(list: &[Value]) -> Vec<Value> {
+        list.iter().rev().cloned().collect::<Vec<Value>>()
+    }
+
     pub fn cartesian_product(list_a: &[Value], list_b: &[Value]) -> Vec<Value> {
         list_a
             .iter()
