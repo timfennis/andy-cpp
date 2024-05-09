@@ -239,25 +239,21 @@ impl Parser {
         // NOTE: When we start supporting more lvalues we should insert this step between
         //       `variable_declaration_or_assignment` and `logic_or`
         let maybe_lvalue = self.range()?;
-        let (start, end) = (maybe_lvalue.start, maybe_lvalue.end);
+        let start = maybe_lvalue.start;
 
-        let l_value = match maybe_lvalue.expression {
-            Expression::Identifier(identifier) => Lvalue::Variable { identifier },
-            Expression::Index { value, index } => Lvalue::Index { value, index },
-            _ => {
-                // In this case we got some kind of expression that we can't assign to. We can just return the expression as is.
-                // But to improve error handling and stuff it would be nice if we could check if the next token matches one
-                // of the assignment operator and throw an appropriate error.
-                return match self.peek_current_token() {
-                    Some(Token::DeclareVar | Token::EqualsSign) => {
-                        Err(Error::InvalidAssignmentTarget {
-                            target: maybe_lvalue,
-                        })
-                    }
-                    _ => Ok(maybe_lvalue),
-                };
-            }
-        };
+        if !Lvalue::can_build_from_expression(&maybe_lvalue.expression) {
+            // In this case we got some kind of expression that we can't assign to. We can just return the expression as is.
+            // But to improve error handling and stuff it would be nice if we could check if the next token matches one
+            // of the assignment operator and throw an appropriate error.
+            return match self.peek_current_token() {
+                Some(Token::DeclareVar | Token::EqualsSign) => {
+                    Err(Error::InvalidAssignmentTarget {
+                        target: maybe_lvalue,
+                    })
+                }
+                _ => Ok(maybe_lvalue),
+            };
+        }
 
         return match self.peek_current_token() {
             // NOTE: the parser supports every LValue but some might cause an error when declaring vars
@@ -266,7 +262,8 @@ impl Parser {
                 let expression = self.expression()?;
                 let end = expression.end;
                 let declaration = Expression::VariableDeclaration {
-                    l_value,
+                    l_value: Lvalue::try_from(maybe_lvalue)
+                        .expect("guaranteed to produce an lvalue"),
                     value: Box::new(expression),
                 };
 
@@ -277,7 +274,8 @@ impl Parser {
                 let expression = self.expression()?;
                 let end = expression.end;
                 let assignment_expression = Expression::Assignment {
-                    l_value,
+                    l_value: Lvalue::try_from(maybe_lvalue)
+                        .expect("guaranteed to produce an lvalue"),
                     value: Box::new(expression),
                 };
 
@@ -293,7 +291,8 @@ impl Parser {
                 let expression = self.expression()?;
                 let end = expression.end;
                 let op_assign = Expression::OpAssignment {
-                    l_value,
+                    l_value: Lvalue::try_from(maybe_lvalue)
+                        .expect("guaranteed to produce an lvalue"),
                     value: Box::new(expression),
                     operation: thing,
                 };
@@ -301,27 +300,8 @@ impl Parser {
                 Ok(op_assign.to_location(start, end))
             }
             // Repacking these into expression is not nice
-            _ => Ok(Self::l_value_into_expression(l_value, start, end)),
+            _ => Ok(maybe_lvalue),
         };
-    }
-
-    fn l_value_into_expression(
-        l_value: Lvalue,
-        start: Location,
-        end: Location,
-    ) -> ExpressionLocation {
-        match l_value {
-            Lvalue::Variable { identifier } => ExpressionLocation {
-                expression: Expression::Identifier(identifier),
-                start,
-                end,
-            },
-            Lvalue::Index { index, value } => ExpressionLocation {
-                expression: Expression::Index { index, value },
-                start,
-                end,
-            },
-        }
     }
 
     fn range(&mut self) -> Result<ExpressionLocation, Error> {

@@ -17,13 +17,17 @@ pub struct ExpressionLocation {
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum Lvalue {
+    // Example: `foo := ...`
     Variable {
         identifier: String,
     },
+    // Example: `foo()[1] = ...`
     Index {
         value: Box<ExpressionLocation>,
         index: Box<ExpressionLocation>,
     },
+    // Example: `a, b := ...`
+    Sequence(Vec<Lvalue>),
 }
 
 #[derive(Debug, PartialEq)]
@@ -188,6 +192,38 @@ impl Lvalue {
         match self {
             Lvalue::Variable { .. } => "variable",
             Lvalue::Index { .. } => "index expression",
+            Lvalue::Sequence(_) => "destructure pattern", // ??
+        }
+    }
+
+    #[must_use]
+    pub fn can_build_from_expression(expression: &Expression) -> bool {
+        match expression {
+            Expression::Identifier(_)
+            | Expression::Index { .. }
+            | Expression::List { .. }
+            | Expression::Tuple { .. } => true,
+            Expression::Grouping(inner) => Self::can_build_from_expression(&inner.expression),
+            _ => false,
+        }
+    }
+}
+
+impl TryFrom<ExpressionLocation> for Lvalue {
+    type Error = (); //crate::ast::parser::Error;
+
+    fn try_from(value: ExpressionLocation) -> Result<Self, Self::Error> {
+        match value.expression {
+            Expression::Identifier(identifier) => Ok(Lvalue::Variable { identifier }),
+            Expression::Index { value, index } => Ok(Lvalue::Index { value, index }),
+            Expression::List { values } | Expression::Tuple { values } => Ok(Lvalue::Sequence(
+                values
+                    .into_iter()
+                    .map(Lvalue::try_from)
+                    .collect::<Result<Vec<Self>, Self::Error>>()?,
+            )),
+            Expression::Grouping(value) => Ok(Lvalue::Sequence(vec![Self::try_from(*value)?])),
+            _ => Err(()),
         }
     }
 }
