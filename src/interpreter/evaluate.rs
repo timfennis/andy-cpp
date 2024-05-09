@@ -75,42 +75,13 @@ pub(crate) fn evaluate_expression(
         }
         Expression::Grouping(expr) => evaluate_expression(expr, environment)?,
         Expression::VariableDeclaration { l_value, value } => {
-            let Lvalue::Variable { identifier } = l_value else {
-                return Err(EvaluationError::syntax_error(
-                    &format!(
-                        "Can't declare values into {}",
-                        l_value.expression_type_name()
-                    ),
-                    start,
-                    end,
-                )
-                .into());
-            };
-
             let value = evaluate_expression(value, environment)?;
-
-            // If we enable this check we can reuse environments a little bit better and gain some
-            // performance but the downside is that closures behave weirdly. We could probably enable
-            // it if we ensure that closures always close over the previously defined environment
-            // instead of resolving at runtime. Check page 177 of the book for more info.
-            if environment.borrow().contains(identifier) {
-                let new_env = Environment::new_scope(environment);
-                *environment = new_env;
-            }
-
-            environment.borrow_mut().declare(identifier, value.clone());
-
-            value
+            declare_or_assign_variable(l_value, value, true, environment, start, end)?
         }
         Expression::Assignment { l_value, value } => match l_value {
-            Lvalue::Variable { identifier } => {
-                if !environment.borrow().contains(identifier) {
-                    Err(EvaluationError::undefined_variable(identifier, start, end))?;
-                }
-
+            l_value @ (Lvalue::Variable { .. } | Lvalue::Sequence(_)) => {
                 let value = evaluate_expression(value, environment)?;
-                environment.borrow_mut().assign(identifier, value.clone());
-                value
+                declare_or_assign_variable(l_value, value, false, environment, start, end)?
             }
             Lvalue::Index {
                 value: assign_to,
@@ -280,6 +251,7 @@ pub(crate) fn evaluate_expression(
 
                 new_value
             }
+            Lvalue::Sequence(_) => todo!("not implemented, and not sure if we should either"),
         },
         Expression::Block { statements } => {
             let mut local_scope = Environment::new_scope(environment);
@@ -709,6 +681,56 @@ pub(crate) fn evaluate_expression(
     };
 
     Ok(literal)
+}
+
+fn declare_or_assign_variable(
+    l_value: &Lvalue,
+    value: Value,
+    declare: bool,
+    environment: &mut EnvironmentRef,
+    start: Location,
+    end: Location,
+) -> EvaluationResult {
+    match l_value {
+        Lvalue::Variable { identifier } => {
+            if declare {
+                // If we enable this check we can reuse environments a little bit better and gain some
+                // performance but the downside is that closures behave weirdly. We could probably enable
+                // it if we ensure that closures always close over the previously defined environment
+                // instead of resolving at runtime. Check page 177 of the book for more info.
+                if environment.borrow().contains(identifier) {
+                    let new_env = Environment::new_scope(environment);
+                    *environment = new_env;
+                }
+                environment.borrow_mut().declare(identifier, value.clone());
+            } else {
+                if !environment.borrow().contains(identifier) {
+                    return Err(EvaluationError::undefined_variable(identifier, start, end))?;
+                }
+
+                environment.borrow_mut().assign(identifier, value.clone());
+            }
+
+            Ok(value)
+        }
+        Lvalue::Sequence(l_values) => {
+            let values = value.into_vec().expect("TODO: handle value is not a list");
+            assert_eq!(values.len(), l_values.len()); // TEMP
+            for (l_value, value) in l_values.iter().zip(values.into_iter()) {
+                declare_or_assign_variable(l_value, value, declare, environment, start, end)?;
+            }
+            Ok(Value::Unit)
+        }
+        Lvalue::Index { .. } => Err(EvaluationError::syntax_error(
+            &format!(
+                "Can't declare values into {}",
+                l_value.expression_type_name()
+            ),
+            start,
+            end,
+        )
+        .into()),
+    }
 }
 
 // Applies operations like `+` or functions like `max(x, y)` to mutable pointers to values. This is

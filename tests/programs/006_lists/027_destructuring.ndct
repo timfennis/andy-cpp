@@ -1,0 +1,30 @@
+--PROGRAM--
+// List
+[a, b] := [1, 2];
+assert(a == 1 && b == 2);
+[a] := [3];
+assert(a == 3);
+
+// Tuple
+(a, b) := (4, 5);
+assert(a == 4 && b == 5);
+// This special case is not allowed right but I might enable it in the future
+// (c) := (6);
+// assert(c == 6);
+
+// Also a special case that does work, confusingly
+// Mixed (some doubt about the sanity of this)
+(d) := [1];
+assert(d == 1);
+
+// Assignment into tuple
+(a, b) = (10, 20);
+assert(a == 10 && b == 20);
+
+// Assignment into list
+[b, d] = (30, 40);
+assert(b == 30 && d == 40);
+
+print("ok");
+--EXPECT--
+ok

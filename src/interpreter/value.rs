@@ -24,6 +24,20 @@ pub enum Value {
 
 impl Value {
     #[must_use]
+    pub fn into_vec(self) -> Option<Vec<Self>> {
+        // TODO: this can probably be optimized with into_inner and such
+        match self {
+            Value::Sequence(Sequence::List(list)) => Some(Vec::clone(&*list.borrow())),
+            Value::Sequence(Sequence::Tuple(list)) => Some(Vec::clone(&list)),
+            Value::Sequence(Sequence::Map(map, _)) => {
+                Some(map.borrow().keys().cloned().collect::<Vec<_>>())
+            }
+            // TODO: implement string
+            // Value::Sequence(Sequence::String(string)) => Some(Vec::clone(&*list.borrow())),
+            _ => None,
+        }
+    }
+    #[must_use]
     pub fn value_type(&self) -> ValueType {
         match self {
             Value::Unit => ValueType::Unit,
