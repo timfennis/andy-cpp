@@ -1,14 +1,16 @@
 use crate::interpreter::evaluate::EvaluationError;
 use crate::lexer::Location;
+use num::bigint::Sign;
 use num::complex::Complex64;
 use num::traits::CheckedEuclid;
 use num::FromPrimitive;
-use num::{BigInt, BigRational, Signed, ToPrimitive, Zero};
+use num::{pow::Pow, BigInt, BigRational, Signed, ToPrimitive, Zero};
 use std::cmp::Ordering;
 use std::fmt;
+use std::hash::{Hash, Hasher};
 use std::ops;
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Int {
     Int64(i64),
     BigInt(BigInt),
@@ -32,7 +34,7 @@ impl Int {
     }
 
     #[must_use]
-    pub fn simplify(self) -> Self {
+    pub fn simplified(self) -> Self {
         match self {
             i @ Int::Int64(_) => i,
             Int::BigInt(bi) => {
@@ -57,23 +59,19 @@ impl Int {
             .map(Int::BigInt)
     }
 
+    /// # Panics
+    /// This method panics if the `rhs` argument is negative
     #[must_use]
-    pub fn checked_pow(&self, rhs: &Self) -> Option<Self> {
-        if let (Self::Int64(p1), Self::Int64(p2)) = (&self, &rhs) {
-            if let Some(p2) = p2.to_u32() {
-                if let Some(a) = p1.checked_pow(p2) {
-                    return Some(Self::Int64(a));
-                }
-            }
-        }
-
+    pub fn pow(&self, rhs: &Self) -> Self {
         let lhs = self.to_bigint();
         let rhs = rhs.to_bigint();
-        if let Some(rhs) = rhs.to_u32() {
-            return Some(Self::BigInt(lhs.pow(rhs)));
+        match rhs.sign() {
+            Sign::Minus => panic!("right hand side must not be negative"),
+            Sign::NoSign => Int::Int64(1),
+            // This is kinda dumb because if the `rhs` doesn't fit in a u64 we sure as hell aren't
+            // going to be able to compute it in finite time
+            Sign::Plus => Int::BigInt(Pow::pow(lhs, rhs.magnitude())),
         }
-
-        None
     }
 
     #[must_use]
@@ -116,6 +114,22 @@ impl Ord for Int {
             (Int::BigInt(l), Int::Int64(r)) => l.cmp(&BigInt::from(*r)),
             (Int::Int64(l), Int::Int64(r)) => l.cmp(r),
             (Int::BigInt(l), Int::BigInt(r)) => l.cmp(r),
+        }
+    }
+}
+
+impl Hash for Int {
+    // This hash implementation ensures that a BigInt that fits in an i64 is hashed the same way an i64 would
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        match self {
+            Int::Int64(i) => state.write_i64(*i),
+            Int::BigInt(b) => {
+                if let Some(i) = b.to_i64() {
+                    state.write_i64(i);
+                } else {
+                    b.hash(state);
+                }
+            }
         }
     }
 }

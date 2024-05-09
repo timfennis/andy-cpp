@@ -15,7 +15,7 @@ use crate::hash_map::HashMap;
 use crate::interpreter::environment::{Environment, EnvironmentRef};
 use crate::interpreter::function::{Function, FunctionCarrier, OverloadedFunction};
 use crate::interpreter::int::Int;
-use crate::interpreter::num::Number;
+use crate::interpreter::num::{EuclideanDivisionError, Number};
 use crate::interpreter::value::{Sequence, Value, ValueType};
 use crate::lexer::Location;
 
@@ -816,6 +816,8 @@ enum BinaryOpError {
         left: ValueType,
         right: ValueType,
     },
+    #[error(transparent)]
+    EuclideanDivisionFailed(#[from] EuclideanDivisionError),
 }
 #[allow(clippy::too_many_lines)]
 fn apply_operator(
@@ -866,15 +868,11 @@ fn apply_operator(
             _ => return Err(create_type_error()),
         },
         BinaryOperator::EuclideanModulo => match (left, right) {
-            (Value::Number(a), Value::Number(b)) => {
-                Value::Number(a.checked_rem_euclid(b).expect("TODO: fix this error type"))
-            }
+            (Value::Number(a), Value::Number(b)) => Value::Number(a.checked_rem_euclid(b)?),
             _ => return Err(create_type_error()),
         },
         BinaryOperator::Exponent => match (left, right) {
-            (Value::Number(a), Value::Number(b)) => {
-                Value::Number(a.checked_pow(b).expect("TODO: fix this error type"))
-            }
+            (Value::Number(a), Value::Number(b)) => Value::Number(a.pow(b)),
             _ => return Err(create_type_error()),
         },
         BinaryOperator::And => match (left, right) {

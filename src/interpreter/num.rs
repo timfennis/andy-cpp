@@ -374,6 +374,14 @@ impl Rem for Number {
     }
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum EuclideanDivisionError {
+    #[error("euclidean division failed (because division by zero?)")]
+    OperationFailed,
+    #[error("euclidean division is not defined for {left} and {right}")]
+    UndefinedOperation { left: NumberType, right: NumberType },
+}
+
 impl Number {
     fn type_name(&self) -> String {
         match self {
@@ -384,40 +392,33 @@ impl Number {
         }
     }
 
-    pub fn checked_rem_euclid(self, rhs: Self) -> Result<Self, EvaluationError> {
+    pub fn checked_rem_euclid(self, rhs: Self) -> Result<Self, EuclideanDivisionError> {
         match (self, rhs) {
-            (Self::Int(p1), Self::Int(p2)) => Ok(Self::Int(p1.checked_rem_euclid(&p2).ok_or({
-                //TODO move EvaluationError to caller so we can add location
-                EvaluationError::type_error(
-                    "cannot divide by zero",
-                    Location { line: 0, column: 0 },
-                    Location { line: 0, column: 0 },
-                )
-            })?)),
+            (Self::Int(p1), Self::Int(p2)) => p1
+                .checked_rem_euclid(&p2)
+                .ok_or(EuclideanDivisionError::OperationFailed)
+                .map(Self::Int),
+
             (Self::Float(p1), Self::Float(p2)) => Ok(Self::Float(p1.rem_euclid(p2))),
-            // (Number::Rational(p1), Number::Rational(p2)) => Ok(Number::Rational(p1.__(p2))),
-            // TODO: implement other cases
-            (a, b) => panic!(
-                "remainder between {} and {} is not implemented",
-                a.type_name(),
-                b.type_name()
-            ),
+            (left, right) => Err(EuclideanDivisionError::UndefinedOperation {
+                left: NumberType::from(&left),
+                right: NumberType::from(&right),
+            }),
         }
     }
-    pub fn checked_pow(self, rhs: Self) -> Result<Self, EvaluationError> {
-        Ok(match (self, rhs) {
+
+    #[must_use]
+    pub fn pow(self, rhs: Self) -> Self {
+        match (self, rhs) {
             // Int vs others
             (Self::Int(p1), Self::Int(p2)) => {
                 if p2.is_negative() {
-                    let p2 = i32::try_from(p2)?;
-                    Self::Rational(Box::new(BigRational::from(p1).pow(p2)))
+                    let p2 = p2.to_bigint();
+                    let p2 = p2.magnitude();
+                    let ans = num::pow::Pow::pow(p1.to_bigint(), p2);
+                    Self::Rational(Box::new(BigRational::new(BigInt::from(1), ans)))
                 } else {
-                    //TODO: this error is wrong, if checked_pow fails the number is too large and we should use BigInt instead
-                    Self::Int(p1.checked_pow(&p2).ok_or(EvaluationError::type_error(
-                        "integer overflow",
-                        Location { line: 0, column: 0 },
-                        Location { line: 0, column: 0 },
-                    ))?)
+                    Self::Int(p1.pow(&p2))
                 }
             }
             (Self::Int(p1), Self::Float(p2)) => Self::Float(f64::from(p1).powf(p2)),
@@ -426,9 +427,7 @@ impl Number {
             }
             (Self::Int(p1), Self::Rational(p2)) => {
                 if p2.is_integer() {
-                    if let Some(n) = p1.checked_pow(&Int::BigInt(p2.to_integer())) {
-                        return Ok(Self::Int(n));
-                    }
+                    return Number::Int(p1.pow(&Int::BigInt(p2.to_integer())));
                 }
 
                 Self::Float(f64::from(p1).powf(rational_to_float(&p2)))
@@ -436,20 +435,16 @@ impl Number {
 
             // Rational vs Others
             (Self::Rational(p1), Self::Int(p2)) => {
-                Self::Rational(Box::new(p1.pow(i32::try_from(p2)?)))
+                Self::Rational(Box::new(num::pow::Pow::pow(&*p1, p2.to_bigint())))
             }
             (Self::Rational(p1), Self::Rational(p2)) => {
                 if p2.is_integer() {
                     if let Some(p2) = p2.to_i32() {
-                        return Ok(Self::Rational(Box::new(p1.pow(p2))));
+                        return Self::Rational(Box::new(p1.pow(p2)));
                     }
                 }
 
-                return Err(EvaluationError::type_error(
-                    "Cannot raise a rational to the power of another rational, try converting the operands to floats",
-                    Location { line: 0, column: 0 },
-                    Location { line: 0, column: 0 },
-                ));
+                Self::Float(rational_to_float(&p1).powf(rational_to_float(&p2)))
             }
             (Self::Rational(p1), Self::Float(p2)) => Self::Float(rational_to_float(&p1).powf(p2)),
             (Self::Rational(p1), Self::Complex(p2)) => {
@@ -469,10 +464,9 @@ impl Number {
                 Self::Complex(p1.powc(Complex::from(f64::from(p2))))
             }
             (Self::Complex(p1), Self::Rational(p2)) => {
-                // TODO: add more???
                 Self::Complex(p1.powc(rational_to_complex(&p2)))
             }
-        })
+        }
     }
 
     /// # Errors
@@ -482,7 +476,7 @@ impl Number {
             Number::Int(i) => Self::Int(i.clone()),
             Number::Float(f) => {
                 if let Some(bi) = BigInt::from_f64(*f) {
-                    Number::Int(Int::BigInt(bi).simplify())
+                    Number::Int(Int::BigInt(bi).simplified())
                 } else {
                     // TODO FIX line 0 column 0
                     return Err(EvaluationError::type_error(
@@ -492,7 +486,7 @@ impl Number {
                     ));
                 }
             }
-            Number::Rational(r) => Self::Int(Int::BigInt(r.to_integer()).simplify()),
+            Number::Rational(r) => Self::Int(Int::BigInt(r.to_integer()).simplified()),
             Number::Complex(c) => {
                 return Err(EvaluationError::type_error(
                     &format!("cannot convert complex number {c} to int"),

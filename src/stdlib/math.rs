@@ -94,7 +94,7 @@ mod inner {
             Value::Sequence(Sequence::String(string)) => {
                 let string = string.borrow();
                 let bi = string.parse::<BigInt>()?;
-                Ok(Number::Int(Int::BigInt(bi).simplify()))
+                Ok(Number::Int(Int::BigInt(bi).simplified()))
             }
             value => Err(anyhow::anyhow!(
                 "cannot convert {} to int",
@@ -158,7 +158,7 @@ pub mod f64 {
                                 "string \"{s}\" cannot be converted into an integer because \"{err}\""
                             ))
                         })?;
-                        Ok(Value::Number(Number::Int(Int::BigInt(bi).simplify())))
+                        Ok(Value::Number(Number::Int(Int::BigInt(bi).simplified())))
                     }
                     [single_value] => Err(FunctionCallError::ConvertToNativeTypeError(format!(
                         "cannot convert {single_value} to string"
