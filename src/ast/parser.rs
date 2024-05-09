@@ -1,11 +1,12 @@
+use std::fmt::Write;
+use std::rc::Rc;
+
+use either::Either;
+
 use crate::ast::expression::{ExpressionLocation, Lvalue};
 use crate::ast::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
 use crate::ast::Expression;
 use crate::lexer::{Location, Token, TokenLocation};
-use either::Either;
-use std::fmt::Write;
-use std::process::id;
-use std::rc::Rc;
 
 pub struct Parser {
     tokens: Vec<TokenLocation>,
@@ -233,12 +234,11 @@ impl Parser {
     }
 
     fn variable_declaration_or_assignment(&mut self) -> Result<ExpressionLocation, Error> {
-        let next = Self::maybe_tuple;
         // NOTE: I think the way we implemented this method makes it right associative
         // NOTE: Instead of just parsing an identifier we continue to recurse down to the next level `range` at the
         //       time of writing. If whatever comes back is a valid identifier (possibly lvalue in the future) we treat
         //       this expression as an assignment expression. Otherwise, we just treat the expression as whatever we got.
-        let maybe_lvalue = next(self)?;
+        let maybe_lvalue = self.maybe_tuple(Self::single_expression)?;
 
         let start = maybe_lvalue.start;
 
@@ -260,7 +260,7 @@ impl Parser {
             // NOTE: the parser supports every LValue but some might cause an error when declaring vars
             Some(Token::DeclareVar) => {
                 self.advance();
-                let expression = next(self)?;
+                let expression = self.maybe_tuple(Self::single_expression)?;
                 let end = expression.end;
                 let declaration = Expression::VariableDeclaration {
                     l_value: Lvalue::try_from(maybe_lvalue)
@@ -272,7 +272,7 @@ impl Parser {
             }
             Some(Token::EqualsSign) => {
                 self.advance();
-                let expression = next(self)?;
+                let expression = self.maybe_tuple(Self::single_expression)?;
                 let end = expression.end;
                 let assignment_expression = Expression::Assignment {
                     l_value: Lvalue::try_from(maybe_lvalue)
@@ -289,7 +289,7 @@ impl Parser {
                 };
 
                 self.advance();
-                let expression = next(self)?;
+                let expression = self.maybe_tuple(Self::single_expression)?;
                 let end = expression.end;
                 let op_assign = Expression::OpAssignment {
                     l_value: Lvalue::try_from(maybe_lvalue)
@@ -305,8 +305,10 @@ impl Parser {
         };
     }
 
-    fn maybe_tuple(&mut self) -> Result<ExpressionLocation, Error> {
-        let next = Self::single_expression;
+    fn maybe_tuple(
+        &mut self,
+        next: fn(&mut Parser) -> Result<ExpressionLocation, Error>,
+    ) -> Result<ExpressionLocation, Error> {
         let mut expressions = vec![next(self)?];
 
         while self.consume_token_if(&[Token::Comma]).is_some() {
@@ -719,7 +721,7 @@ impl Parser {
     }
 
     fn for_expression(&mut self) -> Result<ExpressionLocation, Error> {
-        let l_value = self.require_lvalue()?;
+        let l_value = self.maybe_tuple(Self::primary)?;
         let l_value_start = l_value.start;
         let l_value = Lvalue::try_from(l_value).expect("this can't fail right??");
         self.require_current_token_matches(Token::In)?;
@@ -749,32 +751,6 @@ impl Parser {
         } else {
             Err(Error::ExpectedIdentifier {
                 actual: identifier_expression,
-            })
-        }
-    }
-
-    // NOTE: this method clones a lot of behavior from other parts of the parser, but it's a lot more
-    // selective in what it allows.
-    fn require_lvalue(&mut self) -> Result<ExpressionLocation, Error> {
-        let mut expressions = vec![self.require_identifier()?];
-
-        while self.consume_token_if(&[Token::Comma]).is_some() {
-            expressions.push(self.require_identifier()?);
-        }
-
-        if expressions.len() == 1 {
-            Ok(expressions.remove(0))
-        } else {
-            let (start, end) = (
-                expressions.first().unwrap().start,
-                expressions.last().unwrap().end,
-            );
-            Ok(ExpressionLocation {
-                expression: Expression::Tuple {
-                    values: expressions,
-                },
-                start,
-                end,
             })
         }
     }
