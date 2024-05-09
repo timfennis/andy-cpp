@@ -1,5 +1,7 @@
 use crate::ast::Error as ParseError;
 use crate::lexer::{Token, TokenLocation};
+use std::fmt;
+use std::fmt::Formatter;
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum UnaryOperator {
@@ -24,7 +26,7 @@ impl TryFrom<TokenLocation> for UnaryOperator {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Copy, Clone)]
+#[derive(Eq, PartialEq, Copy, Clone)]
 pub enum BinaryOperator {
     Equality,
     Inequality,
@@ -115,5 +117,35 @@ impl TryFrom<TokenLocation> for BinaryOperator {
                 })
             }
         })
+    }
+}
+
+impl fmt::Debug for BinaryOperator {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{self}")
+    }
+}
+impl fmt::Display for BinaryOperator {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let op = match self {
+            BinaryOperator::Equality => "==",
+            BinaryOperator::Inequality => "!=",
+            BinaryOperator::Greater => ">",
+            BinaryOperator::GreaterEquals => ">=",
+            BinaryOperator::Less => "<",
+            BinaryOperator::LessEquals => "<=",
+            BinaryOperator::Plus => "+",
+            BinaryOperator::Minus => "-",
+            BinaryOperator::Multiply => "*",
+            BinaryOperator::Divide => "/",
+            BinaryOperator::CModulo => "%",
+            BinaryOperator::EuclideanModulo => "%%",
+            BinaryOperator::Exponent => "^",
+            BinaryOperator::And => "&",
+            BinaryOperator::Or => "|",
+            BinaryOperator::Concat => "++",
+            BinaryOperator::In => "in",
+        };
+        write!(f, "{op}")
     }
 }

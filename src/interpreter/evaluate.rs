@@ -68,9 +68,10 @@ pub(crate) fn evaluate_expression(
             operator: operator_token,
             right,
         } => {
+            let (start, end) = (left.start, right.end);
             let left = evaluate_expression(left, environment)?;
             let right = evaluate_expression(right, environment)?;
-            apply_operator(left, *operator_token, right)?
+            apply_operator(left, *operator_token, right).into_evaluation_result(start, end)?
         }
         Expression::Grouping(expr) => evaluate_expression(expr, environment)?,
         Expression::VariableDeclaration { l_value, value } => {
@@ -790,7 +791,8 @@ fn apply_operation_to_value(
         let old_value = std::mem::replace(value, Value::Unit);
         match operation {
             Either::Left(binary_operator) => {
-                *value = apply_operator(old_value, *binary_operator, right_value)?;
+                *value = apply_operator(old_value, *binary_operator, right_value)
+                    .into_evaluation_result(start, end)?;
             }
             Either::Right(identifier) => {
                 *value = call_function_by_name(
@@ -806,27 +808,27 @@ fn apply_operation_to_value(
     };
 }
 
+#[derive(thiserror::Error, Debug)]
+enum BinaryOpError {
+    #[error("operator {operator} is not defined for {left} and {right}")]
+    UndefinedOperation {
+        operator: BinaryOperator,
+        left: ValueType,
+        right: ValueType,
+    },
+}
 #[allow(clippy::too_many_lines)]
 fn apply_operator(
     left: Value,
     operator: BinaryOperator,
     right: Value,
-) -> Result<Value, EvaluationError> {
-    fn create_type_error(
-        operator: BinaryOperator,
-        left: ValueType,
-        right: ValueType,
-    ) -> EvaluationError {
-        EvaluationError::type_error(
-            &format!("cannot apply operator {operator:?} to {left} and {right}"),
-            // TODO: fix error handling, possibly by changing the function signature to return a
-            //       special kind of error that does not require line numbers
-            Location { line: 0, column: 0 },
-            Location { line: 0, column: 0 },
-        )
-    }
+) -> Result<Value, BinaryOpError> {
     let (left_type, right_type) = (left.value_type(), right.value_type());
-    let create_type_error = { || create_type_error(operator, left_type, right_type) };
+    let create_type_error = || BinaryOpError::UndefinedOperation {
+        operator,
+        left: left_type,
+        right: right_type,
+    };
 
     let val: Value = match operator {
         BinaryOperator::Equality => left.eq(&right).into(),
@@ -845,31 +847,35 @@ fn apply_operator(
         }
         BinaryOperator::Plus => match (left, right) {
             (Value::Number(a), Value::Number(b)) => Value::Number(a + b),
-            _ => todo!("implement + for these types"),
+            _ => return Err(create_type_error()),
         },
         BinaryOperator::Minus => match (left, right) {
             (Value::Number(a), Value::Number(b)) => Value::Number(a - b),
-            _ => todo!("implement - for these types"),
+            _ => return Err(create_type_error()),
         },
         BinaryOperator::Multiply => match (left, right) {
             (Value::Number(a), Value::Number(b)) => Value::Number(a * b),
-            _ => todo!("implement * for these types"),
+            _ => return Err(create_type_error()),
         },
         BinaryOperator::Divide => match (left, right) {
             (Value::Number(a), Value::Number(b)) => Value::Number(a / b),
-            _ => todo!("implement / for these types"),
+            _ => return Err(create_type_error()),
         },
         BinaryOperator::CModulo => match (left, right) {
             (Value::Number(a), Value::Number(b)) => Value::Number(a.rem(b)),
-            _ => todo!("implement % for these types"),
+            _ => return Err(create_type_error()),
         },
         BinaryOperator::EuclideanModulo => match (left, right) {
-            (Value::Number(a), Value::Number(b)) => Value::Number(a.checked_rem_euclid(b)?),
-            _ => todo!("implement %% for these types"),
+            (Value::Number(a), Value::Number(b)) => {
+                Value::Number(a.checked_rem_euclid(b).expect("TODO: fix this error type"))
+            }
+            _ => return Err(create_type_error()),
         },
         BinaryOperator::Exponent => match (left, right) {
-            (Value::Number(a), Value::Number(b)) => Value::Number(a.checked_pow(b)?),
-            _ => todo!("implement ^ for these types"),
+            (Value::Number(a), Value::Number(b)) => {
+                Value::Number(a.checked_pow(b).expect("TODO: fix this error type"))
+            }
+            _ => return Err(create_type_error()),
         },
         BinaryOperator::And => match (left, right) {
             (
@@ -887,7 +893,7 @@ fn apply_operator(
                 ))),
                 default,
             )),
-            _ => todo!("implement & for these types"),
+            _ => return Err(create_type_error()),
         },
         BinaryOperator::Or => match (left, right) {
             (
@@ -904,7 +910,7 @@ fn apply_operator(
                 ))),
                 default,
             )),
-            _ => todo!("implement & for these types"),
+            _ => return Err(create_type_error()),
         },
         BinaryOperator::In => match (left, right) {
             (
@@ -950,7 +956,7 @@ fn apply_operator(
                     ),
                 }
             }
-            _ => todo!("handle errors"),
+            _ => return Err(create_type_error()),
         },
     };
 
