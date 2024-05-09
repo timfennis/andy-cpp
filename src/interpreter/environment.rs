@@ -181,6 +181,10 @@ impl Environment {
             values: HashMap::default(),
         }))
     }
+
+    pub fn reset(&mut self) {
+        self.values.clear();
+    }
 }
 
 impl Default for Environment {

@@ -458,13 +458,13 @@ impl Parser {
                     };
                 }
                 Token::Dot => {
-                    // TODO: figure out if we can reuse code from the previous match arm
                     let (identifier, identifier_start, identifier_end) =
                         self.require_identifier()?;
                     let left_paren = self.require_token(&[Token::LeftParentheses])?;
+                    let tuple_expression = self.tuple(left_paren)?;
                     let Expression::Tuple {
                         values: mut arguments,
-                    } = self.tuple(left_paren)?.expression
+                    } = tuple_expression.expression
                     else {
                         unreachable!("self.tuple() must always produce a tuple");
                     };
@@ -479,7 +479,7 @@ impl Parser {
                             arguments,
                         },
                         start: identifier_start,
-                        end: identifier_end, // TODO: figure out the real end
+                        end: tuple_expression.end,
                     }
 
                     // for now, we require parentheses

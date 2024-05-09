@@ -32,7 +32,6 @@ impl OverloadedFunction {
     pub fn call(&self, args: &[Value], env: &EnvironmentRef) -> EvaluationResult {
         let types: Vec<ValueType> = args.iter().map(ValueType::from).collect();
 
-        // TODO: this only supports exact matching we should add subtypes
         let mut best = None;
         let mut best_distance = u32::MAX;
         for (signature, function) in &self.implementations {

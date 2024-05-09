@@ -111,8 +111,6 @@ struct TempVar {
     initialize_code: TokenStream,
 }
 
-// TODO this style of path matching only works if types are just identifiers which is a weakness I'd
-//      like to fix
 fn into_param_type(ty: &syn::Type) -> TokenStream {
     if path_ends_with(ty, "Vec") {
         return quote! { crate::interpreter::function::ParamType::List };

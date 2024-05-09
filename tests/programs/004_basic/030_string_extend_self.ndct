@@ -1,0 +1,7 @@
+--PROGRAM--
+s := "haha";
+s ++= s;
+assert(s == "hahahaha");
+print("ok");
+--EXPECT--
+ok

@@ -494,14 +494,11 @@ pub(crate) fn evaluate_expression(
                     let str = str.borrow();
                     for char in str.chars() {
                         let mut scope = Environment::new_scope(environment);
-
-                        // TODO: allocating a new string here is probably not optimal
-                        scope.borrow_mut().declare(
-                            var_name,
-                            Value::Sequence(Sequence::String(Rc::new(RefCell::new(String::from(
-                                char,
-                            ))))),
-                        );
+                        {
+                            let mut scope = scope.borrow_mut();
+                            scope.reset();
+                            scope.declare(var_name, Value::from(String::from(char)));
+                        }
 
                         evaluate_expression(loop_body, &mut scope)?;
                     }
@@ -509,35 +506,45 @@ pub(crate) fn evaluate_expression(
                 }
                 Sequence::List(xs) => {
                     let xs = xs.borrow();
+                    let mut scope = Environment::new_scope(environment);
                     for x in xs.iter() {
-                        let mut scope = Environment::new_scope(environment);
-
-                        scope.borrow_mut().declare(var_name, x.clone());
+                        {
+                            let mut scope = scope.borrow_mut();
+                            scope.reset();
+                            scope.declare(var_name, x.clone());
+                        }
 
                         evaluate_expression(loop_body, &mut scope)?;
                     }
                 }
                 Sequence::Tuple(values) => {
+                    let mut scope = Environment::new_scope(environment);
                     for x in &*values {
-                        let mut scope = Environment::new_scope(environment);
-
-                        scope.borrow_mut().declare(var_name, x.clone());
+                        {
+                            let mut scope = scope.borrow_mut();
+                            scope.reset();
+                            scope.declare(var_name, x.clone());
+                        }
 
                         evaluate_expression(loop_body, &mut scope)?;
                     }
                 }
                 Sequence::Map(map, _) => {
                     let xs = map.borrow();
+
+                    let mut scope = Environment::new_scope(environment);
                     for (key, value) in xs.iter() {
-                        // TODO: support pattern matching tuples in var name
-                        let mut scope = Environment::new_scope(environment);
-                        scope.borrow_mut().declare(
-                            var_name,
-                            Value::Sequence(Sequence::Tuple(Rc::new(vec![
-                                key.clone(),
-                                value.clone(),
-                            ]))),
-                        );
+                        {
+                            let mut scope = scope.borrow_mut();
+                            scope.reset();
+                            scope.declare(
+                                var_name,
+                                Value::Sequence(Sequence::Tuple(Rc::new(vec![
+                                    key.clone(),
+                                    value.clone(),
+                                ]))),
+                            );
+                        }
                         evaluate_expression(loop_body, &mut scope)?;
                     }
                 }
@@ -558,88 +565,83 @@ pub(crate) fn evaluate_expression(
             let value = evaluate_expression(value_expr, environment)?;
 
             match value {
-                Value::Sequence(sequence) => {
-                    match sequence {
-                        Sequence::String(string) => {
-                            let string = string.borrow();
+                Value::Sequence(sequence) => match sequence {
+                    Sequence::String(string) => {
+                        let string = string.borrow();
 
-                            let index = value_to_forward_index(
-                                evaluate_expression(index_expr, environment)?,
-                                string.chars().count(),
+                        let index = value_to_forward_index(
+                            evaluate_expression(index_expr, environment)?,
+                            string.chars().count(),
+                            index_expr.start,
+                            index_expr.end,
+                        )?;
+
+                        let Some(char) = string.chars().nth(index) else {
+                            return Err(EvaluationError::out_of_bounds(
+                                index,
                                 index_expr.start,
                                 index_expr.end,
-                            )?;
-
-                            let Some(char) = string.chars().nth(index) else {
-                                return Err(EvaluationError::out_of_bounds(
-                                    index,
-                                    index_expr.start,
-                                    index_expr.end,
-                                )
-                                .into());
-                            };
-                            Value::Sequence(Sequence::String(Rc::new(RefCell::new(String::from(
-                                char,
-                            )))))
-                        }
-                        Sequence::List(list) => {
-                            let index = value_to_forward_index(
-                                evaluate_expression(index_expr, environment)?,
-                                list.borrow().len(),
-                                index_expr.start,
-                                index_expr.end,
-                            )?;
-
-                            let list = list.borrow();
-                            let Some(value) = list.get(index) else {
-                                return Err(EvaluationError::out_of_bounds(
-                                    index,
-                                    index_expr.start,
-                                    index_expr.end,
-                                )
-                                .into());
-                            };
-                            value.clone()
-                        }
-                        // TODO: this implementation is 99% the same as the one above
-                        Sequence::Tuple(tuple) => {
-                            let index = value_to_forward_index(
-                                evaluate_expression(index_expr, environment)?,
-                                tuple.len(),
-                                index_expr.start,
-                                index_expr.end,
-                            )?;
-
-                            let Some(value) = tuple.get(index) else {
-                                return Err(EvaluationError::out_of_bounds(
-                                    index,
-                                    index_expr.start,
-                                    index_expr.end,
-                                )
-                                .into());
-                            };
-
-                            value.clone()
-                        }
-                        Sequence::Map(dict, default) => {
-                            let key = evaluate_expression(index_expr, environment)?;
-                            let dict = dict.borrow();
-
-                            return if let Some(value) = dict.get(&key) {
-                                Ok(value.clone())
-                            } else if let Some(default) = default {
-                                Ok(Value::clone(&*default))
-                            } else {
-                                Err(EvaluationError::key_not_found(
-                                    &key,
-                                    index_expr.start,
-                                    index_expr.end,
-                                )
-                                .into())
-                            };
-                        }
+                            )
+                            .into());
+                        };
+                        Value::Sequence(Sequence::String(Rc::new(RefCell::new(String::from(char)))))
                     }
-                }
+                    Sequence::List(list) => {
+                        let index = value_to_forward_index(
+                            evaluate_expression(index_expr, environment)?,
+                            list.borrow().len(),
+                            index_expr.start,
+                            index_expr.end,
+                        )?;
+
+                        let list = list.borrow();
+                        let Some(value) = list.get(index) else {
+                            return Err(EvaluationError::out_of_bounds(
+                                index,
+                                index_expr.start,
+                                index_expr.end,
+                            )
+                            .into());
+                        };
+                        value.clone()
+                    }
+                    Sequence::Tuple(tuple) => {
+                        let index = value_to_forward_index(
+                            evaluate_expression(index_expr, environment)?,
+                            tuple.len(),
+                            index_expr.start,
+                            index_expr.end,
+                        )?;
+
+                        let Some(value) = tuple.get(index) else {
+                            return Err(EvaluationError::out_of_bounds(
+                                index,
+                                index_expr.start,
+                                index_expr.end,
+                            )
+                            .into());
+                        };
+
+                        value.clone()
+                    }
+                    Sequence::Map(dict, default) => {
+                        let key = evaluate_expression(index_expr, environment)?;
+                        let dict = dict.borrow();
+
+                        return if let Some(value) = dict.get(&key) {
+                            Ok(value.clone())
+                        } else if let Some(default) = default {
+                            Ok(Value::clone(&*default))
+                        } else {
+                            Err(EvaluationError::key_not_found(
+                                &key,
+                                index_expr.start,
+                                index_expr.end,
+                            )
+                            .into())
+                        };
+                    }
+                },
                 // TODO: improve error handling
                 value => {
                     return Err(EvaluationError::type_error(
@@ -729,24 +731,38 @@ fn apply_operation_to_value(
     return if let Either::Left(BinaryOperator::Concat) = operation {
         match (value, right_value) {
             (Value::Sequence(Sequence::String(left)), Value::Sequence(Sequence::String(right))) => {
-                left.borrow_mut().push_str(&right.borrow());
+                if Rc::ptr_eq(left, &right) {
+                    let copy = String::from(&*right.borrow());
+                    left.borrow_mut().push_str(&copy);
+                } else {
+                    left.borrow_mut().push_str(&right.borrow());
+                }
                 Ok(Value::Sequence(Sequence::String(left.clone())))
             }
             (Value::Sequence(Sequence::List(left)), Value::Sequence(Sequence::List(right))) => {
-                // TODO if left == right this will panic
-                left.borrow_mut().extend_from_slice(&right.borrow());
+                // Special case for when a list is extended with itself
+                // x := [1,2,3]; x ++= x;
+                if Rc::ptr_eq(left, &right) {
+                    let copy = Vec::clone(&*right.borrow());
+                    left.borrow_mut().extend_from_slice(&copy);
+                } else {
+                    left.borrow_mut().extend_from_slice(&right.borrow());
+                };
                 Ok(Value::Sequence(Sequence::List(left.clone())))
             }
             (
                 Value::Sequence(Sequence::Tuple(ref mut left)),
                 Value::Sequence(Sequence::Tuple(right)),
             ) => {
-                //
                 Rc::make_mut(left).extend_from_slice(&right);
                 Ok(Value::Sequence(Sequence::Tuple(left.clone())))
             }
-            _ => Err(EvaluationError::type_error(
-                "cannot apply the ++ operator between these types",
+            (left, right) => Err(EvaluationError::type_error(
+                &format!(
+                    "cannot apply the ++ operator to {} and {}",
+                    left.value_type(),
+                    right.value_type()
+                ),
                 start,
                 end,
             )

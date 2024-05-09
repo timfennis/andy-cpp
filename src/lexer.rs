@@ -287,8 +287,6 @@ impl Iterator for Lexer<'_> {
                         location: start,
                     }));
                 }
-                //TODO: For now we just support boring c-style identifiers but maybe allowing Emoji or other characters
-                //      could be cool too
                 // Lex identifiers and keywords
                 (char, _) if char.is_alphabetic() || char == '_' => {
                     // Parse an identifier, or not
