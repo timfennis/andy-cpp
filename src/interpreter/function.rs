@@ -74,7 +74,6 @@ fn match_types_to_signature(types: &[ValueType], signature: &TypeSignature) -> O
     }
 }
 
-// TODO: does it make sense to have this since we need to have merge logic somehwere
 impl From<Function> for OverloadedFunction {
     fn from(function: Function) -> Self {
         let type_signature = function.type_signature();
@@ -136,7 +135,6 @@ pub enum ParamType {
     Complex,
 
     // Sequences
-    #[allow(dead_code)] // TODO: this can probably be removed in the future
     Sequence,
     List,
     String,

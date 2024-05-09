@@ -781,12 +781,9 @@ fn apply_operation_to_value(
                             left.borrow_mut().extend(right.take());
                         }
                         Err(right) => {
-                            left.borrow_mut().extend(
-                                right
-                                    .borrow() // TODO: change to try borrow in case something i
-                                    .iter()
-                                    .map(|(a, b)| (a.clone(), b.clone())),
-                            );
+                            // If we ever figure out how to make the borrow below panic we should add a test and fix it
+                            left.borrow_mut()
+                                .extend(right.borrow().iter().map(|(a, b)| (a.clone(), b.clone())));
                         }
                     }
                 }

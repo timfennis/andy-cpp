@@ -191,8 +191,7 @@ impl Add for Number {
             }
             (Self::Rational(p1), Self::Float(p2)) => Self::Float(rational_to_float(&p1).add(p2)),
             (Self::Rational(p1), Self::Complex(p2)) => {
-                Self::Complex(Complex::from(p1.to_f64().unwrap_or(f64::NAN)).add(p2))
-                //TODO: Check if this is logical
+                Self::Complex(rational_to_complex(&p1).add(p2))
             }
 
             // Complex vs other

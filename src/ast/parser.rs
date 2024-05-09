@@ -624,13 +624,9 @@ impl Parser {
             // After the first expression we have to figure out if this is a tuple `(1,2,3)` or a grouping `(5 - 1)`
             return match self.peek_current_token_location() {
                 // An expression followed by a comma indicates that we're dealing with a tuple
-                Some(TokenLocation {
-                         token: Token::Comma,
-                         location: _comma_location,
-                     }) => {
+                Some(TokenLocation { token: Token::Comma, .. }) => {
                     self.advance();
 
-                    // TODO: could we just call self.tuple() instead? we would have to add first_expression if we want to 
                     let mut expressions = vec![first_expression];
                     while self.peek_current_token().is_some() {
                         expressions.push(self.expression()?);
