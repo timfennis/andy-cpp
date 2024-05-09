@@ -977,13 +977,6 @@ fn apply_operator(
     Ok(val)
 }
 
-// TODO: nice generic error for now?
-#[derive(thiserror::Error, Debug)]
-#[error("{message}")]
-pub struct ErrorMessage {
-    pub message: String,
-}
-
 pub struct EvaluationError {
     text: String,
     start: Location,

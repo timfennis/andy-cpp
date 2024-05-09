@@ -1,24 +1,24 @@
 use crate::interpreter::environment::Environment;
-use crate::interpreter::evaluate::ErrorMessage;
 use crate::interpreter::num::Number;
 use crate::interpreter::value::{Sequence, Value};
 use andy_cpp_macros::export_module;
 use num::ToPrimitive;
 
-trait FallibleSum {
-    fn try_sum(&mut self) -> Result<Number, ErrorMessage>;
+trait FallibleSum<E> {
+    fn try_sum(&mut self) -> Result<Number, E>;
 }
 
-impl<'a, T> FallibleSum for T
+impl<'a, T> FallibleSum<anyhow::Error> for T
 where
     T: Iterator<Item = &'a Value> + Sized,
 {
-    fn try_sum(&mut self) -> Result<Number, ErrorMessage> {
+    fn try_sum(&mut self) -> anyhow::Result<Number> {
         self.try_fold(Number::from(0), |acc, cur| match cur {
             Value::Number(n) => Ok(acc + n.clone()),
-            value => Err(ErrorMessage {
-                message: format!("cannot sum {} and number", value.value_type()),
-            }),
+            value => Err(anyhow::anyhow!(
+                "cannot sum {} and number",
+                value.value_type()
+            )),
         })
     }
 }
@@ -26,16 +26,13 @@ where
 #[export_module]
 mod inner {
     use super::FallibleSum;
-    use crate::interpreter::evaluate::ErrorMessage;
     use crate::interpreter::int::Int;
     use crate::interpreter::num::Number;
     use num::{BigInt, Integer};
 
-    pub fn sum(seq: &Sequence) -> Result<Number, ErrorMessage> {
+    pub fn sum(seq: &Sequence) -> anyhow::Result<Number> {
         match seq {
-            Sequence::String(_s) => Err(ErrorMessage {
-                message: "string cannot be summed".to_string(),
-            }),
+            Sequence::String(_s) => Err(anyhow::anyhow!("string cannot be summed".to_string())),
             Sequence::List(list) => list.borrow().iter().try_sum(),
             Sequence::Tuple(tup) => tup.iter().try_sum(),
             Sequence::Map(map, _) => map.borrow().keys().try_sum(),
