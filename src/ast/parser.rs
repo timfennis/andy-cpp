@@ -4,6 +4,7 @@ use crate::ast::Expression;
 use crate::lexer::{Location, Token, TokenLocation};
 use either::Either;
 use std::fmt::Write;
+use std::process::id;
 use std::rc::Rc;
 
 pub struct Parser {
@@ -232,13 +233,13 @@ impl Parser {
     }
 
     fn variable_declaration_or_assignment(&mut self) -> Result<ExpressionLocation, Error> {
+        let next = Self::maybe_tuple;
         // NOTE: I think the way we implemented this method makes it right associative
-        // NOTE: Instead of just parsing an identifier we continue to recurse down to the next level `logic_or` at the
+        // NOTE: Instead of just parsing an identifier we continue to recurse down to the next level `range` at the
         //       time of writing. If whatever comes back is a valid identifier (possibly lvalue in the future) we treat
         //       this expression as an assignment expression. Otherwise, we just treat the expression as whatever we got.
-        // NOTE: When we start supporting more lvalues we should insert this step between
-        //       `variable_declaration_or_assignment` and `logic_or`
-        let maybe_lvalue = self.range()?;
+        let maybe_lvalue = next(self)?;
+
         let start = maybe_lvalue.start;
 
         if !Lvalue::can_build_from_expression(&maybe_lvalue.expression) {
@@ -259,7 +260,7 @@ impl Parser {
             // NOTE: the parser supports every LValue but some might cause an error when declaring vars
             Some(Token::DeclareVar) => {
                 self.advance();
-                let expression = self.expression()?;
+                let expression = next(self)?;
                 let end = expression.end;
                 let declaration = Expression::VariableDeclaration {
                     l_value: Lvalue::try_from(maybe_lvalue)
@@ -271,7 +272,7 @@ impl Parser {
             }
             Some(Token::EqualsSign) => {
                 self.advance();
-                let expression = self.expression()?;
+                let expression = next(self)?;
                 let end = expression.end;
                 let assignment_expression = Expression::Assignment {
                     l_value: Lvalue::try_from(maybe_lvalue)
@@ -288,7 +289,7 @@ impl Parser {
                 };
 
                 self.advance();
-                let expression = self.expression()?;
+                let expression = next(self)?;
                 let end = expression.end;
                 let op_assign = Expression::OpAssignment {
                     l_value: Lvalue::try_from(maybe_lvalue)
@@ -302,6 +303,36 @@ impl Parser {
             // Repacking these into expression is not nice
             _ => Ok(maybe_lvalue),
         };
+    }
+
+    fn maybe_tuple(&mut self) -> Result<ExpressionLocation, Error> {
+        let next = Self::single_expression;
+        let mut expressions = vec![next(self)?];
+
+        while self.consume_token_if(&[Token::Comma]).is_some() {
+            expressions.push(next(self)?);
+        }
+
+        let (start, end) = (
+            expressions.first().unwrap().start,
+            expressions.last().unwrap().end,
+        );
+
+        if expressions.len() == 1 {
+            Ok(expressions.remove(0))
+        } else {
+            Ok(ExpressionLocation {
+                expression: Expression::Tuple {
+                    values: expressions,
+                },
+                start,
+                end,
+            })
+        }
+    }
+
+    fn single_expression(&mut self) -> Result<ExpressionLocation, Error> {
+        self.range()
     }
 
     fn range(&mut self) -> Result<ExpressionLocation, Error> {
@@ -438,9 +469,15 @@ impl Parser {
                     };
                 }
                 Token::Dot => {
-                    let (identifier, identifier_start, identifier_end) =
-                        self.require_identifier()?;
+                    let l_value = self.require_identifier()?;
+                    let (identifier_start, identifier_end) = (l_value.start, l_value.end);
+                    let identifier = Lvalue::try_from(l_value)?;
+                    let Lvalue::Variable { identifier } = identifier else {
+                        unreachable!("Guaranteed to match by previous calls")
+                    };
+
                     let left_paren = self.require_token(&[Token::LeftParentheses])?;
+                    // TODO: replace call below with maybe_tuple?
                     let tuple_expression = self.tuple(left_paren)?;
                     let Expression::Tuple {
                         values: mut arguments,
@@ -465,6 +502,10 @@ impl Parser {
                     // for now, we require parentheses
                 }
                 Token::LeftSquareBracket => {
+                    // self.expression here allows for this syntax which is maybe a good idea
+                    // `foo[1, 2] == foo[(1, 2)]`
+                    // and
+                    // `foo[x := 3]`
                     let index_expression = self.expression()?;
                     let end_token =
                         self.require_current_token_matches(Token::RightSquareBracket)?;
@@ -501,7 +542,7 @@ impl Parser {
                     return Ok(values);
                 }
 
-                values.push(self.expression()?);
+                values.push(self.single_expression()?);
 
                 // After we parse an expression we look ahead and see if the next token is either a ',' or ')'
                 // if it's not we can return a parse error
@@ -532,6 +573,7 @@ impl Parser {
     }
 
     // Parses a tuple NOT including the opening parentheses
+    #[deprecated(note = "tuples are parsed with maybe_tuple")]
     fn tuple(&mut self, start: Location) -> Result<ExpressionLocation, Error> {
         let values = self.group_of_expressions(Token::RightParentheses)?;
         let end = values.last().map_or(start, |e| e.end);
@@ -598,67 +640,11 @@ impl Parser {
                     .to_location(start_parentheses.location, end_parentheses.location));
             }
 
-            // After a `(` we can always expect an expression
-            let first_expression = self.expression()?;
+            let grouped = self.expression()?;
 
-            // After the first expression we have to figure out if this is a tuple `(1,2,3)` or a grouping `(5 - 1)`
-            return match self.peek_current_token_location() {
-                // An expression followed by a comma indicates that we're dealing with a tuple
-                Some(TokenLocation { token: Token::Comma, .. }) => {
-                    self.advance();
+            self.require_current_token_matches(Token::RightParentheses)?;
 
-                    let mut expressions = vec![first_expression];
-                    while self.peek_current_token().is_some() {
-                        expressions.push(self.expression()?);
-
-                        if let Some(end_parentheses) =
-                            self.consume_token_if(&[Token::RightParentheses])
-                        {
-                            let tuple_expression = Expression::Tuple {
-                                values: expressions,
-                            };
-
-                            return Ok(tuple_expression.to_location(
-                                start_parentheses.location,
-                                end_parentheses.location,
-                            ));
-                        }
-
-                        self.require_token(&[Token::Comma])?;
-                    }
-
-                    Err(Error::UnexpectedEndOfStream {
-                        help_text:
-                        "expected a comma to be followed by an expression but got end of stream"
-                            .to_string(),
-                    })
-                }
-                // If after the expression we get a closing right parentheses we know we're dealing with a grouping
-                Some(TokenLocation {
-                         token: Token::RightParentheses,
-                         location: expression_end,
-                     }) => {
-                    let expression_end = *expression_end;
-                    self.advance();
-
-                    Ok(Expression::Grouping(Box::new(first_expression))
-                        .to_location(start_parentheses.location, expression_end))
-                }
-                // If we match some other token inside parentheses we throw an error
-                Some(_) => {
-                    // use require_current_token because the previous call to peek_current_token_location hasn't consumed this invalid token yet
-                    let token = self.require_current_token()?;
-                    Err(Error::UnexpectedToken {
-                        actual_token: token,
-                    })
-                }
-
-                None => {
-                    Err(Error::UnexpectedEndOfStream {
-                        help_text: "expected a ',' or ')' inside this grouping or tuple but got an end of stream instead".to_string(),
-                    })
-                }
-            };
+            return Ok(grouped);
         }
 
         let token_location = self.require_current_token()?;
@@ -733,7 +719,9 @@ impl Parser {
     }
 
     fn for_expression(&mut self) -> Result<ExpressionLocation, Error> {
-        let (l_value, l_value_start, _l_value_end) = self.require_lvalue()?;
+        let l_value = self.require_lvalue()?;
+        let l_value_start = l_value.start;
+        let l_value = Lvalue::try_from(l_value).expect("this can't fail right??");
         self.require_current_token_matches(Token::In)?;
         let sequence = self.expression()?;
         let body = self.block()?;
@@ -747,24 +735,48 @@ impl Parser {
         .to_location(l_value_start, end))
     }
 
-    fn require_identifier(&mut self) -> Result<(String, Location, Location), Error> {
+    fn require_identifier(&mut self) -> Result<ExpressionLocation, Error> {
         let identifier_expression = self.primary()?;
 
-        match identifier_expression.expression {
-            Expression::Identifier(identifier) => Ok((
-                identifier,
-                identifier_expression.start,
-                identifier_expression.end,
-            )),
-            _ => Err(Error::ExpectedIdentifier {
+        if matches!(
+            identifier_expression,
+            ExpressionLocation {
+                expression: Expression::Identifier(_),
+                ..
+            }
+        ) {
+            Ok(identifier_expression)
+        } else {
+            Err(Error::ExpectedIdentifier {
                 actual: identifier_expression,
-            }),
+            })
         }
     }
 
-    fn require_lvalue(&mut self) -> Result<(Lvalue, Location, Location), Error> {
-        let (identifier, start, end) = self.require_identifier()?;
-        Ok((Lvalue::Variable { identifier }, start, end))
+    // NOTE: this method clones a lot of behavior from other parts of the parser, but it's a lot more
+    // selective in what it allows.
+    fn require_lvalue(&mut self) -> Result<ExpressionLocation, Error> {
+        let mut expressions = vec![self.require_identifier()?];
+
+        while self.consume_token_if(&[Token::Comma]).is_some() {
+            expressions.push(self.require_identifier()?);
+        }
+
+        if expressions.len() == 1 {
+            Ok(expressions.remove(0))
+        } else {
+            let (start, end) = (
+                expressions.first().unwrap().start,
+                expressions.last().unwrap().end,
+            );
+            Ok(ExpressionLocation {
+                expression: Expression::Tuple {
+                    values: expressions,
+                },
+                start,
+                end,
+            })
+        }
     }
 
     fn function_declaration(&mut self) -> Result<ExpressionLocation, Error> {
@@ -828,7 +840,7 @@ impl Parser {
 
         // Optional default value
         let default = if self.consume_token_if(&[Token::Colon]).is_some() {
-            let default = self.expression()?;
+            let default = self.single_expression()?;
             if self.match_token(&[Token::RightCurlyBracket]).is_some() {
                 // If the list ends without any values we just do nothing and let the loop below handle the rest
             } else {
@@ -849,10 +861,10 @@ impl Parser {
                 break token_location.location;
             }
 
-            let key = self.expression()?;
+            let key = self.single_expression()?;
 
             if self.consume_token_if(&[Token::Colon]).is_some() {
-                let value = self.expression()?;
+                let value = self.single_expression()?;
                 values.push((key, Some(value)));
             } else {
                 values.push((key, None));
@@ -902,6 +914,10 @@ pub enum Error {
 
     #[error("unexpected token {} on {}", .actual_token.token, .actual_token.location)]
     UnexpectedToken { actual_token: TokenLocation },
+
+    //TODO: this error is a little raw
+    #[error("the following expression cannot be used as an lvalue: {0:?}")]
+    InvalidLvalue(Expression),
 }
 
 fn tokens_to_string(tokens: &[Token]) -> String {

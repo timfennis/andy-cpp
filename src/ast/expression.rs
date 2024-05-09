@@ -1,4 +1,5 @@
 use crate::ast::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
+use crate::ast::parser::Error as ParseError;
 use crate::interpreter::evaluate::EvaluationError;
 use crate::lexer::Location;
 use either::Either;
@@ -210,7 +211,7 @@ impl Lvalue {
 }
 
 impl TryFrom<ExpressionLocation> for Lvalue {
-    type Error = (); //crate::ast::parser::Error;
+    type Error = ParseError;
 
     fn try_from(value: ExpressionLocation) -> Result<Self, Self::Error> {
         match value.expression {
@@ -223,7 +224,7 @@ impl TryFrom<ExpressionLocation> for Lvalue {
                     .collect::<Result<Vec<Self>, Self::Error>>()?,
             )),
             Expression::Grouping(value) => Ok(Lvalue::Sequence(vec![Self::try_from(*value)?])),
-            _ => Err(()),
+            expr => Err(ParseError::InvalidLvalue(expr)),
         }
     }
 }

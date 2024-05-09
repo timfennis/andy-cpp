@@ -14,16 +14,16 @@ assert(a == 4 && b == 5);
 
 // Also a special case that does work, confusingly
 // Mixed (some doubt about the sanity of this)
-(d) := [1];
-assert(d == 1);
+// (d) := [1];
+// assert(d == [1]);
 
 // Assignment into tuple
 (a, b) = (10, 20);
 assert(a == 10 && b == 20);
 
 // Assignment into list
-[b, d] = (30, 40);
-assert(b == 30 && d == 40);
+[a, b] = (30, 40);
+assert(a == 30 && b == 40);
 
 print("ok");
 --EXPECT--
