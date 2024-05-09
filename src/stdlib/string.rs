@@ -23,7 +23,7 @@ mod inner {
     // TODO: remove this function once actual slicing is supported
     pub fn slice(string: &str, i: usize, j: usize) -> anyhow::Result<String> {
         let len = string.chars().count();
-        if i + j > len {
+        if j > len {
             return Err(anyhow::anyhow!("slice offset out of bounds"));
         }
         Ok(string.chars().dropping(i).take(j).collect::<String>())

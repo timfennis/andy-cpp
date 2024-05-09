@@ -133,6 +133,9 @@ mod inner {
             }
         }
     }
+    pub fn byte_len(str: &str) -> usize {
+        str.len()
+    }
     pub fn len(seq: &Sequence) -> usize {
         match seq {
             Sequence::String(s) => s.borrow().chars().count(),
