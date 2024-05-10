@@ -10,7 +10,7 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::ops;
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum Int {
     Int64(i64),
     BigInt(BigInt),
@@ -107,6 +107,7 @@ impl Int {
     }
 }
 
+impl Eq for Int {}
 impl Ord for Int {
     fn cmp(&self, other: &Self) -> Ordering {
         match (self, other) {

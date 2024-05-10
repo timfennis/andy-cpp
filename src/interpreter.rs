@@ -53,6 +53,10 @@ impl Interpreter {
 
         let final_value = self.interpret(statements.into_iter())?;
 
+        if debug {
+            dbg!(&final_value, final_value.value_type());
+        }
+
         Ok(format!("{final_value}"))
     }
 

@@ -446,7 +446,7 @@ pub(crate) fn evaluate_expression(
             let mut out_values = Vec::new();
             execute_for_iterations(iterations, body, &mut out_values, environment, start, end)?;
             match &**body {
-                ForBody::Body(_) => Value::Unit,
+                ForBody::Block(_) => Value::Unit,
                 ForBody::Result(_) => Value::from(out_values),
             }
         }
@@ -1184,7 +1184,7 @@ fn execute_body(
     result: &mut Vec<Value>,
 ) -> EvaluationResult {
     match body {
-        ForBody::Body(expr) => {
+        ForBody::Block(expr) => {
             evaluate_expression(expr, environment)?;
         }
         ForBody::Result(expr) => {
@@ -1222,16 +1222,14 @@ fn execute_for_iterations(
                 .into());
             };
 
-            match sequence {
-                Sequence::String(str) => {
-                    let str = str.borrow();
-
+            macro_rules! implement_loop {
+                ($iter:expr, $convert:expr) => {
                     let mut scope = Environment::new_scope(environment);
-                    for char in str.chars() {
+                    for item in $iter {
                         scope.borrow_mut().reset();
                         declare_or_assign_variable(
                             l_value,
-                            Value::from(String::from(char)),
+                            $convert(item),
                             true,
                             &mut scope,
                             start,
@@ -1244,77 +1242,41 @@ fn execute_for_iterations(
                             execute_for_iterations(tail, body, out_values, &mut scope, start, end)?;
                         }
                     }
+                };
+            }
+
+            match sequence {
+                Sequence::String(str) => {
+                    let str = str.borrow();
+                    implement_loop!(str.chars(), |it| Value::from(String::from(it)));
                     drop(str);
                 }
                 Sequence::List(xs) => {
                     let xs = xs.borrow();
-                    let mut scope = Environment::new_scope(environment);
-                    for x in xs.iter() {
-                        scope.borrow_mut().reset();
-                        declare_or_assign_variable(
-                            l_value,
-                            x.clone(),
-                            true,
-                            &mut scope,
-                            start,
-                            end,
-                        )?;
-
-                        if tail.is_empty() {
-                            execute_body(body, &mut scope, out_values)?;
-                        } else {
-                            execute_for_iterations(tail, body, out_values, &mut scope, start, end)?;
-                        }
-                    }
+                    implement_loop!(xs.iter(), |it: &Value| it.clone());
                 }
                 Sequence::Tuple(values) => {
-                    let mut scope = Environment::new_scope(environment);
-                    for x in &*values {
-                        scope.borrow_mut().reset();
-                        declare_or_assign_variable(
-                            l_value,
-                            x.clone(),
-                            true,
-                            &mut scope,
-                            start,
-                            end,
-                        )?;
-
-                        if tail.is_empty() {
-                            execute_body(body, &mut scope, out_values)?;
-                        } else {
-                            execute_for_iterations(tail, body, out_values, &mut scope, start, end)?;
-                        }
-                    }
+                    implement_loop!(&*values, |it: &Value| it.clone());
                 }
                 Sequence::Map(map, _) => {
                     let xs = map.borrow();
 
-                    let mut scope = Environment::new_scope(environment);
-                    for (key, value) in xs.iter() {
-                        scope.borrow_mut().reset();
-                        declare_or_assign_variable(
-                            l_value,
-                            Value::Sequence(Sequence::Tuple(Rc::new(vec![
-                                key.clone(),
-                                value.clone(),
-                            ]))),
-                            true,
-                            &mut scope,
-                            start,
-                            end,
-                        )?;
-
-                        if tail.is_empty() {
-                            execute_body(body, &mut scope, out_values)?;
-                        } else {
-                            execute_for_iterations(tail, body, out_values, &mut scope, start, end)?;
-                        }
-                    }
+                    implement_loop!(xs.iter(), |(key, value): (&Value, &Value)| Value::Sequence(
+                        Sequence::Tuple(Rc::new(vec![key.clone(), value.clone(),]))
+                    ));
                 }
             }
         }
-        ForIteration::Guard(_) => todo!("guard not implemented"),
+        ForIteration::Guard(guard) => match evaluate_expression(guard, environment)? {
+            Value::Bool(true) if tail.is_empty() => {
+                execute_body(body, environment, out_values)?;
+            }
+            Value::Bool(true) => {
+                execute_for_iterations(tail, body, out_values, environment, start, end)?;
+            }
+            Value::Bool(false) => {}
+            _ => todo!("type error!!"),
+        },
     }
 
     Ok(Value::Unit)

@@ -121,7 +121,7 @@ pub enum ForIteration {
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum ForBody {
-    Body(ExpressionLocation),
+    Block(ExpressionLocation),
     Result(ExpressionLocation),
 }
 
