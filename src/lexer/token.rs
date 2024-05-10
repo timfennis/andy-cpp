@@ -13,7 +13,6 @@ pub enum Token {
 
     Identifier(String),
     OpAssign(Box<TokenLocation>),
-    Unit,
 
     // Operator - Assignment
     DeclareVar,
@@ -134,7 +133,6 @@ impl fmt::Display for Token {
             Self::Comma => ",",
             Self::LogicAnd => "&&",
             Self::LogicOr => "||",
-            Self::Unit => "()",
             Self::DotDot => "..",
             Self::DotDotEquals => "..=",
             Self::Concat => "++",
