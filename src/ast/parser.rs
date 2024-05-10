@@ -554,53 +554,20 @@ impl Parser {
         Ok(expr)
     }
 
-    fn group_of_expressions(
-        &mut self,
-        terminated_by: Token,
-    ) -> Result<Vec<ExpressionLocation>, Error> {
-        let mut values = Vec::new();
-
-        loop {
-            let current_token = self.peek_current_token_location().cloned();
-            if let Some(ref token_location) = current_token {
-                if token_location.token == terminated_by {
-                    self.advance();
-                    return Ok(values);
-                }
-
-                values.push(self.single_expression()?);
-
-                // After we parse an expression we look ahead and see if the next token is either a ',' or ')'
-                // if it's not we can return a parse error
-                let current_token = self.peek_current_token_location();
-                match current_token.map(|it| &it.token) {
-                    Some(token) if token == &terminated_by => {
-                        // Termination token is handled by the next iteration
-                    }
-                    Some(Token::Comma) => {
-                        self.advance();
-                    }
-                    Some(_) => {
-                        return Err(Error::ExpectedToken {
-                            expected_tokens: vec![Token::Comma, terminated_by],
-                            actual_token: current_token.unwrap().clone(),
-                        });
-                    }
-                    _ => {
-                        // None case is handled by just looping again
-                    }
-                }
-            } else {
-                return Err(Error::UnexpectedEndOfStream {
-                    help_text: "unexpected end of stream while parsing method call".to_string(),
-                });
-            }
-        }
-    }
-
     fn list(&mut self, start: Location) -> Result<ExpressionLocation, Error> {
-        let values = self.group_of_expressions(Token::RightSquareBracket)?;
-        let end = values.last().map_or(start, |e| e.end);
+        let (values, end) =
+            if let Some(bracket) = self.consume_token_if(&[Token::RightSquareBracket]) {
+                (vec![], bracket.location)
+            } else {
+                let expr = self.tuple_expressions(Self::single_expression)?;
+                let Expression::Tuple { values } = expr.expression else {
+                    unreachable!("tuple_expression guarantees a tuple");
+                };
+                self.require_current_token_matches(Token::RightSquareBracket)?;
+                let end = values.last().map_or(start, |e| e.end);
+                (values, end)
+            };
+
         Ok(Expression::List { values }.to_location(start, end))
     }
 
