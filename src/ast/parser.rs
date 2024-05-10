@@ -234,12 +234,7 @@ impl Parser {
     }
 
     fn variable_declaration_or_assignment(&mut self) -> Result<ExpressionLocation, Error> {
-        // NOTE: I think the way we implemented this method makes it right associative
-        // NOTE: Instead of just parsing an identifier we continue to recurse down to the next level `range` at the
-        //       time of writing. If whatever comes back is a valid identifier (possibly lvalue in the future) we treat
-        //       this expression as an assignment expression. Otherwise, we just treat the expression as whatever we got.
         let maybe_lvalue = self.maybe_tuple(Self::single_expression)?;
-
         let start = maybe_lvalue.start;
 
         if !Lvalue::can_build_from_expression(&maybe_lvalue.expression) {
@@ -305,12 +300,11 @@ impl Parser {
         };
     }
 
-    fn maybe_tuple(
+    fn tuple_expressions(
         &mut self,
         next: fn(&mut Parser) -> Result<ExpressionLocation, Error>,
     ) -> Result<ExpressionLocation, Error> {
         let mut expressions = vec![next(self)?];
-
         while self.consume_token_if(&[Token::Comma]).is_some() {
             expressions.push(next(self)?);
         }
@@ -320,16 +314,42 @@ impl Parser {
             expressions.last().unwrap().end,
         );
 
-        if expressions.len() == 1 {
-            Ok(expressions.remove(0))
+        Ok(ExpressionLocation {
+            expression: Expression::Tuple {
+                values: expressions,
+            },
+            start,
+            end,
+        })
+    }
+
+    /// Parses a delimited tuple (enclosed in parentheses) that can be empty
+    fn delimited_tuple(
+        &mut self,
+        next: fn(&mut Parser) -> Result<ExpressionLocation, Error>,
+    ) -> Result<ExpressionLocation, Error> {
+        let start = self.require_current_token_matches(Token::LeftParentheses)?;
+        if let Some(end) = self.consume_token_if(&[Token::RightParentheses]) {
+            Ok(Expression::Tuple { values: vec![] }.to_location(start.location, end.location))
         } else {
-            Ok(ExpressionLocation {
-                expression: Expression::Tuple {
-                    values: expressions,
-                },
-                start,
-                end,
-            })
+            let tuple_expression = self.tuple_expressions(next)?;
+            self.require_current_token_matches(Token::RightParentheses)?;
+            Ok(tuple_expression)
+        }
+    }
+
+    fn maybe_tuple(
+        &mut self,
+        next: fn(&mut Parser) -> Result<ExpressionLocation, Error>,
+    ) -> Result<ExpressionLocation, Error> {
+        let tuple = self.tuple_expressions(next)?;
+
+        match tuple {
+            ExpressionLocation {
+                expression: Expression::Tuple { mut values },
+                ..
+            } if values.len() == 1 => Ok(values.remove(0)),
+            tuple @ ExpressionLocation { .. } => Ok(tuple),
         }
     }
 
@@ -448,13 +468,18 @@ impl Parser {
     fn operand(&mut self) -> Result<ExpressionLocation, Error> {
         let mut expr = self.primary()?;
 
+        // This loop handles the following cases:
+        //    * `identifier()` <-- call
+        //    * `identifier[idx]` <-- idx
+        //    * `identifier.ident()` <-- dot call
         while let Some(current) =
-            self.consume_token_if(&[Token::LeftParentheses, Token::LeftSquareBracket, Token::Dot])
+            self.match_token(&[Token::LeftParentheses, Token::LeftSquareBracket, Token::Dot])
         {
             match current.token {
+                // handles: foo()
                 Token::LeftParentheses => {
                     let Expression::Tuple { values: arguments } =
-                        self.tuple(expr.start)?.expression
+                        self.delimited_tuple(Self::single_expression)?.expression
                     else {
                         unreachable!("self.tuple() must always produce a tuple");
                     };
@@ -471,6 +496,7 @@ impl Parser {
                     };
                 }
                 Token::Dot => {
+                    self.require_current_token_matches(Token::Dot)?; // consume matched token
                     let l_value = self.require_identifier()?;
                     let (identifier_start, identifier_end) = (l_value.start, l_value.end);
                     let identifier = Lvalue::try_from(l_value)?;
@@ -478,9 +504,7 @@ impl Parser {
                         unreachable!("Guaranteed to match by previous calls")
                     };
 
-                    let left_paren = self.require_token(&[Token::LeftParentheses])?;
-                    // TODO: replace call below with maybe_tuple?
-                    let tuple_expression = self.tuple(left_paren)?;
+                    let tuple_expression = self.delimited_tuple(Self::single_expression)?;
                     let Expression::Tuple {
                         values: mut arguments,
                     } = tuple_expression.expression
@@ -504,6 +528,7 @@ impl Parser {
                     // for now, we require parentheses
                 }
                 Token::LeftSquareBracket => {
+                    self.require_current_token_matches(Token::LeftSquareBracket)?;
                     // self.expression here allows for this syntax which is maybe a good idea
                     // `foo[1, 2] == foo[(1, 2)]`
                     // and
@@ -572,14 +597,6 @@ impl Parser {
                 });
             }
         }
-    }
-
-    // Parses a tuple NOT including the opening parentheses
-    #[deprecated(note = "tuples are parsed with maybe_tuple")]
-    fn tuple(&mut self, start: Location) -> Result<ExpressionLocation, Error> {
-        let values = self.group_of_expressions(Token::RightParentheses)?;
-        let end = values.last().map_or(start, |e| e.end);
-        Ok(Expression::Tuple { values }.to_location(start, end))
     }
 
     fn list(&mut self, start: Location) -> Result<ExpressionLocation, Error> {
@@ -761,8 +778,7 @@ impl Parser {
             return Err(Error::ExpectedIdentifier { actual: identifier });
         };
 
-        let arg_start = self.require_token(&[Token::LeftParentheses])?;
-        let argument_list = self.tuple(arg_start)?;
+        let argument_list = self.delimited_tuple(Self::single_expression)?;
         let body = self.block()?;
 
         let (start, end) = (identifier.start, body.end);
