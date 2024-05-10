@@ -444,7 +444,11 @@ pub(crate) fn evaluate_expression(
         }
         Expression::For { iterations, body } => {
             let mut out_values = Vec::new();
-            execute_for_iterations(iterations, body, &mut out_values, environment, start, end)?
+            execute_for_iterations(iterations, body, &mut out_values, environment, start, end)?;
+            match &**body {
+                ForBody::Body(_) => Value::Unit,
+                ForBody::Result(_) => Value::from(out_values),
+            }
         }
         Expression::Return { value } => {
             return Err(FunctionCarrier::Return(evaluate_expression(
@@ -1237,14 +1241,7 @@ fn execute_for_iterations(
                         if tail.is_empty() {
                             execute_body(body, &mut scope, out_values)?;
                         } else {
-                            execute_for_iterations(
-                                tail,
-                                body,
-                                out_values,
-                                environment,
-                                start,
-                                end,
-                            )?;
+                            execute_for_iterations(tail, body, out_values, &mut scope, start, end)?;
                         }
                     }
                     drop(str);
@@ -1266,14 +1263,7 @@ fn execute_for_iterations(
                         if tail.is_empty() {
                             execute_body(body, &mut scope, out_values)?;
                         } else {
-                            execute_for_iterations(
-                                tail,
-                                body,
-                                out_values,
-                                environment,
-                                start,
-                                end,
-                            )?;
+                            execute_for_iterations(tail, body, out_values, &mut scope, start, end)?;
                         }
                     }
                 }
@@ -1293,14 +1283,7 @@ fn execute_for_iterations(
                         if tail.is_empty() {
                             execute_body(body, &mut scope, out_values)?;
                         } else {
-                            execute_for_iterations(
-                                tail,
-                                body,
-                                out_values,
-                                environment,
-                                start,
-                                end,
-                            )?;
+                            execute_for_iterations(tail, body, out_values, &mut scope, start, end)?;
                         }
                     }
                 }
@@ -1325,14 +1308,7 @@ fn execute_for_iterations(
                         if tail.is_empty() {
                             execute_body(body, &mut scope, out_values)?;
                         } else {
-                            execute_for_iterations(
-                                tail,
-                                body,
-                                out_values,
-                                environment,
-                                start,
-                                end,
-                            )?;
+                            execute_for_iterations(tail, body, out_values, &mut scope, start, end)?;
                         }
                     }
                 }
