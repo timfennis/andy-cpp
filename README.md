@@ -12,7 +12,7 @@ You can produce very large numbers quite quickly because we use the [num](https:
 the hood.
 
 ```ndc
-n := v := 10;
+n, v := 10, 10;
 while { n -= 1 } > 0 {
     v *= n;
 }
