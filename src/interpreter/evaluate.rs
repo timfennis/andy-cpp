@@ -251,7 +251,14 @@ pub(crate) fn evaluate_expression(
 
                 new_value
             }
-            Lvalue::Sequence(_) => todo!("not implemented, and not sure if we should either"),
+            Lvalue::Sequence(_) => {
+                return Err(EvaluationError::syntax_error(
+                    "cannot use augmented assignment in combination with destructuring",
+                    start,
+                    end,
+                )
+                .into())
+            }
         },
         Expression::Block { statements } => {
             let mut local_scope = Environment::new_scope(environment);
@@ -448,18 +455,6 @@ pub(crate) fn evaluate_expression(
                 )
                 .into());
             };
-
-            // let Lvalue::Variable {
-            //     identifier: var_name,
-            // } = l_value
-            // else {
-            //     return Err(EvaluationError::syntax_error(
-            //         "cannot use this expression in for loop",
-            //         start,
-            //         end,
-            //     )
-            //     .into());
-            // };
 
             match sequence {
                 Sequence::String(str) => {
@@ -727,10 +722,27 @@ fn declare_or_assign_variable(
             Ok(value)
         }
         Lvalue::Sequence(l_values) => {
-            let values = value.into_vec().expect("TODO: handle value is not a list");
-            assert_eq!(values.len(), l_values.len()); // TEMP
-            for (l_value, value) in l_values.iter().zip(values.into_iter()) {
+            let mut remaining = l_values.len();
+            let mut iter = l_values.iter().zip(value.try_into_iter().ok_or_else(|| {
+                FunctionCarrier::EvaluationError(EvaluationError::syntax_error(
+                    "failed to unpack non iterable value into pattern",
+                    start,
+                    end,
+                ))
+            })?);
+
+            for (l_value, value) in iter.by_ref() {
+                remaining -= 1;
                 declare_or_assign_variable(l_value, value, declare, environment, start, end)?;
+            }
+
+            if remaining > 0 || iter.next().is_some() {
+                return Err(EvaluationError::syntax_error(
+                    "failed to unpack value into pattern because the lengths do not match",
+                    start,
+                    end,
+                )
+                .into());
             }
             Ok(Value::Unit)
         }
