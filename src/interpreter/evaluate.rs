@@ -8,7 +8,8 @@ use std::rc::Rc;
 use either::Either;
 
 use crate::ast::{
-    BinaryOperator, Expression, ExpressionLocation, LogicalOperator, Lvalue, UnaryOperator,
+    BinaryOperator, Expression, ExpressionLocation, ForBody, ForIteration, LogicalOperator, Lvalue,
+    UnaryOperator,
 };
 use crate::hash_map;
 use crate::hash_map::HashMap;
@@ -441,96 +442,9 @@ pub(crate) fn evaluate_expression(
 
             Value::Sequence(Sequence::Map(Rc::new(RefCell::new(hashmap)), default))
         }
-        Expression::For {
-            l_value,
-            sequence,
-            loop_body,
-        } => {
-            let sequence = evaluate_expression(sequence, environment)?;
-            let Value::Sequence(sequence) = sequence else {
-                return Err(EvaluationError::syntax_error(
-                    &format!("cannot iterate over {}", sequence.value_type()),
-                    start,
-                    end,
-                )
-                .into());
-            };
-
-            match sequence {
-                Sequence::String(str) => {
-                    let str = str.borrow();
-
-                    let mut scope = Environment::new_scope(environment);
-                    for char in str.chars() {
-                        scope.borrow_mut().reset();
-                        declare_or_assign_variable(
-                            l_value,
-                            Value::from(String::from(char)),
-                            true,
-                            &mut scope,
-                            start,
-                            end,
-                        )?;
-                        evaluate_expression(loop_body, &mut scope)?;
-                    }
-                    drop(str);
-                }
-                Sequence::List(xs) => {
-                    let xs = xs.borrow();
-                    let mut scope = Environment::new_scope(environment);
-                    for x in xs.iter() {
-                        scope.borrow_mut().reset();
-                        declare_or_assign_variable(
-                            l_value,
-                            x.clone(),
-                            true,
-                            &mut scope,
-                            start,
-                            end,
-                        )?;
-
-                        evaluate_expression(loop_body, &mut scope)?;
-                    }
-                }
-                Sequence::Tuple(values) => {
-                    let mut scope = Environment::new_scope(environment);
-                    for x in &*values {
-                        scope.borrow_mut().reset();
-                        declare_or_assign_variable(
-                            l_value,
-                            x.clone(),
-                            true,
-                            &mut scope,
-                            start,
-                            end,
-                        )?;
-
-                        evaluate_expression(loop_body, &mut scope)?;
-                    }
-                }
-                Sequence::Map(map, _) => {
-                    let xs = map.borrow();
-
-                    let mut scope = Environment::new_scope(environment);
-                    for (key, value) in xs.iter() {
-                        scope.borrow_mut().reset();
-                        declare_or_assign_variable(
-                            l_value,
-                            Value::Sequence(Sequence::Tuple(Rc::new(vec![
-                                key.clone(),
-                                value.clone(),
-                            ]))),
-                            true,
-                            &mut scope,
-                            start,
-                            end,
-                        )?;
-                        evaluate_expression(loop_body, &mut scope)?;
-                    }
-                }
-            }
-
-            Value::Unit
+        Expression::For { iterations, body } => {
+            let mut out_values = Vec::new();
+            execute_for_iterations(iterations, body, &mut out_values, environment, start, end)?
         }
         Expression::Return { value } => {
             return Err(FunctionCarrier::Return(evaluate_expression(
@@ -1258,4 +1172,174 @@ fn call_function(
         e @ Err(FunctionCarrier::EvaluationError(_) | FunctionCarrier::FunctionNotFound) => e,
         Err(carrier @ FunctionCarrier::IntoEvaluationError(_)) => Err(carrier.lift(start, end)),
     }
+}
+
+fn execute_body(
+    body: &ForBody,
+    environment: &mut EnvironmentRef,
+    result: &mut Vec<Value>,
+) -> EvaluationResult {
+    match body {
+        ForBody::Body(expr) => {
+            evaluate_expression(expr, environment)?;
+        }
+        ForBody::Result(expr) => {
+            let value = evaluate_expression(expr, environment)?;
+            result.push(value);
+        }
+    }
+    Ok(Value::Unit)
+}
+
+#[allow(clippy::too_many_lines)]
+fn execute_for_iterations(
+    iterations: &[ForIteration],
+    body: &ForBody,
+    out_values: &mut Vec<Value>,
+    environment: &mut EnvironmentRef,
+    start: Location,
+    end: Location,
+) -> Result<Value, FunctionCarrier> {
+    let Some((cur, tail)) = iterations.split_first() else {
+        panic!("empty iterations")
+    };
+
+    match cur {
+        ForIteration::Iteration { l_value, sequence } => {
+            let sequence = evaluate_expression(sequence, environment)?;
+
+            // Unpack the sequence
+            let Value::Sequence(sequence) = sequence else {
+                return Err(EvaluationError::syntax_error(
+                    &format!("cannot iterate over {}", sequence.value_type()),
+                    start,
+                    end,
+                )
+                .into());
+            };
+
+            match sequence {
+                Sequence::String(str) => {
+                    let str = str.borrow();
+
+                    let mut scope = Environment::new_scope(environment);
+                    for char in str.chars() {
+                        scope.borrow_mut().reset();
+                        declare_or_assign_variable(
+                            l_value,
+                            Value::from(String::from(char)),
+                            true,
+                            &mut scope,
+                            start,
+                            end,
+                        )?;
+
+                        if tail.is_empty() {
+                            execute_body(body, &mut scope, out_values)?;
+                        } else {
+                            execute_for_iterations(
+                                tail,
+                                body,
+                                out_values,
+                                environment,
+                                start,
+                                end,
+                            )?;
+                        }
+                    }
+                    drop(str);
+                }
+                Sequence::List(xs) => {
+                    let xs = xs.borrow();
+                    let mut scope = Environment::new_scope(environment);
+                    for x in xs.iter() {
+                        scope.borrow_mut().reset();
+                        declare_or_assign_variable(
+                            l_value,
+                            x.clone(),
+                            true,
+                            &mut scope,
+                            start,
+                            end,
+                        )?;
+
+                        if tail.is_empty() {
+                            execute_body(body, &mut scope, out_values)?;
+                        } else {
+                            execute_for_iterations(
+                                tail,
+                                body,
+                                out_values,
+                                environment,
+                                start,
+                                end,
+                            )?;
+                        }
+                    }
+                }
+                Sequence::Tuple(values) => {
+                    let mut scope = Environment::new_scope(environment);
+                    for x in &*values {
+                        scope.borrow_mut().reset();
+                        declare_or_assign_variable(
+                            l_value,
+                            x.clone(),
+                            true,
+                            &mut scope,
+                            start,
+                            end,
+                        )?;
+
+                        if tail.is_empty() {
+                            execute_body(body, &mut scope, out_values)?;
+                        } else {
+                            execute_for_iterations(
+                                tail,
+                                body,
+                                out_values,
+                                environment,
+                                start,
+                                end,
+                            )?;
+                        }
+                    }
+                }
+                Sequence::Map(map, _) => {
+                    let xs = map.borrow();
+
+                    let mut scope = Environment::new_scope(environment);
+                    for (key, value) in xs.iter() {
+                        scope.borrow_mut().reset();
+                        declare_or_assign_variable(
+                            l_value,
+                            Value::Sequence(Sequence::Tuple(Rc::new(vec![
+                                key.clone(),
+                                value.clone(),
+                            ]))),
+                            true,
+                            &mut scope,
+                            start,
+                            end,
+                        )?;
+
+                        if tail.is_empty() {
+                            execute_body(body, &mut scope, out_values)?;
+                        } else {
+                            execute_for_iterations(
+                                tail,
+                                body,
+                                out_values,
+                                environment,
+                                start,
+                                end,
+                            )?;
+                        }
+                    }
+                }
+            }
+        }
+        ForIteration::Guard(_) => todo!("guard not implemented"),
+    }
+
+    Ok(Value::Unit)
 }
