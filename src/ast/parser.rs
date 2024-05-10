@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use either::Either;
 
-use crate::ast::expression::{ExpressionLocation, Lvalue};
+use crate::ast::expression::{ExpressionLocation, ForBody, ForIteration, Lvalue};
 use crate::ast::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
 use crate::ast::Expression;
 use crate::lexer::{Location, Token, TokenLocation};
@@ -342,14 +342,7 @@ impl Parser {
         next: fn(&mut Parser) -> Result<ExpressionLocation, Error>,
     ) -> Result<ExpressionLocation, Error> {
         let tuple = self.tuple_expressions(next)?;
-
-        match tuple {
-            ExpressionLocation {
-                expression: Expression::Tuple { mut values },
-                ..
-            } if values.len() == 1 => Ok(values.remove(0)),
-            tuple @ ExpressionLocation { .. } => Ok(tuple),
-        }
+        Ok(tuple.maybe_extract_tuple())
     }
 
     fn single_expression(&mut self) -> Result<ExpressionLocation, Error> {
@@ -560,12 +553,45 @@ impl Parser {
                 (vec![], bracket.location)
             } else {
                 let expr = self.tuple_expressions(Self::single_expression)?;
-                let Expression::Tuple { values } = expr.expression else {
-                    unreachable!("tuple_expression guarantees a tuple");
-                };
-                self.require_current_token_matches(Token::RightSquareBracket)?;
-                let end = values.last().map_or(start, |e| e.end);
-                (values, end)
+
+                match self.peek_current_token() {
+                    Some(Token::RightSquareBracket) => {
+                        self.advance();
+
+                        let Expression::Tuple { values } = expr.expression else {
+                            unreachable!("tuple_expression guarantees a tuple");
+                        };
+
+                        // Next we can maybe turn this into a list expression
+                        let end = values.last().map_or(start, |e| e.end);
+                        (values, end)
+                        // DONE
+                    }
+                    // WOAH, this is not a list, it's a list comprehension
+                    Some(Token::For) => {
+                        self.advance();
+
+                        let result = ForBody::Result(expr.maybe_extract_tuple());
+                        let l_value = Lvalue::try_from(self.maybe_tuple(Self::primary)?)?;
+
+                        self.require_current_token_matches(Token::In)?;
+
+                        let iteration = ForIteration::Iteration {
+                            l_value,
+                            sequence: self.single_expression()?,
+                        };
+
+                        // TODO: continue parsing more
+                        self.require_current_token_matches(Token::RightSquareBracket)?;
+
+                        return Ok(Expression::For {
+                            body: Box::new(result),
+                            iterations: vec![iteration],
+                        }
+                        .to_location(start, start)); // TODO fix loc
+                    }
+                    _ => panic!("KAPOT"),
+                }
             };
 
         Ok(Expression::List { values }.to_location(start, end))
@@ -582,7 +608,7 @@ impl Parser {
             return self.while_expression();
         }
         // matches for loops like `for x in xs { }`
-        else if self.consume_token_if(&[Token::For]).is_some() {
+        else if self.match_token(&[Token::For]).is_some() {
             return self.for_expression();
         }
         // matches function declarations like `fn function_name(arg1, arg2) { }`
@@ -704,20 +730,28 @@ impl Parser {
     }
 
     fn for_expression(&mut self) -> Result<ExpressionLocation, Error> {
-        let l_value = self.maybe_tuple(Self::primary)?;
-        let l_value_start = l_value.start;
-        let l_value = Lvalue::try_from(l_value).expect("this can't fail right??");
-        self.require_current_token_matches(Token::In)?;
-        let sequence = self.expression()?;
+        let for_token = self
+            .require_current_token_matches(Token::For)
+            .expect("for token should be guaranteed by the caller");
+
+        let iteration = self.for_iteration()?;
         let body = self.block()?;
 
         let end = body.end;
         Ok(Expression::For {
-            l_value,
-            sequence: Box::new(sequence),
-            loop_body: Box::new(body),
+            iterations: vec![iteration],
+            body: Box::new(ForBody::Body(body)),
         }
-        .to_location(l_value_start, end))
+        .to_location(for_token.location, end))
+    }
+
+    fn for_iteration(&mut self) -> Result<ForIteration, Error> {
+        let l_value = self.maybe_tuple(Self::primary)?;
+        let l_value = Lvalue::try_from(l_value).expect("this can't fail right??");
+        self.require_current_token_matches(Token::In)?;
+        let sequence = self.expression()?;
+
+        Ok(ForIteration::Iteration { l_value, sequence })
     }
 
     fn require_identifier(&mut self) -> Result<ExpressionLocation, Error> {

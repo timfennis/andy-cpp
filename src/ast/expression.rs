@@ -16,21 +16,6 @@ pub struct ExpressionLocation {
     pub end: Location,
 }
 
-#[derive(Debug, Eq, PartialEq)]
-pub enum Lvalue {
-    // Example: `foo := ...`
-    Variable {
-        identifier: String,
-    },
-    // Example: `foo()[1] = ...`
-    Index {
-        value: Box<ExpressionLocation>,
-        index: Box<ExpressionLocation>,
-    },
-    // Example: `a, b := ...`
-    Sequence(Vec<Lvalue>),
-}
-
 #[derive(Debug, PartialEq)]
 pub enum Expression {
     // Literals
@@ -90,9 +75,8 @@ pub enum Expression {
         loop_body: Box<ExpressionLocation>,
     },
     For {
-        l_value: Lvalue,
-        sequence: Box<ExpressionLocation>,
-        loop_body: Box<ExpressionLocation>,
+        iterations: Vec<ForIteration>,
+        body: Box<ForBody>,
     },
     Call {
         /// The function to call, could be an identifier, or any expression that produces a function as its value
@@ -124,6 +108,36 @@ pub enum Expression {
         start: Option<Box<ExpressionLocation>>,
         end: Option<Box<ExpressionLocation>>,
     },
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub enum ForIteration {
+    Iteration {
+        l_value: Lvalue,
+        sequence: ExpressionLocation,
+    },
+    Guard(ExpressionLocation),
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub enum ForBody {
+    Body(ExpressionLocation),
+    Result(ExpressionLocation),
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub enum Lvalue {
+    // Example: `foo := ...`
+    Variable {
+        identifier: String,
+    },
+    // Example: `foo()[1] = ...`
+    Index {
+        value: Box<ExpressionLocation>,
+        index: Box<ExpressionLocation>,
+    },
+    // Example: `a, b := ...`
+    Sequence(Vec<Lvalue>),
 }
 
 impl Eq for Expression {}
@@ -177,6 +191,17 @@ impl ExpressionLocation {
                 self.start,
                 self.end,
             )),
+        }
+    }
+
+    #[must_use]
+    pub fn maybe_extract_tuple(self) -> ExpressionLocation {
+        match self {
+            ExpressionLocation {
+                expression: Expression::Tuple { mut values },
+                ..
+            } if values.len() == 1 => values.remove(0),
+            tuple @ ExpressionLocation { .. } => tuple,
         }
     }
 }
