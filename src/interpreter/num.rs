@@ -4,7 +4,7 @@ use std::hash::{Hash, Hasher};
 use std::num::TryFromIntError;
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
-use num::bigint::TryFromBigIntError;
+use num::bigint::{ToBigInt, TryFromBigIntError};
 use num::complex::{Complex64, ComplexFloat};
 use num::{BigInt, BigRational, Complex, FromPrimitive, Signed, ToPrimitive};
 use ordered_float::OrderedFloat;
@@ -74,6 +74,17 @@ impl PartialEq for Number {
             (Number::Rational(left), Number::Rational(right)) => left.eq(right),
             (Number::Complex(left), Number::Complex(right)) => left.eq(right),
             _ => false,
+        }
+    }
+}
+
+impl PartialEq for Int {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Int::BigInt(left), Int::BigInt(right)) => left == right,
+            (Int::BigInt(left), Int::Int64(right)) => left == &BigInt::from(*right),
+            (Int::Int64(left), Int::BigInt(right)) => &BigInt::from(*left) == right,
+            (Int::Int64(left), Int::Int64(right)) => left == right,
         }
     }
 }

@@ -1,5 +1,5 @@
 --PROGRAM--
-out := [ x * y for x in 1..=10, for y in 1..=10 ];
+out := [ x * y for x in 1..=10, y in 1..=10 ];
 assert(out.len() == 100);
 assert(out[0] == 1);
 assert(out[99] == 100);

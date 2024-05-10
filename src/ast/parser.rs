@@ -569,11 +569,18 @@ impl Parser {
                     }
                     // WOAH, this is not a list, it's a list comprehension
                     Some(Token::For) => {
+                        self.require_current_token_matches(Token::For)
+                            .expect("guaranteed to match");
                         let result = ForBody::Result(expr.maybe_extract_tuple());
                         let mut iterations = Vec::new();
 
                         loop {
-                            iterations.push(self.for_iteration()?);
+                            match self.peek_current_token() {
+                                Some(Token::Comma | Token::RightSquareBracket) => {} // Fall through
+                                Some(Token::If) => iterations.push(self.if_guard()?),
+                                Some(_) => iterations.push(self.for_iteration()?),
+                                _ => {}
+                            }
 
                             // If next is not a comma we break
                             if self.consume_token_if(&[Token::Comma]).is_none() {
@@ -597,9 +604,17 @@ impl Parser {
         Ok(Expression::List { values }.to_location(start, end))
     }
 
-    fn for_iteration(&mut self) -> Result<ForIteration, Error> {
-        self.require_current_token_matches(Token::For)?;
+    fn if_guard(&mut self) -> Result<ForIteration, Error> {
+        self.require_current_token_matches(Token::If)?;
+        let guard = self.single_expression()?;
+        Ok(ForIteration::Guard(guard))
+    }
 
+    /// Parses a for iteration without the for keyword. Examples
+    /// ```ndc
+    /// x in xs
+    /// ```
+    fn for_iteration(&mut self) -> Result<ForIteration, Error> {
         let l_value = Lvalue::try_from(self.maybe_tuple(Self::primary)?)?;
 
         self.require_current_token_matches(Token::In)?;
@@ -746,16 +761,31 @@ impl Parser {
 
     fn for_expression(&mut self) -> Result<ExpressionLocation, Error> {
         let start = self
-            .peek_current_token_location()
+            .require_current_token_matches(Token::For)
             .expect("required to be the correct token")
             .location;
-        let iteration = self.for_iteration()?;
-        let body = self.block()?;
+        let mut iterations = vec![self.for_iteration()?];
 
+        while self.consume_token_if(&[Token::Comma]).is_some() {
+            match self.peek_current_token() {
+                // Some(Token::RightCurlyBracket) => break,
+                Some(Token::If) => iterations.push(self.if_guard()?),
+                Some(_) => iterations.push(self.for_iteration()?),
+                _ => {
+                    return Err(Error::UnexpectedEndOfStream {
+                        help_text: "unexpected end of stream when parsing for expression"
+                            .to_string(),
+                    })
+                }
+            }
+        }
+
+        let body = self.block()?;
         let end = body.end;
+
         Ok(Expression::For {
-            iterations: vec![iteration],
-            body: Box::new(ForBody::Body(body)),
+            iterations,
+            body: Box::new(ForBody::Block(body)),
         }
         .to_location(start, end))
     }
