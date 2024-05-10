@@ -569,24 +569,24 @@ impl Parser {
                     }
                     // WOAH, this is not a list, it's a list comprehension
                     Some(Token::For) => {
-                        self.advance();
-
                         let result = ForBody::Result(expr.maybe_extract_tuple());
-                        let l_value = Lvalue::try_from(self.maybe_tuple(Self::primary)?)?;
+                        let mut iterations = Vec::new();
 
-                        self.require_current_token_matches(Token::In)?;
+                        loop {
+                            iterations.push(self.for_iteration()?);
 
-                        let iteration = ForIteration::Iteration {
-                            l_value,
-                            sequence: self.single_expression()?,
-                        };
+                            // If next is not a comma we break
+                            if self.consume_token_if(&[Token::Comma]).is_none() {
+                                break;
+                            };
+                        }
 
                         // TODO: continue parsing more
                         self.require_current_token_matches(Token::RightSquareBracket)?;
 
                         return Ok(Expression::For {
                             body: Box::new(result),
-                            iterations: vec![iteration],
+                            iterations,
                         }
                         .to_location(start, start)); // TODO fix loc
                     }
@@ -595,6 +595,21 @@ impl Parser {
             };
 
         Ok(Expression::List { values }.to_location(start, end))
+    }
+
+    fn for_iteration(&mut self) -> Result<ForIteration, Error> {
+        self.require_current_token_matches(Token::For)?;
+
+        let l_value = Lvalue::try_from(self.maybe_tuple(Self::primary)?)?;
+
+        self.require_current_token_matches(Token::In)?;
+
+        let iteration = ForIteration::Iteration {
+            l_value,
+            sequence: self.single_expression()?,
+        };
+
+        Ok(iteration)
     }
 
     #[allow(clippy::too_many_lines)] // WERE BUILDING A PROGRAMMING LANGUAGE CLIPPY WHAT DO YOU WANT?
@@ -730,10 +745,10 @@ impl Parser {
     }
 
     fn for_expression(&mut self) -> Result<ExpressionLocation, Error> {
-        let for_token = self
-            .require_current_token_matches(Token::For)
-            .expect("for token should be guaranteed by the caller");
-
+        let start = self
+            .peek_current_token_location()
+            .expect("required to be the correct token")
+            .location;
         let iteration = self.for_iteration()?;
         let body = self.block()?;
 
@@ -742,16 +757,7 @@ impl Parser {
             iterations: vec![iteration],
             body: Box::new(ForBody::Body(body)),
         }
-        .to_location(for_token.location, end))
-    }
-
-    fn for_iteration(&mut self) -> Result<ForIteration, Error> {
-        let l_value = self.maybe_tuple(Self::primary)?;
-        let l_value = Lvalue::try_from(l_value).expect("this can't fail right??");
-        self.require_current_token_matches(Token::In)?;
-        let sequence = self.expression()?;
-
-        Ok(ForIteration::Iteration { l_value, sequence })
+        .to_location(start, end))
     }
 
     fn require_identifier(&mut self) -> Result<ExpressionLocation, Error> {
