@@ -1,0 +1,5 @@
+--PROGRAM--
+x, y := 0, 0;
+x, y += 1; // ERROR
+--EXPECT-ERROR--
+cannot use augmented assignment in combination with destructuring

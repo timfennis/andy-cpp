@@ -295,7 +295,6 @@ impl Parser {
 
                 Ok(op_assign.to_location(start, end))
             }
-            // Repacking these into expression is not nice
             _ => Ok(maybe_lvalue),
         };
     }
@@ -501,7 +500,7 @@ impl Parser {
                     let (identifier_start, identifier_end) = (l_value.start, l_value.end);
                     let identifier = Lvalue::try_from(l_value)?;
                     let Lvalue::Variable { identifier } = identifier else {
-                        unreachable!("Guaranteed to match by previous calls")
+                        unreachable!("Guaranteed to match by previous call to require_identifier")
                     };
 
                     let tuple_expression = self.delimited_tuple(Self::single_expression)?;
@@ -907,7 +906,6 @@ pub enum Error {
     #[error("unexpected token {} on {}", .actual_token.token, .actual_token.location)]
     UnexpectedToken { actual_token: TokenLocation },
 
-    //TODO: this error is a little raw
     #[error("the following expression cannot be used as an lvalue: {0:?}")]
     InvalidLvalue(Expression),
 }

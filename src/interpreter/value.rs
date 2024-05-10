@@ -4,6 +4,7 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
+use itertools::Itertools;
 use num::BigInt;
 
 use crate::hash_map::{DefaultHasher, HashMap};
@@ -23,20 +24,49 @@ pub enum Value {
 }
 
 impl Value {
+    // The alternate solution in this SO thread has a nice way to iterate over the contents of a
+    // RefCell but the iterator would not be compatible with non refcell items
+    // https://stackoverflow.com/questions/33541492/returning-iterator-of-a-vec-in-a-refcell
+
     #[must_use]
-    pub fn into_vec(self) -> Option<Vec<Self>> {
-        // TODO: this can probably be optimized with into_inner and such
+    pub fn try_into_iter(self) -> Option<impl Iterator<Item = Value>> {
         match self {
-            Value::Sequence(Sequence::List(list)) => Some(Vec::clone(&*list.borrow())),
-            Value::Sequence(Sequence::Tuple(list)) => Some(Vec::clone(&list)),
+            Value::Sequence(Sequence::List(list)) => match Rc::try_unwrap(list) {
+                // This short circuit is almost certainly wrong because take will panic if list is borrowed
+                Ok(list) => Some(list.into_inner().into_iter()),
+                Err(list) => Some(Vec::clone(&*list.borrow()).into_iter()),
+            },
+            Value::Sequence(Sequence::Tuple(list)) => match Rc::try_unwrap(list) {
+                Ok(list) => Some(list.into_iter()),
+                Err(list) => Some(Vec::clone(&list).into_iter()),
+            },
             Value::Sequence(Sequence::Map(map, _)) => {
-                Some(map.borrow().keys().cloned().collect::<Vec<_>>())
+                let x = map.borrow().keys().cloned().collect_vec().into_iter();
+                Some(x)
             }
-            // TODO: implement string
-            // Value::Sequence(Sequence::String(string)) => Some(Vec::clone(&*list.borrow())),
+            Value::Sequence(Sequence::String(string)) => match Rc::try_unwrap(string) {
+                // This implementation is peak retard, we don't want collect_vec here
+                Ok(string) => Some(
+                    string
+                        .into_inner()
+                        .chars()
+                        .map(Value::from)
+                        .collect_vec()
+                        .into_iter(),
+                ),
+                Err(string) => Some(
+                    string
+                        .borrow()
+                        .chars()
+                        .map(Value::from)
+                        .collect_vec()
+                        .into_iter(),
+                ),
+            },
             _ => None,
         }
     }
+
     #[must_use]
     pub fn value_type(&self) -> ValueType {
         match self {
@@ -207,6 +237,13 @@ impl From<i64> for Value {
 impl From<i32> for Value {
     fn from(value: i32) -> Self {
         Self::Number(Number::Int(Int::Int64(i64::from(value))))
+    }
+}
+
+impl From<char> for Value {
+    fn from(value: char) -> Self {
+        // Haha so many heap allocations and decorators for a single character
+        Self::Sequence(Sequence::String(Rc::new(RefCell::new(String::from(value)))))
     }
 }
 
