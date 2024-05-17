@@ -547,67 +547,92 @@ impl Parser {
         Ok(expr)
     }
 
-    fn list(&mut self, start: Location) -> Result<ExpressionLocation, Error> {
-        let (values, end) =
-            if let Some(bracket) = self.consume_token_if(&[Token::RightSquareBracket]) {
-                (vec![], bracket.location)
-            } else {
-                let expr = self.tuple_expressions(Self::single_expression)?;
+    /// Parses a list expression from the current position.
+    /// There are a few valid kinds of expressions
+    /// # 1. empty list
+    /// ```ndc
+    /// []
+    /// ```
+    /// # 2. list of values
+    /// ```ndc
+    /// [1,2,3]
+    /// ```
+    /// # 3. list comprehensions
+    /// ```ndc
+    /// [x + y for x in 0..10, y in 0..10, if x != y]
+    /// ```
+    fn list(&mut self) -> Result<ExpressionLocation, Error> {
+        // Lists must begin with a `[` and the caller should have checked for this
+        let start = self
+            .require_current_token_matches(Token::LeftSquareBracket)?
+            .location;
 
-                match self.peek_current_token() {
-                    Some(Token::RightSquareBracket) => {
-                        self.advance();
+        if let Some(bracket) = self.consume_token_if(&[Token::RightSquareBracket]) {
+            return Ok(Expression::List { values: vec![] }.to_location(start, bracket.location));
+        }
 
-                        let Expression::Tuple { values } = expr.expression else {
-                            unreachable!("tuple_expression guarantees a tuple");
-                        };
+        // If this isn't an empty list we parse a tuple expression (without delimiters) consisting of
+        // single statements like `a, b, c`
+        let expr = self.tuple_expressions(Self::single_expression)?;
 
-                        // Next we can maybe turn this into a list expression
-                        let end = values.last().map_or(start, |e| e.end);
-                        (values, end)
-                        // DONE
-                    }
-                    // WOAH, this is not a list, it's a list comprehension
-                    Some(Token::For) => {
-                        self.require_current_token_matches(Token::For)
-                            .expect("guaranteed to match");
-                        let result = ForBody::Result(expr.simplify());
-                        let mut iterations = Vec::new();
+        // Now we can take two paths, either the list ends, and it's just a literal list of values
+        // OR right after the last value there is a `for` keyword turning this into a list comprehension
+        // if neither of those is the case it is an error
+        match self.peek_current_token() {
+            Some(Token::RightSquareBracket) => {
+                self.advance();
 
-                        loop {
-                            match self.peek_current_token() {
-                                Some(Token::Comma) => {
-                                    return Err(Error::UnexpectedToken {
-                                        actual_token: self
-                                            .require_current_token()
-                                            .expect("guaranteed to exist"),
-                                    })
-                                }
-                                Some(Token::RightSquareBracket) => break,
-                                Some(Token::If) => iterations.push(self.if_guard()?),
-                                Some(_) => iterations.push(self.for_iteration()?),
-                                _ => {}
-                            }
+                let Expression::Tuple { values } = expr.expression else {
+                    unreachable!("tuple_expression guarantees a tuple");
+                };
 
-                            // If next is not a comma we break
-                            if self.consume_token_if(&[Token::Comma]).is_none() {
-                                break;
-                            };
+                // Next we can maybe turn this into a list expression
+                let end = values.last().map_or(start, |e| e.end);
+
+                Ok(Expression::List { values }.to_location(start, end))
+            }
+            // WOAH, this is not a list, it's a list comprehension
+            Some(Token::For) => {
+                self.require_current_token_matches(Token::For)
+                    .expect("guaranteed to match");
+                let result = ForBody::Result(expr.simplify());
+                let mut iterations = Vec::new();
+
+                loop {
+                    match self.peek_current_token() {
+                        Some(Token::Comma) => {
+                            return Err(Error::UnexpectedToken {
+                                actual_token: self
+                                    .require_current_token()
+                                    .expect("guaranteed to exist"),
+                            })
                         }
-
-                        self.require_current_token_matches(Token::RightSquareBracket)?;
-
-                        return Ok(Expression::For {
-                            body: Box::new(result),
-                            iterations,
-                        }
-                        .to_location(start, start)); // TODO fix loc
+                        Some(Token::RightSquareBracket) => break,
+                        Some(Token::If) => iterations.push(self.if_guard()?),
+                        Some(_) => iterations.push(self.for_iteration()?),
+                        _ => {}
                     }
-                    _ => panic!("KAPOT"),
+
+                    // If next is not a comma we break
+                    if self.consume_token_if(&[Token::Comma]).is_none() {
+                        break;
+                    };
                 }
-            };
 
-        Ok(Expression::List { values }.to_location(start, end))
+                let end = self.require_current_token_matches(Token::RightSquareBracket)?;
+
+                Ok(Expression::For {
+                    body: Box::new(result),
+                    iterations,
+                }
+                .to_location(start, end.location))
+            }
+            _ => Err(Error::UnexpectedToken {
+                actual_token: self
+                    .require_current_token()
+                    .expect("guaranteed to have a token here"),
+            }),
+        }
     }
 
     fn if_guard(&mut self) -> Result<ForIteration, Error> {
@@ -679,6 +704,10 @@ impl Parser {
         else if self.match_token(&[Token::MapOpen]).is_some() {
             return self.map_expression();
         }
+        // matches list and list comprehensions
+        else if self.match_token(&[Token::LeftSquareBracket]).is_some() {
+            return self.list();
+        }
         // matches either a grouped expression `(1+1)` or a tuple `(1,1)`
         else if let Some(start_parentheses) = self.consume_token_if(&[Token::LeftParentheses]) {
             // If an opening parentheses is immediately followed by a closing parentheses we're dealing with a Unit expression
@@ -704,7 +733,6 @@ impl Parser {
             Token::BigInt(num) => Expression::BigIntLiteral(num),
             Token::Complex(num) => Expression::ComplexLiteral(num),
             Token::String(value) => Expression::StringLiteral(value),
-            Token::LeftSquareBracket => return self.list(token_location.location),
             Token::Identifier(identifier) => Expression::Identifier(identifier),
             _ => {
                 // TODO: this error might not be the best way to describe what's happening here
@@ -937,7 +965,7 @@ pub enum Error {
     #[error("expected identifier got '{:?}' on {}", .actual, .actual.start)]
     ExpectedIdentifier { actual: ExpressionLocation },
 
-    #[error("unexpected token '{}' expected symbol '{}' on {}", .actual_token.token, tokens_to_string(.expected_tokens), .actual_token.location)]
+    #[error("unexpected token '{}' expected {} on {}", .actual_token.token, tokens_to_string(.expected_tokens), .actual_token.location)]
     ExpectedToken {
         actual_token: TokenLocation,
         expected_tokens: Vec<Token>,
@@ -946,7 +974,7 @@ pub enum Error {
     #[error("invalid variable declaration or assignment. Cannot assign a value to expression: {target:?}")]
     InvalidAssignmentTarget { target: ExpressionLocation },
 
-    #[error("unexpected token {} on {}", .actual_token.token, .actual_token.location)]
+    #[error("unexpected token '{}' on {}", .actual_token.token, .actual_token.location)]
     UnexpectedToken { actual_token: TokenLocation },
 
     #[error("the following expression cannot be used as an lvalue: {0:?}")]
@@ -958,9 +986,9 @@ fn tokens_to_string(tokens: &[Token]) -> String {
     let mut iter = tokens.iter().peekable();
     while let Some(token) = iter.next() {
         if iter.peek().is_none() {
-            write!(buf, "{token}").expect("serializing symbols must succeed");
+            write!(buf, "'{token}'").expect("serializing symbols must succeed");
         } else {
-            write!(buf, "{token}, ").expect("serializing symbols must succeed");
+            write!(buf, "'{token}', ").expect("serializing symbols must succeed");
         }
     }
     buf

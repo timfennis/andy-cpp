@@ -1,4 +1,4 @@
 --PROGRAM--
 [x for x in 0..10,,,,,,y in 0..10]
 --EXPECT-ERROR--
-unexpected token , on line 1 column 19
+unexpected token ',' on line 1 column 19
