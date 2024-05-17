@@ -194,12 +194,15 @@ impl ExpressionLocation {
         }
     }
 
+    /// If this `ExpressionLocation` is a tuple expression with length one, it returns the
+    /// `ExpressionLocation` inside the tuple.
     #[must_use]
-    pub fn maybe_extract_tuple(self) -> ExpressionLocation {
+    pub fn simplify(self) -> ExpressionLocation {
         match self {
             ExpressionLocation {
                 expression: Expression::Tuple { mut values },
                 ..
+            // } if values.len() == 1 => values.remove(0).simplify(),
             } if values.len() == 1 => values.remove(0),
             tuple @ ExpressionLocation { .. } => tuple,
         }
@@ -225,10 +228,10 @@ impl Lvalue {
     #[must_use]
     pub fn can_build_from_expression(expression: &Expression) -> bool {
         match expression {
-            Expression::Identifier(_)
-            | Expression::Index { .. }
-            | Expression::List { .. }
-            | Expression::Tuple { .. } => true,
+            Expression::Identifier(_) | Expression::Index { .. } => true,
+            Expression::List { values } | Expression::Tuple { values } => values
+                .iter()
+                .all(|el| Self::can_build_from_expression(&el.expression)),
             Expression::Grouping(inner) => Self::can_build_from_expression(&inner.expression),
             _ => false,
         }
