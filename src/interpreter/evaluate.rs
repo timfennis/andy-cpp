@@ -1195,6 +1195,9 @@ fn execute_body(
     Ok(Value::Unit)
 }
 
+/// Execute a `ForBody` for a slice of `ForIteration`s.
+/// # Panics
+/// If the slice of `ForIterations` is empty which is something the parser should take care of for us
 #[allow(clippy::too_many_lines)]
 fn execute_for_iterations(
     iterations: &[ForIteration],
@@ -1205,7 +1208,7 @@ fn execute_for_iterations(
     end: Location,
 ) -> Result<Value, FunctionCarrier> {
     let Some((cur, tail)) = iterations.split_first() else {
-        panic!("empty iterations")
+        unreachable!("slice of for-iterations was empty")
     };
 
     match cur {
