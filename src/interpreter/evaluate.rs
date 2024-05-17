@@ -1275,7 +1275,17 @@ fn execute_for_iterations(
                 execute_for_iterations(tail, body, out_values, environment, start, end)?;
             }
             Value::Bool(false) => {}
-            _ => todo!("type error!!"),
+            value => {
+                return Err(EvaluationError::type_error(
+                    &format!(
+                        "mismatched types: expected bool, found {}",
+                        ValueType::from(&value)
+                    ),
+                    start,
+                    end,
+                )
+                .into())
+            }
         },
     }
 
