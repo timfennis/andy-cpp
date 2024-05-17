@@ -342,7 +342,7 @@ impl Parser {
         next: fn(&mut Parser) -> Result<ExpressionLocation, Error>,
     ) -> Result<ExpressionLocation, Error> {
         let tuple = self.tuple_expressions(next)?;
-        Ok(tuple.maybe_extract_tuple())
+        Ok(tuple.simplify())
     }
 
     fn single_expression(&mut self) -> Result<ExpressionLocation, Error> {
@@ -571,7 +571,7 @@ impl Parser {
                     Some(Token::For) => {
                         self.require_current_token_matches(Token::For)
                             .expect("guaranteed to match");
-                        let result = ForBody::Result(expr.maybe_extract_tuple());
+                        let result = ForBody::Result(expr.simplify());
                         let mut iterations = Vec::new();
 
                         loop {
