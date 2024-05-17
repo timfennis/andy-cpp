@@ -576,7 +576,14 @@ impl Parser {
 
                         loop {
                             match self.peek_current_token() {
-                                Some(Token::Comma | Token::RightSquareBracket) => {} // Fall through
+                                Some(Token::Comma) => {
+                                    return Err(Error::UnexpectedToken {
+                                        actual_token: self
+                                            .require_current_token()
+                                            .expect("guaranteed to exist"),
+                                    })
+                                }
+                                Some(Token::RightSquareBracket) => break,
                                 Some(Token::If) => iterations.push(self.if_guard()?),
                                 Some(_) => iterations.push(self.for_iteration()?),
                                 _ => {}
@@ -588,7 +595,6 @@ impl Parser {
                             };
                         }
 
-                        // TODO: continue parsing more
                         self.require_current_token_matches(Token::RightSquareBracket)?;
 
                         return Ok(Expression::For {
