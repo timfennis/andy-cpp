@@ -11,6 +11,7 @@ use crate::hash_map::{DefaultHasher, HashMap};
 use crate::interpreter::function::{Function, OverloadedFunction};
 use crate::interpreter::int::Int;
 use crate::interpreter::num::{Number, NumberToUsizeError, NumberType};
+use crate::interpreter::value::ConversionError::{IncorrectLength, UnsupportedVariant};
 
 /// Enumerates all the different types of values that exist in the language
 /// All values should be pretty cheap to clone because the bigger ones are wrapped using Rc's
@@ -27,7 +28,6 @@ impl Value {
     // The alternate solution in this SO thread has a nice way to iterate over the contents of a
     // RefCell but the iterator would not be compatible with non refcell items
     // https://stackoverflow.com/questions/33541492/returning-iterator-of-a-vec-in-a-refcell
-
     #[must_use]
     pub fn try_into_iter(self) -> Option<impl Iterator<Item = Value>> {
         match self {
@@ -313,8 +313,36 @@ pub enum ConversionError {
     #[error("Cannot convert {0} into {1}")]
     UnsupportedVariant(ValueType, &'static str),
 
+    #[error("Cannot into {0} because the length is incorrect")]
+    IncorrectLength(&'static str),
+
     #[error("{0}")]
     NumberToUsizeError(#[from] NumberToUsizeError),
+}
+
+impl TryFrom<Value> for (Value, Value) {
+    type Error = ConversionError;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        let Value::Sequence(Sequence::Tuple(tuple)) = value else {
+            return Err(UnsupportedVariant(
+                value.value_type(),
+                stringify!((Value, Value)),
+            ));
+        };
+
+        // If we can take ownership of the vector we use pop otherwise we use get + clone
+        let (right, left) = match Rc::try_unwrap(tuple) {
+            Ok(mut tuple) => (tuple.pop(), tuple.pop()),
+            Err(tuple) => (tuple.get(1).cloned(), tuple.first().cloned()),
+        };
+
+        if let (Some(left), Some(right)) = (left, right) {
+            Ok((left, right))
+        } else {
+            Err(IncorrectLength(stringify!((Value, Value))))
+        }
+    }
 }
 
 impl TryFrom<Value> for i64 {

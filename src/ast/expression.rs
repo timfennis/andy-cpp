@@ -122,7 +122,12 @@ pub enum ForIteration {
 #[derive(Debug, Eq, PartialEq)]
 pub enum ForBody {
     Block(ExpressionLocation),
-    Result(ExpressionLocation),
+    List(ExpressionLocation),
+    Map {
+        key: ExpressionLocation,
+        value: Option<ExpressionLocation>,
+        default: Option<Box<ExpressionLocation>>,
+    },
 }
 
 #[derive(Debug, Eq, PartialEq)]
