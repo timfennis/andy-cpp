@@ -447,7 +447,24 @@ pub(crate) fn evaluate_expression(
             execute_for_iterations(iterations, body, &mut out_values, environment, start, end)?;
             match &**body {
                 ForBody::Block(_) => Value::Unit,
-                ForBody::Result(_) => Value::from(out_values),
+                ForBody::List(_) => Value::from(out_values),
+                ForBody::Map {
+                    key: _,
+                    value: _,
+                    default,
+                } => Value::Sequence(Sequence::Map(
+                    Rc::new(RefCell::new(
+                        out_values
+                            .into_iter()
+                            .map(TryInto::<(Value, Value)>::try_into)
+                            .collect::<Result<HashMap<Value, Value>, _>>()
+                            .into_evaluation_result(start, end)?,
+                    )),
+                    default
+                        .as_ref()
+                        .map(|default| evaluate_expression(default, environment).map(Box::new))
+                        .transpose()?,
+                )),
             }
         }
         Expression::Return { value } => {
@@ -1187,9 +1204,19 @@ fn execute_body(
         ForBody::Block(expr) => {
             evaluate_expression(expr, environment)?;
         }
-        ForBody::Result(expr) => {
+        ForBody::List(expr) => {
             let value = evaluate_expression(expr, environment)?;
             result.push(value);
+        }
+        ForBody::Map { key, value, .. } => {
+            result.push(Value::Sequence(Sequence::Tuple(Rc::new(vec![
+                evaluate_expression(key, environment)?,
+                value
+                    .as_ref()
+                    .map(|value| evaluate_expression(value, environment))
+                    .transpose()?
+                    .unwrap_or(Value::Unit),
+            ]))));
         }
     }
     Ok(Value::Unit)

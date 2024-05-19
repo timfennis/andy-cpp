@@ -593,39 +593,8 @@ impl Parser {
             }
             // WOAH, this is not a list, it's a list comprehension
             Some(Token::For) => {
-                self.require_current_token_matches(Token::For)
-                    .expect("guaranteed to match");
-                let result = ForBody::Result(expr.simplify());
-                let mut iterations = Vec::new();
-
-                loop {
-                    match self.peek_current_token() {
-                        Some(Token::Comma) => {
-                            return Err(Error::UnexpectedToken {
-                                actual_token: self
-                                    .require_current_token()
-                                    .expect("guaranteed to exist"),
-                            })
-                        }
-                        Some(Token::RightSquareBracket) => break,
-                        Some(Token::If) => iterations.push(self.if_guard()?),
-                        Some(_) => iterations.push(self.for_iteration()?),
-                        _ => {}
-                    }
-
-                    // If next is not a comma we break
-                    if self.consume_token_if(&[Token::Comma]).is_none() {
-                        break;
-                    };
-                }
-
-                let end = self.require_current_token_matches(Token::RightSquareBracket)?;
-
-                Ok(Expression::For {
-                    body: Box::new(result),
-                    iterations,
-                }
-                .to_location(start, end.location))
+                let result = ForBody::List(expr.simplify());
+                self.for_comprehension(start, result, Token::RightSquareBracket)
             }
             _ => Err(Error::UnexpectedToken {
                 actual_token: self
@@ -633,6 +602,44 @@ impl Parser {
                     .expect("guaranteed to have a token here"),
             }),
         }
+    }
+
+    fn for_comprehension(
+        &mut self,
+        start: Location,
+        result: ForBody,
+        end_token: Token,
+    ) -> Result<ExpressionLocation, Error> {
+        self.require_current_token_matches(Token::For)
+            .expect("guaranteed to match");
+        let mut iterations = Vec::new();
+
+        loop {
+            match self.peek_current_token() {
+                Some(Token::Comma) => {
+                    return Err(Error::UnexpectedToken {
+                        actual_token: self.require_current_token().expect("guaranteed to exist"),
+                    })
+                }
+                Some(Token::RightSquareBracket) => break,
+                Some(Token::If) => iterations.push(self.if_guard()?),
+                Some(_) => iterations.push(self.for_iteration()?),
+                _ => {}
+            }
+
+            // If next is not a comma we break
+            if self.consume_token_if(&[Token::Comma]).is_none() {
+                break;
+            };
+        }
+
+        let end = self.require_current_token_matches(end_token)?;
+
+        Ok(Expression::For {
+            body: Box::new(result),
+            iterations,
+        }
+        .to_location(start, end.location))
     }
 
     fn if_guard(&mut self) -> Result<ForIteration, Error> {
@@ -903,10 +910,9 @@ impl Parser {
         // Optional default value
         let default = if self.consume_token_if(&[Token::Colon]).is_some() {
             let default = self.single_expression()?;
-            if self.match_token(&[Token::RightCurlyBracket]).is_some() {
-                // If the list ends without any values we just do nothing and let the loop below handle the rest
-            } else {
-                // If there isn't a } to close the map there must be a comma otherwise we error out
+            // If the list ends without any values we just do nothing and let the loop below handle the rest
+            if self.match_token(&[Token::RightCurlyBracket]).is_none() {
+                // If there isn't a '}' to close the map there must be a comma otherwise we error out
                 self.require_current_token_matches(Token::Comma)?;
             }
             Some(Box::new(default))
@@ -934,6 +940,21 @@ impl Parser {
 
             if let Some(token_location) = self.consume_token_if(&[Token::RightCurlyBracket]) {
                 break token_location.location;
+            }
+
+            if values.len() == 1 && self.match_token(&[Token::For]).is_some() {
+                let (key_expr, value_expr) = values
+                    .pop()
+                    .expect("guaranteed by previous call to values.len()");
+                return self.for_comprehension(
+                    start,
+                    ForBody::Map {
+                        key: key_expr,
+                        value: value_expr,
+                        default,
+                    },
+                    Token::RightCurlyBracket,
+                );
             }
 
             self.require_current_token_matches(Token::Comma)?;

@@ -1,0 +1,17 @@
+--PROGRAM--
+squared := %{ x * x for x in 1..=8 };
+assert(squared == %{ 1, 4, 9, 16, 25, 36, 49, 64});
+
+mapped := %{ x: x * x for x in 1..=8 };
+assert(mapped[5] == 25);
+assert(mapped[8] == 64);
+
+def := %{:false, x: true for x in 1..=100, if int(sqrt(x)) * int(sqrt(x)) == x };
+assert(def[64]);
+assert(def[49]);
+assert(!def[59]);
+assert(!def[1010101]);
+assert(!def["haha"]);
+print("ok");
+--EXPECT--
+ok
