@@ -1,9 +1,9 @@
 --PROGRAM--
 x := 0;
-true && { x = x + 1; false };
-false && { x = x + 1; false };
-true || { x = x + 1; false };
-false || { x = x + 1; false };
+true and { x = x + 1; false };
+false and { x = x + 1; false };
+true or { x = x + 1; false };
+false or { x = x + 1; false };
 print(x);
 --EXPECT--
 2

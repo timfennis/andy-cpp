@@ -93,6 +93,28 @@ uhm[0] ++= [1];
 uhm[1] == [1] 
 ```
 
+### List comprehensions
+
+The language supports list comprehensions with the same semantics as Haskell but a syntax slightly more similar to
+python.
+
+```ndc
+fn pythagorean_triples(n) {
+    return [(a, b, c) for a in 1..=n,
+                          b in a..=n,
+                          c in b..=n,
+                          if a ^ 2 + b ^ 2 == c ^ 2]
+}
+```
+
+The same features are also available in regular for iterations
+
+```ndc
+for a in 1..=25, b in a..=25, c in b..=25, if a ^ 2 + b ^ 2 == c ^ 2 {
+    print(a, b, c);
+}
+```
+
 ## Thanks
 
 This language and implementation was inspired by Robert Nystrom's

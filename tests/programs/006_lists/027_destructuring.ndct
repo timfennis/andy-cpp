@@ -1,13 +1,13 @@
 --PROGRAM--
 // List
 [a, b] := [1, 2];
-assert(a == 1 && b == 2);
+assert(a == 1 and b == 2);
 [a] := [3];
 assert(a == 3);
 
 // Tuple
 (a, b) := (4, 5);
-assert(a == 4 && b == 5);
+assert(a == 4 and b == 5);
 // This special case is not allowed right but I might enable it in the future
 // (c) := (6);
 // assert(c == 6);
@@ -19,11 +19,11 @@ assert(a == 4 && b == 5);
 
 // Assignment into tuple
 (a, b) = (10, 20);
-assert(a == 10 && b == 20);
+assert(a == 10 and b == 20);
 
 // Assignment into list
 [a, b] = (30, 40);
-assert(a == 30 && b == 40);
+assert(a == 30 and b == 40);
 
 print("ok");
 --EXPECT--

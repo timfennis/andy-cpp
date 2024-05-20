@@ -5,7 +5,7 @@ use std::fmt::Formatter;
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum UnaryOperator {
-    Bang,
+    Not,
     Neg,
 }
 
@@ -15,7 +15,7 @@ impl TryFrom<TokenLocation> for UnaryOperator {
     fn try_from(value: TokenLocation) -> Result<Self, Self::Error> {
         Ok(match value.token {
             Token::Minus => Self::Neg,
-            Token::Bang => Self::Bang,
+            Token::Bang | Token::LogicNot => Self::Not,
             _ => {
                 return Err(ParseError::ExpectedToken {
                     expected_tokens: vec![Token::Minus, Token::Bang],
@@ -87,9 +87,9 @@ impl TryFrom<TokenLocation> for BinaryOperator {
             Token::Divide => Self::Divide,
             Token::CModulo => Self::CModulo,
             Token::EuclideanModulo => Self::EuclideanModulo,
-            Token::Exponent => Self::Exponent,
-            Token::And => Self::And,
-            Token::Or => Self::Or,
+            Token::Caret => Self::Exponent,
+            Token::Ampersand => Self::And,
+            Token::Pipe => Self::Or,
             Token::In => Self::In,
             Token::Concat => Self::Concat,
             _ => {
@@ -108,9 +108,9 @@ impl TryFrom<TokenLocation> for BinaryOperator {
                         Token::Divide,
                         Token::CModulo,
                         Token::EuclideanModulo,
-                        Token::Exponent,
-                        Token::And,
-                        Token::Or,
+                        Token::Caret,
+                        Token::Ampersand,
+                        Token::Pipe,
                         Token::In,
                         Token::Concat,
                     ],

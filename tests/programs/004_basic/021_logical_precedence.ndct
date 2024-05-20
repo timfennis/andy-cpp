@@ -1,7 +1,7 @@
 --PROGRAM--
-a := true || true && false;
-b := false && true || true;
-if a && b {
+a := true or true and false;
+b := false and true or true;
+if a and b {
     print("correct");
 }
 --EXPECT--

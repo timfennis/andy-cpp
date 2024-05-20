@@ -1,13 +1,13 @@
 --PROGRAM--
-print(true && true); // true
-print(true && false); // false
-print(false && true); // false
-print(false && false); // false
+print(true and true); // true
+print(true and false); // false
+print(false and true); // false
+print(false and false); // false
 
-print(true || false); // true
-print(true || true); // true
-print(false || true); // true
-print(false || false); // false
+print(true or false); // true
+print(true or true); // true
+print(false or true); // true
+print(false or false); // false
 --EXPECT--
 true
 false

@@ -45,8 +45,8 @@ pub(crate) fn evaluate_expression(
             let value = evaluate_expression(expression_location, environment)?;
             match (value, operator) {
                 (Value::Number(n), UnaryOperator::Neg) => Value::Number(n.neg()),
-                (Value::Bool(b), UnaryOperator::Bang) => Value::Bool(b.not()),
-                (_, UnaryOperator::Bang) => {
+                (Value::Bool(b), UnaryOperator::Not) => Value::Bool(b.not()),
+                (_, UnaryOperator::Not) => {
                     return Err(EvaluationError::type_error(
                         "the '!' operator cannot be applied to this type",
                         start,

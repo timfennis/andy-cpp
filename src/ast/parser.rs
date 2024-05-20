@@ -135,13 +135,38 @@ impl Parser {
         Ok(token)
     }
 
+    /// Creates a tree of binary expression in a left associative way.
+    /// Optionally you can set the `augment_not` boolean to true to allow token augmentation
+    /// for now this is hardcoded to a single keyword and operation, but we could extend this in the
+    /// future.
+    ///
+    /// The most important reason this exists is for `x not in y` to translate to `not x in y`, but
+    /// it also works for expression like `x not == 5` which is a debatable feature.
     fn consume_binary_expression_left_associative(
         &mut self,
         next: fn(&mut Self) -> Result<ExpressionLocation, Error>,
         valid_tokens: &[Token],
+        augment_not: bool,
     ) -> Result<ExpressionLocation, Error> {
         let mut left = next(self)?;
-        while let Some(token_location) = self.consume_token_if(valid_tokens) {
+
+        let mut extended_valid_tokens = valid_tokens.to_vec();
+        if augment_not {
+            extended_valid_tokens.push(Token::LogicNot);
+        }
+
+        while let Some(token_location) = self.consume_token_if(&extended_valid_tokens) {
+            let (invert, token_location) = if token_location.token == Token::LogicNot {
+                let augmented =
+                    self.consume_token_if(valid_tokens)
+                        .ok_or_else(|| Error::UnexpectedToken {
+                            actual_token: self.require_current_token().expect("has to be present"),
+                        })?;
+                (Some(token_location), augmented)
+            } else {
+                (None, token_location)
+            };
+
             let operator: BinaryOperator = token_location.clone().try_into().unwrap_or_else(|_| {
                 panic!(
                     "cannot convert '{}' into a binary operator",
@@ -149,14 +174,21 @@ impl Parser {
                 )
             });
             let right = next(self)?;
-            let start = left.start;
-            let end = right.end;
+            let (start, end) = (left.start, right.end);
             left = Expression::Binary {
                 left: Box::new(left),
                 operator,
                 right: Box::new(right),
             }
             .to_location(start, end);
+
+            if let Some(invert) = invert {
+                left = Expression::Unary {
+                    expression: Box::new(left),
+                    operator: UnaryOperator::Not,
+                }
+                .to_location(invert.location, end);
+            }
         }
         Ok(left)
     }
@@ -346,16 +378,46 @@ impl Parser {
     }
 
     fn single_expression(&mut self) -> Result<ExpressionLocation, Error> {
-        self.range()
+        self.logic_or()
+    }
+
+    fn logic_or(&mut self) -> Result<ExpressionLocation, Error> {
+        self.consume_logical_expression_left_associative(Self::logic_and, &[Token::LogicOr])
+    }
+    fn logic_and(&mut self) -> Result<ExpressionLocation, Error> {
+        self.consume_logical_expression_left_associative(Self::logic_not, &[Token::LogicAnd])
+    }
+
+    // The logical not operator that has much lower precedence than the ! operator.
+    // ```ndc
+    // x := not foo in bar
+    // ```
+    fn logic_not(&mut self) -> Result<ExpressionLocation, Error> {
+        if let Some(token) = self.consume_token_if(&[Token::LogicNot]) {
+            let operator: UnaryOperator = token
+                .try_into()
+                .expect("consume_operator_if guaranteed us that this token can be UnaryOperator");
+
+            let right = self.logic_not()?;
+            let (start, end) = (right.start, right.end);
+
+            Ok(Expression::Unary {
+                operator,
+                expression: Box::new(right),
+            }
+            .to_location(start, end))
+        } else {
+            self.range()
+        }
     }
 
     fn range(&mut self) -> Result<ExpressionLocation, Error> {
-        let left = self.logic_or()?;
+        let left = self.comparison()?;
         if let Some(token) = self.consume_token_if(&[Token::DotDot, Token::DotDotEquals]) {
             let (start, end, right) = if self.peek_range_end() {
                 (left.start, token.location, None)
             } else {
-                let right = self.logic_or()?;
+                let right = self.comparison()?;
                 (left.start, right.end, Some(Box::new(right)))
             };
 
@@ -380,13 +442,6 @@ impl Parser {
             Ok(left)
         }
     }
-    fn logic_or(&mut self) -> Result<ExpressionLocation, Error> {
-        self.consume_logical_expression_left_associative(Self::logic_and, &[Token::LogicOr])
-    }
-
-    fn logic_and(&mut self) -> Result<ExpressionLocation, Error> {
-        self.consume_logical_expression_left_associative(Self::comparison, &[Token::LogicAnd])
-    }
 
     fn comparison(&mut self) -> Result<ExpressionLocation, Error> {
         self.consume_binary_expression_left_associative(
@@ -400,21 +455,23 @@ impl Parser {
                 Token::LessEquals,
                 Token::In,
             ],
+            true,
         )
     }
 
     fn boolean_or(&mut self) -> Result<ExpressionLocation, Error> {
-        self.consume_binary_expression_left_associative(Self::boolean_and, &[Token::Or])
+        self.consume_binary_expression_left_associative(Self::boolean_and, &[Token::Pipe], false)
     }
 
     fn boolean_and(&mut self) -> Result<ExpressionLocation, Error> {
-        self.consume_binary_expression_left_associative(Self::term, &[Token::And])
+        self.consume_binary_expression_left_associative(Self::term, &[Token::Ampersand], false)
     }
 
     fn term(&mut self) -> Result<ExpressionLocation, Error> {
         self.consume_binary_expression_left_associative(
             Self::factor,
             &[Token::Plus, Token::Minus, Token::Concat],
+            false,
         )
     }
 
@@ -427,24 +484,25 @@ impl Parser {
                 Token::CModulo,
                 Token::EuclideanModulo,
             ],
+            false,
         )
     }
 
     fn exponent(&mut self) -> Result<ExpressionLocation, Error> {
         self.consume_binary_expression_right_associative(
-            Self::unary,
+            Self::tight_unary,
             Self::exponent,
-            &[Token::Exponent],
+            &[Token::Caret],
         )
     }
 
-    fn unary(&mut self) -> Result<ExpressionLocation, Error> {
+    fn tight_unary(&mut self) -> Result<ExpressionLocation, Error> {
         if let Some(token) = self.consume_token_if(&[Token::Bang, Token::Minus]) {
             let operator: UnaryOperator = token
                 .try_into()
                 .expect("consume_operator_if guaranteed us that the next token is an Operator");
 
-            let right = self.unary()?;
+            let right = self.tight_unary()?;
             let (start, end) = (right.start, right.end);
 
             Ok(Expression::Unary {

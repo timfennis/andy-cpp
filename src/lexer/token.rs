@@ -20,6 +20,7 @@ pub enum Token {
     // Operator - Logic
     LogicAnd,
     LogicOr,
+    LogicNot,
     // Operator - Comparison
     Equality,
     Inequality,
@@ -34,9 +35,10 @@ pub enum Token {
     Divide,
     CModulo,
     EuclideanModulo,
-    Exponent,
-    And, // &
-    Or,  // |
+    Caret,
+    Ampersand, // &
+    Pipe,      // |
+    Tilde,     //
     // Operator - Unary
     Bang,
     // Operator - Call
@@ -109,9 +111,10 @@ impl fmt::Display for Token {
             Self::Divide => "/",
             Self::CModulo => "%",
             Self::EuclideanModulo => "%%",
-            Self::Exponent => "^",
-            Self::And => "&",
-            Self::Or => "|",
+            Self::Caret => "^",
+            Self::Ampersand => "&",
+            Self::Pipe => "|",
+            Self::Tilde => "~",
             Self::Bang => "!",
             Self::Fn => "fn",
             Self::If => "if",
@@ -131,8 +134,9 @@ impl fmt::Display for Token {
             Self::RightCurlyBracket => "}",
             Self::Semicolon => ";",
             Self::Comma => ",",
-            Self::LogicAnd => "&&",
-            Self::LogicOr => "||",
+            Self::LogicNot => "not",
+            Self::LogicAnd => "and",
+            Self::LogicOr => "or",
             Self::DotDot => "..",
             Self::DotDotEquals => "..=",
             Self::Concat => "++",
@@ -160,10 +164,10 @@ impl Token {
                 | Self::EuclideanModulo
                 | Self::CModulo
                 | Self::Identifier(_)
-                | Self::Exponent
+                | Self::Caret
                 | Self::Concat
-                | Self::And
-                | Self::Or
+                | Self::Ampersand
+                | Self::Pipe
         )
     }
 }
@@ -236,8 +240,6 @@ impl TryFrom<(char, char)> for Token {
             ('.', '.') => Ok(Self::DotDot),
             ('%', '{') => Ok(Self::MapOpen),
             ('+', '+') => Ok(Self::Concat),
-            ('&', '&') => Ok(Self::LogicAnd),
-            ('|', '|') => Ok(Self::LogicOr),
             ('%', '%') => Ok(Self::EuclideanModulo),
             (':', '=') => Ok(Self::DeclareVar),
             ('=', '=') => Ok(Self::Equality),
@@ -257,10 +259,11 @@ impl TryFrom<char> for Token {
             '-' => Ok(Self::Minus),
             '+' => Ok(Self::Plus),
             '*' => Ok(Self::Multiply),
-            '^' => Ok(Self::Exponent),
+            '^' => Ok(Self::Caret),
             '%' => Ok(Self::CModulo),
-            '&' => Ok(Self::And),
-            '|' => Ok(Self::Or),
+            '&' => Ok(Self::Ampersand),
+            '~' => Ok(Self::Tilde),
+            '|' => Ok(Self::Pipe),
             '!' => Ok(Self::Bang),
             '=' => Ok(Self::EqualsSign),
             '>' => Ok(Self::Greater),
@@ -288,6 +291,9 @@ impl From<String> for Token {
             "Inf" => Self::Float64(f64::INFINITY),
             "NaN" => Self::Float64(f64::NAN),
             // Normal keywords
+            "and" => Self::LogicAnd,
+            "or" => Self::LogicOr,
+            "not" => Self::LogicNot,
             "while" => Self::While,
             "if" => Self::If,
             "else" => Self::Else,

@@ -1,7 +1,7 @@
 --PROGRAM--
 a, b, c := "foo";
 assert(a == "f");
-assert(b == c && c == "o");
+assert(b == c and c == "o");
 print("ok");
 --EXPECT--
 ok
