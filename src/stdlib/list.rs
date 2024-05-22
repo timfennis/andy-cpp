@@ -17,6 +17,14 @@ mod inner {
         Ok(Value::Unit)
     }
 
+    pub fn remove(list: &mut Vec<Value>, index: usize) -> anyhow::Result<Value> {
+        if index > list.len() {
+            return Err(anyhow!("index {index} is out of bounds"));
+        }
+
+        Ok(list.remove(index))
+    }
+
     pub fn push(list: &mut Vec<Value>, elem: Value) {
         list.push(elem);
     }
