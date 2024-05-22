@@ -4,8 +4,17 @@ use std::rc::Rc;
 #[andy_cpp_macros::export_module]
 mod inner {
     use crate::interpreter::value::{Sequence, Value};
+    use anyhow::anyhow;
     pub fn contains(list: &[Value], elem: &Value) -> bool {
         list.contains(elem)
+    }
+
+    pub fn insert(list: &mut Vec<Value>, index: usize, elem: Value) -> anyhow::Result<Value> {
+        if index > list.len() {
+            return Err(anyhow!("index {index} is out of bounds"));
+        }
+        list.insert(index, elem);
+        Ok(Value::Unit)
     }
 
     pub fn push(list: &mut Vec<Value>, elem: Value) {
