@@ -584,6 +584,24 @@ impl Parser {
                     // and
                     // `foo[x := 3]`
                     let index_expression = self.expression()?;
+
+                    // TODO: this error may be triggered in a scenario described below, and it would
+                    //       probably be nice if we could have a special message in a later version
+                    //
+                    // # Error code
+                    //
+                    // if x == y { true } else { false }
+                    // [x for x in 1..10]
+                    //
+                    // In this case we have some kind of expression that could also be a statement
+                    // followed by a list comprehension (the same problem would arise if the next
+                    // statement was a tuple). The list comprehension or tuple will now be interpreted
+                    // as an operand for the previous expression as if we meant to write this:
+                    //
+                    // if x == y { foo } else { bar }[12]
+                    //
+                    // This ambiguity can only be resolved by adding a semicolon to the if expression
+                    // or by not putting a list comprehension or tuple in this position.
                     let end_token =
                         self.require_current_token_matches(Token::RightSquareBracket)?;
 
