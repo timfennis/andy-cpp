@@ -1239,17 +1239,6 @@ fn execute_for_iterations(
     match cur {
         ForIteration::Iteration { l_value, sequence } => {
             let mut sequence = evaluate_expression(sequence, environment)?;
-
-            // Unpack the sequence
-            // let Value::Sequence(sequence) = sequence else {
-            //     return Err(EvaluationError::syntax_error(
-            //         &format!("cannot iterate over {}", sequence.value_type()),
-            //         start,
-            //         end,
-            //     )
-            //     .into());
-            // };
-
             let iter = mut_value_to_iterator(&mut sequence).into_evaluation_result(start, end)?;
 
             let mut scope = Environment::new_scope(environment);
@@ -1263,58 +1252,6 @@ fn execute_for_iterations(
                     execute_for_iterations(tail, body, out_values, &mut scope, start, end)?;
                 }
             }
-
-            // macro_rules! implement_loop {
-            //     ($iter:expr, $convert:expr) => {
-            //         let mut scope = Environment::new_scope(environment);
-            //         for item in $iter {
-            //             scope.borrow_mut().reset();
-            //             declare_or_assign_variable(
-            //                 l_value,
-            //                 $convert(item),
-            //                 true,
-            //                 &mut scope,
-            //                 start,
-            //                 end,
-            //             )?;
-            //
-            //             if tail.is_empty() {
-            //                 execute_body(body, &mut scope, out_values)?;
-            //             } else {
-            //                 execute_for_iterations(tail, body, out_values, &mut scope, start, end)?;
-            //             }
-            //         }
-            //     };
-            // }
-            //
-            // match sequence {
-            //     Sequence::String(str) => {
-            //         let str = str.borrow();
-            //         implement_loop!(str.chars(), |it| Value::from(String::from(it)));
-            //         drop(str);
-            //     }
-            //     Sequence::List(xs) => {
-            //         let xs = xs.borrow();
-            //         implement_loop!(xs.iter(), |it: &Value| it.clone());
-            //     }
-            //     Sequence::Tuple(values) => {
-            //         implement_loop!(&*values, |it: &Value| it.clone());
-            //     }
-            //     Sequence::Map(map, _) => {
-            //         let xs = map.borrow();
-            //
-            //         implement_loop!(xs.iter(), |(key, value): (&Value, &Value)| Value::Sequence(
-            //             Sequence::Tuple(Rc::new(vec![key.clone(), value.clone(),]))
-            //         ));
-            //     }
-            //     Sequence::Iterator(mut xs) => {
-            //         if let Some(xs) = Rc::get_mut(&mut xs) {
-            //             implement_loop!(xs, |it| it);
-            //         } else {
-            //             implement_loop!(xs.boxed_clone(), |it| it);
-            //         }
-            //     }
-            // }
         }
         ForIteration::Guard(guard) => match evaluate_expression(guard, environment)? {
             Value::Bool(true) if tail.is_empty() => {

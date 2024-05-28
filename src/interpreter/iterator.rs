@@ -10,7 +10,6 @@ use std::cell::{Ref, RefCell};
 use std::rc::Rc;
 
 pub trait ValueIterator: Iterator<Item = Value> {
-    //noinspection RsWrongAssocTypeArguments RustRover is an idiot
     fn boxed_clone(&self) -> Box<dyn ValueIterator>;
 }
 
@@ -32,8 +31,8 @@ impl<'a> Iterator for MutableValueIntoIterator<'a> {
             MutableValueIntoIterator::String(iter) => iter.next().map(Ok),
             MutableValueIntoIterator::Map(iter) => iter.next().map(Ok),
 
-            // This beautiful piece of black magic tries to get a mutable reference to the iterator
-            // which is needed if we want to be able to call `next`. This is only possible if the
+            // This beautiful piece of magic tries to get a mutable reference to the iterator which
+            // is needed if we want to be able to call `next`. This is only possible if the
             // reference count in Rc == 1. If there are more references to the iterator we use
             // `boxed_clone` to obtain a copy of the iterator and we write that copy back into
             // `MutableVecIntoIterator`.
@@ -146,7 +145,7 @@ where
     }
 }
 
-/// The mutable string iterator effectively takes a reference to the string and keeps track of the '
+/// The mutable string iterator effectively takes a reference to the string and keeps track of the
 /// current offset in order to implement character by character iteration (instead of iterating over
 /// u8's)
 ///

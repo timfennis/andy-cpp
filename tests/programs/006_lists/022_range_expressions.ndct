@@ -1,7 +1,6 @@
 --PROGRAM--
-// This test should fail in the future when range expressions aren't evaluated to values
-assert([1,2,3,4,5] == [ x for x in 1..=5 ]);
-assert([1,2,3,4,5] == [ x for x in 1..6 ]);
+assert([1,2,3,4,5] == [x for x in 1..=5]);
+assert([1,2,3,4,5] == [x for x in 1..6]);
 print("ok");
 --EXPECT--
 ok
