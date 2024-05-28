@@ -3,6 +3,7 @@ use std::rc::Rc;
 
 #[andy_cpp_macros::export_module]
 mod inner {
+    use crate::interpreter::iterator::ValueIterator;
     use crate::interpreter::sequence::Sequence;
     use crate::interpreter::value::Value;
     use anyhow::anyhow;
@@ -10,6 +11,10 @@ mod inner {
     pub fn contains(list: &[Value], elem: &Value) -> bool {
         list.contains(elem)
     }
+
+    // pub fn take(iter: impl ValueIterator) -> impl ValueIterator {
+    //     todo!("halp")
+    // }A
 
     pub fn insert(list: &mut Vec<Value>, index: usize, elem: Value) -> anyhow::Result<Value> {
         if index > list.len() {

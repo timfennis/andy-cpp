@@ -47,14 +47,14 @@ pub fn wrap_function(function: syn::ItemFn) -> WrappedFunction {
         inner
     };
 
-    let mut temp_var_init = Vec::new();
-    let mut temp_vars = Vec::new();
+    let mut argument_init_code_blocks = Vec::new();
+    let mut arguments = Vec::new();
     let mut param_types: Vec<TokenStream> = Vec::new();
 
     for (position, fn_arg) in function.sig.inputs.iter().enumerate() {
         if let Some(x) = create_temp_variable(position, fn_arg, &identifier) {
-            temp_var_init.push(x.initialize_code);
-            temp_vars.push(x.temp_var);
+            argument_init_code_blocks.push(x.initialize_code);
+            arguments.push(x.argument);
             param_types.push(x.param_type);
         }
     }
@@ -76,16 +76,31 @@ pub fn wrap_function(function: syn::ItemFn) -> WrappedFunction {
         },
     };
 
+    // This generates a function declaration from a rust function
+    // The expansion looks something like this
+    //
+    // fn wrapper_function(values: &[Value]) -> EvaluationResult {
+    //     fn original_function(....) { .... }
+    //     let arg0 = ....; // from values[0]
+    //     let arg1 = ....; // from values[1]
+    //
+    //     return original_function(arg0, arg1);
+    // }
     let function_declaration = quote! {
         pub fn #identifier (
             values: &[crate::interpreter::value::Value],
             environment: &crate::interpreter::environment::EnvironmentRef
         ) -> crate::interpreter::evaluate::EvaluationResult {
+            // Define the inner function that has the rust type signature
             #inner
 
-            #(#temp_var_init; )*
+            // Initialize the arguments and map them from the Andy C types to the rust types
+            #(#argument_init_code_blocks; )*
 
-            let result = #inner_ident (#(#temp_vars, )*);
+            // Call the inner function with the unpacked arguments
+            let result = #inner_ident (#(#arguments, )*);
+
+            // Return the result (Possibly by unpacking errors)
             #return_expr
         }
     };
@@ -105,9 +120,9 @@ pub fn wrap_function(function: syn::ItemFn) -> WrappedFunction {
     }
 }
 
-struct TempVar {
+struct Argument {
     param_type: TokenStream,
-    temp_var: TokenStream,
+    argument: TokenStream,
     initialize_code: TokenStream,
 }
 
@@ -149,115 +164,121 @@ fn create_temp_variable(
     position: usize,
     input: &syn::FnArg,
     identifier: &syn::Ident,
-) -> Option<TempVar> {
-    let temp_var = syn::Ident::new(&format!("temp_{position}"), identifier.span());
+) -> Option<Argument> {
+    let argument_var_name = syn::Ident::new(&format!("arg{position}"), identifier.span());
     if let syn::FnArg::Typed(pat_type) = input {
         let ty = &*pat_type.ty;
-        // Special case for &str because we need to create a temporary binding for the borrow
 
         // The pattern is exactly &mut String
         if is_ref_mut(ty) && is_string(ty) {
-            let rc_temp_var = syn::Ident::new(&format!("temp_{temp_var}"), identifier.span());
-            return Some(TempVar {
+            let rc_temp_var =
+                syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
+            return Some(Argument {
                 param_type: quote! { crate::interpreter::function::ParamType::String },
-                temp_var: quote! { #temp_var },
+                argument: quote! { #argument_var_name },
                 initialize_code: quote! {
                     let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::String(#rc_temp_var)) = &values[#position] else {
                         panic!("Value #position needed to be a Sequence::String but wasn't");
                     };
-                    let #temp_var = &mut *#rc_temp_var.try_borrow_mut()?;
+                    let #argument_var_name = &mut *#rc_temp_var.try_borrow_mut()?;
                 },
             });
         }
         // The pattern is &HashMap<Value, Value>
         else if is_ref(ty) && path_ends_with(ty, "HashMap") {
-            let rc_temp_var = syn::Ident::new(&format!("temp_{temp_var}"), identifier.span());
-            return Some(TempVar {
+            let rc_temp_var =
+                syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
+            return Some(Argument {
                 param_type: quote! { crate::interpreter::function::ParamType::Map },
-                temp_var: quote! { #temp_var },
+                argument: quote! { #argument_var_name },
                 initialize_code: quote! {
                     let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::Map(#rc_temp_var, _default)) = &values[#position] else {
                         panic!("Value #position needed to be a Sequence::Map but wasn't");
                     };
-                    let #temp_var = &*#rc_temp_var.borrow();
+                    let #argument_var_name = &*#rc_temp_var.borrow();
                 },
             });
         }
         // The pattern is &mut HashMap<Value, Value>
         else if is_ref_mut(ty) && path_ends_with(ty, "HashMap") {
-            let rc_temp_var = syn::Ident::new(&format!("temp_{temp_var}"), identifier.span());
-            return Some(TempVar {
+            let rc_temp_var =
+                syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
+            return Some(Argument {
                 param_type: quote! { crate::interpreter::function::ParamType::Map },
-                temp_var: quote! { #temp_var },
+                argument: quote! { #argument_var_name },
                 initialize_code: quote! {
                     let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::Map(#rc_temp_var, _default)) = &values[#position] else {
                         panic!("Value #position needed to be a Sequence::Map but wasn't");
                     };
-                    let #temp_var = &mut *#rc_temp_var.try_borrow_mut()?;
+                    let #argument_var_name = &mut *#rc_temp_var.try_borrow_mut()?;
                 },
             });
         } else if path_ends_with(ty, "DefaultMap") {
-            let rc_temp_var = syn::Ident::new(&format!("temp_{temp_var}"), identifier.span());
-            return Some(TempVar {
+            let rc_temp_var =
+                syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
+            return Some(Argument {
                 param_type: quote! { crate::interpreter::function::ParamType::Map },
-                temp_var: quote! { #temp_var },
+                argument: quote! { #argument_var_name },
                 initialize_code: quote! {
                     let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::Map(#rc_temp_var, default)) = &values[#position] else {
                         panic!("Value #position needed to be a Sequence::Map but wasn't");
                     };
-                    let #temp_var = (&*#rc_temp_var.borrow(), default.to_owned());
+                    let #argument_var_name = (&*#rc_temp_var.borrow(), default.to_owned());
                 },
             });
         }
         // The pattern is &mut HashMap<Value, Value>
         else if path_ends_with(ty, "DefaultMapMut") {
-            let rc_temp_var = syn::Ident::new(&format!("temp_{temp_var}"), identifier.span());
-            return Some(TempVar {
+            let rc_temp_var =
+                syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
+            return Some(Argument {
                 param_type: quote! { crate::interpreter::function::ParamType::Map },
-                temp_var: quote! { #temp_var },
+                argument: quote! { #argument_var_name },
                 initialize_code: quote! {
                     let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::Map(#rc_temp_var, default)) = &values[#position] else {
                         panic!("Value #position needed to be a Sequence::Map but wasn't");
                     };
-                    let #temp_var = (&mut *#rc_temp_var.try_borrow_mut()?, default.to_owned());
+                    let #argument_var_name = (&mut *#rc_temp_var.try_borrow_mut()?, default.to_owned());
                 },
             });
         }
         // The pattern is exactly &mut Vec
         else if is_ref_mut(ty) && path_ends_with(ty, "Vec") {
-            let rc_temp_var = syn::Ident::new(&format!("temp_{temp_var}"), identifier.span());
-            return Some(TempVar {
+            let rc_temp_var =
+                syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
+            return Some(Argument {
                 param_type: quote! { crate::interpreter::function::ParamType::List },
-                temp_var: quote! { #temp_var },
+                argument: quote! { #argument_var_name },
                 initialize_code: quote! {
                     let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::List(#rc_temp_var)) = &values[#position] else {
                         panic!("Value #position needed to be a Sequence::List but wasn't");
                     };
-                    let #temp_var = &mut *#rc_temp_var.try_borrow_mut()?;
+                    let #argument_var_name = &mut *#rc_temp_var.try_borrow_mut()?;
                 },
             });
         }
         // The pattern is exactly &str
         else if is_str_ref(ty) {
-            let rc_temp_var = syn::Ident::new(&format!("temp_{temp_var}"), identifier.span());
-            return Some(TempVar {
+            let rc_temp_var =
+                syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
+            return Some(Argument {
                 param_type: quote! { crate::interpreter::function::ParamType::String },
-                temp_var: quote! { #temp_var },
+                argument: quote! { #argument_var_name },
                 initialize_code: quote! {
                     let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::String(#rc_temp_var)) = &values[#position] else {
                         panic!("Value #position needed to be a Sequence::String but wasn't");
                     };
                     let #rc_temp_var = #rc_temp_var.borrow();
-                    let #temp_var = #rc_temp_var.as_ref();
+                    let #argument_var_name = #rc_temp_var.as_ref();
                 },
             });
         }
         // The pattern is &BigInt
         else if is_ref_of_bigint(ty) {
-            let big_int = syn::Ident::new(&format!("temp_{temp_var}"), identifier.span());
-            return Some(TempVar {
+            let big_int = syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
+            return Some(Argument {
                 param_type: quote! { crate::interpreter::function::ParamType::Int },
-                temp_var: quote! { #temp_var },
+                argument: quote! { #argument_var_name },
                 initialize_code: quote! {
                     let #big_int = if let crate::interpreter::value::Value::Number(crate::interpreter::num::Number::Int(crate::interpreter::int::Int::Int64(smol))) = &values[#position] {
                         Some(num::BigInt::from(*smol))
@@ -265,7 +286,7 @@ fn create_temp_variable(
                         None
                     };
 
-                    let #temp_var = match &values[#position] {
+                    let #argument_var_name = match &values[#position] {
                         crate::interpreter::value::Value::Number(crate::interpreter::num::Number::Int(crate::interpreter::int::Int::BigInt(big))) => big,
                         crate::interpreter::value::Value::Number(crate::interpreter::num::Number::Int(crate::interpreter::int::Int::Int64(smoll))) => #big_int.as_ref().unwrap(),
                         _ => panic!("Value #position need to be an Int but wasn't"),
@@ -275,49 +296,54 @@ fn create_temp_variable(
         }
         // If we need an owned Value
         else if path_ends_with(ty, "Value") && !is_ref(ty) {
-            return Some(TempVar {
+            return Some(Argument {
                 param_type: quote! { crate::interpreter::function::ParamType::Any },
-                temp_var: quote! { #temp_var },
+                argument: quote! { #argument_var_name },
                 initialize_code: quote! {
-                    let #temp_var = values[#position].clone();
+                    let #argument_var_name = values[#position].clone();
                 },
             });
         }
         // The pattern is &[Value]
         else if is_ref_of_slice_of_value(ty) {
-            let rc_temp_var = syn::Ident::new(&format!("temp_{temp_var}"), identifier.span());
-            return Some(TempVar {
+            let rc_temp_var =
+                syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
+            return Some(Argument {
                 param_type: quote! { crate::interpreter::function::ParamType::List },
-                temp_var: quote! { #temp_var },
+                argument: quote! { #argument_var_name },
                 initialize_code: quote! {
                     let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::List(#rc_temp_var)) = &values[#position] else {
                         panic!("Value #position needed to be a Sequence::List but wasn't");
                     };
-                    let #temp_var = &*#rc_temp_var.borrow();
+                    let #argument_var_name = &*#rc_temp_var.borrow();
                 },
             });
         }
         // The pattern is something like `i64`
         else if let syn::Type::Path(path) = ty {
-            return Some(TempVar {
+            return Some(Argument {
                 param_type: into_param_type(ty),
-                temp_var: quote! { #temp_var },
+                argument: quote! { #argument_var_name },
                 initialize_code: quote! {
-                    let #temp_var = #path :: try_from(&values[#position]).map_err(|err| crate::interpreter::function::FunctionCallError::ConvertToNativeTypeError(format!("{err}")))?
+                    let #argument_var_name = #path :: try_from(&values[#position]).map_err(|err| crate::interpreter::function::FunctionCallError::ConvertToNativeTypeError(format!("{err}")))?
                 },
             });
         }
         // The pattern is something like '&Number'
         else if let syn::Type::Reference(type_ref) = &*pat_type.ty {
-            return Some(TempVar {
+            return Some(Argument {
                 param_type: into_param_type(ty),
-                temp_var: quote! { #temp_var },
+                argument: quote! { #argument_var_name },
                 initialize_code: quote! {
-                    let #temp_var = <#type_ref as TryFrom<&crate::interpreter::value::Value>> :: try_from(&values[#position]).map_err(|err| crate::interpreter::function::FunctionCallError::ConvertToNativeTypeError(format!("{err}")))?
+                    let #argument_var_name = <#type_ref as TryFrom<&crate::interpreter::value::Value>> :: try_from(&values[#position]).map_err(|err| crate::interpreter::function::FunctionCallError::ConvertToNativeTypeError(format!("{err}")))?
                 },
             });
+        } else if let syn::Type::ImplTrait(syn::TypeImplTrait { .. }) = &*pat_type.ty {
+            // TODO: we should perform a type check, but in order to get results quick we can just assume that all impl blocks are iterators
+            
+            todo!("impl trait!!! WHAT NOW")
         } else {
-            panic!("not sure how to handle this type of thing");
+            panic!("not sure how to handle this type of thing:\n|---> {:?}", ty);
         }
     }
 
