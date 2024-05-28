@@ -12,7 +12,9 @@ pub mod environment;
 pub mod evaluate;
 pub mod function;
 pub mod int;
+pub mod iterator;
 pub mod num;
+pub mod sequence;
 pub mod value;
 
 pub struct Interpreter {

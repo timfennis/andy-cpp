@@ -7,7 +7,8 @@ use crate::interpreter::environment::Environment;
 use crate::interpreter::function::{
     Function, FunctionCallError, FunctionCarrier, ParamType, TypeSignature,
 };
-use crate::interpreter::value::{Sequence, Value, ValueType};
+use crate::interpreter::sequence::Sequence;
+use crate::interpreter::value::{Value, ValueType};
 
 pub fn register(env: &mut Environment) {
     env.declare(

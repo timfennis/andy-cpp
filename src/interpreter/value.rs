@@ -2,16 +2,21 @@ use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::fmt;
 use std::hash::{Hash, Hasher};
+use std::ops::{Range, RangeFrom, RangeInclusive};
 use std::rc::Rc;
 
 use itertools::Itertools;
 use num::BigInt;
 
-use crate::hash_map::{DefaultHasher, HashMap};
+use crate::compare::FallibleOrd;
+use crate::hash_map::DefaultHasher;
 use crate::interpreter::function::{Function, OverloadedFunction};
 use crate::interpreter::int::Int;
 use crate::interpreter::num::{Number, NumberToUsizeError, NumberType};
+use crate::interpreter::sequence::Sequence;
 use crate::interpreter::value::ConversionError::{IncorrectLength, UnsupportedVariant};
+
+use super::iterator::{ValueIterator, ValueRange, ValueRangeFrom, ValueRangeInclusive};
 
 /// Enumerates all the different types of values that exist in the language
 /// All values should be pretty cheap to clone because the bigger ones are wrapped using Rc's
@@ -68,6 +73,14 @@ impl Value {
     }
 
     #[must_use]
+    /// Returns the `ValueType` associated with this value
+    /// ```
+    /// # use ndc_lib::interpreter::value::Value;
+    /// # use ndc_lib::interpreter::value::ValueType;
+    /// # use ndc_lib::interpreter::num::NumberType;
+    /// let val = Value::from(1);
+    /// assert_eq!(val.value_type(), NumberType::Int.into());
+    /// ```
     pub fn value_type(&self) -> ValueType {
         match self {
             Value::Unit => ValueType::Unit,
@@ -78,6 +91,7 @@ impl Value {
             Value::Sequence(Sequence::Tuple(_)) => ValueType::Tuple,
             Value::Function(_) => ValueType::Function,
             Value::Sequence(Sequence::Map(_, _)) => ValueType::Map,
+            Value::Sequence(Sequence::Iterator(_)) => ValueType::Iterator,
         }
     }
 
@@ -85,8 +99,12 @@ impl Value {
     pub fn empty_list() -> Value {
         Value::Sequence(Sequence::List(Rc::new(RefCell::new(vec![]))))
     }
+}
 
-    pub fn try_cmp(&self, other: &Value) -> anyhow::Result<Ordering> {
+impl FallibleOrd for Value {
+    type Error = anyhow::Error;
+
+    fn try_cmp(&self, other: &Self) -> anyhow::Result<Ordering> {
         self.partial_cmp(other).ok_or_else(|| {
             anyhow::anyhow!(
                 "{} cannot be compared to {}",
@@ -94,6 +112,20 @@ impl Value {
                 other.value_type()
             )
         })
+    }
+}
+
+impl FallibleOrd for &Value {
+    type Error = anyhow::Error;
+
+    fn try_cmp(&self, other: &Self) -> Result<Ordering, Self::Error> {
+        (*self).try_cmp(*other)
+    }
+}
+
+impl From<&Value> for Value {
+    fn from(value: &Value) -> Self {
+        value.clone()
     }
 }
 
@@ -145,6 +177,10 @@ impl Hash for Value {
                     state.write_u64(acc);
                     state.write_u64(cube_acc);
                 }
+                Sequence::Iterator(i) => {
+                    state.write_u8(9);
+                    Rc::as_ptr(i).hash(state);
+                }
             },
             Value::Function(f) => {
                 state.write_u8(9);
@@ -178,30 +214,6 @@ impl PartialOrd for Value {
             (Value::Bool(left), Value::Bool(right)) => left.partial_cmp(right),
             // Functions definitely don't have an order
             // Things that are different don't have an order either
-            _ => None,
-        }
-    }
-}
-
-pub type DefaultMapMut<'a> = (&'a mut HashMap<Value, Value>, Option<Box<Value>>);
-pub type DefaultMap<'a> = (&'a HashMap<Value, Value>, Option<Box<Value>>);
-
-#[derive(Clone, PartialEq)]
-pub enum Sequence {
-    String(Rc<RefCell<String>>),
-    List(Rc<RefCell<Vec<Value>>>),
-    Tuple(Rc<Vec<Value>>),
-    Map(Rc<RefCell<HashMap<Value, Value>>>, Option<Box<Value>>),
-}
-
-impl Eq for Sequence {}
-
-impl PartialOrd for Sequence {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        match (self, other) {
-            (Sequence::String(left), Sequence::String(right)) => left.partial_cmp(right),
-            (Sequence::List(left), Sequence::List(right)) => left.partial_cmp(right),
-            (Sequence::Tuple(left), Sequence::Tuple(right)) => left.partial_cmp(right),
             _ => None,
         }
     }
@@ -277,6 +289,12 @@ impl From<Function> for Value {
     }
 }
 
+impl From<ValueIterator> for Value {
+    fn from(value: ValueIterator) -> Self {
+        Self::Sequence(Sequence::Iterator(Rc::new(RefCell::new(value))))
+    }
+}
+
 // TODO: is this implementation useful, should it be over an Iterator of some kind instead
 impl<T: Into<Value>> From<Vec<T>> for Value {
     fn from(value: Vec<T>) -> Self {
@@ -301,6 +319,26 @@ impl From<Sequence> for Value {
 impl From<OverloadedFunction> for Value {
     fn from(value: OverloadedFunction) -> Self {
         Self::Function(Rc::new(RefCell::new(value)))
+    }
+}
+
+impl From<RangeInclusive<i64>> for Value {
+    fn from(value: RangeInclusive<i64>) -> Self {
+        Value::from(ValueIterator::ValueRangeInclusive(ValueRangeInclusive(
+            value,
+        )))
+    }
+}
+
+impl From<RangeFrom<i64>> for Value {
+    fn from(value: RangeFrom<i64>) -> Self {
+        Value::from(ValueIterator::ValueRangeFrom(ValueRangeFrom(value)))
+    }
+}
+
+impl From<Range<i64>> for Value {
+    fn from(value: Range<i64>) -> Self {
+        Value::from(ValueIterator::ValueRange(ValueRange(value)))
     }
 }
 
@@ -481,6 +519,7 @@ pub enum ValueType {
     Tuple,
     Function,
     Map,
+    Iterator,
 }
 
 impl From<&Value> for ValueType {
@@ -499,7 +538,8 @@ impl fmt::Display for ValueType {
             Self::List => write!(f, "list"),
             Self::Tuple => write!(f, "tuple"),
             Self::Function => write!(f, "function"),
-            ValueType::Map => write!(f, "map"),
+            Self::Map => write!(f, "map"),
+            Self::Iterator => write!(f, "iterator"),
         }
     }
 }
@@ -529,71 +569,6 @@ impl fmt::Display for Value {
                 write!(f, "function")
             }
             Self::Sequence(s) => write!(f, "{s}"),
-        }
-    }
-}
-
-impl fmt::Debug for Sequence {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Sequence::String(s) => write!(f, "\"{}\"", s.borrow()),
-            Sequence::List(vs) => {
-                write!(f, "[")?;
-                let vs = vs.borrow();
-                let mut vs = vs.iter().peekable();
-                while let Some(v) = vs.next() {
-                    if vs.peek().is_some() {
-                        write!(f, "{v:?},")?;
-                    } else {
-                        write!(f, "{v:?}")?;
-                    }
-                }
-                write!(f, "]")
-            }
-            Sequence::Tuple(vs) => {
-                write!(f, "(")?;
-                let mut iter = vs.iter().peekable();
-                while let Some(v) = iter.next() {
-                    write!(f, "{v:?}")?;
-                    if iter.peek().is_some() {
-                        write!(f, ",")?;
-                    }
-                }
-                write!(f, ")")
-            }
-            Sequence::Map(dict, default) => {
-                let dict = dict.borrow();
-                let mut iter = dict.iter().peekable();
-                if let Some(default) = default {
-                    write!(f, "{{default: {default:?}")?;
-                    if iter.peek().is_some() {
-                        write!(f, ",")?;
-                    }
-                } else {
-                    write!(f, "{{")?;
-                }
-                while let Some((key, value)) = iter.next() {
-                    if value == &Value::Unit {
-                        write!(f, "{key:?}")?;
-                    } else {
-                        write!(f, "{key:?}: {value:?}")?;
-                    }
-
-                    if iter.peek().is_some() {
-                        write!(f, ",")?;
-                    }
-                }
-                write!(f, "}}")
-            }
-        }
-    }
-}
-
-impl fmt::Display for Sequence {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Sequence::String(s) => write!(f, "{}", s.borrow()),
-            otherwise => write!(f, "{otherwise:?}"),
         }
     }
 }

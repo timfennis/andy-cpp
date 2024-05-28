@@ -9,7 +9,8 @@ use crate::interpreter::evaluate::{
     evaluate_expression, ErrorConverter, EvaluationError, EvaluationResult,
 };
 use crate::interpreter::num::{Number, NumberType};
-use crate::interpreter::value::{Sequence, Value, ValueType};
+use crate::interpreter::sequence::Sequence;
+use crate::interpreter::value::{Value, ValueType};
 use crate::lexer::Location;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -140,6 +141,7 @@ pub enum ParamType {
     String,
     Tuple,
     Map,
+    Iterator,
 }
 
 impl ParamType {
@@ -156,12 +158,17 @@ impl ParamType {
             (ParamType::List, ValueType::List) => Some(0),
             (ParamType::Tuple, ValueType::Tuple) => Some(0),
             (ParamType::Map, ValueType::Map) => Some(0),
+            (ParamType::Iterator, ValueType::Iterator) => Some(0),
             (ParamType::Function, ValueType::Function) => Some(0),
             (ParamType::Any, _) => Some(2),
             (ParamType::Number, ValueType::Number(_)) => Some(1),
             (
                 ParamType::Sequence,
-                ValueType::List | ValueType::String | ValueType::Map | ValueType::Tuple,
+                ValueType::List
+                | ValueType::String
+                | ValueType::Map
+                | ValueType::Tuple
+                | ValueType::Iterator,
             ) => Some(1),
             _ => None,
         }
@@ -183,6 +190,7 @@ impl From<&Value> for ParamType {
             Value::Sequence(Sequence::Tuple(_)) => ParamType::Tuple,
             Value::Function(_) => ParamType::Function,
             Value::Sequence(Sequence::Map(_, _)) => ParamType::Map,
+            Value::Sequence(Sequence::Iterator(_)) => ParamType::Iterator,
         }
     }
 }

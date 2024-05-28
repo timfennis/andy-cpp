@@ -2,7 +2,7 @@ use andy_cpp_macros::export_module;
 
 #[export_module]
 mod inner {
-    use crate::interpreter::value::Sequence;
+    use crate::interpreter::sequence::Sequence;
     use crate::interpreter::value::Value;
     use std::cell::RefCell;
     use std::rc::Rc;
@@ -20,6 +20,9 @@ mod inner {
             )),
             Value::Sequence(Sequence::Tuple(tuple)) => {
                 Value::Sequence(Sequence::Tuple(tuple.clone()))
+            }
+            Value::Sequence(Sequence::Iterator(iterator)) => {
+                Value::Sequence(Sequence::Iterator(iterator.clone()))
             }
             Value::Function(f) => Value::from(f.borrow().to_owned()),
         }
