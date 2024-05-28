@@ -14,6 +14,8 @@ use crate::interpreter::num::{Number, NumberToUsizeError, NumberType};
 use crate::interpreter::sequence::Sequence;
 use crate::interpreter::value::ConversionError::{IncorrectLength, UnsupportedVariant};
 
+use super::iterator::ValueIterator;
+
 /// Enumerates all the different types of values that exist in the language
 /// All values should be pretty cheap to clone because the bigger ones are wrapped using Rc's
 #[derive(Clone)]
@@ -256,6 +258,15 @@ impl From<&str> for Value {
 impl From<Function> for Value {
     fn from(value: Function) -> Self {
         Self::Function(Rc::new(RefCell::new(OverloadedFunction::from(value))))
+    }
+}
+
+impl<T> From<T> for Value
+where
+    T: ValueIterator + 'static,
+{
+    fn from(value: T) -> Self {
+        Self::Sequence(Sequence::Iterator(Rc::new(value)))
     }
 }
 

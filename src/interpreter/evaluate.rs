@@ -571,58 +571,53 @@ pub(crate) fn evaluate_expression(
             start: range_start,
             end: range_end,
         } => {
-            let range_start = evaluate_expression(
-                range_start
-                    .as_deref()
-                    .expect("Unbound ranges are not yet implemented"),
-                environment,
-            )?;
-            let range_end = evaluate_expression(
-                range_end
-                    .as_deref()
-                    .expect("Unbound ranges are not yet implemented"),
-                environment,
-            )?;
+            let range_start = if let Some(range_start) = range_start {
+                evaluate_expression(range_start, environment)?
+            } else {
+                return Err(EvaluationError::type_error(
+                    "ranges without a lower bound cannot be evaluated into a value",
+                    start,
+                    end,
+                )
+                .into());
+            };
 
             let range_start = i64::try_from(range_start).into_evaluation_result(start, end)?;
-            let range_end = i64::try_from(range_end).into_evaluation_result(start, end)?;
 
-            Value::Sequence(Sequence::Iterator(Rc::new(ValueRangeInclusive(
-                range_start..=range_end,
-            ))))
+            if let Some(range_end) = range_end {
+                let range_end = evaluate_expression(range_end, environment)?;
+                let range_end = i64::try_from(range_end).into_evaluation_result(start, end)?;
+
+                Value::from(ValueRangeInclusive(range_start..=range_end))
+            } else {
+                Value::from(ValueRangeFrom(range_start..))
+            }
         }
         Expression::RangeExclusive {
             start: range_start,
             end: range_end,
         } => {
-            let range_start = evaluate_expression(
-                range_start
-                    .as_deref()
-                    .expect("Unbound ranges are not yet implemented"),
-                environment,
-            )?;
+            let range_start = if let Some(range_start) = range_start {
+                evaluate_expression(range_start, environment)?
+            } else {
+                return Err(EvaluationError::type_error(
+                    "ranges without a lower bound cannot be evaluated into a value",
+                    start,
+                    end,
+                )
+                .into());
+            };
 
             let range_start = i64::try_from(range_start).into_evaluation_result(start, end)?;
 
-            // TODO: clean up the implementation of this evaluation once we have working iteration
-            if range_end.is_none() {
-                return Ok(Value::Sequence(Sequence::Iterator(Rc::new(
-                    ValueRangeFrom(range_start..),
-                ))));
+            if let Some(range_end) = range_end {
+                let range_end = evaluate_expression(range_end, environment)?;
+                let range_end = i64::try_from(range_end).into_evaluation_result(start, end)?;
+
+                Value::from(ValueRange(range_start..range_end))
+            } else {
+                Value::from(ValueRangeFrom(range_start..))
             }
-
-            let range_end = evaluate_expression(
-                range_end
-                    .as_deref()
-                    .expect("Unbound ranges are not yet implemented"),
-                environment,
-            )?;
-
-            let range_end = i64::try_from(range_end).into_evaluation_result(start, end)?;
-
-            Value::Sequence(Sequence::Iterator(Rc::new(ValueRange(
-                range_start..range_end,
-            ))))
         }
     };
 
