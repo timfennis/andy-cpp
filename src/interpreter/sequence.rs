@@ -1,6 +1,6 @@
+use crate::hash_map::HashMap;
 use crate::interpreter::iterator::ValueIterator;
 use crate::interpreter::value::Value;
-use ahash::AHashMap as HashMap;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::fmt;
