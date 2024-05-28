@@ -3,8 +3,10 @@ use std::rc::Rc;
 
 #[andy_cpp_macros::export_module]
 mod inner {
-    use crate::interpreter::value::{Sequence, Value};
+    use crate::interpreter::sequence::Sequence;
+    use crate::interpreter::value::Value;
     use anyhow::anyhow;
+
     pub fn contains(list: &[Value], elem: &Value) -> bool {
         list.contains(elem)
     }

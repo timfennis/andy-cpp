@@ -1,6 +1,7 @@
 use crate::interpreter::environment::Environment;
 use crate::interpreter::num::Number;
-use crate::interpreter::value::{Sequence, Value};
+use crate::interpreter::sequence::Sequence;
+use crate::interpreter::value::Value;
 use andy_cpp_macros::export_module;
 use num::ToPrimitive;
 
@@ -23,6 +24,20 @@ where
     }
 }
 
+// impl<T> FallibleSum<anyhow::Error> for T
+// where
+//     T: Iterator<Item = Value> ,
+// {
+//     fn try_sum(&mut self) -> anyhow::Result<Number> {
+//         self.try_fold(Number::from(0), |acc, cur| match cur {
+//             Value::Number(n) => Ok(acc + n),
+//             value => Err(anyhow::anyhow!(
+//                 "cannot sum {} and number",
+//                 value.value_type()
+//             )),
+//         })
+//     }
+// }
 #[export_module]
 mod inner {
     use super::FallibleSum;
@@ -36,6 +51,7 @@ mod inner {
             Sequence::List(list) => list.borrow().iter().try_sum(),
             Sequence::Tuple(tup) => tup.iter().try_sum(),
             Sequence::Map(map, _) => map.borrow().keys().try_sum(),
+            Sequence::Iterator(_iter) => todo!("somehow implement this"),
         }
     }
 
@@ -105,7 +121,8 @@ pub mod f64 {
     use super::{f64, Environment, Number, ToPrimitive};
     use crate::interpreter::function::{Function, FunctionCallError, ParamType, TypeSignature};
     use crate::interpreter::int::Int;
-    use crate::interpreter::value::{Sequence, Value};
+    use crate::interpreter::sequence::Sequence;
+    use crate::interpreter::value::Value;
     use num::BigInt;
 
     pub fn register(env: &mut Environment) {

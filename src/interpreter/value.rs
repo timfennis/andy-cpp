@@ -7,10 +7,11 @@ use std::rc::Rc;
 use itertools::Itertools;
 use num::BigInt;
 
-use crate::hash_map::{DefaultHasher, HashMap};
+use crate::hash_map::DefaultHasher;
 use crate::interpreter::function::{Function, OverloadedFunction};
 use crate::interpreter::int::Int;
 use crate::interpreter::num::{Number, NumberToUsizeError, NumberType};
+use crate::interpreter::sequence::Sequence;
 use crate::interpreter::value::ConversionError::{IncorrectLength, UnsupportedVariant};
 
 /// Enumerates all the different types of values that exist in the language
@@ -78,6 +79,7 @@ impl Value {
             Value::Sequence(Sequence::Tuple(_)) => ValueType::Tuple,
             Value::Function(_) => ValueType::Function,
             Value::Sequence(Sequence::Map(_, _)) => ValueType::Map,
+            Value::Sequence(Sequence::Iterator(_)) => ValueType::Iterator,
         }
     }
 
@@ -145,6 +147,10 @@ impl Hash for Value {
                     state.write_u64(acc);
                     state.write_u64(cube_acc);
                 }
+                Sequence::Iterator(i) => {
+                    state.write_u8(9);
+                    Rc::as_ptr(i).hash(state);
+                }
             },
             Value::Function(f) => {
                 state.write_u8(9);
@@ -178,30 +184,6 @@ impl PartialOrd for Value {
             (Value::Bool(left), Value::Bool(right)) => left.partial_cmp(right),
             // Functions definitely don't have an order
             // Things that are different don't have an order either
-            _ => None,
-        }
-    }
-}
-
-pub type DefaultMapMut<'a> = (&'a mut HashMap<Value, Value>, Option<Box<Value>>);
-pub type DefaultMap<'a> = (&'a HashMap<Value, Value>, Option<Box<Value>>);
-
-#[derive(Clone, PartialEq)]
-pub enum Sequence {
-    String(Rc<RefCell<String>>),
-    List(Rc<RefCell<Vec<Value>>>),
-    Tuple(Rc<Vec<Value>>),
-    Map(Rc<RefCell<HashMap<Value, Value>>>, Option<Box<Value>>),
-}
-
-impl Eq for Sequence {}
-
-impl PartialOrd for Sequence {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        match (self, other) {
-            (Sequence::String(left), Sequence::String(right)) => left.partial_cmp(right),
-            (Sequence::List(left), Sequence::List(right)) => left.partial_cmp(right),
-            (Sequence::Tuple(left), Sequence::Tuple(right)) => left.partial_cmp(right),
             _ => None,
         }
     }
@@ -481,6 +463,7 @@ pub enum ValueType {
     Tuple,
     Function,
     Map,
+    Iterator,
 }
 
 impl From<&Value> for ValueType {
@@ -499,7 +482,8 @@ impl fmt::Display for ValueType {
             Self::List => write!(f, "list"),
             Self::Tuple => write!(f, "tuple"),
             Self::Function => write!(f, "function"),
-            ValueType::Map => write!(f, "map"),
+            Self::Map => write!(f, "map"),
+            Self::Iterator => write!(f, "iterator"),
         }
     }
 }
@@ -529,71 +513,6 @@ impl fmt::Display for Value {
                 write!(f, "function")
             }
             Self::Sequence(s) => write!(f, "{s}"),
-        }
-    }
-}
-
-impl fmt::Debug for Sequence {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Sequence::String(s) => write!(f, "\"{}\"", s.borrow()),
-            Sequence::List(vs) => {
-                write!(f, "[")?;
-                let vs = vs.borrow();
-                let mut vs = vs.iter().peekable();
-                while let Some(v) = vs.next() {
-                    if vs.peek().is_some() {
-                        write!(f, "{v:?},")?;
-                    } else {
-                        write!(f, "{v:?}")?;
-                    }
-                }
-                write!(f, "]")
-            }
-            Sequence::Tuple(vs) => {
-                write!(f, "(")?;
-                let mut iter = vs.iter().peekable();
-                while let Some(v) = iter.next() {
-                    write!(f, "{v:?}")?;
-                    if iter.peek().is_some() {
-                        write!(f, ",")?;
-                    }
-                }
-                write!(f, ")")
-            }
-            Sequence::Map(dict, default) => {
-                let dict = dict.borrow();
-                let mut iter = dict.iter().peekable();
-                if let Some(default) = default {
-                    write!(f, "{{default: {default:?}")?;
-                    if iter.peek().is_some() {
-                        write!(f, ",")?;
-                    }
-                } else {
-                    write!(f, "{{")?;
-                }
-                while let Some((key, value)) = iter.next() {
-                    if value == &Value::Unit {
-                        write!(f, "{key:?}")?;
-                    } else {
-                        write!(f, "{key:?}: {value:?}")?;
-                    }
-
-                    if iter.peek().is_some() {
-                        write!(f, ",")?;
-                    }
-                }
-                write!(f, "}}")
-            }
-        }
-    }
-}
-
-impl fmt::Display for Sequence {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Sequence::String(s) => write!(f, "{}", s.borrow()),
-            otherwise => write!(f, "{otherwise:?}"),
         }
     }
 }

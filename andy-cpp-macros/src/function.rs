@@ -162,7 +162,7 @@ fn create_temp_variable(
                 param_type: quote! { crate::interpreter::function::ParamType::String },
                 temp_var: quote! { #temp_var },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Sequence(crate::interpreter::value::Sequence::String(#rc_temp_var)) = &values[#position] else {
+                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::String(#rc_temp_var)) = &values[#position] else {
                         panic!("Value #position needed to be a Sequence::String but wasn't");
                     };
                     let #temp_var = &mut *#rc_temp_var.try_borrow_mut()?;
@@ -176,7 +176,7 @@ fn create_temp_variable(
                 param_type: quote! { crate::interpreter::function::ParamType::Map },
                 temp_var: quote! { #temp_var },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Sequence(crate::interpreter::value::Sequence::Map(#rc_temp_var, _default)) = &values[#position] else {
+                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::Map(#rc_temp_var, _default)) = &values[#position] else {
                         panic!("Value #position needed to be a Sequence::Map but wasn't");
                     };
                     let #temp_var = &*#rc_temp_var.borrow();
@@ -190,7 +190,7 @@ fn create_temp_variable(
                 param_type: quote! { crate::interpreter::function::ParamType::Map },
                 temp_var: quote! { #temp_var },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Sequence(crate::interpreter::value::Sequence::Map(#rc_temp_var, _default)) = &values[#position] else {
+                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::Map(#rc_temp_var, _default)) = &values[#position] else {
                         panic!("Value #position needed to be a Sequence::Map but wasn't");
                     };
                     let #temp_var = &mut *#rc_temp_var.try_borrow_mut()?;
@@ -202,7 +202,7 @@ fn create_temp_variable(
                 param_type: quote! { crate::interpreter::function::ParamType::Map },
                 temp_var: quote! { #temp_var },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Sequence(crate::interpreter::value::Sequence::Map(#rc_temp_var, default)) = &values[#position] else {
+                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::Map(#rc_temp_var, default)) = &values[#position] else {
                         panic!("Value #position needed to be a Sequence::Map but wasn't");
                     };
                     let #temp_var = (&*#rc_temp_var.borrow(), default.to_owned());
@@ -216,7 +216,7 @@ fn create_temp_variable(
                 param_type: quote! { crate::interpreter::function::ParamType::Map },
                 temp_var: quote! { #temp_var },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Sequence(crate::interpreter::value::Sequence::Map(#rc_temp_var, default)) = &values[#position] else {
+                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::Map(#rc_temp_var, default)) = &values[#position] else {
                         panic!("Value #position needed to be a Sequence::Map but wasn't");
                     };
                     let #temp_var = (&mut *#rc_temp_var.try_borrow_mut()?, default.to_owned());
@@ -230,7 +230,7 @@ fn create_temp_variable(
                 param_type: quote! { crate::interpreter::function::ParamType::List },
                 temp_var: quote! { #temp_var },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Sequence(crate::interpreter::value::Sequence::List(#rc_temp_var)) = &values[#position] else {
+                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::List(#rc_temp_var)) = &values[#position] else {
                         panic!("Value #position needed to be a Sequence::List but wasn't");
                     };
                     let #temp_var = &mut *#rc_temp_var.try_borrow_mut()?;
@@ -244,7 +244,7 @@ fn create_temp_variable(
                 param_type: quote! { crate::interpreter::function::ParamType::String },
                 temp_var: quote! { #temp_var },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Sequence(crate::interpreter::value::Sequence::String(#rc_temp_var)) = &values[#position] else {
+                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::String(#rc_temp_var)) = &values[#position] else {
                         panic!("Value #position needed to be a Sequence::String but wasn't");
                     };
                     let #rc_temp_var = #rc_temp_var.borrow();
@@ -290,7 +290,7 @@ fn create_temp_variable(
                 param_type: quote! { crate::interpreter::function::ParamType::List },
                 temp_var: quote! { #temp_var },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Sequence(crate::interpreter::value::Sequence::List(#rc_temp_var)) = &values[#position] else {
+                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::List(#rc_temp_var)) = &values[#position] else {
                         panic!("Value #position needed to be a Sequence::List but wasn't");
                     };
                     let #temp_var = &*#rc_temp_var.borrow();

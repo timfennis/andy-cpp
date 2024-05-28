@@ -60,7 +60,8 @@ fn try_sort(v: &mut [Value]) -> anyhow::Result<()> {
 
 #[export_module]
 mod inner {
-    use crate::interpreter::value::{Sequence, Value};
+    use crate::interpreter::sequence::Sequence;
+    use crate::interpreter::value::Value;
     use anyhow::anyhow;
     use itertools::Itertools;
     use std::cell::RefCell;
@@ -77,6 +78,7 @@ mod inner {
             Sequence::List(l) => l.try_borrow()?.iter().try_max(),
             Sequence::Tuple(l) => l.iter().try_max(),
             Sequence::Map(map, _) => map.borrow().keys().try_max(),
+            Sequence::Iterator(_) => todo!("implement this"),
         }
     }
     pub fn min(seq: &Sequence) -> anyhow::Result<Value> {
@@ -90,6 +92,7 @@ mod inner {
             Sequence::List(l) => l.try_borrow()?.iter().try_min(),
             Sequence::Tuple(l) => l.iter().try_min(),
             Sequence::Map(map, _) => map.borrow().keys().try_min(),
+            Sequence::Iterator(_) => todo!("implement this"),
         }
     }
 
@@ -107,6 +110,7 @@ mod inner {
             }
             Sequence::Tuple(_) => Err(anyhow!("tuple cannot be sorted in place")),
             Sequence::Map(_, _) => Err(anyhow!("map cannot be sorted in place")),
+            Sequence::Iterator(_) => Err(anyhow!("iterator cannot be sorted in place")),
         }
     }
 
@@ -131,17 +135,21 @@ mod inner {
                 try_sort(&mut out)?;
                 Ok(Sequence::List(Rc::new(RefCell::new(out))))
             }
+            Sequence::Iterator(_) => {
+                todo!("implement this, probably by converting to a list and sorting that")
+            }
         }
     }
     pub fn byte_len(str: &str) -> usize {
         str.len()
     }
-    pub fn len(seq: &Sequence) -> usize {
+    pub fn len(seq: &Sequence) -> anyhow::Result<usize> {
         match seq {
-            Sequence::String(s) => s.borrow().chars().count(),
-            Sequence::List(l) => l.borrow().len(),
-            Sequence::Tuple(t) => t.len(),
-            Sequence::Map(d, _) => d.borrow().len(),
+            Sequence::String(s) => Ok(s.borrow().chars().count()),
+            Sequence::List(l) => Ok(l.borrow().len()),
+            Sequence::Tuple(t) => Ok(t.len()),
+            Sequence::Map(d, _) => Ok(d.borrow().len()),
+            Sequence::Iterator(_) => Err(anyhow!("cannot determine the length of an iterator")),
         }
     }
 }
