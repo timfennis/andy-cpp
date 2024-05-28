@@ -2,10 +2,11 @@ use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::error::Error;
 use std::fmt;
-use std::ops::{IndexMut, Neg, Not, Range, RangeInclusive, Rem};
+use std::ops::{IndexMut, Neg, Not, Rem};
 use std::rc::Rc;
 
 use either::Either;
+use itertools::Itertools;
 
 use crate::ast::{
     BinaryOperator, Expression, ExpressionLocation, ForBody, ForIteration, LogicalOperator, Lvalue,
@@ -16,8 +17,10 @@ use crate::hash_map::HashMap;
 use crate::interpreter::environment::{Environment, EnvironmentRef};
 use crate::interpreter::function::{Function, FunctionCarrier, OverloadedFunction};
 use crate::interpreter::int::Int;
+use crate::interpreter::iterator::mut_value_to_iterator;
 use crate::interpreter::num::{EuclideanDivisionError, Number};
-use crate::interpreter::value::{Sequence, Value, ValueType};
+use crate::interpreter::sequence::Sequence;
+use crate::interpreter::value::{Value, ValueType};
 use crate::lexer::Location;
 
 pub type EvaluationResult = Result<Value, FunctionCarrier>;
@@ -480,84 +483,79 @@ pub(crate) fn evaluate_expression(
             let value = evaluate_expression(value_expr, environment)?;
 
             match value {
-                Value::Sequence(sequence) => match sequence {
-                    Sequence::String(string) => {
-                        let string = string.borrow();
+                Value::Sequence(Sequence::String(string)) => {
+                    let string = string.borrow();
 
-                        let index = value_to_forward_index(
-                            evaluate_expression(index_expr, environment)?,
-                            string.chars().count(),
+                    let index = value_to_forward_index(
+                        evaluate_expression(index_expr, environment)?,
+                        string.chars().count(),
+                        index_expr.start,
+                        index_expr.end,
+                    )?;
+
+                    let Some(char) = string.chars().nth(index) else {
+                        return Err(EvaluationError::out_of_bounds(
+                            index,
                             index_expr.start,
                             index_expr.end,
-                        )?;
+                        )
+                        .into());
+                    };
+                    Value::Sequence(Sequence::String(Rc::new(RefCell::new(String::from(char)))))
+                }
+                Value::Sequence(Sequence::List(list)) => {
+                    let index = value_to_forward_index(
+                        evaluate_expression(index_expr, environment)?,
+                        list.borrow().len(),
+                        index_expr.start,
+                        index_expr.end,
+                    )?;
 
-                        let Some(char) = string.chars().nth(index) else {
-                            return Err(EvaluationError::out_of_bounds(
-                                index,
-                                index_expr.start,
-                                index_expr.end,
-                            )
-                            .into());
-                        };
-                        Value::Sequence(Sequence::String(Rc::new(RefCell::new(String::from(char)))))
-                    }
-                    Sequence::List(list) => {
-                        let index = value_to_forward_index(
-                            evaluate_expression(index_expr, environment)?,
-                            list.borrow().len(),
+                    let list = list.borrow();
+                    let Some(value) = list.get(index) else {
+                        return Err(EvaluationError::out_of_bounds(
+                            index,
                             index_expr.start,
                             index_expr.end,
-                        )?;
+                        )
+                        .into());
+                    };
+                    value.clone()
+                }
+                Value::Sequence(Sequence::Tuple(tuple)) => {
+                    let index = value_to_forward_index(
+                        evaluate_expression(index_expr, environment)?,
+                        tuple.len(),
+                        index_expr.start,
+                        index_expr.end,
+                    )?;
 
-                        let list = list.borrow();
-                        let Some(value) = list.get(index) else {
-                            return Err(EvaluationError::out_of_bounds(
-                                index,
-                                index_expr.start,
-                                index_expr.end,
-                            )
-                            .into());
-                        };
-                        value.clone()
-                    }
-                    Sequence::Tuple(tuple) => {
-                        let index = value_to_forward_index(
-                            evaluate_expression(index_expr, environment)?,
-                            tuple.len(),
+                    let Some(value) = tuple.get(index) else {
+                        return Err(EvaluationError::out_of_bounds(
+                            index,
                             index_expr.start,
                             index_expr.end,
-                        )?;
+                        )
+                        .into());
+                    };
 
-                        let Some(value) = tuple.get(index) else {
-                            return Err(EvaluationError::out_of_bounds(
-                                index,
-                                index_expr.start,
-                                index_expr.end,
-                            )
-                            .into());
-                        };
+                    value.clone()
+                }
+                Value::Sequence(Sequence::Map(dict, default)) => {
+                    let key = evaluate_expression(index_expr, environment)?;
+                    let dict = dict.borrow();
 
-                        value.clone()
-                    }
-                    Sequence::Map(dict, default) => {
-                        let key = evaluate_expression(index_expr, environment)?;
-                        let dict = dict.borrow();
-
-                        return if let Some(value) = dict.get(&key) {
-                            Ok(value.clone())
-                        } else if let Some(default) = default {
-                            Ok(Value::clone(&*default))
-                        } else {
-                            Err(EvaluationError::key_not_found(
-                                &key,
-                                index_expr.start,
-                                index_expr.end,
-                            )
-                            .into())
-                        };
-                    }
-                },
-                // TODO: improve error handling
+                    return if let Some(value) = dict.get(&key) {
+                        Ok(value.clone())
+                    } else if let Some(default) = default {
+                        Ok(Value::clone(&*default))
+                    } else {
+                        Err(
+                            EvaluationError::key_not_found(&key, index_expr.start, index_expr.end)
+                                .into(),
+                        )
+                    };
+                }
                 value => {
                     return Err(EvaluationError::type_error(
                         &format!("cannot index into {}", value.value_type()),
@@ -572,54 +570,53 @@ pub(crate) fn evaluate_expression(
             start: range_start,
             end: range_end,
         } => {
-            let range_start = evaluate_expression(
-                range_start
-                    .as_deref()
-                    .expect("Unbound ranges are not yet implemented"),
-                environment,
-            )?;
-            let range_end = evaluate_expression(
-                range_end
-                    .as_deref()
-                    .expect("Unbound ranges are not yet implemented"),
-                environment,
-            )?;
+            let range_start = if let Some(range_start) = range_start {
+                evaluate_expression(range_start, environment)?
+            } else {
+                return Err(EvaluationError::type_error(
+                    "ranges without a lower bound cannot be evaluated into a value",
+                    start,
+                    end,
+                )
+                .into());
+            };
 
             let range_start = i64::try_from(range_start).into_evaluation_result(start, end)?;
-            let range_end = i64::try_from(range_end).into_evaluation_result(start, end)?;
-            let range = RangeInclusive::new(range_start, range_end)
-                .map(Value::from)
-                .collect::<Vec<Value>>();
 
-            Value::from(range)
+            if let Some(range_end) = range_end {
+                let range_end = evaluate_expression(range_end, environment)?;
+                let range_end = i64::try_from(range_end).into_evaluation_result(start, end)?;
+
+                Value::from(range_start..=range_end)
+            } else {
+                Value::from(range_start..)
+            }
         }
         Expression::RangeExclusive {
             start: range_start,
             end: range_end,
         } => {
-            let range_start = evaluate_expression(
-                range_start
-                    .as_deref()
-                    .expect("Unbound ranges are not yet implemented"),
-                environment,
-            )?;
-            let range_end = evaluate_expression(
-                range_end
-                    .as_deref()
-                    .expect("Unbound ranges are not yet implemented"),
-                environment,
-            )?;
+            let range_start = if let Some(range_start) = range_start {
+                evaluate_expression(range_start, environment)?
+            } else {
+                return Err(EvaluationError::type_error(
+                    "ranges without a lower bound cannot be evaluated into a value",
+                    start,
+                    end,
+                )
+                .into());
+            };
 
             let range_start = i64::try_from(range_start).into_evaluation_result(start, end)?;
-            let range_end = i64::try_from(range_end).into_evaluation_result(start, end)?;
-            let range = Range {
-                start: range_start,
-                end: range_end,
-            }
-            .map(Value::from)
-            .collect::<Vec<Value>>();
 
-            Value::from(range)
+            if let Some(range_end) = range_end {
+                let range_end = evaluate_expression(range_end, environment)?;
+                let range_end = i64::try_from(range_end).into_evaluation_result(start, end)?;
+
+                Value::from(range_start..range_end)
+            } else {
+                Value::from(range_start..)
+            }
         }
     };
 
@@ -1128,8 +1125,9 @@ fn call_function_by_name(
     let values = environment.borrow().get_all_by_name(name);
     let result = try_call_function(&values, evaluated_args, environment, start, end);
     if let Err(FunctionCarrier::FunctionNotFound) = result {
+        let arguments = evaluated_args.iter().map(Value::value_type).join(", ");
         return Err(FunctionCarrier::EvaluationError(EvaluationError::new(
-            format!("no function called '{name}' found matches the arguments"),
+            format!("no function called '{name}' found matches the arguments: ({arguments})"),
             start,
             end,
         )));
@@ -1240,60 +1238,18 @@ fn execute_for_iterations(
 
     match cur {
         ForIteration::Iteration { l_value, sequence } => {
-            let sequence = evaluate_expression(sequence, environment)?;
+            let mut sequence = evaluate_expression(sequence, environment)?;
+            let iter = mut_value_to_iterator(&mut sequence).into_evaluation_result(start, end)?;
 
-            // Unpack the sequence
-            let Value::Sequence(sequence) = sequence else {
-                return Err(EvaluationError::syntax_error(
-                    &format!("cannot iterate over {}", sequence.value_type()),
-                    start,
-                    end,
-                )
-                .into());
-            };
+            let mut scope = Environment::new_scope(environment);
+            for r_value in iter {
+                scope.borrow_mut().reset();
+                declare_or_assign_variable(l_value, r_value?, true, &mut scope, start, end)?;
 
-            macro_rules! implement_loop {
-                ($iter:expr, $convert:expr) => {
-                    let mut scope = Environment::new_scope(environment);
-                    for item in $iter {
-                        scope.borrow_mut().reset();
-                        declare_or_assign_variable(
-                            l_value,
-                            $convert(item),
-                            true,
-                            &mut scope,
-                            start,
-                            end,
-                        )?;
-
-                        if tail.is_empty() {
-                            execute_body(body, &mut scope, out_values)?;
-                        } else {
-                            execute_for_iterations(tail, body, out_values, &mut scope, start, end)?;
-                        }
-                    }
-                };
-            }
-
-            match sequence {
-                Sequence::String(str) => {
-                    let str = str.borrow();
-                    implement_loop!(str.chars(), |it| Value::from(String::from(it)));
-                    drop(str);
-                }
-                Sequence::List(xs) => {
-                    let xs = xs.borrow();
-                    implement_loop!(xs.iter(), |it: &Value| it.clone());
-                }
-                Sequence::Tuple(values) => {
-                    implement_loop!(&*values, |it: &Value| it.clone());
-                }
-                Sequence::Map(map, _) => {
-                    let xs = map.borrow();
-
-                    implement_loop!(xs.iter(), |(key, value): (&Value, &Value)| Value::Sequence(
-                        Sequence::Tuple(Rc::new(vec![key.clone(), value.clone(),]))
-                    ));
+                if tail.is_empty() {
+                    execute_body(body, &mut scope, out_values)?;
+                } else {
+                    execute_for_iterations(tail, body, out_values, &mut scope, start, end)?;
                 }
             }
         }

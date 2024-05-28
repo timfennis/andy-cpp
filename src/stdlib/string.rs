@@ -2,7 +2,8 @@ use andy_cpp_macros::export_module;
 
 #[export_module]
 mod inner {
-    use crate::interpreter::value::{Sequence, Value};
+    use crate::interpreter::sequence::Sequence;
+    use crate::interpreter::value::Value;
     use anyhow::anyhow;
     use itertools::Itertools;
     use std::rc::Rc;

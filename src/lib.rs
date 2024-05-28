@@ -6,6 +6,7 @@
 #![allow(clippy::missing_panics_doc)]
 
 pub mod ast;
+mod compare;
 mod hash_map;
 pub mod interpreter;
 pub mod lexer;

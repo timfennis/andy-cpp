@@ -1,8 +1,9 @@
-use crate::interpreter::value::Value;
-use std::cmp::Ordering;
-
 #[andy_cpp_macros::export_module]
 mod inner {
+    use crate::compare::FallibleOrd;
+    use crate::interpreter::value::Value;
+    use std::cmp::Ordering;
+
     pub fn assert(value: bool) -> Value {
         assert!(value, "failed asserting that argument is true");
         Value::Unit

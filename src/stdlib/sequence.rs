@@ -1,41 +1,47 @@
-use crate::interpreter::value::Value;
+use crate::{compare::FallibleOrd, interpreter::value::Value};
 use andy_cpp_macros::export_module;
 use std::cmp::Ordering;
 
-trait TryCompare {
+trait TryCompare<R> {
     type Error;
-    fn try_min(&mut self) -> Result<Value, Self::Error>;
-    fn try_max(&mut self) -> Result<Value, Self::Error>;
+    fn try_min(&mut self) -> Result<R, Self::Error>;
+    fn try_max(&mut self) -> Result<R, Self::Error>;
 }
 
-impl<'a, T> TryCompare for T
+impl<C, T, R> TryCompare<R> for C
 where
-    T: Iterator<Item = &'a Value>,
+    C: Iterator<Item = T>,
+    T: FallibleOrd<Error = anyhow::Error>,
+    T: Into<R>,
 {
     type Error = anyhow::Error;
 
-    fn try_min(&mut self) -> Result<Value, Self::Error> {
-        self.try_fold(None, |a: Option<&Value>, b| match a {
+    fn try_min(&mut self) -> Result<R, Self::Error> {
+        self.try_fold(None::<T>, |a, b| match a {
             None => Ok(Some(b)),
-            Some(a) => a.try_cmp(b).map(|o| match o {
+            Some(a) => a.try_cmp(&b).map(|o| match o {
                 Ordering::Greater => Some(b),
                 Ordering::Equal | Ordering::Less => Some(a),
             }),
         })
-        .and_then(|x| x.ok_or_else(|| anyhow::anyhow!("empty input to min")))
-        .cloned()
+        .and_then(|x| {
+            x.map(Into::into)
+                .ok_or_else(|| anyhow::anyhow!("empty input to min"))
+        })
     }
 
-    fn try_max(&mut self) -> Result<Value, Self::Error> {
-        self.try_fold(None, |a: Option<&Value>, b| match a {
+    fn try_max(&mut self) -> Result<R, Self::Error> {
+        self.try_fold(None::<T>, |a, b| match a {
             None => Ok(Some(b)),
-            Some(a) => a.try_cmp(b).map(|o| match o {
+            Some(a) => a.try_cmp(&b).map(|o| match o {
                 Ordering::Less => Some(b),
                 Ordering::Equal | Ordering::Greater => Some(a),
             }),
         })
-        .and_then(|x| x.ok_or_else(|| anyhow::anyhow!("empty input to max")))
-        .cloned()
+        .and_then(|x| {
+            x.map(Into::into)
+                .ok_or_else(|| anyhow::anyhow!("empty input to max"))
+        })
     }
 }
 
@@ -60,7 +66,8 @@ fn try_sort(v: &mut [Value]) -> anyhow::Result<()> {
 
 #[export_module]
 mod inner {
-    use crate::interpreter::value::{Sequence, Value};
+    use crate::interpreter::sequence::Sequence;
+    use crate::interpreter::value::Value;
     use anyhow::anyhow;
     use itertools::Itertools;
     use std::cell::RefCell;
@@ -77,6 +84,7 @@ mod inner {
             Sequence::List(l) => l.try_borrow()?.iter().try_max(),
             Sequence::Tuple(l) => l.iter().try_max(),
             Sequence::Map(map, _) => map.borrow().keys().try_max(),
+            Sequence::Iterator(iter) => iter.borrow_mut().try_max(),
         }
     }
     pub fn min(seq: &Sequence) -> anyhow::Result<Value> {
@@ -90,6 +98,7 @@ mod inner {
             Sequence::List(l) => l.try_borrow()?.iter().try_min(),
             Sequence::Tuple(l) => l.iter().try_min(),
             Sequence::Map(map, _) => map.borrow().keys().try_min(),
+            Sequence::Iterator(iter) => iter.borrow_mut().try_min(),
         }
     }
 
@@ -107,6 +116,7 @@ mod inner {
             }
             Sequence::Tuple(_) => Err(anyhow!("tuple cannot be sorted in place")),
             Sequence::Map(_, _) => Err(anyhow!("map cannot be sorted in place")),
+            Sequence::Iterator(_) => Err(anyhow!("iterator cannot be sorted in place")),
         }
     }
 
@@ -131,17 +141,24 @@ mod inner {
                 try_sort(&mut out)?;
                 Ok(Sequence::List(Rc::new(RefCell::new(out))))
             }
+            Sequence::Iterator(iter) => {
+                let mut iter = iter.borrow_mut();
+                let mut out: Vec<Value> = iter.by_ref().collect();
+                try_sort(&mut out)?;
+                Ok(Sequence::List(Rc::new(RefCell::new(out))))
+            }
         }
     }
     pub fn byte_len(str: &str) -> usize {
         str.len()
     }
-    pub fn len(seq: &Sequence) -> usize {
+    pub fn len(seq: &Sequence) -> anyhow::Result<usize> {
         match seq {
-            Sequence::String(s) => s.borrow().chars().count(),
-            Sequence::List(l) => l.borrow().len(),
-            Sequence::Tuple(t) => t.len(),
-            Sequence::Map(d, _) => d.borrow().len(),
+            Sequence::String(s) => Ok(s.borrow().chars().count()),
+            Sequence::List(l) => Ok(l.borrow().len()),
+            Sequence::Tuple(t) => Ok(t.len()),
+            Sequence::Map(d, _) => Ok(d.borrow().len()),
+            Sequence::Iterator(_) => Err(anyhow!("cannot determine the length of an iterator")),
         }
     }
 }

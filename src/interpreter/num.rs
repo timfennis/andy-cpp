@@ -13,6 +13,8 @@ use crate::interpreter::evaluate::EvaluationError;
 use crate::interpreter::int::Int;
 use crate::lexer::Location;
 
+use super::value::ValueType;
+
 #[derive(Debug, Clone)]
 pub enum Number {
     Int(Int),
@@ -75,6 +77,12 @@ impl PartialEq for Number {
             (Number::Complex(left), Number::Complex(right)) => left.eq(right),
             _ => false,
         }
+    }
+}
+
+impl Default for Number {
+    fn default() -> Self {
+        Number::Int(Int::Int64(0))
     }
 }
 
@@ -620,6 +628,12 @@ pub enum NumberType {
     Float,
     Rational,
     Complex,
+}
+
+impl From<NumberType> for ValueType {
+    fn from(value: NumberType) -> Self {
+        Self::Number(value)
+    }
 }
 
 impl From<&Number> for NumberType {

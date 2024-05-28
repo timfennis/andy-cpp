@@ -1,7 +1,7 @@
 use crate::hash_map;
 use crate::hash_map::HashMap;
-use crate::interpreter::value::DefaultMap;
-use crate::interpreter::value::{Sequence, Value};
+use crate::interpreter::sequence::{DefaultMap, Sequence};
+use crate::interpreter::value::Value;
 use std::cell::RefCell;
 use std::rc::Rc;
 
