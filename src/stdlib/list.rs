@@ -5,8 +5,26 @@ use std::rc::Rc;
 mod inner {
     use crate::interpreter::value::{Sequence, Value};
     use anyhow::anyhow;
+
     pub fn contains(list: &[Value], elem: &Value) -> bool {
         list.contains(elem)
+    }
+
+    pub fn contains_subsequence(list: &[Value], subsequence: &[Value]) -> bool {
+        list.windows(subsequence.len()).contains(&subsequence)
+    }
+
+    pub fn find_subsequence(list: &[Value], subsequence: &[Value]) -> Value {
+        let result = list
+            .windows(subsequence.len())
+            .enumerate()
+            .find(|(_, seq)| *seq == subsequence)
+            .map(|(idx, _)| idx);
+        if let Some(result) = result {
+            Value::from(result)
+        } else {
+            Value::Unit
+        }
     }
 
     pub fn insert(list: &mut Vec<Value>, index: usize, elem: Value) -> anyhow::Result<Value> {
@@ -31,6 +49,14 @@ mod inner {
 
     pub fn pop(list: &mut Vec<Value>) -> Value {
         list.pop().unwrap_or(Value::Unit)
+    }
+
+    pub fn pop_left(list: &mut Vec<Value>) -> Value {
+        if list.is_empty() {
+            return Value::Unit;
+        }
+
+        list.remove(0)
     }
 
     pub fn reversed(list: &[Value]) -> Vec<Value> {
