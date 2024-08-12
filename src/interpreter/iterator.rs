@@ -144,11 +144,6 @@ where
 /// The mutable string iterator effectively takes a reference to the string and keeps track of the
 /// current offset in order to implement character by character iteration (instead of iterating over
 /// u8's)
-///
-/// The current implementation is probably needlessly slow for very long strings since every call to
-/// `next` does a `string.chars().drop(offset)` with the current offset. We might look into a way to
-/// improve this in the future but fighting the borrow checker on this has already been a huge
-/// nightmare.
 pub struct MutableStringIterator {
     inner: Rc<RefCell<String>>,
     offset: usize,
@@ -167,14 +162,11 @@ impl Iterator for MutableStringIterator {
     type Item = Value;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let current_char = self
-            .inner
-            .borrow()
+        let current_char = self.inner.borrow()[self.offset..]
             .chars()
-            .dropping(self.offset)
             .take(1)
             .collect::<String>();
-        self.offset += 1;
+        self.offset += current_char.len();
         if current_char.is_empty() {
             None
         } else {
@@ -211,6 +203,7 @@ where
         }
     }
 }
+
 /// Hashmaps
 /// Hashmaps
 /// Hashmaps

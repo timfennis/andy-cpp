@@ -3,6 +3,7 @@ use std::rc::Rc;
 
 #[andy_cpp_macros::export_module]
 mod inner {
+    use crate::interpreter::iterator::ValueIterator;
     use crate::interpreter::sequence::Sequence;
     use crate::interpreter::value::Value;
     use anyhow::anyhow;
