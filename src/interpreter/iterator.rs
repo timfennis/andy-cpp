@@ -119,15 +119,11 @@ pub enum MutableVecIterator<'a, T> {
 
 impl<'a, T> MutableVecIterator<'a, T> {
     pub fn from_rc_ref_cell_vec(value: &mut Rc<RefCell<Vec<T>>>) -> MutableVecIterator<T> {
-        if Rc::get_mut(value).is_some() {
-            // TODO: Does this branch make any sense?!?!?
-            let vec = Rc::get_mut(value).expect("must be some at this point");
-            let ito_iter = vec.take().into_iter();
-            MutableVecIterator::IntoIter(ito_iter)
-        } else {
-            MutableVecIterator::RefCellIterator(RefCellIterator {
+        match Rc::get_mut(value) {
+            Some(vec) => MutableVecIterator::IntoIter(vec.take().into_iter()),
+            None => MutableVecIterator::RefCellIterator(RefCellIterator {
                 inner: Some(Ref::map(value.borrow(), |it| &it[..])),
-            })
+            }),
         }
     }
 }
@@ -159,9 +155,9 @@ pub struct MutableStringIterator {
 }
 
 impl MutableStringIterator {
-    pub fn new(value: &mut Rc<RefCell<String>>) -> Self {
+    pub fn new(value: &Rc<RefCell<String>>) -> Self {
         Self {
-            inner: Rc::clone(value), // TODO: does it make sense to take a &mut for consistency if we're just going to Rc::clone anyways? maybe we can be more restrictive in what we take Ref<String> would be mint!
+            inner: Rc::clone(value),
             offset: 0,
         }
     }
