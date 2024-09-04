@@ -1,0 +1,12 @@
+--PROGRAM--
+counter := 0;
+for i in 0..100 {
+    counter += 1;
+    if i == 23 {
+        break;
+    }
+}
+assert(counter == 23);
+print("ok");
+--EXPECT--
+ok

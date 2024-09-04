@@ -52,6 +52,7 @@ pub enum Token {
     If,
     Else,
     Return,
+    Break,
     For,
     In,
     While,
@@ -120,6 +121,7 @@ impl fmt::Display for Token {
             Self::If => "if",
             Self::Else => "else",
             Self::Return => "return",
+            Self::Break => "break",
             Self::For => "for",
             Self::In => "in",
             Self::While => "while",
@@ -303,6 +305,7 @@ impl From<String> for Token {
             "true" => Self::True,
             "false" => Self::False,
             "return" => Self::Return,
+            "break" => Self::Break,
             _ => Self::Identifier(value),
         }
     }
