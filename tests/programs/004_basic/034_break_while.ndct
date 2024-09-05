@@ -1,0 +1,11 @@
+--PROGRAM--
+i := 0;
+while true {
+    i += 1;
+    if i == 30 { break; }
+}
+
+assert(i == 30);
+print("ok");
+--EXPECT--
+ok

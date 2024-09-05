@@ -338,7 +338,12 @@ pub(crate) fn evaluate_expression(
             loop {
                 let lit = evaluate_expression(expression, environment)?;
                 if lit == Value::Bool(true) {
-                    evaluate_expression(loop_body, environment)?;
+                    let result = evaluate_expression(loop_body, environment);
+                    match result {
+                        Err(FunctionCarrier::Break(value)) => return Ok(value),
+                        Err(err) => return Err(err),
+                        Ok(_) => {}
+                    }
                 } else if lit == Value::Bool(false) {
                     break;
                 } else {
