@@ -276,6 +276,8 @@ impl From<FunctionCallError> for FunctionCarrier {
 pub enum FunctionCarrier {
     #[error("not an error")]
     Return(Value),
+    #[error("not an error")]
+    Break(Value),
     #[error("evaluation error {0}")]
     EvaluationError(#[from] EvaluationError),
     #[error("function does not exist")]

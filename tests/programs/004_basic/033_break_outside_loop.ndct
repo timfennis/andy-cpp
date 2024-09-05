@@ -1,0 +1,4 @@
+--PROGRAM--
+break;
+--EXPECT-ERROR--
+unexpected break statement outside of loop

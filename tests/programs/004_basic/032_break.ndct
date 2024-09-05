@@ -1,12 +1,24 @@
 --PROGRAM--
 counter := 0;
-for i in 0..100 {
+for i in 1..100 {
     counter += 1;
     if i == 23 {
         break;
     }
 }
 assert(counter == 23);
+
+// Nested break
+counter := 0;
+for i in 0..50 {
+    for j in 1..5 {
+        counter += 1;
+        if j == 2 { break; }
+    }
+}
+
+assert(counter == 100);
+
 print("ok");
 --EXPECT--
 ok

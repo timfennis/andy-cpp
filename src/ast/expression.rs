@@ -100,6 +100,7 @@ pub enum Expression {
     Return {
         value: Box<ExpressionLocation>,
     },
+    Break,
     RangeInclusive {
         start: Option<Box<ExpressionLocation>>,
         end: Option<Box<ExpressionLocation>>,

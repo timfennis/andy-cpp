@@ -447,7 +447,15 @@ pub(crate) fn evaluate_expression(
         }
         Expression::For { iterations, body } => {
             let mut out_values = Vec::new();
-            execute_for_iterations(iterations, body, &mut out_values, environment, start, end)?;
+            let result =
+                execute_for_iterations(iterations, body, &mut out_values, environment, start, end);
+
+            match result {
+                Err(FunctionCarrier::Break(break_value)) => return Ok(break_value),
+                Err(err) => return Err(err),
+                Ok(_) => {}
+            }
+
             match &**body {
                 ForBody::Block(_) => Value::Unit,
                 ForBody::List(_) => Value::from(out_values),
@@ -476,6 +484,7 @@ pub(crate) fn evaluate_expression(
                 environment,
             )?));
         }
+        Expression::Break => return Err(FunctionCarrier::Break(Value::Unit)), // TODO: for now we just put unit in here so we can improve break functionality later
         Expression::Index {
             value: value_expr,
             index: index_expr,
@@ -1188,7 +1197,12 @@ fn call_function(
 
     match result {
         Err(FunctionCarrier::Return(value)) | Ok(value) => Ok(value),
-        e @ Err(FunctionCarrier::EvaluationError(_) | FunctionCarrier::FunctionNotFound) => e,
+        e @ Err(
+            FunctionCarrier::EvaluationError(_)
+            | FunctionCarrier::FunctionNotFound
+            // TODO: for now we just pass the break from inside the function to outside the function. This would allow some pretty funky code and might introduce weird bugs?
+            | FunctionCarrier::Break(_),
+        ) => e,
         Err(carrier @ FunctionCarrier::IntoEvaluationError(_)) => Err(carrier.lift(start, end)),
     }
 }

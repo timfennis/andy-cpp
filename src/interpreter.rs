@@ -82,6 +82,13 @@ impl Interpreter {
                         expr.start,
                         expr.end,
                     ))?;
+                },
+                Err(FunctionCarrier::Break(_)) => {
+                    Err(EvaluationError::syntax_error(
+                        "unexpected break statement outside of loop body",
+                        expr.start,
+                        expr.end,
+                    ))?;
                 }
                 Err(e) => Err(e)?,
             }
@@ -114,7 +121,8 @@ pub enum InterpreterError {
 impl From<FunctionCarrier> for InterpreterError {
     fn from(value: FunctionCarrier) -> Self {
         match value {
-            FunctionCarrier::Return(_) => panic!("attempted to convert return value to Error"),
+            FunctionCarrier::Return(_) => panic!("attempted to convert return to Error"),
+            FunctionCarrier::Break(_) => panic!("attempted to convert break to Error"),
             FunctionCarrier::EvaluationError(e) => e.into(),
             FunctionCarrier::FunctionNotFound => panic!("attempted to convert FunctionNotFound to Error without line number info"),
             FunctionCarrier::IntoEvaluationError(_) => panic!("attempted to convert incomplete EvaluationError into Error without line number info"),
