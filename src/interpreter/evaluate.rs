@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::error::Error;
 use std::fmt;
-use std::ops::{IndexMut, Neg, Not, Rem};
+use std::ops::{Deref, IndexMut, Neg, Not, Rem};
 use std::rc::Rc;
 
 use either::Either;
@@ -494,9 +494,9 @@ pub(crate) fn evaluate_expression(
             value: value_expr,
             index: index_expr,
         } => {
-            let value = evaluate_expression(value_expr, environment)?;
+            let indexed_value = evaluate_expression(value_expr, environment)?;
 
-            match value {
+            match indexed_value {
                 Value::Sequence(Sequence::String(string)) => {
                     let string = string.borrow();
 
@@ -518,23 +518,56 @@ pub(crate) fn evaluate_expression(
                     Value::Sequence(Sequence::String(Rc::new(RefCell::new(String::from(char)))))
                 }
                 Value::Sequence(Sequence::List(list)) => {
-                    let index = value_to_forward_index(
-                        evaluate_expression(index_expr, environment)?,
-                        list.borrow().len(),
-                        index_expr.start,
-                        index_expr.end,
-                    )?;
+                    let list_length = list.borrow().len();
+                    match &index_expr.expression {
+                        Expression::RangeInclusive { start, end } => {
+                            let start = if let Some(start) = start {
+                                Some(value_to_forward_index(
+                                    evaluate_expression(&*start, environment)?,
+                                    list_length,
+                                    start.start,
+                                    start.end,
+                                )?)
+                            } else {
+                                None
+                            };
 
-                    let list = list.borrow();
-                    let Some(value) = list.get(index) else {
-                        return Err(EvaluationError::out_of_bounds(
-                            index,
-                            index_expr.start,
-                            index_expr.end,
-                        )
-                        .into());
-                    };
-                    value.clone()
+                            let end = if let Some(end) = end {
+                                Some(value_to_forward_index(
+                                    evaluate_expression(&*end, environment)?,
+                                    list_length,
+                                    end.start,
+                                    end.end,
+                                )?)
+                            } else {
+                                None
+                            };
+
+                            todo!("finish him")
+                        }
+                        Expression::RangeExclusive { start, end } => {
+                            todo!("implement for range exclusive")
+                        }
+                        _ => {
+                            let index = value_to_forward_index(
+                                evaluate_expression(index_expr, environment)?,
+                                list.borrow().len(),
+                                index_expr.start,
+                                index_expr.end,
+                            )?;
+
+                            let list = list.borrow();
+                            let Some(value) = list.get(index) else {
+                                return Err(EvaluationError::out_of_bounds(
+                                    index,
+                                    index_expr.start,
+                                    index_expr.end,
+                                )
+                                .into());
+                            };
+                            value.clone()
+                        }
+                    }
                 }
                 Value::Sequence(Sequence::Tuple(tuple)) => {
                     let index = value_to_forward_index(
@@ -1099,6 +1132,28 @@ where
     fn into_evaluation_result(self, start: Location, end: Location) -> Result<R, FunctionCarrier> {
         self.map_err(|err| FunctionCarrier::EvaluationError(err.as_evaluation_error(start, end)))
     }
+}
+
+fn expression_to_forward_index<D>(
+    expression: Option<D>,
+    list_length: usize,
+    environment: &mut EnvironmentRef,
+) -> Result<Option<usize>, FunctionCarrier>
+where
+    D: Deref<Target = ExpressionLocation>,
+{
+    let result = if let Some(expression) = expression {
+        Some(value_to_forward_index(
+            evaluate_expression(&*expression, environment)?,
+            list_length,
+            expression.start,
+            expression.end,
+        )?)
+    } else {
+        None
+    };
+
+    Ok(result)
 }
 
 /// Takes a value from the Andy C runtime and converts it to a forward index respecting bi-directional
