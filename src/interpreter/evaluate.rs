@@ -138,16 +138,16 @@ pub(crate) fn evaluate_expression(
                     .ok_or_else(|| EvaluationError::undefined_variable(identifier, start, end))??
             }
             Lvalue::Index {
-                value: assign_to,
-                index,
+                value: lhs_expr,
+                index: index_expr,
             } => {
-                let assign_to = evaluate_expression(assign_to, environment)?;
+                let assign_to = evaluate_expression(lhs_expr, environment)?;
                 let new_value = match &assign_to {
                     Value::Sequence(Sequence::List(list)) => {
                         // It's important that index and right_value are computed before the list is borrowed
                         let right_value = evaluate_expression(value, environment)?;
                         let size = list.try_borrow().into_evaluation_result(start, end)?.len();
-                        let index = evaluate_as_index(index, environment)?
+                        let index = evaluate_as_index(index_expr, environment)?
                             .try_into_offset(size, start, end)?;
 
                         let mut list = list.try_borrow_mut().into_evaluation_result(start, end)?;
@@ -165,12 +165,14 @@ pub(crate) fn evaluate_expression(
                                     end,
                                 )?
                             }
-                            Offset::Range(_, _) => todo!("implement indexing with ranges"),
+                            Offset::Range(_, _) => {
+                                todo!("OpAssign into an index with range is not yet implemented")
+                            }
                         }
                     }
                     Value::Sequence(Sequence::Map(dict, default)) => {
                         let right_value = evaluate_expression(value, environment)?;
-                        let index = evaluate_expression(index, environment)?;
+                        let index = evaluate_expression(index_expr, environment)?;
 
                         let mut dict = dict.try_borrow_mut().into_evaluation_result(start, end)?;
 
@@ -495,7 +497,6 @@ pub(crate) fn evaluate_expression(
                         Offset::Range(from_usize, to_usize) => {
                             let list = list.borrow();
                             let Some(values) = list.get(from_usize..to_usize) else {
-                                // TODO: improve error message for slices
                                 return Err(EvaluationError::out_of_bounds(
                                     index,
                                     index_expr.start,
