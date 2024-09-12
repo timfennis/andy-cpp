@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::error::Error;
 use std::fmt;
-use std::ops::{Deref, IndexMut, Neg, Not, Rem};
+use std::ops::{IndexMut, Neg, Not, Rem};
 use std::rc::Rc;
 
 use either::Either;
@@ -522,34 +522,26 @@ pub(crate) fn evaluate_expression(
                 Value::Sequence(Sequence::String(string)) => {
                     let string = string.borrow();
 
-                    let index = value_to_forward_index(
-                        evaluate_expression(index_expr, environment)?,
+                    let index = expression_to_forward_index(
+                        index_expr,
+                        environment,
                         string.chars().count(),
-                        index_expr.start,
-                        index_expr.end,
+                        start,
+                        end,
                     )?;
 
-                    match index {
-                        Index::Element(index_usize) => {
-                            let Some(char) = string.chars().nth(index_usize) else {
-                                return Err(EvaluationError::out_of_bounds(
-                                    index,
-                                    index_expr.start,
-                                    index_expr.end,
-                                )
-                                .into());
-                            };
-                            Value::Sequence(Sequence::String(Rc::new(RefCell::new(String::from(
-                                char,
-                            )))))
-                        }
-                        Index::Range(_, _) => {
-                            todo!("implement indexing in to strings with a range")
-                        }
-                    }
+                    let (start, end) = index.into_tuple();
+                    let new = string
+                        .chars()
+                        .dropping(start)
+                        .take(end - start)
+                        .collect::<String>();
+
+                    new.into()
                 }
                 Value::Sequence(Sequence::List(list)) => {
                     let list_length = list.borrow().len();
+
                     let index = expression_to_forward_index(
                         index_expr,
                         environment,
