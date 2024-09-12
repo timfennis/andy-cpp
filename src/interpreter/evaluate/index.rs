@@ -19,6 +19,15 @@ pub enum Index {
     Range(usize, usize),
 }
 
+impl Index {
+    pub fn into_tuple(&self) -> (usize, usize) {
+        match self {
+            Index::Element(idx) => (*idx, *idx + 1),
+            Index::Range(from, to) => (*from, *to),
+        }
+    }
+}
+
 pub(crate) fn expression_to_forward_index(
     expression_location: &ExpressionLocation,
     environment: &mut EnvironmentRef,
