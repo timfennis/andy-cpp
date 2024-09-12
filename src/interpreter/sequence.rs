@@ -19,13 +19,14 @@ pub enum Sequence {
 }
 
 impl Sequence {
+    #[must_use]
     pub fn length(&self) -> Option<usize> {
         match self {
             Sequence::String(string) => Some(string.borrow().chars().count()),
             Sequence::List(list) => Some(list.borrow().len()),
             Sequence::Tuple(tup) => Some(tup.len()),
             Sequence::Map(map, _) => Some(map.borrow().len()),
-            Sequence::Iterator(iter) => None,
+            Sequence::Iterator(_iter) => None,
         }
     }
 }

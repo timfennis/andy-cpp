@@ -446,12 +446,12 @@ pub(crate) fn evaluate_expression(
         }
         Expression::Break => return Err(FunctionCarrier::Break(Value::Unit)), // TODO: for now we just put unit in here so we can improve break functionality later
         Expression::Index {
-            value: value_expr,
+            value: lhs_expr,
             index: index_expr,
         } => {
-            let indexed_value = evaluate_expression(value_expr, environment)?;
+            let lhs_value = evaluate_expression(lhs_expr, environment)?;
 
-            match indexed_value {
+            match lhs_value {
                 Value::Sequence(Sequence::String(string)) => {
                     let string = string.borrow();
 
@@ -504,7 +504,7 @@ pub(crate) fn evaluate_expression(
                                 .into());
                             };
 
-                            values.iter().cloned().collect::<Vec<Value>>().into()
+                            values.to_vec().into()
                         }
                     }
                 }
@@ -552,8 +552,8 @@ pub(crate) fn evaluate_expression(
                 value => {
                     return Err(EvaluationError::type_error(
                         &format!("cannot index into {}", value.value_type()),
-                        value_expr.start,
-                        value_expr.end,
+                        lhs_expr.start,
+                        lhs_expr.end,
                     )
                     .into())
                 }

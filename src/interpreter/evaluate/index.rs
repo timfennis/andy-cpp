@@ -58,7 +58,7 @@ impl EvaluatedIndex {
                     size
                 };
 
-                Offset::Range(from_idx, to_idx + if inclusive { 1 } else { 0 })
+                Offset::Range(from_idx, to_idx + usize::from(inclusive))
             }
         })
     }
@@ -129,6 +129,7 @@ fn value_to_forward_index_usize(
     }
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub enum Offset {
     Element(usize),
     Range(usize, usize),
