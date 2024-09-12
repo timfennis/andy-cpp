@@ -1,0 +1,4 @@
+--PROGRAM--
+[][0..=]
+--EXPECT-ERROR--
+inclusive ranges must have an end

@@ -83,6 +83,15 @@ pub(crate) fn evaluate_as_index(
         }
     };
 
+    if inclusive && range_end.is_none() {
+        return Err(EvaluationError::new(
+            "inclusive ranges must have an end".to_string(),
+            expression_location.start,
+            expression_location.end,
+        )
+        .into());
+    }
+
     let start = if let Some(range_start) = range_start {
         Some(evaluate_expression(range_start, environment)?)
     } else {
