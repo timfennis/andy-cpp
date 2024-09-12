@@ -1,7 +1,22 @@
 --PROGRAM--
 list := [0,1,2,3,4,5,6,7,8,9];
-cut := list[0..2];
-assert(cut == [0,1,2]);
+
+// Test exclusive ranges
+assert(list[0..3] == [0,1,2]);
+
+// Test inclusive ranges
+assert(list[0..=3] == [0,1,2,3]);
+
+// Test with negative ranges
+assert([0,1,2,3,4,5,6,7,8] == list[0..-1]);
+assert([0,1,2,3,4,5,6,7,8,9] == list[0..=-1]);
+
+// Test with unbound ranges
+assert([0,1,2,3,4,5,6,7,8,9] == list[0..]);
+// For now unbound ranges without a start are not yet supported
+// assert([0,1,2,3,4,5,6,7,8,9] == list[(..=-1)]);
+// For now unbound ranges on both ends are not supported
+// assert([0,1,2,3,4,5,6,7,8,9] == list[..]);
 print("ok");
 --EXPECT--
 ok
