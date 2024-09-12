@@ -17,31 +17,57 @@ use crate::{
     lexer::Location,
 };
 use std::ops::IndexMut;
-use std::{cell::Ref, fmt};
 
 use super::{evaluate_expression, EvaluationError, IntoEvaluationResult};
 
-pub enum Index {
-    Element(usize),
-    Range(usize, usize),
+pub enum EvaluatedIndex {
+    Index(Value),
+    Slice {
+        from: Option<Value>,
+        to: Option<Value>,
+        inclusive: bool,
+    },
 }
 
-impl Index {
-    pub fn into_tuple(&self) -> (usize, usize) {
-        match self {
-            Index::Element(idx) => (*idx, *idx + 1),
-            Index::Range(from, to) => (*from, *to),
-        }
+impl EvaluatedIndex {
+    // TODO: improve error contract so we don't need EvaluationError (maybe??)
+    pub fn try_into_offset(
+        self,
+        size: usize,
+        start: Location,
+        end: Location,
+    ) -> Result<Offset, EvaluationError> {
+        Ok(match self {
+            EvaluatedIndex::Index(idx) => {
+                Offset::Element(value_to_forward_index_usize(idx, size, start, end)?)
+            }
+            EvaluatedIndex::Slice {
+                from,
+                to,
+                inclusive,
+            } => {
+                let from_idx = if let Some(from) = from {
+                    value_to_forward_index_usize(from, size, start, end)?
+                } else {
+                    0
+                };
+
+                let to_idx = if let Some(to) = to {
+                    value_to_forward_index_usize(to, size, start, end)?
+                } else {
+                    size
+                };
+
+                Offset::Range(from_idx, to_idx + if inclusive { 1 } else { 0 })
+            }
+        })
     }
 }
 
-pub(crate) fn expression_to_forward_index(
+pub(crate) fn evaluate_as_index(
     expression_location: &ExpressionLocation,
     environment: &mut EnvironmentRef,
-    size: usize,
-    start: Location,
-    end: Location,
-) -> Result<Index, FunctionCarrier> {
+) -> Result<EvaluatedIndex, FunctionCarrier> {
     let (range_start, range_end, inclusive) = match expression_location.expression {
         Expression::RangeExclusive {
             start: ref range_start,
@@ -53,48 +79,27 @@ pub(crate) fn expression_to_forward_index(
         } => (range_start, range_end, true),
         _ => {
             let result = evaluate_expression(expression_location, environment)?;
-            let index = value_to_forward_index(result, size, start, end)?;
-            return Ok(index);
+            return Ok(EvaluatedIndex::Index(result));
         }
     };
 
-    let start_index = if let Some(range_start) = range_start {
-        value_to_forward_index_usize(
-            evaluate_expression(range_start, environment)?,
-            size,
-            start,
-            end,
-        )
+    let start = if let Some(range_start) = range_start {
+        Some(evaluate_expression(range_start, environment)?)
     } else {
-        Ok(0)
-    }?;
+        None
+    };
 
-    let end_index = if let Some(range_end) = range_end {
-        value_to_forward_index_usize(
-            evaluate_expression(range_end, environment)?,
-            size,
-            start,
-            end,
-        )
+    let end = if let Some(range_end) = range_end {
+        Some(evaluate_expression(range_end, environment)?)
     } else {
-        Ok(size)
-    }?;
+        None
+    };
 
-    Ok(Index::Range(
-        start_index,
-        end_index + if inclusive { 1 } else { 0 },
-    ))
-}
-
-/// Takes a value from the Andy C runtime and converts it to a forward index respecting bi-directional
-/// indexing rules.
-pub(crate) fn value_to_forward_index(
-    value: Value,
-    size: usize,
-    start: Location,
-    end: Location,
-) -> Result<Index, EvaluationError> {
-    value_to_forward_index_usize(value, size, start, end).map(|idx| Index::Element(idx))
+    Ok(EvaluatedIndex::Slice {
+        from: start,
+        to: end,
+        inclusive,
+    })
 }
 
 fn value_to_forward_index_usize(
@@ -124,13 +129,36 @@ fn value_to_forward_index_usize(
     }
 }
 
+pub enum Offset {
+    Element(usize),
+    Range(usize, usize),
+}
+
+impl Offset {
+    pub fn into_tuple(self) -> (usize, usize) {
+        match self {
+            Offset::Element(idx) => (idx, idx + 1),
+            Offset::Range(from, to) => (from, to),
+        }
+    }
+}
+
 pub fn set_at_index(
     lhs: &mut Value,
     rhs: Value,
-    index: Index,
+    index: EvaluatedIndex,
     start: Location,
     end: Location,
 ) -> Result<(), FunctionCarrier> {
+    let Some(size) = lhs.sequence_length() else {
+        return Err(EvaluationError::type_error(
+            "cannot index into this type because it doesn't have a length",
+            start,
+            end,
+        )
+        .into());
+    };
+
     match lhs {
         Value::Sequence(Sequence::List(list)) => {
             let mut list = list.try_borrow_mut().map_err(|_| {
@@ -141,12 +169,14 @@ pub fn set_at_index(
                 )
             })?;
 
+            let index = index.try_into_offset(size, start, end)?;
+
             match index {
-                Index::Element(index_usize) => {
+                Offset::Element(index_usize) => {
                     let x = list.index_mut(index_usize);
                     *x = rhs;
                 }
-                Index::Range(from_usize, to_usize) => {
+                Offset::Range(from_usize, to_usize) => {
                     let tail = list.drain(from_usize..).collect::<Vec<_>>();
 
                     list.extend(rhs.try_into_iter().unwrap());
@@ -160,11 +190,14 @@ pub fn set_at_index(
                 let target_string = target_string.borrow();
 
                 let mut insertion_target = insertion_target.borrow_mut();
+
+                let index = index.try_into_offset(size, start, end)?;
+
                 match index {
-                    Index::Element(index) => {
+                    Offset::Element(index) => {
                         insertion_target.replace_range(index..=index, target_string.as_str());
                     }
-                    Index::Range(from, to) => {
+                    Offset::Range(from, to) => {
                         insertion_target.replace_range(from..to, target_string.as_str());
                     }
                 }
@@ -180,7 +213,17 @@ pub fn set_at_index(
         Value::Sequence(Sequence::Map(map, _)) => {
             let mut map = map.try_borrow_mut().into_evaluation_result(start, end)?;
 
-            map.insert(todo!("add a key variant to index?"), rhs);
+            let key = match index {
+                EvaluatedIndex::Index(idx) => idx,
+                EvaluatedIndex::Slice {
+                    from: _,
+                    to: _,
+                    inclusive: _,
+                } => {
+                    todo!("TODO: implement inserting ranges as dict keys")
+                }
+            };
+            map.insert(key, rhs);
         }
         _ => {
             return Err(EvaluationError::syntax_error(
@@ -192,13 +235,4 @@ pub fn set_at_index(
         }
     };
     Ok(())
-}
-
-impl fmt::Display for Index {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Index::Element(idx) => write!(f, "{}", idx),
-            Index::Range(from, to) => write!(f, "{}..{}", from, to),
-        }
-    }
 }

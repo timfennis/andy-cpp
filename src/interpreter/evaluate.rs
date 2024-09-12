@@ -6,7 +6,7 @@ use std::ops::{IndexMut, Neg, Not, Rem};
 use std::rc::Rc;
 
 use either::Either;
-use index::{expression_to_forward_index, set_at_index, value_to_forward_index, Index};
+use index::{evaluate_as_index, set_at_index, Offset};
 use itertools::Itertools;
 
 use crate::ast::{
@@ -94,26 +94,17 @@ pub(crate) fn evaluate_expression(
                 declare_or_assign_variable(l_value, value, false, environment, start, end)?
             }
             Lvalue::Index {
-                value: assign_to,
-                index,
+                value: lhs_expression,
+                index: index_expression,
             } => {
-                let mut lhs = evaluate_expression(assign_to, environment)?;
+                let mut lhs = evaluate_expression(lhs_expression, environment)?;
 
                 // the computation of this value may need the list that we assign to,
                 // therefore the value needs to be computed before we mutably borrow the list
                 // see: `bug0001_in_place_map.ndct`
                 let rhs = evaluate_expression(value, environment)?;
 
-                let Some(size) = lhs.sequence_length() else {
-                    return Err(EvaluationError::type_error(
-                        "cannot index into this type because it doesn't have a length",
-                        start,
-                        end,
-                    )
-                    .into());
-                };
-
-                let index = expression_to_forward_index(index, environment, size, start, end)?;
+                let index = evaluate_as_index(index_expression, environment)?;
 
                 set_at_index(&mut lhs, rhs, index, start, end)?;
                 lhs
@@ -155,17 +146,14 @@ pub(crate) fn evaluate_expression(
                     Value::Sequence(Sequence::List(list)) => {
                         // It's important that index and right_value are computed before the list is borrowed
                         let right_value = evaluate_expression(value, environment)?;
-                        let index = value_to_forward_index(
-                            evaluate_expression(index, environment)?,
-                            list.try_borrow().into_evaluation_result(start, end)?.len(),
-                            start,
-                            end,
-                        )?;
+                        let size = list.try_borrow().into_evaluation_result(start, end)?.len();
+                        let index = evaluate_as_index(index, environment)?
+                            .try_into_offset(size, start, end)?;
 
                         let mut list = list.try_borrow_mut().into_evaluation_result(start, end)?;
 
                         match index {
-                            Index::Element(index) => {
+                            Offset::Element(index) => {
                                 let list_item = list.index_mut(index);
 
                                 apply_operation_to_value(
@@ -177,7 +165,7 @@ pub(crate) fn evaluate_expression(
                                     end,
                                 )?
                             }
-                            Index::Range(_, _) => todo!("implement indexing with ranges"),
+                            Offset::Range(_, _) => todo!("implement indexing with ranges"),
                         }
                     }
                     Value::Sequence(Sequence::Map(dict, default)) => {
@@ -467,9 +455,7 @@ pub(crate) fn evaluate_expression(
                 Value::Sequence(Sequence::String(string)) => {
                     let string = string.borrow();
 
-                    let index = expression_to_forward_index(
-                        index_expr,
-                        environment,
+                    let index = evaluate_as_index(index_expr, environment)?.try_into_offset(
                         string.chars().count(),
                         start,
                         end,
@@ -487,16 +473,14 @@ pub(crate) fn evaluate_expression(
                 Value::Sequence(Sequence::List(list)) => {
                     let list_length = list.borrow().len();
 
-                    let index = expression_to_forward_index(
-                        index_expr,
-                        environment,
+                    let index = evaluate_as_index(index_expr, environment)?.try_into_offset(
                         list_length,
                         start,
                         end,
                     )?;
 
                     match index {
-                        Index::Element(usize_index) => {
+                        Offset::Element(usize_index) => {
                             let list = list.borrow();
                             let Some(value) = list.get(usize_index) else {
                                 return Err(EvaluationError::out_of_bounds(
@@ -508,7 +492,7 @@ pub(crate) fn evaluate_expression(
                             };
                             value.clone()
                         }
-                        Index::Range(from_usize, to_usize) => {
+                        Offset::Range(from_usize, to_usize) => {
                             let list = list.borrow();
                             let Some(values) = list.get(from_usize..to_usize) else {
                                 // TODO: improve error message for slices
@@ -525,15 +509,14 @@ pub(crate) fn evaluate_expression(
                     }
                 }
                 Value::Sequence(Sequence::Tuple(tuple)) => {
-                    let index = value_to_forward_index(
-                        evaluate_expression(index_expr, environment)?,
+                    let index = evaluate_as_index(index_expr, environment)?.try_into_offset(
                         tuple.len(),
-                        index_expr.start,
-                        index_expr.end,
+                        start,
+                        end,
                     )?;
 
                     match index {
-                        Index::Element(index_usize) => {
+                        Offset::Element(index_usize) => {
                             let Some(value) = tuple.get(index_usize) else {
                                 return Err(EvaluationError::out_of_bounds(
                                     index,
@@ -546,7 +529,7 @@ pub(crate) fn evaluate_expression(
                             value.clone()
                         }
 
-                        Index::Range(_, _) => {
+                        Offset::Range(_, _) => {
                             todo!("implement range index for tuples")
                         }
                     }
@@ -1024,11 +1007,18 @@ impl EvaluationError {
     }
 
     #[must_use]
-    pub fn out_of_bounds(index: Index, start: Location, end: Location) -> Self {
-        Self {
-            text: format!("Index {index} out of bounds"),
-            start,
-            end,
+    pub fn out_of_bounds(index: Offset, start: Location, end: Location) -> Self {
+        match index {
+            Offset::Element(index) => Self {
+                text: format!("Index {index} out of bounds"),
+                start,
+                end,
+            },
+            Offset::Range(from, to) => Self {
+                text: format!("Index {from} or {to} out of bounds"),
+                start,
+                end,
+            },
         }
     }
 
