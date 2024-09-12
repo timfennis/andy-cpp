@@ -6,6 +6,7 @@ use std::ops::{Deref, IndexMut, Neg, Not, Rem};
 use std::rc::Rc;
 
 use either::Either;
+use index::{expression_to_forward_index, value_to_forward_index, Index};
 use itertools::Itertools;
 
 use crate::ast::{
@@ -24,6 +25,8 @@ use crate::interpreter::value::{Value, ValueType};
 use crate::lexer::Location;
 
 pub type EvaluationResult = Result<Value, FunctionCarrier>;
+
+mod index;
 
 #[allow(clippy::too_many_lines)]
 pub(crate) fn evaluate_expression(
@@ -110,8 +113,13 @@ pub(crate) fn evaluate_expression(
                             .try_borrow_mut()
                             .map_err(|_| EvaluationError::mutation_error("you cannot mutate a value in a list while you're iterating over this list", start, end))?;
 
-                        let x = list.index_mut(index);
-                        *x = value;
+                        match index {
+                            Index::Element(index) => {
+                                let x = list.index_mut(index);
+                                *x = value;
+                            }
+                            Index::Range(_, _) => todo!("implement assignment to ranges"),
+                        }
                     }
                     Value::Sequence(Sequence::String(insertion_target)) => {
                         let value = evaluate_expression(value, environment)?;
@@ -126,7 +134,16 @@ pub(crate) fn evaluate_expression(
                             )?;
 
                             let mut insertion_target = insertion_target.borrow_mut();
-                            insertion_target.replace_range(index..=index, target_string.as_str());
+                            match index {
+                                Index::Element(index) => {
+                                    insertion_target
+                                        .replace_range(index..=index, target_string.as_str());
+                                }
+                                Index::Range(from, to) => {
+                                    insertion_target
+                                        .replace_range(from..=to, target_string.as_str());
+                                }
+                            }
                         } else {
                             return Err(EvaluationError::syntax_error(
                                 &format!("cannot insert {} at index", value.value_type()),
@@ -202,16 +219,21 @@ pub(crate) fn evaluate_expression(
 
                         let mut list = list.try_borrow_mut().into_evaluation_result(start, end)?;
 
-                        let list_item = list.index_mut(index);
+                        match index {
+                            Index::Element(index) => {
+                                let list_item = list.index_mut(index);
 
-                        apply_operation_to_value(
-                            environment,
-                            list_item,
-                            operation,
-                            right_value,
-                            start,
-                            end,
-                        )?
+                                apply_operation_to_value(
+                                    environment,
+                                    list_item,
+                                    operation,
+                                    right_value,
+                                    start,
+                                    end,
+                                )?
+                            }
+                            Index::Range(_, _) => todo!("implement indexing with ranges"),
+                        }
                     }
                     Value::Sequence(Sequence::Map(dict, default)) => {
                         let right_value = evaluate_expression(value, environment)?;
@@ -507,57 +529,39 @@ pub(crate) fn evaluate_expression(
                         index_expr.end,
                     )?;
 
-                    let Some(char) = string.chars().nth(index) else {
-                        return Err(EvaluationError::out_of_bounds(
-                            index,
-                            index_expr.start,
-                            index_expr.end,
-                        )
-                        .into());
-                    };
-                    Value::Sequence(Sequence::String(Rc::new(RefCell::new(String::from(char)))))
+                    match index {
+                        Index::Element(index_usize) => {
+                            let Some(char) = string.chars().nth(index_usize) else {
+                                return Err(EvaluationError::out_of_bounds(
+                                    index,
+                                    index_expr.start,
+                                    index_expr.end,
+                                )
+                                .into());
+                            };
+                            Value::Sequence(Sequence::String(Rc::new(RefCell::new(String::from(
+                                char,
+                            )))))
+                        }
+                        Index::Range(_, _) => {
+                            todo!("implement indexing in to strings with a range")
+                        }
+                    }
                 }
                 Value::Sequence(Sequence::List(list)) => {
                     let list_length = list.borrow().len();
-                    match &index_expr.expression {
-                        Expression::RangeInclusive { start, end } => {
-                            let start = if let Some(start) = start {
-                                Some(value_to_forward_index(
-                                    evaluate_expression(&*start, environment)?,
-                                    list_length,
-                                    start.start,
-                                    start.end,
-                                )?)
-                            } else {
-                                None
-                            };
+                    let index = expression_to_forward_index(
+                        index_expr,
+                        environment,
+                        list_length,
+                        start,
+                        end,
+                    )?;
 
-                            let end = if let Some(end) = end {
-                                Some(value_to_forward_index(
-                                    evaluate_expression(&*end, environment)?,
-                                    list_length,
-                                    end.start,
-                                    end.end,
-                                )?)
-                            } else {
-                                None
-                            };
-
-                            todo!("finish him")
-                        }
-                        Expression::RangeExclusive { start, end } => {
-                            todo!("implement for range exclusive")
-                        }
-                        _ => {
-                            let index = value_to_forward_index(
-                                evaluate_expression(index_expr, environment)?,
-                                list.borrow().len(),
-                                index_expr.start,
-                                index_expr.end,
-                            )?;
-
+                    match index {
+                        Index::Element(usize_index) => {
                             let list = list.borrow();
-                            let Some(value) = list.get(index) else {
+                            let Some(value) = list.get(usize_index) else {
                                 return Err(EvaluationError::out_of_bounds(
                                     index,
                                     index_expr.start,
@@ -566,6 +570,20 @@ pub(crate) fn evaluate_expression(
                                 .into());
                             };
                             value.clone()
+                        }
+                        Index::Range(from_usize, to_usize) => {
+                            let list = list.borrow();
+                            let Some(values) = list.get(from_usize..to_usize) else {
+                                // TODO: improve error message for slices
+                                return Err(EvaluationError::out_of_bounds(
+                                    index,
+                                    index_expr.start,
+                                    index_expr.end,
+                                )
+                                .into());
+                            };
+
+                            values.iter().cloned().collect::<Vec<Value>>().into()
                         }
                     }
                 }
@@ -577,16 +595,24 @@ pub(crate) fn evaluate_expression(
                         index_expr.end,
                     )?;
 
-                    let Some(value) = tuple.get(index) else {
-                        return Err(EvaluationError::out_of_bounds(
-                            index,
-                            index_expr.start,
-                            index_expr.end,
-                        )
-                        .into());
-                    };
+                    match index {
+                        Index::Element(index_usize) => {
+                            let Some(value) = tuple.get(index_usize) else {
+                                return Err(EvaluationError::out_of_bounds(
+                                    index,
+                                    index_expr.start,
+                                    index_expr.end,
+                                )
+                                .into());
+                            };
 
-                    value.clone()
+                            value.clone()
+                        }
+
+                        Index::Range(_, _) => {
+                            todo!("implement range index for tuples")
+                        }
+                    }
                 }
                 Value::Sequence(Sequence::Map(dict, default)) => {
                     let key = evaluate_expression(index_expr, environment)?;
@@ -1061,9 +1087,9 @@ impl EvaluationError {
     }
 
     #[must_use]
-    pub fn out_of_bounds(index: usize, start: Location, end: Location) -> Self {
+    pub fn out_of_bounds(index: Index, start: Location, end: Location) -> Self {
         Self {
-            text: format!("Index ({index}) out of bounds"),
+            text: format!("Index {index} out of bounds"),
             start,
             end,
         }
@@ -1131,56 +1157,6 @@ where
 {
     fn into_evaluation_result(self, start: Location, end: Location) -> Result<R, FunctionCarrier> {
         self.map_err(|err| FunctionCarrier::EvaluationError(err.as_evaluation_error(start, end)))
-    }
-}
-
-fn expression_to_forward_index<D>(
-    expression: Option<D>,
-    list_length: usize,
-    environment: &mut EnvironmentRef,
-) -> Result<Option<usize>, FunctionCarrier>
-where
-    D: Deref<Target = ExpressionLocation>,
-{
-    let result = if let Some(expression) = expression {
-        Some(value_to_forward_index(
-            evaluate_expression(&*expression, environment)?,
-            list_length,
-            expression.start,
-            expression.end,
-        )?)
-    } else {
-        None
-    };
-
-    Ok(result)
-}
-
-/// Takes a value from the Andy C runtime and converts it to a forward index respecting bi-directional
-/// indexing rules.
-fn value_to_forward_index(
-    value: Value,
-    size: usize,
-    start: Location,
-    end: Location,
-) -> Result<usize, EvaluationError> {
-    let typ = value.value_type();
-    let index = i64::try_from(value).map_err(|_| {
-        EvaluationError::type_error(
-            &format!("cannot use {typ} to index into a sequence, possibly because it's too big"),
-            start,
-            end,
-        )
-    })?;
-
-    if index.is_negative() {
-        let index = usize::try_from(index.abs())
-            .map_err(|_err| EvaluationError::syntax_error("invalid index too large", start, end))?;
-
-        size.checked_sub(index)
-            .ok_or_else(|| EvaluationError::syntax_error("index out of bounds", start, end))
-    } else {
-        usize::try_from(index).map_err(|_| EvaluationError::syntax_error("kapot", start, end))
     }
 }
 
