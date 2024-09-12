@@ -1,18 +1,25 @@
-//! Indexing
+//! # Indexing
 //!
-//! -------------------------------------------------------------------
-//! List values    |   0 |  1 |  2 |  3 |  4 |  5 |  6 |  7 |  8 |  9 |
-//! ---------------+-----+----+----+----+----+----+----+----+----+----+
-//! Forward index  |   0 |  1 |  2 |  3 |  4 |  5 |  6 |  7 |  8 |  9 |
-//! Backward index | -10 | -9 | -8 | -7 | -6 | -5 | -4 | -3 | -2 | -1 |
+//! Visual explanation of how indexing works
+//!
+//! +----------------+-----+----+----+----+----+----+----+----+----+----+
+//! | List values    |   0 |  1 |  2 |  3 |  4 |  5 |  6 |  7 |  8 |  9 |
+//! +----------------+-----+----+----+----+----+----+----+----+----+----+
+//! | Forward index  |   0 |  1 |  2 |  3 |  4 |  5 |  6 |  7 |  8 |  9 |
+//! | Backward index | -10 | -9 | -8 | -7 | -6 | -5 | -4 | -3 | -2 | -1 |
+//! +----------------+-----+----+----+----+----+----+----+----+----+----+
+
 use crate::{
     ast::{Expression, ExpressionLocation},
-    interpreter::{environment::EnvironmentRef, function::FunctionCarrier, value::Value},
+    interpreter::{
+        environment::EnvironmentRef, function::FunctionCarrier, sequence::Sequence, value::Value,
+    },
     lexer::Location,
 };
-use std::fmt;
+use std::ops::IndexMut;
+use std::{cell::Ref, fmt};
 
-use super::{evaluate_expression, EvaluationError};
+use super::{evaluate_expression, EvaluationError, IntoEvaluationResult};
 
 pub enum Index {
     Element(usize),
@@ -115,6 +122,76 @@ fn value_to_forward_index_usize(
     } else {
         usize::try_from(index).map_err(|_| EvaluationError::syntax_error("kapot", start, end))
     }
+}
+
+pub fn set_at_index(
+    lhs: &mut Value,
+    rhs: Value,
+    index: Index,
+    start: Location,
+    end: Location,
+) -> Result<(), FunctionCarrier> {
+    match lhs {
+        Value::Sequence(Sequence::List(list)) => {
+            let mut list = list.try_borrow_mut().map_err(|_| {
+                EvaluationError::mutation_error(
+                    "you cannot mutate a value in a list while you're iterating over this list",
+                    start,
+                    end,
+                )
+            })?;
+
+            match index {
+                Index::Element(index_usize) => {
+                    let x = list.index_mut(index_usize);
+                    *x = rhs;
+                }
+                Index::Range(from_usize, to_usize) => {
+                    let tail = list.drain(from_usize..).collect::<Vec<_>>();
+
+                    list.extend(rhs.try_into_iter().unwrap());
+
+                    list.extend_from_slice(&tail[(to_usize - from_usize)..]);
+                }
+            }
+        }
+        Value::Sequence(Sequence::String(insertion_target)) => {
+            if let Value::Sequence(Sequence::String(target_string)) = rhs {
+                let target_string = target_string.borrow();
+
+                let mut insertion_target = insertion_target.borrow_mut();
+                match index {
+                    Index::Element(index) => {
+                        insertion_target.replace_range(index..=index, target_string.as_str());
+                    }
+                    Index::Range(from, to) => {
+                        insertion_target.replace_range(from..to, target_string.as_str());
+                    }
+                }
+            } else {
+                return Err(EvaluationError::syntax_error(
+                    &format!("cannot insert {} into a string", rhs.value_type()),
+                    start,
+                    end,
+                )
+                .into());
+            }
+        }
+        Value::Sequence(Sequence::Map(map, _)) => {
+            let mut map = map.try_borrow_mut().into_evaluation_result(start, end)?;
+
+            map.insert(todo!("add a key variant to index?"), rhs);
+        }
+        _ => {
+            return Err(EvaluationError::syntax_error(
+                &format!("cannot insert into {} at index", lhs.value_type()),
+                start,
+                end,
+            )
+            .into());
+        }
+    };
+    Ok(())
 }
 
 impl fmt::Display for Index {

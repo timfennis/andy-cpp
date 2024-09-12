@@ -30,9 +30,21 @@ pub enum Value {
 }
 
 impl Value {
+    /// If this value is a type of `Sequence` it returns the length of the sequence, otherwise it returns `None`
+    #[must_use]
+    pub fn sequence_length(&self) -> Option<usize> {
+        match self {
+            Value::Sequence(seq) => seq.length(),
+            _ => None,
+        }
+    }
+
     // The alternate solution in this SO thread has a nice way to iterate over the contents of a
     // RefCell but the iterator would not be compatible with non refcell items
     // https://stackoverflow.com/questions/33541492/returning-iterator-of-a-vec-in-a-refcell
+    //
+    // Note: this method is called `try_into_iter` but it doesn't always create an iterator over
+    //       the original value. In most cases you get an iterator over a copy of the data.
     #[must_use]
     pub fn try_into_iter(self) -> Option<impl Iterator<Item = Value>> {
         match self {
@@ -51,6 +63,7 @@ impl Value {
             }
             Value::Sequence(Sequence::String(string)) => match Rc::try_unwrap(string) {
                 // This implementation is peak retard, we don't want collect_vec here
+                // ^-- WTF: is this comment, we collect_vec here anyways?
                 Ok(string) => Some(
                     string
                         .into_inner()

@@ -304,7 +304,7 @@ impl Parser {
                 let assignment_expression = Expression::Assignment {
                     l_value: Lvalue::try_from(maybe_lvalue)
                         .expect("guaranteed to produce an lvalue"),
-                    value: Box::new(expression),
+                    r_value: Box::new(expression),
                 };
 
                 Ok(assignment_expression.to_location(start, end))

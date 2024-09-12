@@ -6,7 +6,7 @@ use std::ops::{IndexMut, Neg, Not, Rem};
 use std::rc::Rc;
 
 use either::Either;
-use index::{expression_to_forward_index, value_to_forward_index, Index};
+use index::{expression_to_forward_index, set_at_index, value_to_forward_index, Index};
 use itertools::Itertools;
 
 use crate::ast::{
@@ -85,7 +85,10 @@ pub(crate) fn evaluate_expression(
             let value = evaluate_expression(value, environment)?;
             declare_or_assign_variable(l_value, value, true, environment, start, end)?
         }
-        Expression::Assignment { l_value, value } => match l_value {
+        Expression::Assignment {
+            l_value,
+            r_value: value,
+        } => match l_value {
             l_value @ (Lvalue::Variable { .. } | Lvalue::Sequence(_)) => {
                 let value = evaluate_expression(value, environment)?;
                 declare_or_assign_variable(l_value, value, false, environment, start, end)?
@@ -94,84 +97,26 @@ pub(crate) fn evaluate_expression(
                 value: assign_to,
                 index,
             } => {
-                let assign_to = evaluate_expression(assign_to, environment)?;
-                match &assign_to {
-                    Value::Sequence(Sequence::List(list)) => {
-                        // the computation of this value may need the list that we assign to,
-                        // therefore the value needs to be computed before we mutably borrow the list
-                        // see: `bug0001_in_place_map.ndct`
-                        let value = evaluate_expression(value, environment)?;
+                let mut lhs = evaluate_expression(assign_to, environment)?;
 
-                        let index = value_to_forward_index(
-                            evaluate_expression(index, environment)?,
-                            list.borrow().len(),
-                            start,
-                            end,
-                        )?;
+                // the computation of this value may need the list that we assign to,
+                // therefore the value needs to be computed before we mutably borrow the list
+                // see: `bug0001_in_place_map.ndct`
+                let rhs = evaluate_expression(value, environment)?;
 
-                        let mut list = list
-                            .try_borrow_mut()
-                            .map_err(|_| EvaluationError::mutation_error("you cannot mutate a value in a list while you're iterating over this list", start, end))?;
+                let Some(size) = lhs.sequence_length() else {
+                    return Err(EvaluationError::type_error(
+                        "cannot index into this type because it doesn't have a length",
+                        start,
+                        end,
+                    )
+                    .into());
+                };
 
-                        match index {
-                            Index::Element(index) => {
-                                let x = list.index_mut(index);
-                                *x = value;
-                            }
-                            Index::Range(_, _) => todo!("implement assignment to ranges"),
-                        }
-                    }
-                    Value::Sequence(Sequence::String(insertion_target)) => {
-                        let value = evaluate_expression(value, environment)?;
+                let index = expression_to_forward_index(index, environment, size, start, end)?;
 
-                        if let Value::Sequence(Sequence::String(target_string)) = value {
-                            let target_string = target_string.borrow();
-                            let index = value_to_forward_index(
-                                evaluate_expression(index, environment)?,
-                                insertion_target.borrow().chars().count(),
-                                start,
-                                end,
-                            )?;
-
-                            let mut insertion_target = insertion_target.borrow_mut();
-                            match index {
-                                Index::Element(index) => {
-                                    insertion_target
-                                        .replace_range(index..=index, target_string.as_str());
-                                }
-                                Index::Range(from, to) => {
-                                    insertion_target
-                                        .replace_range(from..=to, target_string.as_str());
-                                }
-                            }
-                        } else {
-                            return Err(EvaluationError::syntax_error(
-                                &format!("cannot insert {} at index", value.value_type()),
-                                start,
-                                end,
-                            )
-                            .into());
-                        }
-                    }
-                    Value::Sequence(Sequence::Map(map, _)) => {
-                        let value = evaluate_expression(value, environment)?;
-                        let key = evaluate_expression(index, environment)?;
-
-                        let mut map = map.try_borrow_mut().into_evaluation_result(start, end)?;
-
-                        map.insert(key, value);
-                    }
-                    _ => {
-                        return Err(EvaluationError::syntax_error(
-                            &format!("cannot insert into {} at index", assign_to.value_type()),
-                            start,
-                            end,
-                        )
-                        .into());
-                    }
-                }
-
-                assign_to
+                set_at_index(&mut lhs, rhs, index, start, end)?;
+                lhs
             }
         },
         Expression::OpAssignment {
