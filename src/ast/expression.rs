@@ -50,7 +50,7 @@ pub enum Expression {
     },
     Assignment {
         l_value: Lvalue,
-        value: Box<ExpressionLocation>,
+        r_value: Box<ExpressionLocation>,
     },
     OpAssignment {
         l_value: Lvalue,

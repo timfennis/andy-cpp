@@ -18,6 +18,18 @@ pub enum Sequence {
     Iterator(Rc<RefCell<ValueIterator>>),
 }
 
+impl Sequence {
+    pub fn length(&self) -> Option<usize> {
+        match self {
+            Sequence::String(string) => Some(string.borrow().chars().count()),
+            Sequence::List(list) => Some(list.borrow().len()),
+            Sequence::Tuple(tup) => Some(tup.len()),
+            Sequence::Map(map, _) => Some(map.borrow().len()),
+            Sequence::Iterator(iter) => None,
+        }
+    }
+}
+
 impl PartialEq for Sequence {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
