@@ -530,8 +530,17 @@ pub(crate) fn evaluate_expression(
                             value.clone()
                         }
 
-                        Offset::Range(_, _) => {
-                            todo!("implement range index for tuples")
+                        Offset::Range(from_usize, to_usize) => {
+                            let Some(values) = tuple.get(from_usize..to_usize) else {
+                                return Err(EvaluationError::out_of_bounds(
+                                    index,
+                                    index_expr.start,
+                                    index_expr.end,
+                                )
+                                .into());
+                            };
+
+                            Value::Sequence(Sequence::Tuple(Rc::new(values.to_vec())))
                         }
                     }
                 }
@@ -1016,7 +1025,7 @@ impl EvaluationError {
                 end,
             },
             Offset::Range(from, to) => Self {
-                text: format!("Index {from} or {to} out of bounds"),
+                text: format!("Index {from}..{to} out of bounds"),
                 start,
                 end,
             },
