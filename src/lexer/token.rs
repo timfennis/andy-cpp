@@ -1,6 +1,7 @@
 use num::complex::Complex64;
 use num::BigInt;
 use std::fmt;
+use std::ops::Range;
 
 #[derive(PartialEq, Clone)]
 pub enum Token {
@@ -75,7 +76,10 @@ pub enum Token {
 
 impl fmt::Debug for Token {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{self}")
+        match self {
+            Self::String(string) => write!(f, "\"{string}\""),
+            _ => write!(f, "{self}"),
+        }
     }
 }
 
@@ -174,33 +178,53 @@ impl Token {
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct TokenLocation {
     pub token: Token,
-    pub location: Location,
+    pub span: Span,
 }
 
-impl fmt::Display for TokenLocation {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} on {}", self.token, self.location)
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
+pub struct Span {
+    offset: usize,
+    length: usize,
+}
+
+impl Span {
+    #[must_use]
+    pub fn new(offset: usize, length: usize) -> Self {
+        Self { offset, length }
+    }
+
+    #[must_use]
+    pub fn merge(self, other: Self) -> Self {
+        let from = self.offset.min(other.offset);
+        let to = (self.offset + self.length).max(other.offset + other.length);
+        Self {
+            offset: from,
+            length: to - from,
+        }
+    }
+
+    #[must_use]
+    pub fn range(&self) -> Range<usize> {
+        self.offset..self.end()
+    }
+
+    #[must_use]
+    pub fn offset(&self) -> usize {
+        self.offset
+    }
+
+    #[must_use]
+    pub fn end(&self) -> usize {
+        self.offset + self.length
     }
 }
 
-impl fmt::Debug for TokenLocation {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "token='{}' on {}", self.token, self.location)
-    }
-}
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub struct Location {
-    pub line: usize,
-    pub column: usize,
-}
-
-impl fmt::Display for Location {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "line {} column {}", self.line, self.column)
+impl From<Span> for miette::SourceSpan {
+    fn from(val: Span) -> Self {
+        (val.offset, val.length).into()
     }
 }
 
@@ -308,5 +332,22 @@ impl From<String> for Token {
             "break" => Self::Break,
             _ => Self::Identifier(value),
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::lexer::Span;
+
+    #[test]
+    fn test_merge() {
+        let a = Span::new(0, 1);
+        let b = Span::new(3, 1);
+        assert_eq!(Span::new(0, 4), a.merge(b));
+
+        let a = Span::new(3, 100);
+        let b = Span::new(5, 10);
+        assert_eq!(Span::new(3, 100), a.merge(b));
+        assert_eq!(Span::new(3, 100), a.merge(a));
     }
 }

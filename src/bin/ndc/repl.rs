@@ -8,6 +8,8 @@ use rustyline::Helper;
 use rustyline::{ColorMode, Completer, Editor, Hinter, Validator};
 use std::borrow::Cow;
 
+use crate::miette_hack;
+
 #[derive(Helper, Completer, Hinter, Validator)]
 struct RustlylineHelper {}
 
@@ -39,7 +41,7 @@ impl rustyline::highlight::Highlighter for RustlylineHelper {
         let mut start = 0;
         let mut ranges = vec![];
         for token in tokens.iter().dropping(1) {
-            let end = token.location.column - 1;
+            let end = token.span.offset();
             ranges.push(start..end);
             start = end;
         }
@@ -116,13 +118,16 @@ pub fn run(debug: bool) -> anyhow::Result<()> {
                 let _ = rl.add_history_entry(line.as_str());
 
                 // Run the line we just read through the interpreter
-                match interpreter.run_str(line.as_str(), debug) {
+                match miette_hack(interpreter.run_str(line.as_str(), debug)) {
                     Ok(output) => {
                         if !output.is_empty() {
                             println!("{output}")
                         }
                     }
-                    Err(err) => eprintln!("{err}"),
+                    Err(report) => {
+                        let report = report.with_source_code(line.to_string());
+                        eprintln!("{report:?}")
+                    }
                 }
             }
             Err(ReadlineError::Interrupted) => {

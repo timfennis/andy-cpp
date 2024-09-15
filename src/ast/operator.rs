@@ -17,10 +17,12 @@ impl TryFrom<TokenLocation> for UnaryOperator {
             Token::Minus => Self::Neg,
             Token::Bang | Token::LogicNot => Self::Not,
             _ => {
-                return Err(ParseError::ExpectedToken {
-                    expected_tokens: vec![Token::Minus, Token::Bang],
-                    actual_token: value,
-                })
+                // This is essentially an internal error since the parser should check the token before trying to convert it into a UnaryOperator
+                // maybe in the future it would be better to use From and panic!
+                return Err(ParseError::text(
+                    format!("Expected '-' or '!' but got {} instead", value.token),
+                    value.span,
+                ));
             }
         })
     }
@@ -61,10 +63,14 @@ impl TryFrom<TokenLocation> for LogicalOperator {
             Token::LogicAnd => Self::And,
             Token::LogicOr => Self::Or,
             _ => {
-                return Err(ParseError::ExpectedToken {
-                    actual_token: value,
-                    expected_tokens: vec![Token::LogicAnd, Token::LogicOr],
-                })
+                // This is more of an internal parser error than a parser error caused by the user
+                return Err(ParseError::text(
+                    format!(
+                        "Expected either 'and' or 'or' but got {} instead",
+                        value.token
+                    ),
+                    value.span,
+                ));
             }
         })
     }
@@ -93,28 +99,14 @@ impl TryFrom<TokenLocation> for BinaryOperator {
             Token::In => Self::In,
             Token::Concat => Self::Concat,
             _ => {
-                return Err(ParseError::ExpectedToken {
-                    actual_token: value,
-                    expected_tokens: vec![
-                        Token::Equality,
-                        Token::Inequality,
-                        Token::Greater,
-                        Token::GreaterEquals,
-                        Token::Less,
-                        Token::LessEquals,
-                        Token::Plus,
-                        Token::Minus,
-                        Token::Multiply,
-                        Token::Divide,
-                        Token::CModulo,
-                        Token::EuclideanModulo,
-                        Token::Caret,
-                        Token::Ampersand,
-                        Token::Pipe,
-                        Token::In,
-                        Token::Concat,
-                    ],
-                })
+                // NOTE: this is more of an internal error than a user caused error since the parser should check the token prior to converting it.
+                return Err(ParseError::text(
+                    format!(
+                        "Expected a valid binary operator but got {} instead",
+                        value.token
+                    ),
+                    value.span,
+                ));
             }
         })
     }

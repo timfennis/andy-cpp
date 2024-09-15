@@ -11,7 +11,7 @@ use crate::interpreter::evaluate::{
 use crate::interpreter::num::{Number, NumberType};
 use crate::interpreter::sequence::Sequence;
 use crate::interpreter::value::{Value, ValueType};
-use crate::lexer::Location;
+use crate::lexer::Span;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum TypeSignature {
@@ -288,10 +288,10 @@ pub enum FunctionCarrier {
 
 impl FunctionCarrier {
     #[must_use]
-    pub fn lift(self, start: Location, end: Location) -> Self {
+    pub fn lift(self, span: Span) -> Self {
         match self {
             FunctionCarrier::IntoEvaluationError(into) => {
-                Self::EvaluationError(into.as_evaluation_error(start, end))
+                Self::EvaluationError(into.as_evaluation_error(span))
             }
             e => e,
         }

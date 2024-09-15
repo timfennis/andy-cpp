@@ -44,6 +44,10 @@ mod inner {
         Ok(list.remove(index))
     }
 
+    pub fn remove_element(list: &mut Vec<Value>, element: &Value) {
+        list.retain(|cur| cur != element);
+    }
+
     pub fn push(list: &mut Vec<Value>, elem: Value) {
         list.push(elem);
     }

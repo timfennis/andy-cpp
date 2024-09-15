@@ -5,7 +5,8 @@ use std::process::exit;
 
 use clap::Parser;
 
-use ndc_lib::interpreter::Interpreter;
+use miette::NamedSource;
+use ndc_lib::interpreter::{Interpreter, InterpreterError};
 
 #[cfg(feature = "repl")]
 mod repl;
@@ -21,20 +22,48 @@ struct Cli {
     debug: bool,
 }
 
+pub fn miette_hack<T>(result: Result<T, InterpreterError>) -> miette::Result<T> {
+    match result {
+        Err(err) => Err(err)?,
+        Ok(val) => Ok(val),
+    }
+}
+
 fn main() -> anyhow::Result<()> {
+    miette::set_hook(Box::new(|_| {
+        Box::new(
+            miette::MietteHandlerOpts::new()
+                .terminal_links(true)
+                .unicode(true)
+                .context_lines(1)
+                // TODO: use this for custom highlighting
+                // .with_syntax_highlighting(MyMietteHighlighter {})
+                .build(),
+        )
+    }))?;
+
     let cli = Cli::parse();
     if let Some(path) = cli.file {
+        // Create a copy of the filename for error reporting later
+        let filename = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(|string| string.to_string());
+
         let mut file = File::open(path)?;
         let mut string = String::new();
         file.read_to_string(&mut string)?;
 
         let stdout = std::io::stdout();
         let mut interpreter = Interpreter::new(Box::new(stdout));
-        match interpreter.run_str(&string, cli.debug) {
+        match miette_hack(interpreter.run_str(&string, cli.debug)) {
             // we can just ignore successful runs because we have print statements
             Ok(_final_value) => {}
-            Err(err) => {
-                eprintln!("{err}");
+            Err(report) => {
+                let source =
+                    NamedSource::new(filename.expect("filename must exist"), string.to_string());
+                let report = report.with_source_code(source);
+                eprintln!("{:?}", report);
                 exit(1);
             }
         }

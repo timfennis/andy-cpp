@@ -11,7 +11,7 @@ use ordered_float::OrderedFloat;
 
 use crate::interpreter::evaluate::EvaluationError;
 use crate::interpreter::int::Int;
-use crate::lexer::Location;
+use crate::lexer::Span;
 
 use super::value::ValueType;
 
@@ -499,8 +499,7 @@ impl Number {
                     // TODO FIX line 0 column 0
                     return Err(EvaluationError::type_error(
                         &format!("cannot convert {f} to int"),
-                        Location { line: 0, column: 0 },
-                        Location { line: 0, column: 0 },
+                        Span::new(0, 0), // TODO: fix span creation (move out of this impl)
                     ));
                 }
             }
@@ -508,8 +507,7 @@ impl Number {
             Number::Complex(c) => {
                 return Err(EvaluationError::type_error(
                     &format!("cannot convert complex number {c} to int"),
-                    Location { line: 0, column: 0 },
-                    Location { line: 0, column: 0 },
+                    Span::new(0, 0), // TODO: fix span creation (move out of this impl)
                 ));
             }
         };

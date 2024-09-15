@@ -15,7 +15,7 @@ name = "ndc_lib"
 path = "src/lib.rs"
 
 [profile.release]
-debug = true # true for flamegraph, false otherwise
+debug = true  # true for flamegraph, false otherwise
 strip = false # false for flamegraph, true otherwise
 lto = true
 
@@ -34,6 +34,7 @@ ahash = { version = "0.8.11", optional = true }
 ordered-float = "4.2.0"
 regex = "1.10.4"
 self_cell = "1.0.4"
+miette = { version = "7.2.0", features = ["fancy"] }
 
 [features]
 default = ["repl", "ahash"]

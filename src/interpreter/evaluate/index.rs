@@ -14,7 +14,7 @@ use crate::{
     interpreter::{
         environment::EnvironmentRef, function::FunctionCarrier, sequence::Sequence, value::Value,
     },
-    lexer::Location,
+    lexer::Span,
 };
 use std::ops::IndexMut;
 
@@ -31,15 +31,10 @@ pub enum EvaluatedIndex {
 
 impl EvaluatedIndex {
     // TODO: improve error contract so we don't need EvaluationError (maybe??)
-    pub fn try_into_offset(
-        self,
-        size: usize,
-        start: Location,
-        end: Location,
-    ) -> Result<Offset, EvaluationError> {
+    pub fn try_into_offset(self, size: usize, span: Span) -> Result<Offset, EvaluationError> {
         Ok(match self {
             EvaluatedIndex::Index(idx) => {
-                Offset::Element(value_to_forward_index_usize(idx, size, start, end)?)
+                Offset::Element(value_to_forward_index_usize(idx, size, span)?)
             }
             EvaluatedIndex::Slice {
                 from,
@@ -47,13 +42,13 @@ impl EvaluatedIndex {
                 inclusive,
             } => {
                 let from_idx = if let Some(from) = from {
-                    value_to_forward_index_usize(from, size, start, end)?
+                    value_to_forward_index_usize(from, size, span)?
                 } else {
                     0
                 };
 
                 let to_idx = if let Some(to) = to {
-                    value_to_forward_index_usize(to, size, start, end)?
+                    value_to_forward_index_usize(to, size, span)?
                 } else {
                     size
                 };
@@ -86,8 +81,7 @@ pub(crate) fn evaluate_as_index(
     if inclusive && range_end.is_none() {
         return Err(EvaluationError::new(
             "inclusive ranges must have an end".to_string(),
-            expression_location.start,
-            expression_location.end,
+            expression_location.span,
         )
         .into());
     }
@@ -115,26 +109,24 @@ fn value_to_forward_index_usize(
     value: Value,
     size: usize,
     // Add one to the final index found (useful when dealing with inclusive ranges ..=)
-    start: Location,
-    end: Location,
+    span: Span,
 ) -> Result<usize, EvaluationError> {
-    let typ = value.value_type();
-    let index = i64::try_from(value).map_err(|_| {
-        EvaluationError::type_error(
-            &format!("cannot use {typ} to index into a sequence, possibly because it's too big"),
-            start,
-            end,
+    let index = i64::try_from(value).map_err(|_err| {
+        EvaluationError::with_help(
+            format!("Invalid list index"),
+            span,
+            format!("The value used as a list index is not valid. List indices must be convertible to a signed 64-bit integer. Ensure the index is a valid integer within the range of -2^63 to 2^63-1"),
         )
     })?;
 
     if index.is_negative() {
         let index = usize::try_from(index.abs())
-            .map_err(|_err| EvaluationError::syntax_error("invalid index too large", start, end))?;
+            .map_err(|_err| EvaluationError::syntax_error("invalid index too large", span))?;
 
         size.checked_sub(index)
-            .ok_or_else(|| EvaluationError::syntax_error("index out of bounds", start, end))
+            .ok_or_else(|| EvaluationError::syntax_error("index out of bounds", span))
     } else {
-        usize::try_from(index).map_err(|_| EvaluationError::syntax_error("kapot", start, end))
+        usize::try_from(index).map_err(|_| EvaluationError::syntax_error("kapot", span))
     }
 }
 
@@ -157,14 +149,12 @@ pub fn set_at_index(
     lhs: &mut Value,
     rhs: Value,
     index: EvaluatedIndex,
-    start: Location,
-    end: Location,
+    span: Span,
 ) -> Result<(), FunctionCarrier> {
     let Some(size) = lhs.sequence_length() else {
         return Err(EvaluationError::type_error(
             "cannot index into this type because it doesn't have a length",
-            start,
-            end,
+            span,
         )
         .into());
     };
@@ -174,12 +164,11 @@ pub fn set_at_index(
             let mut list = list.try_borrow_mut().map_err(|_| {
                 EvaluationError::mutation_error(
                     "you cannot mutate a value in a list while you're iterating over this list",
-                    start,
-                    end,
+                    span,
                 )
             })?;
 
-            let index = index.try_into_offset(size, start, end)?;
+            let index = index.try_into_offset(size, span)?;
 
             match index {
                 Offset::Element(index_usize) => {
@@ -201,7 +190,7 @@ pub fn set_at_index(
 
                 let mut insertion_target = insertion_target.borrow_mut();
 
-                let index = index.try_into_offset(size, start, end)?;
+                let index = index.try_into_offset(size, span)?;
 
                 match index {
                     Offset::Element(index) => {
@@ -214,14 +203,13 @@ pub fn set_at_index(
             } else {
                 return Err(EvaluationError::syntax_error(
                     &format!("cannot insert {} into a string", rhs.value_type()),
-                    start,
-                    end,
+                    span,
                 )
                 .into());
             }
         }
         Value::Sequence(Sequence::Map(map, _)) => {
-            let mut map = map.try_borrow_mut().into_evaluation_result(start, end)?;
+            let mut map = map.try_borrow_mut().into_evaluation_result(span)?;
 
             let key = match index {
                 EvaluatedIndex::Index(idx) => idx,
@@ -240,8 +228,7 @@ pub fn set_at_index(
         _ => {
             return Err(EvaluationError::syntax_error(
                 &format!("cannot insert into {} at index", lhs.value_type()),
-                start,
-                end,
+                span,
             )
             .into());
         }
