@@ -230,6 +230,8 @@ pub fn set_at_index(
                     to: _,
                     inclusive: _,
                 } => {
+                    // PROBLEM: when we evaluate the indexes the following expression become similar, but should they also map to the same dictionary keys?
+                    // 1..5 == 1..=4 ?
                     todo!("TODO: implement inserting ranges as dict keys")
                 }
             };
