@@ -1,4 +1,4 @@
 --PROGRAM--
 if if 5 > 3 { true } else { false }
 --EXPECT-ERROR--
-unexpected end of stream
+Unexpected end of input

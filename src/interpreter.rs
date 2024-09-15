@@ -1,6 +1,8 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use miette::Diagnostic;
+
 use crate::ast::ExpressionLocation;
 use crate::interpreter::environment::{Environment, EnvironmentRef, InterpreterOutput};
 use crate::interpreter::evaluate::{evaluate_expression, EvaluationError};
@@ -79,15 +81,13 @@ impl Interpreter {
                 Err(FunctionCarrier::Return(_)) => {
                     Err(EvaluationError::syntax_error(
                         "unexpected return statement outside of function body",
-                        expr.start,
-                        expr.end,
+                        expr.span,
                     ))?;
-                },
+                }
                 Err(FunctionCarrier::Break(_)) => {
                     Err(EvaluationError::syntax_error(
                         "unexpected break statement outside of loop body",
-                        expr.start,
-                        expr.end,
+                        expr.span,
                     ))?;
                 }
                 Err(e) => Err(e)?,
@@ -97,23 +97,23 @@ impl Interpreter {
     }
 }
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Diagnostic, Debug)]
 pub enum InterpreterError {
-    #[error("Lexer error: {cause}")]
+    #[error("Error while lexing source")]
+    #[diagnostic(transparent)]
     Lexer {
         #[from]
         cause: crate::lexer::Error,
     },
-    #[error("Parser error: {cause}")]
+    #[error("Error while parsing source")]
+    #[diagnostic(transparent)]
     Parser {
         #[from]
         cause: crate::ast::Error,
     },
-    #[error("Evaluation error: {cause}")]
-    Evaluation {
-        #[from]
-        cause: EvaluationError,
-    },
+    #[error("Error while executing code")]
+    #[diagnostic(transparent)]
+    Evaluation(#[from] EvaluationError),
 }
 
 /// This trait converts a `FunctionError` into an `InterpreterError` but the callee needs to ensure the variant is already `FunctionCarrier::EvaluationError`

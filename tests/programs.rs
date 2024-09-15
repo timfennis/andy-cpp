@@ -73,7 +73,7 @@ fn run_test(path: PathBuf) -> Result<(), std::io::Error> {
 
     let program_had_error = interpreter_result.is_err();
 
-    let actual_error = interpreter_result.unwrap_or_else(|err| format!("{err}"));
+    let actual_error = interpreter_result.unwrap_or_else(|err| format!("{err:?}"));
 
     let environment = interpreter.environment();
     let environment = environment.borrow();
@@ -95,6 +95,7 @@ fn run_test(path: PathBuf) -> Result<(), std::io::Error> {
 
     if !expect_error.is_empty() && !actual_error.trim().contains(expect_error.trim()) {
         println!(" {}", "ERR".red().bold());
+        dbg!(&expect_error, &actual_error);
         panic!("\n\tThere was a problem running {path:?}\n\tExpected error:\t{}\n\tActual error:\t{}\n",  expect_error.trim_end(), actual_error.trim_end());
     }
 

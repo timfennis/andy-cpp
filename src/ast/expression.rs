@@ -1,7 +1,7 @@
 use crate::ast::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
 use crate::ast::parser::Error as ParseError;
 use crate::interpreter::evaluate::EvaluationError;
-use crate::lexer::Location;
+use crate::lexer::Span;
 use either::Either;
 use num::complex::Complex64;
 use num::BigInt;
@@ -12,8 +12,7 @@ use std::rc::Rc;
 #[derive(Eq, PartialEq)]
 pub struct ExpressionLocation {
     pub expression: Expression,
-    pub start: Location,
-    pub end: Location,
+    pub span: Span,
 }
 
 #[derive(Debug, PartialEq)]
@@ -150,11 +149,10 @@ impl Eq for Expression {}
 
 impl Expression {
     #[must_use]
-    pub fn to_location(self, start: Location, end: Location) -> ExpressionLocation {
+    pub fn to_location(self, span: Span) -> ExpressionLocation {
         ExpressionLocation {
-            start,
-            end,
             expression: self,
+            span,
         }
     }
 }
@@ -163,8 +161,7 @@ impl ExpressionLocation {
     #[must_use]
     pub fn to_statement(self) -> Self {
         Self {
-            start: self.start,
-            end: self.end,
+            span: self.span,
             expression: Expression::Statement(Box::new(self)),
         }
     }
@@ -176,8 +173,7 @@ impl ExpressionLocation {
             Expression::Identifier(i) => Ok(i.clone()),
             _ => Err(EvaluationError::syntax_error(
                 "expected identifier",
-                self.start,
-                self.end,
+                self.span,
             )),
         }
     }
@@ -194,8 +190,7 @@ impl ExpressionLocation {
                 .collect::<Result<Vec<String>, EvaluationError>>(),
             _ => Err(EvaluationError::syntax_error(
                 "expected a parameter list",
-                self.start,
-                self.end,
+                self.span,
             )),
         }
     }
@@ -258,13 +253,13 @@ impl TryFrom<ExpressionLocation> for Lvalue {
                     .collect::<Result<Vec<Self>, Self::Error>>()?,
             )),
             Expression::Grouping(value) => Ok(Lvalue::Sequence(vec![Self::try_from(*value)?])),
-            expr => Err(ParseError::InvalidLvalue(expr)),
+            _expr => Err(ParseError::text("invalid l-value".to_string(), value.span)),
         }
     }
 }
 
 impl fmt::Debug for ExpressionLocation {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "[{:?} on {}]", self.expression, self.start)
+        write!(f, "{{{:?} at {:?}}}", self.expression, self.span)
     }
 }

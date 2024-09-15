@@ -3,4 +3,4 @@ x := { 5 }
 y := { 10 }
 print(x + y);
 --EXPECT-ERROR--
-unexpected token 'y'
+Expected semicolon but got y instead

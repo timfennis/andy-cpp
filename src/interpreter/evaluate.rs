@@ -1,6 +1,5 @@
 use std::cell::RefCell;
 use std::cmp::Ordering;
-use std::error::Error;
 use std::fmt;
 use std::ops::{IndexMut, Neg, Not, Rem};
 use std::rc::Rc;
@@ -8,6 +7,7 @@ use std::rc::Rc;
 use either::Either;
 use index::{evaluate_as_index, set_at_index, Offset};
 use itertools::Itertools;
+use rustyline::Helper;
 
 use crate::ast::{
     BinaryOperator, Expression, ExpressionLocation, ForBody, ForIteration, LogicalOperator, Lvalue,
@@ -22,7 +22,7 @@ use crate::interpreter::iterator::mut_value_to_iterator;
 use crate::interpreter::num::{EuclideanDivisionError, Number};
 use crate::interpreter::sequence::Sequence;
 use crate::interpreter::value::{Value, ValueType};
-use crate::lexer::Location;
+use crate::lexer::Span;
 
 pub type EvaluationResult = Result<Value, FunctionCarrier>;
 
@@ -33,7 +33,7 @@ pub(crate) fn evaluate_expression(
     expression_location: &ExpressionLocation,
     environment: &mut EnvironmentRef,
 ) -> EvaluationResult {
-    let (start, end) = (expression_location.start, expression_location.end);
+    let span = expression_location.span;
     let literal: Value = match &expression_location.expression {
         Expression::BoolLiteral(b) => Value::Bool(*b),
         Expression::StringLiteral(s) => {
@@ -55,18 +55,14 @@ pub(crate) fn evaluate_expression(
                 (_, UnaryOperator::Not) => {
                     return Err(EvaluationError::type_error(
                         "the '!' operator cannot be applied to this type",
-                        start,
-                        end,
+                        span,
                     )
                     .into());
                 }
                 (_, UnaryOperator::Neg) => {
-                    return Err(EvaluationError::type_error(
-                        "this type cannot be negated",
-                        start,
-                        end,
-                    )
-                    .into());
+                    return Err(
+                        EvaluationError::type_error("this type cannot be negated", span).into(),
+                    );
                 }
             }
         }
@@ -75,15 +71,15 @@ pub(crate) fn evaluate_expression(
             operator: operator_token,
             right,
         } => {
-            let (start, end) = (left.start, right.end);
+            let span = left.span.merge(right.span);
             let left = evaluate_expression(left, environment)?;
             let right = evaluate_expression(right, environment)?;
-            apply_operator(left, *operator_token, right).into_evaluation_result(start, end)?
+            apply_operator(left, *operator_token, right).into_evaluation_result(span)?
         }
         Expression::Grouping(expr) => evaluate_expression(expr, environment)?,
         Expression::VariableDeclaration { l_value, value } => {
             let value = evaluate_expression(value, environment)?;
-            declare_or_assign_variable(l_value, value, true, environment, start, end)?
+            declare_or_assign_variable(l_value, value, true, environment, span)?
         }
         Expression::Assignment {
             l_value,
@@ -91,7 +87,7 @@ pub(crate) fn evaluate_expression(
         } => match l_value {
             l_value @ (Lvalue::Variable { .. } | Lvalue::Sequence(_)) => {
                 let value = evaluate_expression(value, environment)?;
-                declare_or_assign_variable(l_value, value, false, environment, start, end)?
+                declare_or_assign_variable(l_value, value, false, environment, span)?
             }
             Lvalue::Index {
                 value: lhs_expression,
@@ -106,7 +102,7 @@ pub(crate) fn evaluate_expression(
 
                 let index = evaluate_as_index(index_expression, environment)?;
 
-                set_at_index(&mut lhs, rhs, index, start, end)?;
+                set_at_index(&mut lhs, rhs, index, span)?;
                 lhs
             }
         },
@@ -131,11 +127,10 @@ pub(crate) fn evaluate_expression(
                             existing_value,
                             operation,
                             right_value,
-                            start,
-                            end,
+                            span,
                         )
                     })
-                    .ok_or_else(|| EvaluationError::undefined_variable(identifier, start, end))??
+                    .ok_or_else(|| EvaluationError::undefined_variable(identifier, span))??
             }
             Lvalue::Index {
                 value: lhs_expr,
@@ -146,11 +141,11 @@ pub(crate) fn evaluate_expression(
                     Value::Sequence(Sequence::List(list)) => {
                         // It's important that index and right_value are computed before the list is borrowed
                         let right_value = evaluate_expression(value, environment)?;
-                        let size = list.try_borrow().into_evaluation_result(start, end)?.len();
+                        let size = list.try_borrow().into_evaluation_result(span)?.len();
                         let index = evaluate_as_index(index_expr, environment)?
-                            .try_into_offset(size, start, end)?;
+                            .try_into_offset(size, index_expr.span)?;
 
-                        let mut list = list.try_borrow_mut().into_evaluation_result(start, end)?;
+                        let mut list = list.try_borrow_mut().into_evaluation_result(span)?;
 
                         match index {
                             Offset::Element(index) => {
@@ -161,8 +156,7 @@ pub(crate) fn evaluate_expression(
                                     list_item,
                                     operation,
                                     right_value,
-                                    start,
-                                    end,
+                                    span,
                                 )?
                             }
                             Offset::Range(_, _) => {
@@ -174,13 +168,13 @@ pub(crate) fn evaluate_expression(
                         let right_value = evaluate_expression(value, environment)?;
                         let index = evaluate_expression(index_expr, environment)?;
 
-                        let mut dict = dict.try_borrow_mut().into_evaluation_result(start, end)?;
+                        let mut dict = dict.try_borrow_mut().into_evaluation_result(span)?;
 
                         let map_entry = if let Some(default) = default {
                             dict.entry(index).or_insert(Value::clone(default))
                         } else {
                             dict.get_mut(&index)
-                                .ok_or_else(|| EvaluationError::key_not_found(&index, start, end))?
+                                .ok_or_else(|| EvaluationError::key_not_found(&index, span))?
                         };
 
                         apply_operation_to_value(
@@ -188,23 +182,20 @@ pub(crate) fn evaluate_expression(
                             map_entry,
                             operation,
                             right_value,
-                            start,
-                            end,
+                            span,
                         )?
                     }
                     Value::Sequence(Sequence::String(_)) => {
                         return Err(EvaluationError::type_error(
                             "cannot OpAssign into a string",
-                            start,
-                            end,
+                            span,
                         )
                         .into());
                     }
                     _ => {
                         return Err(EvaluationError::syntax_error(
                             &format!("cannot OpAssign an index into a {}", assign_to.value_type()),
-                            start,
-                            end,
+                            span,
                         )
                         .into());
                     }
@@ -215,8 +206,7 @@ pub(crate) fn evaluate_expression(
             Lvalue::Sequence(_) => {
                 return Err(EvaluationError::syntax_error(
                     "cannot use augmented assignment in combination with destructuring",
-                    start,
-                    end,
+                    span,
                 )
                 .into())
             }
@@ -249,8 +239,7 @@ pub(crate) fn evaluate_expression(
                             "mismatched types: expected bool, found {}",
                             ValueType::from(&value)
                         ),
-                        start,
-                        end,
+                        span,
                     )
                     .into())
                 }
@@ -281,8 +270,7 @@ pub(crate) fn evaluate_expression(
                             "Cannot apply logical operator to non bool value {}",
                             ValueType::from(&value)
                         ),
-                        start,
-                        end,
+                        span,
                     )
                     .into())
                 }
@@ -306,8 +294,7 @@ pub(crate) fn evaluate_expression(
                 } else {
                     return Err(EvaluationError::type_error(
                         "Expression in a while structure must return a bool",
-                        start,
-                        end,
+                        span,
                     )
                     .into());
                 }
@@ -330,7 +317,7 @@ pub(crate) fn evaluate_expression(
             // In case the expression is an identifier we get ALL the values that match the identifier
             // ordered by the distance is the scope-hierarchy.
             return if let Expression::Identifier(identifier) = &function.expression {
-                call_function_by_name(identifier, &evaluated_args, environment, start, end)
+                call_function_by_name(identifier, &evaluated_args, environment, span)
             } else {
                 let function_as_value = evaluate_expression(function, environment)?;
 
@@ -338,8 +325,7 @@ pub(crate) fn evaluate_expression(
                     &[RefCell::new(function_as_value)],
                     &evaluated_args,
                     environment,
-                    start,
-                    end,
+                    span,
                 )
             };
         }
@@ -375,7 +361,7 @@ pub(crate) fn evaluate_expression(
             if let Some(value) = environment.borrow().get(identifier) {
                 value.borrow().clone()
             } else {
-                return Err(EvaluationError::undefined_variable(identifier, start, end).into());
+                return Err(EvaluationError::undefined_variable(identifier, span).into());
             }
         }
         Expression::List { values } => {
@@ -410,7 +396,7 @@ pub(crate) fn evaluate_expression(
         Expression::For { iterations, body } => {
             let mut out_values = Vec::new();
             let result =
-                execute_for_iterations(iterations, body, &mut out_values, environment, start, end);
+                execute_for_iterations(iterations, body, &mut out_values, environment, span);
 
             match result {
                 Err(FunctionCarrier::Break(break_value)) => return Ok(break_value),
@@ -431,7 +417,7 @@ pub(crate) fn evaluate_expression(
                             .into_iter()
                             .map(TryInto::<(Value, Value)>::try_into)
                             .collect::<Result<HashMap<Value, Value>, _>>()
-                            .into_evaluation_result(start, end)?,
+                            .into_evaluation_result(span)?,
                     )),
                     default
                         .as_ref()
@@ -457,11 +443,8 @@ pub(crate) fn evaluate_expression(
                 Value::Sequence(Sequence::String(string)) => {
                     let string = string.borrow();
 
-                    let index = evaluate_as_index(index_expr, environment)?.try_into_offset(
-                        string.chars().count(),
-                        start,
-                        end,
-                    )?;
+                    let index = evaluate_as_index(index_expr, environment)?
+                        .try_into_offset(string.chars().count(), index_expr.span)?;
 
                     let (start, end) = index.into_tuple();
                     let new = string
@@ -475,34 +458,25 @@ pub(crate) fn evaluate_expression(
                 Value::Sequence(Sequence::List(list)) => {
                     let list_length = list.borrow().len();
 
-                    let index = evaluate_as_index(index_expr, environment)?.try_into_offset(
-                        list_length,
-                        start,
-                        end,
-                    )?;
+                    let index = evaluate_as_index(index_expr, environment)?
+                        .try_into_offset(list_length, index_expr.span)?;
 
                     match index {
                         Offset::Element(usize_index) => {
                             let list = list.borrow();
                             let Some(value) = list.get(usize_index) else {
-                                return Err(EvaluationError::out_of_bounds(
-                                    index,
-                                    index_expr.start,
-                                    index_expr.end,
-                                )
-                                .into());
+                                return Err(
+                                    EvaluationError::out_of_bounds(index, index_expr.span).into()
+                                );
                             };
                             value.clone()
                         }
                         Offset::Range(from_usize, to_usize) => {
                             let list = list.borrow();
                             let Some(values) = list.get(from_usize..to_usize) else {
-                                return Err(EvaluationError::out_of_bounds(
-                                    index,
-                                    index_expr.start,
-                                    index_expr.end,
-                                )
-                                .into());
+                                return Err(
+                                    EvaluationError::out_of_bounds(index, index_expr.span).into()
+                                );
                             };
 
                             values.to_vec().into()
@@ -510,21 +484,15 @@ pub(crate) fn evaluate_expression(
                     }
                 }
                 Value::Sequence(Sequence::Tuple(tuple)) => {
-                    let index = evaluate_as_index(index_expr, environment)?.try_into_offset(
-                        tuple.len(),
-                        start,
-                        end,
-                    )?;
+                    let index = evaluate_as_index(index_expr, environment)?
+                        .try_into_offset(tuple.len(), index_expr.span)?;
 
                     match index {
                         Offset::Element(index_usize) => {
                             let Some(value) = tuple.get(index_usize) else {
-                                return Err(EvaluationError::out_of_bounds(
-                                    index,
-                                    index_expr.start,
-                                    index_expr.end,
-                                )
-                                .into());
+                                return Err(
+                                    EvaluationError::out_of_bounds(index, index_expr.span).into()
+                                );
                             };
 
                             value.clone()
@@ -532,12 +500,9 @@ pub(crate) fn evaluate_expression(
 
                         Offset::Range(from_usize, to_usize) => {
                             let Some(values) = tuple.get(from_usize..to_usize) else {
-                                return Err(EvaluationError::out_of_bounds(
-                                    index,
-                                    index_expr.start,
-                                    index_expr.end,
-                                )
-                                .into());
+                                return Err(
+                                    EvaluationError::out_of_bounds(index, index_expr.span).into()
+                                );
                             };
 
                             Value::Sequence(Sequence::Tuple(Rc::new(values.to_vec())))
@@ -553,17 +518,13 @@ pub(crate) fn evaluate_expression(
                     } else if let Some(default) = default {
                         Ok(Value::clone(&*default))
                     } else {
-                        Err(
-                            EvaluationError::key_not_found(&key, index_expr.start, index_expr.end)
-                                .into(),
-                        )
+                        Err(EvaluationError::key_not_found(&key, index_expr.span).into())
                     };
                 }
                 value => {
                     return Err(EvaluationError::type_error(
                         &format!("cannot index into {}", value.value_type()),
-                        lhs_expr.start,
-                        lhs_expr.end,
+                        lhs_expr.span,
                     )
                     .into())
                 }
@@ -578,17 +539,16 @@ pub(crate) fn evaluate_expression(
             } else {
                 return Err(EvaluationError::type_error(
                     "ranges without a lower bound cannot be evaluated into a value",
-                    start,
-                    end,
+                    span,
                 )
                 .into());
             };
 
-            let range_start = i64::try_from(range_start).into_evaluation_result(start, end)?;
+            let range_start = i64::try_from(range_start).into_evaluation_result(span)?;
 
             if let Some(range_end) = range_end {
                 let range_end = evaluate_expression(range_end, environment)?;
-                let range_end = i64::try_from(range_end).into_evaluation_result(start, end)?;
+                let range_end = i64::try_from(range_end).into_evaluation_result(span)?;
 
                 Value::from(range_start..=range_end)
             } else {
@@ -604,17 +564,16 @@ pub(crate) fn evaluate_expression(
             } else {
                 return Err(EvaluationError::type_error(
                     "ranges without a lower bound cannot be evaluated into a value",
-                    start,
-                    end,
+                    span,
                 )
                 .into());
             };
 
-            let range_start = i64::try_from(range_start).into_evaluation_result(start, end)?;
+            let range_start = i64::try_from(range_start).into_evaluation_result(span)?;
 
             if let Some(range_end) = range_end {
                 let range_end = evaluate_expression(range_end, environment)?;
-                let range_end = i64::try_from(range_end).into_evaluation_result(start, end)?;
+                let range_end = i64::try_from(range_end).into_evaluation_result(span)?;
 
                 Value::from(range_start..range_end)
             } else {
@@ -631,8 +590,7 @@ fn declare_or_assign_variable(
     value: Value,
     declare: bool,
     environment: &mut EnvironmentRef,
-    start: Location,
-    end: Location,
+    span: Span,
 ) -> EvaluationResult {
     match l_value {
         Lvalue::Variable { identifier } => {
@@ -648,7 +606,7 @@ fn declare_or_assign_variable(
                 environment.borrow_mut().declare(identifier, value.clone());
             } else {
                 if !environment.borrow().contains(identifier) {
-                    return Err(EvaluationError::undefined_variable(identifier, start, end))?;
+                    return Err(EvaluationError::undefined_variable(identifier, span))?;
                 }
 
                 environment.borrow_mut().assign(identifier, value.clone());
@@ -661,21 +619,19 @@ fn declare_or_assign_variable(
             let mut iter = l_values.iter().zip(value.try_into_iter().ok_or_else(|| {
                 FunctionCarrier::EvaluationError(EvaluationError::syntax_error(
                     "failed to unpack non iterable value into pattern",
-                    start,
-                    end,
+                    span,
                 ))
             })?);
 
             for (l_value, value) in iter.by_ref() {
                 remaining -= 1;
-                declare_or_assign_variable(l_value, value, declare, environment, start, end)?;
+                declare_or_assign_variable(l_value, value, declare, environment, span)?;
             }
 
             if remaining > 0 || iter.next().is_some() {
                 return Err(EvaluationError::syntax_error(
                     "failed to unpack value into pattern because the lengths do not match",
-                    start,
-                    end,
+                    span,
                 )
                 .into());
             }
@@ -686,8 +642,7 @@ fn declare_or_assign_variable(
                 "Can't declare values into {}",
                 l_value.expression_type_name()
             ),
-            start,
-            end,
+            span,
         )
         .into()),
     }
@@ -707,8 +662,7 @@ fn apply_operation_to_value(
     value: &mut Value,
     operation: &Either<BinaryOperator, String>,
     right_value: Value,
-    start: Location,
-    end: Location,
+    span: Span,
 ) -> Result<Value, FunctionCarrier> {
     return if let Either::Left(BinaryOperator::Concat) = operation {
         match (value, right_value) {
@@ -745,8 +699,7 @@ fn apply_operation_to_value(
                     left.value_type(),
                     right.value_type()
                 ),
-                start,
-                end,
+                span,
             )
             .into()),
         }
@@ -777,8 +730,7 @@ fn apply_operation_to_value(
             }
             _ => Err(EvaluationError::type_error(
                 "cannot apply the | operator between these types",
-                start,
-                end,
+                span,
             )
             .into()),
         }
@@ -787,15 +739,14 @@ fn apply_operation_to_value(
         match operation {
             Either::Left(binary_operator) => {
                 *value = apply_operator(old_value, *binary_operator, right_value)
-                    .into_evaluation_result(start, end)?;
+                    .into_evaluation_result(span)?;
             }
             Either::Right(identifier) => {
                 *value = call_function_by_name(
                     identifier,
                     &[old_value, right_value],
                     environment,
-                    start,
-                    end,
+                    span,
                 )?;
             }
         }
@@ -956,128 +907,126 @@ fn apply_operator(
     Ok(val)
 }
 
+#[derive(thiserror::Error, miette::Diagnostic, Debug)]
+#[error("{text}")]
 pub struct EvaluationError {
     text: String,
-    start: Location,
-    #[allow(unused)]
-    end: Location,
+    #[label("related to this")]
+    span: Span,
+    #[help]
+    help_text: Option<String>,
 }
 
 impl EvaluationError {
     #[must_use]
-    pub fn undefined_variable(identifier: &str, start: Location, end: Location) -> Self {
+    pub fn with_help(text: String, span: Span, help_text: String) -> Self {
+        Self {
+            text,
+            span,
+            help_text: Some(help_text),
+        }
+    }
+
+    #[must_use]
+    pub fn undefined_variable(identifier: &str, span: Span) -> Self {
         Self {
             text: format!("Undefined variable '{identifier}'"),
-            start,
-            end,
+            span,
+            help_text: None,
         }
     }
 
     #[must_use]
-    pub fn new(message: String, start: Location, end: Location) -> Self {
+    pub fn new(message: String, span: Span) -> Self {
         Self {
             text: message,
-            start,
-            end,
+            span,
+            help_text: None,
         }
     }
 
     #[must_use]
-    pub fn mutation_error(message: &str, start: Location, end: Location) -> Self {
+    pub fn mutation_error(message: &str, span: Span) -> Self {
         Self {
             text: format!("Mutation error: {message}"),
-            start,
-            end,
+            span,
+            help_text: None,
         }
     }
     #[must_use]
-    pub fn type_error(message: &str, start: Location, end: Location) -> Self {
+    pub fn type_error(message: &str, span: Span) -> Self {
         Self {
             text: format!("Type error: {message}"),
-            start,
-            end,
+            span,
+            help_text: None,
         }
     }
     #[must_use]
-    pub fn syntax_error(message: &str, start: Location, end: Location) -> Self {
+    pub fn syntax_error(message: &str, span: Span) -> Self {
         Self {
             text: format!("Syntax error: {message}"),
-            start,
-            end,
+            span,
+            help_text: None,
         }
     }
 
     #[must_use]
-    pub fn io_error(err: &std::io::Error, start: Location, end: Location) -> Self {
+    pub fn io_error(err: &std::io::Error, span: Span) -> Self {
         Self {
             text: format!("IO error: {err}"),
-            start,
-            end,
+            span,
+            help_text: None,
         }
     }
 
     #[must_use]
-    pub fn out_of_bounds(index: Offset, start: Location, end: Location) -> Self {
+    pub fn out_of_bounds(index: Offset, span: Span) -> Self {
         match index {
             Offset::Element(index) => Self {
                 text: format!("Index {index} out of bounds"),
-                start,
-                end,
+                span,
+                help_text: None,
             },
             Offset::Range(from, to) => Self {
                 text: format!("Index {from}..{to} out of bounds"),
-                start,
-                end,
+                span,
+                help_text: None,
             },
         }
     }
 
     #[must_use]
-    pub fn key_not_found(key: &Value, start: Location, end: Location) -> Self {
+    pub fn key_not_found(key: &Value, span: Span) -> Self {
         Self {
             text: format!("Key not found in map: {key}"),
-            start,
-            end,
+            span,
+            help_text: None,
         }
     }
 
     #[must_use]
-    pub fn argument_error(message: &str, start: Location, end: Location) -> Self {
+    pub fn argument_error(message: &str, span: Span) -> Self {
         Self {
             text: message.to_string(),
-            start,
-            end,
+            span,
+            help_text: None,
         }
     }
 }
 
-impl fmt::Display for EvaluationError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} on line {}", self.text, self.start.line)
-    }
-}
-
-impl fmt::Debug for EvaluationError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{self}")
-    }
-}
-
-impl Error for EvaluationError {}
-
 pub trait ErrorConverter: fmt::Debug + fmt::Display {
-    fn as_evaluation_error(&self, start: Location, end: Location) -> EvaluationError;
+    fn as_evaluation_error(&self, span: Span) -> EvaluationError;
 }
 
 impl<E> ErrorConverter for E
 where
     E: fmt::Debug + fmt::Display,
 {
-    fn as_evaluation_error(&self, start: Location, end: Location) -> EvaluationError {
+    fn as_evaluation_error(&self, span: Span) -> EvaluationError {
         EvaluationError {
             text: format!("{self}"),
-            start,
-            end,
+            span,
+            help_text: None,
         }
     }
 }
@@ -1085,15 +1034,15 @@ where
 // NOTE: this is called `IntoEvaluationResult` but it actually only takes care of the error part of an evaluation result.
 // `EvaluationResult` always wants the `Ok` type to be `Value` but this converter doesn't care.
 pub trait IntoEvaluationResult<R> {
-    fn into_evaluation_result(self, start: Location, end: Location) -> Result<R, FunctionCarrier>;
+    fn into_evaluation_result(self, span: Span) -> Result<R, FunctionCarrier>;
 }
 
 impl<E, R> IntoEvaluationResult<R> for Result<R, E>
 where
     E: ErrorConverter,
 {
-    fn into_evaluation_result(self, start: Location, end: Location) -> Result<R, FunctionCarrier> {
-        self.map_err(|err| FunctionCarrier::EvaluationError(err.as_evaluation_error(start, end)))
+    fn into_evaluation_result(self, span: Span) -> Result<R, FunctionCarrier> {
+        self.map_err(|err| FunctionCarrier::EvaluationError(err.as_evaluation_error(span)))
     }
 }
 
@@ -1101,17 +1050,15 @@ fn call_function_by_name(
     name: &str,
     evaluated_args: &[Value],
     environment: &EnvironmentRef,
-    start: Location,
-    end: Location,
+    span: Span,
 ) -> EvaluationResult {
     let values = environment.borrow().get_all_by_name(name);
-    let result = try_call_function(&values, evaluated_args, environment, start, end);
+    let result = try_call_function(&values, evaluated_args, environment, span);
     if let Err(FunctionCarrier::FunctionNotFound) = result {
         let arguments = evaluated_args.iter().map(Value::value_type).join(", ");
         return Err(FunctionCarrier::EvaluationError(EvaluationError::new(
             format!("no function called '{name}' found matches the arguments: ({arguments})"),
-            start,
-            end,
+            span,
         )));
     }
 
@@ -1128,8 +1075,7 @@ fn try_call_function(
     values: &[RefCell<Value>],
     evaluated_args: &[Value],
     environment: &EnvironmentRef,
-    start: Location,
-    end: Location,
+    span: Span,
 ) -> EvaluationResult {
     // We evaluate all potential function values by first checking if they're a function and
     // then attempting to call them. If the `OverloadedFunction` returns that there are no
@@ -1146,7 +1092,7 @@ fn try_call_function(
 
         // Skip all values that aren't functions
         if let Value::Function(function) = value {
-            let result = call_function(function, evaluated_args, environment, start, end);
+            let result = call_function(function, evaluated_args, environment, span);
 
             if let Err(FunctionCarrier::FunctionNotFound) = result {
                 continue;
@@ -1163,8 +1109,7 @@ fn call_function(
     function: &Rc<RefCell<OverloadedFunction>>,
     evaluated_args: &[Value],
     environment: &EnvironmentRef,
-    start: Location,
-    end: Location,
+    span: Span,
 ) -> EvaluationResult {
     let result = function.borrow().call(evaluated_args, environment);
 
@@ -1176,7 +1121,7 @@ fn call_function(
             // TODO: for now we just pass the break from inside the function to outside the function. This would allow some pretty funky code and might introduce weird bugs?
             | FunctionCarrier::Break(_),
         ) => e,
-        Err(carrier @ FunctionCarrier::IntoEvaluationError(_)) => Err(carrier.lift(start, end)),
+        Err(carrier @ FunctionCarrier::IntoEvaluationError(_)) => Err(carrier.lift(span)),
     }
 }
 
@@ -1216,8 +1161,7 @@ fn execute_for_iterations(
     body: &ForBody,
     out_values: &mut Vec<Value>,
     environment: &mut EnvironmentRef,
-    start: Location,
-    end: Location,
+    span: Span,
 ) -> Result<Value, FunctionCarrier> {
     let Some((cur, tail)) = iterations.split_first() else {
         unreachable!("slice of for-iterations was empty")
@@ -1226,17 +1170,17 @@ fn execute_for_iterations(
     match cur {
         ForIteration::Iteration { l_value, sequence } => {
             let mut sequence = evaluate_expression(sequence, environment)?;
-            let iter = mut_value_to_iterator(&mut sequence).into_evaluation_result(start, end)?;
+            let iter = mut_value_to_iterator(&mut sequence).into_evaluation_result(span)?;
 
             let mut scope = Environment::new_scope(environment);
             for r_value in iter {
                 scope.borrow_mut().reset();
-                declare_or_assign_variable(l_value, r_value?, true, &mut scope, start, end)?;
+                declare_or_assign_variable(l_value, r_value?, true, &mut scope, span)?;
 
                 if tail.is_empty() {
                     execute_body(body, &mut scope, out_values)?;
                 } else {
-                    execute_for_iterations(tail, body, out_values, &mut scope, start, end)?;
+                    execute_for_iterations(tail, body, out_values, &mut scope, span)?;
                 }
             }
         }
@@ -1245,7 +1189,7 @@ fn execute_for_iterations(
                 execute_body(body, environment, out_values)?;
             }
             Value::Bool(true) => {
-                execute_for_iterations(tail, body, out_values, environment, start, end)?;
+                execute_for_iterations(tail, body, out_values, environment, span)?;
             }
             Value::Bool(false) => {}
             value => {
@@ -1254,8 +1198,7 @@ fn execute_for_iterations(
                         "mismatched types: expected bool, found {}",
                         ValueType::from(&value)
                     ),
-                    start,
-                    end,
+                    span,
                 )
                 .into())
             }

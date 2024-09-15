@@ -1,10 +1,11 @@
+use miette::{Diagnostic, SourceSpan};
 use num::{BigInt, Complex};
 use std::collections::VecDeque;
 use std::str::Chars;
 
 mod token;
 
-pub use token::{Location, Token, TokenLocation};
+pub use token::{Span, Token, TokenLocation};
 
 pub struct Lexer<'a> {
     source: SourceIterator<'a>,
@@ -18,13 +19,17 @@ impl<'a> Lexer<'a> {
     /// foo := false
     /// foo &&= true
     /// ```
-    fn lex_op_assign(&mut self, operation_token: TokenLocation, start: Location) -> TokenLocation {
+    fn lex_op_assign(
+        &mut self,
+        operation_token: TokenLocation,
+        start_offset: usize,
+    ) -> TokenLocation {
         match self.source.peek_one() {
             Some('=') if operation_token.token.is_augmentable() => {
                 self.source.next();
                 TokenLocation {
                     token: Token::OpAssign(Box::new(operation_token)),
-                    location: start,
+                    span: self.source.create_span(start_offset),
                 }
             }
             _ => operation_token,
@@ -37,15 +42,14 @@ impl<'a> Lexer<'a> {
             source: SourceIterator {
                 inner: source.chars(),
                 buffer: VecDeque::default(),
-                line: 1,
-                column: 0,
+                offset: 0,
             },
         }
     }
 
     fn lex_string_literal(
         &mut self,
-        start: Location,
+        start_offset: usize,
         pounds: usize,
     ) -> Result<TokenLocation, Error> {
         let mut buf = String::new();
@@ -58,54 +62,62 @@ impl<'a> Lexer<'a> {
                 buf.truncate(buf.len() - end_pattern.len());
                 return Ok(TokenLocation {
                     token: Token::String(buf),
-                    location: start,
+                    span: self.source.create_span(start_offset),
                 });
             }
         }
 
-        Err(Error::UnterminatedString { location: start })
+        Err(Error::unterminated_string(
+            self.source.create_span(start_offset),
+        ))
     }
-    fn lex_string(&mut self, start: Location) -> Result<TokenLocation, Error> {
+
+    fn lex_string(&mut self, start_offset: usize) -> Result<TokenLocation, Error> {
         // TODO: support \u8080 type escape sequences
         // TODO: should we handle bytes like \xFF? Probably not for strings because they aren't valid UTF-8
         let mut buf = String::new();
         #[allow(clippy::while_let_on_iterator)]
         while let Some(next_ch) = self.source.next() {
             match next_ch {
-                '\\' => match self.source.next() {
-                    Some('n') => {
-                        buf.push('\n');
+                '\\' => {
+                    let escape_span = self.source.span();
+                    match self.source.next() {
+                        Some('n') => {
+                            buf.push('\n');
+                        }
+                        Some('r') => {
+                            buf.push('\r');
+                        }
+                        Some('t') => {
+                            buf.push('\t');
+                        }
+                        Some('0') => {
+                            buf.push('\0');
+                        }
+                        Some('\\') => {
+                            buf.push('\\');
+                        }
+                        Some('"') => {
+                            buf.push('"');
+                        }
+                        Some(_x) => {
+                            return Err(Error::text(
+                                "Invalid escapes equence".to_string(),
+                                escape_span.merge(self.source.span()),
+                            ));
+                        }
+                        None => {
+                            return Err(Error::unterminated_string(
+                                self.source.create_span(start_offset),
+                            ))
+                        }
                     }
-                    Some('r') => {
-                        buf.push('\r');
-                    }
-                    Some('t') => {
-                        buf.push('\t');
-                    }
-                    Some('0') => {
-                        buf.push('\0');
-                    }
-                    Some('\\') => {
-                        buf.push('\\');
-                    }
-                    Some('"') => {
-                        buf.push('"');
-                    }
-                    Some(x) => {
-                        return Err(Error::InvalidEscapeSequence {
-                            sequence: format!("\\{x}"),
-                            location: self.source.location(),
-                        });
-                    }
-                    None => {
-                        return Err(Error::UnterminatedString { location: start });
-                    }
-                },
+                }
                 '"' => {
                     // advance iterator and end the string
                     return Ok(TokenLocation {
                         token: Token::String(buf),
-                        location: start,
+                        span: self.source.create_span(start_offset),
                     });
                 }
                 _ => {
@@ -114,7 +126,10 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        Err(Error::UnterminatedString { location: start })
+        // THIS one is the most likely to hit
+        Err(Error::unterminated_string(
+            self.source.create_span(start_offset),
+        ))
     }
 }
 
@@ -124,11 +139,7 @@ impl Iterator for Lexer<'_> {
     #[allow(clippy::too_many_lines)]
     fn next(&mut self) -> Option<Self::Item> {
         'iterator: while let Some(char) = self.source.next() {
-            let start = Location {
-                column: self.source.column,
-                line: self.source.line,
-            };
-
+            let start_offset = self.source.current_offset();
             let next = self.source.peek_one();
             let next2 = self.source.peek_n(1);
 
@@ -149,36 +160,36 @@ impl Iterator for Lexer<'_> {
             }
 
             if let Ok(token) = Token::try_from((char, next, next2)) {
+                self.source.next();
+                self.source.next();
+
                 let operator_token = TokenLocation {
                     token,
-                    location: self.source.location(),
+                    span: self.source.create_span(start_offset),
                 };
 
-                self.source.next();
-                self.source.next();
-
-                return Some(Ok(self.lex_op_assign(operator_token, start)));
+                return Some(Ok(self.lex_op_assign(operator_token, start_offset)));
             }
             // Check for double character tokens
             if let Ok(token) = Token::try_from((char, next)) {
-                let operator_token = TokenLocation {
-                    token,
-                    location: self.source.location(),
-                };
-
                 self.source.next();
 
-                return Some(Ok(self.lex_op_assign(operator_token, start)));
+                let operator_token = TokenLocation {
+                    token,
+                    span: self.source.create_span(start_offset),
+                };
+
+                return Some(Ok(self.lex_op_assign(operator_token, start_offset)));
             }
 
             // Check for single character tokens
             if let Ok(token) = Token::try_from(char) {
                 let operator_token = TokenLocation {
                     token,
-                    location: self.source.location(),
+                    span: self.source.create_span(start_offset),
                 };
 
-                return Some(Ok(self.lex_op_assign(operator_token, start)));
+                return Some(Ok(self.lex_op_assign(operator_token, start_offset)));
             }
 
             match (char, next) {
@@ -187,7 +198,7 @@ impl Iterator for Lexer<'_> {
                 }
                 ('r', Some('"')) => {
                     self.source.next();
-                    return Some(self.lex_string_literal(start, 0));
+                    return Some(self.lex_string_literal(start_offset, 0));
                 }
                 ('r', Some('#')) => {
                     self.source.next();
@@ -195,22 +206,27 @@ impl Iterator for Lexer<'_> {
                     loop {
                         match self.source.next() {
                             Some('#') => cnt += 1,
-                            Some('"') => return Some(self.lex_string_literal(start, cnt)),
+                            Some('"') => return Some(self.lex_string_literal(start_offset, cnt)),
                             Some(char) => {
-                                return Some(Err(Error::UnexpectedCharacter {
-                                    char,
-                                    location: self.source.location(),
-                                }))
+                                // TODO: include char,
+                                return Some(Err(Error::text(
+                                    format!("Unexpected chracter '{char}' in string literal"),
+                                    self.source.span(),
+                                )));
                             }
                             None => {
-                                return Some(Err(Error::UnterminatedString { location: start }))
+                                return Some(Err(Error::text(
+                                    "Unexpected end of input while lexing string literal"
+                                        .to_string(),
+                                    self.source.create_span(start_offset),
+                                )));
                             }
                         }
                     }
                 }
                 // lex string
-                ('"', _) => return Some(self.lex_string(start)),
-                // lex float
+                ('"', _) => return Some(self.lex_string(start_offset)),
+                // lex float & int
                 (char, _) if char.is_ascii_digit() => {
                     let mut buf = String::new();
                     buf.push(char);
@@ -223,6 +239,7 @@ impl Iterator for Lexer<'_> {
                                 buf.push(c);
                             }
                             '_' => {
+                                // TODO: Maybe disallow `_` after `.`
                                 self.source.next();
                                 // ignore underscore for nice number formatting
                             }
@@ -249,15 +266,15 @@ impl Iterator for Lexer<'_> {
                                 self.source.next();
 
                                 let Ok(num) = buf.parse::<f64>() else {
-                                    return Some(Err(Error::InvalidFloat {
-                                        string: buf,
-                                        location: start,
-                                    }));
+                                    return Some(Err(Error::text(
+                                        format!("invalid float '{buf}'"),
+                                        self.source.create_span(start_offset),
+                                    )));
                                 };
 
                                 return Some(Ok(TokenLocation {
                                     token: Token::Complex(Complex::new(0.0, num)),
-                                    location: start,
+                                    span: self.source.create_span(start_offset),
                                 }));
                             }
 
@@ -271,10 +288,10 @@ impl Iterator for Lexer<'_> {
                         if let Ok(num) = buf.parse::<f64>() {
                             Token::Float64(num)
                         } else {
-                            return Some(Err(Error::InvalidFloat {
-                                string: buf,
-                                location: start,
-                            }));
+                            return Some(Err(Error::text(
+                                format!("invalid float '{buf}' "),
+                                self.source.create_span(start_offset),
+                            )));
                         }
                     } else {
                         let i = buf
@@ -284,7 +301,7 @@ impl Iterator for Lexer<'_> {
                     };
                     return Some(Ok(TokenLocation {
                         token,
-                        location: start,
+                        span: self.source.create_span(start_offset),
                     }));
                 }
                 // Lex identifiers and keywords
@@ -302,27 +319,28 @@ impl Iterator for Lexer<'_> {
                         }
                     }
 
+                    let ident_end_span = self.source.span();
                     // If the identifier is followed by a single `=` we construct an OpAssign
                     if self.source.peek_one() == Some('=') && self.source.peek_n(1) != Some('=') {
                         self.source.next();
                         return Some(Ok(TokenLocation {
                             token: Token::OpAssign(Box::new(TokenLocation {
                                 token: buf.into(),
-                                location: start,
+                                span: self.source.create_span(start_offset).merge(ident_end_span), // TODO test is
                             })),
-                            location: start,
+                            span: self.source.create_span(start_offset),
                         }));
                     }
                     return Some(Ok(TokenLocation {
                         token: buf.into(),
-                        location: start,
+                        span: self.source.create_span(start_offset),
                     }));
                 }
                 (char, _) => {
-                    return Some(Err(Error::UnexpectedCharacter {
-                        char,
-                        location: self.source.location(),
-                    }));
+                    return Some(Err(Error::text(
+                        format!("Unexpected character '{char}'"),
+                        self.source.span(),
+                    )));
                 }
             };
         }
@@ -334,16 +352,20 @@ impl Iterator for Lexer<'_> {
 struct SourceIterator<'a> {
     inner: Chars<'a>,
     buffer: VecDeque<char>,
-    line: usize,
-    column: usize,
+    offset: usize,
 }
 
 impl SourceIterator<'_> {
-    pub fn location(&self) -> Location {
-        Location {
-            column: self.column,
-            line: self.line,
-        }
+    pub fn current_offset(&self) -> usize {
+        self.offset - 1
+    }
+
+    pub fn create_span(&self, start: usize) -> Span {
+        Span::new(start, (self.current_offset() + 1) - start)
+    }
+
+    pub fn span(&self) -> Span {
+        Span::new(self.current_offset(), 1)
     }
 }
 
@@ -356,15 +378,8 @@ impl<'a> Iterator for SourceIterator<'a> {
             _ => self.inner.next(),
         };
 
-        match next {
-            Some('\n') => {
-                self.line += 1;
-                self.column = 0;
-            }
-            Some(_) => {
-                self.column += 1;
-            }
-            None => {}
+        if next.is_some() {
+            self.offset += 1;
         }
 
         next
@@ -385,17 +400,34 @@ impl<'a> SourceIterator<'a> {
     }
 }
 
-#[derive(thiserror::Error, Debug, Eq, PartialEq)]
-pub enum Error {
-    #[error("invalid float '{string}' at {location}")]
-    InvalidFloat { string: String, location: Location },
-    #[error("unexpected character '{char}' at {location}")]
-    UnexpectedCharacter { char: char, location: Location },
-    #[error("unterminated string starting at {location}")]
-    UnterminatedString { location: Location },
-    #[error("invalid escape sequence '{sequence}' at {location}")]
-    InvalidEscapeSequence {
-        sequence: String,
-        location: Location,
-    },
+#[derive(Diagnostic, thiserror::Error, Debug)]
+#[error("{text}")]
+#[diagnostic()]
+pub struct Error {
+    text: String,
+
+    label: String,
+
+    #[label("{label}")]
+    location: SourceSpan,
+}
+
+impl Error {
+    #[must_use]
+    pub fn text(text: String, source: Span) -> Self {
+        Self {
+            text,
+            label: "here".to_string(),
+            location: source.into(),
+        }
+    }
+
+    #[must_use]
+    pub fn unterminated_string(span: Span) -> Self {
+        Self {
+            text: "Unterminated string".to_string(),
+            label: "here".to_string(),
+            location: span.into(),
+        }
+    }
 }

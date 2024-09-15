@@ -1,5 +1,5 @@
 use crate::interpreter::evaluate::EvaluationError;
-use crate::lexer::Location;
+use crate::lexer::Span;
 use num::bigint::Sign;
 use num::complex::Complex64;
 use num::traits::CheckedEuclid;
@@ -247,8 +247,7 @@ impl TryFrom<f64> for Int {
         let bit_int = BigInt::from_f64(value).ok_or_else(|| {
             EvaluationError::type_error(
                 &format!("cannot convert {value:?} to int"),
-                Location { line: 0, column: 0 },
-                Location { line: 0, column: 0 },
+                Span::new(0, 0), // TODO: fix span creation (move out of this impl)
             )
         })?;
         Ok(Self::BigInt(bit_int))
@@ -298,8 +297,7 @@ impl TryFrom<Int> for i32 {
                 } else {
                     return Err(EvaluationError::type_error(
                         &format!("cannot convert {p2} to 32-bit signed integer"),
-                        Location { line: 0, column: 0 },
-                        Location { line: 0, column: 0 },
+                        Span::new(0, 0), // TODO: fix span creation (move out of this impl)
                     ));
                 }
             }
@@ -309,8 +307,7 @@ impl TryFrom<Int> for i32 {
                 } else {
                     return Err(EvaluationError::type_error(
                         &format!("cannot convert {p2} to 32-bit signed integer"),
-                        Location { line: 0, column: 0 },
-                        Location { line: 0, column: 0 },
+                        Span::new(0, 0), // TODO: fix span creation (move out of this impl)
                     ));
                 }
             }
