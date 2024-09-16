@@ -5,11 +5,14 @@ use std::process::exit;
 
 use clap::Parser;
 
+use highlighter::AndycppHighlighter;
 use miette::NamedSource;
 use ndc_lib::interpreter::{Interpreter, InterpreterError};
 
 #[cfg(feature = "repl")]
 mod repl;
+
+mod highlighter;
 
 #[derive(Parser)]
 #[command(name = "Andy C++")]
@@ -20,6 +23,9 @@ struct Cli {
     file: Option<PathBuf>,
     #[arg(long)]
     debug: bool,
+
+    #[arg(short = 'C', long, default_value_t = 1)]
+    context_lines: usize,
 }
 
 pub fn miette_hack<T>(result: Result<T, InterpreterError>) -> miette::Result<T> {
@@ -30,19 +36,22 @@ pub fn miette_hack<T>(result: Result<T, InterpreterError>) -> miette::Result<T> 
 }
 
 fn main() -> anyhow::Result<()> {
-    miette::set_hook(Box::new(|_| {
+    let cli = Cli::parse();
+
+    let context_lines = cli.context_lines;
+
+    miette::set_hook(Box::new(move |_| {
         Box::new(
             miette::MietteHandlerOpts::new()
                 .terminal_links(true)
+                .color(true)
                 .unicode(true)
-                .context_lines(1)
-                // TODO: use this for custom highlighting
-                // .with_syntax_highlighting(MyMietteHighlighter {})
+                .context_lines(context_lines)
+                .with_syntax_highlighting(AndycppHighlighter::default())
                 .build(),
         )
     }))?;
 
-    let cli = Cli::parse();
     if let Some(path) = cli.file {
         // Create a copy of the filename for error reporting later
         let filename = path

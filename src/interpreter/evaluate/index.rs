@@ -113,9 +113,9 @@ fn value_to_forward_index_usize(
 ) -> Result<usize, EvaluationError> {
     let index = i64::try_from(value).map_err(|_err| {
         EvaluationError::with_help(
-            format!("Invalid list index"),
+            "Invalid list index".to_string(),
             span,
-            format!("The value used as a list index is not valid. List indices must be convertible to a signed 64-bit integer. Ensure the index is a valid integer within the range of -2^63 to 2^63-1"),
+            "The value used as a list index is not valid. List indices must be convertible to a signed 64-bit integer. Ensure the index is a valid integer within the range of -2^63 to 2^63-1".to_string(),
         )
     })?;
 

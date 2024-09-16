@@ -1,83 +1,24 @@
-use colored::{Color, Colorize};
 use itertools::Itertools;
+use miette::highlighters::HighlighterState;
 use ndc_lib::interpreter::Interpreter;
-use ndc_lib::lexer::{Lexer, Token};
 use rustyline::config::Configurer;
 use rustyline::error::ReadlineError;
 use rustyline::Helper;
 use rustyline::{ColorMode, Completer, Editor, Hinter, Validator};
 use std::borrow::Cow;
 
+use crate::highlighter::CustomHighlighterState;
 use crate::miette_hack;
 
 #[derive(Helper, Completer, Hinter, Validator)]
 struct RustlylineHelper {}
 
-const NUMBER_LITERAL_COLOR: Color = Color::TrueColor {
-    r: 253,
-    g: 151,
-    b: 31,
-};
-
-const PARENTHESES_COLOR: Color = Color::TrueColor {
-    r: 229,
-    g: 181,
-    b: 103,
-};
-
-const STRING_LITERAL_COLOR: Color = Color::BrightGreen;
-const IDENTIFIER_COLOR: Color = Color::BrightCyan;
-
 impl rustyline::highlight::Highlighter for RustlylineHelper {
     fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
-        let Ok(tokens) = Lexer::new(line).collect::<Result<Vec<_>, _>>() else {
-            return Cow::Owned(line.red().to_string());
-        };
+        let mut state = CustomHighlighterState {};
+        let out = state.highlight_line(line);
 
-        if tokens.is_empty() {
-            return Cow::Owned(line.red().to_string());
-        }
-
-        let mut start = 0;
-        let mut ranges = vec![];
-        for token in tokens.iter().dropping(1) {
-            let end = token.span.offset();
-            ranges.push(start..end);
-            start = end;
-        }
-        if !line.is_empty() {
-            ranges.push(start..line.len());
-        }
-
-        let mut buf = String::new();
-        for (range, token) in ranges.into_iter().zip(tokens.into_iter()) {
-            let sub = line
-                .chars()
-                .dropping(range.start)
-                .take(range.len())
-                .collect::<String>();
-
-            let colored = match &token.token {
-                Token::String(_) => sub.color(STRING_LITERAL_COLOR),
-                Token::BigInt(_) | Token::Int64(_) | Token::Float64(_) | Token::Complex(_) => {
-                    sub.color(NUMBER_LITERAL_COLOR)
-                }
-                Token::True | Token::False => sub.color(NUMBER_LITERAL_COLOR),
-                Token::LeftSquareBracket
-                | Token::RightSquareBracket
-                | Token::LeftCurlyBracket
-                | Token::RightCurlyBracket
-                | Token::LeftParentheses
-                | Token::RightParentheses
-                | Token::MapOpen => sub.color(PARENTHESES_COLOR),
-                Token::Identifier(_) => sub.color(IDENTIFIER_COLOR),
-                _ => sub.bright_blue().bold(), // BOLD
-            };
-
-            buf.push_str(&colored.to_string());
-        }
-
-        Cow::Owned(buf)
+        Cow::Owned(out.into_iter().join(""))
     }
 
     fn highlight_char(&self, _line: &str, _pos: usize, _forced: bool) -> bool {
