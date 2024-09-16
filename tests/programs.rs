@@ -1,5 +1,5 @@
-use colored::Colorize;
 use ndc_lib::interpreter::Interpreter;
+use owo_colors::OwoColorize;
 use std::fs;
 use std::path::{Path, PathBuf};
 

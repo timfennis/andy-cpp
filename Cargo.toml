@@ -22,7 +22,6 @@ lto = true
 [dependencies]
 anyhow = "1.0.80"
 clap = { version = "4.5.1", features = ["derive"] }
-colored = "2.1.0"
 num = "0.4.1"
 rustyline = { version = "14.0.0", optional = true, features = ["derive"] }
 ryu = "1.0.17"
@@ -35,6 +34,7 @@ ordered-float = "4.2.0"
 regex = "1.10.4"
 self_cell = "1.0.4"
 miette = { version = "7.2.0", features = ["fancy"] }
+owo-colors = "4.1.0"
 
 [features]
 default = ["repl", "ahash"]

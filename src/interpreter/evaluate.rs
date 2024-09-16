@@ -7,7 +7,6 @@ use std::rc::Rc;
 use either::Either;
 use index::{evaluate_as_index, set_at_index, Offset};
 use itertools::Itertools;
-use rustyline::Helper;
 
 use crate::ast::{
     BinaryOperator, Expression, ExpressionLocation, ForBody, ForIteration, LogicalOperator, Lvalue,
