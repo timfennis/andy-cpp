@@ -49,6 +49,11 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// Lexes a literal string that needs to be terminated by `pounds` number of poundsigns
+    /// Example
+    /// ```ndc
+    /// r##"this is some text that "can contain double quotes" and even "#."##
+    /// ```
     fn lex_string_literal(
         &mut self,
         start_offset: usize,
@@ -74,6 +79,7 @@ impl<'a> Lexer<'a> {
         ))
     }
 
+    /// Lexes a literal string that can contain escape sequences
     fn lex_string(&mut self, start_offset: usize) -> Result<TokenLocation, Error> {
         // TODO: support \u8080 type escape sequences
         // TODO: should we handle bytes like \xFF? Probably not for strings because they aren't valid UTF-8
@@ -132,6 +138,127 @@ impl<'a> Lexer<'a> {
         Err(Error::unterminated_string(
             self.source.create_span(start_offset),
         ))
+    }
+
+    fn lex_number(
+        &mut self,
+        first_char: char,
+        start_offset: usize,
+    ) -> Result<TokenLocation, Error> {
+        let mut buf = String::new();
+
+        if first_char == '0' && matches!(self.source.peek_one(), Some('b')) {
+            self.source.next(); // eat the 'b'
+
+            // TODO parse literals with any radix (maybe make function for this)
+            while let Some(next_char) = self.source.peek_one() {
+                match next_char {
+                    '0' | '1' => {
+                        self.source.next();
+                        buf.push(next_char);
+                    }
+                    '_' => {
+                        self.source.next();
+                    }
+                    // Special case, if we find an ascii digit somebody is writing 0b02 for instance and we can throw a special error like the rust parser
+                    c if c.is_ascii_digit() => {
+                        self.source.next();
+                        return Err(Error::text(
+                            "invalid digit for base 2 literal".to_string(),
+                            self.source.span(),
+                        ));
+                    }
+                    _ => break,
+                }
+            }
+
+            return match i64::from_str_radix(&buf, 2) {
+                Ok(num) => Ok(TokenLocation {
+                    token: Token::Int64(num),
+                    span: self.source.create_span(start_offset),
+                }),
+                Err(_err) => Err(Error::text(
+                    "invalid base-2 number".to_string(),
+                    self.source.create_span(start_offset),
+                )),
+            };
+        }
+
+        buf.push(first_char);
+
+        let mut is_float = false;
+        while let Some(next_char) = self.source.peek_one() {
+            match next_char {
+                c if c.is_ascii_digit() => {
+                    self.source.next();
+                    buf.push(c);
+                }
+                // A `_` inside a number is ignored unless it's after a `.`
+                '_' => {
+                    // TODO: Maybe disallow `_` after `.`
+                    self.source.next();
+                    // ignore underscore for nice number formatting
+                }
+                '.' if !is_float => {
+                    // if we find a dot we're likely dealing with a float, but it could
+                    // also be an integer followed by a method call eg: 1.add(2)
+                    // in this match we look ahead one step further to figure out if the
+                    // dot is followed by a number in which case it's a float, otherwise
+                    // we stop and just return the int and leave the dot for later
+                    match self.source.peek_n(1) {
+                        // it's truly a num
+                        Some(n) if n.is_ascii_digit() => {
+                            is_float = true;
+                            self.source.next();
+                            buf.push('.');
+                        }
+                        // It's actually an int followed by dot or some weird error
+                        _ => {
+                            break;
+                        }
+                    }
+                }
+                'j' | 'i' => {
+                    self.source.next();
+
+                    let Ok(num) = buf.parse::<f64>() else {
+                        return Err(Error::text(
+                            format!("invalid float '{buf}'"),
+                            self.source.create_span(start_offset),
+                        ));
+                    };
+
+                    return Ok(TokenLocation {
+                        token: Token::Complex(Complex::new(0.0, num)),
+                        span: self.source.create_span(start_offset),
+                    });
+                }
+
+                _ => break,
+            }
+        }
+
+        let token = if let Ok(num) = buf.parse::<i64>() {
+            Token::Int64(num)
+        } else if is_float {
+            if let Ok(num) = buf.parse::<f64>() {
+                Token::Float64(num)
+            } else {
+                return Err(Error::text(
+                    format!("invalid float '{buf}' "),
+                    self.source.create_span(start_offset),
+                ));
+            }
+        } else {
+            let i = buf
+                .parse::<BigInt>()
+                .expect("must be a valid big int at this point");
+            Token::BigInt(i)
+        };
+        return Ok(TokenLocation {
+            token,
+            span: self.source.create_span(start_offset),
+        });
     }
 }
 
@@ -230,83 +357,8 @@ impl Iterator for Lexer<'_> {
                 ('"', _) => return Some(self.lex_string(start_offset)),
                 // lex float & int
                 (char, _) if char.is_ascii_digit() => {
-                    let mut buf = String::new();
-                    buf.push(char);
-
-                    let mut float = false;
-                    while let Some(next_char) = self.source.peek_one() {
-                        match next_char {
-                            c if c.is_ascii_digit() => {
-                                self.source.next();
-                                buf.push(c);
-                            }
-                            '_' => {
-                                // TODO: Maybe disallow `_` after `.`
-                                self.source.next();
-                                // ignore underscore for nice number formatting
-                            }
-                            '.' if !float => {
-                                // if we find a dot we're likely dealing with a float, but it could
-                                // also be an integer followed by a method call eg: 1.add(2)
-                                // in this match we look ahead one step further to figure out if the
-                                // dot is followed by a number in which case it's a float, otherwise
-                                // we stop and just return the int and leave the dot for later
-                                match self.source.peek_n(1) {
-                                    // it's truly a num
-                                    Some(n) if n.is_ascii_digit() => {
-                                        float = true;
-                                        self.source.next();
-                                        buf.push('.');
-                                    }
-                                    // It's actually an int followed by dot or some weird error
-                                    _ => {
-                                        break;
-                                    }
-                                }
-                            }
-                            'j' | 'i' => {
-                                self.source.next();
-
-                                let Ok(num) = buf.parse::<f64>() else {
-                                    return Some(Err(Error::text(
-                                        format!("invalid float '{buf}'"),
-                                        self.source.create_span(start_offset),
-                                    )));
-                                };
-
-                                return Some(Ok(TokenLocation {
-                                    token: Token::Complex(Complex::new(0.0, num)),
-                                    span: self.source.create_span(start_offset),
-                                }));
-                            }
-
-                            _ => break,
-                        }
-                    }
-
-                    let token = if let Ok(num) = buf.parse::<i64>() {
-                        Token::Int64(num)
-                    } else if float {
-                        if let Ok(num) = buf.parse::<f64>() {
-                            Token::Float64(num)
-                        } else {
-                            return Some(Err(Error::text(
-                                format!("invalid float '{buf}' "),
-                                self.source.create_span(start_offset),
-                            )));
-                        }
-                    } else {
-                        let i = buf
-                            .parse::<BigInt>()
-                            .expect("must be a valid big int at this point");
-                        Token::BigInt(i)
-                    };
-                    return Some(Ok(TokenLocation {
-                        token,
-                        span: self.source.create_span(start_offset),
-                    }));
-                }
-                // Lex identifiers and keywords
+                    return Some(self.lex_number(char, start_offset))
+                } // Lex identifiers and keywords
                 (char, _) if char.is_alphabetic() || char == '_' => {
                     // Parse an identifier, or not
                     let mut buf = String::new();
