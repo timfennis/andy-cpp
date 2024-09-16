@@ -491,7 +491,12 @@ impl Parser {
     fn term(&mut self) -> Result<ExpressionLocation, Error> {
         self.consume_binary_expression_left_associative(
             Self::factor,
-            &[Token::Plus, Token::Minus, Token::Concat],
+            &[
+                Token::Plus,
+                Token::Minus,
+                Token::Concat,
+                Token::StringConcat,
+            ],
             false,
         )
     }
@@ -859,7 +864,10 @@ impl Parser {
                 // TODO: this error might not be the best way to describe what's happening here
                 //       figure out if there is a better way to handle errors here.
                 return Err(Error::text(
-                    "expected an expression but got an unexpected token instead".to_string(),
+                    format!(
+                        "Expected an expression but got '{}' instead",
+                        token_location.token
+                    ),
                     token_location.span,
                 ));
             }
