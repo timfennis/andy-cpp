@@ -382,8 +382,14 @@ impl Parser {
         if let Some(end) = self.consume_token_if(&[Token::RightParentheses]) {
             Ok(Expression::Tuple { values: vec![] }.to_location(start.span.merge(end.span)))
         } else {
-            let tuple_expression = self.tuple_expressions(next)?;
-            self.require_current_token_matches(&Token::RightParentheses)?;
+            let mut tuple_expression = self.tuple_expressions(next)?;
+            let right_paren_span = self
+                .require_current_token_matches(&Token::RightParentheses)?
+                .span;
+
+            // Include the right paretheses in the span
+            tuple_expression.span = tuple_expression.span.merge(right_paren_span);
+
             Ok(tuple_expression)
         }
     }
@@ -544,9 +550,9 @@ impl Parser {
             match current.token {
                 // handles: foo()
                 Token::LeftParentheses => {
-                    let Expression::Tuple { values: arguments } =
-                        self.delimited_tuple(Self::single_expression)?.expression
-                    else {
+                    let arguments = self.delimited_tuple(Self::single_expression)?;
+                    let arguments_span = arguments.span;
+                    let Expression::Tuple { values: arguments } = arguments.expression else {
                         unreachable!("self.tuple() must always produce a tuple");
                     };
 
@@ -557,13 +563,14 @@ impl Parser {
                             function: Box::new(expr),
                             arguments,
                         },
-                        span,
+                        span: span.merge(arguments_span),
                     };
                 }
                 Token::Dot => {
                     self.require_current_token_matches(&Token::Dot)?; // consume matched token
                     let l_value = self.require_identifier()?;
                     let identifier_span = l_value.span;
+                    let first_argument_span = expr.span;
                     let identifier = Lvalue::try_from(l_value)?;
                     let Lvalue::Variable { identifier } = identifier else {
                         unreachable!("Guaranteed to match by previous call to require_identifier")
@@ -586,7 +593,9 @@ impl Parser {
                             ),
                             arguments,
                         },
-                        span: identifier_span,
+                        span: identifier_span
+                            .merge(first_argument_span)
+                            .merge(tuple_expression.span),
                     }
 
                     // for now, we require parentheses
