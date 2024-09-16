@@ -3,9 +3,11 @@ use num::{BigInt, Complex};
 use std::collections::VecDeque;
 use std::str::Chars;
 
+mod span;
 mod token;
 
-pub use token::{Span, Token, TokenLocation};
+pub use span::Span;
+pub use token::{Token, TokenLocation};
 
 pub struct Lexer<'a> {
     source: SourceIterator<'a>,

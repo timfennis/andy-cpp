@@ -1,7 +1,8 @@
 use num::complex::Complex64;
 use num::BigInt;
 use std::fmt;
-use std::ops::Range;
+
+use super::Span;
 
 #[derive(PartialEq, Clone)]
 pub enum Token {
@@ -48,6 +49,7 @@ pub enum Token {
     DotDot,       // range builder
     DotDotEquals, // inclusive range builder
     Concat,       // ++ operator will be for concatenation
+    StringConcat, // <> operator will be for string concatenation with coersion
     // Keywords
     Fn,
     If,
@@ -146,6 +148,7 @@ impl fmt::Display for Token {
             Self::DotDot => "..",
             Self::DotDotEquals => "..=",
             Self::Concat => "++",
+            Self::StringConcat => "<>",
             Self::Dot => ".",
             Self::OpAssign(inner) => {
                 return write!(f, "{}=", inner.token);
@@ -174,6 +177,7 @@ impl Token {
                 | Self::Concat
                 | Self::Ampersand
                 | Self::Pipe
+                | Self::StringConcat
         )
     }
 }
@@ -182,50 +186,6 @@ impl Token {
 pub struct TokenLocation {
     pub token: Token,
     pub span: Span,
-}
-
-#[derive(Clone, Copy, Eq, PartialEq, Debug)]
-pub struct Span {
-    offset: usize,
-    length: usize,
-}
-
-impl Span {
-    #[must_use]
-    pub fn new(offset: usize, length: usize) -> Self {
-        Self { offset, length }
-    }
-
-    #[must_use]
-    pub fn merge(self, other: Self) -> Self {
-        let from = self.offset.min(other.offset);
-        let to = (self.offset + self.length).max(other.offset + other.length);
-        Self {
-            offset: from,
-            length: to - from,
-        }
-    }
-
-    #[must_use]
-    pub fn range(&self) -> Range<usize> {
-        self.offset..self.end()
-    }
-
-    #[must_use]
-    pub fn offset(&self) -> usize {
-        self.offset
-    }
-
-    #[must_use]
-    pub fn end(&self) -> usize {
-        self.offset + self.length
-    }
-}
-
-impl From<Span> for miette::SourceSpan {
-    fn from(val: Span) -> Self {
-        (val.offset, val.length).into()
-    }
 }
 
 impl TryFrom<(char, Option<char>, Option<char>)> for Token {
@@ -272,6 +232,7 @@ impl TryFrom<(char, char)> for Token {
             ('!', '=') => Ok(Self::Inequality),
             ('>', '=') => Ok(Self::GreaterEquals),
             ('<', '=') => Ok(Self::LessEquals),
+            ('<', '>') => Ok(Self::StringConcat),
             _ => Err(()),
         }
     }

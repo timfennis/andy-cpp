@@ -901,6 +901,7 @@ fn apply_operator(
             }
             _ => return Err(create_type_error()),
         },
+        BinaryOperator::StringConcat => Value::from(format!("{left}{right}")),
     };
 
     Ok(val)

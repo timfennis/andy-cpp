@@ -46,6 +46,7 @@ pub enum BinaryOperator {
     And,
     Or,
     Concat,
+    StringConcat,
     In,
 }
 
@@ -98,6 +99,7 @@ impl TryFrom<TokenLocation> for BinaryOperator {
             Token::Pipe => Self::Or,
             Token::In => Self::In,
             Token::Concat => Self::Concat,
+            Token::StringConcat => Self::StringConcat,
             _ => {
                 // NOTE: this is more of an internal error than a user caused error since the parser should check the token prior to converting it.
                 return Err(ParseError::text(
@@ -136,6 +138,7 @@ impl fmt::Display for BinaryOperator {
             BinaryOperator::And => "&",
             BinaryOperator::Or => "|",
             BinaryOperator::Concat => "++",
+            BinaryOperator::StringConcat => "<>",
             BinaryOperator::In => "in",
         };
         write!(f, "{op}")
