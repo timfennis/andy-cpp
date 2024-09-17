@@ -1,5 +1,11 @@
 --PROGRAM--
+// Simple binary number
 assert(0b1111 == 15);
+// Really big binary numbers are valid too!
+assert(0b1111111111111111111111111111111111111111111111111111111111111111 == 18446744073709551615);
+// Underscores are allowed
+assert(0b10_10_10 == 42);
+
 print("ok");
 --EXPECT--
 ok

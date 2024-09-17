@@ -1,0 +1,8 @@
+--PROGRAM--
+assert(32rmmmm == 744150);
+assert(36r10 == 36);
+assert(36rZ == 35);
+assert(2r101011 == 0b101011);
+print("ok");
+--EXPECT--
+ok
