@@ -45,6 +45,8 @@ impl<'a> NumberLexer for Lexer<'a> {
 
             self.lex_to_buffer(&mut buf, |c| c == '1' || c == '0');
 
+            // TODO do these common error interceptions even make sense considering we don't really have any suffixes we support
+            // maybe we can pull these checks outside of lex number and see if the next token after lexing a number is ascii alpha?
             match self.source.peek_one() {
                 Some(c) if c.is_ascii_digit() => {
                     self.source.next();
@@ -83,6 +85,25 @@ impl<'a> NumberLexer for Lexer<'a> {
             // TODO: also intercept common errors here?
 
             return match buf_to_token_with_radix(&buf, 16) {
+                Some(token) => Ok(TokenLocation {
+                    token,
+                    span: self.source.create_span(start_offset),
+                }),
+                None => Err(Error::text(
+                    "invalid base 16 number".to_string(),
+                    self.source.create_span(start_offset),
+                )),
+            };
+        }
+
+        if first_char == '0' && matches!(self.source.peek_one(), Some('o')) {
+            self.source.next();
+
+            self.lex_to_buffer(&mut buf, |c| matches!(c, '0'..='7'));
+
+            // TODO: also intercept common errors here?
+
+            return match buf_to_token_with_radix(&buf, 8) {
                 Some(token) => Ok(TokenLocation {
                     token,
                     span: self.source.create_span(start_offset),
