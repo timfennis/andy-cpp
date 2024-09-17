@@ -23,8 +23,8 @@ pub(crate) struct CustomHighlighterState {}
 const NUMBER_LITERAL_COLOR: owo_colors::Rgb = Rgb(253, 151, 31);
 const PARENTHESES_COLOR: owo_colors::Rgb = Rgb(229, 181, 103);
 
-const STRING_LITERAL_COLOR: owo_colors::DynColors =
-    owo_colors::DynColors::Ansi(owo_colors::AnsiColors::BrightGreen);
+const STRING_LITERAL_COLOR: owo_colors::AnsiColors = owo_colors::AnsiColors::BrightGreen;
+const IDENTIFIER_COLOR: owo_colors::AnsiColors = owo_colors::AnsiColors::Cyan;
 
 impl HighlighterState for CustomHighlighterState {
     fn highlight_line<'s>(&mut self, line: &'s str) -> Vec<Styled<&'s str>> {
@@ -62,7 +62,7 @@ impl HighlighterState for CustomHighlighterState {
                 | Token::LeftParentheses
                 | Token::RightParentheses
                 | Token::MapOpen => Style::new().color(PARENTHESES_COLOR).style(substring),
-                Token::Identifier(_) => Style::new().bright_cyan().style(substring),
+                Token::Identifier(_) => Style::new().color(IDENTIFIER_COLOR).style(substring),
                 _ => Style::new().bright_blue().bold().style(substring),
             };
 
