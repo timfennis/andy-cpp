@@ -8,7 +8,7 @@ use num::{pow::Pow, BigInt, BigRational, Signed, ToPrimitive, Zero};
 use std::cmp::Ordering;
 use std::fmt;
 use std::hash::{Hash, Hasher};
-use std::ops;
+use std::ops::{BitAnd, BitOr, BitXor, Neg, Not};
 
 #[derive(Debug, Clone)]
 pub enum Int {
@@ -141,13 +141,24 @@ impl PartialOrd for Int {
     }
 }
 
-impl ops::Neg for Int {
+impl Neg for Int {
     type Output = Self;
 
     fn neg(self) -> Self::Output {
         match self {
             Self::Int64(i) => Self::Int64(i.neg()),
             Self::BigInt(i) => Self::BigInt(i.neg()),
+        }
+    }
+}
+
+impl Not for Int {
+    type Output = Self;
+
+    fn not(self) -> Self::Output {
+        match self {
+            Int::Int64(i) => i.not().into(),
+            Int::BigInt(big_int) => big_int.not().into(),
         }
     }
 }
@@ -207,6 +218,66 @@ impl_binary_operator!(Sub, sub, checked_sub);
 impl_binary_operator!(Mul, mul, checked_mul);
 impl_binary_operator!(Div, div, checked_div);
 impl_binary_operator!(Rem, rem, checked_rem);
+
+impl BitAnd for &Int {
+    type Output = Int;
+
+    fn bitand(self, rhs: Self) -> Self::Output {
+        if let (Int::Int64(p1), Int::Int64(p2)) = (self, rhs) {
+            return Int::Int64(p1 & p2);
+        }
+
+        Int::BigInt(self.to_bigint().bitand(rhs.to_bigint())).simplified()
+    }
+}
+
+impl BitAnd for Int {
+    type Output = Self;
+
+    fn bitand(self, rhs: Self) -> Self::Output {
+        &self & &rhs
+    }
+}
+
+impl BitOr for &Int {
+    type Output = Int;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        if let (Int::Int64(p1), Int::Int64(p2)) = (self, rhs) {
+            return Int::Int64(p1 | p2);
+        }
+
+        Int::BigInt(self.to_bigint().bitor(rhs.to_bigint()))
+    }
+}
+
+impl BitOr for Int {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        &self | &rhs
+    }
+}
+
+impl BitXor for &Int {
+    type Output = Int;
+
+    fn bitxor(self, rhs: Self) -> Self::Output {
+        if let (Int::Int64(p1), Int::Int64(p2)) = (self, rhs) {
+            return Int::Int64(p1 ^ p2);
+        }
+
+        Int::BigInt(self.to_bigint().bitxor(rhs.to_bigint())).simplified()
+    }
+}
+
+impl BitXor for Int {
+    type Output = Self;
+
+    fn bitxor(self, rhs: Self) -> Self::Output {
+        &self ^ &rhs
+    }
+}
 
 impl From<i32> for Int {
     fn from(value: i32) -> Self {

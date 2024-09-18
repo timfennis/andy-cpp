@@ -7,6 +7,7 @@ use std::fmt::Formatter;
 pub enum UnaryOperator {
     Not,
     Neg,
+    BitNot,
 }
 
 impl TryFrom<TokenLocation> for UnaryOperator {
@@ -14,6 +15,7 @@ impl TryFrom<TokenLocation> for UnaryOperator {
 
     fn try_from(value: TokenLocation) -> Result<Self, Self::Error> {
         Ok(match value.token {
+            Token::Tilde => Self::BitNot,
             Token::Minus => Self::Neg,
             Token::Bang | Token::LogicNot => Self::Not,
             _ => {
@@ -45,6 +47,7 @@ pub enum BinaryOperator {
     Exponent,
     And,
     Or,
+    Xor,
     Concat,
     StringConcat,
     In,
@@ -96,6 +99,7 @@ impl TryFrom<TokenLocation> for BinaryOperator {
             Token::EuclideanModulo => Self::EuclideanModulo,
             Token::Caret => Self::Exponent,
             Token::Ampersand => Self::And,
+            Token::Tilde => Self::Xor,
             Token::Pipe => Self::Or,
             Token::In => Self::In,
             Token::Concat => Self::Concat,
@@ -137,6 +141,7 @@ impl fmt::Display for BinaryOperator {
             BinaryOperator::Exponent => "^",
             BinaryOperator::And => "&",
             BinaryOperator::Or => "|",
+            BinaryOperator::Xor => "~",
             BinaryOperator::Concat => "++",
             BinaryOperator::StringConcat => "<>",
             BinaryOperator::In => "in",

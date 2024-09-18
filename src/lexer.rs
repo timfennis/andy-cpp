@@ -127,12 +127,14 @@ impl Iterator for Lexer<'_> {
                 ('"', _) => return Some(self.lex_string()),
                 // lex float & int
                 (char, _) if char.is_ascii_digit() => return Some(self.lex_number()), // Lex identifiers and keywords
-                // Identifier
+                // Identifier or keyword
                 (char, _) if char.is_alphabetic() || char == '_' => {
-                    self.source.consume(1); // Because we use the peeked char we consume it from the iterator
-                                            // Parse an identifier, or not
+                    // Because we use the peeked char we consume it from the iterator
+                    self.source.consume(1);
+
                     let mut buf = String::new();
                     buf.push(char);
+
                     while let Some(next_char) = self.source.peek() {
                         if next_char.is_alphanumeric() || next_char == '_' {
                             // advance iterator for next
@@ -144,6 +146,7 @@ impl Iterator for Lexer<'_> {
                     }
 
                     let ident_end_span = self.source.span();
+
                     // If the identifier is followed by a single `=` we construct an OpAssign
                     if self.source.peek() == Some('=') && self.source.peek_n(1) != Some('=') {
                         self.source.next();
@@ -155,6 +158,8 @@ impl Iterator for Lexer<'_> {
                             span: self.source.create_span(start_offset),
                         }));
                     }
+
+                    // `buf.into()` takes care of creating a Keyword or Identifier depending on the string content
                     return Some(Ok(TokenLocation {
                         token: buf.into(),
                         span: self.source.create_span(start_offset),
@@ -265,6 +270,7 @@ impl Error {
         }
     }
 
+    #[must_use]
     pub fn help(text: String, source: Span, help_text: String) -> Self {
         Self {
             text,

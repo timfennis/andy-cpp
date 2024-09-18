@@ -359,6 +359,7 @@ impl Parser {
             expressions.push(next(self)?);
         }
 
+        // TODO: although they can probably never fail, remove these unwraps
         let new_span = expressions
             .first()
             .unwrap()
@@ -481,7 +482,11 @@ impl Parser {
     }
 
     fn boolean_or(&mut self) -> Result<ExpressionLocation, Error> {
-        self.consume_binary_expression_left_associative(Self::boolean_and, &[Token::Pipe], false)
+        self.consume_binary_expression_left_associative(Self::boolean_xor, &[Token::Pipe], false)
+    }
+
+    fn boolean_xor(&mut self) -> Result<ExpressionLocation, Error> {
+        self.consume_binary_expression_left_associative(Self::boolean_and, &[Token::Tilde], false)
     }
 
     fn boolean_and(&mut self) -> Result<ExpressionLocation, Error> {
@@ -523,7 +528,7 @@ impl Parser {
     }
 
     fn tight_unary(&mut self) -> Result<ExpressionLocation, Error> {
-        if let Some(token) = self.consume_token_if(&[Token::Bang, Token::Minus]) {
+        if let Some(token) = self.consume_token_if(&[Token::Bang, Token::Minus, Token::Tilde]) {
             let token_span = token.span;
             let operator: UnaryOperator = token
                 .try_into()
