@@ -40,7 +40,7 @@ pub enum Token {
     Caret,
     Ampersand, // &
     Pipe,      // |
-    Tilde,     //
+    Tilde,     // ~
     // Operator - Unary
     Bang,
     // Operator - Call

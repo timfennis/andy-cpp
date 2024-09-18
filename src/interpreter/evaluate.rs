@@ -49,7 +49,10 @@ pub(crate) fn evaluate_expression(
         } => {
             let value = evaluate_expression(expression_location, environment)?;
             match (value, operator) {
+                (Value::Number(n), UnaryOperator::BitNot) => Value::Number(n.not()),
                 (Value::Number(n), UnaryOperator::Neg) => Value::Number(n.neg()),
+                // Just like in C the bitwise negation of `false` is `-1`
+                (Value::Bool(b), UnaryOperator::BitNot) => i64::from(b).not().into(),
                 (Value::Bool(b), UnaryOperator::Not) => Value::Bool(b.not()),
                 (_, UnaryOperator::Not) => {
                     return Err(EvaluationError::type_error(
@@ -62,6 +65,13 @@ pub(crate) fn evaluate_expression(
                     return Err(
                         EvaluationError::type_error("this type cannot be negated", span).into(),
                     );
+                }
+                (_, UnaryOperator::BitNot) => {
+                    return Err(EvaluationError::type_error(
+                        "this type does not support bitwise negation",
+                        span,
+                    )
+                    .into());
                 }
             }
         }
@@ -821,10 +831,9 @@ fn apply_operator(
             _ => return Err(create_type_error()),
         },
         BinaryOperator::And => match (left, right) {
-            (
-                Value::Number(Number::Int(Int::Int64(a))),
-                Value::Number(Number::Int(Int::Int64(b))),
-            ) => Value::from(a & b),
+            (Value::Number(Number::Int(a)), Value::Number(Number::Int(b))) => {
+                Value::from(Number::from(a & b))
+            }
             // Note that when using & on two dictionaries with a default values the default value from left is kept
             (
                 Value::Sequence(Sequence::Map(left, default)),
@@ -839,15 +848,30 @@ fn apply_operator(
             _ => return Err(create_type_error()),
         },
         BinaryOperator::Or => match (left, right) {
-            (
-                Value::Number(Number::Int(Int::Int64(a))),
-                Value::Number(Number::Int(Int::Int64(b))),
-            ) => Value::from(a | b),
+            (Value::Number(Number::Int(a)), Value::Number(Number::Int(b))) => {
+                Value::from(Number::from(a | b))
+            }
             (
                 Value::Sequence(Sequence::Map(left, default)),
                 Value::Sequence(Sequence::Map(right, _)),
             ) => Value::Sequence(Sequence::Map(
                 Rc::new(RefCell::new(hash_map::union(
+                    &*left.borrow(),
+                    &*right.borrow(),
+                ))),
+                default,
+            )),
+            _ => return Err(create_type_error()),
+        },
+        BinaryOperator::Xor => match (left, right) {
+            (Value::Number(Number::Int(a)), Value::Number(Number::Int(b))) => {
+                Value::from(Number::from(a ^ b))
+            }
+            (
+                Value::Sequence(Sequence::Map(left, default)),
+                Value::Sequence(Sequence::Map(right, _)),
+            ) => Value::Sequence(Sequence::Map(
+                Rc::new(RefCell::new(hash_map::symmetric_difference(
                     &*left.borrow(),
                     &*right.borrow(),
                 ))),

@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::num::TryFromIntError;
-use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
+use std::ops::{Add, Div, Mul, Neg, Not, Rem, Sub};
 
 use num::bigint::TryFromBigIntError;
 use num::complex::{Complex64, ComplexFloat};
@@ -175,6 +175,18 @@ impl Neg for Number {
             Self::Float(f) => f.neg().into(),
             Self::Rational(r) => r.neg().into(),
             Self::Complex(c) => c.neg().into(),
+        }
+    }
+}
+
+impl Not for Number {
+    type Output = Self;
+
+    fn not(self) -> Self::Output {
+        match self {
+            Number::Int(int) => int.not().into(),
+            // TODO: bitwise negation of all non integer numbers in Noulith result in NAN, is that what we want for our language too?
+            _ => f64::NAN.into(),
         }
     }
 }
