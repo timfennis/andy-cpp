@@ -1,18 +1,46 @@
 #[andy_cpp_macros::export_module]
 mod inner {
+    use anyhow::anyhow;
+
     use crate::compare::FallibleOrd;
     use crate::interpreter::value::Value;
     use std::cmp::Ordering;
 
-    pub fn assert(value: bool) -> Value {
-        assert!(value, "failed asserting that argument is true");
-        Value::Unit
+    pub fn assert(value: bool) -> anyhow::Result<Value> {
+        if value == false {
+            Err(anyhow!("failed asserting that argument is true"))
+        } else {
+            Ok(Value::Unit)
+        }
+    }
+
+    pub fn assert_eq(left: &Value, right: &Value) -> anyhow::Result<Value> {
+        if left != right {
+            Err(anyhow!(format!(
+                "failed asserting that {left} equals {right}"
+            )))
+        } else {
+            Ok(Value::Unit)
+        }
+    }
+
+    pub fn assert_ne(left: &Value, right: &Value) -> anyhow::Result<Value> {
+        if left == right {
+            Err(anyhow!(format!(
+                "failed asserting that {left} does not equal {right}"
+            )))
+        } else {
+            Ok(Value::Unit)
+        }
     }
 
     #[function(name = "assert")]
-    pub fn assert_with_message(value: bool, message: &str) -> Value {
-        assert!(value, "{message}");
-        Value::Unit
+    pub fn assert_with_message(value: bool, message: &str) -> anyhow::Result<Value> {
+        if value == false {
+            Err(anyhow!(message.to_string()))
+        } else {
+            Ok(Value::Unit)
+        }
     }
 
     pub fn max(left: &Value, right: &Value) -> Result<Value, anyhow::Error> {
