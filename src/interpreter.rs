@@ -80,13 +80,13 @@ impl Interpreter {
                 Ok(val) => value = val,
                 Err(FunctionCarrier::Return(_)) => {
                     Err(EvaluationError::syntax_error(
-                        "unexpected return statement outside of function body",
+                        "unexpected return statement outside of function body".to_string(),
                         expr.span,
                     ))?;
                 }
                 Err(FunctionCarrier::Break(_)) => {
                     Err(EvaluationError::syntax_error(
-                        "unexpected break statement outside of loop body",
+                        "unexpected break statement outside of loop body".to_string(),
                         expr.span,
                     ))?;
                 }

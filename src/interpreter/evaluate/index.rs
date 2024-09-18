@@ -120,13 +120,14 @@ fn value_to_forward_index_usize(
     })?;
 
     if index.is_negative() {
-        let index = usize::try_from(index.abs())
-            .map_err(|_err| EvaluationError::syntax_error("invalid index too large", span))?;
+        let index = usize::try_from(index.abs()).map_err(|_err| {
+            EvaluationError::syntax_error("invalid index too large".to_string(), span)
+        })?;
 
         size.checked_sub(index)
-            .ok_or_else(|| EvaluationError::syntax_error("index out of bounds", span))
+            .ok_or_else(|| EvaluationError::syntax_error("index out of bounds".to_string(), span))
     } else {
-        usize::try_from(index).map_err(|_| EvaluationError::syntax_error("kapot", span))
+        usize::try_from(index).map_err(|_| EvaluationError::syntax_error("kapot".to_string(), span))
     }
 }
 
@@ -153,7 +154,7 @@ pub fn set_at_index(
 ) -> Result<(), FunctionCarrier> {
     let Some(size) = lhs.sequence_length() else {
         return Err(EvaluationError::type_error(
-            "cannot index into this type because it doesn't have a length",
+            "cannot index into this type because it doesn't have a length".to_string(),
             span,
         )
         .into());
@@ -202,7 +203,7 @@ pub fn set_at_index(
                 }
             } else {
                 return Err(EvaluationError::syntax_error(
-                    &format!("cannot insert {} into a string", rhs.value_type()),
+                    format!("cannot insert {} into a string", rhs.value_type()),
                     span,
                 )
                 .into());
@@ -227,7 +228,7 @@ pub fn set_at_index(
         }
         _ => {
             return Err(EvaluationError::syntax_error(
-                &format!("cannot insert into {} at index", lhs.value_type()),
+                format!("cannot insert into {} at index", lhs.value_type()),
                 span,
             )
             .into());

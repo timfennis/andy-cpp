@@ -510,7 +510,7 @@ impl Number {
                 } else {
                     // TODO FIX line 0 column 0
                     return Err(EvaluationError::type_error(
-                        &format!("cannot convert {f} to int"),
+                        format!("cannot convert {f} to int"),
                         Span::new(0, 0), // TODO: fix span creation (move out of this impl)
                     ));
                 }
@@ -518,7 +518,7 @@ impl Number {
             Number::Rational(r) => Self::Int(Int::BigInt(r.to_integer()).simplified()),
             Number::Complex(c) => {
                 return Err(EvaluationError::type_error(
-                    &format!("cannot convert complex number {c} to int"),
+                    format!("cannot convert complex number {c} to int"),
                     Span::new(0, 0), // TODO: fix span creation (move out of this impl)
                 ));
             }

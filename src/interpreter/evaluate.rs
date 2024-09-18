@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::fmt;
-use std::ops::{IndexMut, Neg, Not, Rem};
+use std::ops::{BitAnd, BitOr, BitXor, IndexMut, Neg, Not, Rem};
 use std::rc::Rc;
 
 use either::Either;
@@ -54,21 +54,23 @@ pub(crate) fn evaluate_expression(
                 // Just like in C the bitwise negation of `false` is `-1`
                 (Value::Bool(b), UnaryOperator::BitNot) => i64::from(b).not().into(),
                 (Value::Bool(b), UnaryOperator::Not) => Value::Bool(b.not()),
-                (_, UnaryOperator::Not) => {
+                (v, UnaryOperator::Not) => {
                     return Err(EvaluationError::type_error(
-                        "the '!' operator cannot be applied to this type",
+                        format!("the '!' operator cannot be applied to {}", v.value_type()),
                         span,
                     )
                     .into());
                 }
-                (_, UnaryOperator::Neg) => {
-                    return Err(
-                        EvaluationError::type_error("this type cannot be negated", span).into(),
-                    );
-                }
-                (_, UnaryOperator::BitNot) => {
+                (v, UnaryOperator::Neg) => {
                     return Err(EvaluationError::type_error(
-                        "this type does not support bitwise negation",
+                        format!("{} does not support bitwise negation", v.value_type()),
+                        span,
+                    )
+                    .into());
+                }
+                (v, UnaryOperator::BitNot) => {
+                    return Err(EvaluationError::type_error(
+                        format!("{} does not support bitwise negation", v.value_type()),
                         span,
                     )
                     .into());
@@ -196,14 +198,14 @@ pub(crate) fn evaluate_expression(
                     }
                     Value::Sequence(Sequence::String(_)) => {
                         return Err(EvaluationError::type_error(
-                            "cannot OpAssign into a string",
+                            "cannot OpAssign into a string".to_string(),
                             span,
                         )
                         .into());
                     }
                     _ => {
                         return Err(EvaluationError::syntax_error(
-                            &format!("cannot OpAssign an index into a {}", assign_to.value_type()),
+                            format!("cannot OpAssign an index into a {}", assign_to.value_type()),
                             span,
                         )
                         .into());
@@ -214,7 +216,7 @@ pub(crate) fn evaluate_expression(
             }
             Lvalue::Sequence(_) => {
                 return Err(EvaluationError::syntax_error(
-                    "cannot use augmented assignment in combination with destructuring",
+                    "cannot use augmented assignment in combination with destructuring".to_string(),
                     span,
                 )
                 .into())
@@ -244,7 +246,7 @@ pub(crate) fn evaluate_expression(
                 (Value::Bool(false), None) => Value::Unit,
                 (value, _) => {
                     return Err(EvaluationError::type_error(
-                        &format!(
+                        format!(
                             "mismatched types: expected bool, found {}",
                             ValueType::from(&value)
                         ),
@@ -275,7 +277,7 @@ pub(crate) fn evaluate_expression(
                 (LogicalOperator::Or, Value::Bool(true)) => Value::Bool(true),
                 (LogicalOperator::And | LogicalOperator::Or, value) => {
                     return Err(EvaluationError::type_error(
-                        &format!(
+                        format!(
                             "Cannot apply logical operator to non bool value {}",
                             ValueType::from(&value)
                         ),
@@ -302,7 +304,7 @@ pub(crate) fn evaluate_expression(
                     break;
                 } else {
                     return Err(EvaluationError::type_error(
-                        "Expression in a while structure must return a bool",
+                        "Expression in a while structure must return a bool".to_string(),
                         span,
                     )
                     .into());
@@ -532,7 +534,7 @@ pub(crate) fn evaluate_expression(
                 }
                 value => {
                     return Err(EvaluationError::type_error(
-                        &format!("cannot index into {}", value.value_type()),
+                        format!("cannot index into {}", value.value_type()),
                         lhs_expr.span,
                     )
                     .into())
@@ -547,7 +549,7 @@ pub(crate) fn evaluate_expression(
                 evaluate_expression(range_start, environment)?
             } else {
                 return Err(EvaluationError::type_error(
-                    "ranges without a lower bound cannot be evaluated into a value",
+                    "ranges without a lower bound cannot be evaluated into a value".to_string(),
                     span,
                 )
                 .into());
@@ -572,7 +574,7 @@ pub(crate) fn evaluate_expression(
                 evaluate_expression(range_start, environment)?
             } else {
                 return Err(EvaluationError::type_error(
-                    "ranges without a lower bound cannot be evaluated into a value",
+                    "ranges without a lower bound cannot be evaluated into a value".to_string(),
                     span,
                 )
                 .into());
@@ -627,7 +629,7 @@ fn declare_or_assign_variable(
             let mut remaining = l_values.len();
             let mut iter = l_values.iter().zip(value.try_into_iter().ok_or_else(|| {
                 FunctionCarrier::EvaluationError(EvaluationError::syntax_error(
-                    "failed to unpack non iterable value into pattern",
+                    "failed to unpack non iterable value into pattern".to_string(),
                     span,
                 ))
             })?);
@@ -639,7 +641,8 @@ fn declare_or_assign_variable(
 
             if remaining > 0 || iter.next().is_some() {
                 return Err(EvaluationError::syntax_error(
-                    "failed to unpack value into pattern because the lengths do not match",
+                    "failed to unpack value into pattern because the lengths do not match"
+                        .to_string(),
                     span,
                 )
                 .into());
@@ -647,7 +650,7 @@ fn declare_or_assign_variable(
             Ok(Value::Unit)
         }
         Lvalue::Index { .. } => Err(EvaluationError::syntax_error(
-            &format!(
+            format!(
                 "Can't declare values into {}",
                 l_value.expression_type_name()
             ),
@@ -703,7 +706,7 @@ fn apply_operation_to_value(
                 Ok(Value::Sequence(Sequence::Tuple(left.clone())))
             }
             (left, right) => Err(EvaluationError::type_error(
-                &format!(
+                format!(
                     "cannot apply the ++ operator to {} and {}",
                     left.value_type(),
                     right.value_type()
@@ -738,7 +741,7 @@ fn apply_operation_to_value(
                 )));
             }
             _ => Err(EvaluationError::type_error(
-                "cannot apply the | operator between these types",
+                "cannot apply the | operator between these types".to_string(),
                 span,
             )
             .into()),
@@ -831,6 +834,7 @@ fn apply_operator(
             _ => return Err(create_type_error()),
         },
         BinaryOperator::And => match (left, right) {
+            (Value::Bool(a), Value::Bool(b)) => a.bitand(b).into(),
             (Value::Number(Number::Int(a)), Value::Number(Number::Int(b))) => {
                 Value::from(Number::from(a & b))
             }
@@ -848,6 +852,7 @@ fn apply_operator(
             _ => return Err(create_type_error()),
         },
         BinaryOperator::Or => match (left, right) {
+            (Value::Bool(a), Value::Bool(b)) => a.bitor(b).into(),
             (Value::Number(Number::Int(a)), Value::Number(Number::Int(b))) => {
                 Value::from(Number::from(a | b))
             }
@@ -864,6 +869,7 @@ fn apply_operator(
             _ => return Err(create_type_error()),
         },
         BinaryOperator::Xor => match (left, right) {
+            (Value::Bool(a), Value::Bool(b)) => a.bitxor(b).into(),
             (Value::Number(Number::Int(a)), Value::Number(Number::Int(b))) => {
                 Value::from(Number::from(a ^ b))
             }
@@ -978,17 +984,17 @@ impl EvaluationError {
         }
     }
     #[must_use]
-    pub fn type_error(message: &str, span: Span) -> Self {
+    pub fn type_error(message: String, span: Span) -> Self {
         Self {
-            text: format!("Type error: {message}"),
+            text: message,
             span,
             help_text: None,
         }
     }
     #[must_use]
-    pub fn syntax_error(message: &str, span: Span) -> Self {
+    pub fn syntax_error(message: String, span: Span) -> Self {
         Self {
-            text: format!("Syntax error: {message}"),
+            text: message,
             span,
             help_text: None,
         }
@@ -1218,7 +1224,7 @@ fn execute_for_iterations(
             Value::Bool(false) => {}
             value => {
                 return Err(EvaluationError::type_error(
-                    &format!(
+                    format!(
                         "mismatched types: expected bool, found {}",
                         ValueType::from(&value)
                     ),
