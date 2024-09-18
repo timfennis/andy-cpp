@@ -13,7 +13,6 @@ trait NumberLexerHelper {
 
 impl<'a> NumberLexerHelper for Lexer<'a> {
     fn lex_to_buffer(&mut self, buf: &mut String, is_valid: impl Fn(char) -> bool) {
-        // TODO parse literals with any radix (maybe make function for this)
         while let Some(next_char) = self.source.peek() {
             match next_char {
                 c if is_valid(c) => {
