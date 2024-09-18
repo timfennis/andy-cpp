@@ -214,7 +214,11 @@ impl TryFrom<(char, Option<char>)> for Token {
     type Error = ();
 
     fn try_from((c1, next): (char, Option<char>)) -> Result<Self, Self::Error> {
-        next.map_or_else(|| c1.try_into(), |c2| (c1, c2).try_into())
+        if let Some(c2) = next {
+            (c1, c2).try_into()
+        } else {
+            Err(())
+        }
     }
 }
 

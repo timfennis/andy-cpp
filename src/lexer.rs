@@ -29,7 +29,7 @@ impl<'a> Lexer<'a> {
         operation_token: TokenLocation,
         start_offset: usize,
     ) -> TokenLocation {
-        match self.source.peek_one() {
+        match self.source.peek() {
             Some('=') if operation_token.token.is_augmentable() => {
                 self.source.next();
                 TokenLocation {
@@ -58,17 +58,19 @@ impl Iterator for Lexer<'_> {
 
     #[allow(clippy::too_many_lines)]
     fn next(&mut self) -> Option<Self::Item> {
-        'iterator: while let Some(char) = self.source.next() {
+        'iterator: while let Some(first) = self.source.peek() {
             let start_offset = self.source.current_offset();
-            let next = self.source.peek_one();
-            let next2 = self.source.peek_n(1);
+            let second = self.source.peek_n(1);
+            let third = self.source.peek_n(2);
 
             // Exclude // docs
-            if matches!((char, next), ('/', Some('/'))) {
+            if matches!((first, second), ('/', Some('/'))) {
+                self.source.consume(2);
                 // We ran into a doc comment, and we just keep consuming characters as long as we
                 // don't encounter a linebreak
-                while let Some(ch) = self.source.peek_one() {
+                while let Some(ch) = self.source.peek() {
                     if ch == '\n' {
+                        // NOTE: can we consume this '\n' now that we don't count line breaks anymore
                         continue 'iterator;
                     }
 
@@ -79,9 +81,8 @@ impl Iterator for Lexer<'_> {
                 continue 'iterator;
             }
 
-            if let Ok(token) = Token::try_from((char, next, next2)) {
-                self.source.next();
-                self.source.next();
+            if let Ok(token) = Token::try_from((first, second, third)) {
+                self.source.consume(3);
 
                 let operator_token = TokenLocation {
                     token,
@@ -91,8 +92,8 @@ impl Iterator for Lexer<'_> {
                 return Some(Ok(self.lex_op_assign(operator_token, start_offset)));
             }
             // Check for double character tokens
-            if let Ok(token) = Token::try_from((char, next)) {
-                self.source.next();
+            if let Ok(token) = Token::try_from((first, second)) {
+                self.source.consume(2);
 
                 let operator_token = TokenLocation {
                     token,
@@ -103,7 +104,9 @@ impl Iterator for Lexer<'_> {
             }
 
             // Check for single character tokens
-            if let Ok(token) = Token::try_from(char) {
+            if let Ok(token) = Token::try_from(first) {
+                self.source.consume(1);
+
                 let operator_token = TokenLocation {
                     token,
                     span: self.source.create_span(start_offset),
@@ -112,49 +115,25 @@ impl Iterator for Lexer<'_> {
                 return Some(Ok(self.lex_op_assign(operator_token, start_offset)));
             }
 
-            match (char, next) {
+            match (first, second) {
                 (' ' | '\t' | '\r' | '\n', _) => {
+                    self.source.consume(1);
                     continue 'iterator;
                 }
-                ('r', Some('"')) => {
-                    self.source.next();
-                    return Some(self.lex_string_literal(start_offset, 0));
-                }
-                ('r', Some('#')) => {
-                    self.source.next();
-                    let mut cnt = 1;
-                    loop {
-                        match self.source.next() {
-                            Some('#') => cnt += 1,
-                            Some('"') => return Some(self.lex_string_literal(start_offset, cnt)),
-                            Some(char) => {
-                                // TODO: include char,
-                                return Some(Err(Error::text(
-                                    format!("Unexpected chracter '{char}' in string literal"),
-                                    self.source.span(),
-                                )));
-                            }
-                            None => {
-                                return Some(Err(Error::text(
-                                    "Unexpected end of input while lexing string literal"
-                                        .to_string(),
-                                    self.source.create_span(start_offset),
-                                )));
-                            }
-                        }
-                    }
+                ('r', Some('"' | '#')) => {
+                    return Some(self.lex_string_literal());
                 }
                 // lex string
-                ('"', _) => return Some(self.lex_string(start_offset)),
+                ('"', _) => return Some(self.lex_string()),
                 // lex float & int
-                (char, _) if char.is_ascii_digit() => {
-                    return Some(self.lex_number(char, start_offset))
-                } // Lex identifiers and keywords
+                (char, _) if char.is_ascii_digit() => return Some(self.lex_number()), // Lex identifiers and keywords
+                // Identifier
                 (char, _) if char.is_alphabetic() || char == '_' => {
-                    // Parse an identifier, or not
+                    self.source.consume(1); // Because we use the peeked char we consume it from the iterator
+                                            // Parse an identifier, or not
                     let mut buf = String::new();
                     buf.push(char);
-                    while let Some(next_char) = self.source.peek_one() {
+                    while let Some(next_char) = self.source.peek() {
                         if next_char.is_alphanumeric() || next_char == '_' {
                             // advance iterator for next
                             buf.push(next_char);
@@ -166,7 +145,7 @@ impl Iterator for Lexer<'_> {
 
                     let ident_end_span = self.source.span();
                     // If the identifier is followed by a single `=` we construct an OpAssign
-                    if self.source.peek_one() == Some('=') && self.source.peek_n(1) != Some('=') {
+                    if self.source.peek() == Some('=') && self.source.peek_n(1) != Some('=') {
                         self.source.next();
                         return Some(Ok(TokenLocation {
                             token: Token::OpAssign(Box::new(TokenLocation {
@@ -182,6 +161,7 @@ impl Iterator for Lexer<'_> {
                     }));
                 }
                 (char, _) => {
+                    self.source.consume(1);
                     return Some(Err(Error::text(
                         format!("Unexpected character '{char}'"),
                         self.source.span(),
@@ -202,15 +182,23 @@ struct SourceIterator<'a> {
 
 impl SourceIterator<'_> {
     pub fn current_offset(&self) -> usize {
-        self.offset - 1
+        self.offset
     }
 
     pub fn create_span(&self, start: usize) -> Span {
-        Span::new(start, (self.current_offset() + 1) - start)
+        Span::new(start, (self.current_offset()) - start)
     }
 
     pub fn span(&self) -> Span {
         Span::new(self.current_offset(), 1)
+    }
+
+    pub fn consume(&mut self, count: usize) {
+        for _ in 0..count {
+            // TODO: this is an internal error how should we handle these?
+            self.next()
+                .expect("tried to consume but iterator was empty");
+        }
     }
 }
 
@@ -240,7 +228,7 @@ impl<'a> SourceIterator<'a> {
         self.buffer.get(n).copied()
     }
 
-    pub fn peek_one(&mut self) -> Option<char> {
+    pub fn peek(&mut self) -> Option<char> {
         self.peek_n(0)
     }
 }
@@ -251,10 +239,11 @@ impl<'a> SourceIterator<'a> {
 pub struct Error {
     text: String,
 
-    label: String,
-
-    #[label("{label}")]
+    #[label("here")]
     location: SourceSpan,
+
+    #[help]
+    help_text: Option<String>,
 }
 
 impl Error {
@@ -262,8 +251,8 @@ impl Error {
     pub fn text(text: String, source: Span) -> Self {
         Self {
             text,
-            label: "here".to_string(),
             location: source.into(),
+            help_text: None,
         }
     }
 
@@ -271,8 +260,16 @@ impl Error {
     pub fn unterminated_string(span: Span) -> Self {
         Self {
             text: "Unterminated string".to_string(),
-            label: "here".to_string(),
             location: span.into(),
+            help_text: None,
+        }
+    }
+
+    pub fn help(text: String, source: Span, help_text: String) -> Self {
+        Self {
+            text,
+            location: source.into(),
+            help_text: Some(help_text),
         }
     }
 }

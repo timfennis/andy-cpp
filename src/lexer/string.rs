@@ -11,28 +11,42 @@ pub trait StringLexer {
     ///
     /// # Assumptions:
     ///  - Assumes the starting `r#"` has already been consumed from the lexer
-    fn lex_string_literal(
-        &mut self,
-        start_offset: usize,
-        pounds: usize,
-    ) -> Result<TokenLocation, Error>;
+    fn lex_string_literal(&mut self) -> Result<TokenLocation, Error>;
 
     /// Lexes a literal string that can contain escape sequences
     ///
     /// # Assumptions:
     ///  - Assumes the starting `"` has already been consumed from the lexer
-    fn lex_string(&mut self, start_offset: usize) -> Result<TokenLocation, Error>;
+    fn lex_string(&mut self) -> Result<TokenLocation, Error>;
 }
 
 impl<'a> StringLexer for Lexer<'a> {
-    fn lex_string_literal(
-        &mut self,
-        start_offset: usize,
-        pounds: usize,
-    ) -> Result<TokenLocation, Error> {
+    fn lex_string_literal(&mut self) -> Result<TokenLocation, Error> {
+        let start_offset: usize = self.source.current_offset();
+        let mut pounds: usize = 0;
+
+        // Note: the caller should have checked that the first character is an 'r'
+        assert_eq!(self.source.next(), Some('r'));
+
+        while let Some('#') = self.source.peek() {
+            self.source.next();
+            pounds += 1;
+        }
+
+        let Some('"') = self.source.peek() else {
+            // dbg!(self.source.create_span(start_offset));
+            return Err(Error::help(
+                "Invalid raw string".to_string(),
+                self.source.create_span(start_offset),
+                "Raw string delimitation ended prematurely or contained an invalid character. Only '#' is allowed.".to_string(),
+            ));
+        };
+
+        self.source.consume(1);
+
         let mut buf = String::new();
         let end_pattern = format!("{}{}", '"', "#".repeat(pounds));
-        // eprintln!("end pattern: {end_pattern}");
+
         for char in self.source.by_ref() {
             buf.push(char);
 
@@ -50,7 +64,12 @@ impl<'a> StringLexer for Lexer<'a> {
         ))
     }
 
-    fn lex_string(&mut self, start_offset: usize) -> Result<TokenLocation, Error> {
+    fn lex_string(&mut self) -> Result<TokenLocation, Error> {
+        let start_offset = self.source.current_offset();
+
+        // This was guaranteed by the caller, but we could make a nice error?
+        assert_eq!(self.source.next(), Some('"'));
+
         // TODO: support \u8080 type escape sequences
         // TODO: should we handle bytes like \xFF? Probably not for strings because they aren't valid UTF-8
         let mut buf = String::new();

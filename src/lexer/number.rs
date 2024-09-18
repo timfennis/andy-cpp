@@ -4,8 +4,7 @@ use super::Error;
 use super::{Lexer, Token, TokenLocation};
 
 pub trait NumberLexer {
-    fn lex_number(&mut self, first_char: char, start_offset: usize)
-        -> Result<TokenLocation, Error>;
+    fn lex_number(&mut self) -> Result<TokenLocation, Error>;
 }
 
 trait NumberLexerHelper {
@@ -15,7 +14,7 @@ trait NumberLexerHelper {
 impl<'a> NumberLexerHelper for Lexer<'a> {
     fn lex_to_buffer(&mut self, buf: &mut String, is_valid: impl Fn(char) -> bool) {
         // TODO parse literals with any radix (maybe make function for this)
-        while let Some(next_char) = self.source.peek_one() {
+        while let Some(next_char) = self.source.peek() {
             match next_char {
                 c if is_valid(c) => {
                     self.source.next();
@@ -32,22 +31,24 @@ impl<'a> NumberLexerHelper for Lexer<'a> {
 
 impl<'a> NumberLexer for Lexer<'a> {
     #[allow(clippy::too_many_lines)]
-    fn lex_number(
-        &mut self,
-        first_char: char,
-        start_offset: usize,
-    ) -> Result<TokenLocation, Error> {
+    fn lex_number(&mut self) -> Result<TokenLocation, Error> {
         let mut buf = String::new();
 
+        let start_offset = self.source.current_offset();
+        let first_char = self
+            .source
+            .next()
+            .expect("the existance of the first char was guaranteed by the caller");
+
         // If the string starts with `0b` it must be a binary literal
-        if first_char == '0' && matches!(self.source.peek_one(), Some('b')) {
+        if first_char == '0' && matches!(self.source.peek(), Some('b')) {
             self.source.next(); // eat the 'b'
 
             self.lex_to_buffer(&mut buf, |c| c == '1' || c == '0');
 
             // TODO do these common error interceptions even make sense considering we don't really have any suffixes we support
             // maybe we can pull these checks outside of lex number and see if the next token after lexing a number is ascii alpha?
-            match self.source.peek_one() {
+            match self.source.peek() {
                 Some(c) if c.is_ascii_digit() => {
                     self.source.next();
                     return Err(Error::text(
@@ -77,7 +78,7 @@ impl<'a> NumberLexer for Lexer<'a> {
             };
         }
 
-        if first_char == '0' && matches!(self.source.peek_one(), Some('x')) {
+        if first_char == '0' && matches!(self.source.peek(), Some('x')) {
             self.source.next();
 
             self.lex_to_buffer(&mut buf, |c| c.is_ascii_hexdigit());
@@ -96,7 +97,7 @@ impl<'a> NumberLexer for Lexer<'a> {
             };
         }
 
-        if first_char == '0' && matches!(self.source.peek_one(), Some('o')) {
+        if first_char == '0' && matches!(self.source.peek(), Some('o')) {
             self.source.next();
 
             self.lex_to_buffer(&mut buf, |c| matches!(c, '0'..='7'));
@@ -119,7 +120,7 @@ impl<'a> NumberLexer for Lexer<'a> {
         buf.push(first_char);
 
         let mut is_float = false;
-        while let Some(next_char) = self.source.peek_one() {
+        while let Some(next_char) = self.source.peek() {
             match next_char {
                 c if c.is_ascii_digit() => {
                     self.source.next();
