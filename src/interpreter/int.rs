@@ -317,7 +317,7 @@ impl TryFrom<f64> for Int {
     fn try_from(value: f64) -> Result<Self, Self::Error> {
         let bit_int = BigInt::from_f64(value).ok_or_else(|| {
             EvaluationError::type_error(
-                &format!("cannot convert {value:?} to int"),
+                format!("cannot convert {value:?} to int"),
                 Span::new(0, 0), // TODO: fix span creation (move out of this impl)
             )
         })?;
@@ -367,7 +367,7 @@ impl TryFrom<Int> for i32 {
                     p2
                 } else {
                     return Err(EvaluationError::type_error(
-                        &format!("cannot convert {p2} to 32-bit signed integer"),
+                        format!("cannot convert {p2} to 32-bit signed integer"),
                         Span::new(0, 0), // TODO: fix span creation (move out of this impl)
                     ));
                 }
@@ -377,7 +377,7 @@ impl TryFrom<Int> for i32 {
                     p2
                 } else {
                     return Err(EvaluationError::type_error(
-                        &format!("cannot convert {p2} to 32-bit signed integer"),
+                        format!("cannot convert {p2} to 32-bit signed integer"),
                         Span::new(0, 0), // TODO: fix span creation (move out of this impl)
                     ));
                 }
