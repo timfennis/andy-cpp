@@ -7,20 +7,20 @@ mod inner {
     use std::cmp::Ordering;
 
     pub fn assert(value: bool) -> anyhow::Result<Value> {
-        if value == false {
-            Err(anyhow!("failed asserting that argument is true"))
-        } else {
+        if value {
             Ok(Value::Unit)
+        } else {
+            Err(anyhow!("failed asserting that argument is true"))
         }
     }
 
     pub fn assert_eq(left: &Value, right: &Value) -> anyhow::Result<Value> {
-        if left != right {
+        if left == right {
+            Ok(Value::Unit)
+        } else {
             Err(anyhow!(format!(
                 "failed asserting that {left} equals {right}"
             )))
-        } else {
-            Ok(Value::Unit)
         }
     }
 
@@ -36,10 +36,10 @@ mod inner {
 
     #[function(name = "assert")]
     pub fn assert_with_message(value: bool, message: &str) -> anyhow::Result<Value> {
-        if value == false {
-            Err(anyhow!(message.to_string()))
-        } else {
+        if value {
             Ok(Value::Unit)
+        } else {
+            Err(anyhow!(message.to_string()))
         }
     }
 

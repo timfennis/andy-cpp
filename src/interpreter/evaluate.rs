@@ -63,7 +63,7 @@ pub(crate) fn evaluate_expression(
                 }
                 (v, UnaryOperator::Neg) => {
                     return Err(EvaluationError::type_error(
-                        format!("{} does not support bitwise negation", v.value_type()),
+                        format!("{} does not support negation", v.value_type()),
                         span,
                     )
                     .into());

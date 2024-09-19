@@ -51,7 +51,7 @@ impl Interpreter {
         let statements = parser.parse()?;
         if debug {
             for s in &statements {
-                dbg!(s);
+                println!("{s:#?}");
             }
         }
 

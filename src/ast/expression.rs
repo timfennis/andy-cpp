@@ -258,8 +258,164 @@ impl TryFrom<ExpressionLocation> for Lvalue {
     }
 }
 
+#[allow(clippy::missing_fields_in_debug, clippy::too_many_lines)]
 impl fmt::Debug for ExpressionLocation {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{{{:?} at {:?}}}", self.expression, self.span)
+        // write!(f, "{{{:?} at {:?}}}", self.expression, self.span)
+        match &self.expression {
+            Expression::UnitLiteral => f.debug_struct("UnitLiteral").finish(),
+            Expression::BoolLiteral(b) => {
+                f.debug_struct("BooleanLiteral").field("value", &b).finish()
+            }
+            Expression::StringLiteral(s) => {
+                f.debug_struct("StringLiteral").field("value", &s).finish()
+            }
+            Expression::Int64Literal(i) => f.debug_struct("IntLiteral").field("value", &i).finish(),
+            Expression::Float64Literal(v) => {
+                f.debug_struct("FloatLiteral").field("value", &v).finish()
+            }
+            Expression::BigIntLiteral(big_int) => f
+                .debug_struct("BigIntLiteral")
+                .field("value", &big_int)
+                .finish(),
+            Expression::ComplexLiteral(complex) => f
+                .debug_struct("CoplexLiteral")
+                .field("value", &complex)
+                .finish(),
+            Expression::Identifier(ident) => {
+                f.debug_struct("Ident").field("value", &ident).finish()
+            }
+            Expression::Statement(expression_location) => f
+                .debug_struct("Statement")
+                .field("expression", &expression_location)
+                .finish(),
+            Expression::Unary {
+                operator,
+                expression,
+            } => f
+                .debug_struct("Unary")
+                .field("operator", operator)
+                .field("expression", expression)
+                .finish(),
+            Expression::Binary {
+                left,
+                operator,
+                right,
+            } => f
+                .debug_struct("Binary")
+                .field("left", left)
+                .field("operator", operator)
+                .field("right", right)
+                .finish(),
+            Expression::Logical {
+                left,
+                operator,
+                right,
+            } => f
+                .debug_struct("Logical")
+                .field("left", left)
+                .field("operator", operator)
+                .field("right", right)
+                .finish(),
+            Expression::Grouping(expression_location) => f
+                .debug_struct("Grouping")
+                .field("expression", expression_location)
+                .finish(),
+            Expression::VariableDeclaration { l_value, value } => f
+                .debug_struct("VariableDeclaration")
+                .field("l_value", l_value)
+                .field("value", value)
+                .finish(),
+            Expression::Assignment { l_value, r_value } => f
+                .debug_struct("Assignment")
+                .field("l_value", l_value)
+                .field("r_value", r_value)
+                .finish(),
+            Expression::OpAssignment {
+                l_value,
+                value,
+                operation,
+            } => f
+                .debug_struct("OpAssignment")
+                .field("l_value", l_value)
+                .field("value", value)
+                .field("operation", operation)
+                .finish(),
+            Expression::FunctionDeclaration {
+                name,
+                arguments,
+                body,
+            } => f
+                .debug_struct("FunctionDeclaration")
+                .field("name", name)
+                .field("arguments", arguments)
+                .field("body", body)
+                .finish(),
+            Expression::Block { statements } => f
+                .debug_struct("Block")
+                .field("statements", statements)
+                .finish(),
+            Expression::If {
+                condition,
+                on_true,
+                on_false,
+            } => f
+                .debug_struct("If")
+                .field("condition", condition)
+                .field("on_true", on_true)
+                .field("on_false", on_false)
+                .finish(),
+            Expression::While {
+                expression,
+                loop_body,
+            } => f
+                .debug_struct("While")
+                .field("expression", expression)
+                .field("loop_body", loop_body)
+                .finish(),
+            Expression::For { iterations, body } => f
+                .debug_struct("For")
+                .field("iterations", iterations)
+                .field("body", body)
+                .finish(),
+            Expression::Call {
+                function,
+                arguments,
+            } => f
+                .debug_struct("Call")
+                .field("function", function)
+                .field("arguments", arguments)
+                .finish(),
+            Expression::Index { value, index } => f
+                .debug_struct("Index")
+                .field("value", value)
+                .field("index", index)
+                .finish(),
+            Expression::Tuple { values } => {
+                f.debug_struct("Tuple").field("values", values).finish()
+            }
+            Expression::List { values } => f.debug_struct("List").field("values", values).finish(),
+            Expression::Map { values, default } => f
+                .debug_struct("Map")
+                .field("values", values)
+                .field("default", default)
+                .finish(),
+            Expression::Return { value } => f.debug_struct("Return").field("value", value).finish(),
+            Expression::Break => f.debug_struct("Break").finish(),
+            Expression::RangeInclusive { start, end } => f
+                .debug_struct("RangeInclusive")
+                .field("start", start)
+                .field("end", end)
+                .field("start", start)
+                .field("end", end)
+                .finish(),
+            Expression::RangeExclusive { start, end } => f
+                .debug_struct("RangeExclusive")
+                .field("start", start)
+                .field("end", end)
+                .field("start", start)
+                .field("end", end)
+                .finish(),
+        }
     }
 }
