@@ -35,6 +35,7 @@ regex = "1.10.4"
 self_cell = "1.0.4"
 miette = { version = "7.2.0", features = ["fancy"] }
 owo-colors = "4.1.0"
+factorial = "0.4.0"
 
 [features]
 default = ["repl", "ahash"]

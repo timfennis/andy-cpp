@@ -3,6 +3,7 @@ use crate::interpreter::num::Number;
 use crate::interpreter::sequence::Sequence;
 use crate::interpreter::value::Value;
 use andy_cpp_macros::export_module;
+use factorial::Factorial;
 use num::ToPrimitive;
 
 trait FallibleSum<E> {
@@ -30,16 +31,28 @@ mod inner {
     use super::FallibleSum;
     use crate::interpreter::int::Int;
     use crate::interpreter::num::Number;
-    use num::{BigInt, Integer};
+    use anyhow::{anyhow, Context};
+    use num::{BigInt, BigUint, Integer};
 
     pub fn sum(seq: &Sequence) -> anyhow::Result<Number> {
         match seq {
-            Sequence::String(_s) => Err(anyhow::anyhow!("string cannot be summed".to_string())),
+            Sequence::String(_s) => Err(anyhow!("string cannot be summed")),
             Sequence::List(list) => list.borrow().iter().try_sum(),
             Sequence::Tuple(tup) => tup.iter().try_sum(),
             Sequence::Map(map, _) => map.borrow().keys().try_sum(),
             Sequence::Iterator(iter) => iter.borrow_mut().try_sum(),
         }
+    }
+
+    pub fn factorial(a: &BigInt) -> anyhow::Result<BigInt> {
+        let num =
+            BigUint::try_from(a).context("cannot compute the factorial of a negative number")?;
+
+        Ok(num.factorial().into())
+    }
+
+    pub fn gcd(a: &BigInt, b: &BigInt) -> BigInt {
+        a.gcd(b)
     }
 
     pub fn lcm(a: &BigInt, b: &BigInt) -> BigInt {
