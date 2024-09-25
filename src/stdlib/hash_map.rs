@@ -12,6 +12,12 @@ mod inner {
     pub fn keys(map: &mut HashMap<Value, Value>) -> Value {
         map.keys().cloned().collect::<Vec<_>>().into()
     }
+
+    // TODO: this function makes a copy when returning some kind of iterator would be better
+    pub fn values(map: &mut HashMap<Value, Value>) -> Value {
+        map.values().cloned().collect::<Vec<_>>().into()
+    }
+
     pub fn remove(map: &mut HashMap<Value, Value>, key: &Value) {
         map.remove(key);
     }
@@ -20,6 +26,7 @@ mod inner {
     pub fn insert_map(map: &mut HashMap<Value, Value>, key: Value, value: Value) {
         map.insert(key, value);
     }
+
     #[function(name = "insert")]
     pub fn insert_set(map: &mut HashMap<Value, Value>, key: Value) {
         map.insert(key, Value::Unit);

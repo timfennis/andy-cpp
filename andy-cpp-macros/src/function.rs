@@ -156,6 +156,7 @@ fn into_param_type(ty: &syn::Type) -> TokenStream {
             }
             _ => panic!("Don't know how to convert Path into ParamType\n\n{path:?}"),
         },
+        syn::Type::ImplTrait(_) => quote! { crate::interpreter::function::ParamType::Iterator },
         x => panic!("Don't know how to convert {x:?} into ParamType"),
     }
 }
@@ -341,7 +342,19 @@ fn create_temp_variable(
         } else if let syn::Type::ImplTrait(syn::TypeImplTrait { .. }) = &*pat_type.ty {
             // TODO: we should perform a type check, but in order to get results quick we can just assume that all impl blocks are iterators
 
-            todo!("the pattern is 'impl SomeTrait' but this hasn't been implemented")
+            let rc_temp_var =
+                syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
+            return Some(Argument {
+                param_type: into_param_type(ty),
+                argument: quote! { #argument_var_name },
+                initialize_code: quote! {
+                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::Iterator(#rc_temp_var)) = &values[#position] else {
+                        panic!("Value #position needed to be a Sequence::Iterator but wasn't");
+                    };
+
+                    let #argument_var_name = crate::interpreter::iterator::RcIter::new(Rc::clone(#rc_temp_var));
+                },
+            });
         } else {
             panic!("not sure how to handle this type of thing:\n|---> {:?}", ty);
         }

@@ -277,3 +277,22 @@ impl Iterator for ValueRangeFrom {
         self.0.next().map(Value::from)
     }
 }
+
+/// Cursed experiment
+pub struct RcIter {
+    iter: Rc<RefCell<ValueIterator>>,
+}
+
+impl RcIter {
+    pub fn new(iter: Rc<RefCell<ValueIterator>>) -> Self {
+        Self { iter }
+    }
+}
+
+impl Iterator for RcIter {
+    type Item = Value;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.borrow_mut().next()
+    }
+}
