@@ -223,14 +223,10 @@ impl Function {
                 // This drop is very important
                 drop(env);
 
-                let return_value = match evaluate_expression(body, &mut local_scope) {
-                    Err(FunctionCarrier::Return(v)) | Ok(v) => v,
-                    e => return e,
-                };
-
-                // This explicit drop is probably not needed but who cares
-                drop(local_scope);
-                Ok(return_value)
+                match evaluate_expression(body, &mut local_scope) {
+                    Err(FunctionCarrier::Return(v)) => Ok(v),
+                    r => r,
+                }
             }
             Function::SingleNumberFunction { body } => match args {
                 [Value::Number(num)] => Ok(Value::Number((body)(num.clone()))),

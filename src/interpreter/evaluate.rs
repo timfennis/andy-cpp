@@ -1095,12 +1095,11 @@ fn call_function_by_name(
     result
 }
 
-/// Executes a function with some extra steps
+/// Executes a function with some extra steps:
 ///     * `values`: a list of values that are attempted to be executed in the order they appear in
 ///     * `evaluated_args`: a slice of values passed as arguments to the function
 ///     * `environment`: the execution environment for the function
-///     * `start`: beginning of the expression (for error reporting)
-///     * `end`: end of the expression (for error reporting)
+///     * `span`: span of the expression used for error reporting
 fn try_call_function(
     values: &[RefCell<Value>],
     evaluated_args: &[Value],
