@@ -1,0 +1,4 @@
+--PROGRAM--
+print(chr(3486));
+--EXPECT--
+ඞ

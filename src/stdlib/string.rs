@@ -4,7 +4,8 @@ use andy_cpp_macros::export_module;
 mod inner {
     use crate::interpreter::sequence::Sequence;
     use crate::interpreter::value::Value;
-    use anyhow::anyhow;
+
+    use anyhow::{anyhow, Context};
     use itertools::Itertools;
     use std::rc::Rc;
 
@@ -19,6 +20,12 @@ mod inner {
         }
 
         Ok(res)
+    }
+
+    pub fn chr(num: i64) -> anyhow::Result<String> {
+        let num = u32::try_from(num).context("this number is not a valid character")?;
+        let char = char::from_u32(num).context("this number is not a valid character")?;
+        Ok(String::from(char))
     }
 
     // TODO: remove this function once actual slicing is supported
