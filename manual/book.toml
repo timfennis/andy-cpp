@@ -1,0 +1,6 @@
+[book]
+authors = ["Tim Fennis"]
+language = "en"
+multilingual = false
+src = "src"
+title = "Andy C++ Manual"
