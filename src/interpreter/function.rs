@@ -1,4 +1,4 @@
-use std::cell::BorrowMutError;
+use std::cell::{BorrowMutError, RefCell};
 use std::fmt;
 use std::rc::Rc;
 
@@ -12,6 +12,19 @@ use crate::interpreter::num::{Number, NumberType};
 use crate::interpreter::sequence::Sequence;
 use crate::interpreter::value::{Value, ValueType};
 use crate::lexer::Span;
+
+/// Callable is a wrapper aroudn a OverloadedFunction pointer and the environment to make it
+/// easy to have an executable fucntion as a method signature in the standard library
+pub struct Callable<'a> {
+    pub function: Rc<RefCell<OverloadedFunction>>,
+    pub environment: &'a EnvironmentRef,
+}
+
+impl<'a> Callable<'a> {
+    pub fn call(&self, args: &[Value]) -> EvaluationResult {
+        self.function.borrow().call(args, self.environment)
+    }
+}
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum TypeSignature {

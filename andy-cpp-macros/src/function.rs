@@ -154,6 +154,9 @@ fn into_param_type(ty: &syn::Type) -> TokenStream {
             _ if path.is_ident("Sequence") => {
                 quote! { crate::interpreter::function::ParamType::Sequence }
             }
+            _ if path.is_ident("Callable") => {
+                quote! { crate::interpreter::function::ParamType::Function }
+            }
             _ => panic!("Don't know how to convert Path into ParamType\n\n{path:?}"),
         },
         syn::Type::ImplTrait(_) => quote! { crate::interpreter::function::ParamType::Iterator },
@@ -182,6 +185,23 @@ fn create_temp_variable(
                         panic!("Value #position needed to be a Sequence::String but wasn't");
                     };
                     let #argument_var_name = &mut *#rc_temp_var.try_borrow_mut()?;
+                },
+            });
+        }
+        // The pattern is Callable
+        else if path_ends_with(ty, "Callable") {
+            let temp_var = syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
+            return Some(Argument {
+                param_type: quote! { crate::interpreter::function::ParamType::Function },
+                argument: quote! { #argument_var_name },
+                initialize_code: quote! {
+                    let crate::interpreter::value::Value::Function(#temp_var) = &values[#position] else {
+                        panic!("Value #position needed to be a Sequence::Map but wasn't");
+                    };
+                    let #argument_var_name = Callable {
+                        function: Rc::clone(#temp_var),
+                        environment: environment
+                    };
                 },
             });
         }
