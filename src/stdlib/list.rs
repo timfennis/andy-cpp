@@ -1,20 +1,11 @@
 #[andy_cpp_macros::export_module]
 mod inner {
-    use crate::interpreter::function::Callable;
     use crate::interpreter::sequence::Sequence;
     use crate::interpreter::value::Value;
     use itertools::Itertools;
     use std::rc::Rc;
 
     use anyhow::anyhow;
-
-    pub fn map(list: &[Value], function: Callable) -> Value {
-        for item in list {
-            function.call(&[item.clone()]).unwrap();
-        }
-        Value::Unit
-        //
-    }
 
     pub fn contains(list: &[Value], elem: &Value) -> bool {
         list.contains(elem)

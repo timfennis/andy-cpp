@@ -66,6 +66,8 @@ fn try_sort(v: &mut [Value]) -> anyhow::Result<()> {
 
 #[export_module]
 mod inner {
+    use crate::interpreter::evaluate::EvaluationResult;
+    use crate::interpreter::function::Callable;
     use crate::interpreter::sequence::Sequence;
     use crate::interpreter::value::Value;
     use anyhow::anyhow;
@@ -160,5 +162,44 @@ mod inner {
             Sequence::Map(d, _) => Ok(d.borrow().len()),
             Sequence::Iterator(_) => Err(anyhow!("cannot determine the length of an iterator")),
         }
+    }
+
+    // TODO: can we clean up this implementation
+    pub fn map(list: &Sequence, function: Callable) -> EvaluationResult {
+        let mut out = Vec::new();
+        match list {
+            Sequence::String(rc) => {
+                for item in rc.borrow().chars() {
+                    out.push(function.call(&[Value::from(item)])?);
+                }
+            }
+            Sequence::List(rc) => {
+                for item in rc.borrow().iter() {
+                    out.push(function.call(&[item.clone()])?);
+                }
+            }
+            Sequence::Tuple(rc) => {
+                for item in rc.iter() {
+                    out.push(function.call(&[item.clone()])?);
+                }
+            }
+            Sequence::Map(rc, _value) => {
+                for item in rc.borrow().iter() {
+                    out.push(
+                        function.call(&[Value::Sequence(Sequence::Tuple(Rc::new(vec![
+                            item.0.clone(),
+                            item.1.clone(),
+                        ])))])?,
+                    );
+                }
+            }
+            Sequence::Iterator(rc) => {
+                while let Some(item) = rc.try_borrow_mut()?.next() {
+                    out.push(function.call(&[item])?);
+                }
+            }
+        }
+
+        Ok(Value::from(out))
     }
 }

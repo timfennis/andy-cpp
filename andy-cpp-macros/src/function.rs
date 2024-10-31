@@ -65,6 +65,9 @@ pub fn wrap_function(function: syn::ItemFn) -> WrappedFunction {
         },
         syn::ReturnType::Type(_, typ) => match &*typ {
             // If the function returns a result we unpack it using the question mark operator
+            ty @ syn::Type::Path(_) if path_ends_with(ty, "EvaluationResult") => quote! {
+                return result;
+            },
             ty @ syn::Type::Path(_) if path_ends_with(ty, "Result") => quote! {
                 let value = result.map_err(|err| crate::interpreter::function::FunctionCarrier::IntoEvaluationError(Box::new(err)))?;
                 return Ok(Value::from(value));
