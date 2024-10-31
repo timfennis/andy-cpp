@@ -308,6 +308,22 @@ impl From<ValueIterator> for Value {
     }
 }
 
+impl<'a> TryFrom<&'a mut Value> for &'a mut Sequence {
+    type Error = &'static str;
+    fn try_from(value: &'a mut Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Sequence(seq) => Ok(seq),
+            _ => Err("Kapot"),
+        }
+    }
+}
+
+impl<'a> From<&'a mut Value> for &'a Value {
+    fn from(value: &'a mut Value) -> Self {
+        &*value
+    }
+}
+
 // TODO: is this implementation useful, should it be over an Iterator of some kind instead
 impl<T: Into<Value>> From<Vec<T>> for Value {
     fn from(value: Vec<T>) -> Self {
@@ -410,10 +426,10 @@ impl TryFrom<Value> for i64 {
     }
 }
 
-impl TryFrom<&Value> for i64 {
+impl TryFrom<&mut Value> for i64 {
     type Error = ConversionError;
 
-    fn try_from(value: &Value) -> Result<Self, Self::Error> {
+    fn try_from(value: &mut Value) -> Result<Self, Self::Error> {
         match value {
             Value::Number(Number::Int(Int::Int64(i))) => Ok(*i),
             v => Err(Self::Error::UnsupportedVariant(
@@ -424,10 +440,10 @@ impl TryFrom<&Value> for i64 {
     }
 }
 
-impl TryFrom<&Value> for bool {
+impl TryFrom<&mut Value> for bool {
     type Error = ConversionError;
 
-    fn try_from(value: &Value) -> Result<Self, Self::Error> {
+    fn try_from(value: &mut Value) -> Result<Self, Self::Error> {
         match value {
             Value::Bool(bool) => Ok(*bool),
             v => Err(Self::Error::UnsupportedVariant(
@@ -480,10 +496,10 @@ impl TryFrom<Value> for BigInt {
     }
 }
 
-impl TryFrom<&Value> for usize {
+impl TryFrom<&mut Value> for usize {
     type Error = ConversionError;
 
-    fn try_from(value: &Value) -> Result<Self, Self::Error> {
+    fn try_from(value: &mut Value) -> Result<Self, Self::Error> {
         match value {
             Value::Number(number) => Ok(usize::try_from(number.clone())?),
             v => Err(ConversionError::UnsupportedVariant(
@@ -494,10 +510,10 @@ impl TryFrom<&Value> for usize {
     }
 }
 
-impl<'a> TryFrom<&'a Value> for &'a Sequence {
+impl<'a> TryFrom<&'a mut Value> for &'a Sequence {
     type Error = ConversionError;
 
-    fn try_from(value: &'a Value) -> Result<Self, Self::Error> {
+    fn try_from(value: &'a mut Value) -> Result<Self, Self::Error> {
         match value {
             Value::Sequence(seq) => Ok(seq),
             v => Err(ConversionError::UnsupportedVariant(
@@ -508,10 +524,10 @@ impl<'a> TryFrom<&'a Value> for &'a Sequence {
     }
 }
 
-impl<'a> TryFrom<&'a Value> for &'a Number {
+impl<'a> TryFrom<&'a mut Value> for &'a Number {
     type Error = ConversionError;
 
-    fn try_from(value: &'a Value) -> Result<Self, Self::Error> {
+    fn try_from(value: &'a mut Value) -> Result<Self, Self::Error> {
         match value {
             Value::Number(n) => Ok(n),
             v => Err(ConversionError::UnsupportedVariant(

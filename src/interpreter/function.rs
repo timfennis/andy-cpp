@@ -21,7 +21,7 @@ pub struct Callable<'a> {
 }
 
 impl<'a> Callable<'a> {
-    pub fn call(&self, args: &[Value]) -> EvaluationResult {
+    pub fn call(&self, args: &mut [Value]) -> EvaluationResult {
         self.function.borrow().call(args, self.environment)
     }
 }
@@ -43,7 +43,7 @@ impl OverloadedFunction {
             .insert(function.type_signature(), function);
     }
 
-    pub fn call(&self, args: &[Value], env: &EnvironmentRef) -> EvaluationResult {
+    pub fn call(&self, args: &mut [Value], env: &EnvironmentRef) -> EvaluationResult {
         let types: Vec<ValueType> = args.iter().map(ValueType::from).collect();
 
         let mut best = None;
@@ -118,18 +118,18 @@ pub enum Function {
     },
     GenericFunction {
         type_signature: TypeSignature,
-        function: fn(&[Value], &EnvironmentRef) -> EvaluationResult,
+        function: fn(&mut [Value], &EnvironmentRef) -> EvaluationResult,
     },
 }
 
 impl Function {
     pub fn generic(
         type_signature: TypeSignature,
-        function: fn(&[Value], &EnvironmentRef) -> EvaluationResult,
+        function: fn(&mut [Value], &EnvironmentRef) -> EvaluationResult,
     ) -> Self {
         Self::GenericFunction {
-            function,
             type_signature,
+            function,
         }
     }
 }
@@ -219,7 +219,7 @@ impl Function {
         }
     }
 
-    pub fn call(&self, args: &[Value], env: &EnvironmentRef) -> EvaluationResult {
+    pub fn call(&self, args: &mut [Value], env: &EnvironmentRef) -> EvaluationResult {
         match self {
             Function::Closure {
                 body,

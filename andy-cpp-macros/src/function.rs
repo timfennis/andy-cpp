@@ -91,13 +91,14 @@ pub fn wrap_function(function: syn::ItemFn) -> WrappedFunction {
     // }
     let function_declaration = quote! {
         pub fn #identifier (
-            values: &[crate::interpreter::value::Value],
+            values: &mut [crate::interpreter::value::Value],
             environment: &crate::interpreter::environment::EnvironmentRef
         ) -> crate::interpreter::evaluate::EvaluationResult {
             // Define the inner function that has the rust type signature
             #inner
 
             // Initialize the arguments and map them from the Andy C types to the rust types
+            let [#(#arguments, )*] = values else { panic!("unable to unpack arguments") };
             #(#argument_init_code_blocks; )*
 
             // Call the inner function with the unpacked arguments
@@ -184,7 +185,7 @@ fn create_temp_variable(
                 param_type: quote! { crate::interpreter::function::ParamType::String },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::String(#rc_temp_var)) = &values[#position] else {
+                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::String(#rc_temp_var)) = #argument_var_name else {
                         panic!("Value #position needed to be a Sequence::String but wasn't");
                     };
                     let #argument_var_name = &mut *#rc_temp_var.try_borrow_mut()?;
@@ -198,7 +199,7 @@ fn create_temp_variable(
                 param_type: quote! { crate::interpreter::function::ParamType::Function },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Function(#temp_var) = &values[#position] else {
+                    let crate::interpreter::value::Value::Function(#temp_var) = #argument_var_name else {
                         panic!("Value #position needed to be a Sequence::Map but wasn't");
                     };
                     let #argument_var_name = Callable {
@@ -216,7 +217,7 @@ fn create_temp_variable(
                 param_type: quote! { crate::interpreter::function::ParamType::Map },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::Map(#rc_temp_var, _default)) = &values[#position] else {
+                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::Map(#rc_temp_var, _default)) = #argument_var_name else {
                         panic!("Value #position needed to be a Sequence::Map but wasn't");
                     };
                     let #argument_var_name = &*#rc_temp_var.borrow();
@@ -231,7 +232,7 @@ fn create_temp_variable(
                 param_type: quote! { crate::interpreter::function::ParamType::Map },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::Map(#rc_temp_var, _default)) = &values[#position] else {
+                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::Map(#rc_temp_var, _default)) = #argument_var_name else {
                         panic!("Value #position needed to be a Sequence::Map but wasn't");
                     };
                     let #argument_var_name = &mut *#rc_temp_var.try_borrow_mut()?;
@@ -244,7 +245,7 @@ fn create_temp_variable(
                 param_type: quote! { crate::interpreter::function::ParamType::Map },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::Map(#rc_temp_var, default)) = &values[#position] else {
+                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::Map(#rc_temp_var, default)) = #argument_var_name else {
                         panic!("Value #position needed to be a Sequence::Map but wasn't");
                     };
                     let #argument_var_name = (&*#rc_temp_var.borrow(), default.to_owned());
@@ -259,7 +260,7 @@ fn create_temp_variable(
                 param_type: quote! { crate::interpreter::function::ParamType::Map },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::Map(#rc_temp_var, default)) = &values[#position] else {
+                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::Map(#rc_temp_var, default)) = #argument_var_name else {
                         panic!("Value #position needed to be a Sequence::Map but wasn't");
                     };
                     let #argument_var_name = (&mut *#rc_temp_var.try_borrow_mut()?, default.to_owned());
@@ -274,7 +275,7 @@ fn create_temp_variable(
                 param_type: quote! { crate::interpreter::function::ParamType::List },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::List(#rc_temp_var)) = &values[#position] else {
+                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::List(#rc_temp_var)) = #argument_var_name else {
                         panic!("Value #position needed to be a Sequence::List but wasn't");
                     };
                     let #argument_var_name = &mut *#rc_temp_var.try_borrow_mut()?;
@@ -289,7 +290,7 @@ fn create_temp_variable(
                 param_type: quote! { crate::interpreter::function::ParamType::String },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::String(#rc_temp_var)) = &values[#position] else {
+                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::String(#rc_temp_var)) = #argument_var_name else {
                         panic!("Value #position needed to be a Sequence::String but wasn't");
                     };
                     let #rc_temp_var = #rc_temp_var.borrow();
@@ -304,13 +305,13 @@ fn create_temp_variable(
                 param_type: quote! { crate::interpreter::function::ParamType::Int },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
-                    let #big_int = if let crate::interpreter::value::Value::Number(crate::interpreter::num::Number::Int(crate::interpreter::int::Int::Int64(smol))) = &values[#position] {
+                    let #big_int = if let crate::interpreter::value::Value::Number(crate::interpreter::num::Number::Int(crate::interpreter::int::Int::Int64(smol))) = #argument_var_name {
                         Some(num::BigInt::from(*smol))
                     } else {
                         None
                     };
 
-                    let #argument_var_name = match &values[#position] {
+                    let #argument_var_name = match #argument_var_name {
                         crate::interpreter::value::Value::Number(crate::interpreter::num::Number::Int(crate::interpreter::int::Int::BigInt(big))) => big,
                         crate::interpreter::value::Value::Number(crate::interpreter::num::Number::Int(crate::interpreter::int::Int::Int64(smoll))) => #big_int.as_ref().unwrap(),
                         _ => panic!("Value #position need to be an Int but wasn't"),
@@ -324,7 +325,7 @@ fn create_temp_variable(
                 param_type: quote! { crate::interpreter::function::ParamType::Any },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
-                    let #argument_var_name = values[#position].clone();
+                    let #argument_var_name = #argument_var_name.clone();
                 },
             });
         }
@@ -336,7 +337,7 @@ fn create_temp_variable(
                 param_type: quote! { crate::interpreter::function::ParamType::List },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::List(#rc_temp_var)) = &values[#position] else {
+                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::List(#rc_temp_var)) = #argument_var_name else {
                         panic!("Value #position needed to be a Sequence::List but wasn't");
                     };
                     let #argument_var_name = &*#rc_temp_var.borrow();
@@ -349,7 +350,7 @@ fn create_temp_variable(
                 param_type: into_param_type(ty),
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
-                    let #argument_var_name = #path :: try_from(&values[#position]).map_err(|err| crate::interpreter::function::FunctionCallError::ConvertToNativeTypeError(format!("{err}")))?
+                    let #argument_var_name = #path :: try_from(#argument_var_name).map_err(|err| crate::interpreter::function::FunctionCallError::ConvertToNativeTypeError(format!("{err}")))?
                 },
             });
         }
@@ -359,7 +360,7 @@ fn create_temp_variable(
                 param_type: into_param_type(ty),
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
-                    let #argument_var_name = <#type_ref as TryFrom<&crate::interpreter::value::Value>> :: try_from(&values[#position]).map_err(|err| crate::interpreter::function::FunctionCallError::ConvertToNativeTypeError(format!("{err}")))?
+                    let #argument_var_name = <#type_ref as TryFrom<&mut crate::interpreter::value::Value>> :: try_from(#argument_var_name).map_err(|err| crate::interpreter::function::FunctionCallError::ConvertToNativeTypeError(format!("{err}")))?
                 },
             });
         } else if let syn::Type::ImplTrait(syn::TypeImplTrait { .. }) = &*pat_type.ty {
@@ -371,7 +372,7 @@ fn create_temp_variable(
                 param_type: into_param_type(ty),
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::Iterator(#rc_temp_var)) = &values[#position] else {
+                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::Iterator(#rc_temp_var)) = #argument_var_name else {
                         panic!("Value #position needed to be a Sequence::Iterator but wasn't");
                     };
 

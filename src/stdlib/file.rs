@@ -69,7 +69,7 @@ pub fn register(env: &mut Environment) {
                 }
                 [value] => Err(FunctionCallError::ArgumentTypeError {
                     expected: ValueType::String,
-                    actual: ValueType::from(value),
+                    actual: ValueType::from(&*value),
                 }
                 .into()),
                 args => Err(FunctionCallError::ArgumentCountError {

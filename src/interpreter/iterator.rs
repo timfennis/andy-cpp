@@ -66,7 +66,7 @@ pub fn mut_value_to_iterator(
     }
 }
 
-fn mut_seq_into_iterator(sequence: &mut Sequence) -> MutableValueIntoIterator {
+pub fn mut_seq_into_iterator(sequence: &mut Sequence) -> MutableValueIntoIterator {
     match sequence {
         Sequence::String(string) => {
             MutableValueIntoIterator::String(SharedStringIterator::new(string))

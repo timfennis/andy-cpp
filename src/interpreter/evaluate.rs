@@ -328,13 +328,13 @@ pub(crate) fn evaluate_expression(
             // In case the expression is an identifier we get ALL the values that match the identifier
             // ordered by the distance is the scope-hierarchy.
             return if let Expression::Identifier(identifier) = &function.expression {
-                call_function_by_name(identifier, &evaluated_args, environment, span)
+                call_function_by_name(identifier, &mut evaluated_args, environment, span)
             } else {
                 let function_as_value = evaluate_expression(function, environment)?;
 
                 try_call_function(
                     &[RefCell::new(function_as_value)],
-                    &evaluated_args,
+                    &mut evaluated_args,
                     environment,
                     span,
                 )
@@ -756,7 +756,7 @@ fn apply_operation_to_value(
             Either::Right(identifier) => {
                 *value = call_function_by_name(
                     identifier,
-                    &[old_value, right_value],
+                    &mut [old_value, right_value],
                     environment,
                     span,
                 )?;
@@ -1078,7 +1078,7 @@ where
 
 fn call_function_by_name(
     name: &str,
-    evaluated_args: &[Value],
+    evaluated_args: &mut [Value],
     environment: &EnvironmentRef,
     span: Span,
 ) -> EvaluationResult {
@@ -1102,7 +1102,7 @@ fn call_function_by_name(
 ///     * `span`: span of the expression used for error reporting
 fn try_call_function(
     values: &[RefCell<Value>],
-    evaluated_args: &[Value],
+    evaluated_args: &mut [Value],
     environment: &EnvironmentRef,
     span: Span,
 ) -> EvaluationResult {
@@ -1136,7 +1136,7 @@ fn try_call_function(
 
 fn call_function(
     function: &Rc<RefCell<OverloadedFunction>>,
-    evaluated_args: &[Value],
+    evaluated_args: &mut [Value],
     environment: &EnvironmentRef,
     span: Span,
 ) -> EvaluationResult {

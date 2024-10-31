@@ -68,6 +68,7 @@ fn try_sort(v: &mut [Value]) -> anyhow::Result<()> {
 mod inner {
     use crate::interpreter::evaluate::{EvaluationError, EvaluationResult};
     use crate::interpreter::function::Callable;
+    use crate::interpreter::iterator::{mut_seq_into_iterator, mut_value_to_iterator};
     use crate::interpreter::sequence::Sequence;
     use crate::interpreter::value::Value;
     use anyhow::anyhow;
@@ -164,46 +165,51 @@ mod inner {
         }
     }
 
-    // pub fn map2(seq: &mut Sequence, function: Callable) -> EvaluationResult {
-    //     Ok(Value::Unit)
-    // }
-
-    // TODO: can we clean up this implementation
-    pub fn map(list: &Sequence, function: Callable) -> EvaluationResult {
+    pub fn map(seq: &mut Sequence, function: Callable) -> EvaluationResult {
+        let mut iterator = mut_seq_into_iterator(seq);
         let mut out = Vec::new();
-        match list {
-            Sequence::String(rc) => {
-                for item in rc.borrow().chars() {
-                    out.push(function.call(&[Value::from(item)])?);
-                }
-            }
-            Sequence::List(rc) => {
-                for item in rc.borrow().iter() {
-                    out.push(function.call(&[item.clone()])?);
-                }
-            }
-            Sequence::Tuple(rc) => {
-                for item in rc.iter() {
-                    out.push(function.call(&[item.clone()])?);
-                }
-            }
-            Sequence::Map(rc, _value) => {
-                for item in rc.borrow().iter() {
-                    out.push(
-                        function.call(&[Value::Sequence(Sequence::Tuple(Rc::new(vec![
-                            item.0.clone(),
-                            item.1.clone(),
-                        ])))])?,
-                    );
-                }
-            }
-            Sequence::Iterator(rc) => {
-                while let Some(item) = rc.try_borrow_mut()?.next() {
-                    out.push(function.call(&[item])?);
-                }
-            }
+
+        while let Some(item) = iterator.next() {
+            let item = item?;
+            out.push(function.call(&mut [item])?);
         }
 
         Ok(Value::from(out))
     }
+
+    // TODO: can we clean up this implementation
+    // pub fn map(list: &Sequence, function: Callable) -> EvaluationResult {
+    //     let mut out = Vec::new();
+    //     match list {
+    //         Sequence::String(rc) => {
+    //             for item in rc.borrow().chars() {
+    //                 out.push(function.call(&mut [Value::from(item)])?);
+    //             }
+    //         }
+    //         Sequence::List(rc) => {
+    //             for item in rc.borrow().iter() {
+    //                 out.push(function.call(&mut [item.clone()])?);
+    //             }
+    //         }
+    //         Sequence::Tuple(rc) => {
+    //             for item in rc.iter() {
+    //                 out.push(function.call(&mut [item.clone()])?);
+    //             }
+    //         }
+    //         Sequence::Map(rc, _value) => {
+    //             for item in rc.borrow().iter() {
+    //                 out.push(function.call(&mut [Value::Sequence(Sequence::Tuple(Rc::new(
+    //                     vec![item.0.clone(), item.1.clone()],
+    //                 )))])?);
+    //             }
+    //         }
+    //         Sequence::Iterator(rc) => {
+    //             while let Some(item) = rc.try_borrow_mut()?.next() {
+    //                 out.push(function.call(&mut [item])?);
+    //             }
+    //         }
+    //     }
+
+    //     Ok(Value::from(out))
+    // }
 }
