@@ -66,7 +66,7 @@ fn try_sort(v: &mut [Value]) -> anyhow::Result<()> {
 
 #[export_module]
 mod inner {
-    use crate::interpreter::evaluate::EvaluationResult;
+    use crate::interpreter::evaluate::{EvaluationError, EvaluationResult};
     use crate::interpreter::function::Callable;
     use crate::interpreter::sequence::Sequence;
     use crate::interpreter::value::Value;
@@ -163,6 +163,10 @@ mod inner {
             Sequence::Iterator(_) => Err(anyhow!("cannot determine the length of an iterator")),
         }
     }
+
+    // pub fn map2(seq: &mut Sequence, function: Callable) -> EvaluationResult {
+    //     Ok(Value::Unit)
+    // }
 
     // TODO: can we clean up this implementation
     pub fn map(list: &Sequence, function: Callable) -> EvaluationResult {

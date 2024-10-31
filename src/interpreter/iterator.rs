@@ -29,9 +29,9 @@ impl Iterator for ValueIterator {
 
 pub enum MutableValueIntoIterator<'a> {
     Tuple(RcVecIterator<'a, Value>),
-    List(MutableVecIterator<'a, Value>),
-    String(MutableStringIterator),
-    Map(MutableHashMapIterator<'a>),
+    List(SharedVecIterator<'a, Value>),
+    String(SharedStringIterator),
+    Map(SharedHashMapIterator<'a>),
     Iterator(Rc<RefCell<ValueIterator>>),
 }
 
@@ -69,14 +69,14 @@ pub fn mut_value_to_iterator(
 fn mut_seq_into_iterator(sequence: &mut Sequence) -> MutableValueIntoIterator {
     match sequence {
         Sequence::String(string) => {
-            MutableValueIntoIterator::String(MutableStringIterator::new(string))
+            MutableValueIntoIterator::String(SharedStringIterator::new(string))
         }
         Sequence::List(list) => {
-            MutableValueIntoIterator::List(MutableVecIterator::from_rc_ref_cell_vec(list))
+            MutableValueIntoIterator::List(SharedVecIterator::from_shared_vec(list))
         }
         Sequence::Tuple(tup) => MutableValueIntoIterator::Tuple(RcVecIterator::from_rc_vec(tup)),
         Sequence::Map(map, _) => {
-            MutableValueIntoIterator::Map(MutableHashMapIterator::from_mut_ref(map))
+            MutableValueIntoIterator::Map(SharedHashMapIterator::from_ref(map))
         }
         Sequence::Iterator(iter) => MutableValueIntoIterator::Iterator(Rc::clone(iter)),
     }
@@ -90,7 +90,8 @@ pub enum RcVecIterator<'a, T> {
 impl<'a, T> RcVecIterator<'a, T> {
     pub fn from_rc_vec(value: &mut Rc<Vec<T>>) -> RcVecIterator<T> {
         if Rc::get_mut(value).is_some() {
-            let vec = Rc::get_mut(value).expect("must be some at this point");
+            let vec =
+                Rc::get_mut(value).expect("guaranteed to be some by previous call to is_some");
             RcVecIterator::Draining(vec.drain(..))
         } else {
             RcVecIterator::Cloning(value.iter())
@@ -112,31 +113,31 @@ where
     }
 }
 
-pub enum MutableVecIterator<'a, T> {
+pub enum SharedVecIterator<'a, T> {
     IntoIter(std::vec::IntoIter<T>),
     RefCellIterator(RefCellIterator<'a, T>),
 }
 
-impl<'a, T> MutableVecIterator<'a, T> {
-    pub fn from_rc_ref_cell_vec(value: &mut Rc<RefCell<Vec<T>>>) -> MutableVecIterator<T> {
+impl<'a, T> SharedVecIterator<'a, T> {
+    pub fn from_shared_vec(value: &mut Rc<RefCell<Vec<T>>>) -> SharedVecIterator<T> {
         match Rc::get_mut(value) {
-            Some(vec) => MutableVecIterator::IntoIter(vec.take().into_iter()),
-            None => MutableVecIterator::RefCellIterator(RefCellIterator {
+            Some(vec) => SharedVecIterator::IntoIter(vec.take().into_iter()),
+            None => SharedVecIterator::RefCellIterator(RefCellIterator {
                 inner: Some(Ref::map(value.borrow(), |it| &it[..])),
             }),
         }
     }
 }
 
-impl<'a, T> Iterator for MutableVecIterator<'a, T>
+impl<'a, T> Iterator for SharedVecIterator<'a, T>
 where
     T: Clone,
 {
     type Item = T;
     fn next(&mut self) -> Option<Self::Item> {
         match self {
-            MutableVecIterator::RefCellIterator(i) => i.next().map(|it| it.to_owned()),
-            MutableVecIterator::IntoIter(i) => i.next(),
+            SharedVecIterator::RefCellIterator(i) => i.next().map(|it| it.to_owned()),
+            SharedVecIterator::IntoIter(i) => i.next(),
         }
     }
 }
@@ -144,12 +145,12 @@ where
 /// The mutable string iterator effectively takes a reference to the string and keeps track of the
 /// current offset in order to implement character by character iteration (instead of iterating over
 /// u8's)
-pub struct MutableStringIterator {
+pub struct SharedStringIterator {
     inner: Rc<RefCell<String>>,
     offset: usize,
 }
 
-impl MutableStringIterator {
+impl SharedStringIterator {
     pub fn new(value: &Rc<RefCell<String>>) -> Self {
         Self {
             inner: Rc::clone(value),
@@ -158,7 +159,7 @@ impl MutableStringIterator {
     }
 }
 
-impl Iterator for MutableStringIterator {
+impl Iterator for SharedStringIterator {
     type Item = Value;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -212,7 +213,7 @@ use crate::hash_map::HashMap;
 struct HashMapIter<'a>(pub std::collections::hash_map::Iter<'a, Value, Value>);
 
 self_cell! {
-    pub struct MutableHashMapIterator<'a> {
+    pub struct SharedHashMapIterator<'a> {
         owner: Ref<'a, HashMap<Value, Value>>,
 
         #[covariant]
@@ -220,14 +221,14 @@ self_cell! {
     }
 }
 
-impl MutableHashMapIterator<'_> {
-    pub fn from_mut_ref(value: &mut Rc<RefCell<HashMap<Value, Value>>>) -> MutableHashMapIterator {
+impl SharedHashMapIterator<'_> {
+    pub fn from_ref(value: &Rc<RefCell<HashMap<Value, Value>>>) -> SharedHashMapIterator {
         let borrow = value.borrow();
-        MutableHashMapIterator::new(borrow, |map| HashMapIter(map.iter()))
+        SharedHashMapIterator::new(borrow, |map| HashMapIter(map.iter()))
     }
 }
 
-impl<'a> Iterator for MutableHashMapIterator<'a> {
+impl<'a> Iterator for SharedHashMapIterator<'a> {
     type Item = Value;
 
     fn next(&mut self) -> Option<Self::Item> {
