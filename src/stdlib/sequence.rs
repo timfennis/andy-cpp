@@ -1,6 +1,15 @@
-use crate::{compare::FallibleOrd, interpreter::value::Value};
+use crate::interpreter::iterator::{mut_seq_into_iterator, MutableValueIntoIterator};
+use crate::interpreter::sequence::Sequence;
+use crate::{
+    compare::FallibleOrd,
+    interpreter::{evaluate::EvaluationResult, function::Callable, value::Value},
+};
 use andy_cpp_macros::export_module;
+use anyhow::anyhow;
+use itertools::Itertools;
+use std::cell::RefCell;
 use std::cmp::Ordering;
+use std::rc::Rc;
 
 trait TryCompare<R> {
     type Error;
@@ -66,15 +75,6 @@ fn try_sort(v: &mut [Value]) -> anyhow::Result<()> {
 
 #[export_module]
 mod inner {
-    use crate::interpreter::evaluate::EvaluationResult;
-    use crate::interpreter::function::Callable;
-    use crate::interpreter::iterator::mut_seq_into_iterator;
-    use crate::interpreter::sequence::Sequence;
-    use crate::interpreter::value::Value;
-    use anyhow::anyhow;
-    use itertools::Itertools;
-    use std::cell::RefCell;
-    use std::rc::Rc;
 
     pub fn max(seq: &Sequence) -> anyhow::Result<Value> {
         match seq {
@@ -166,26 +166,34 @@ mod inner {
     }
 
     pub fn fold(seq: &mut Sequence, initial: Value, function: Callable) -> EvaluationResult {
-        let mut iterator = mut_seq_into_iterator(seq);
-        let mut acc = initial;
-        while let Some(item) = iterator.next() {
-            acc = function.call(&mut [acc, item?])?;
-        }
-
-        Ok(acc)
+        fold_iterator(mut_seq_into_iterator(seq), initial, function)
     }
 
     pub fn reduce(seq: &mut Sequence, function: Callable) -> EvaluationResult {
         let mut iterator = mut_seq_into_iterator(seq);
-        let mut acc = iterator
+        let fst = iterator
             .next()
             .ok_or_else(|| anyhow!("first argument to reduce must not be empty"))??;
 
-        while let Some(item) = iterator.next() {
-            acc = function.call(&mut [acc, item?])?;
+        fold_iterator(iterator, fst, function)
+    }
+
+    pub fn any(seq: &mut Sequence, function: Callable) -> EvaluationResult {
+        for item in mut_seq_into_iterator(seq) {
+            match function.call(&mut [item?])? {
+                Value::Bool(true) => return Ok(Value::Bool(true)),
+                Value::Bool(false) => {}
+                v => {
+                    return Err(anyhow!(format!(
+                        "invalid return type, predicate returned {}",
+                        v.value_type()
+                    ))
+                    .into());
+                }
+            }
         }
 
-        Ok(acc)
+        Ok(Value::Bool(false))
     }
 
     pub fn map(seq: &mut Sequence, function: Callable) -> EvaluationResult {
@@ -199,4 +207,17 @@ mod inner {
 
         Ok(Value::from(out))
     }
+}
+
+fn fold_iterator(
+    mut iterator: MutableValueIntoIterator,
+    initial: Value,
+    function: Callable,
+) -> EvaluationResult {
+    let mut acc = initial;
+    while let Some(item) = iterator.next() {
+        acc = function.call(&mut [acc, item?])?;
+    }
+
+    Ok(acc)
 }
