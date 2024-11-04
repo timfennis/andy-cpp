@@ -178,6 +178,41 @@ mod inner {
         fold_iterator(iterator, fst, function)
     }
 
+    pub fn none(seq: &mut Sequence, function: Callable) -> EvaluationResult {
+        for item in mut_seq_into_iterator(seq) {
+            match function.call(&mut [item?])? {
+                Value::Bool(true) => return Ok(Value::Bool(false)),
+                Value::Bool(false) => {}
+                v => {
+                    return Err(anyhow!(format!(
+                        "invalid return type, predicate returned {}",
+                        v.value_type()
+                    ))
+                    .into());
+                }
+            }
+        }
+
+        Ok(Value::Bool(true))
+    }
+    pub fn all(seq: &mut Sequence, function: Callable) -> EvaluationResult {
+        for item in mut_seq_into_iterator(seq) {
+            match function.call(&mut [item?])? {
+                Value::Bool(true) => {}
+                Value::Bool(false) => return Ok(Value::Bool(false)),
+                v => {
+                    return Err(anyhow!(format!(
+                        "invalid return type, predicate returned {}",
+                        v.value_type()
+                    ))
+                    .into());
+                }
+            }
+        }
+
+        Ok(Value::Bool(true))
+    }
+
     pub fn any(seq: &mut Sequence, function: Callable) -> EvaluationResult {
         for item in mut_seq_into_iterator(seq) {
             match function.call(&mut [item?])? {
