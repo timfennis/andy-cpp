@@ -345,7 +345,10 @@ pub(crate) fn evaluate_expression(
             body,
             name,
         } => {
-            let name = name.try_into_identifier()?;
+            let name = name
+                .as_ref()
+                .map(|it| it.try_into_identifier())
+                .transpose()?;
 
             let user_function = Function::Closure {
                 parameter_names: arguments.try_into_parameters()?,
@@ -353,11 +356,15 @@ pub(crate) fn evaluate_expression(
                 environment: environment.clone(),
             };
 
-            environment
-                .borrow_mut()
-                .declare_function(&name, user_function);
+            if let Some(name) = name {
+                environment
+                    .borrow_mut()
+                    .declare_function(&name, user_function);
 
-            Value::Unit
+                Value::Unit
+            } else {
+                user_function.into()
+            }
         }
 
         Expression::Tuple { values } => {

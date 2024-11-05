@@ -57,7 +57,7 @@ pub enum Expression {
         operation: Either<BinaryOperator, String>,
     },
     FunctionDeclaration {
-        name: Box<ExpressionLocation>,
+        name: Option<Box<ExpressionLocation>>,
         arguments: Box<ExpressionLocation>,
         body: Rc<ExpressionLocation>, //TODO what happens if we remove the Rc?
     },
@@ -168,9 +168,9 @@ impl ExpressionLocation {
 
     /// # Errors
     /// If this expression cannot be converted into an identifier an `EvaluationError::InvalidExpression` will be returned
-    pub fn try_into_identifier(&self) -> Result<String, EvaluationError> {
+    pub fn try_into_identifier(&self) -> Result<&str, EvaluationError> {
         match &self.expression {
-            Expression::Identifier(i) => Ok(i.clone()),
+            Expression::Identifier(i) => Ok(i),
             _ => Err(EvaluationError::syntax_error(
                 "expected identifier".to_string(),
                 self.span,
@@ -186,7 +186,7 @@ impl ExpressionLocation {
                 values: tuple_values,
             } => tuple_values
                 .iter()
-                .map(Self::try_into_identifier)
+                .map(|it| it.try_into_identifier().map(|ident| ident.to_string()))
                 .collect::<Result<Vec<String>, EvaluationError>>(),
             _ => Err(EvaluationError::syntax_error(
                 "expected a parameter list".to_string(),

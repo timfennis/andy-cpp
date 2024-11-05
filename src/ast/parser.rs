@@ -804,7 +804,7 @@ impl Parser {
             return self.for_expression();
         }
         // matches function declarations like `fn function_name(arg1, arg2) { }`
-        else if self.consume_token_if(&[Token::Fn]).is_some() {
+        else if self.match_token(&[Token::Fn]).is_some() {
             return self.function_declaration();
         }
         // matches `return;` and `return (expression);`
@@ -978,21 +978,34 @@ impl Parser {
     }
 
     fn function_declaration(&mut self) -> Result<ExpressionLocation, Error> {
-        let identifier = self.primary()?;
-        let Expression::Identifier(_) = identifier.expression else {
-            return Err(Error::text(
-                "expected an identifier".to_string(),
-                identifier.span,
-            ));
+        let fn_token = self
+            .require_current_token_matches(&Token::Fn)
+            .expect("first token must be guaranteed to be fn");
+
+        let identifier = match self.peek_current_token() {
+            Some(Token::LeftParentheses) => None,
+            Some(Token::Identifier(_)) => Some(
+                self.require_identifier()
+                    .expect("this is guaranteed to produce an identifier by previous match"),
+            ), // MUST BE IDENT
+            Some(_) | None => {
+                return Err(Error::with_help(
+                    "Expected identifier or left parentheses to follow fn keyword".to_string(),
+                    self.peek_current_token_location()
+                        .map_or(fn_token.span, |it| it.span),
+                    "The fn token must either start a named function or an anonymous function."
+                        .to_string(),
+                ))
+            }
         };
 
         let argument_list = self.delimited_tuple(Self::single_expression)?;
         let body = self.block()?;
 
-        let span = identifier.span.merge(body.span);
+        let span = fn_token.span.merge(body.span);
         Ok(ExpressionLocation {
             expression: Expression::FunctionDeclaration {
-                name: Box::new(identifier),
+                name: identifier.map(Box::new),
                 arguments: Box::new(argument_list),
                 body: Rc::new(body),
             },
