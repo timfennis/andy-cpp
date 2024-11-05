@@ -1,12 +1,11 @@
 --PROGRAM--
-fn add_one(x) { x + 1 }
+l := [1,2,3];
+fn add_one(n) { n + 1 }
+assert_eq(l.map(add_one), [2,3,4]);
 
-// LIST
-list := [1,2,3];
-assert_eq(list.map(add_one), [2,3,4]);
-
-// STRING
-
+s := "foo";
+fn ap(n) { "[" <> n <> "]" }
+assert_eq(s.map(ap), ["[f]", "[o]", "[o]"]);
 
 print("ok");
 --EXPECT--
