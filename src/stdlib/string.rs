@@ -61,8 +61,19 @@ mod inner {
         string.lines().map(ToString::to_string).collect()
     }
 
+    pub fn words(string: &str) -> Vec<String> {
+        string.split_whitespace().map(ToString::to_string).collect()
+    }
     pub fn split(string: &str) -> Vec<String> {
         string.split_whitespace().map(ToString::to_string).collect()
+    }
+
+    pub fn starts_with(haystack: &str, pat: &str) -> bool {
+        haystack.starts_with(pat)
+    }
+
+    pub fn ends_with(haystack: &str, pat: &str) -> bool {
+        haystack.ends_with(pat)
     }
 
     #[function(name = "split")]
@@ -82,5 +93,29 @@ mod inner {
 
     pub fn trim(string: &str) -> &str {
         string.trim()
+    }
+
+    // &str is not a DoubleEnded searcher
+    // what happens if you want to trim "aa" from "aaa": "[aa]a" or "a[aa]"
+    // #[function(name = "trim")]
+    // pub fn trim_matches<'a>(string: &'a str, pat: &str) -> &'a str {
+    //     string.trim_matches(pat)
+    // }
+
+    pub fn trim_start(string: &str) -> &str {
+        string.trim_start()
+    }
+
+    #[function(name = "trim_start")]
+    pub fn trim_start_matches<'a>(string: &'a str, pat: &str) -> &'a str {
+        string.trim_start_matches(pat)
+    }
+    pub fn trim_end(string: &str) -> &str {
+        string.trim_end()
+    }
+
+    #[function(name = "trim_end")]
+    pub fn trim_end_matches<'a>(string: &'a str, pat: &str) -> &'a str {
+        string.trim_end_matches(pat)
     }
 }

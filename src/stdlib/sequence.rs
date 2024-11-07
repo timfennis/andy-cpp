@@ -152,9 +152,11 @@ mod inner {
             }
         }
     }
+
     pub fn byte_len(str: &str) -> usize {
         str.len()
     }
+
     pub fn len(seq: &Sequence) -> anyhow::Result<usize> {
         match seq {
             Sequence::String(s) => Ok(s.borrow().chars().count()),
@@ -176,6 +178,25 @@ mod inner {
             .ok_or_else(|| anyhow!("first argument to reduce must not be empty"))??;
 
         fold_iterator(iterator, fst, function)
+    }
+
+    pub fn filter(seq: &mut Sequence, predicate: Callable) -> EvaluationResult {
+        let iterator = mut_seq_into_iterator(seq);
+        let mut out = Vec::new();
+        for element in iterator {
+            out.push(element?);
+            let last_idx = out.len() - 1;
+            let result = predicate.call(&mut out[last_idx..])?;
+            match result {
+                Value::Bool(true) => {}
+                Value::Bool(false) => {
+                    out.pop();
+                }
+                _ => return Err(anyhow!("return value of predicate must be a boolean").into()),
+            }
+        }
+
+        Ok(out.into())
     }
 
     pub fn none(seq: &mut Sequence, function: Callable) -> EvaluationResult {

@@ -982,6 +982,9 @@ impl Parser {
             .require_current_token_matches(&Token::Fn)
             .expect("first token must be guaranteed to be fn");
 
+        // After the fn token we either expect an identifier, or a parameter list incase the fucntion is anonymous
+        // fn foo () { }
+        // fn() { }
         let identifier = match self.peek_current_token() {
             Some(Token::LeftParentheses) => None,
             Some(Token::Identifier(_)) => Some(
