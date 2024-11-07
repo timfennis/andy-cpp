@@ -1,5 +1,5 @@
 --PROGRAM--
-set := %{1,2,3,4};
+let set = %{1,2,3,4};
 print("ok");
 --EXPECT--
 ok

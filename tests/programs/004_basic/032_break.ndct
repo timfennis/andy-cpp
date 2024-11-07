@@ -1,5 +1,5 @@
 --PROGRAM--
-counter := 0;
+let counter = 0;
 for i in 1..100 {
     counter += 1;
     if i == 23 {
@@ -9,7 +9,7 @@ for i in 1..100 {
 assert(counter == 23);
 
 // Nested break
-counter := 0;
+let counter = 0;
 for i in 0..50 {
     for j in 1..5 {
         counter += 1;

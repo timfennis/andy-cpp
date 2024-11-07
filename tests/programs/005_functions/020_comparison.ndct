@@ -2,7 +2,7 @@
 fn foo() { 5 }
 fn bar() { 6 }
 print(foo == bar);
-baz := foo;
+let baz = foo;
 print(foo == baz);
 --EXPECT--
 false

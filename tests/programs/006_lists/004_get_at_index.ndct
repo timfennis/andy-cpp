@@ -1,13 +1,13 @@
 --PROGRAM--
-l := ["foo", "bar", "baz"];
+let l = ["foo", "bar", "baz"];
 print(l[1]);
-ll := [[1,2,3],[3,4,5],[6,7,8]];
+let ll = [[1,2,3],[3,4,5],[6,7,8]];
 print(ll[2][0]);
 
 fn li() {
     [1,2,3]
 }
-lll := [li];
+let lll = [li];
 print(lll[0]()[1]);
 --EXPECT--
 bar

@@ -1,5 +1,5 @@
 --PROGRAM--
-list := ["foobar", 123];
+let list = ["foobar", 123];
 print(list)
 --EXPECT--
 ["foobar",123]

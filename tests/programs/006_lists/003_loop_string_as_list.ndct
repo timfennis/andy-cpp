@@ -1,5 +1,5 @@
 --PROGRAM--
-text := "hello";
+let text = "hello";
 for char in text {
     print(char);
 }

@@ -1,6 +1,6 @@
 --PROGRAM--
-a := true or true and false;
-b := false and true or true;
+let a = true or true and false;
+let b = false and true or true;
 if a and b {
     print("correct");
 }

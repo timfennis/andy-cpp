@@ -1,5 +1,5 @@
 --PROGRAM--
-var := "Hello, World!";
+let var = "Hello, World!";
 print(var);
 --EXPECT--
 Hello, World!

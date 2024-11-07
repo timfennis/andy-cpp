@@ -1,6 +1,6 @@
 --PROGRAM--
-tuple := (1,1+1,1+1+1);
-sum := 0;
+let tuple = (1,1+1,1+1+1);
+let sum = 0;
 for v in tuple {
     sum = sum + v;
 }

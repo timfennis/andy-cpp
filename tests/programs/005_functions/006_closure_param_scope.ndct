@@ -5,8 +5,8 @@ fn create(n) {
   get_n
 }
 
-x := create(5);
-y := create(6);
+let x = create(5);
+let y = create(6);
 
 print(x());
 print(y());

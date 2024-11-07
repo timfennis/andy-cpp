@@ -1,6 +1,6 @@
 --PROGRAM--
 fn multiply(a, b) { a * b };
-x := 5;
+let x = 5;
 x multiply= 10;
 print(x);
 --EXPECT--

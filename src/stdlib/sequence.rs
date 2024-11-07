@@ -263,6 +263,24 @@ mod inner {
 
         Ok(Value::from(out))
     }
+
+    pub fn first_or(seq: &mut Sequence, default: Value) -> EvaluationResult {
+        let mut iterator = mut_seq_into_iterator(seq);
+        Ok(if let Some(item) = iterator.next() {
+            item?
+        } else {
+            default
+        })
+    }
+
+    pub fn first_or_else(seq: &mut Sequence, default: Callable) -> EvaluationResult {
+        let mut iterator = mut_seq_into_iterator(seq);
+        Ok(if let Some(item) = iterator.next() {
+            item?
+        } else {
+            default.call(&mut [])?
+        })
+    }
 }
 
 fn fold_iterator(

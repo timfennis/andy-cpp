@@ -1,5 +1,5 @@
 --PROGRAM--
-s := "Ohana means 👪";
+let s = "Ohana means 👪";
 assert("👪" == s[-1]);
 print("ok");
 --EXPECT--

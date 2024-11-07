@@ -90,7 +90,8 @@ pub(crate) fn evaluate_expression(
         Expression::Grouping(expr) => evaluate_expression(expr, environment)?,
         Expression::VariableDeclaration { l_value, value } => {
             let value = evaluate_expression(value, environment)?;
-            declare_or_assign_variable(l_value, value, true, environment, span)?
+            declare_or_assign_variable(l_value, value, true, environment, span)?;
+            Value::Unit
         }
         Expression::Assignment {
             l_value,
@@ -114,7 +115,8 @@ pub(crate) fn evaluate_expression(
                 let index = evaluate_as_index(index_expression, environment)?;
 
                 set_at_index(&mut lhs, rhs, index, span)?;
-                lhs
+
+                Value::Unit
             }
         },
         Expression::OpAssignment {
@@ -629,8 +631,6 @@ fn declare_or_assign_variable(
 
                 environment.borrow_mut().assign(identifier, value.clone());
             }
-
-            Ok(value)
         }
         Lvalue::Sequence(l_values) => {
             let mut remaining = l_values.len();
@@ -654,17 +654,20 @@ fn declare_or_assign_variable(
                 )
                 .into());
             }
-            Ok(Value::Unit)
         }
-        Lvalue::Index { .. } => Err(EvaluationError::syntax_error(
-            format!(
-                "Can't declare values into {}",
-                l_value.expression_type_name()
-            ),
-            span,
-        )
-        .into()),
-    }
+        Lvalue::Index { .. } => {
+            return Err(EvaluationError::syntax_error(
+                format!(
+                    "Can't declare values into {}",
+                    l_value.expression_type_name()
+                ),
+                span,
+            )
+            .into())
+        }
+    };
+
+    Ok(Value::Unit)
 }
 
 // Applies operations like `+` or functions like `max(x, y)` to mutable pointers to values. This is

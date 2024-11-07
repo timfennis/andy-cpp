@@ -1,12 +1,17 @@
 --PROGRAM--
-l := [1,2,3];
+let l = [1,2,3];
 assert_eq(l.map(fn(x) { x + 1 }), [2,3,4]);
 
-s := "foo";
+let s = "foo";
 assert_eq(s.map(fn(x) { "[" <> x <> "]" }), ["[f]", "[o]", "[o]"]);
 
-ss := %{"foo", "bar", "baz"};
-assert_eq(ss.map(fn(tup) { key, value := tup; key <> "f" }), ["foof", "barf", "bazf"]);
+let ss = %{"foo", "bar", "baz"};
+assert_eq(
+    ss.map(
+        fn(tup) { let key, value = tup; key <> "f" }
+    ).set(),
+    %{"foof", "barf", "bazf"}
+);
 
 print("ok");
 --EXPECT--

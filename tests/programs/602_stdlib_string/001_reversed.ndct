@@ -1,5 +1,5 @@
 --PROGRAM--
-s := "Foobar";
+let s = "Foobar";
 print(s.reversed())
 --EXPECT--
 rabooF

@@ -1,5 +1,5 @@
 --PROGRAM--
-string := "The quick brown fox jumps over the lazy dog.";
+let string = "The quick brown fox jumps over the lazy dog.";
 
 // Test exclusive ranges
 assert("The" == string[0..3]);

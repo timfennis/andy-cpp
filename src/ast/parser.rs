@@ -269,7 +269,11 @@ impl Parser {
     // ---------------------------------------- Recursive Descent Parser ----------------------------------------
 
     fn expression_or_statement(&mut self) -> Result<ExpressionLocation, Error> {
-        let mut expression = self.variable_declaration_or_assignment()?;
+        let mut expression = if self.match_token(&[Token::Let]).is_some() {
+            self.let_statement()?
+        } else {
+            self.expression()?
+        };
 
         if self.match_token(&[Token::Semicolon]).is_some() {
             self.advance();
@@ -279,11 +283,45 @@ impl Parser {
         Ok(expression)
     }
 
-    fn expression(&mut self) -> Result<ExpressionLocation, Error> {
-        self.variable_declaration_or_assignment()
+    fn let_statement(&mut self) -> Result<ExpressionLocation, Error> {
+        let let_token = self
+            .require_current_token_matches(&Token::Let)
+            .expect("guaranteed to match by caller");
+
+        let maybe_lvalue = self.maybe_tuple(Self::single_expression)?;
+        let lvalue_span = maybe_lvalue.span;
+
+        let Ok(lvalue) = Lvalue::try_from(maybe_lvalue) else {
+            return Err(Error::with_help(
+                "Invalid assignment target".to_string(),
+                lvalue_span,
+                "Assignment target is not a valid lvalue. Only a few expressions can be assigned a value. Check that the left-hand side of the assignment is a valid target.".to_string()
+            ));
+        };
+
+        self.require_current_token_matches(&Token::EqualsSign)?;
+
+        let expression = self.variable_assignment()?;
+        let end = expression.span;
+        let declaration = Expression::VariableDeclaration {
+            l_value: lvalue,
+            value: Box::new(expression),
+        };
+
+        if self.peek_current_token().is_some() {
+            self.require_current_token_matches(&Token::Semicolon)?;
+        }
+
+        Ok(declaration
+            .to_location(let_token.span.merge(end))
+            .to_statement())
     }
 
-    fn variable_declaration_or_assignment(&mut self) -> Result<ExpressionLocation, Error> {
+    fn expression(&mut self) -> Result<ExpressionLocation, Error> {
+        self.variable_assignment()
+    }
+
+    fn variable_assignment(&mut self) -> Result<ExpressionLocation, Error> {
         let maybe_lvalue = self.maybe_tuple(Self::single_expression)?;
         let start = maybe_lvalue.span;
 
@@ -293,7 +331,7 @@ impl Parser {
             // of the assignment operator and throw an appropriate error.
             return match self.peek_current_token() {
                 // TODO: this really requires a link to the documentation once we have that.
-                Some(Token::DeclareVar | Token::EqualsSign) => Err(Error::with_help(
+                Some(Token::EqualsSign) => Err(Error::with_help(
                     "Invalid assignment target".to_string(),
                     maybe_lvalue.span,
                     "Assignment target is not a valid lvalue. Only a few expressions can be assigned a value. Check that the left-hand side of the assignment is a valid target.".to_string()
@@ -304,18 +342,6 @@ impl Parser {
 
         return match self.peek_current_token() {
             // NOTE: the parser supports every LValue but some might cause an error when declaring vars
-            Some(Token::DeclareVar) => {
-                self.advance();
-                let expression = self.maybe_tuple(Self::single_expression)?;
-                let end = expression.span;
-                let declaration = Expression::VariableDeclaration {
-                    l_value: Lvalue::try_from(maybe_lvalue)
-                        .expect("guaranteed to produce an lvalue"),
-                    value: Box::new(expression),
-                };
-
-                Ok(declaration.to_location(start.merge(end)))
-            }
             Some(Token::EqualsSign) => {
                 self.advance();
                 let expression = self.maybe_tuple(Self::single_expression)?;
@@ -359,10 +385,9 @@ impl Parser {
             expressions.push(next(self)?);
         }
 
-        // TODO: although they can probably never fail, remove these unwraps
         let new_span = expressions
             .first()
-            .unwrap()
+            .expect("first is guaranteed to have a result")
             .span
             .merge(expressions.last().unwrap().span);
 

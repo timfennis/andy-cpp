@@ -1,5 +1,5 @@
 --PROGRAM--
-foo := if true { 5 } else { 3 } + 8;
+let foo = if true { 5 } else { 3 } + 8;
 print(foo);
 --EXPECT--
 13

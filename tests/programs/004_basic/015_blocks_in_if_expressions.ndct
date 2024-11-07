@@ -1,5 +1,5 @@
 --PROGRAM--
-if { a := 3; a * a } == 9 {
+if { let a = 3; a * a } == 9 {
     print(true);
 }
 --EXPECT--

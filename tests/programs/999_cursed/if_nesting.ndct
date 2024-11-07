@@ -1,9 +1,9 @@
 --PROGRAM--
 if if {
-    x := 5;
-    y := 9;
+    let x = 5;
+    let y = 9;
     y ^ x
-} > 12 ^ { one := 1; one + one } { ten := 10 } else { minus_ten := -10 } > 0 {
+} > 12 ^ { let one = 1; one + one } { let ten = 10; ten } else { let minus_ten = -10; minus_ten } > 0 {
     print(true);
 } else {
     print(false);

@@ -1,7 +1,7 @@
 --PROGRAM--
-x := {
-    y := 3;
-    z := 4;
+let x = {
+let     y = 3;
+let     z = 4;
 };
 print(x);
 --EXPECT--

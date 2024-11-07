@@ -1,5 +1,5 @@
 --PROGRAM--
-list := [1,2,3];
+let list = [1,2,3];
 list ++= list;
 assert(list == [1,2,3,1,2,3]);
 print("ok");

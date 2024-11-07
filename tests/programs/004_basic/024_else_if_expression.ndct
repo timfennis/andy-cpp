@@ -1,5 +1,5 @@
 --PROGRAM--
-x := 10;
+let x = 10;
 
 if x > 100 {
     print(false);

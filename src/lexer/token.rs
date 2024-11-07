@@ -17,7 +17,7 @@ pub enum Token {
     OpAssign(Box<TokenLocation>),
 
     // Operator - Assignment
-    DeclareVar,
+    // DeclareVar,
     EqualsSign,
     // Operator - Logic
     LogicAnd,
@@ -51,6 +51,7 @@ pub enum Token {
     Concat,       // ++ operator will be for concatenation
     StringConcat, // <> operator will be for string concatenation with coersion
     // Keywords
+    Let,
     Fn,
     If,
     Else,
@@ -104,7 +105,7 @@ impl fmt::Display for Token {
             }
             Self::Infinity => "Inf",
             Self::Identifier(ident) => ident,
-            Self::DeclareVar => ":=",
+            // Self::DeclareVar => ":=",
             Self::EqualsSign => "=",
             Self::Equality => "==",
             Self::Inequality => "!=",
@@ -123,6 +124,7 @@ impl fmt::Display for Token {
             Self::Pipe => "|",
             Self::Tilde => "~",
             Self::Bang => "!",
+            Self::Let => "let",
             Self::Fn => "fn",
             Self::If => "if",
             Self::Else => "else",
@@ -231,7 +233,7 @@ impl TryFrom<(char, char)> for Token {
             ('%', '{') => Ok(Self::MapOpen),
             ('+', '+') => Ok(Self::Concat),
             ('%', '%') => Ok(Self::EuclideanModulo),
-            (':', '=') => Ok(Self::DeclareVar),
+            // (':', '=') => Ok(Self::DeclareVar),
             ('=', '=') => Ok(Self::Equality),
             ('!', '=') => Ok(Self::Inequality),
             ('>', '=') => Ok(Self::GreaterEquals),
@@ -282,6 +284,7 @@ impl From<String> for Token {
             "Inf" => Self::Float64(f64::INFINITY),
             "NaN" => Self::Float64(f64::NAN),
             // Normal keywords
+            "let" => Self::Let,
             "and" => Self::LogicAnd,
             "or" => Self::LogicOr,
             "not" => Self::LogicNot,

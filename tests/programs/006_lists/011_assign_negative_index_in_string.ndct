@@ -1,5 +1,5 @@
 --PROGRAM--
-str := "foobak";
+let str = "foobak";
 str[-1] = "r";
 print(str);
 --EXPECT--

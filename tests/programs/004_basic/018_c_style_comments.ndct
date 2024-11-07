@@ -1,6 +1,6 @@
 --PROGRAM--
 // this is a program
-init := "foo"; // we init foo!
+let init = "foo"; // we init foo!
 // let's print foo
 // print init;
 print(init);

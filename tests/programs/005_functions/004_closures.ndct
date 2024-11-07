@@ -1,8 +1,8 @@
 --PROGRAM--
-invoked := 0;
+let invoked = 0;
 
 fn counter() {
-  n := 0;
+let   n = 0;
   fn add_one() {
     n = n + 1;
     invoked = invoked + 1;
@@ -11,8 +11,8 @@ fn counter() {
   add_one
 }
 
-c1 := counter();
-c2 := counter();
+let c1 = counter();
+let c2 = counter();
 
 print(c1());
 print(c2());

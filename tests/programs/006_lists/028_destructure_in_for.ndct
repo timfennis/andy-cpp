@@ -1,12 +1,12 @@
 --PROGRAM--
-map := %{
+let map = %{
   0: "foo",
   1: "bar",
   2: "baz",
   3: "quux",
 };
 
-set := %{};
+let set = %{};
 for key, value in map {
     set.insert(key);
     set.insert(value);

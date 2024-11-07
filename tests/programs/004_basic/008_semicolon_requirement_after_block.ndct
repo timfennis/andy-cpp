@@ -1,6 +1,6 @@
 --PROGRAM--
-x := { 5 }
-y := { 10 }
+let x = { 5 }
+let y = { 10 }
 print(x + y);
 --EXPECT-ERROR--
-Expected semicolon but got y instead
+Expected token ';' but got 'let' instead

@@ -1,5 +1,5 @@
 --PROGRAM--
-string := "The quick brown fox jumps over the lazy dog";
+let string = "The quick brown fox jumps over the lazy dog";
 string[0..3] = "A";
 
 assert(string == "A quick brown fox jumps over the lazy dog");

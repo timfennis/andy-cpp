@@ -1,6 +1,6 @@
 --PROGRAM--
-// l := [ x * x for x in 1..100 ];
-// assert(l[8] == 64);
+let l = [ x * x for x in 1..100 ];
+assert(l[7] == 64);
 print("ok");
 --EXPECT--
 ok

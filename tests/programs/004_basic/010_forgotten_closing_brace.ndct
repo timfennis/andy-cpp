@@ -1,4 +1,4 @@
 --PROGRAM--
-foo := { 3
+let foo = { 3
 --EXPECT-ERROR--
 expected '}'

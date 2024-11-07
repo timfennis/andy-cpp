@@ -1,5 +1,5 @@
 --PROGRAM--
-s := "Foobar is the Woobar";
+let s = "Foobar is the Woobar";
 print(s.split());
 print(s.split(" is the "));
 --EXPECT--

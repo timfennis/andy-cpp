@@ -1,20 +1,20 @@
 --PROGRAM--
 // List
-[a, b] := [1, 2];
+let [a, b] = [1, 2];
 assert(a == 1 and b == 2);
-[a] := [3];
+let [a] = [3];
 assert(a == 3);
 
 // Tuple
-(a, b) := (4, 5);
+let (a, b) = (4, 5);
 assert(a == 4 and b == 5);
 // This special case is not allowed right but I might enable it in the future
-// (c) := (6);
+// let (c) = (6);
 // assert(c == 6);
 
 // Also a special case that does work, confusingly
 // Mixed (some doubt about the sanity of this)
-// (d) := [1];
+// let (d) = [1];
 // assert(d == [1]);
 
 // Assignment into tuple

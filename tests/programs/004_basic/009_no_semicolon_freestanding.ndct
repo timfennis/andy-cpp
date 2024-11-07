@@ -1,5 +1,5 @@
 --PROGRAM--
-text := "";
+let text = "";
 {
     {
         {

@@ -1,5 +1,5 @@
 --PROGRAM--
-nums := [1,2,3,4,5,6,7];
+let nums = [1,2,3,4,5,6,7];
 
 assert(8 not in nums);
 assert(not 9 in nums);

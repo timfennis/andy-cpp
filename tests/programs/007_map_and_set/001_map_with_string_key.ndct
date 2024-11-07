@@ -1,5 +1,5 @@
 --PROGRAM--
-x := %{"foo": "bar"};
+let x = %{"foo": "bar"};
 print("ok");
 --EXPECT--
 ok

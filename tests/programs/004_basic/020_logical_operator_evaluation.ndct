@@ -1,5 +1,5 @@
 --PROGRAM--
-x := 0;
+let x = 0;
 true and { x = x + 1; false };
 false and { x = x + 1; false };
 true or { x = x + 1; false };

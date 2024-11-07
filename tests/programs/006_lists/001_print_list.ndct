@@ -1,5 +1,5 @@
 --PROGRAM--
-my_list := [1,2,3];
+let my_list = [1,2,3];
 print(my_list);
 --EXPECT--
 [1,2,3]

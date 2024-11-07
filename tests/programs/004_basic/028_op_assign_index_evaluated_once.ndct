@@ -1,12 +1,12 @@
 --PROGRAM--
-i := 0;
+let i = 0;
 fn idx() {
-    r := i;
+let     r = i;
     i += 1;
     r
 }
 
-foo := [0];
+let foo = [0];
 foo[idx()] += 10;
 print(foo[0], i)
 --EXPECT--
