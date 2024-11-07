@@ -52,4 +52,36 @@ mod inner {
             left.1,
         ))
     }
+
+    pub fn set(seq: &Sequence) -> Value {
+        let out: HashMap<Value, Value> = match seq {
+            Sequence::String(rc) => rc
+                .borrow()
+                .chars()
+                .map(|c| (c.into(), Value::Unit))
+                .collect(),
+            // TODO: we could change the implementation so that ref counts of 1 are consumed instead of copied
+            Sequence::List(rc) => rc
+                .borrow()
+                .iter()
+                .map(|v| (v.to_owned(), Value::Unit))
+                .collect(),
+            Sequence::Tuple(rc) => rc.iter().map(|v| (v.to_owned(), Value::Unit)).collect(),
+            Sequence::Map(rc, _) => rc
+                .borrow()
+                .iter()
+                .map(|(key, _value)| (key.to_owned(), Value::Unit))
+                .collect(),
+            Sequence::Iterator(rc) => {
+                let mut iter = rc.borrow_mut();
+                let mut out = HashMap::new();
+                while let Some(item) = iter.next() {
+                    out.insert(item, Value::Unit);
+                }
+                out
+            }
+        };
+
+        Value::Sequence(Sequence::Map(Rc::new(RefCell::new(out)), None))
+    }
 }

@@ -1,11 +1,12 @@
 --PROGRAM--
 l := [1,2,3];
-fn add_one(n) { n + 1 }
-assert_eq(l.map(add_one), [2,3,4]);
+assert_eq(l.map(fn(x) { x + 1 }), [2,3,4]);
 
 s := "foo";
-fn ap(n) { "[" <> n <> "]" }
-assert_eq(s.map(ap), ["[f]", "[o]", "[o]"]);
+assert_eq(s.map(fn(x) { "[" <> x <> "]" }), ["[f]", "[o]", "[o]"]);
+
+ss := %{"foo", "bar", "baz"};
+assert_eq(ss.map(fn(tup) { key, value := tup; key <> "f" }), ["foof", "barf", "bazf"]);
 
 print("ok");
 --EXPECT--
