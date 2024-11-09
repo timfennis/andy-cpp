@@ -108,7 +108,6 @@ pub(crate) fn evaluate_as_index(
 fn value_to_forward_index_usize(
     value: Value,
     size: usize,
-    // Add one to the final index found (useful when dealing with inclusive ranges ..=)
     span: Span,
 ) -> Result<usize, EvaluationError> {
     let index = i64::try_from(value).map_err(|_err| {
@@ -120,14 +119,22 @@ fn value_to_forward_index_usize(
     })?;
 
     if index.is_negative() {
-        let index = usize::try_from(index.abs()).map_err(|_err| {
-            EvaluationError::syntax_error("invalid index too large".to_string(), span)
-        })?;
+        let index = usize::try_from(index.abs())
+            .map_err(|_err| EvaluationError::new("invalid index: too large".to_string(), span))?;
 
         size.checked_sub(index)
-            .ok_or_else(|| EvaluationError::syntax_error("index out of bounds".to_string(), span))
+            .ok_or_else(|| EvaluationError::new("index out of bounds".to_string(), span))
     } else {
-        usize::try_from(index).map_err(|_| EvaluationError::syntax_error("kapot".to_string(), span))
+        let index = usize::try_from(index)
+            .map_err(|_| EvaluationError::syntax_error("kapot".to_string(), span))?;
+        if index >= size {
+            return Err(EvaluationError::new(
+                "index out of bounds".to_string(),
+                span,
+            ));
+        }
+
+        Ok(index)
     }
 }
 
