@@ -18,38 +18,37 @@ pub enum Token {
 
     // Operator - Assignment
     // DeclareVar,
-    EqualsSign,
+    EqualsSign, // =
     // Operator - Logic
-    LogicAnd,
-    LogicOr,
-    LogicNot,
+    LogicAnd, // and
+    LogicOr,  // or
+    LogicNot, // not
     // Operator - Comparison
-    Equality,
-    Inequality,
-    Greater,
-    GreaterEquals,
-    Less,
-    LessEquals,
+    EqualsEquals,  // ==
+    BangEquals,    // !=
+    Greater,       // >
+    GreaterEquals, // >=
+    Less,          // <
+    LessEquals,    // <=
     // Operator - Math
-    Plus,
-    Minus,
-    Multiply,
-    Divide,
-    CModulo,
-    EuclideanModulo,
-    Caret,
-    Ampersand, // &
-    Pipe,      // |
-    Tilde,     // ~
-    // Operator - Unary
-    Bang,
-    // Operator - Call
-    Dot,
+    Plus,           // +
+    Minus,          // -
+    Asterix,        // *
+    Divide,         // /
+    Percent,        // %
+    PercentPercent, // %%
+    Caret,          // ^
+    Ampersand,      // &
+    Pipe,           // |
+    Tilde,          // ~
     // Operator - Other
+    Bang,         // !
+    Dot,          // .
     DotDot,       // range builder
     DotDotEquals, // inclusive range builder
-    Concat,       // ++ operator will be for concatenation
-    StringConcat, // <> operator will be for string concatenation with coersion
+    PlusPlus,     // ++ operator will be for concatenation
+    Diamond,      // <> operator will be for string concatenation with coersion
+    RightArrow,   // ->
     // Keywords
     Let,
     Fn,
@@ -64,15 +63,15 @@ pub enum Token {
     False,
     _Self,
     // Symbols
-    LeftParentheses,
-    RightParentheses,
-    LeftSquareBracket,
-    RightSquareBracket,
-    LeftCurlyBracket,
-    RightCurlyBracket,
-    Semicolon,
-    Comma,
-    Colon, // : operator is used in building maps and specifying type hints (in the future)
+    LeftParentheses,    // (
+    RightParentheses,   // )
+    LeftSquareBracket,  // [
+    RightSquareBracket, // ]
+    LeftCurlyBracket,   // {
+    RightCurlyBracket,  // }
+    Semicolon,          // ;
+    Comma,              // ,
+    Colon,              // :
     // Lmao syntax
     MapOpen, // %{ operator stolen from elixir
 }
@@ -107,18 +106,18 @@ impl fmt::Display for Token {
             Self::Identifier(ident) => ident,
             // Self::DeclareVar => ":=",
             Self::EqualsSign => "=",
-            Self::Equality => "==",
-            Self::Inequality => "!=",
+            Self::EqualsEquals => "==",
+            Self::BangEquals => "!=",
             Self::Greater => ">",
             Self::GreaterEquals => ">=",
             Self::Less => "<",
             Self::LessEquals => "<=",
             Self::Plus => "+",
             Self::Minus => "-",
-            Self::Multiply => "*",
+            Self::Asterix => "*",
             Self::Divide => "/",
-            Self::CModulo => "%",
-            Self::EuclideanModulo => "%%",
+            Self::Percent => "%",
+            Self::PercentPercent => "%%",
             Self::Caret => "^",
             Self::Ampersand => "&",
             Self::Pipe => "|",
@@ -149,14 +148,15 @@ impl fmt::Display for Token {
             Self::LogicOr => "or",
             Self::DotDot => "..",
             Self::DotDotEquals => "..=",
-            Self::Concat => "++",
-            Self::StringConcat => "<>",
+            Self::PlusPlus => "++",
+            Self::Diamond => "<>",
             Self::Dot => ".",
             Self::OpAssign(inner) => {
                 return write!(f, "{}=", inner.token);
             }
             Token::Colon => ":",
             Token::MapOpen => "%{",
+            Token::RightArrow => "->",
         };
         write!(f, "{s}")
     }
@@ -170,16 +170,16 @@ impl Token {
             self,
             Self::Plus
                 | Self::Minus
-                | Self::Multiply
+                | Self::Asterix
                 | Self::Divide
-                | Self::EuclideanModulo
-                | Self::CModulo
+                | Self::PercentPercent
+                | Self::Percent
                 | Self::Identifier(_)
                 | Self::Caret
-                | Self::Concat
+                | Self::PlusPlus
                 | Self::Ampersand
                 | Self::Pipe
-                | Self::StringConcat
+                | Self::Diamond
         )
     }
 }
@@ -231,14 +231,14 @@ impl TryFrom<(char, char)> for Token {
         match (c1, c2) {
             ('.', '.') => Ok(Self::DotDot),
             ('%', '{') => Ok(Self::MapOpen),
-            ('+', '+') => Ok(Self::Concat),
-            ('%', '%') => Ok(Self::EuclideanModulo),
-            // (':', '=') => Ok(Self::DeclareVar),
-            ('=', '=') => Ok(Self::Equality),
-            ('!', '=') => Ok(Self::Inequality),
+            ('+', '+') => Ok(Self::PlusPlus),
+            ('%', '%') => Ok(Self::PercentPercent),
+            ('=', '=') => Ok(Self::EqualsEquals),
+            ('!', '=') => Ok(Self::BangEquals),
             ('>', '=') => Ok(Self::GreaterEquals),
             ('<', '=') => Ok(Self::LessEquals),
-            ('<', '>') => Ok(Self::StringConcat),
+            ('<', '>') => Ok(Self::Diamond),
+            ('-', '>') => Ok(Self::RightArrow),
             _ => Err(()),
         }
     }
@@ -251,9 +251,9 @@ impl TryFrom<char> for Token {
         match value {
             '-' => Ok(Self::Minus),
             '+' => Ok(Self::Plus),
-            '*' => Ok(Self::Multiply),
+            '*' => Ok(Self::Asterix),
             '^' => Ok(Self::Caret),
-            '%' => Ok(Self::CModulo),
+            '%' => Ok(Self::Percent),
             '&' => Ok(Self::Ampersand),
             '~' => Ok(Self::Tilde),
             '|' => Ok(Self::Pipe),

@@ -494,8 +494,8 @@ impl Parser {
         self.consume_binary_expression_left_associative(
             Self::boolean_or,
             &[
-                Token::Equality,
-                Token::Inequality,
+                Token::EqualsEquals,
+                Token::BangEquals,
                 Token::Greater,
                 Token::GreaterEquals,
                 Token::Less,
@@ -521,12 +521,7 @@ impl Parser {
     fn term(&mut self) -> Result<ExpressionLocation, Error> {
         self.consume_binary_expression_left_associative(
             Self::factor,
-            &[
-                Token::Plus,
-                Token::Minus,
-                Token::Concat,
-                Token::StringConcat,
-            ],
+            &[Token::Plus, Token::Minus, Token::PlusPlus, Token::Diamond],
             false,
         )
     }
@@ -536,9 +531,9 @@ impl Parser {
             Self::exponent,
             &[
                 Token::Divide,
-                Token::Multiply,
-                Token::CModulo,
-                Token::EuclideanModulo,
+                Token::Asterix,
+                Token::Percent,
+                Token::PercentPercent,
             ],
             false,
         )

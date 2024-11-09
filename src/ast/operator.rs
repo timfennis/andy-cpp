@@ -85,25 +85,25 @@ impl TryFrom<TokenLocation> for BinaryOperator {
 
     fn try_from(value: TokenLocation) -> Result<Self, Self::Error> {
         Ok(match value.token {
-            Token::Equality => Self::Equality,
-            Token::Inequality => Self::Inequality,
+            Token::EqualsEquals => Self::Equality,
+            Token::BangEquals => Self::Inequality,
             Token::Greater => Self::Greater,
             Token::GreaterEquals => Self::GreaterEquals,
             Token::Less => Self::Less,
             Token::LessEquals => Self::LessEquals,
             Token::Plus => Self::Plus,
             Token::Minus => Self::Minus,
-            Token::Multiply => Self::Multiply,
+            Token::Asterix => Self::Multiply,
             Token::Divide => Self::Divide,
-            Token::CModulo => Self::CModulo,
-            Token::EuclideanModulo => Self::EuclideanModulo,
+            Token::Percent => Self::CModulo,
+            Token::PercentPercent => Self::EuclideanModulo,
             Token::Caret => Self::Exponent,
             Token::Ampersand => Self::And,
             Token::Tilde => Self::Xor,
             Token::Pipe => Self::Or,
             Token::In => Self::In,
-            Token::Concat => Self::Concat,
-            Token::StringConcat => Self::StringConcat,
+            Token::PlusPlus => Self::Concat,
+            Token::Diamond => Self::StringConcat,
             _ => {
                 // NOTE: this is more of an internal error than a user caused error since the parser should check the token prior to converting it.
                 return Err(ParseError::text(

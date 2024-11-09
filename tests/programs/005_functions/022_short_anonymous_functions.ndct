@@ -1,0 +1,5 @@
+--PROGRAM--
+assert_eq(54, (1..10).map(fn(x) -> x + 1).sum());
+print("ok");
+--EXPECT--
+ok
