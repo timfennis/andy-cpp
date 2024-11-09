@@ -361,7 +361,7 @@ pub(crate) fn evaluate_expression(
             if let Some(name) = name {
                 environment
                     .borrow_mut()
-                    .declare_function(&name, user_function);
+                    .declare_function(name, user_function);
 
                 Value::Unit
             } else {
@@ -627,7 +627,7 @@ fn declare_or_assign_variable(
                 environment.borrow_mut().declare(identifier, value.clone());
             } else {
                 if !environment.borrow().contains(identifier) {
-                    return Err(EvaluationError::undefined_variable(identifier, span))?;
+                    Err(EvaluationError::undefined_variable(identifier, span))?;
                 }
 
                 environment.borrow_mut().assign(identifier, value.clone());

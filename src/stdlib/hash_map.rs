@@ -75,7 +75,7 @@ mod inner {
             Sequence::Iterator(rc) => {
                 let mut iter = rc.borrow_mut();
                 let mut out = HashMap::new();
-                while let Some(item) = iter.next() {
+                for item in iter.by_ref() {
                     out.insert(item, Value::Unit);
                 }
                 out

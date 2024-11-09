@@ -13,7 +13,7 @@ use crate::interpreter::sequence::Sequence;
 use crate::interpreter::value::{Value, ValueType};
 use crate::lexer::Span;
 
-/// Callable is a wrapper aroudn a OverloadedFunction pointer and the environment to make it
+/// Callable is a wrapper aroudn a `OverloadedFunction` pointer and the environment to make it
 /// easy to have an executable fucntion as a method signature in the standard library
 pub struct Callable<'a> {
     pub function: Rc<RefCell<OverloadedFunction>>,

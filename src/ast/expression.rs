@@ -186,7 +186,7 @@ impl ExpressionLocation {
                 values: tuple_values,
             } => tuple_values
                 .iter()
-                .map(|it| it.try_into_identifier().map(|ident| ident.to_string()))
+                .map(|it| it.try_into_identifier().map(std::string::ToString::to_string))
                 .collect::<Result<Vec<String>, EvaluationError>>(),
             _ => Err(EvaluationError::syntax_error(
                 "expected a parameter list".to_string(),

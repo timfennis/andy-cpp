@@ -98,7 +98,7 @@ pub fn wrap_function(function: syn::ItemFn) -> WrappedFunction {
             #inner
 
             // Initialize the arguments and map them from the Andy C types to the rust types
-            let [#(#arguments, )*] = values else { panic!("unable to unpack arguments") };
+            let [#(#arguments, )*] = values else { panic!("actual argument count did not match expected argument count when calling native method, this should be prevented by the runtime") };
             #(#argument_init_code_blocks; )*
 
             // Call the inner function with the unpacked arguments
@@ -202,7 +202,7 @@ fn create_temp_variable(
                     let crate::interpreter::value::Value::Function(#temp_var) = #argument_var_name else {
                         panic!("Value #position needed to be a Sequence::Map but wasn't");
                     };
-                    let #argument_var_name = Callable {
+                    let #argument_var_name = &Callable {
                         function: Rc::clone(#temp_var),
                         environment: environment
                     };

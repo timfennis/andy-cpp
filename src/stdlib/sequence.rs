@@ -167,11 +167,11 @@ mod inner {
         }
     }
 
-    pub fn fold(seq: &mut Sequence, initial: Value, function: Callable) -> EvaluationResult {
+    pub fn fold(seq: &mut Sequence, initial: Value, function: &Callable) -> EvaluationResult {
         fold_iterator(mut_seq_into_iterator(seq), initial, function)
     }
 
-    pub fn reduce(seq: &mut Sequence, function: Callable) -> EvaluationResult {
+    pub fn reduce(seq: &mut Sequence, function: &Callable) -> EvaluationResult {
         let mut iterator = mut_seq_into_iterator(seq);
         let fst = iterator
             .next()
@@ -180,7 +180,7 @@ mod inner {
         fold_iterator(iterator, fst, function)
     }
 
-    pub fn filter(seq: &mut Sequence, predicate: Callable) -> EvaluationResult {
+    pub fn filter(seq: &mut Sequence, predicate: &Callable) -> EvaluationResult {
         let iterator = mut_seq_into_iterator(seq);
         let mut out = Vec::new();
         for element in iterator {
@@ -199,7 +199,7 @@ mod inner {
         Ok(out.into())
     }
 
-    pub fn none(seq: &mut Sequence, function: Callable) -> EvaluationResult {
+    pub fn none(seq: &mut Sequence, function: &Callable) -> EvaluationResult {
         for item in mut_seq_into_iterator(seq) {
             match function.call(&mut [item?])? {
                 Value::Bool(true) => return Ok(Value::Bool(false)),
@@ -216,7 +216,7 @@ mod inner {
 
         Ok(Value::Bool(true))
     }
-    pub fn all(seq: &mut Sequence, function: Callable) -> EvaluationResult {
+    pub fn all(seq: &mut Sequence, function: &Callable) -> EvaluationResult {
         for item in mut_seq_into_iterator(seq) {
             match function.call(&mut [item?])? {
                 Value::Bool(true) => {}
@@ -234,7 +234,7 @@ mod inner {
         Ok(Value::Bool(true))
     }
 
-    pub fn any(seq: &mut Sequence, function: Callable) -> EvaluationResult {
+    pub fn any(seq: &mut Sequence, function: &Callable) -> EvaluationResult {
         for item in mut_seq_into_iterator(seq) {
             match function.call(&mut [item?])? {
                 Value::Bool(true) => return Ok(Value::Bool(true)),
@@ -252,11 +252,11 @@ mod inner {
         Ok(Value::Bool(false))
     }
 
-    pub fn map(seq: &mut Sequence, function: Callable) -> EvaluationResult {
-        let mut iterator = mut_seq_into_iterator(seq);
+    pub fn map(seq: &mut Sequence, function: &Callable) -> EvaluationResult {
+        let iterator = mut_seq_into_iterator(seq);
         let mut out = Vec::new();
 
-        while let Some(item) = iterator.next() {
+        for item in iterator {
             let item = item?;
             out.push(function.call(&mut [item])?);
         }
@@ -273,7 +273,7 @@ mod inner {
         })
     }
 
-    pub fn first_or_else(seq: &mut Sequence, default: Callable) -> EvaluationResult {
+    pub fn first_or_else(seq: &mut Sequence, default: &Callable) -> EvaluationResult {
         let mut iterator = mut_seq_into_iterator(seq);
         Ok(if let Some(item) = iterator.next() {
             item?
@@ -284,12 +284,12 @@ mod inner {
 }
 
 fn fold_iterator(
-    mut iterator: MutableValueIntoIterator,
+    iterator: MutableValueIntoIterator,
     initial: Value,
-    function: Callable,
+    function: &Callable,
 ) -> EvaluationResult {
     let mut acc = initial;
-    while let Some(item) = iterator.next() {
+    for item in iterator {
         acc = function.call(&mut [acc, item?])?;
     }
 
