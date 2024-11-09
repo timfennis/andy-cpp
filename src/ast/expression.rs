@@ -132,7 +132,7 @@ pub enum ForBody {
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum Lvalue {
-    // Example: `foo := ...`
+    // Example: `let foo = ...`
     Variable {
         identifier: String,
     },
@@ -141,7 +141,7 @@ pub enum Lvalue {
         value: Box<ExpressionLocation>,
         index: Box<ExpressionLocation>,
     },
-    // Example: `a, b := ...`
+    // Example: `let a, b = ...`
     Sequence(Vec<Lvalue>),
 }
 

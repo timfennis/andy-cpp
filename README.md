@@ -4,7 +4,7 @@ This is the source code for the Andy C++ programming language. Not meant for any
 
 ## Example
 
-Currently, the language only has some very basic features. I'll try to update the sample below as I make more progress.
+Currently, the language has quite a lot of features allowing you to write some pretty neat programs.
 
 ### Factorial
 
@@ -12,11 +12,11 @@ You can produce very large numbers quite quickly because we use the [num](https:
 the hood.
 
 ```ndc
-n, v := 10, 10;
-while { n -= 1 } > 0 {
+let n, v = 10, 10;
+while { n -= 1; n } > 0 {
     v *= n;
 }
-print v;
+print(v);
 ```
 
 ### Recursive factorial
@@ -25,8 +25,8 @@ print v;
 fn factorial(n) {
     if n == 1 {
         return 1
-    } 
-    
+    }
+
     n * factorial(n - 1)
 }
 
@@ -55,7 +55,7 @@ Many functions can be used to
 create [augmented assignment operators](https://blog.vero.site/post/noulith#augmented-assignment).
 
 ```ndc
-r := 0;
+let r = 0;
 
 for i in 0..100 {
     // roughly translates to r = max(r, i * 8333446703 % 94608103)
@@ -70,15 +70,15 @@ print(r);
 Maps and sets are the same type and have their own special syntax
 
 ```ndc
-map := %{"foo": "bar"};
+let map = %{"foo": "bar"};
 
-set := %{1,2,3,4};
+let set = %{1,2,3,4};
 ```
 
 Something like the `defaultdict` in python is natively supported using this syntax (stolen from Noulith)
 
 ```ndc
-default_map := %{:1, 0: 10};
+let default_map = %{:1, 0: 10};
 default_map[0] == 10
 default_map[1] == 1 // default value
 
@@ -86,11 +86,11 @@ default_map[1] == 1 // default value
 default_map[5] += 3; // puts 4 in the map
 
 // pitfall: lists are copied by reference
-uhm := %{:[]};
+let uhm = %{:[]};
 uhm[0] ++= [1];
 
 // true because the default value was changed in the line above
-uhm[1] == [1] 
+uhm[1] == [1]
 ```
 
 ### List comprehensions

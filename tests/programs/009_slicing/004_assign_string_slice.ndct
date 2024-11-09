@@ -8,6 +8,10 @@ string[0..=0] = "Every";
 
 assert(string == "Every quick brown fox jumps over the lazy dog");
 
+let s = "The world is mine";
+s[4..8] = "foo";
+assert_eq(s, "The food is mine");
+
 print("ok");
 --EXPECT--
 ok
