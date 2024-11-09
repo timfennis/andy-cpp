@@ -55,21 +55,21 @@ pub(crate) fn evaluate_expression(
                 (Value::Bool(b), UnaryOperator::BitNot) => i64::from(b).not().into(),
                 (Value::Bool(b), UnaryOperator::Not) => Value::Bool(b.not()),
                 (v, UnaryOperator::Not) => {
-                    return Err(EvaluationError::type_error(
+                    return Err(EvaluationError::new(
                         format!("the '!' operator cannot be applied to {}", v.value_type()),
                         span,
                     )
                     .into());
                 }
                 (v, UnaryOperator::Neg) => {
-                    return Err(EvaluationError::type_error(
+                    return Err(EvaluationError::new(
                         format!("{} does not support negation", v.value_type()),
                         span,
                     )
                     .into());
                 }
                 (v, UnaryOperator::BitNot) => {
-                    return Err(EvaluationError::type_error(
+                    return Err(EvaluationError::new(
                         format!("{} does not support bitwise negation", v.value_type()),
                         span,
                     )
@@ -199,7 +199,7 @@ pub(crate) fn evaluate_expression(
                         )?
                     }
                     Value::Sequence(Sequence::String(_)) => {
-                        return Err(EvaluationError::type_error(
+                        return Err(EvaluationError::new(
                             "cannot OpAssign into a string".to_string(),
                             span,
                         )
@@ -247,7 +247,7 @@ pub(crate) fn evaluate_expression(
                 (Value::Bool(false), Some(block)) => evaluate_expression(block, environment)?,
                 (Value::Bool(false), None) => Value::Unit,
                 (value, _) => {
-                    return Err(EvaluationError::type_error(
+                    return Err(EvaluationError::new(
                         format!(
                             "mismatched types: expected bool, found {}",
                             ValueType::from(&value)
@@ -278,7 +278,7 @@ pub(crate) fn evaluate_expression(
                 }
                 (LogicalOperator::Or, Value::Bool(true)) => Value::Bool(true),
                 (LogicalOperator::And | LogicalOperator::Or, value) => {
-                    return Err(EvaluationError::type_error(
+                    return Err(EvaluationError::new(
                         format!(
                             "Cannot apply logical operator to non bool value {}",
                             ValueType::from(&value)
@@ -305,7 +305,7 @@ pub(crate) fn evaluate_expression(
                 } else if lit == Value::Bool(false) {
                     break;
                 } else {
-                    return Err(EvaluationError::type_error(
+                    return Err(EvaluationError::new(
                         "Expression in a while structure must return a bool".to_string(),
                         span,
                     )
@@ -542,7 +542,7 @@ pub(crate) fn evaluate_expression(
                     };
                 }
                 value => {
-                    return Err(EvaluationError::type_error(
+                    return Err(EvaluationError::new(
                         format!("cannot index into {}", value.value_type()),
                         lhs_expr.span,
                     )
@@ -557,7 +557,7 @@ pub(crate) fn evaluate_expression(
             let range_start = if let Some(range_start) = range_start {
                 evaluate_expression(range_start, environment)?
             } else {
-                return Err(EvaluationError::type_error(
+                return Err(EvaluationError::new(
                     "ranges without a lower bound cannot be evaluated into a value".to_string(),
                     span,
                 )
@@ -582,7 +582,7 @@ pub(crate) fn evaluate_expression(
             let range_start = if let Some(range_start) = range_start {
                 evaluate_expression(range_start, environment)?
             } else {
-                return Err(EvaluationError::type_error(
+                return Err(EvaluationError::new(
                     "ranges without a lower bound cannot be evaluated into a value".to_string(),
                     span,
                 )
@@ -619,6 +619,7 @@ fn declare_or_assign_variable(
                 // performance but the downside is that closures behave weirdly. We could probably enable
                 // it if we ensure that closures always close over the previously defined environment
                 // instead of resolving at runtime. Check page 177 of the book for more info.
+                // ^--- I think we did this
                 if environment.borrow().contains(identifier) {
                     let new_env = Environment::new_scope(environment);
                     *environment = new_env;
@@ -715,7 +716,7 @@ fn apply_operation_to_value(
                 Rc::make_mut(left).extend_from_slice(&right);
                 Ok(Value::Sequence(Sequence::Tuple(left.clone())))
             }
-            (left, right) => Err(EvaluationError::type_error(
+            (left, right) => Err(EvaluationError::new(
                 format!(
                     "cannot apply the ++ operator to {} and {}",
                     left.value_type(),
@@ -750,7 +751,7 @@ fn apply_operation_to_value(
                     default.to_owned(),
                 )));
             }
-            _ => Err(EvaluationError::type_error(
+            _ => Err(EvaluationError::new(
                 "cannot apply the | operator between these types".to_string(),
                 span,
             )

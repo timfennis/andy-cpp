@@ -160,7 +160,7 @@ pub fn set_at_index(
     span: Span,
 ) -> Result<(), FunctionCarrier> {
     let Some(size) = lhs.sequence_length() else {
-        return Err(EvaluationError::type_error(
+        return Err(EvaluationError::new(
             "cannot index into this type because it doesn't have a length".to_string(),
             span,
         )
