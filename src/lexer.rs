@@ -216,8 +216,8 @@ impl<'a> Iterator for SourceIterator<'a> {
             _ => self.inner.next(),
         };
 
-        if next.is_some() {
-            self.offset += 1;
+        if let Some(c) = next {
+            self.offset += c.len_utf8();
         }
 
         next
