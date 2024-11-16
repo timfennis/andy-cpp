@@ -23,7 +23,7 @@ pub struct Callable<'a> {
 
 impl<'a> Callable<'a> {
     pub fn call(&self, args: &mut [Value]) -> EvaluationResult {
-        self.function.borrow_mut().call(args, self.environment)
+        self.function.borrow().call(args, self.environment)
     }
 }
 
