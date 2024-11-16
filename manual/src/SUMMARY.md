@@ -26,3 +26,4 @@
 - [Augmented assignment](./features/augmented-assignment.md)
 - [Method call syntax](./features/method-call-syntax.md)
 - [Slices](./features/slices.md)
+- [Memoization](./features/memoization.md)

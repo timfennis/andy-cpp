@@ -1,9 +1,10 @@
 use std::cell::{BorrowMutError, RefCell};
 use std::fmt;
+use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 use crate::ast::ExpressionLocation;
-use crate::hash_map::HashMap;
+use crate::hash_map::{DefaultHasher, HashMap};
 use crate::interpreter::environment::{Environment, EnvironmentRef};
 use crate::interpreter::evaluate::{
     evaluate_expression, ErrorConverter, EvaluationError, EvaluationResult,
@@ -22,7 +23,7 @@ pub struct Callable<'a> {
 
 impl<'a> Callable<'a> {
     pub fn call(&self, args: &mut [Value]) -> EvaluationResult {
-        self.function.borrow().call(args, self.environment)
+        self.function.borrow_mut().call(args, self.environment)
     }
 }
 
@@ -120,6 +121,10 @@ pub enum Function {
         type_signature: TypeSignature,
         function: fn(&mut [Value], &EnvironmentRef) -> EvaluationResult,
     },
+    Memoized {
+        cache: RefCell<HashMap<u64, Value>>,
+        function: Box<Function>,
+    },
 }
 
 impl Function {
@@ -214,6 +219,7 @@ impl Function {
             Function::Closure {
                 parameter_names, ..
             } => TypeSignature::Exact(parameter_names.iter().map(|_| ParamType::Any).collect()),
+            Function::Memoized { cache: _, function } => function.type_signature(),
             Function::SingleNumberFunction { .. } => TypeSignature::Exact(vec![ParamType::Number]),
             Function::GenericFunction { type_signature, .. } => type_signature.clone(),
         }
@@ -255,6 +261,25 @@ impl Function {
                 .into()),
             },
             Function::GenericFunction { function, .. } => function(args, env),
+            Function::Memoized { cache, function } => {
+                let mut hasher = DefaultHasher::default();
+                for arg in &*args {
+                    arg.hash(&mut hasher);
+                }
+
+                let key = hasher.finish();
+
+                if !cache.borrow().contains_key(&key) {
+                    let result = function.call(args, env)?;
+                    cache.borrow_mut().insert(key, result);
+                }
+
+                Ok(cache
+                    .borrow()
+                    .get(&key)
+                    .expect("guaranteed to work")
+                    .clone())
+            }
         }
     }
 }

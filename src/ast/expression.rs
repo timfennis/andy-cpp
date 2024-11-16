@@ -60,6 +60,7 @@ pub enum Expression {
         name: Option<Box<ExpressionLocation>>,
         arguments: Box<ExpressionLocation>,
         body: Rc<ExpressionLocation>, //TODO what happens if we remove the Rc?
+        pure: bool,                   // TODO: maybe have flags instead of booleans?
     },
     Block {
         statements: Vec<ExpressionLocation>,
@@ -186,7 +187,10 @@ impl ExpressionLocation {
                 values: tuple_values,
             } => tuple_values
                 .iter()
-                .map(|it| it.try_into_identifier().map(std::string::ToString::to_string))
+                .map(|it| {
+                    it.try_into_identifier()
+                        .map(std::string::ToString::to_string)
+                })
                 .collect::<Result<Vec<String>, EvaluationError>>(),
             _ => Err(EvaluationError::syntax_error(
                 "expected a parameter list".to_string(),
@@ -345,11 +349,13 @@ impl fmt::Debug for ExpressionLocation {
                 name,
                 arguments,
                 body,
+                pure,
             } => f
                 .debug_struct("FunctionDeclaration")
                 .field("name", name)
                 .field("arguments", arguments)
                 .field("body", body)
+                .field("pure", pure)
                 .finish(),
             Expression::Block { statements } => f
                 .debug_struct("Block")

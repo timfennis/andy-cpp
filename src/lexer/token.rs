@@ -61,7 +61,7 @@ pub enum Token {
     While,
     True,
     False,
-    _Self,
+    Pure,
     // Symbols
     LeftParentheses,    // (
     RightParentheses,   // )
@@ -134,7 +134,7 @@ impl fmt::Display for Token {
             Self::While => "while",
             Self::True => "true",
             Self::False => "false",
-            Self::_Self => "self",
+            Self::Pure => "pure",
             Self::LeftParentheses => "(",
             Self::RightParentheses => ")",
             Self::LeftSquareBracket => "[",
@@ -298,6 +298,7 @@ impl From<String> for Token {
             "false" => Self::False,
             "return" => Self::Return,
             "break" => Self::Break,
+            "pure" => Self::Pure,
             _ => Self::Identifier(value),
         }
     }

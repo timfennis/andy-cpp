@@ -346,17 +346,25 @@ pub(crate) fn evaluate_expression(
             arguments,
             body,
             name,
+            pure,
         } => {
             let name = name
                 .as_ref()
                 .map(|it| it.try_into_identifier())
                 .transpose()?;
 
-            let user_function = Function::Closure {
+            let mut user_function = Function::Closure {
                 parameter_names: arguments.try_into_parameters()?,
                 body: body.clone(),
                 environment: environment.clone(),
             };
+
+            if *pure {
+                user_function = Function::Memoized {
+                    cache: RefCell::default(),
+                    function: Box::new(user_function),
+                }
+            }
 
             if let Some(name) = name {
                 environment

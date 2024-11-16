@@ -824,7 +824,7 @@ impl Parser {
             return self.for_expression();
         }
         // matches function declarations like `fn function_name(arg1, arg2) { }`
-        else if self.match_token(&[Token::Fn]).is_some() {
+        else if self.match_token(&[Token::Fn, Token::Pure]).is_some() {
             return self.function_declaration();
         }
         // matches `return;` and `return (expression);`
@@ -998,9 +998,33 @@ impl Parser {
     }
 
     fn function_declaration(&mut self) -> Result<ExpressionLocation, Error> {
-        let fn_token = self
-            .require_current_token_matches(&Token::Fn)
-            .expect("first token must be guaranteed to be fn");
+        let mut modifiers = Vec::new();
+
+        while let Some(token) = self.consume_token_if(&[Token::Fn, Token::Pure]) {
+            modifiers.push(token);
+        }
+
+        // Remove the last token, check that it matches fn
+        let fn_token = match modifiers.pop() {
+            // Must be true
+            Some(
+                token @ TokenLocation {
+                    token: Token::Fn, ..
+                },
+            ) => token,
+            Some(TokenLocation { token: _, span }) => {
+                return Err(Error::with_help(
+                    "The fn keyword must be last in function declaration".to_string(),
+                    span,
+                    "This token is not in the right place try changing the order".to_string(),
+                ))
+            }
+            None => {
+                unreachable!("the caller of this method has guaranteed us that there are tokens")
+            }
+        };
+
+        let is_pure = modifiers.iter().any(|keyword| keyword.token == Token::Pure);
 
         // After the fn token we either expect an identifier, or a parameter list incase the fucntion is anonymous
         // fn foo () { }
@@ -1031,6 +1055,7 @@ impl Parser {
                 name: identifier.map(Box::new),
                 arguments: Box::new(argument_list),
                 body: Rc::new(body),
+                pure: is_pure,
             },
             span,
         })
