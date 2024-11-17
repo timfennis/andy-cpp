@@ -51,6 +51,8 @@ pub enum BinaryOperator {
     Concat,
     StringConcat,
     In,
+    ShiftRight,
+    ShiftLeft,
 }
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
@@ -104,6 +106,8 @@ impl TryFrom<TokenLocation> for BinaryOperator {
             Token::In => Self::In,
             Token::PlusPlus => Self::Concat,
             Token::Diamond => Self::StringConcat,
+            Token::GreaterGreater => Self::ShiftRight,
+            Token::LessLess => Self::ShiftLeft,
             _ => {
                 // NOTE: this is more of an internal error than a user caused error since the parser should check the token prior to converting it.
                 return Err(ParseError::text(
@@ -123,6 +127,8 @@ impl fmt::Debug for BinaryOperator {
         write!(f, "{self}")
     }
 }
+
+// TODO: This actually makes no sense, we should convert it back into a token and then print that?
 impl fmt::Display for BinaryOperator {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let op = match self {
@@ -145,6 +151,8 @@ impl fmt::Display for BinaryOperator {
             BinaryOperator::Concat => "++",
             BinaryOperator::StringConcat => "<>",
             BinaryOperator::In => "in",
+            BinaryOperator::ShiftRight => ">>",
+            BinaryOperator::ShiftLeft => "<<",
         };
         write!(f, "{op}")
     }

@@ -795,6 +795,8 @@ enum BinaryOpError {
     },
     #[error(transparent)]
     EuclideanDivisionFailed(#[from] EuclideanDivisionError),
+    #[error("operator {operator} failed because one of its operands is invalid")]
+    InvalidOperand { operator: BinaryOperator },
 }
 #[allow(clippy::too_many_lines)]
 fn apply_operator(
@@ -902,6 +904,24 @@ fn apply_operator(
                 ))),
                 default,
             )),
+            _ => return Err(create_type_error()),
+        },
+        BinaryOperator::ShiftRight => match (left, right) {
+            (Value::Number(Number::Int(a)), Value::Number(Number::Int(b))) => {
+                Value::Number(Number::Int(
+                    a.checked_shr(b)
+                        .ok_or_else(|| BinaryOpError::InvalidOperand { operator })?,
+                ))
+            }
+            _ => return Err(create_type_error()),
+        },
+        BinaryOperator::ShiftLeft => match (left, right) {
+            (Value::Number(Number::Int(a)), Value::Number(Number::Int(b))) => {
+                Value::Number(Number::Int(
+                    a.checked_shl(b)
+                        .ok_or_else(|| BinaryOpError::InvalidOperand { operator })?,
+                ))
+            }
             _ => return Err(create_type_error()),
         },
         BinaryOperator::In => match (left, right) {

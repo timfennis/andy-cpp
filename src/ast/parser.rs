@@ -492,7 +492,7 @@ impl Parser {
 
     fn comparison(&mut self) -> Result<ExpressionLocation, Error> {
         self.consume_binary_expression_left_associative(
-            Self::boolean_or,
+            Self::bit_shift,
             &[
                 Token::EqualsEquals,
                 Token::BangEquals,
@@ -503,6 +503,14 @@ impl Parser {
                 Token::In,
             ],
             true,
+        )
+    }
+
+    fn bit_shift(&mut self) -> Result<ExpressionLocation, Error> {
+        self.consume_binary_expression_left_associative(
+            Self::boolean_or,
+            &[Token::LessLess, Token::GreaterGreater],
+            false,
         )
     }
 

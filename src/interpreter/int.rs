@@ -1,6 +1,6 @@
 use crate::interpreter::evaluate::EvaluationError;
 use crate::lexer::Span;
-use num::bigint::Sign;
+use num::bigint::{Sign, ToBigInt};
 use num::complex::Complex64;
 use num::traits::CheckedEuclid;
 use num::FromPrimitive;
@@ -8,7 +8,7 @@ use num::{pow::Pow, BigInt, BigRational, Signed, ToPrimitive, Zero};
 use std::cmp::Ordering;
 use std::fmt;
 use std::hash::{Hash, Hasher};
-use std::ops::{BitAnd, BitOr, BitXor, Neg, Not};
+use std::ops::{BitAnd, BitOr, BitXor, Neg, Not, Shl, Shr};
 
 #[derive(Debug, Clone)]
 pub enum Int {
@@ -57,6 +57,42 @@ impl Int {
         self.to_bigint()
             .checked_rem_euclid(&rhs.to_bigint())
             .map(Int::BigInt)
+    }
+
+    pub fn checked_shl(self, rhs: Self) -> Option<Self> {
+        let rhs: u32 = match rhs {
+            Int::Int64(rhs) => rhs.try_into().ok()?,
+            Int::BigInt(rhs) => rhs.try_into().ok()?,
+        };
+
+        return match self {
+            Int::Int64(lhs) => {
+                if let Some(result) = lhs.checked_shl(rhs) {
+                    Some(Self::Int64(result))
+                } else {
+                    Some(Self::BigInt(lhs.to_bigint().expect("cannot fail").shl(rhs)))
+                }
+            }
+            Int::BigInt(big_int) => Some(Self::BigInt(big_int.shl(rhs))),
+        };
+    }
+
+    pub fn checked_shr(self, rhs: Self) -> Option<Self> {
+        let rhs: u32 = match rhs {
+            Int::Int64(rhs) => rhs.try_into().ok()?,
+            Int::BigInt(rhs) => rhs.try_into().ok()?,
+        };
+
+        return match self {
+            Int::Int64(lhs) => {
+                if let Some(result) = lhs.checked_shr(rhs) {
+                    Some(Self::Int64(result))
+                } else {
+                    Some(Self::BigInt(lhs.to_bigint().expect("cannot fail").shr(rhs)))
+                }
+            }
+            Int::BigInt(big_int) => Some(Self::BigInt(big_int.shr(rhs))),
+        };
     }
 
     /// # Panics

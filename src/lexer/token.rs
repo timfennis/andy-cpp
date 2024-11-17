@@ -41,6 +41,8 @@ pub enum Token {
     Ampersand,      // &
     Pipe,           // |
     Tilde,          // ~
+    LessLess,       // <<
+    GreaterGreater, // >>
     // Operator - Other
     Bang,         // !
     Dot,          // .
@@ -122,6 +124,8 @@ impl fmt::Display for Token {
             Self::Ampersand => "&",
             Self::Pipe => "|",
             Self::Tilde => "~",
+            Self::LessLess => "<<",
+            Self::GreaterGreater => ">>",
             Self::Bang => "!",
             Self::Let => "let",
             Self::Fn => "fn",
@@ -239,6 +243,8 @@ impl TryFrom<(char, char)> for Token {
             ('<', '=') => Ok(Self::LessEquals),
             ('<', '>') => Ok(Self::Diamond),
             ('-', '>') => Ok(Self::RightArrow),
+            ('<', '<') => Ok(Self::LessLess),
+            ('>', '>') => Ok(Self::GreaterGreater),
             _ => Err(()),
         }
     }
