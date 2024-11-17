@@ -33,8 +33,8 @@ Additionally for integers the following operations are available:
 | `\|` | Bitwise OR |
 | `&` | Bitwise AND |
 | `~` | Bitwise XOR, or bitwise NOT in unary position |
-| `>>` | Bitshift right (not yet implemented) |
-| `<<` | Bitshift left (not yet implemented) |
+| `>>` | Bitshift right |
+| `<<` | Bitshift left |
 
 ### Integers
 
