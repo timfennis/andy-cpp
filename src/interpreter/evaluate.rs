@@ -719,10 +719,11 @@ fn apply_operation_to_value(
             }
             (
                 Value::Sequence(Sequence::Tuple(ref mut left)),
-                Value::Sequence(Sequence::Tuple(right)),
+                Value::Sequence(Sequence::Tuple(mut right)),
             ) => {
-                Rc::make_mut(left).extend_from_slice(&right);
-                Ok(Value::Sequence(Sequence::Tuple(left.clone())))
+                let right = Rc::make_mut(&mut right);
+                Rc::make_mut(left).append(right);
+                Ok(Value::Sequence(Sequence::Tuple(Rc::clone(left))))
             }
             (left, right) => Err(EvaluationError::new(
                 format!(
@@ -967,6 +968,16 @@ fn apply_operator(
                             .collect::<Vec<_>>(),
                     ),
                 }
+            }
+            (
+                Value::Sequence(Sequence::Tuple(mut left)),
+                Value::Sequence(Sequence::Tuple(mut right)),
+            ) => {
+                let left_mut = Rc::make_mut(&mut left);
+                let right_mut = Rc::make_mut(&mut right);
+                left_mut.append(right_mut);
+
+                Value::Sequence(Sequence::Tuple(left))
             }
             _ => return Err(create_type_error()),
         },
