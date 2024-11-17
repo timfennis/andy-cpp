@@ -16,3 +16,27 @@ for item in my_tuple {
   // ..
 }
 ```
+
+
+## Copy-on-write
+
+Tuples in this language are immutable data structures. Once a tuple is created, its contents cannot be changed. However,
+operations that seem to modify a tuple, such as appending elements, trigger a copy-on-write mechanism. This means the
+original tuple remains unchanged, and a new tuple is created to reflect the modification.
+
+
+```ndc
+let a = (1,2,3);
+let b = a;
+b ++= (4,5);
+
+// A remains the same
+assert_eq(a, (1,2,3));
+
+// B was copied and (4,5) was appended
+assert_eq(b, (1,2,3,4,5));
+```
+
+## Operators
+
+{{#include ../../snippets/list-operators.md}}

@@ -28,3 +28,7 @@ assert_eq(9, my_list[-1]);
 ## Slicing
 
 {{#include ../../snippets/slices.md}}
+
+## Operators
+
+{{#include ../../snippets/list-operators.md}}

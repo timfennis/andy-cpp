@@ -24,6 +24,15 @@ after the heart which messes everything up. This specific behavior will probably
 | `++` | concatenate two strings |
 | `<>` | coerces both operands into strings before concatenating them |
 | `in` | check if left operand is a substring of right operand |
+| `==` | Equality |
+| `!=` | Inequality |
+| `>` | Greater (lexicographically) |
+| `<` | Less (lexicographically) |
+| `>=` | Greater equals (lexicographically) |
+| `<=` | Less equals (lexicographically) |
+
+> **Note:** The `in` operator checking if the left operand is a substring of the right operand is different from
+> the behavior of `in` on lists.
 
 ### Examples
 

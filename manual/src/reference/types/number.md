@@ -9,32 +9,34 @@ Andy C++ has four number types that you should keep in mind when programming.
 
 ## Operators
 
-| Operator | Function |
-| :-: | --- |
-| `+` | Addition |
-| `-` | Subtraction, or negation in unary position |
-| `*` | Multiplication |
-| `/` | Division |
-| `^` | Exponentiation |
-| `%` | C-style modulo (can be negative) |
-| `%%` | Remainder of euclidean division (always positive) |
-| `==` | Strict equality |
-| `<=` | Less or equal |
-| `<` | Less than |
-| `>=` | Greater or equal |
-| `>` | Greater than |
-| `!=` | Not equal |
-| `<>` | Concatenate string values |
+| Operator | Function | Support agumented assignment <sup>[[1]](../../features/augmented-assignment.md)</sup> | Augmentable with `not` |
+| :-: | --- | --- | --- |
+| `+` | Addition | `true` | `false` |
+| `-` | Subtraction | `true` | `false` |
+| unary `-` | Negation | `true` | `false` |
+| `*` | Multiplication | `true` | `false` |
+| `/` | Division | `true` | `false` |
+| `^` | Exponentiation | `true` | `false` |
+| `%` | C-style modulo (can be negative) | `true` | `false` |
+| `%%` | Remainder of [euclidean division](https://en.wikipedia.org/wiki/Euclidean_division) | `true` | `false` |
+| `==` | Strict equality | `false` | `true` |
+| `<=` | Less or equal | `false` | `true` |
+| `<` | Less than | `false` | `true` |
+| `>=` | Greater or equal | `false` | `true` |
+| `>` | Greater than | `false` | `true` |
+| `!=` | Not equal | `false` | `true` |
+| `<>` | Concatenate string values | `true` | `false` |
 
-Additionally for integers the following operations are available:
+Additionally for **integers** the following operations are available:
 
-| Operator | Function |
-| :-: | --- |
-| `\|` | Bitwise OR |
-| `&` | Bitwise AND |
-| `~` | Bitwise XOR, or bitwise NOT in unary position |
-| `>>` | Bitshift right |
-| `<<` | Bitshift left |
+| Operator | Function | Support agumented assignment <sup>[[1]](../../features/augmented-assignment.md)</sup> | Augmentable with `not` |
+| :-: | --- | --- | --- |
+| `\|` | Bitwise OR | `true` | `false` |
+| `&` | Bitwise AND | `true` | `false` |
+| `~` | Bitwise XOR, or bitwise NOT in unary position | `true` | `false` |
+| unary `~` | bitwise NOT | `true` | `false` |
+| `>>` | Bitshift right | `true` | `false` |
+| `<<` | Bitshift left | `true` | `false` |
 
 ### Integers
 
