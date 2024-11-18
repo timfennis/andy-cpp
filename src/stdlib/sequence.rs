@@ -167,6 +167,76 @@ mod inner {
         }
     }
 
+    pub fn enumerate(seq: &Sequence) -> Value {
+        match seq {
+            Sequence::String(s) => s
+                .borrow()
+                .chars()
+                .enumerate()
+                .map(|(index, char)| {
+                    Value::Sequence(Sequence::Tuple(Rc::new(vec![
+                        Value::from(index),
+                        Value::from(char),
+                    ])))
+                })
+                .collect::<Vec<Value>>()
+                .into(),
+            Sequence::List(list) => list
+                .borrow()
+                .iter()
+                .enumerate()
+                .map(|(index, value)| {
+                    Value::Sequence(Sequence::Tuple(Rc::new(vec![
+                        Value::from(index),
+                        Value::clone(value),
+                    ])))
+                })
+                .collect::<Vec<Value>>()
+                .into(),
+            Sequence::Tuple(tuple) => tuple
+                .iter()
+                .enumerate()
+                .map(|(index, value)| {
+                    Value::Sequence(Sequence::Tuple(Rc::new(vec![
+                        Value::from(index),
+                        Value::clone(value),
+                    ])))
+                })
+                .collect::<Vec<Value>>()
+                .into(),
+            Sequence::Map(map, _) => map
+                .borrow()
+                .iter()
+                .enumerate()
+                .map(|(index, (key, value))| {
+                    Value::Sequence(Sequence::Tuple(Rc::new(vec![
+                        Value::from(index),
+                        Value::Sequence(Sequence::Tuple(Rc::new(vec![
+                            Value::clone(key),
+                            Value::clone(value),
+                        ]))),
+                    ])))
+                })
+                .collect::<Vec<Value>>()
+                .into(),
+            // TODO: This entire branch is so cringe, why are we even trying to use iterators if we do shit like this
+            Sequence::Iterator(rc) => {
+                let mut iter = rc.borrow_mut();
+                let mut out = Vec::new();
+                let mut idx = 0usize;
+                while let Some(value) = iter.next() {
+                    out.push(Value::Sequence(Sequence::Tuple(Rc::new(vec![
+                        Value::from(idx),
+                        value,
+                    ]))));
+                    idx += 1;
+                }
+
+                out.into()
+            }
+        }
+    }
+
     pub fn fold(seq: &mut Sequence, initial: Value, function: &Callable) -> EvaluationResult {
         fold_iterator(mut_seq_into_iterator(seq), initial, function)
     }

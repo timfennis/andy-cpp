@@ -120,22 +120,21 @@ mod inner {
     }
 
     pub fn is_digit(string: &str) -> anyhow::Result<bool> {
-        if string.len() != 1 {
-            Err(anyhow!("is_digit requires string length to be exactly 1"))
-        } else {
+        if string.len() == 1 {
             Ok(string
                 .chars()
                 .next()
                 .map(|c| c.is_ascii_digit())
                 .expect("previous check guaranteed there must be one char"))
+        } else {
+            Err(anyhow!("is_digit requires string length to be exactly 1"))
         }
     }
 
     #[function(name = "is_digit")]
     pub fn is_digit_radix(string: &str, radix: i64) -> anyhow::Result<bool> {
-        if string.len() != 1 {
-            Err(anyhow!("is_digit requires string length to be exactly 1"))
-        } else {
+        if string.len() == 1 {
+            #[allow(clippy::cast_possible_truncation)]
             let radix = match radix {
                 2..=36 => radix as u32,
                 _ => {
@@ -149,6 +148,8 @@ mod inner {
                 .next()
                 .map(|c| c.is_digit(radix))
                 .expect("previous check guaranteed there must be one char"))
+        } else {
+            Err(anyhow!("is_digit requires string length to be exactly 1"))
         }
     }
 }
