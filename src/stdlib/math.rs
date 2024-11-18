@@ -26,6 +26,25 @@ where
     }
 }
 
+trait FallibleProduct<E> {
+    fn try_product(&mut self) -> Result<Number, E>;
+}
+
+impl<C, T> FallibleProduct<anyhow::Error> for C
+where
+    C: Iterator<Item = T>,
+    T: std::borrow::Borrow<Value>,
+{
+    fn try_product(&mut self) -> anyhow::Result<Number> {
+        self.try_fold(Number::from(1), |acc, cur| match cur.borrow() {
+            Value::Number(n) => Ok(acc * n.clone()),
+            value => Err(anyhow::anyhow!(
+                "cannot multiply {} and number",
+                value.value_type()
+            )),
+        })
+    }
+}
 #[export_module]
 mod inner {
     use super::FallibleSum;
@@ -41,6 +60,16 @@ mod inner {
             Sequence::Tuple(tup) => tup.iter().try_sum(),
             Sequence::Map(map, _) => map.borrow().keys().try_sum(),
             Sequence::Iterator(iter) => iter.borrow_mut().try_sum(),
+        }
+    }
+
+    pub fn product(seq: &Sequence) -> anyhow::Result<Number> {
+        match seq {
+            Sequence::String(_s) => Err(anyhow!("string cannot be summed")),
+            Sequence::List(list) => list.borrow().iter().try_product(),
+            Sequence::Tuple(tup) => tup.iter().try_product(),
+            Sequence::Map(map, _) => map.borrow().keys().try_product(),
+            Sequence::Iterator(iter) => iter.borrow_mut().try_product(),
         }
     }
 
