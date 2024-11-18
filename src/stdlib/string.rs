@@ -118,4 +118,37 @@ mod inner {
     pub fn trim_end_matches<'a>(string: &'a str, pat: &str) -> &'a str {
         string.trim_end_matches(pat)
     }
+
+    pub fn is_digit(string: &str) -> anyhow::Result<bool> {
+        if string.len() != 1 {
+            Err(anyhow!("is_digit requires string length to be exactly 1"))
+        } else {
+            Ok(string
+                .chars()
+                .next()
+                .map(|c| c.is_ascii_digit())
+                .expect("previous check guaranteed there must be one char"))
+        }
+    }
+
+    #[function(name = "is_digit")]
+    pub fn is_digit_radix(string: &str, radix: i64) -> anyhow::Result<bool> {
+        if string.len() != 1 {
+            Err(anyhow!("is_digit requires string length to be exactly 1"))
+        } else {
+            let radix = match radix {
+                2..=36 => radix as u32,
+                _ => {
+                    return Err(anyhow!(
+                        "Invalid radix: must be an integer between 2 and 36"
+                    ))
+                }
+            };
+            Ok(string
+                .chars()
+                .next()
+                .map(|c| c.is_digit(radix))
+                .expect("previous check guaranteed there must be one char"))
+        }
+    }
 }
