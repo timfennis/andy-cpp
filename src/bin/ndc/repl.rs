@@ -7,7 +7,7 @@ use rustyline::Helper;
 use rustyline::{ColorMode, Completer, Editor, Hinter, Validator};
 use std::borrow::Cow;
 
-use crate::highlighter::CustomHighlighterState;
+use crate::highlighter::AndycppHighlighterState;
 use crate::miette_hack;
 
 #[derive(Helper, Completer, Hinter, Validator)]
@@ -15,7 +15,7 @@ struct RustlylineHelper {}
 
 impl rustyline::highlight::Highlighter for RustlylineHelper {
     fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
-        let mut state = CustomHighlighterState {};
+        let mut state = AndycppHighlighterState {};
         let out = state.highlight_line(line);
 
         Cow::Owned(out.into_iter().join(""))

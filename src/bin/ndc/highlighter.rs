@@ -14,19 +14,21 @@ impl Highlighter for AndycppHighlighter {
         &'h self,
         _source: &dyn SpanContents<'_>,
     ) -> Box<dyn HighlighterState + 'h> {
-        Box::new(CustomHighlighterState {})
+        Box::new(AndycppHighlighterState {})
     }
 }
 
-pub(crate) struct CustomHighlighterState {}
+pub(crate) struct AndycppHighlighterState {}
 
 const NUMBER_LITERAL_COLOR: owo_colors::Rgb = Rgb(253, 151, 31);
 const PARENTHESES_COLOR: owo_colors::Rgb = Rgb(229, 181, 103);
 
-const STRING_LITERAL_COLOR: owo_colors::AnsiColors = owo_colors::AnsiColors::BrightGreen;
-const IDENTIFIER_COLOR: owo_colors::AnsiColors = owo_colors::AnsiColors::Cyan;
+const LITERAL_COLOR: owo_colors::Rgb = Rgb(140, 182, 255);
+const STRING_LITERAL_COLOR: owo_colors::Rgb = Rgb(70, 200, 128);
+// 33b1ff
+const IDENTIFIER_COLOR: owo_colors::Rgb = Rgb(51, 177, 255);
 
-impl HighlighterState for CustomHighlighterState {
+impl HighlighterState for AndycppHighlighterState {
     fn highlight_line<'s>(&mut self, line: &'s str) -> Vec<Styled<&'s str>> {
         let Ok(tokens) = Lexer::new(line).collect::<Result<Vec<_>, _>>() else {
             return vec![Style::new().red().style(line)];
@@ -63,7 +65,7 @@ impl HighlighterState for CustomHighlighterState {
                 | Token::RightParentheses
                 | Token::MapOpen => Style::new().color(PARENTHESES_COLOR).style(substring),
                 Token::Identifier(_) => Style::new().color(IDENTIFIER_COLOR).style(substring),
-                _ => Style::new().bright_blue().bold().style(substring),
+                _ => Style::new().color(LITERAL_COLOR).bold().style(substring),
             };
 
             out.push(colored);

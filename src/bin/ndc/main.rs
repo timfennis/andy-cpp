@@ -1,12 +1,12 @@
-use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
 use std::process::exit;
+use std::{fs::File, io::Write};
 
 use clap::Parser;
 
-use highlighter::AndycppHighlighter;
-use miette::NamedSource;
+use highlighter::{AndycppHighlighter, AndycppHighlighterState};
+use miette::{highlighters::HighlighterState, NamedSource};
 use ndc_lib::interpreter::{Interpreter, InterpreterError};
 
 #[cfg(feature = "repl")]
@@ -21,8 +21,12 @@ mod highlighter;
 #[command(about = "An interpreter for the Andy C++ language")]
 struct Cli {
     file: Option<PathBuf>,
+
     #[arg(long)]
     debug: bool,
+
+    #[arg(long)]
+    highlight: bool,
 
     #[arg(short = 'C', long, default_value_t = 1)]
     context_lines: usize,
@@ -62,6 +66,17 @@ fn main() -> anyhow::Result<()> {
         let mut file = File::open(path)?;
         let mut string = String::new();
         file.read_to_string(&mut string)?;
+
+        if cli.highlight {
+            let mut foo = AndycppHighlighterState {};
+            let out = foo.highlight_line(&string);
+            for styled in out {
+                print!("{}", styled);
+            }
+            std::io::stdout().flush()?;
+
+            exit(0);
+        }
 
         let stdout = std::io::stdout();
         let mut interpreter = Interpreter::new(Box::new(stdout));
