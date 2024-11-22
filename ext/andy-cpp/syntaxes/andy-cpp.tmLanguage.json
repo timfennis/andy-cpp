@@ -1,99 +1,232 @@
 {
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
   "name": "Andy C++",
+  "fileTypes": [
+    "ndc"
+  ],
   "patterns": [
     {
-      "include": "#comments"
+      "include": "#expression"
+    },
+    {
+      "include": "#functions"
     },
     {
       "include": "#keywords"
     },
     {
-      "include": "#strings"
-    },
-    {
-      "include": "#constants"
-    },
-    {
-      "include": "#variables"
-    },
-    {
-      "comment": "Floating point literal (fraction)",
-      "name": "constant.numeric.float.andy-cpp",
-      "match": "\\b[0-9][0-9_]*\\.[0-9][0-9_]*([eE][+-]?[0-9_]+)?(f32|f64)?\\b"
-    },
-    {
-      "comment": "Integer literal (decimal)",
-      "name": "constant.numeric.integer.decimal.andy-cpp",
-      "match": "\\b[0-9][0-9_]*\\b"
-    },
-    {
-      "comment": "logical operators",
-      "name": "keyword.operator.logical.andy-cpp",
-      "match": "(\\^|\\|\\||&&|!)(?!=)"
-    },
-    {
-      "comment": "assignment operators",
-      "name": "keyword.operator.assignment.andy-cpp",
-      "match": "(=|:=)"
-    },
-    {
-      "comment": "math operators",
-      "name": "keyword.operator.math.andy-cpp",
-      "match": "(([+%]|(\\*(?!\\w)))(?!=))|(-(?!>))|(/(?!/))"
+      "include": "#comment"
     }
   ],
   "repository": {
-    "comments": {
+    "expression": {
       "patterns": [
         {
-          "comment": "documentation comments",
-          "name": "comment.line.documentation.andy-cpp",
-          "match": "^\\s*//.*"
+          "include": "#numbers"
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#operators"
+        }
+      ]
+    },
+    "functions": {
+      "patterns": [
+        {
+          "comment": "function definition",
+          "name": "meta.function.definition.andy-cpp",
+          "begin": "\\b((pure)\\s)?(fn)\\s+([A-Za-z_][A-Za-z_0-9]*)",
+          "beginCaptures": {
+            "2": {
+              "name": "keyword.other.pure.andy-cpp"
+            },
+            "3": {
+              "name": "keyword.other.fn.andy-cpp"
+            },
+            "4": {
+              "name": "entity.name.function.andy-cpp"
+            }
+          },
+          "end": "\\{"
+        },
+        {
+          "comment": "anonymous function definition",
+          "name": "meta.function.definition.anonymous.andy-cpp",
+          "begin": "\\b((pure)\\s)?(fn)",
+          "beginCaptures": {
+            "2": {
+              "name": "keyword.other.pure.andy-cpp"
+            },
+            "3": {
+              "name": "keyword.other.fn.andy-cpp"
+            }
+          },
+          "end": "\\{"
+        }
+ 
+      ]
+    },
+    "comment": {
+      "patterns": [
+        {
+          "begin": "(//)",
+          "end": "$",
+          "name": "comment.line.double-slash.andy-cpp"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "comment": "Floats",
+          "match": "\\b([0-9]+\\.[0-9]+)\\b",
+          "name": "constant.numeric.float.andy-cpp"
+        },
+        {
+          "comment": "Hexadecimal numbers",
+          "match": "\\b(0x[0-9A-Fa-f]+)\\b",
+          "name": "constant.numeric.hex.andy-cpp"
+        },
+        {
+          "comment": "Ocatal n umbers",
+          "match": "\\b(0o[0-7]+)\\b",
+          "name": "constant.numeric.octal.andy-cpp"
+        },
+        {
+          "comment": "Arbitrary radix numbers (parsed as if a-z is always valid)",
+          "match": "\\b(0r[0-9A-Za-z]+)\\b",
+          "name": "constant.numeric.andy-cpp"
+        },
+        {
+          "comment": "Binary numbers",
+          "match": "\\b(0b[01]+)\\b",
+          "name": "constant.numeric.binary.andy-cpp"
+        },
+        {
+          "comment": "Integer numbers",
+          "match": "\\b([0-9]+)\\b",
+          "name": "constant.numeric.decimal.andy-cpp"
+        },
+        {
+          "comment": "booleans",
+          "name": "constant.language.bool.andy-cpp",
+          "match": "\\b(true|false)\\b"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "comment": "double-quoted string",
+          "name": "string.quoted.double.andy-cpp",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "include": "#escapes"
+            }
+          ]
+        },
+        {
+          "comment": "double-quoted raw strings",
+          "name": "string.quoted.double.andy-cpp",
+          "begin": "r(#*)(\")",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.definition.string.raw.andy-cpp"
+            },
+            "2": {
+              "name": "punctuation.definition.string.andy-cpp"
+            }
+          },
+          "end": "(\")(\\1)",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.definition.string.andy-cpp"
+            },
+            "2": {
+              "name": "punctuation.definition.string.raw.andy-cpp"
+            }
+          }
         }
       ]
     },
     "keywords": {
       "patterns": [
         {
+          "comment": "control flow keywords",
           "name": "keyword.control.andy-cpp",
-          "match": "\\b(if|else|while|for|return|fn)\\b"
-        }
-      ]
-    },
-    "strings": {
-      "name": "string.quoted.double.andy-cpp",
-      "begin": "\"",
-      "end": "\"",
-      "patterns": [
-        {
-          "name": "constant.character.escape.andy-cpp",
-          "match": "\\\\."
-        }
-      ]
-    },
-    "constants": {
-      "patterns": [
-        {
-          "comment": "booleans",
-          "name": "constant.language.bool.andy-cpp",
-          "match": "\\b(true|false)\\b"
+          "match": "\\b(break|if|else|while|for|return)\\b"
         },
         {
-          "comment": "decimal integers and floats",
-          "name": "constant.numeric.decimal.rust",
-          "match": "\\b\\d[\\d_]*(\\.?)[\\d_]*(?:(E|e)([+-]?)([\\d_]+))?(f32|f64|i128|i16|i32|i64|i8|isize|u128|u16|u32|u64|u8|usize)?\\b",
+          "comment": "storage keywords",
+          "name": "keyword.other.andy-cpp storage.type.andy-cpp",
+          "match": "\\b(let)\\b"
+        },
+        {
+          "comment": "fn",
+          "name": "keyword.other.fn.andy-cpp",
+          "match": "\\bfn\\b"
+        },
+        {
+          "comment": "other keywords",
+          "name": "keyword.other.andy-cpp",
+          "match": "\\b(in)\\b"
         }
       ]
     },
-    "variables": {
+    "operators": {
       "patterns": [
         {
-          "comment": "variables",
-          "name": "variable.other.andy-cpp",
-          "match": "\\b(?<!(?<!\\.)\\.)(?:r#(?!(crate|[Ss]elf|super)))?[a-z0-9_]+\\b"
+          "comment": "logical operators",
+          "name": "keyword.operator.logical.andy-cpp",
+          "match": "\\b(not|or|and)\\b"
+        },
+        {
+          "comment": "augmented assignment operators",
+          "name": "keyword.operator.assignment.andy-cpp",
+          "match": "((\\+|-|\\*|/|\\^|&|\\||<<|>>|~|<>|\\+\\+)=)"
+        },
+        {
+          "comment": "function augmented assignment opreators",
+          "name": "keyword.operator.assignment.andy-cpp",
+          "match": "(([a-zA-Z]+)=)"
+        },
+        {
+          "comment": "single equal",
+          "name": "keyword.operator.assignment.equal.andy-cpp",
+          "match": "(?<![<>])=(?!=|>)"
+        },
+        {
+          "comment": "comparison operators",
+          "name": "keyword.operator.comparison.andy-cpp",
+          "match": "(=(=)?(?!>)|!=|<=|(?<!=)>=)"
+        },
+        {
+          "comment": "math operators",
+          "name": "keyword.operator.arithmetic.andy-cpp",
+          "match": "(\\+|\\-|\\*|\\/(?!\\/)|\\^|\\%%?|>>|<<|&(?!&)|\\|(?!\\|)|~)"
+        },
+        {
+          "name": "punctuation.semicolon.andy-cpp",
+          "match": ";"
         }
       ]
+    },
+    "escapes": {
+      "comment": "escapes: ASCII, byte, Unicode, quote, regex",
+      "name": "constant.character.escape.andy-cpp",
+      "match": "(\\\\)(.)",
+      "captures": {
+        "1": {
+          "name": "constant.character.escape.backslash.andy-cpp"
+        },
+        "2": {
+          "name": "constant.character.escape.andy-cpp"
+        }
+      }
     }
   },
   "scopeName": "source.andy-cpp"
