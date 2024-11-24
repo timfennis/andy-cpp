@@ -2,6 +2,11 @@
   "name": "andy-cpp",
   "displayName": "andy-cpp",
   "description": "Andy C++ Programming Language",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/timfennis/andy-cpp.git"
+  },
+  "publisher": "TimFennis",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.85.0"
