@@ -7,28 +7,37 @@
   "patterns": [
     {
       "include": "#expression"
-    },
-    {
-      "include": "#functions"
-    },
-    {
-      "include": "#keywords"
-    },
-    {
-      "include": "#comment"
     }
   ],
   "repository": {
     "expression": {
       "patterns": [
         {
+          "include": "#dictionary"
+        },
+        {
+          "include": "#call"
+        },
+        {
+          "include": "#list"
+        },
+        {
           "include": "#numbers"
+        },
+        {
+          "include": "#functions"
         },
         {
           "include": "#strings"
         },
         {
           "include": "#operators"
+        },
+        {
+          "include": "#keywords"
+        },
+        {
+          "include": "#comment"
         }
       ]
     },
@@ -65,7 +74,6 @@
           },
           "end": "\\{"
         }
- 
       ]
     },
     "comment": {
@@ -81,32 +89,32 @@
       "patterns": [
         {
           "comment": "Floats",
-          "match": "\\b([0-9]+\\.[0-9]+)\\b",
+          "match": "\\b([0-9][0-9_]*\\.[0-9][0-9_]*)\\b",
           "name": "constant.numeric.float.andy-cpp"
         },
         {
           "comment": "Hexadecimal numbers",
-          "match": "\\b(0x[0-9A-Fa-f]+)\\b",
+          "match": "\\b(0x[0-9A-Fa-f][0-9A-Fa-f_]*)\\b",
           "name": "constant.numeric.hex.andy-cpp"
         },
         {
           "comment": "Ocatal n umbers",
-          "match": "\\b(0o[0-7]+)\\b",
+          "match": "\\b(0o[0-7][0-7]*)\\b",
           "name": "constant.numeric.octal.andy-cpp"
         },
         {
           "comment": "Arbitrary radix numbers (parsed as if a-z is always valid)",
-          "match": "\\b(0r[0-9A-Za-z]+)\\b",
+          "match": "\\b(0r[0-9A-Za-z][0-9A-Za-z_]*)\\b",
           "name": "constant.numeric.andy-cpp"
         },
         {
           "comment": "Binary numbers",
-          "match": "\\b(0b[01]+)\\b",
+          "match": "\\b(0b[01][01_]*)\\b",
           "name": "constant.numeric.binary.andy-cpp"
         },
         {
           "comment": "Integer numbers",
-          "match": "\\b([0-9]+)\\b",
+          "match": "\\b([0-9][0-9_]*)\\b",
           "name": "constant.numeric.decimal.andy-cpp"
         },
         {
@@ -214,6 +222,68 @@
           "match": ";"
         }
       ]
+    },
+    "list": {
+      "begin": "\\[",
+      "end": "\\]",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.list.begin.andy-cpp"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.list.end.andy-cpp"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#expression"
+        }
+      ]
+    },
+    "dictionary": {
+      "begin": "%{",
+      "end": "}",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.dictionary.begin.andy-cpp"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.dictionary.end.andy-cpp"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#expression"
+        }
+      ]
+    },
+    "call": {
+      "comment": "Function call",
+      "name": "meta.function.call.andy-cpp",
+      "begin": "([A-Za-z_][A-Za-z0-9_]*)(\\()",
+      "beginCaptures": {
+        "1": {
+          "name": "entity.name.function.andy-cpp"
+        },
+        "2": {
+          "name": "punctuation.bracket.round.andy-cpp"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#expression"
+        }
+      ],
+      "end": "\\)",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.brackets.round.andy-cpp"
+        }
+      }
     },
     "escapes": {
       "comment": "escapes: ASCII, byte, Unicode, quote, regex",
