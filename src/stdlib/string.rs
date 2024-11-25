@@ -1,13 +1,32 @@
 use andy_cpp_macros::export_module;
 
+use crate::interpreter::evaluate::EvaluationResult;
+use crate::interpreter::iterator::mut_seq_into_iterator;
+use crate::interpreter::sequence::Sequence;
+use crate::interpreter::value::Value;
+
+use anyhow::{anyhow, Context};
+use itertools::Itertools;
+use std::fmt::Write;
+use std::rc::Rc;
+
+pub fn join_to_string(list: &mut Sequence, sep: &str) -> EvaluationResult {
+    let mut iter = mut_seq_into_iterator(list);
+    match iter.next() {
+        None => Ok(Value::from(String::new())),
+        Some(first) => {
+            let mut out = String::new();
+            write!(out, "{}", first?).map_err(|_| anyhow!("failed to write to String"))?;
+            while let Some(item) = iter.next() {
+                write!(out, "{sep}{}", item?).map_err(|_| anyhow!("failed to write to String"))?;
+            }
+            Ok(Value::from(out))
+        }
+    }
+}
+
 #[export_module]
 mod inner {
-    use crate::interpreter::sequence::Sequence;
-    use crate::interpreter::value::Value;
-
-    use anyhow::{anyhow, Context};
-    use itertools::Itertools;
-    use std::rc::Rc;
 
     pub fn ord(string: &str) -> anyhow::Result<i64> {
         let mut iterator = string.chars().map(|ch| ch as i64);
@@ -57,13 +76,34 @@ mod inner {
         string.push_str(value);
     }
 
+    pub fn join(list: &mut Sequence, sep: &str) -> EvaluationResult {
+        join_to_string(list, sep)
+    }
+
+    pub fn paragraphs(string: &str) -> Vec<String> {
+        string.split("\n\n").map(ToString::to_string).collect()
+    }
+
+    pub fn unparagraphs(list: &mut Sequence) -> EvaluationResult {
+        join_to_string(list, "\n\n")
+    }
+
     pub fn lines(string: &str) -> Vec<String> {
         string.lines().map(ToString::to_string).collect()
+    }
+
+    pub fn unlines(list: &mut Sequence) -> EvaluationResult {
+        join_to_string(list, "\n")
     }
 
     pub fn words(string: &str) -> Vec<String> {
         string.split_whitespace().map(ToString::to_string).collect()
     }
+
+    pub fn unwords(list: &mut Sequence) -> EvaluationResult {
+        join_to_string(list, " ")
+    }
+
     pub fn split(string: &str) -> Vec<String> {
         string.split_whitespace().map(ToString::to_string).collect()
     }
