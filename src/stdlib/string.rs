@@ -64,6 +64,14 @@ mod inner {
         string.to_uppercase()
     }
 
+    pub fn is_upper(string: &str) -> bool {
+        string.chars().all(|c| c.is_uppercase())
+    }
+
+    pub fn is_lower(string: &str) -> bool {
+        string.chars().all(|c| c.is_lowercase())
+    }
+
     pub fn reversed(string: &str) -> String {
         string.chars().rev().collect()
     }
