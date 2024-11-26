@@ -911,7 +911,7 @@ fn apply_operator(
             (Value::Number(Number::Int(a)), Value::Number(Number::Int(b))) => {
                 Value::Number(Number::Int(
                     a.checked_shr(b)
-                        .ok_or_else(|| BinaryOpError::InvalidOperand { operator })?,
+                        .ok_or(BinaryOpError::InvalidOperand { operator })?,
                 ))
             }
             _ => return Err(create_type_error()),
@@ -920,7 +920,7 @@ fn apply_operator(
             (Value::Number(Number::Int(a)), Value::Number(Number::Int(b))) => {
                 Value::Number(Number::Int(
                     a.checked_shl(b)
-                        .ok_or_else(|| BinaryOpError::InvalidOperand { operator })?,
+                        .ok_or(BinaryOpError::InvalidOperand { operator })?,
                 ))
             }
             _ => return Err(create_type_error()),

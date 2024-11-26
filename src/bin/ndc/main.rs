@@ -68,8 +68,8 @@ fn main() -> anyhow::Result<()> {
         file.read_to_string(&mut string)?;
 
         if cli.highlight {
-            let mut foo = AndycppHighlighterState {};
-            let out = foo.highlight_line(&string);
+            let mut highlighter = AndycppHighlighterState {};
+            let out = highlighter.highlight_line(&string);
             for styled in out {
                 print!("{}", styled);
             }

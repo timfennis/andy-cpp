@@ -59,13 +59,14 @@ impl Int {
             .map(Int::BigInt)
     }
 
+    #[must_use]
     pub fn checked_shl(self, rhs: Self) -> Option<Self> {
         let rhs: u32 = match rhs {
             Int::Int64(rhs) => rhs.try_into().ok()?,
             Int::BigInt(rhs) => rhs.try_into().ok()?,
         };
 
-        return match self {
+        match self {
             Int::Int64(lhs) => {
                 if let Some(result) = lhs.checked_shl(rhs) {
                     Some(Self::Int64(result))
@@ -74,16 +75,17 @@ impl Int {
                 }
             }
             Int::BigInt(big_int) => Some(Self::BigInt(big_int.shl(rhs))),
-        };
+        }
     }
 
+    #[must_use]
     pub fn checked_shr(self, rhs: Self) -> Option<Self> {
         let rhs: u32 = match rhs {
             Int::Int64(rhs) => rhs.try_into().ok()?,
             Int::BigInt(rhs) => rhs.try_into().ok()?,
         };
 
-        return match self {
+        match self {
             Int::Int64(lhs) => {
                 if let Some(result) = lhs.checked_shr(rhs) {
                     Some(Self::Int64(result))
@@ -92,7 +94,7 @@ impl Int {
                 }
             }
             Int::BigInt(big_int) => Some(Self::BigInt(big_int.shr(rhs))),
-        };
+        }
     }
 
     /// # Panics

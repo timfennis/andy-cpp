@@ -75,7 +75,6 @@ fn try_sort(v: &mut [Value]) -> anyhow::Result<()> {
 
 #[export_module]
 mod inner {
-
     pub fn max(seq: &Sequence) -> anyhow::Result<Value> {
         match seq {
             Sequence::String(s) => s
@@ -223,13 +222,11 @@ mod inner {
             Sequence::Iterator(rc) => {
                 let mut iter = rc.borrow_mut();
                 let mut out = Vec::new();
-                let mut idx = 0usize;
-                while let Some(value) = iter.next() {
+                for (idx, value) in iter.by_ref().enumerate() {
                     out.push(Value::Sequence(Sequence::Tuple(Rc::new(vec![
                         Value::from(idx),
                         value,
                     ]))));
-                    idx += 1;
                 }
 
                 out.into()
@@ -267,6 +264,35 @@ mod inner {
         }
 
         Ok(out.into())
+    }
+
+    pub fn find(seq: &mut Sequence, predicate: &Callable) -> EvaluationResult {
+        let iterator = mut_seq_into_iterator(seq);
+        for element in iterator {
+            let element = element?;
+            let result = predicate.call(&mut [element.clone()])?;
+            match result {
+                Value::Bool(true) => return Ok(element),
+                Value::Bool(false) => {}
+                _ => return Err(anyhow!("return value of predicate must be a boolean").into()),
+            }
+        }
+
+        Err(anyhow!("find did not find anything").into())
+    }
+
+    pub fn locate(seq: &mut Sequence, predicate: &Callable) -> EvaluationResult {
+        let iterator = mut_seq_into_iterator(seq);
+        for (idx, element) in iterator.enumerate() {
+            let result = predicate.call(&mut [element?])?;
+            match result {
+                Value::Bool(true) => return Ok(Value::from(idx)),
+                Value::Bool(false) => {}
+                _ => return Err(anyhow!("return value of predicate must be a boolean").into()),
+            }
+        }
+
+        Err(anyhow!("find did not find anything").into())
     }
 
     pub fn none(seq: &mut Sequence, function: &Callable) -> EvaluationResult {

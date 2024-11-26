@@ -17,7 +17,7 @@ pub fn join_to_string(list: &mut Sequence, sep: &str) -> EvaluationResult {
         Some(first) => {
             let mut out = String::new();
             write!(out, "{}", first?).map_err(|_| anyhow!("failed to write to String"))?;
-            while let Some(item) = iter.next() {
+            for item in iter {
                 write!(out, "{sep}{}", item?).map_err(|_| anyhow!("failed to write to String"))?;
             }
             Ok(Value::from(out))
@@ -65,11 +65,11 @@ mod inner {
     }
 
     pub fn is_upper(string: &str) -> bool {
-        string.chars().all(|c| c.is_uppercase())
+        string.chars().all(char::is_uppercase)
     }
 
     pub fn is_lower(string: &str) -> bool {
-        string.chars().all(|c| c.is_lowercase())
+        string.chars().all(char::is_lowercase)
     }
 
     pub fn reversed(string: &str) -> String {
@@ -184,7 +184,7 @@ mod inner {
         if string.len() == 1 {
             #[allow(clippy::cast_possible_truncation)]
             let radix = match radix {
-                2..=36 => radix as u32,
+                2..=36 => u32::try_from(radix).expect("must be valid"),
                 _ => {
                     return Err(anyhow!(
                         "Invalid radix: must be an integer between 2 and 36"
