@@ -1251,9 +1251,15 @@ fn execute_for_iterations(
             let mut sequence = evaluate_expression(sequence, environment)?;
             let iter = mut_value_to_iterator(&mut sequence).into_evaluation_result(span)?;
 
-            let mut scope = Environment::new_scope(environment);
             for r_value in iter {
-                scope.borrow_mut().reset();
+                // In a previous version this scope was lifted outside of the loop and reset for every iteration inside the loop
+                // in the following code sample this matters (a lot):
+                // ```ndc
+                // [fn(x) { x + i } for i in 0...10]
+                // ```
+                // With the current implementation with a new scope declared for every iteration this produces 10 functions
+                // each with their own scope and their own version of `i`, this might potentially be a bit slower though
+                let mut scope = Environment::new_scope(environment);
                 declare_or_assign_variable(l_value, r_value?, true, &mut scope, span)?;
 
                 if tail.is_empty() {
