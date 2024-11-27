@@ -179,6 +179,10 @@ mod inner {
         }
     }
 
+    pub fn replace(source: &str, from: &str, to: &str) -> String {
+        source.replace(from, to)
+    }
+
     #[function(name = "is_digit")]
     pub fn is_digit_radix(string: &str, radix: i64) -> anyhow::Result<bool> {
         if string.len() == 1 {
