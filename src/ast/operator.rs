@@ -48,8 +48,8 @@ pub enum BinaryOperator {
     And,
     Or,
     Xor,
-    Concat,
-    StringConcat,
+    Concat,       // ++
+    StringConcat, // <>
     In,
     ShiftRight,
     ShiftLeft,

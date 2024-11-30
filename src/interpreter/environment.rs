@@ -128,15 +128,14 @@ impl Environment {
     }
 
     pub fn assign(&mut self, name: &str, value: Value) -> bool {
-        // Clippy wants us to use self.values.entry(name) but that moves name and breaks the recursive case
-        return if self.values.contains_key(name) {
+        if self.values.contains_key(name) {
             self.values.insert(name.to_string(), RefCell::new(value));
             true
         } else if let Some(parent) = &self.parent {
             parent.borrow_mut().assign(name, value)
         } else {
             false
-        };
+        }
     }
 
     #[must_use]
