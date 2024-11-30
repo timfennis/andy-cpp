@@ -23,6 +23,7 @@ pub enum Number {
     Complex(Complex64),
 }
 
+#[derive(Debug)]
 pub enum RealNumber<'a> {
     Int(&'a Int),
     Float(OrderedFloat<f64>),
@@ -66,17 +67,7 @@ impl PartialOrd for Number {
 
 impl PartialEq for Number {
     fn eq(&self, other: &Self) -> bool {
-        // NOTE: Noulith has a flexible implementation where 123 = 123.0 but implementing that for Number makes it impossible to store these values in a HashSet
-        // self.to_reals().eq(&other.to_reals())
-        match (self, other) {
-            (Number::Int(left), Number::Int(right)) => left.eq(right),
-            (Number::Float(left), Number::Float(right)) => {
-                OrderedFloat(*left).eq(&OrderedFloat(*right))
-            }
-            (Number::Rational(left), Number::Rational(right)) => left.eq(right),
-            (Number::Complex(left), Number::Complex(right)) => left.eq(right),
-            _ => false,
-        }
+        self.partial_cmp(other) == Some(Ordering::Equal)
     }
 }
 
@@ -105,8 +96,17 @@ impl Hash for Number {
                 i.hash(state);
             }
             Number::Float(f) => {
-                state.write_u8(2);
-                OrderedFloat(*f).hash(state);
+                // If this float happens to be an integer (such as 1.0) hash it as if it's an int
+                match Int::from_f64_if_int(*f) {
+                    None => {
+                        state.write_u8(2);
+                        OrderedFloat(*f).hash(state);
+                    }
+                    Some(int) => {
+                        state.write_u8(1);
+                        int.hash(state);
+                    }
+                }
             }
             Number::Rational(r) => {
                 state.write_u8(3);
@@ -121,7 +121,7 @@ impl Hash for Number {
     }
 }
 
-impl<'a> PartialEq for RealNumber<'a> {
+impl PartialEq for RealNumber<'_> {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Int(left), Self::Int(right)) => left.eq(right),
@@ -147,11 +147,13 @@ fn compare_int_to_float(a: &Int, b: OrderedFloat<f64>) -> Option<Ordering> {
         Some(OrderedFloat(f64::from(a)).cmp(&b))
     } else {
         let x = BigInt::from_f64(b.trunc()).expect("b can't be NaN");
-        a.to_bigint().partial_cmp(&x)
+        a.to_bigint()
+            .partial_cmp(&x)
+            .map(|ord| ord.then(0.0f64.total_cmp(&b.fract())))
     }
 }
 
-impl<'a> PartialOrd for RealNumber<'a> {
+impl PartialOrd for RealNumber<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         match (self, other) {
             (RealNumber::Int(a), RealNumber::Int(b)) => Some(a.cmp(b)),
@@ -570,7 +572,7 @@ macro_rules! implement_rounding {
                     Number::Int(i) => Number::Int(i.clone()),
                     Number::Float(f) => {
                         let f = f.$method();
-                        if let Some(i) = Int::from_f64(f) {
+                        if let Some(i) = Int::from_f64_trunc(f) {
                             Number::Int(i)
                         } else {
                             Number::Float(f)

@@ -34,7 +34,6 @@ impl<'a> StringLexer for Lexer<'a> {
         }
 
         let Some('"') = self.source.peek() else {
-            // dbg!(self.source.create_span(start_offset));
             return Err(Error::help(
                 "Invalid raw string".to_string(),
                 self.source.create_span(start_offset),

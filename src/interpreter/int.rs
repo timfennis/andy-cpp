@@ -17,12 +17,24 @@ pub enum Int {
 }
 
 impl Int {
-    pub fn from_f64(value: f64) -> Option<Self> {
+    /// Truncates the float and returns Some<Int> if the float was not NaN or Inf
+    #[must_use]
+    pub fn from_f64_trunc(value: f64) -> Option<Self> {
         if value.is_nan() || value.is_infinite() {
             return None;
         }
 
         BigInt::from_f64(value).map(Int::BigInt)
+    }
+
+    /// Converts to float to an int only if it's fractal part is zero, otherwise it returns None
+    #[must_use]
+    pub fn from_f64_if_int(value: f64) -> Option<Self> {
+        if value.fract() == 0.0 {
+            Int::from_f64_trunc(value)
+        } else {
+            None
+        }
     }
 
     #[must_use]
