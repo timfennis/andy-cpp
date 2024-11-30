@@ -128,14 +128,22 @@ impl FallibleOrd for Value {
     }
 }
 
+// TODO: is there a way to get rid of this implementation?!??!
 impl FallibleOrd for &Value {
     type Error = anyhow::Error;
 
     fn try_cmp(&self, other: &Self) -> Result<Ordering, Self::Error> {
-        (*self).try_cmp(*other)
+        self.partial_cmp(other).ok_or_else(|| {
+            anyhow::anyhow!(
+                "{} cannot be compared to {}",
+                self.value_type(),
+                other.value_type()
+            )
+        })
     }
 }
 
+// TODO: probably get rid of this and do explicit clones
 impl From<&Value> for Value {
     fn from(value: &Value) -> Self {
         value.clone()

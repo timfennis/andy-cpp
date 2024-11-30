@@ -1,0 +1,7 @@
+--PROGRAM--
+assert(1.1 > 1);
+assert_ne(1.1, 1);
+
+print("ok");
+--EXPECT--
+ok
