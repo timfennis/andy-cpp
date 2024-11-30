@@ -30,6 +30,18 @@ pub enum Value {
 }
 
 impl Value {
+    pub(crate) fn string<S: Into<String>>(string: S) -> Self {
+        Value::Sequence(Sequence::String(Rc::new(RefCell::new(string.into()))))
+    }
+
+    pub(crate) fn list(data: Vec<Value>) -> Self {
+        Value::Sequence(Sequence::List(Rc::new(RefCell::new(data))))
+    }
+
+    pub(crate) fn tuple(data: Vec<Value>) -> Self {
+        Value::Sequence(Sequence::Tuple(Rc::new(data)))
+    }
+
     /// If this value is a type of `Sequence` it returns the length of the sequence, otherwise it returns `None`
     #[must_use]
     pub fn sequence_length(&self) -> Option<usize> {
