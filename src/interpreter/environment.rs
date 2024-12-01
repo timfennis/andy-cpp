@@ -79,6 +79,7 @@ impl Environment {
         };
 
         // TODO: move this out of this module to a more general location
+        crate::stdlib::aoc::register(&mut env);
         crate::stdlib::cmp::register(&mut env);
         crate::stdlib::file::register(&mut env);
         crate::stdlib::list::register(&mut env);

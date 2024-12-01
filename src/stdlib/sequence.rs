@@ -75,6 +75,8 @@ fn try_sort(v: &mut [Value]) -> anyhow::Result<()> {
 
 #[export_module]
 mod inner {
+    use crate::interpreter::iterator::mut_value_to_iterator;
+
     pub fn max(seq: &Sequence) -> anyhow::Result<Value> {
         match seq {
             Sequence::String(s) => s
@@ -472,6 +474,25 @@ mod inner {
                 .map(|i| Value::list(out[i..].to_vec()))
                 .collect::<Vec<Value>>(),
         ))
+    }
+
+    pub fn transposed(seq: &mut Sequence) -> EvaluationResult {
+        let mut main = mut_seq_into_iterator(seq).collect::<Result<Vec<_>, _>>()?;
+        let mut iterators = Vec::new();
+        for iter in main.iter_mut() {
+            iterators.push(mut_value_to_iterator(iter)?);
+        }
+        let mut out = Vec::new();
+        loop {
+            let row = iterators
+                .iter_mut()
+                .flat_map(|iter| iter.next())
+                .collect::<Result<Vec<_>, _>>()?;
+            if row.is_empty() {
+                return Ok(Value::list(out));
+            }
+            out.push(Value::list(row));
+        }
     }
 }
 

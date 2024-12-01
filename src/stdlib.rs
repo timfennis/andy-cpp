@@ -1,3 +1,4 @@
+pub mod aoc;
 pub mod cmp;
 pub mod file;
 pub mod hash_map;

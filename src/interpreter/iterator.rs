@@ -61,9 +61,9 @@ impl From<NotIterableError> for FunctionCarrier {
     }
 }
 
-pub fn mut_value_to_iterator(
-    value: &mut Value,
-) -> Result<MutableValueIntoIterator, NotIterableError> {
+pub fn mut_value_to_iterator<'a>(
+    value: &'a mut Value,
+) -> Result<MutableValueIntoIterator<'a>, NotIterableError> {
     match value {
         Value::Sequence(sequence) => Ok(mut_seq_into_iterator(sequence)),
         value => Err(NotIterableError {
