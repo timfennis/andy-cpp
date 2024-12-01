@@ -23,6 +23,8 @@ use crate::interpreter::sequence::Sequence;
 use crate::interpreter::value::{Value, ValueType};
 use crate::lexer::Span;
 
+use super::iterator::ValueIterator;
+
 pub type EvaluationResult = Result<Value, FunctionCarrier>;
 
 mod index;
@@ -938,6 +940,19 @@ fn apply_operator(
             }
             (needle, Value::Sequence(Sequence::Map(map, _))) => {
                 map.borrow().contains_key(&needle).into()
+            }
+            (needle, Value::Sequence(Sequence::Iterator(iter))) => {
+                let iter = ValueIterator::clone(&*iter.borrow());
+                let c = match iter {
+                    super::iterator::ValueIterator::ValueRange(range) => range.contains(&needle),
+                    super::iterator::ValueIterator::ValueRangeFrom(range) => {
+                        range.contains(&needle)
+                    }
+                    super::iterator::ValueIterator::ValueRangeInclusive(range) => {
+                        range.contains(&needle)
+                    } // For non range iterators the implementation probably has to fallback to a slow scan
+                };
+                Value::from(c)
             }
             _ => Value::Bool(false),
         },

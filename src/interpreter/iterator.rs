@@ -218,6 +218,8 @@ where
 use crate::hash_map::HashMap;
 
 use super::function::FunctionCarrier;
+use super::int::Int::Int64;
+use super::num::Number;
 
 struct HashMapIter<'a>(pub std::collections::hash_map::Iter<'a, Value, Value>);
 
@@ -258,6 +260,16 @@ impl<'a> Iterator for HashMapIter<'a> {
 /// Ranges are a whole thing
 #[derive(Clone)]
 pub struct ValueRange(pub std::ops::Range<i64>);
+
+impl ValueRange {
+    pub fn contains(&self, v: &Value) -> bool {
+        match v {
+            Value::Number(Number::Int(Int64(v))) => self.0.contains(v),
+            _ => false,
+        }
+    }
+}
+
 impl Iterator for ValueRange {
     type Item = Value;
 
@@ -269,6 +281,15 @@ impl Iterator for ValueRange {
 #[derive(Clone)]
 pub struct ValueRangeInclusive(pub std::ops::RangeInclusive<i64>);
 
+impl ValueRangeInclusive {
+    pub fn contains(&self, v: &Value) -> bool {
+        match v {
+            Value::Number(Number::Int(Int64(v))) => self.0.contains(v),
+            _ => false,
+        }
+    }
+}
+
 impl Iterator for ValueRangeInclusive {
     type Item = Value;
 
@@ -279,6 +300,14 @@ impl Iterator for ValueRangeInclusive {
 
 #[derive(Clone)]
 pub struct ValueRangeFrom(pub std::ops::RangeFrom<i64>);
+impl ValueRangeFrom {
+    pub fn contains(&self, v: &Value) -> bool {
+        match v {
+            Value::Number(Number::Int(Int64(v))) => self.0.contains(v),
+            _ => false,
+        }
+    }
+}
 
 impl Iterator for ValueRangeFrom {
     type Item = Value;
