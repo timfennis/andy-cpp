@@ -1,0 +1,16 @@
+--PROGRAM--
+// Define 1-ary functions for testing
+fn square(x) {
+    return x * x;
+}
+
+// Test case for numeric values
+let my_num = 5;
+
+assert_eq(25, my_num.square);    // Test calling with `my_num.function`
+assert_eq(25, my_num.square());  // Test calling with `my_num.function()`
+assert_eq(25, square(my_num));   // Test calling with `function(my_num)`
+
+print("ok");
+--EXPECT--
+ok
