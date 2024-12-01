@@ -61,9 +61,9 @@ impl From<NotIterableError> for FunctionCarrier {
     }
 }
 
-pub fn mut_value_to_iterator<'a>(
-    value: &'a mut Value,
-) -> Result<MutableValueIntoIterator<'a>, NotIterableError> {
+pub fn mut_value_to_iterator(
+    value: &mut Value,
+) -> Result<MutableValueIntoIterator<'_>, NotIterableError> {
     match value {
         Value::Sequence(sequence) => Ok(mut_seq_into_iterator(sequence)),
         value => Err(NotIterableError {
@@ -262,7 +262,7 @@ impl<'a> Iterator for HashMapIter<'a> {
 pub struct ValueRange(pub std::ops::Range<i64>);
 
 impl ValueRange {
-    pub fn contains(&self, v: &Value) -> bool {
+    #[must_use] pub fn contains(&self, v: &Value) -> bool {
         match v {
             Value::Number(Number::Int(Int64(v))) => self.0.contains(v),
             _ => false,
@@ -282,7 +282,7 @@ impl Iterator for ValueRange {
 pub struct ValueRangeInclusive(pub std::ops::RangeInclusive<i64>);
 
 impl ValueRangeInclusive {
-    pub fn contains(&self, v: &Value) -> bool {
+    #[must_use] pub fn contains(&self, v: &Value) -> bool {
         match v {
             Value::Number(Number::Int(Int64(v))) => self.0.contains(v),
             _ => false,
@@ -301,7 +301,7 @@ impl Iterator for ValueRangeInclusive {
 #[derive(Clone)]
 pub struct ValueRangeFrom(pub std::ops::RangeFrom<i64>);
 impl ValueRangeFrom {
-    pub fn contains(&self, v: &Value) -> bool {
+    #[must_use] pub fn contains(&self, v: &Value) -> bool {
         match v {
             Value::Number(Number::Int(Int64(v))) => self.0.contains(v),
             _ => false,
