@@ -582,6 +582,7 @@ impl Parser {
         //    * `identifier()` <-- call
         //    * `identifier[idx]` <-- idx
         //    * `identifier.ident()` <-- dot call
+        //    * `identifier.ident` <-- dot call w/o parentheses
         while let Some(current) =
             self.match_token(&[Token::LeftParentheses, Token::LeftSquareBracket, Token::Dot])
         {
@@ -614,13 +615,22 @@ impl Parser {
                         unreachable!("Guaranteed to match by previous call to require_identifier")
                     };
 
-                    let tuple_expression = self.delimited_tuple(Self::single_expression)?;
-                    let Expression::Tuple {
-                        values: mut arguments,
-                    } = tuple_expression.expression
-                    else {
-                        unreachable!("self.tuple() must always produce a tuple");
-                    };
+                    // () is now optional?
+                    let (mut arguments, tuple_span) =
+                        if self.match_token(&[Token::LeftParentheses]).is_some() {
+                            let tuple_expression = self.delimited_tuple(Self::single_expression)?;
+
+                            if let Expression::Tuple { values: arguments } =
+                                tuple_expression.expression
+                            {
+                                (arguments, Some(tuple_expression.span))
+                            } else {
+                                unreachable!("self.tuple() must always produce a tuple");
+                            }
+                        } else {
+                            (Vec::new(), None)
+                        };
+
                     arguments.insert(0, expr);
 
                     expr = ExpressionLocation {
@@ -631,9 +641,9 @@ impl Parser {
                             ),
                             arguments,
                         },
-                        span: identifier_span
-                            .merge(first_argument_span)
-                            .merge(tuple_expression.span),
+                        span: tuple_span
+                            .unwrap_or(identifier_span)
+                            .merge(first_argument_span),
                     }
 
                     // for now, we require parentheses
