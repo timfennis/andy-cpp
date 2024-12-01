@@ -337,6 +337,7 @@ impl From<anyhow::Error> for FunctionCarrier {
         Self::IntoEvaluationError(Box::new(value))
     }
 }
+
 impl From<BorrowMutError> for FunctionCarrier {
     fn from(value: BorrowMutError) -> Self {
         // TODO: maybe this needs a better message

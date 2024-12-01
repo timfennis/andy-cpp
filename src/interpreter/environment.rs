@@ -86,6 +86,7 @@ impl Environment {
         crate::stdlib::math::register(&mut env);
         crate::stdlib::regex::register(&mut env);
         crate::stdlib::sequence::register(&mut env);
+        crate::stdlib::sequence::extra::register(&mut env);
         crate::stdlib::hash_map::register(&mut env);
         crate::stdlib::string::register(&mut env);
         crate::stdlib::value::register(&mut env);

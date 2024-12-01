@@ -55,6 +55,12 @@ pub struct NotIterableError {
     value_type: ValueType,
 }
 
+impl From<NotIterableError> for FunctionCarrier {
+    fn from(value: NotIterableError) -> Self {
+        FunctionCarrier::IntoEvaluationError(Box::new(value))
+    }
+}
+
 pub fn mut_value_to_iterator(
     value: &mut Value,
 ) -> Result<MutableValueIntoIterator, NotIterableError> {
@@ -210,6 +216,8 @@ where
 /// Hashmaps
 /// Hashmaps
 use crate::hash_map::HashMap;
+
+use super::function::FunctionCarrier;
 
 struct HashMapIter<'a>(pub std::collections::hash_map::Iter<'a, Value, Value>);
 

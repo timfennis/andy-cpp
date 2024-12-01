@@ -47,6 +47,8 @@ where
 }
 #[export_module]
 mod inner {
+    use std::ops::Sub;
+
     use super::FallibleSum;
     use crate::interpreter::int::Int;
     use crate::interpreter::num::Number;
@@ -102,6 +104,11 @@ mod inner {
 
     pub fn abs(number: &Number) -> Number {
         number.abs()
+    }
+
+    pub fn abs_diff(left: &Number, right: &Number) -> Number {
+        // TODO: why are we taking references if we just have to clone?!?!?
+        (left.clone().sub(right.clone())).abs()
     }
 
     pub fn float(value: &Value) -> anyhow::Result<f64> {
