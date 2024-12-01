@@ -479,14 +479,14 @@ mod inner {
     pub fn transposed(seq: &mut Sequence) -> EvaluationResult {
         let mut main = mut_seq_into_iterator(seq).collect::<Result<Vec<_>, _>>()?;
         let mut iterators = Vec::new();
-        for iter in main.iter_mut() {
+        for iter in &mut main {
             iterators.push(mut_value_to_iterator(iter)?);
         }
         let mut out = Vec::new();
         loop {
             let row = iterators
                 .iter_mut()
-                .flat_map(|iter| iter.next())
+                .filter_map(std::iter::Iterator::next)
                 .collect::<Result<Vec<_>, _>>()?;
             if row.is_empty() {
                 return Ok(Value::list(out));
