@@ -1,6 +1,10 @@
 --PROGRAM--
-// TODO: WIP
-// assert_eq(54, (1..10).map(fn(x) -> x + 1).sum());
-print("ok");
+let square = fn(x) => x * x;
+assert_eq(square(5), 25);
+
+// Assert that this expression produces a tuple
+let tuple = fn(x) => x, 2;
+assert_eq(tuple.len(), 2);
+print(tuple);
 --EXPECT--
-ok
+(function,2)

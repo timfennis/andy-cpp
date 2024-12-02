@@ -1044,7 +1044,7 @@ impl Parser {
 
         let is_pure = modifiers.iter().any(|keyword| keyword.token == Token::Pure);
 
-        // After the fn token we either expect an identifier, or a parameter list incase the fucntion is anonymous
+        // After the fn token we either expect an identifier, or a parameter list in case the function is anonymous
         // fn foo () { }
         // fn() { }
         let identifier = match self.peek_current_token() {
@@ -1065,7 +1065,21 @@ impl Parser {
         };
 
         let argument_list = self.delimited_tuple(Self::single_expression)?;
-        let body = self.block()?;
+
+        // Next we either expect a body block `{ ... }` or a fat arrow followed by a single expression `=> ...`
+
+        let body = match self.peek_current_token() {
+            Some(Token::FatArrow) => { self.advance(); self.single_expression()?},
+            Some(Token::LeftCurlyBracket) => self.block()?,
+            Some(token) => {
+                return Err(Error::with_help(
+                    format!("unexpected token: {token}"),
+                    self.peek_current_token_location().unwrap().span,
+                    "Expected that the argument list is followed by either a body `{}` or a fat arrow `=>`".to_string(),
+                ))
+            }
+            None => return Err(Error::end_of_input(argument_list.span)),
+        };
 
         let span = fn_token.span.merge(body.span);
         Ok(ExpressionLocation {

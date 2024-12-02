@@ -51,6 +51,7 @@ pub enum Token {
     PlusPlus,     // ++ operator will be for concatenation
     Diamond,      // <> operator will be for string concatenation with coersion
     RightArrow,   // ->
+    FatArrow,     // =>
     // Keywords
     Let,
     Fn,
@@ -161,6 +162,7 @@ impl fmt::Display for Token {
             Token::Colon => ":",
             Token::MapOpen => "%{",
             Token::RightArrow => "->",
+            Token::FatArrow => "=>",
         };
         write!(f, "{s}")
     }
@@ -242,9 +244,10 @@ impl TryFrom<(char, char)> for Token {
             ('>', '=') => Ok(Self::GreaterEquals),
             ('<', '=') => Ok(Self::LessEquals),
             ('<', '>') => Ok(Self::Diamond),
-            ('-', '>') => Ok(Self::RightArrow),
             ('<', '<') => Ok(Self::LessLess),
             ('>', '>') => Ok(Self::GreaterGreater),
+            ('-', '>') => Ok(Self::RightArrow),
+            ('=', '>') => Ok(Self::FatArrow),
             _ => Err(()),
         }
     }
