@@ -262,7 +262,8 @@ impl<'a> Iterator for HashMapIter<'a> {
 pub struct ValueRange(pub std::ops::Range<i64>);
 
 impl ValueRange {
-    #[must_use] pub fn contains(&self, v: &Value) -> bool {
+    #[must_use]
+    pub fn contains(&self, v: &Value) -> bool {
         match v {
             Value::Number(Number::Int(Int64(v))) => self.0.contains(v),
             _ => false,
@@ -282,7 +283,8 @@ impl Iterator for ValueRange {
 pub struct ValueRangeInclusive(pub std::ops::RangeInclusive<i64>);
 
 impl ValueRangeInclusive {
-    #[must_use] pub fn contains(&self, v: &Value) -> bool {
+    #[must_use]
+    pub fn contains(&self, v: &Value) -> bool {
         match v {
             Value::Number(Number::Int(Int64(v))) => self.0.contains(v),
             _ => false,
@@ -301,7 +303,8 @@ impl Iterator for ValueRangeInclusive {
 #[derive(Clone)]
 pub struct ValueRangeFrom(pub std::ops::RangeFrom<i64>);
 impl ValueRangeFrom {
-    #[must_use] pub fn contains(&self, v: &Value) -> bool {
+    #[must_use]
+    pub fn contains(&self, v: &Value) -> bool {
         match v {
             Value::Number(Number::Int(Int64(v))) => self.0.contains(v),
             _ => false,

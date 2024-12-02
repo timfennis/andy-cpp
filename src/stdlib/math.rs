@@ -55,6 +55,10 @@ mod inner {
     use anyhow::{anyhow, Context};
     use num::{BigInt, BigUint, Integer};
 
+    pub fn signum(n: &Number) -> Number {
+        n.signum()
+    }
+
     pub fn sum(seq: &Sequence) -> anyhow::Result<Number> {
         match seq {
             Sequence::String(_s) => Err(anyhow!("string cannot be summed")),

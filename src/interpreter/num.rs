@@ -6,7 +6,7 @@ use std::ops::{Add, Div, Mul, Neg, Not, Rem, Sub};
 
 use num::bigint::TryFromBigIntError;
 use num::complex::{Complex64, ComplexFloat};
-use num::{BigInt, BigRational, Complex, FromPrimitive, Signed, ToPrimitive};
+use num::{BigInt, BigRational, Complex, FromPrimitive, Signed, ToPrimitive, Zero};
 use ordered_float::OrderedFloat;
 
 use crate::interpreter::evaluate::EvaluationError;
@@ -559,6 +559,23 @@ impl Number {
             Number::Float(f) => Number::Float(f.abs()),
             Number::Rational(r) => Number::Rational(Box::new(r.abs())),
             Number::Complex(c) => Number::Float(c.abs()),
+        }
+    }
+
+    #[must_use]
+    pub fn signum(&self) -> Self {
+        match self {
+            Number::Int(i) => i.signum().into(),
+            Number::Float(f) => Number::Float(f.signum()),
+            Number::Rational(ratio) => Number::from(ratio.signum()),
+            Number::Complex(complex) => {
+                // I trust you Brian :crycat:
+                if complex.re.is_zero() && complex.im.is_zero() {
+                    self.clone()
+                } else {
+                    Number::Complex(complex / complex.norm())
+                }
+            }
         }
     }
 }

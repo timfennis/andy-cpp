@@ -155,6 +155,18 @@ impl Int {
             Int::BigInt(b) => Self::from(b.abs()),
         }
     }
+
+    #[must_use]
+    pub fn signum(&self) -> Int {
+        match self {
+            Int::Int64(i) => Int::Int64(i.signum()),
+            Int::BigInt(i) => match i.sign() {
+                Sign::Minus => Int::Int64(-1),
+                Sign::NoSign => Int::Int64(0),
+                Sign::Plus => Int::Int64(1),
+            },
+        }
+    }
 }
 
 impl Eq for Int {}
