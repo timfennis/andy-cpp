@@ -16,6 +16,9 @@
           "include": "#dictionary"
         },
         {
+          "include": "#functions"
+        },
+        {
           "include": "#call"
         },
         {
@@ -23,9 +26,6 @@
         },
         {
           "include": "#numbers"
-        },
-        {
-          "include": "#functions"
         },
         {
           "include": "#strings"
@@ -262,28 +262,50 @@
       ]
     },
     "call": {
-      "comment": "Function call",
-      "name": "meta.function.call.andy-cpp",
-      "begin": "([A-Za-z_][A-Za-z0-9_]*)(\\()",
-      "beginCaptures": {
-        "1": {
-          "name": "entity.name.function.andy-cpp"
-        },
-        "2": {
-          "name": "punctuation.bracket.round.andy-cpp"
-        }
-      },
       "patterns": [
         {
-          "include": "#expression"
+          "comment": "Field accessor style call",
+          "name": "meta.function.call.andy-cpp",
+          "match": "(\\.)([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.operator.access.dot.andy-cpp"
+            },
+            "2": {
+              "name": "entity.name.function.andy-cpp"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#expression"
+            }
+          ]
+        },
+        {
+          "comment": "Function call",
+          "name": "meta.function.call.andy-cpp",
+          "begin": "([A-Za-z_][A-Za-z0-9_]*)(\\()",
+          "beginCaptures": {
+            "1": {
+              "name": "entity.name.function.andy-cpp"
+            },
+            "2": {
+              "name": "punctuation.bracket.round.andy-cpp"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#expression"
+            }
+          ],
+          "end": "\\)",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.brackets.round.andy-cpp"
+            }
+          }
         }
-      ],
-      "end": "\\)",
-      "endCaptures": {
-        "0": {
-          "name": "punctuation.brackets.round.andy-cpp"
-        }
-      }
+      ]
     },
     "escapes": {
       "comment": "escapes: ASCII, byte, Unicode, quote, regex",

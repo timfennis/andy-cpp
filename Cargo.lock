@@ -391,6 +391,7 @@ dependencies = [
  "itertools",
  "miette",
  "num",
+ "once_cell",
  "ordered-float",
  "owo-colors",
  "regex",

@@ -388,6 +388,7 @@ mod inner {
             let fnout = function.call(&mut [item])?;
             match fnout {
                 Value::Sequence(mut inner_seq) => {
+                    // TODO: would it be (much?) faster if we iterate over the iterator and append the elements individually?
                     let mut inner =
                         mut_seq_into_iterator(&mut inner_seq).collect::<Result<Vec<_>, _>>()?;
                     out.append(&mut inner);

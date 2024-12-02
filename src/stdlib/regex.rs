@@ -1,11 +1,14 @@
+use crate::interpreter::value::Value;
+use once_cell::sync::Lazy;
+use regex::Regex;
+
 #[andy_cpp_macros::export_module]
 mod inner {
-    use crate::interpreter::value::Value;
-    use regex::Regex;
 
     pub fn nums(haystack: &str) -> Vec<i64> {
-        let re = Regex::new(r"\d+").expect("we know the regex is valid");
-        re.captures_iter(haystack)
+        static RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\d+").unwrap());
+
+        RE.captures_iter(haystack)
             .filter_map(|cap| {
                 let (full, []) = cap.extract();
                 full.parse::<i64>().ok()
@@ -14,8 +17,8 @@ mod inner {
     }
 
     pub fn signed_nums(haystack: &str) -> Vec<i64> {
-        let re = Regex::new(r"-?\d+").expect("we know this regex is valid");
-        re.captures_iter(haystack)
+        static RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"-?\d+").unwrap());
+        RE.captures_iter(haystack)
             .filter_map(|cap| {
                 let (full, []) = cap.extract();
                 full.parse::<i64>().ok()

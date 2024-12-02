@@ -7,7 +7,7 @@
     "url": "https://github.com/timfennis/andy-cpp.git"
   },
   "publisher": "TimFennis",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -15,16 +15,25 @@
     "Programming Languages"
   ],
   "contributes": {
-    "languages": [{
-      "id": "andy-cpp",
-      "aliases": ["Andy C++", "andy-cpp"],
-      "extensions": [".ndc"],
-      "configuration": "./language-configuration.json"
-    }],
-    "grammars": [{
-      "language": "andy-cpp",
-      "scopeName": "source.andy-cpp",
-      "path": "./syntaxes/andy-cpp.tmLanguage.json"
-    }]
+    "languages": [
+      {
+        "id": "andy-cpp",
+        "aliases": [
+          "Andy C++",
+          "andy-cpp"
+        ],
+        "extensions": [
+          ".ndc"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "andy-cpp",
+        "scopeName": "source.andy-cpp",
+        "path": "./syntaxes/andy-cpp.tmLanguage.json"
+      }
+    ]
   }
 }
