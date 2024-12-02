@@ -494,6 +494,34 @@ mod inner {
             out.push(Value::list(row));
         }
     }
+
+    pub fn pairwise(seq: &mut Sequence) -> EvaluationResult {
+        let main = mut_seq_into_iterator(seq).collect::<Result<Vec<_>, _>>()?;
+
+        let out = main.windows(2).map(Value::tuple).collect::<Vec<_>>();
+
+        Ok(Value::list(out))
+    }
+
+    #[function(name = "pairwise")]
+    pub fn pairwise_map(seq: &mut Sequence, function: &Callable) -> EvaluationResult {
+        let main = mut_seq_into_iterator(seq).collect::<Result<Vec<_>, _>>()?;
+
+        let mut out = Vec::with_capacity(main.len() - 1);
+        for (a, b) in main.into_iter().tuple_windows() {
+            out.push(function.call(&mut [a, b])?);
+        }
+
+        Ok(Value::list(out))
+    }
+
+    pub fn windows(seq: &mut Sequence, size: usize) -> EvaluationResult {
+        let main = mut_seq_into_iterator(seq).collect::<Result<Vec<_>, _>>()?;
+
+        let out = main.windows(size).map(Value::tuple).collect::<Vec<_>>();
+
+        Ok(Value::list(out))
+    }
 }
 
 fn fold_iterator(

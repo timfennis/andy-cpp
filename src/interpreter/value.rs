@@ -34,12 +34,12 @@ impl Value {
         Value::Sequence(Sequence::String(Rc::new(RefCell::new(string.into()))))
     }
 
-    pub(crate) fn list(data: Vec<Value>) -> Self {
-        Value::Sequence(Sequence::List(Rc::new(RefCell::new(data))))
+    pub(crate) fn list<V: Into<Vec<Value>>>(data: V) -> Self {
+        Value::Sequence(Sequence::List(Rc::new(RefCell::new(data.into()))))
     }
 
-    pub(crate) fn tuple(data: Vec<Value>) -> Self {
-        Value::Sequence(Sequence::Tuple(Rc::new(data)))
+    pub(crate) fn tuple<V: Into<Vec<Value>>>(data: V) -> Self {
+        Value::Sequence(Sequence::Tuple(Rc::new(data.into())))
     }
 
     /// If this value is a type of `Sequence` it returns the length of the sequence, otherwise it returns `None`
