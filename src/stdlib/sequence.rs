@@ -379,6 +379,26 @@ mod inner {
         Ok(Value::from(out))
     }
 
+    pub fn flat_map(seq: &mut Sequence, function: &Callable) -> EvaluationResult {
+        let iterator = mut_seq_into_iterator(seq);
+        let mut out = Vec::new();
+
+        for item in iterator {
+            let item = item?;
+            let fnout = function.call(&mut [item])?;
+            match fnout {
+                Value::Sequence(mut inner_seq) => {
+                    let mut inner =
+                        mut_seq_into_iterator(&mut inner_seq).collect::<Result<Vec<_>, _>>()?;
+                    out.append(&mut inner);
+                }
+                _ => return Err(anyhow!("callable must return a sequence").into()),
+            }
+        }
+
+        Ok(Value::from(out))
+    }
+
     pub fn first_or(seq: &mut Sequence, default: Value) -> EvaluationResult {
         let mut iterator = mut_seq_into_iterator(seq);
         Ok(if let Some(item) = iterator.next() {

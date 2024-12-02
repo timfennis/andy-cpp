@@ -53,10 +53,26 @@ mod inner {
     use crate::interpreter::int::Int;
     use crate::interpreter::num::Number;
     use anyhow::{anyhow, Context};
-    use num::{BigInt, BigUint, Integer};
+    use num::{complex::Complex64, BigInt, BigRational, BigUint, Integer};
 
     pub fn signum(n: &Number) -> Number {
         n.signum()
+    }
+
+    pub fn real(c: Complex64) -> f64 {
+        c.re
+    }
+
+    pub fn imag(c: Complex64) -> f64 {
+        c.im
+    }
+
+    pub fn numerator(r: BigRational) -> BigInt {
+        r.numer().clone()
+    }
+
+    pub fn denominator(r: BigRational) -> BigInt {
+        r.denom().clone()
     }
 
     pub fn sum(seq: &Sequence) -> anyhow::Result<Number> {

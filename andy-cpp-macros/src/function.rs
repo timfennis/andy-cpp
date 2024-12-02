@@ -344,7 +344,35 @@ fn create_temp_variable(
                 },
             });
         }
-        // The pattern is something like `i64`
+        // The pattern is BigRational
+        else if path_ends_with(ty, "BigRational") && !is_ref(ty) {
+            return Some(Argument {
+                param_type: quote! { crate::interpreter::function::ParamType::Rational },
+                argument: quote! { #argument_var_name },
+                initialize_code: quote! {
+                    let crate::interpreter::value::Value::Number(crate::interpreter::num::Number::Rational(#argument_var_name)) = #argument_var_name else {
+                        panic!("VValue #position needs to be Rational but wasn't");
+                    };
+
+                    let #argument_var_name = *#argument_var_name.clone();
+                },
+            });
+        }
+        // The pattern is Complex64
+        else if path_ends_with(ty, "Complex64") && !is_ref(ty) {
+            return Some(Argument {
+                param_type: quote! { crate::interpreter::function::ParamType::Complex },
+                argument: quote! { #argument_var_name },
+                initialize_code: quote! {
+                    let crate::interpreter::value::Value::Number(crate::interpreter::num::Number::Complex(#argument_var_name)) = #argument_var_name else {
+                        panic!("VValue #position needs to be Complex64 but wasn't");
+                    };
+
+                    let #argument_var_name = #argument_var_name.clone();
+                },
+            });
+        }
+        // The pattern is something like `i64` (but also matches other concrete types)
         else if let syn::Type::Path(path) = ty {
             return Some(Argument {
                 param_type: into_param_type(ty),
@@ -363,7 +391,9 @@ fn create_temp_variable(
                     let #argument_var_name = <#type_ref as TryFrom<&mut crate::interpreter::value::Value>> :: try_from(#argument_var_name).map_err(|err| crate::interpreter::function::FunctionCallError::ConvertToNativeTypeError(format!("{err}")))?
                 },
             });
-        } else if let syn::Type::ImplTrait(syn::TypeImplTrait { .. }) = &*pat_type.ty {
+        }
+        // The pattern is a trait implementation TODO: this is not implemented
+        else if let syn::Type::ImplTrait(syn::TypeImplTrait { .. }) = &*pat_type.ty {
             // TODO: we should perform a type check, but in order to get results quick we can just assume that all impl blocks are iterators
 
             let rc_temp_var =
