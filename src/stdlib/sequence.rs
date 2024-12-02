@@ -406,7 +406,7 @@ mod inner {
         Ok(Value::list(
             out.into_iter()
                 .combinations(k)
-                .map(Value::tuple)
+                .map(Value::list)
                 .collect::<Vec<Value>>(),
         ))
     }
@@ -420,7 +420,7 @@ mod inner {
         Ok(Value::list(
             out.into_iter()
                 .permutations(k)
-                .map(Value::tuple)
+                .map(Value::list)
                 .collect::<Vec<Value>>(),
         ))
     }
@@ -521,6 +521,30 @@ mod inner {
         let out = main.windows(size).map(Value::tuple).collect::<Vec<_>>();
 
         Ok(Value::list(out))
+    }
+
+    pub fn subsequences(seq: &mut Sequence) -> EvaluationResult {
+        let main = mut_seq_into_iterator(seq).collect::<Result<Vec<_>, _>>()?;
+
+        Ok(Value::list(
+            main.into_iter()
+                .powerset()
+                .map(Value::list)
+                .collect::<Vec<Value>>(),
+        ))
+    }
+
+    #[function(name = "subsequences")]
+    pub fn subsequences_len(seq: &mut Sequence, size: usize) -> EvaluationResult {
+        let main = mut_seq_into_iterator(seq).collect::<Result<Vec<_>, _>>()?;
+
+        Ok(Value::list(
+            main.into_iter()
+                .powerset()
+                .filter(|x| x.len() == size)
+                .map(Value::list)
+                .collect::<Vec<Value>>(),
+        ))
     }
 }
 
