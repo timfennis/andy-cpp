@@ -142,9 +142,9 @@ impl Function {
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum ParamType {
     Any,
-    Unit,
     Bool,
     Function,
+    Option,
 
     // Numbers
     Number,
@@ -167,7 +167,7 @@ impl ParamType {
         #[allow(clippy::match_same_arms)]
         match (self, other) {
             (ParamType::Bool, ValueType::Bool) => Some(0),
-            (ParamType::Unit, ValueType::Unit) => Some(0),
+            (ParamType::Option, ValueType::Option) => Some(0),
             (ParamType::Int, ValueType::Number(NumberType::Int)) => Some(0),
             (ParamType::Float, ValueType::Number(NumberType::Float)) => Some(0),
             (ParamType::Rational, ValueType::Number(NumberType::Rational)) => Some(0),
@@ -197,7 +197,7 @@ impl ParamType {
 impl From<&Value> for ParamType {
     fn from(value: &Value) -> Self {
         match value {
-            Value::Unit => ParamType::Unit,
+            Value::Option(_) => ParamType::Option,
             Value::Number(Number::Rational(_)) => ParamType::Rational,
             Value::Number(Number::Complex(_)) => ParamType::Complex,
             Value::Number(Number::Int(_)) => ParamType::Int,

@@ -33,7 +33,7 @@ mod inner {
         if let Some(result) = result {
             Value::from(result)
         } else {
-            Value::Unit
+            Value::none()
         }
     }
 
@@ -42,7 +42,7 @@ mod inner {
             return Err(anyhow!("index {index} is out of bounds"));
         }
         list.insert(index, elem);
-        Ok(Value::Unit)
+        Ok(Value::none())
     }
 
     /// Removes and returns the element at position `index` within the list, shifting all elements after it to the left.
@@ -82,12 +82,12 @@ mod inner {
 
     /// Removes the last element from a list and returns it, or `Unit` if it is empty
     pub fn pop(list: &mut Vec<Value>) -> Value {
-        list.pop().unwrap_or(Value::Unit)
+        list.pop().unwrap_or(Value::none())
     }
 
     pub fn pop_left(list: &mut Vec<Value>) -> Value {
         if list.is_empty() {
-            return Value::Unit;
+            return Value::none();
         }
 
         list.remove(0)
@@ -132,7 +132,7 @@ mod inner {
 
     /// Returns a copy of the first element or `unit` if the list is empty.
     pub fn first_or_unit(list: &[Value]) -> Value {
-        list.first().cloned().unwrap_or_else(|| Value::Unit)
+        list.first().cloned().unwrap_or_else(|| Value::none())
     }
 
     /// Returns a copy of the last element of the list or results in an error if the list is empty.
@@ -144,7 +144,7 @@ mod inner {
 
     /// Returns a copy of the last element or `unit` if the list is empty.
     pub fn last_or_unit(list: &[Value]) -> Value {
-        list.last().cloned().unwrap_or_else(|| Value::Unit)
+        list.last().cloned().unwrap_or_else(|| Value::none())
     }
 
     pub fn cartesian_product(list_a: &[Value], list_b: &[Value]) -> Vec<Value> {

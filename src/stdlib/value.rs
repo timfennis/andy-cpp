@@ -7,9 +7,36 @@ mod inner {
     use std::cell::RefCell;
     use std::rc::Rc;
 
+    pub fn some(value: Value) -> Value {
+        Value::Option(Some(Box::new(value)))
+    }
+
+    pub fn none() -> Value {
+        Value::Option(None)
+    }
+
+    pub fn is_some(value: &Value) -> Value {
+        Value::Bool(matches!(value, Value::Option(Some(_))))
+    }
+
+    pub fn is_none(value: &Value) -> Value {
+        Value::Bool(matches!(value, Value::Option(None)))
+    }
+
+    // TODO: this signature should be Option
+    pub fn unwrap(value: Value) -> anyhow::Result<Value> {
+        match value {
+            Value::Option(Some(val)) => Ok(*val),
+            Value::Option(None) => Err(anyhow::anyhow!("option was none")),
+            _ => Err(anyhow::anyhow!(
+                "incorrect argument to unwrap (temporary error)"
+            )),
+        }
+    }
+
     pub fn clone(value: &Value) -> Value {
         match value {
-            Value::Unit => Value::Unit,
+            Value::Option(o) => Value::Option(o.clone()),
             number @ Value::Number(_) => number.clone(),
             Value::Bool(b) => Value::Bool(*b),
             Value::Sequence(Sequence::String(string)) => Value::from(string.borrow().to_owned()),

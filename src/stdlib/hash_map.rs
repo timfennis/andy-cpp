@@ -29,7 +29,7 @@ mod inner {
 
     #[function(name = "insert")]
     pub fn insert_set(map: &mut HashMap<Value, Value>, key: Value) {
-        map.insert(key, Value::Unit);
+        map.insert(key, Value::none());
     }
 
     pub fn union(left: DefaultMap, right: &HashMap<Value, Value>) -> Value {
@@ -58,25 +58,25 @@ mod inner {
             Sequence::String(rc) => rc
                 .borrow()
                 .chars()
-                .map(|c| (c.into(), Value::Unit))
+                .map(|c| (c.into(), Value::none()))
                 .collect(),
             // TODO: we could change the implementation so that ref counts of 1 are consumed instead of copied
             Sequence::List(rc) => rc
                 .borrow()
                 .iter()
-                .map(|v| (v.to_owned(), Value::Unit))
+                .map(|v| (v.to_owned(), Value::none()))
                 .collect(),
-            Sequence::Tuple(rc) => rc.iter().map(|v| (v.to_owned(), Value::Unit)).collect(),
+            Sequence::Tuple(rc) => rc.iter().map(|v| (v.to_owned(), Value::none())).collect(),
             Sequence::Map(rc, _) => rc
                 .borrow()
                 .iter()
-                .map(|(key, _value)| (key.to_owned(), Value::Unit))
+                .map(|(key, _value)| (key.to_owned(), Value::none()))
                 .collect(),
             Sequence::Iterator(rc) => {
                 let mut iter = rc.borrow_mut();
                 let mut out = HashMap::new();
                 for item in iter.by_ref() {
-                    out.insert(item, Value::Unit);
+                    out.insert(item, Value::none()); // TODO: is this too inefficient?
                 }
                 out
             }

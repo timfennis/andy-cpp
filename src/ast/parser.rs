@@ -848,7 +848,7 @@ impl Parser {
         // matches `return;` and `return (expression);`
         else if let Some(return_token_location) = self.consume_token_if(&[Token::Return]) {
             let expr_loc = if self.match_token(&[Token::Semicolon]).is_some() {
-                Expression::UnitLiteral.to_location(return_token_location.span)
+                Expression::Tuple { values: vec![] }.to_location(return_token_location.span)
             } else {
                 self.expression()?
             };
@@ -881,7 +881,7 @@ impl Parser {
         else if let Some(start_parentheses) = self.consume_token_if(&[Token::LeftParentheses]) {
             // If an opening parentheses is immediately followed by a closing parentheses we're dealing with a Unit expression
             if let Some(end_parentheses) = self.consume_token_if(&[Token::RightParentheses]) {
-                return Ok(Expression::UnitLiteral
+                return Ok(Expression::Tuple { values: vec![] }
                     .to_location(start_parentheses.span.merge(end_parentheses.span)));
             }
 

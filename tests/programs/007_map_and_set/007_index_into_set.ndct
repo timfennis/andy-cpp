@@ -1,6 +1,6 @@
 --PROGRAM--
 let set = %{1,2,3};
-assert(set[1] == ());
+assert(set[1] == None);
 print("ok");
 --EXPECT--
 ok

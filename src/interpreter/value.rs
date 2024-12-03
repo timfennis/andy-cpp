@@ -22,7 +22,7 @@ use super::iterator::{ValueIterator, ValueRange, ValueRangeFrom, ValueRangeInclu
 /// All values should be pretty cheap to clone because the bigger ones are wrapped using Rc's
 #[derive(Clone)]
 pub enum Value {
-    Unit,
+    Option(Option<Box<Value>>),
     Number(Number),
     Bool(bool),
     Sequence(Sequence),
@@ -40,6 +40,10 @@ impl Value {
 
     pub(crate) fn tuple<V: Into<Vec<Value>>>(data: V) -> Self {
         Value::Sequence(Sequence::Tuple(Rc::new(data.into())))
+    }
+
+    pub(crate) fn none() -> Self {
+        Self::Option(None)
     }
 
     /// If this value is a type of `Sequence` it returns the length of the sequence, otherwise it returns `None`
@@ -108,7 +112,7 @@ impl Value {
     /// ```
     pub fn value_type(&self) -> ValueType {
         match self {
-            Value::Unit => ValueType::Unit,
+            Value::Option(_) => ValueType::Option,
             Value::Number(n) => ValueType::Number(n.into()),
             Value::Bool(_) => ValueType::Bool,
             Value::Sequence(Sequence::String(_)) => ValueType::String,
@@ -165,7 +169,10 @@ impl From<&Value> for Value {
 impl Hash for Value {
     fn hash<H: Hasher>(&self, state: &mut H) {
         match self {
-            Value::Unit => state.write_u8(1),
+            Value::Option(o) => {
+                state.write_u8(1);
+                o.hash(state);
+            }
             Value::Number(number) => {
                 state.write_u8(2);
                 number.hash(state);
@@ -226,7 +233,7 @@ impl Hash for Value {
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::Unit, Self::Unit) => true,
+            (Self::Option(o1), Self::Option(o2)) => o1 == o2,
             (Self::Number(n1), Self::Number(n2)) => n1.eq(n2),
             (Self::Bool(b1), Self::Bool(b2)) => b1.eq(b2),
             (Self::Sequence(s1), Self::Sequence(s2)) => s1.eq(s2),
@@ -241,7 +248,7 @@ impl Eq for Value {}
 impl PartialOrd for Value {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         match (self, other) {
-            (Value::Unit, Value::Unit) => Some(Ordering::Equal),
+            (Value::Option(left), Value::Option(right)) => left.partial_cmp(right),
             (Value::Number(left), Value::Number(right)) => left.partial_cmp(right),
             (Value::Sequence(left), Value::Sequence(right)) => left.partial_cmp(right),
             (Value::Bool(left), Value::Bool(right)) => left.partial_cmp(right),
@@ -258,7 +265,7 @@ impl PartialOrd for Value {
 
 impl From<()> for Value {
     fn from(_value: ()) -> Self {
-        Self::Unit
+        Self::tuple(vec![])
     }
 }
 
@@ -560,7 +567,7 @@ impl<'a> TryFrom<&'a mut Value> for &'a Number {
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum ValueType {
-    Unit,
+    Option, // TODO: add type param
     Number(NumberType),
     Bool,
     String,
@@ -580,7 +587,7 @@ impl From<&Value> for ValueType {
 impl fmt::Display for ValueType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Unit => write!(f, "unit"),
+            Self::Option => write!(f, "option"),
             Self::Number(n) => write!(f, "{n}"),
             Self::Bool => write!(f, "bool"),
             Self::String => write!(f, "string"),
@@ -596,7 +603,7 @@ impl fmt::Display for ValueType {
 impl fmt::Debug for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Unit => write!(f, "()"),
+            Self::Option(o) => write!(f, "{o:?}"),
             Self::Number(n) => write!(f, "{n}"),
             Self::Bool(b) => write!(f, "{b}"),
             Self::Function(_) => {
@@ -610,7 +617,8 @@ impl fmt::Debug for Value {
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Unit => write!(f, ""),
+            Self::Option(Some(v)) => write!(f, "Some({v})"),
+            Self::Option(None) => Ok(()), // write!(f, "{o:?}")}, // TODO ?!?!?
             Self::Number(n) => write!(f, "{n}"),
             Self::Bool(b) => write!(f, "{b}"),
             Self::Function(_) => {

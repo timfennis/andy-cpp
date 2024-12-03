@@ -44,7 +44,6 @@ pub(crate) fn evaluate_expression(
         Expression::BigIntLiteral(n) => Value::Number(Number::Int(Int::BigInt(n.clone()))),
         Expression::Float64Literal(n) => Value::Number(Number::Float(*n)),
         Expression::ComplexLiteral(n) => Value::Number(Number::Complex(*n)),
-        Expression::UnitLiteral => Value::Unit,
         Expression::Unary {
             expression: expression_location,
             operator,
@@ -93,7 +92,7 @@ pub(crate) fn evaluate_expression(
         Expression::VariableDeclaration { l_value, value } => {
             let value = evaluate_expression(value, environment)?;
             declare_or_assign_variable(l_value, value, true, environment, span)?;
-            Value::Unit
+            Value::none()
         }
         Expression::Assignment {
             l_value,
@@ -118,7 +117,7 @@ pub(crate) fn evaluate_expression(
 
                 set_at_index(&mut lhs, rhs, index, span)?;
 
-                Value::Unit
+                Value::none()
             }
         },
         Expression::OpAssignment {
@@ -229,7 +228,7 @@ pub(crate) fn evaluate_expression(
         Expression::Block { statements } => {
             let mut local_scope = Environment::new_scope(environment);
 
-            let mut value = Value::Unit;
+            let mut value = Value::none();
             for stm in statements {
                 value = evaluate_expression(stm, &mut local_scope)?;
             }
@@ -247,7 +246,7 @@ pub(crate) fn evaluate_expression(
             match (result, on_false) {
                 (Value::Bool(true), _) => evaluate_expression(on_true, environment)?,
                 (Value::Bool(false), Some(block)) => evaluate_expression(block, environment)?,
-                (Value::Bool(false), None) => Value::Unit,
+                (Value::Bool(false), None) => Value::none(),
                 (value, _) => {
                     return Err(EvaluationError::new(
                         format!(
@@ -262,7 +261,7 @@ pub(crate) fn evaluate_expression(
         }
         Expression::Statement(expression) => {
             evaluate_expression(expression, environment)?;
-            Value::Unit
+            Value::none()
         }
         Expression::Logical {
             operator,
@@ -315,7 +314,7 @@ pub(crate) fn evaluate_expression(
                 }
             }
             // drop(local_scope);
-            Value::Unit
+            Value::none()
         }
         Expression::Call {
             function,
@@ -373,7 +372,7 @@ pub(crate) fn evaluate_expression(
                     .borrow_mut()
                     .declare_function(name, user_function);
 
-                Value::Unit
+                Value::none()
             } else {
                 user_function.into()
             }
@@ -388,6 +387,11 @@ pub(crate) fn evaluate_expression(
             Value::Sequence(Sequence::Tuple(Rc::new(out_values)))
         }
         Expression::Identifier(identifier) => {
+            // MAGIC??!
+            if identifier == "None" {
+                return Ok(Value::none());
+            }
+
             if let Some(value) = environment.borrow().get(identifier) {
                 value.borrow().clone()
             } else {
@@ -409,7 +413,7 @@ pub(crate) fn evaluate_expression(
                 let value = if let Some(value) = value {
                     evaluate_expression(value, environment)?
                 } else {
-                    Value::Unit
+                    Value::none()
                 };
 
                 hashmap.insert(key, value);
@@ -435,7 +439,7 @@ pub(crate) fn evaluate_expression(
             }
 
             match &**body {
-                ForBody::Block(_) => Value::Unit,
+                ForBody::Block(_) => Value::none(),
                 ForBody::List(_) => Value::from(out_values),
                 ForBody::Map {
                     key: _,
@@ -462,7 +466,7 @@ pub(crate) fn evaluate_expression(
                 environment,
             )?));
         }
-        Expression::Break => return Err(FunctionCarrier::Break(Value::Unit)), // TODO: for now we just put unit in here so we can improve break functionality later
+        Expression::Break => return Err(FunctionCarrier::Break(Value::none())), // TODO: for now we just put unit in here so we can improve break functionality later
         Expression::Index {
             value: lhs_expr,
             index: index_expr,
@@ -678,7 +682,7 @@ fn declare_or_assign_variable(
         }
     };
 
-    Ok(Value::Unit)
+    Ok(Value::none())
 }
 
 // Applies operations like `+` or functions like `max(x, y)` to mutable pointers to values. This is
@@ -769,7 +773,7 @@ fn apply_operation_to_value(
             .into()),
         }
     } else {
-        let old_value = std::mem::replace(value, Value::Unit);
+        let old_value = std::mem::replace(value, Value::none());
         match operation {
             Either::Left(binary_operator) => {
                 *value = apply_operator(old_value, *binary_operator, right_value)
@@ -1239,11 +1243,11 @@ fn execute_body(
                     .as_ref()
                     .map(|value| evaluate_expression(value, environment))
                     .transpose()?
-                    .unwrap_or(Value::Unit),
+                    .unwrap_or(Value::none()),
             ]))));
         }
     }
-    Ok(Value::Unit)
+    Ok(Value::none())
 }
 
 /// Execute a `ForBody` for a slice of `ForIteration`s.
@@ -1305,5 +1309,5 @@ fn execute_for_iterations(
         },
     }
 
-    Ok(Value::Unit)
+    Ok(Value::none())
 }

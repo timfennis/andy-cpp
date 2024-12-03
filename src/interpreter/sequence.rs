@@ -97,10 +97,9 @@ impl fmt::Debug for Sequence {
                     write!(f, "{{")?;
                 }
                 while let Some((key, value)) = iter.next() {
-                    if value == &Value::Unit {
-                        write!(f, "{key:?}")?;
-                    } else {
-                        write!(f, "{key:?}: {value:?}")?;
+                    match value {
+                        Value::Option(opt) if opt.is_none() => write!(f, "{key:?}")?,
+                        _ => write!(f, "{key:?}: {value:?}")?,
                     }
 
                     if iter.peek().is_some() {

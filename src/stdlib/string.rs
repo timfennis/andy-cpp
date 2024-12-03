@@ -135,7 +135,7 @@ mod inner {
                 Value::from(fst),
                 Value::from(snd),
             ]))),
-            None => Value::Unit,
+            None => Value::none(),
         }
     }
 

@@ -8,7 +8,7 @@ mod inner {
 
     pub fn assert(value: bool) -> anyhow::Result<Value> {
         if value {
-            Ok(Value::Unit)
+            Ok(Value::none())
         } else {
             Err(anyhow!("failed asserting that argument is true"))
         }
@@ -16,7 +16,7 @@ mod inner {
 
     pub fn assert_eq(left: &Value, right: &Value) -> anyhow::Result<Value> {
         if left == right {
-            Ok(Value::Unit)
+            Ok(Value::none())
         } else {
             Err(anyhow!(format!(
                 "failed asserting that {left} equals {right}"
@@ -30,14 +30,14 @@ mod inner {
                 "failed asserting that {left} does not equal {right}"
             )))
         } else {
-            Ok(Value::Unit)
+            Ok(Value::none())
         }
     }
 
     #[function(name = "assert")]
     pub fn assert_with_message(value: bool, message: &str) -> anyhow::Result<Value> {
         if value {
-            Ok(Value::Unit)
+            Ok(Value::none())
         } else {
             Err(anyhow!(message.to_string()))
         }

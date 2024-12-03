@@ -18,7 +18,6 @@ pub struct ExpressionLocation {
 #[derive(Debug, PartialEq)]
 pub enum Expression {
     // Literals
-    UnitLiteral,
     BoolLiteral(bool),
     StringLiteral(String),
     Int64Literal(i64),
@@ -267,7 +266,6 @@ impl fmt::Debug for ExpressionLocation {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         // write!(f, "{{{:?} at {:?}}}", self.expression, self.span)
         match &self.expression {
-            Expression::UnitLiteral => f.debug_struct("UnitLiteral").finish(),
             Expression::BoolLiteral(b) => {
                 f.debug_struct("BooleanLiteral").field("value", &b).finish()
             }

@@ -74,7 +74,7 @@ impl Interpreter {
         &mut self,
         expressions: impl Iterator<Item = ExpressionLocation>,
     ) -> Result<Value, InterpreterError> {
-        let mut value = Value::Unit;
+        let mut value = Value::none();
         for expr in expressions {
             match evaluate_expression(&expr, &mut self.environment) {
                 Ok(val) => value = val,
