@@ -1,0 +1,13 @@
+--PROGRAM--
+// Unit equals itself
+assert_eq((), ());
+
+// Empty slice from tuple equals unit
+assert_eq((1,2,3)[0..0], ());
+
+// 1 tuple can be produced from slice
+// HOW?? (1,2,3)[0..1] is Tuple
+
+print("ok");
+--EXPECT--
+ok
