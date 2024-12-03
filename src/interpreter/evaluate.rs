@@ -413,7 +413,7 @@ pub(crate) fn evaluate_expression(
                 let value = if let Some(value) = value {
                     evaluate_expression(value, environment)?
                 } else {
-                    Value::none()
+                    Value::unit()
                 };
 
                 hashmap.insert(key, value);
@@ -545,12 +545,23 @@ pub(crate) fn evaluate_expression(
                 }
                 Value::Sequence(Sequence::Map(dict, default)) => {
                     let key = evaluate_expression(index_expr, environment)?;
-                    let dict = dict.borrow();
+                    // let dict = dict.borrow();
 
-                    return if let Some(value) = dict.get(&key) {
-                        Ok(value.clone())
+                    let value = { dict.borrow().get(&key).cloned() };
+
+                    return if let Some(value) = value {
+                        Ok(value)
                     } else if let Some(default) = default {
-                        Ok(Value::clone(&*default))
+                        let default_value = produce_default_value(
+                            &*default,
+                            environment,
+                            // TODO: this span makes little sense
+                            index_expr.span,
+                        )?;
+
+                        dict.borrow_mut().insert(key, default_value.clone());
+
+                        Ok(default_value)
                     } else {
                         Err(EvaluationError::key_not_found(&key, index_expr.span).into())
                     };
@@ -617,6 +628,28 @@ pub(crate) fn evaluate_expression(
     };
 
     Ok(literal)
+}
+
+fn produce_default_value(
+    default: &Value,
+    environment: &EnvironmentRef,
+    span: Span,
+) -> EvaluationResult {
+    match default {
+        Value::Function(function) => {
+            match call_function(function, &mut [], environment, span) {
+                Err(FunctionCarrier::FunctionNotFound) => {
+                    Err(FunctionCarrier::EvaluationError(EvaluationError::new(
+                        "default function is not callable without arguments".to_string(),
+                        span,
+                    )))
+                }
+                a => a,
+            }
+            // test
+        }
+        value => Ok(value.clone()),
+    }
 }
 
 fn declare_or_assign_variable(

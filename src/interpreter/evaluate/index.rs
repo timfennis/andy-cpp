@@ -186,6 +186,7 @@ pub fn set_at_index(
                 Offset::Range(from_usize, to_usize) => {
                     let tail = list.drain(from_usize..).collect::<Vec<_>>();
 
+                    // TODO: why is this unwrap safe
                     list.extend(rhs.try_into_iter().unwrap());
 
                     list.extend_from_slice(&tail[(to_usize - from_usize)..]);

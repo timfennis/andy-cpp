@@ -42,6 +42,10 @@ impl Value {
         Value::Sequence(Sequence::Tuple(Rc::new(data.into())))
     }
 
+    pub(crate) fn unit() -> Self {
+        Value::Sequence(Sequence::Tuple(Rc::new(vec![])))
+    }
+
     pub(crate) fn none() -> Self {
         Self::Option(None)
     }

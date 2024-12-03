@@ -7,7 +7,6 @@ use std::rc::Rc;
 
 #[andy_cpp_macros::export_module]
 mod inner {
-
     // TODO: this function makes a copy when returning some kind of iterator would be better
     pub fn keys(map: &mut HashMap<Value, Value>) -> Value {
         map.keys().cloned().collect::<Vec<_>>().into()
@@ -29,7 +28,7 @@ mod inner {
 
     #[function(name = "insert")]
     pub fn insert_set(map: &mut HashMap<Value, Value>, key: Value) {
-        map.insert(key, Value::none());
+        map.insert(key, Value::unit());
     }
 
     pub fn union(left: DefaultMap, right: &HashMap<Value, Value>) -> Value {
@@ -53,30 +52,30 @@ mod inner {
         ))
     }
 
-    pub fn set(seq: &Sequence) -> Value {
+    pub fn set(seq: &mut Sequence) -> Value {
         let out: HashMap<Value, Value> = match seq {
             Sequence::String(rc) => rc
                 .borrow()
                 .chars()
-                .map(|c| (c.into(), Value::none()))
+                .map(|c| (c.into(), Value::unit()))
                 .collect(),
             // TODO: we could change the implementation so that ref counts of 1 are consumed instead of copied
             Sequence::List(rc) => rc
                 .borrow()
                 .iter()
-                .map(|v| (v.to_owned(), Value::none()))
+                .map(|v| (v.to_owned(), Value::unit()))
                 .collect(),
-            Sequence::Tuple(rc) => rc.iter().map(|v| (v.to_owned(), Value::none())).collect(),
+            Sequence::Tuple(rc) => rc.iter().map(|v| (v.to_owned(), Value::unit())).collect(),
             Sequence::Map(rc, _) => rc
                 .borrow()
                 .iter()
-                .map(|(key, _value)| (key.to_owned(), Value::none()))
+                .map(|(key, _value)| (key.to_owned(), Value::unit()))
                 .collect(),
             Sequence::Iterator(rc) => {
                 let mut iter = rc.borrow_mut();
                 let mut out = HashMap::new();
                 for item in iter.by_ref() {
-                    out.insert(item, Value::none()); // TODO: is this too inefficient?
+                    out.insert(item, Value::unit());
                 }
                 out
             }

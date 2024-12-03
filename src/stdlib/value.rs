@@ -7,6 +7,7 @@ mod inner {
     use std::cell::RefCell;
     use std::rc::Rc;
 
+    #[function(name = "Some")] // <-- fake type constructor
     pub fn some(value: Value) -> Value {
         Value::Option(Some(Box::new(value)))
     }
