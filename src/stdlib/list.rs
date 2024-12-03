@@ -81,6 +81,7 @@ mod inner {
     }
 
     /// Removes the last element from a list and returns it, or `Unit` if it is empty
+    #[function(name = "pop?")]
     pub fn maybe_pop(list: &mut Vec<Value>) -> Value {
         list.pop().map_or_else(Value::none, Value::some)
     }
@@ -89,6 +90,7 @@ mod inner {
         list.pop().unwrap_or(Value::unit())
     }
 
+    #[function(name = "pop_left?")]
     pub fn maybe_pop_left(list: &mut Vec<Value>) -> Value {
         if list.is_empty() {
             return Value::none();
@@ -143,7 +145,7 @@ mod inner {
     }
 
     /// Returns a copy of the first element or `unit` if the list is empty.
-    // #[function(name = "first?")]
+    #[function(name = "first?")]
     pub fn maybe_first(list: &[Value]) -> Value {
         list.first().cloned().map_or_else(Value::none, Value::some)
     }
@@ -156,7 +158,7 @@ mod inner {
     }
 
     /// Returns a copy of the last element or `unit` if the list is empty.
-    // #[function(name = "last?")]
+    #[function(name = "last?")]
     pub fn maybe_last(list: &[Value]) -> Value {
         list.last().cloned().map_or_else(Value::none, Value::some)
     }

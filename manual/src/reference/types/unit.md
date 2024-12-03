@@ -14,4 +14,10 @@ let result = if x == y {
 assert_eq(result, ());
 ```
 
+Unit is also a 0-length tuple:
+
+```ndc
+assert_eq((1,2,3)[0..0], ());
+```
+
 The language does not have `null` or `nil`.

@@ -136,7 +136,8 @@ impl Iterator for Lexer<'_> {
                     buf.push(char);
 
                     while let Some(next_char) = self.source.peek() {
-                        if next_char.is_alphanumeric() || next_char == '_' {
+                        // NOTE: might regret this later but ? can be part of an ident (just not at the start)
+                        if next_char.is_alphanumeric() || next_char == '_' || next_char == '?' {
                             // advance iterator for next
                             buf.push(next_char);
                             self.source.next();

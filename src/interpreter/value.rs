@@ -626,13 +626,15 @@ impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Option(Some(v)) => write!(f, "Some({v})"),
-            Self::Option(None) => Ok(()), // write!(f, "{o:?}")}, // TODO ?!?!?
+            Self::Option(None) => write!(f, ""),
             Self::Number(n) => write!(f, "{n}"),
             Self::Bool(b) => write!(f, "{b}"),
             Self::Function(_) => {
                 //TODO: implement function printing
                 write!(f, "function")
             }
+            // Unit tuple does not print anything
+            Self::Sequence(Sequence::Tuple(t)) if t.len() == 0 => write!(f, ""),
             Self::Sequence(s) => write!(f, "{s}"),
         }
     }

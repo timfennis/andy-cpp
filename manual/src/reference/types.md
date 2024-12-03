@@ -6,7 +6,7 @@ you currently can't annotate your variables using type names they do have types 
 The type system is hierarchical with the root type being `Any`:
 
 * Any
-  * [Unit](./types/unit.md)
+  * [Option](./types/option.md)
   * [Boolean](./types/boolean.md)
   * [Number](./types/number.md)
     * Integer
@@ -19,6 +19,7 @@ The type system is hierarchical with the root type being `Any`:
     * [String](./types/string.md): A mutable list of characters
     * [List](./types/list.md): A mutable list
     * [Tuple](./types/tuple.md): An immutable list
+      * [Unit](./types/unit.md)
     * [Map](./types/map-and-set.md): A hashmap that associates keys with values
     * Iterator: A type that can be consumed and produces values (Currently only used for range expressions like `5..100`)
   * [Function](./types/function.md)
