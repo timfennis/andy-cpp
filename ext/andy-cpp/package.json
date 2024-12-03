@@ -7,7 +7,7 @@
     "url": "https://github.com/timfennis/andy-cpp.git"
   },
   "publisher": "TimFennis",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "engines": {
     "vscode": "^1.85.0"
   },

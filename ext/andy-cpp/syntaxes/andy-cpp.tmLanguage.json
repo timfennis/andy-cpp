@@ -58,7 +58,15 @@
               "name": "entity.name.function.andy-cpp"
             }
           },
-          "end": "\\{"
+          "end": "(\\{)|(=>)",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.brackets.round.andy-cpp"
+            },
+            "2": {
+              "name": "keyword.operator.arrow.fat.andy-cpp"
+            }
+          }
         },
         {
           "comment": "anonymous function definition",
@@ -72,7 +80,15 @@
               "name": "keyword.other.fn.andy-cpp"
             }
           },
-          "end": "\\{"
+          "end": "(\\{)|(=>)",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.brackets.round.andy-cpp"
+            },
+            "2": {
+              "name": "keyword.operator.arrow.fat.andy-cpp"
+            }
+          }
         }
       ]
     },
