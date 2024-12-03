@@ -111,12 +111,12 @@ mod inner {
             Sequence::String(str) => {
                 let r = &mut *str.borrow_mut();
                 *r = r.chars().sorted().collect::<String>();
-                Ok(Value::none())
+                Ok(Value::unit())
             }
             Sequence::List(list) => {
                 let mut m = list.borrow_mut();
                 try_sort(&mut m)?;
-                Ok(Value::none())
+                Ok(Value::unit())
             }
             Sequence::Tuple(_) => Err(anyhow!("tuple cannot be sorted in place")),
             Sequence::Map(_, _) => Err(anyhow!("map cannot be sorted in place")),

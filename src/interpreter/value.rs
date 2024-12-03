@@ -50,6 +50,10 @@ impl Value {
         Self::Option(None)
     }
 
+    pub(crate) fn some(value: Value) -> Self {
+        Self::Option(Some(Box::new(value)))
+    }
+
     /// If this value is a type of `Sequence` it returns the length of the sequence, otherwise it returns `None`
     #[must_use]
     pub fn sequence_length(&self) -> Option<usize> {

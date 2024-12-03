@@ -61,7 +61,7 @@ pub fn wrap_function(function: syn::ItemFn) -> WrappedFunction {
 
     let return_expr = match function.sig.output {
         syn::ReturnType::Default => quote! {
-            return Ok(crate::interpreter::value::Value::none());
+            return Ok(crate::interpreter::value::Value::unit());
         },
         syn::ReturnType::Type(_, typ) => match &*typ {
             // If the function returns a result we unpack it using the question mark operator

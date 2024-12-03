@@ -28,7 +28,7 @@ pub fn register(env: &mut Environment) {
                         Ok(())
                     })
                     .map_err(|err| FunctionCarrier::IntoEvaluationError(Box::new(err)))?;
-                Ok(Value::none())
+                Ok(Value::unit())
             },
             type_signature: TypeSignature::Variadic,
         }),
@@ -51,7 +51,7 @@ pub fn register(env: &mut Environment) {
                         Ok(())
                     })
                     .map_err(|err| FunctionCarrier::IntoEvaluationError(Box::new(err)))?;
-                Ok(Value::none())
+                Ok(Value::unit())
             },
             type_signature: TypeSignature::Variadic,
         }),

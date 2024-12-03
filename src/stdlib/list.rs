@@ -33,7 +33,7 @@ mod inner {
         if let Some(result) = result {
             Value::from(result)
         } else {
-            Value::none()
+            Value::unit()
         }
     }
 
@@ -42,7 +42,7 @@ mod inner {
             return Err(anyhow!("index {index} is out of bounds"));
         }
         list.insert(index, elem);
-        Ok(Value::none())
+        Ok(Value::unit())
     }
 
     /// Removes and returns the element at position `index` within the list, shifting all elements after it to the left.
@@ -81,13 +81,25 @@ mod inner {
     }
 
     /// Removes the last element from a list and returns it, or `Unit` if it is empty
+    pub fn maybe_pop(list: &mut Vec<Value>) -> Value {
+        list.pop().map_or_else(Value::none, Value::some)
+    }
+
     pub fn pop(list: &mut Vec<Value>) -> Value {
-        list.pop().unwrap_or(Value::none())
+        list.pop().unwrap_or(Value::unit())
+    }
+
+    pub fn maybe_pop_left(list: &mut Vec<Value>) -> Value {
+        if list.is_empty() {
+            return Value::none();
+        }
+
+        Value::some(list.remove(0))
     }
 
     pub fn pop_left(list: &mut Vec<Value>) -> Value {
         if list.is_empty() {
-            return Value::none();
+            return Value::unit();
         }
 
         list.remove(0)
@@ -131,8 +143,9 @@ mod inner {
     }
 
     /// Returns a copy of the first element or `unit` if the list is empty.
-    pub fn first_or_unit(list: &[Value]) -> Value {
-        list.first().cloned().unwrap_or_else(|| Value::none())
+    // #[function(name = "first?")]
+    pub fn maybe_first(list: &[Value]) -> Value {
+        list.first().cloned().map_or_else(Value::none, Value::some)
     }
 
     /// Returns a copy of the last element of the list or results in an error if the list is empty.
@@ -143,8 +156,9 @@ mod inner {
     }
 
     /// Returns a copy of the last element or `unit` if the list is empty.
-    pub fn last_or_unit(list: &[Value]) -> Value {
-        list.last().cloned().unwrap_or_else(|| Value::none())
+    // #[function(name = "last?")]
+    pub fn maybe_last(list: &[Value]) -> Value {
+        list.last().cloned().map_or_else(Value::none, Value::some)
     }
 
     pub fn cartesian_product(list_a: &[Value], list_b: &[Value]) -> Vec<Value> {

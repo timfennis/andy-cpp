@@ -8,7 +8,7 @@ fn is_positive(n) {
 
 print(is_positive(3));
 print(is_positive(0));
-print(is_positive(-5) == None);
+print(is_positive(-5) == ());
 --EXPECT--
 true
 true

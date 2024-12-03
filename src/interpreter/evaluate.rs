@@ -92,7 +92,7 @@ pub(crate) fn evaluate_expression(
         Expression::VariableDeclaration { l_value, value } => {
             let value = evaluate_expression(value, environment)?;
             declare_or_assign_variable(l_value, value, true, environment, span)?;
-            Value::none()
+            Value::unit()
         }
         Expression::Assignment {
             l_value,
@@ -117,7 +117,7 @@ pub(crate) fn evaluate_expression(
 
                 set_at_index(&mut lhs, rhs, index, span)?;
 
-                Value::none()
+                Value::unit()
             }
         },
         Expression::OpAssignment {
@@ -228,7 +228,7 @@ pub(crate) fn evaluate_expression(
         Expression::Block { statements } => {
             let mut local_scope = Environment::new_scope(environment);
 
-            let mut value = Value::none();
+            let mut value = Value::unit();
             for stm in statements {
                 value = evaluate_expression(stm, &mut local_scope)?;
             }
@@ -246,7 +246,7 @@ pub(crate) fn evaluate_expression(
             match (result, on_false) {
                 (Value::Bool(true), _) => evaluate_expression(on_true, environment)?,
                 (Value::Bool(false), Some(block)) => evaluate_expression(block, environment)?,
-                (Value::Bool(false), None) => Value::none(),
+                (Value::Bool(false), None) => Value::unit(),
                 (value, _) => {
                     return Err(EvaluationError::new(
                         format!(
@@ -261,7 +261,7 @@ pub(crate) fn evaluate_expression(
         }
         Expression::Statement(expression) => {
             evaluate_expression(expression, environment)?;
-            Value::none()
+            Value::unit()
         }
         Expression::Logical {
             operator,
@@ -314,7 +314,7 @@ pub(crate) fn evaluate_expression(
                 }
             }
             // drop(local_scope);
-            Value::none()
+            Value::unit()
         }
         Expression::Call {
             function,
@@ -372,7 +372,7 @@ pub(crate) fn evaluate_expression(
                     .borrow_mut()
                     .declare_function(name, user_function);
 
-                Value::none()
+                Value::unit()
             } else {
                 user_function.into()
             }
@@ -439,7 +439,7 @@ pub(crate) fn evaluate_expression(
             }
 
             match &**body {
-                ForBody::Block(_) => Value::none(),
+                ForBody::Block(_) => Value::unit(),
                 ForBody::List(_) => Value::from(out_values),
                 ForBody::Map {
                     key: _,
