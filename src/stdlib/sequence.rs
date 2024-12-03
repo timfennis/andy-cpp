@@ -539,7 +539,7 @@ mod inner {
     pub fn windows(seq: &mut Sequence, size: usize) -> EvaluationResult {
         let main = mut_seq_into_iterator(seq).collect::<Result<Vec<_>, _>>()?;
 
-        let out = main.windows(size).map(Value::tuple).collect::<Vec<_>>();
+        let out = main.windows(size).map(Value::list).collect::<Vec<_>>();
 
         Ok(Value::list(out))
     }

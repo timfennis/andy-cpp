@@ -15,19 +15,19 @@ name = "ndc_lib"
 path = "src/lib.rs"
 
 [profile.release]
-debug = false  # true for flamegraph, false otherwise
-strip = true # false for flamegraph, true otherwise
+debug = false # true for flamegraph, false otherwise
+strip = true  # false for flamegraph, true otherwise
 lto = true
 
 [dependencies]
 anyhow = "1.0.80"
 clap = { version = "4.5.1", features = ["derive"] }
 num = "0.4.1"
-rustyline = { version = "14.0.0", optional = true, features = ["derive"] }
+rustyline = { version = "15.0.0", optional = true, features = ["derive"] }
 ryu = "1.0.17"
-thiserror = "1.0.58"
+thiserror = "2.0.3"
 andy-cpp-macros = { path = "andy-cpp-macros" }
-itertools = "0.12.1"
+itertools = "0.13.0"
 either = "1.11.0"
 ahash = { version = "0.8.11", optional = true }
 ordered-float = "4.2.0"

@@ -3,6 +3,7 @@ use miette::highlighters::HighlighterState;
 use ndc_lib::interpreter::Interpreter;
 use rustyline::config::Configurer;
 use rustyline::error::ReadlineError;
+use rustyline::highlight::CmdKind;
 use rustyline::Helper;
 use rustyline::{ColorMode, Completer, Editor, Hinter, Validator};
 use std::borrow::Cow;
@@ -21,7 +22,7 @@ impl rustyline::highlight::Highlighter for RustlylineHelper {
         Cow::Owned(out.into_iter().join(""))
     }
 
-    fn highlight_char(&self, _line: &str, _pos: usize, _forced: bool) -> bool {
+    fn highlight_char(&self, _line: &str, _pos: usize, _forced: CmdKind) -> bool {
         true
     }
 }
