@@ -466,7 +466,8 @@ pub(crate) fn evaluate_expression(
                 environment,
             )?));
         }
-        Expression::Break => return Err(FunctionCarrier::Break(Value::none())), // TODO: for now we just put unit in here so we can improve break functionality later
+        // TODO: for now we just put unit in here so we can improve break functionality later
+        Expression::Break => return Err(FunctionCarrier::Break(Value::unit())),
         Expression::Index {
             value: lhs_expr,
             index: index_expr,
@@ -555,8 +556,10 @@ pub(crate) fn evaluate_expression(
                         let default_value = produce_default_value(
                             &*default,
                             environment,
-                            // TODO: this span makes little sense
-                            index_expr.span,
+                            // NOTE: this span points at the entire expression instead of the
+                            // function that cannot be executed because we don't have that span here
+                            // maybe we can check the function signature earlier when we do have the span
+                            lhs_expr.span.merge(index_expr.span),
                         )?;
 
                         dict.borrow_mut().insert(key, default_value.clone());
@@ -715,7 +718,7 @@ fn declare_or_assign_variable(
         }
     };
 
-    Ok(Value::none())
+    Ok(Value::unit())
 }
 
 // Applies operations like `+` or functions like `max(x, y)` to mutable pointers to values. This is
@@ -806,7 +809,7 @@ fn apply_operation_to_value(
             .into()),
         }
     } else {
-        let old_value = std::mem::replace(value, Value::none());
+        let old_value = std::mem::replace(value, Value::unit());
         match operation {
             Either::Left(binary_operator) => {
                 *value = apply_operator(old_value, *binary_operator, right_value)
@@ -1280,7 +1283,7 @@ fn execute_body(
             ]));
         }
     }
-    Ok(Value::none())
+    Ok(Value::unit())
 }
 
 /// Execute a `ForBody` for a slice of `ForIteration`s.
@@ -1342,5 +1345,5 @@ fn execute_for_iterations(
         },
     }
 
-    Ok(Value::none())
+    Ok(Value::unit())
 }
