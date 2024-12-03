@@ -1,0 +1,9 @@
+--PROGRAM--
+let one_tup = (1,);
+assert_eq(one_tup, one_tup);
+assert(one_tup != 1);
+assert_eq(one_tup.len, 1);
+
+print("ok");
+--EXPECT--
+ok

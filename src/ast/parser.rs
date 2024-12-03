@@ -288,7 +288,7 @@ impl Parser {
             .require_current_token_matches(&Token::Let)
             .expect("guaranteed to match by caller");
 
-        let maybe_lvalue = self.maybe_tuple(Self::single_expression)?;
+        let maybe_lvalue = self.tuple_expression(Self::single_expression, false)?;
         let lvalue_span = maybe_lvalue.span;
 
         let Ok(lvalue) = Lvalue::try_from(maybe_lvalue) else {
@@ -322,7 +322,7 @@ impl Parser {
     }
 
     fn variable_assignment(&mut self) -> Result<ExpressionLocation, Error> {
-        let maybe_lvalue = self.maybe_tuple(Self::single_expression)?;
+        let maybe_lvalue = self.tuple_expression(Self::single_expression, false)?;
         let start = maybe_lvalue.span;
 
         if !Lvalue::can_build_from_expression(&maybe_lvalue.expression) {
@@ -344,7 +344,7 @@ impl Parser {
             // NOTE: the parser supports every LValue but some might cause an error when declaring vars
             Some(Token::EqualsSign) => {
                 self.advance();
-                let expression = self.maybe_tuple(Self::single_expression)?;
+                let expression = self.tuple_expression(Self::single_expression, false)?;
                 let end = expression.span;
                 let assignment_expression = Expression::Assignment {
                     l_value: Lvalue::try_from(maybe_lvalue)
@@ -361,7 +361,7 @@ impl Parser {
                 };
 
                 self.advance();
-                let expression = self.maybe_tuple(Self::single_expression)?;
+                let expression = self.tuple_expression(Self::single_expression, false)?;
                 let end = expression.span;
                 let op_assign = Expression::OpAssignment {
                     l_value: Lvalue::try_from(maybe_lvalue)
@@ -376,12 +376,20 @@ impl Parser {
         };
     }
 
-    fn tuple_expressions(
+    fn tuple_expression(
         &mut self,
         next: fn(&mut Parser) -> Result<ExpressionLocation, Error>,
+        must_be_tuple: bool,
     ) -> Result<ExpressionLocation, Error> {
         let mut expressions = vec![next(self)?];
+        let mut must_be_tuple = must_be_tuple;
         while self.consume_token_if(&[Token::Comma]).is_some() {
+            // Peek at right paren, if that matches we break
+            // this helps us support expressions like `(1,)` and `(1,2,)`
+            if self.match_token(&[Token::RightParentheses]).is_some() {
+                must_be_tuple = true;
+                break;
+            }
             expressions.push(next(self)?);
         }
 
@@ -391,12 +399,18 @@ impl Parser {
             .span
             .merge(expressions.last().unwrap().span);
 
-        Ok(ExpressionLocation {
+        let tuple_expression = ExpressionLocation {
             expression: Expression::Tuple {
                 values: expressions,
             },
             span: new_span,
-        })
+        };
+
+        if must_be_tuple {
+            Ok(tuple_expression)
+        } else {
+            Ok(tuple_expression.simplify())
+        }
     }
 
     /// Parses a delimited tuple (enclosed in parentheses) that can be empty
@@ -408,7 +422,7 @@ impl Parser {
         if let Some(end) = self.consume_token_if(&[Token::RightParentheses]) {
             Ok(Expression::Tuple { values: vec![] }.to_location(start.span.merge(end.span)))
         } else {
-            let mut tuple_expression = self.tuple_expressions(next)?;
+            let mut tuple_expression = self.tuple_expression(next, true)?;
             let right_paren_span = self
                 .require_current_token_matches(&Token::RightParentheses)?
                 .span;
@@ -418,14 +432,6 @@ impl Parser {
 
             Ok(tuple_expression)
         }
-    }
-
-    fn maybe_tuple(
-        &mut self,
-        next: fn(&mut Parser) -> Result<ExpressionLocation, Error>,
-    ) -> Result<ExpressionLocation, Error> {
-        let tuple = self.tuple_expressions(next)?;
-        Ok(tuple.simplify())
     }
 
     fn single_expression(&mut self) -> Result<ExpressionLocation, Error> {
@@ -720,7 +726,7 @@ impl Parser {
 
         // If this isn't an empty list we parse a tuple expression (without delimiters) consisting of
         // single statements like `a, b, c`
-        let expr = self.tuple_expressions(Self::single_expression)?;
+        let expr = self.tuple_expression(Self::single_expression, true)?;
 
         // Now we can take two paths, either the list ends, and it's just a literal list of values
         // OR right after the last value there is a `for` keyword turning this into a list comprehension
@@ -735,7 +741,7 @@ impl Parser {
                 self.advance();
 
                 let Expression::Tuple { values } = expr.expression else {
-                    unreachable!("tuple_expression guarantees a tuple");
+                    unreachable!("tuple_expression must guarantee us a tuple");
                 };
 
                 // Next we can maybe turn this into a list expression
@@ -815,7 +821,7 @@ impl Parser {
     /// x in xs
     /// ```
     fn for_iteration(&mut self) -> Result<ForIteration, Error> {
-        let l_value = Lvalue::try_from(self.maybe_tuple(Self::primary)?)?;
+        let l_value = Lvalue::try_from(self.tuple_expression(Self::primary, false)?)?;
 
         self.require_current_token_matches(&Token::In)?;
 
