@@ -67,11 +67,11 @@ mod inner {
         c.im
     }
 
-    pub fn numerator(r: BigRational) -> BigInt {
+    pub fn numerator(r: &BigRational) -> BigInt {
         r.numer().clone()
     }
 
-    pub fn denominator(r: BigRational) -> BigInt {
+    pub fn denominator(r: &BigRational) -> BigInt {
         r.denom().clone()
     }
 

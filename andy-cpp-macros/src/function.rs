@@ -344,6 +344,20 @@ fn create_temp_variable(
                 },
             });
         }
+        // The pattern is &BigRational
+        else if path_ends_with(ty, "BigRational") && is_ref(ty) {
+            return Some(Argument {
+                param_type: quote! { crate::interpreter::function::ParamType::Rational },
+                argument: quote! { #argument_var_name },
+                initialize_code: quote! {
+                    let crate::interpreter::value::Value::Number(crate::interpreter::num::Number::Rational(#argument_var_name)) = #argument_var_name else {
+                        panic!("VValue #position needs to be Rational but wasn't");
+                    };
+
+                    let #argument_var_name = &#argument_var_name.clone();
+                },
+            });
+        }
         // The pattern is BigRational
         else if path_ends_with(ty, "BigRational") && !is_ref(ty) {
             return Some(Argument {

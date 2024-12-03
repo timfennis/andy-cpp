@@ -1270,14 +1270,14 @@ fn execute_body(
             result.push(value);
         }
         ForBody::Map { key, value, .. } => {
-            result.push(Value::Sequence(Sequence::Tuple(Rc::new(vec![
+            result.push(Value::tuple(vec![
                 evaluate_expression(key, environment)?,
                 value
                     .as_ref()
                     .map(|value| evaluate_expression(value, environment))
                     .transpose()?
-                    .unwrap_or(Value::none()),
-            ]))));
+                    .unwrap_or(Value::unit()),
+            ]));
         }
     }
     Ok(Value::none())
