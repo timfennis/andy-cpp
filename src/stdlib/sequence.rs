@@ -427,7 +427,7 @@ mod inner {
         Ok(Value::list(
             out.into_iter()
                 .combinations(k)
-                .map(Value::list)
+                .map(Value::tuple)
                 .collect::<Vec<Value>>(),
         ))
     }
@@ -441,7 +441,7 @@ mod inner {
         Ok(Value::list(
             out.into_iter()
                 .permutations(k)
-                .map(Value::list)
+                .map(Value::tuple)
                 .collect::<Vec<Value>>(),
         ))
     }
@@ -497,6 +497,8 @@ mod inner {
         ))
     }
 
+    // TODO: right now transposed always produces a list, it probably should produce whatever the input type was (if possible)
+    // TODO: this might not be the expected result for sets (since iterators over sets yield tuples)
     pub fn transposed(seq: &mut Sequence) -> EvaluationResult {
         let mut main = mut_seq_into_iterator(seq).collect::<Result<Vec<_>, _>>()?;
         let mut iterators = Vec::new();
