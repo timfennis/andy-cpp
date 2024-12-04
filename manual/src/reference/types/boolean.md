@@ -24,17 +24,17 @@ This differs from bitwise operators (`|`, `&`, `~`), which always evaluate both 
 
 ```ndc
 fn a() {
-  print("a invoked");
-  false
+    print("a invoked");
+    false
 };
 
 fn b() {
-  print("b invoked");
-  true
+    print("b invoked");
+    true
 };
 
 // Only "a invoked" is printed because evaluation is lazy.
 if a() and b() {
-  // ...
+    // ...
 }
 ```
