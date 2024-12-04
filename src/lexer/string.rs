@@ -20,7 +20,7 @@ pub trait StringLexer {
     fn lex_string(&mut self) -> Result<TokenLocation, Error>;
 }
 
-impl<'a> StringLexer for Lexer<'a> {
+impl StringLexer for Lexer<'_> {
     fn lex_string_literal(&mut self) -> Result<TokenLocation, Error> {
         let start_offset: usize = self.source.current_offset();
         let mut pounds: usize = 0;

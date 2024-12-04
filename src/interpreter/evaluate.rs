@@ -554,7 +554,7 @@ pub(crate) fn evaluate_expression(
                         Ok(value)
                     } else if let Some(default) = default {
                         let default_value = produce_default_value(
-                            &*default,
+                            &default,
                             environment,
                             // NOTE: this span points at the entire expression instead of the
                             // function that cannot be executed because we don't have that span here

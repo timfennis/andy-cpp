@@ -35,7 +35,7 @@ pub enum MutableValueIntoIterator<'a> {
     Iterator(Rc<RefCell<ValueIterator>>),
 }
 
-impl<'a> Iterator for MutableValueIntoIterator<'a> {
+impl Iterator for MutableValueIntoIterator<'_> {
     type Item = EvaluationResult;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -93,7 +93,7 @@ pub enum RcVecIterator<'a, T> {
     Cloning(std::slice::Iter<'a, T>),
 }
 
-impl<'a, T> RcVecIterator<'a, T> {
+impl<T> RcVecIterator<'_, T> {
     pub fn from_rc_vec(value: &mut Rc<Vec<T>>) -> RcVecIterator<T> {
         if Rc::get_mut(value).is_some() {
             let vec =
@@ -105,7 +105,7 @@ impl<'a, T> RcVecIterator<'a, T> {
     }
 }
 
-impl<'a, T> Iterator for RcVecIterator<'a, T>
+impl<T> Iterator for RcVecIterator<'_, T>
 where
     T: Clone,
 {
@@ -124,7 +124,7 @@ pub enum SharedVecIterator<'a, T> {
     RefCellIterator(RefCellIterator<'a, T>),
 }
 
-impl<'a, T> SharedVecIterator<'a, T> {
+impl<T> SharedVecIterator<'_, T> {
     pub fn from_shared_vec(value: &mut Rc<RefCell<Vec<T>>>) -> SharedVecIterator<T> {
         match Rc::get_mut(value) {
             Some(vec) => SharedVecIterator::IntoIter(vec.take().into_iter()),
@@ -135,7 +135,7 @@ impl<'a, T> SharedVecIterator<'a, T> {
     }
 }
 
-impl<'a, T> Iterator for SharedVecIterator<'a, T>
+impl<T> Iterator for SharedVecIterator<'_, T>
 where
     T: Clone,
 {
@@ -239,7 +239,7 @@ impl SharedHashMapIterator<'_> {
     }
 }
 
-impl<'a> Iterator for SharedHashMapIterator<'a> {
+impl Iterator for SharedHashMapIterator<'_> {
     type Item = Value;
 
     fn next(&mut self) -> Option<Self::Item> {

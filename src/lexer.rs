@@ -208,7 +208,7 @@ impl SourceIterator<'_> {
     }
 }
 
-impl<'a> Iterator for SourceIterator<'a> {
+impl Iterator for SourceIterator<'_> {
     type Item = char;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -225,7 +225,7 @@ impl<'a> Iterator for SourceIterator<'a> {
     }
 }
 
-impl<'a> SourceIterator<'a> {
+impl SourceIterator<'_> {
     pub fn peek_n(&mut self, n: usize) -> Option<char> {
         while self.buffer.get(n).is_none() {
             self.buffer.push_back(self.inner.next()?);

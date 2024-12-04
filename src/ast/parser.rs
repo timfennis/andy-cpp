@@ -340,7 +340,7 @@ impl Parser {
             };
         }
 
-        return match self.peek_current_token() {
+        match self.peek_current_token() {
             // NOTE: the parser supports every LValue but some might cause an error when declaring vars
             Some(Token::EqualsSign) => {
                 self.advance();
@@ -373,7 +373,7 @@ impl Parser {
                 Ok(op_assign.to_location(start.merge(end)))
             }
             _ => Ok(maybe_lvalue),
-        };
+        }
     }
 
     fn tuple_expression(

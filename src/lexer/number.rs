@@ -11,7 +11,7 @@ trait NumberLexerHelper {
     fn lex_to_buffer(&mut self, buf: &mut String, is_valid: impl Fn(char) -> bool);
 }
 
-impl<'a> NumberLexerHelper for Lexer<'a> {
+impl NumberLexerHelper for Lexer<'_> {
     fn lex_to_buffer(&mut self, buf: &mut String, is_valid: impl Fn(char) -> bool) {
         while let Some(next_char) = self.source.peek() {
             match next_char {
@@ -28,7 +28,7 @@ impl<'a> NumberLexerHelper for Lexer<'a> {
     }
 }
 
-impl<'a> NumberLexer for Lexer<'a> {
+impl NumberLexer for Lexer<'_> {
     #[allow(clippy::too_many_lines)]
     fn lex_number(&mut self) -> Result<TokenLocation, Error> {
         let mut buf = String::new();

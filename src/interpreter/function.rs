@@ -21,7 +21,7 @@ pub struct Callable<'a> {
     pub environment: &'a EnvironmentRef,
 }
 
-impl<'a> Callable<'a> {
+impl Callable<'_> {
     pub fn call(&self, args: &mut [Value]) -> EvaluationResult {
         self.function.borrow().call(args, self.environment)
     }
