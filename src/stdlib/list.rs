@@ -2,6 +2,7 @@
 mod inner {
     use crate::interpreter::evaluate::EvaluationResult;
     use crate::interpreter::iterator::mut_seq_into_iterator;
+    use crate::interpreter::num::Number;
     use crate::interpreter::sequence::Sequence;
     use crate::interpreter::value::Value;
     use itertools::Itertools;
@@ -169,5 +170,17 @@ mod inner {
             .cartesian_product(list_b)
             .map(|(a, b)| Value::Sequence(Sequence::Tuple(Rc::new(vec![a.clone(), b.clone()]))))
             .collect_vec()
+    }
+
+    pub fn get(list_a: &[Value], index: Value) -> Value {
+        match index {
+            Value::Number(Number::Int(crate::interpreter::int::Int::Int64(index))) => {
+                list_a.get(index as usize).unwrap().clone()
+            }
+            Value::Number(Number::Int(crate::interpreter::int::Int::BigInt(index))) => {
+                list_a.get(usize::try_from(index).unwrap()).unwrap().clone()
+            }
+            _ => todo!(),
+        }
     }
 }

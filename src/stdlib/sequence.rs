@@ -75,7 +75,7 @@ fn try_sort(v: &mut [Value]) -> anyhow::Result<()> {
 
 #[export_module]
 mod inner {
-    use crate::interpreter::iterator::mut_value_to_iterator;
+    use crate::interpreter::{function::FunctionCarrier, iterator::mut_value_to_iterator};
 
     pub fn max(seq: &Sequence) -> anyhow::Result<Value> {
         match seq {
@@ -151,6 +151,38 @@ mod inner {
                 try_sort(&mut out)?;
                 Ok(Sequence::List(Rc::new(RefCell::new(out))))
             }
+        }
+    }
+
+    pub fn sorted_by(seq: &Sequence, comp: &Callable) -> anyhow::Result<Value> {
+        match seq {
+            Sequence::List(list) => {
+                let mut out = Vec::clone(&*list.borrow());
+                // let mut retshift = Ok(());
+                out.sort_by(|left, right| {
+                    let out = comp.call(&mut [left.clone(), right.clone()]);
+
+                    let Ok(call_ret) = out else {
+                        todo!("callable errored");
+                    };
+
+                    // if ret.is_err() {
+                    //     return Ordering::Equal;
+                    // }
+
+                    // shiftshiftshiftshiftshiftshiftshiftshiftshiftshiftshiftdbg!(&left, &right, &call_ret);
+                    if call_ret < Value::from(0) {
+                        Ordering::Less
+                    } else if call_ret > Value::from(0) {
+                        Ordering::Greater
+                    } else {
+                        Ordering::Equal
+                    }
+                });
+                // ret?;
+                Ok(Value::list(out))
+            }
+            _ => todo!(),
         }
     }
 
