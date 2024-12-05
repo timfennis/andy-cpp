@@ -1,7 +1,6 @@
 //! The implementation of the various iterators in this module were heavily inspired by the ones in
 //! noulith which can be found [here](https://github.com/betaveros/noulith/blob/441d52ea433527b7ada5bc6cabd952f9ae8fb791/src/streams.rs)
 //!
-use crate::interpreter::evaluate::EvaluationResult;
 use crate::interpreter::sequence::Sequence;
 use crate::interpreter::value::{Value, ValueType};
 use self_cell::self_cell;
@@ -36,15 +35,15 @@ pub enum MutableValueIntoIterator<'a> {
 }
 
 impl Iterator for MutableValueIntoIterator<'_> {
-    type Item = EvaluationResult;
+    type Item = Value;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
-            MutableValueIntoIterator::Tuple(iter) => iter.next().map(Ok),
-            MutableValueIntoIterator::List(iter) => iter.next().map(Ok),
-            MutableValueIntoIterator::String(iter) => iter.next().map(Ok),
-            MutableValueIntoIterator::Map(iter) => iter.next().map(Ok),
-            MutableValueIntoIterator::Iterator(iter) => iter.borrow_mut().next().map(Ok),
+            MutableValueIntoIterator::Tuple(iter) => iter.next(),
+            MutableValueIntoIterator::List(iter) => iter.next(),
+            MutableValueIntoIterator::String(iter) => iter.next(),
+            MutableValueIntoIterator::Map(iter) => iter.next(),
+            MutableValueIntoIterator::Iterator(iter) => iter.borrow_mut().next(),
         }
     }
 }

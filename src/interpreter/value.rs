@@ -141,6 +141,7 @@ impl Value {
 impl FallibleOrd for Value {
     type Error = anyhow::Error;
 
+    // TODO: do we really want to use anyhow here?
     fn try_cmp(&self, other: &Self) -> anyhow::Result<Ordering> {
         self.partial_cmp(other).ok_or_else(|| {
             anyhow::anyhow!(

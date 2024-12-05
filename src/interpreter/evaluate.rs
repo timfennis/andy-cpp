@@ -1315,7 +1315,7 @@ fn execute_for_iterations(
                 // With the current implementation with a new scope declared for every iteration this produces 10 functions
                 // each with their own scope and their own version of `i`, this might potentially be a bit slower though
                 let mut scope = Environment::new_scope(environment);
-                declare_or_assign_variable(l_value, r_value?, true, &mut scope, span)?;
+                declare_or_assign_variable(l_value, r_value, true, &mut scope, span)?;
 
                 if tail.is_empty() {
                     execute_body(body, &mut scope, out_values)?;

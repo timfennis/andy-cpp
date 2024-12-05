@@ -14,7 +14,6 @@ mod inner {
         let mut out_map = HashMap::new();
 
         for item in mut_seq_into_iterator(seq) {
-            let item = item?;
             *out_map.entry(item).or_insert(0i64) += 1;
         }
 

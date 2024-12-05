@@ -1,6 +1,5 @@
 use andy_cpp_macros::export_module;
 
-use crate::interpreter::evaluate::EvaluationResult;
 use crate::interpreter::iterator::mut_seq_into_iterator;
 use crate::interpreter::sequence::Sequence;
 use crate::interpreter::value::Value;
@@ -10,17 +9,17 @@ use itertools::Itertools;
 use std::fmt::Write;
 use std::rc::Rc;
 
-pub fn join_to_string(list: &mut Sequence, sep: &str) -> EvaluationResult {
+pub fn join_to_string(list: &mut Sequence, sep: &str) -> anyhow::Result<String> {
     let mut iter = mut_seq_into_iterator(list);
     match iter.next() {
-        None => Ok(Value::from(String::new())),
+        None => Ok(String::new()),
         Some(first) => {
             let mut out = String::new();
-            write!(out, "{}", first?).map_err(|_| anyhow!("failed to write to String"))?;
+            write!(out, "{}", first).map_err(|_| anyhow!("failed to write to String"))?;
             for item in iter {
-                write!(out, "{sep}{}", item?).map_err(|_| anyhow!("failed to write to String"))?;
+                write!(out, "{sep}{}", item).map_err(|_| anyhow!("failed to write to String"))?;
             }
-            Ok(Value::from(out))
+            Ok(out)
         }
     }
 }
@@ -84,7 +83,7 @@ mod inner {
         string.push_str(value);
     }
 
-    pub fn join(list: &mut Sequence, sep: &str) -> EvaluationResult {
+    pub fn join(list: &mut Sequence, sep: &str) -> anyhow::Result<String> {
         join_to_string(list, sep)
     }
 
@@ -92,7 +91,7 @@ mod inner {
         string.split("\n\n").map(ToString::to_string).collect()
     }
 
-    pub fn unparagraphs(list: &mut Sequence) -> EvaluationResult {
+    pub fn unparagraphs(list: &mut Sequence) -> anyhow::Result<String> {
         join_to_string(list, "\n\n")
     }
 
@@ -100,7 +99,7 @@ mod inner {
         string.lines().map(ToString::to_string).collect()
     }
 
-    pub fn unlines(list: &mut Sequence) -> EvaluationResult {
+    pub fn unlines(list: &mut Sequence) -> anyhow::Result<String> {
         join_to_string(list, "\n")
     }
 
@@ -108,7 +107,7 @@ mod inner {
         string.split_whitespace().map(ToString::to_string).collect()
     }
 
-    pub fn unwords(list: &mut Sequence) -> EvaluationResult {
+    pub fn unwords(list: &mut Sequence) -> anyhow::Result<String> {
         join_to_string(list, " ")
     }
 

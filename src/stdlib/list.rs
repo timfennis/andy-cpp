@@ -1,6 +1,5 @@
 #[andy_cpp_macros::export_module]
 mod inner {
-    use crate::interpreter::evaluate::EvaluationResult;
     use crate::interpreter::iterator::mut_seq_into_iterator;
     use crate::interpreter::num::Number;
     use crate::interpreter::sequence::Sequence;
@@ -11,10 +10,8 @@ mod inner {
     use anyhow::anyhow;
 
     /// Converts any sequence into a list
-    pub fn list(seq: &mut Sequence) -> EvaluationResult {
-        Ok(Value::list(
-            mut_seq_into_iterator(seq).collect::<Result<Vec<_>, _>>()?,
-        ))
+    pub fn list(seq: &mut Sequence) -> Vec<Value> {
+        mut_seq_into_iterator(seq).collect::<Vec<_>>()
     }
 
     pub fn contains(list: &[Value], elem: &Value) -> bool {
