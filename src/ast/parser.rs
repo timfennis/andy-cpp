@@ -552,7 +552,8 @@ impl Parser {
         self.consume_binary_expression_left_associative(
             Self::exponent,
             &[
-                Token::Divide,
+                Token::ForwardSlash,
+                Token::Backslash,
                 Token::Asterix,
                 Token::Percent,
                 Token::PercentPercent,

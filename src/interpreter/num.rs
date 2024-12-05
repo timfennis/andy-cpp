@@ -6,7 +6,7 @@ use std::ops::{Add, Div, Mul, Neg, Not, Rem, Sub};
 
 use num::bigint::TryFromBigIntError;
 use num::complex::{Complex64, ComplexFloat};
-use num::{BigInt, BigRational, Complex, FromPrimitive, Signed, ToPrimitive, Zero};
+use num::{BigInt, BigRational, Complex, FromPrimitive, Integer, Signed, ToPrimitive, Zero};
 use ordered_float::OrderedFloat;
 
 use crate::interpreter::evaluate::EvaluationError;
@@ -440,6 +440,17 @@ impl Number {
     }
 
     #[must_use]
+    pub fn floor_div(self, rhs: Self) -> Self {
+        match (self, rhs) {
+            // Handle this case separately because it's faster??
+            (Number::Int(Int::Int64(l)), Number::Int(Int::Int64(r))) => {
+                Number::Int(Int::Int64(l.div_euclid(r)))
+            }
+            (l, r) => (l / r).floor(),
+        }
+    }
+
+    #[must_use]
     pub fn pow(self, rhs: Self) -> Self {
         match (self, rhs) {
             // Int vs others
@@ -595,6 +606,7 @@ macro_rules! implement_rounding {
                             Number::Float(f)
                         }
                     }
+                    // TODO: fix bigint -> int
                     Number::Rational(r) => Number::Int(Int::BigInt(r.$method().to_integer())),
                     Number::Complex(c) => Complex::new(c.re.$method(), c.im.$method()).into(),
                 }

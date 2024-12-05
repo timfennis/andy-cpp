@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::fmt;
@@ -452,13 +453,18 @@ impl TryFrom<Value> for i64 {
     type Error = ConversionError;
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
-        match value {
-            Value::Number(Number::Int(Int::Int64(i))) => Ok(i),
-            v => Err(Self::Error::UnsupportedVariant(
-                v.value_type(),
-                stringify!(i64),
-            )),
+        let typ = value.value_type();
+        if let Value::Number(Number::Int(Int::Int64(i))) = value {
+            return Ok(i);
         }
+
+        if let Value::Number(Number::Int(i)) = value {
+            if let Int::Int64(i) = i.simplified() {
+                return Ok(i);
+            }
+        }
+
+        return Err(Self::Error::UnsupportedVariant(typ, stringify!(i64)));
     }
 }
 

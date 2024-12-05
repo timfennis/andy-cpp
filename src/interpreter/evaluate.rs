@@ -899,6 +899,10 @@ fn apply_operator(
             (Value::Number(a), Value::Number(b)) => Value::Number(a / b),
             _ => return Err(create_type_error()),
         },
+        BinaryOperator::FloorDivide => match (left, right) {
+            (Value::Number(a), Value::Number(b)) => Value::Number(a.floor_div(b)),
+            _ => return Err(create_type_error()),
+        },
         BinaryOperator::CModulo => match (left, right) {
             (Value::Number(a), Value::Number(b)) => Value::Number(a.rem(b)),
             _ => return Err(create_type_error()),

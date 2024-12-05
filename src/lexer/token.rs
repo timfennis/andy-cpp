@@ -36,7 +36,8 @@ pub enum Token {
     Plus,           // +
     Minus,          // -
     Asterix,        // *
-    Divide,         // /
+    ForwardSlash,   // /
+    Backslash,      // \
     Percent,        // %
     PercentPercent, // %%
     Caret,          // ^
@@ -122,7 +123,8 @@ impl fmt::Display for Token {
             Self::Plus => "+",
             Self::Minus => "-",
             Self::Asterix => "*",
-            Self::Divide => "/",
+            Self::ForwardSlash => "/",
+            Self::Backslash => "\\",
             Self::Percent => "%",
             Self::PercentPercent => "%%",
             Self::Caret => "^",
@@ -181,7 +183,7 @@ impl Token {
             Self::Plus
                 | Self::Minus
                 | Self::Asterix
-                | Self::Divide
+                | Self::ForwardSlash
                 | Self::PercentPercent
                 | Self::Percent
                 | Self::Identifier(_)
@@ -276,7 +278,8 @@ impl TryFrom<char> for Token {
             '=' => Ok(Self::EqualsSign),
             '>' => Ok(Self::Greater),
             '<' => Ok(Self::Less),
-            '/' => Ok(Self::Divide),
+            '/' => Ok(Self::ForwardSlash),
+            '\\' => Ok(Self::Backslash),
             '(' => Ok(Self::LeftParentheses),
             ')' => Ok(Self::RightParentheses),
             '[' => Ok(Self::LeftSquareBracket),
