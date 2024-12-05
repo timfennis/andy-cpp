@@ -869,6 +869,20 @@ fn apply_operator(
         BinaryOperator::LessEquals => {
             (left.partial_cmp(&right).ok_or_else(create_type_error)? != Ordering::Greater).into()
         }
+        BinaryOperator::Spaceship => {
+            match left.partial_cmp(&right).ok_or_else(create_type_error)? {
+                Ordering::Less => Value::from(-1),
+                Ordering::Equal => Value::from(0),
+                Ordering::Greater => Value::from(1),
+            }
+        }
+        BinaryOperator::InverseSpaceship => {
+            match left.partial_cmp(&right).ok_or_else(create_type_error)? {
+                Ordering::Less => Value::from(1),
+                Ordering::Equal => Value::from(0),
+                Ordering::Greater => Value::from(-1),
+            }
+        }
         BinaryOperator::Plus => match (left, right) {
             (Value::Number(a), Value::Number(b)) => Value::Number(a + b),
             _ => return Err(create_type_error()),

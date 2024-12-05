@@ -24,12 +24,14 @@ pub enum Token {
     LogicOr,  // or
     LogicNot, // not
     // Operator - Comparison
-    EqualsEquals,  // ==
-    BangEquals,    // !=
-    Greater,       // >
-    GreaterEquals, // >=
-    Less,          // <
-    LessEquals,    // <=
+    EqualsEquals,     // ==
+    BangEquals,       // !=
+    Greater,          // >
+    GreaterEquals,    // >=
+    Less,             // <
+    LessEquals,       // <=
+    Spaceship,        // <=>
+    InverseSpaceship, // >=<
     // Operator - Math
     Plus,           // +
     Minus,          // -
@@ -115,6 +117,8 @@ impl fmt::Display for Token {
             Self::GreaterEquals => ">=",
             Self::Less => "<",
             Self::LessEquals => "<=",
+            Self::Spaceship => "<=>",
+            Self::InverseSpaceship => ">=<",
             Self::Plus => "+",
             Self::Minus => "-",
             Self::Asterix => "*",
@@ -213,6 +217,8 @@ impl TryFrom<(char, char, char)> for Token {
 
     fn try_from((c1, c2, c3): (char, char, char)) -> Result<Self, Self::Error> {
         match (c1, c2, c3) {
+            ('<', '=', '>') => Ok(Self::Spaceship),
+            ('>', '=', '<') => Ok(Self::InverseSpaceship),
             ('.', '.', '=') => Ok(Self::DotDotEquals),
             _ => Err(()),
         }

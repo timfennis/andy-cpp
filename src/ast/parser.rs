@@ -498,7 +498,7 @@ impl Parser {
 
     fn comparison(&mut self) -> Result<ExpressionLocation, Error> {
         self.consume_binary_expression_left_associative(
-            Self::bit_shift,
+            Self::spaceship,
             &[
                 Token::EqualsEquals,
                 Token::BangEquals,
@@ -509,6 +509,14 @@ impl Parser {
                 Token::In,
             ],
             true,
+        )
+    }
+
+    fn spaceship(&mut self) -> Result<ExpressionLocation, Error> {
+        self.consume_binary_expression_left_associative(
+            Self::bit_shift,
+            &[Token::Spaceship, Token::InverseSpaceship],
+            false,
         )
     }
 
