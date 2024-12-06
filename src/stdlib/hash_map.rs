@@ -79,6 +79,21 @@ mod inner {
                 }
                 out
             }
+            Sequence::MaxHeap(h) => h
+                .borrow()
+                .iter()
+                .map(|value| (value.0.clone(), Value::unit()))
+                .collect(),
+            Sequence::MinHeap(h) => h
+                .borrow()
+                .iter()
+                .map(|value| (value.0 .0.clone(), Value::unit()))
+                .collect(),
+            Sequence::Deque(rc) => rc
+                .borrow()
+                .iter()
+                .map(|v| (v.to_owned(), Value::unit()))
+                .collect(),
         };
 
         Value::Sequence(Sequence::Map(Rc::new(RefCell::new(out)), None))

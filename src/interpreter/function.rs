@@ -160,6 +160,9 @@ pub enum ParamType {
     Tuple,
     Map,
     Iterator,
+    MinHeap,
+    MaxHeap,
+    Deque,
 }
 
 impl ParamType {
@@ -188,7 +191,10 @@ impl ParamType {
                 | ValueType::Map
                 // Sequence is always 1 distance to tuple
                 | ValueType::Tuple(_)
-                | ValueType::Iterator,
+                | ValueType::Iterator
+                | ValueType::MinHeap
+                | ValueType::MaxHeap
+                | ValueType::Deque,
             ) => Some(1),
             _ => None,
         }
@@ -211,6 +217,9 @@ impl From<&Value> for ParamType {
             Value::Function(_) => ParamType::Function,
             Value::Sequence(Sequence::Map(_, _)) => ParamType::Map,
             Value::Sequence(Sequence::Iterator(_)) => ParamType::Iterator,
+            Value::Sequence(Sequence::MaxHeap(_)) => ParamType::MaxHeap,
+            Value::Sequence(Sequence::MinHeap(_)) => ParamType::MinHeap,
+            Value::Sequence(Sequence::Deque(_)) => ParamType::Deque,
         }
     }
 }

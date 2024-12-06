@@ -1,8 +1,10 @@
 use crate::hash_map::HashMap;
+use crate::interpreter::heap::{MaxHeap, MinHeap};
 use crate::interpreter::iterator::ValueIterator;
 use crate::interpreter::value::Value;
 use std::cell::RefCell;
 use std::cmp::Ordering;
+use std::collections::VecDeque;
 use std::fmt;
 use std::rc::Rc;
 
@@ -16,6 +18,9 @@ pub enum Sequence {
     Tuple(Rc<Vec<Value>>),
     Map(Rc<RefCell<HashMap<Value, Value>>>, Option<Box<Value>>),
     Iterator(Rc<RefCell<ValueIterator>>),
+    MaxHeap(Rc<RefCell<MaxHeap>>),
+    MinHeap(Rc<RefCell<MinHeap>>),
+    Deque(Rc<RefCell<VecDeque<Value>>>),
 }
 
 impl Sequence {
@@ -27,6 +32,9 @@ impl Sequence {
             Sequence::Tuple(tup) => Some(tup.len()),
             Sequence::Map(map, _) => Some(map.borrow().len()),
             Sequence::Iterator(_iter) => None,
+            Sequence::MaxHeap(heap) => Some(heap.borrow().len()),
+            Sequence::MinHeap(heap) => Some(heap.borrow().len()),
+            Sequence::Deque(deque) => Some(deque.borrow().len()),
         }
     }
 }
@@ -38,7 +46,13 @@ impl PartialEq for Sequence {
             (Sequence::List(a), Sequence::List(b)) => a == b,
             (Sequence::Tuple(a), Sequence::Tuple(b)) => a == b,
             (Sequence::Map(a, _), Sequence::Map(b, _)) => a == b,
+            (Sequence::Deque(a), Sequence::Deque(b)) => a == b,
+
+            // TODO: These implementations are a little sussy
+            (Sequence::MaxHeap(a), Sequence::MaxHeap(b)) => Rc::ptr_eq(a, b),
+            (Sequence::MinHeap(a), Sequence::MinHeap(b)) => Rc::ptr_eq(a, b),
             (Sequence::Iterator(a), Sequence::Iterator(b)) => Rc::ptr_eq(a, b),
+
             _ => false,
         }
     }
@@ -111,6 +125,10 @@ impl fmt::Debug for Sequence {
             Sequence::Iterator(_) => {
                 write!(f, "iterator")
             }
+            // TODO: create more sensible implementations??
+            Sequence::MaxHeap(_) => write!(f, "max-heap"),
+            Sequence::MinHeap(_) => write!(f, "min-heap"),
+            Sequence::Deque(_) => write!(f, "deque"),
         }
     }
 }
