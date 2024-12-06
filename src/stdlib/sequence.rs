@@ -505,6 +505,17 @@ mod inner {
             .collect::<Vec<_>>()
     }
 
+    // TODO: this implementation probably clones a bit more than it needs to, but it's better tol
+    //       have something than nothing
+    pub fn circular_tuple_windows(seq: &mut Sequence) -> Vec<Value> {
+        mut_seq_into_iterator(seq)
+            .collect::<Vec<_>>()
+            .iter()
+            .circular_tuple_windows::<(_, _)>()
+            .map(|(a, b)| Value::tuple(vec![a.clone(), b.clone()]))
+            .collect::<Vec<_>>()
+    }
+
     #[function(name = "pairwise")]
     pub fn pairwise_map(seq: &mut Sequence, function: &Callable) -> EvaluationResult {
         let main = mut_seq_into_iterator(seq).collect::<Vec<_>>();
