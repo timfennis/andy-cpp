@@ -79,6 +79,15 @@ pub fn mut_seq_into_iterator(sequence: &mut Sequence) -> MutableValueIntoIterato
         Sequence::List(list) => {
             MutableValueIntoIterator::List(SharedVecIterator::from_shared_vec(list))
         }
+        Sequence::MinHeap(_list) => {
+            todo!()
+        }
+        Sequence::MaxHeap(_list) => {
+            todo!()
+        }
+        Sequence::Deque(_deque) => {
+            todo!()
+        }
         Sequence::Tuple(tup) => MutableValueIntoIterator::Tuple(RcVecIterator::from_rc_vec(tup)),
         Sequence::Map(map, _) => {
             MutableValueIntoIterator::Map(SharedHashMapIterator::from_ref(map))
