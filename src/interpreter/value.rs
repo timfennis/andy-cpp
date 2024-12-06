@@ -128,6 +128,9 @@ impl Value {
             Value::Function(_) => ValueType::Function,
             Value::Sequence(Sequence::Map(_, _)) => ValueType::Map,
             Value::Sequence(Sequence::Iterator(_)) => ValueType::Iterator,
+            Value::Sequence(Sequence::MaxHeap(_)) => ValueType::MaxHeap,
+            Value::Sequence(Sequence::MinHeap(_)) => ValueType::MinHeap,
+            Value::Sequence(Sequence::Deque(_)) => ValueType::Deque,
         }
     }
 
@@ -229,9 +232,23 @@ impl Hash for Value {
                     state.write_u8(9);
                     Rc::as_ptr(i).hash(state);
                 }
+                Sequence::MaxHeap(h) => {
+                    state.write_u8(10);
+                    Rc::as_ptr(h).hash(state); // TODO: does this make sense?
+                }
+                Sequence::MinHeap(h) => {
+                    state.write_u8(11);
+                    Rc::as_ptr(h).hash(state); // TODO: does this make sense?
+                }
+                Sequence::Deque(list) => {
+                    state.write_u8(12);
+                    for item in list.borrow().iter() {
+                        item.hash(state);
+                    }
+                }
             },
             Value::Function(f) => {
-                state.write_u8(9);
+                state.write_u8(13);
                 Rc::as_ptr(f).hash(state);
             }
         }
@@ -302,8 +319,7 @@ impl From<i32> for Value {
 
 impl From<char> for Value {
     fn from(value: char) -> Self {
-        // Haha so many heap allocations and decorators for a single character
-        Self::Sequence(Sequence::String(Rc::new(RefCell::new(String::from(value)))))
+        Value::string(value)
     }
 }
 
@@ -589,6 +605,9 @@ pub enum ValueType {
     Function,
     Map,
     Iterator,
+    MinHeap,
+    MaxHeap,
+    Deque,
 }
 
 impl From<&Value> for ValueType {
@@ -609,6 +628,9 @@ impl fmt::Display for ValueType {
             Self::Function => write!(f, "function"),
             Self::Map => write!(f, "map"),
             Self::Iterator => write!(f, "iterator"),
+            Self::MinHeap => write!(f, "min-heap"),
+            Self::MaxHeap => write!(f, "max-heap"),
+            Self::Deque => write!(f, "deque"),
         }
     }
 }
@@ -631,7 +653,7 @@ impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Option(Some(v)) => write!(f, "Some({v})"),
-            Self::Option(None) => write!(f, ""),
+            Self::Option(None) => write!(f, "None"),
             Self::Number(n) => write!(f, "{n}"),
             Self::Bool(b) => write!(f, "{b}"),
             Self::Function(_) => {

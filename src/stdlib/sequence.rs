@@ -91,6 +91,19 @@ mod inner {
             Sequence::Tuple(l) => l.iter().try_max(),
             Sequence::Map(map, _) => map.borrow().keys().try_max(),
             Sequence::Iterator(iter) => iter.borrow_mut().try_max(),
+            Sequence::MaxHeap(h) => h
+                .borrow()
+                .peek()
+                .map(|hv| hv.0.clone())
+                .ok_or_else(|| anyhow::anyhow!("empty input to max")),
+            // TODO: can this be improved?
+            Sequence::MinHeap(h) => h
+                .borrow()
+                .iter()
+                .last()
+                .map(|v| v.0 .0.clone())
+                .ok_or_else(|| anyhow::anyhow!("empty input to max")),
+            Sequence::Deque(d) => d.try_borrow()?.iter().try_max(),
         }
     }
     pub fn min(seq: &Sequence) -> anyhow::Result<Value> {
@@ -105,6 +118,19 @@ mod inner {
             Sequence::Tuple(l) => l.iter().try_min(),
             Sequence::Map(map, _) => map.borrow().keys().try_min(),
             Sequence::Iterator(iter) => iter.borrow_mut().try_min(),
+            Sequence::MaxHeap(h) => h
+                .borrow()
+                .iter()
+                .last()
+                .map(|hv| hv.0.clone())
+                .ok_or_else(|| anyhow::anyhow!("empty input to max")),
+            // TODO: can this be improved?
+            Sequence::MinHeap(h) => h
+                .borrow()
+                .peek()
+                .map(|hv| hv.0 .0.clone())
+                .ok_or_else(|| anyhow::anyhow!("empty input to max")),
+            Sequence::Deque(d) => d.try_borrow()?.iter().try_min(),
         }
     }
 
@@ -123,6 +149,9 @@ mod inner {
             Sequence::Tuple(_) => Err(anyhow!("tuple cannot be sorted in place")),
             Sequence::Map(_, _) => Err(anyhow!("map cannot be sorted in place")),
             Sequence::Iterator(_) => Err(anyhow!("iterator cannot be sorted in place")),
+            Sequence::MaxHeap(_) => Err(anyhow!("heap is already sorted")),
+            Sequence::MinHeap(_) => Err(anyhow!("heap is already sorted")),
+            Sequence::Deque(_) => Err(anyhow!("deque cannot be sorted in place")),
         }
     }
 
@@ -156,16 +185,12 @@ mod inner {
     }
 
     pub fn len(seq: &Sequence) -> anyhow::Result<usize> {
-        match seq {
-            Sequence::String(s) => Ok(s.borrow().chars().count()),
-            Sequence::List(l) => Ok(l.borrow().len()),
-            Sequence::Tuple(t) => Ok(t.len()),
-            Sequence::Map(d, _) => Ok(d.borrow().len()),
-            Sequence::Iterator(_) => Err(anyhow!("cannot determine the length of an iterator")),
-        }
+        // TODO: determine the type programmatically instead of hardcoding it to iterator (in case we add more types)
+        seq.length()
+            .ok_or_else(|| anyhow!("cannot determine the length of an iterator"))
     }
 
-    pub fn enumerate(seq: &Sequence) -> Value {
+    pub fn enumerate(seq: &mut Sequence) -> Value {
         match seq {
             Sequence::String(s) => s
                 .borrow()
@@ -175,29 +200,6 @@ mod inner {
                     Value::Sequence(Sequence::Tuple(Rc::new(vec![
                         Value::from(index),
                         Value::from(char),
-                    ])))
-                })
-                .collect::<Vec<Value>>()
-                .into(),
-            Sequence::List(list) => list
-                .borrow()
-                .iter()
-                .enumerate()
-                .map(|(index, value)| {
-                    Value::Sequence(Sequence::Tuple(Rc::new(vec![
-                        Value::from(index),
-                        Value::clone(value),
-                    ])))
-                })
-                .collect::<Vec<Value>>()
-                .into(),
-            Sequence::Tuple(tuple) => tuple
-                .iter()
-                .enumerate()
-                .map(|(index, value)| {
-                    Value::Sequence(Sequence::Tuple(Rc::new(vec![
-                        Value::from(index),
-                        Value::clone(value),
                     ])))
                 })
                 .collect::<Vec<Value>>()
@@ -230,6 +232,12 @@ mod inner {
 
                 out.into()
             }
+            seq => Value::list(
+                mut_seq_into_iterator(seq)
+                    .enumerate()
+                    .map(|(idx, value)| Value::tuple(vec![Value::from(idx), value]))
+                    .collect::<Vec<_>>(),
+            ),
         }
     }
 
