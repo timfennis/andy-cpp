@@ -15,9 +15,9 @@ pub fn join_to_string(list: &mut Sequence, sep: &str) -> anyhow::Result<String> 
         None => Ok(String::new()),
         Some(first) => {
             let mut out = String::new();
-            write!(out, "{}", first).map_err(|_| anyhow!("failed to write to String"))?;
+            write!(out, "{first}").map_err(|_| anyhow!("failed to write to String"))?;
             for item in iter {
-                write!(out, "{sep}{}", item).map_err(|_| anyhow!("failed to write to String"))?;
+                write!(out, "{sep}{item}").map_err(|_| anyhow!("failed to write to String"))?;
             }
             Ok(out)
         }

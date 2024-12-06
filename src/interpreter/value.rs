@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::fmt;
@@ -15,7 +14,6 @@ use crate::interpreter::function::{Function, OverloadedFunction};
 use crate::interpreter::int::Int;
 use crate::interpreter::num::{Number, NumberToUsizeError, NumberType};
 use crate::interpreter::sequence::Sequence;
-use crate::interpreter::value::ConversionError::{IncorrectLength, UnsupportedVariant};
 
 use super::iterator::{ValueIterator, ValueRange, ValueRangeFrom, ValueRangeInclusive};
 
@@ -429,7 +427,7 @@ impl TryFrom<Value> for (Value, Value) {
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
         let Value::Sequence(Sequence::Tuple(tuple)) = value else {
-            return Err(UnsupportedVariant(
+            return Err(ConversionError::UnsupportedVariant(
                 value.value_type(),
                 stringify!((Value, Value)),
             ));
@@ -444,7 +442,7 @@ impl TryFrom<Value> for (Value, Value) {
         if let (Some(left), Some(right)) = (left, right) {
             Ok((left, right))
         } else {
-            Err(IncorrectLength(stringify!((Value, Value))))
+            Err(ConversionError::IncorrectLength(stringify!((Value, Value))))
         }
     }
 }
@@ -464,7 +462,7 @@ impl TryFrom<Value> for i64 {
             }
         }
 
-        return Err(Self::Error::UnsupportedVariant(typ, stringify!(i64)));
+        Err(Self::Error::UnsupportedVariant(typ, stringify!(i64)))
     }
 }
 

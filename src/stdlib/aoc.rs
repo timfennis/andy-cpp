@@ -5,12 +5,11 @@ mod inner {
     use std::rc::Rc;
 
     use crate::hash_map::HashMap;
-    use crate::interpreter::evaluate::EvaluationResult;
     use crate::interpreter::iterator::mut_seq_into_iterator;
     use crate::interpreter::sequence::Sequence;
     use crate::interpreter::value::Value;
 
-    pub fn frequencies(seq: &mut Sequence) -> EvaluationResult {
+    pub fn frequencies(seq: &mut Sequence) -> Value {
         let mut out_map = HashMap::new();
 
         for item in mut_seq_into_iterator(seq) {
@@ -22,9 +21,9 @@ mod inner {
             .map(|(key, value)| (key, Value::from(value)))
             .collect::<HashMap<Value, Value>>();
 
-        Ok(Value::Sequence(Sequence::Map(
+        Value::Sequence(Sequence::Map(
             Rc::new(RefCell::new(out_map)),
             Some(Box::new(Value::from(0))),
-        )))
+        ))
     }
 }

@@ -6,7 +6,7 @@ use std::ops::{Add, Div, Mul, Neg, Not, Rem, Sub};
 
 use num::bigint::TryFromBigIntError;
 use num::complex::{Complex64, ComplexFloat};
-use num::{BigInt, BigRational, Complex, FromPrimitive, Integer, Signed, ToPrimitive, Zero};
+use num::{BigInt, BigRational, Complex, FromPrimitive, Signed, ToPrimitive, Zero};
 use ordered_float::OrderedFloat;
 
 use crate::interpreter::evaluate::EvaluationError;

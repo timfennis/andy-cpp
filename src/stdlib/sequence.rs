@@ -410,32 +410,28 @@ mod inner {
         })
     }
 
-    pub fn combinations(seq: &mut Sequence, k: usize) -> EvaluationResult {
-        // TODO: rather than allocating all these items in memory it would be much better to produce an iterator
-        // We could compute this size in advance and throw an error if the request is too insane
-        Ok(Value::list(
+    pub fn combinations(seq: &mut Sequence, k: usize) -> Value {
+        Value::list(
             mut_seq_into_iterator(seq)
                 .combinations(k)
                 .map(Value::list)
                 .collect::<Vec<Value>>(),
-        ))
+        )
     }
 
-    pub fn permutations(seq: &mut Sequence, k: usize) -> EvaluationResult {
-        // TODO: rather than allocating all these items in memory it would be much better to produce an iterator
-        // We could compute this size in advance and throw an error if the request is too insane
-        Ok(Value::list(
+    pub fn permutations(seq: &mut Sequence, k: usize) -> Value {
+        Value::list(
             mut_seq_into_iterator(seq)
                 .permutations(k)
                 .map(Value::list)
                 .collect::<Vec<Value>>(),
-        ))
+        )
     }
 
-    pub fn prefixes(seq: &mut Sequence) -> EvaluationResult {
+    pub fn prefixes(seq: &mut Sequence) -> Value {
         // Special case for string which is more efficient and doesn't produce lists of characters
         if let Sequence::String(string) = &seq {
-            return Ok(Value::list(
+            return Value::list(
                 string
                     .borrow()
                     .chars()
@@ -445,41 +441,41 @@ mod inner {
                         Some(Value::string(acc.clone()))
                     })
                     .collect::<Vec<Value>>(),
-            ));
+            );
         }
 
         let iterator = mut_seq_into_iterator(seq);
 
-        Ok(Value::list(
+        Value::list(
             iterator
                 .scan(Vec::new(), |acc, item| {
                     acc.push(item);
                     Some(Value::list(acc.clone()))
                 })
                 .collect::<Vec<Value>>(),
-        ))
+        )
     }
 
-    pub fn suffixes(seq: &mut Sequence) -> EvaluationResult {
+    pub fn suffixes(seq: &mut Sequence) -> Value {
         // Special case for string which is more efficient and doesn't produce lists of characters
         if let Sequence::String(string) = &seq {
-            return Ok(Value::list(
+            return Value::list(
                 string
                     .borrow()
                     .char_indices()
                     .map(|(idx, _)| Value::string(&string.borrow()[idx..]))
                     .collect::<Vec<Value>>(),
-            ));
+            );
         }
 
         let iterator = mut_seq_into_iterator(seq);
         let out = iterator.collect::<Vec<_>>();
 
-        Ok(Value::list(
+        Value::list(
             (0..out.len())
                 .map(|i| Value::list(out[i..].to_vec()))
                 .collect::<Vec<Value>>(),
-        ))
+        )
     }
 
     pub fn transposed(seq: &mut Sequence) -> EvaluationResult {
