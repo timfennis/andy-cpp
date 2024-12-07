@@ -551,6 +551,23 @@ mod inner {
             .map(Value::list)
             .collect::<Vec<Value>>()
     }
+
+    pub fn multi_cartesian_product(seq: &mut Sequence) -> anyhow::Result<Value> {
+        let mut iterators = Vec::new();
+
+        for mut value in mut_seq_into_iterator(seq) {
+            let iter = mut_value_to_iterator(&mut value)?.collect_vec().into_iter();
+            iterators.push(iter);
+        }
+
+        let out = iterators
+            .into_iter()
+            .multi_cartesian_product()
+            .map(Value::list)
+            .collect_vec();
+
+        return Ok(Value::list(out));
+    }
 }
 
 fn fold_iterator(
