@@ -1,10 +1,10 @@
 use crate::hash_map::HashMap;
-use crate::interpreter::heap::{HeapValue, MaxHeap, MinHeap};
+use crate::interpreter::heap::{MaxHeap, MinHeap};
 use crate::interpreter::iterator::ValueIterator;
 use crate::interpreter::value::Value;
 use std::cell::RefCell;
-use std::cmp::{Ordering, Reverse};
-use std::collections::{BinaryHeap, VecDeque};
+use std::cmp::Ordering;
+use std::collections::VecDeque;
 use std::fmt;
 use std::rc::Rc;
 
