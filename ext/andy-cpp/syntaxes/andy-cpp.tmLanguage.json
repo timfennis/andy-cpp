@@ -209,9 +209,14 @@
           "match": "\\b(not|or|and)\\b"
         },
         {
+          "comment": "range operators",
+          "name": "keyword.operator.range.andy-cpp",
+          "match": "(\\.\\.=?)"
+        },
+        {
           "comment": "augmented assignment operators",
           "name": "keyword.operator.assignment.andy-cpp",
-          "match": "((\\+|-|\\*|/|\\^|&|\\||<<|>>|~|<>|\\+\\+)=)"
+          "match": "((\\+|-|\\*|/|\\\\|\\^|&|\\||<<|>>|~|<>|\\+\\+)=)"
         },
         {
           "comment": "function augmented assignment opreators",
@@ -226,12 +231,12 @@
         {
           "comment": "comparison operators",
           "name": "keyword.operator.comparison.andy-cpp",
-          "match": "(=(=)?(?!>)|!=|<=|(?<!=)>=)"
+          "match": "(>=<|<=>|=(=)?(?!>)|!=|<=|(?<!=)>=)"
         },
         {
           "comment": "math operators",
           "name": "keyword.operator.arithmetic.andy-cpp",
-          "match": "(\\+|\\-|\\*|\\/(?!\\/)|\\^|\\%%?|>>|<<|&(?!&)|\\|(?!\\|)|~)"
+          "match": "(\\+|\\-|\\*|/(?!\\/)|\\\\|\\^|\\%%?|>>|<<|&(?!&)|\\|(?!\\|)|~)"
         },
         {
           "name": "punctuation.semicolon.andy-cpp",
@@ -282,7 +287,7 @@
         {
           "comment": "Field accessor style call",
           "name": "meta.function.call.andy-cpp",
-          "match": "(\\.)([A-Za-z_][A-Za-z0-9_]*)",
+          "match": "(?<!\\.)(\\.)([A-Za-z_][A-Za-z0-9_]*)",
           "captures": {
             "1": {
               "name": "keyword.operator.access.dot.andy-cpp"
@@ -300,7 +305,7 @@
         {
           "comment": "Function call",
           "name": "meta.function.call.andy-cpp",
-          "begin": "([A-Za-z_][A-Za-z0-9_]*)(\\()",
+          "begin": "([A-Za-z_][A-Za-z0-9_\\?]*)(\\()",
           "beginCaptures": {
             "1": {
               "name": "entity.name.function.andy-cpp"
