@@ -1,5 +1,11 @@
 # Change Log
 
+## [v0.0.6] (2024-10-11)
+
+- Fixed some issues with arbitrary base literals not getting parsed correctly
+- Correctly detect augmented assignment operators like `++=`
+- Detect `<>` and `++` as special non arithmetic operators
+
 ## [v0.0.5] (2024-10-11)
 
 - Fixed an issue with `.` operator's capture groups incorrectly parsing methods as operators

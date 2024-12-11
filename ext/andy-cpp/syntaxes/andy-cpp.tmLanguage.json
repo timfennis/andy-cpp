@@ -120,7 +120,7 @@
         },
         {
           "comment": "Arbitrary radix numbers (parsed as if a-z is always valid)",
-          "match": "\\b(0r[0-9A-Za-z][0-9A-Za-z_]*)\\b",
+          "match": "\\b((1[0-9]|2[0-9]|3[0-6]|[2-9])r[0-9A-Za-z][0-9A-Za-z_]*)\\b",
           "name": "constant.numeric.andy-cpp"
         },
         {
@@ -216,7 +216,7 @@
         {
           "comment": "augmented assignment operators",
           "name": "keyword.operator.assignment.andy-cpp",
-          "match": "((\\+|-|\\*|/|\\\\|\\^|&|\\||<<|>>|~|<>|\\+\\+)=)"
+          "match": "((\\+\\+?|-|\\*|/|\\|\\^|&|\\||<<|>>|~|<>)=)"
         },
         {
           "comment": "function augmented assignment opreators",
@@ -232,6 +232,11 @@
           "comment": "comparison operators",
           "name": "keyword.operator.comparison.andy-cpp",
           "match": "(>=<|<=>|=(=)?(?!>)|!=|<=|(?<!=)>=)"
+        },
+        {
+          "comment": "math operators",
+          "name": "keyword.operator.other.andy-cpp",
+          "match": "(\\+\\+|<>)"
         },
         {
           "comment": "math operators",
