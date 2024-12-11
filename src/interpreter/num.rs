@@ -193,216 +193,152 @@ impl Not for Number {
     }
 }
 
-impl Add for Number {
-    type Output = Self;
+trait Unbox {
+    type Output;
+    fn unbox(self) -> Self::Output;
+}
 
-    fn add(self, rhs: Self) -> Self::Output {
-        match (self, rhs) {
-            // Operands are the same
-            (Self::Int(i1), Self::Int(i2)) => Self::Int(i1 + i2),
-            (Self::Float(f1), Self::Float(f2)) => Self::Float(f1.add(f2)),
-            (Self::Rational(r1), Self::Rational(r2)) => {
-                Self::Rational(Box::new(Add::add(*r1, *r2)))
-            }
-            (Self::Complex(c1), Self::Complex(c2)) => Self::Complex(c1 + c2),
-
-            // Float vs other
-            (Self::Float(p1), Self::Int(p2)) => Self::Float(p1.add(f64::from(p2))),
-            (Self::Float(p1), Self::Rational(p2)) => Self::Float(p1.add(rational_to_float(&p2))),
-            (Self::Float(p1), Self::Complex(p2)) => Self::Complex(Complex::from(p1).add(p2)),
-
-            // Int vs other
-            (Self::Int(p1), Self::Float(p2)) => Self::Float(f64::from(p1).add(p2)),
-            (Self::Int(p1), Self::Rational(p2)) => {
-                Self::Rational(Box::new(Add::add(BigRational::from(p1), *p2)))
-            }
-            (Self::Int(p1), Self::Complex(p2)) => Self::Complex(Complex::from(p1).add(p2)),
-
-            // Rational vs other
-            (Self::Rational(p1), Self::Int(p2)) => {
-                Self::Rational(Box::new(Add::add(*p1, BigRational::from(p2))))
-            }
-            (Self::Rational(p1), Self::Float(p2)) => Self::Float(rational_to_float(&p1).add(p2)),
-            (Self::Rational(p1), Self::Complex(p2)) => {
-                Self::Complex(rational_to_complex(&p1).add(p2))
-            }
-
-            // Complex vs other
-            (Self::Complex(p1), Self::Int(p2)) => Self::Complex(Complex::from(p2).add(p1)),
-            (Self::Complex(p1), Self::Rational(p2)) => {
-                Self::Complex(Complex::from(p2.to_f64().unwrap_or(f64::NAN)).add(p1))
-            }
-            (Self::Complex(p1), Self::Float(p2)) => Self::Complex(Complex::from(p2).add(p1)),
-        }
+impl Unbox for Box<BigRational> {
+    type Output = BigRational;
+    fn unbox(self) -> Self::Output {
+        *self
     }
 }
 
-impl Sub for Number {
-    type Output = Self;
-    fn sub(self, rhs: Self) -> Self::Output {
-        match (self, rhs) {
-            // Operands are the same
-            (Self::Int(i1), Self::Int(i2)) => Self::Int(i1 - i2),
-            (Self::Float(f1), Self::Float(f2)) => Self::Float(f1.sub(f2)),
-            (Self::Rational(r1), Self::Rational(r2)) => {
-                Self::Rational(Box::new(Sub::sub(*r1, *r2)))
-            }
-            (Self::Complex(c1), Self::Complex(c2)) => Self::Complex(c1 - c2),
-
-            // Float vs other
-            (Self::Float(p1), Self::Int(p2)) => Self::Float(p1.sub(f64::from(p2))),
-            (Self::Float(p1), Self::Rational(p2)) => Self::Float(p1.sub(rational_to_float(&p2))),
-            (Self::Float(p1), Self::Complex(p2)) => Self::Complex(Complex::from(p1).sub(p2)),
-
-            // Int vs other
-            (Self::Int(p1), Self::Float(p2)) => Self::Float(f64::from(p1).sub(p2)),
-            (Self::Int(p1), Self::Rational(p2)) => {
-                Self::Rational(Box::new(Sub::sub(BigRational::from(p1), *p2)))
-            }
-            (Self::Int(p1), Self::Complex(p2)) => Self::Complex(Complex::from(p1).sub(p2)),
-
-            // Rational vs Other
-            (Self::Rational(p1), Self::Int(p2)) => {
-                Self::Rational(Box::new(Sub::sub(*p1, BigRational::from(p2))))
-            }
-            (Self::Rational(p1), Self::Float(p2)) => Self::Float(rational_to_float(&p1).sub(p2)),
-            (Self::Rational(p1), Self::Complex(p2)) => {
-                Self::Complex(Complex::from(p1.to_f64().unwrap_or(f64::NAN)).sub(p2))
-                //TODO: Check if this is logical
-            }
-
-            // Complex vs Other
-            (Self::Complex(p1), Self::Int(p2)) => Self::Complex(Complex::from(p2).sub(p1)),
-            (Self::Complex(p1), Self::Rational(p2)) => {
-                Self::Complex(Complex::from(p2.to_f64().unwrap_or(f64::NAN)).sub(p1))
-            }
-            (Self::Complex(p1), Self::Float(p2)) => Self::Complex(Complex::from(p2).sub(p1)),
-        }
+impl<'a> Unbox for &'a Box<BigRational> {
+    type Output = &'a BigRational;
+    fn unbox(self) -> Self::Output {
+        &**self
     }
 }
 
-impl Div for Number {
-    type Output = Self;
-
-    fn div(self, rhs: Self) -> Self::Output {
-        match (self, rhs) {
-            (Self::Int(ref p1), Self::Int(p2)) => {
-                if p1.is_zero() && p2.is_zero() {
-                    return Self::Float(f64::NAN);
-                } else if p2.is_zero() {
-                    return Self::Float(f64::INFINITY);
-                } else if p1.rem(&p2) == 0i32.into() {
-                    return Self::Int(p1.div(&p2));
+macro_rules! impl_binary_operator {
+    ($self:ty, $other:ty, $trait:ident, $method:ident,$intmethod:expr,$floatmethod:expr,$rationalmethod:expr,$complexmethod:expr) => {
+        impl $trait<$other> for $self {
+            type Output = Number;
+            fn $method(self, other: $other) -> Number {
+                match (self, other) {
+                    // Complex
+                    (Number::Complex(left), right) => {
+                        Number::Complex($complexmethod(left, right.to_complex()))
+                    }
+                    (left, Number::Complex(right)) => {
+                        Number::Complex($complexmethod(left.to_complex(), right))
+                    }
+                    // Float
+                    // NOTE: these `expect` calls are safe because complex has already been handled
+                    (Number::Float(left), right) => Number::Float($floatmethod(
+                        left,
+                        right.to_f64().expect("cannot convert complex to float"),
+                    )),
+                    (left, Number::Float(right)) => Number::Float($floatmethod(
+                        left.to_f64().expect("cannot convert complex to float"),
+                        right,
+                    )),
+                    // Rational
+                    // NOTE: these `expect` calls are safe because complex and float are handled
+                    (left, Number::Rational(right)) => Number::rational($rationalmethod(
+                        left.to_rational().expect("cannot convert to rational"),
+                        right.unbox(),
+                    )),
+                    (Number::Rational(left), right) => Number::rational($rationalmethod(
+                        left.unbox(),
+                        right.to_rational().expect("cannot convert to rational"),
+                    )),
+                    // Integer
+                    (Number::Int(left), Number::Int(right)) => {
+                        // TODO: is this double to owned retard?
+                        Number::Int($intmethod(left.to_owned(), right.to_owned()))
+                    }
                 }
-                BigRational::new(p1.into(), p2.into()).into()
             }
-            (Self::Float(p1), Self::Float(p2)) => Self::Float(p1 / p2),
-            (Self::Rational(p1), Self::Rational(p2)) => {
-                Self::Rational(Box::new(Div::div(*p1, *p2)))
-            }
-            (Self::Complex(p1), Self::Complex(p2)) => Self::Complex(p1 / p2),
+        }
+    };
+}
 
-            // Float vs other
-            (Self::Float(p1), Self::Int(p2)) => Self::Float(p1.div(f64::from(p2))),
-            (Self::Float(p1), Self::Rational(p2)) => Self::Float(p1.div(rational_to_float(&p2))),
-            (Self::Float(p1), Self::Complex(p2)) => Self::Complex(Complex::from(p1).div(p2)),
+macro_rules! impl_binary_operator_all {
+    ($implement:ident,$method:ident,$intmethod:expr,$floatmethod:expr,$rationalmethod:expr,$complexmethod:expr) => {
+        impl_binary_operator!(
+            Number,
+            Number,
+            $implement,
+            $method,
+            $intmethod,
+            $floatmethod,
+            $rationalmethod,
+            $complexmethod
+        );
+        impl_binary_operator!(
+            Number,
+            &Number,
+            $implement,
+            $method,
+            $intmethod,
+            $floatmethod,
+            $rationalmethod,
+            $complexmethod
+        );
+        impl_binary_operator!(
+            &Number,
+            Number,
+            $implement,
+            $method,
+            $intmethod,
+            $floatmethod,
+            $rationalmethod,
+            $complexmethod
+        );
+        impl_binary_operator!(
+            &Number,
+            &Number,
+            $implement,
+            $method,
+            $intmethod,
+            $floatmethod,
+            $rationalmethod,
+            $complexmethod
+        );
+    };
+}
 
-            // Int vs other
-            (Self::Int(p1), Self::Rational(p2)) => {
-                Self::Rational(Box::new(Div::div(BigRational::from(p1), *p2)))
-            }
-            (Self::Int(p1), Self::Float(p2)) => Self::Float(f64::from(p1).div(p2)),
-            (Self::Int(p1), Self::Complex(p2)) => Self::Complex(Complex::from(p1).div(p2)),
+impl_binary_operator_all!(Add, add, Add::add, Add::add, Add::add, Add::add);
+impl_binary_operator_all!(Sub, sub, Sub::sub, Sub::sub, Sub::sub, Sub::sub);
+impl_binary_operator_all!(Mul, mul, Mul::mul, Mul::mul, Mul::mul, Mul::mul);
+impl_binary_operator_all!(Rem, rem, Rem::rem, Rem::rem, Rem::rem, Rem::rem);
 
-            // Rational vs other
-            (Self::Rational(p1), Self::Int(p2)) => {
-                Self::Rational(Box::new(Div::div(*p1, BigRational::from(p2))))
-            }
-            (Self::Rational(p1), Self::Float(p2)) => Self::Float(rational_to_float(&p1).div(p2)),
-            (Self::Rational(p1), Self::Complex(p2)) => {
-                Self::Complex(Complex::from(p1.to_f64().unwrap_or(f64::NAN)).div(p2))
-                //TODO: Check if this is logical
-            }
+impl Div<&Number> for &Number {
+    type Output = Number;
 
-            // Complex vs Other
-            (Self::Complex(p1), Self::Int(p2)) => Self::Complex(Complex::from(p2).div(p1)),
-            (Self::Complex(p1), Self::Rational(p2)) => {
-                Self::Complex(Complex::from(p2.to_f64().unwrap_or(f64::NAN)).div(p1))
-            }
-            (Self::Complex(p1), Self::Float(p2)) => Self::Complex(Complex::from(p2).div(p1)),
+    fn div(self, rhs: &Number) -> Self::Output {
+        match (self.to_rational(), rhs.to_rational()) {
+            (Some(left), Some(right)) if !right.is_zero() => Number::rational(left / right),
+            _ => match (self.to_f64(), rhs.to_f64()) {
+                (Some(left), Some(right)) => Number::Float(left / right),
+                _ => Number::Complex(self.to_complex() / rhs.to_complex()),
+            },
         }
     }
 }
 
-impl Mul for Number {
-    type Output = Self;
+impl Div<Number> for Number {
+    type Output = Number;
 
-    fn mul(self, rhs: Self) -> Self::Output {
-        match (self, rhs) {
-            (Self::Int(p1), Self::Int(p2)) => Self::Int(p1 * p2),
-            (Self::Float(p1), Self::Float(p2)) => Self::Float(p1 * p2),
-            (Self::Rational(p1), Self::Rational(p2)) => {
-                Self::Rational(Box::new(Mul::mul(*p1, *p2)))
-            }
-            (Self::Complex(p1), Self::Complex(p2)) => Self::Complex(p1 * p2),
-
-            // Float vs other
-            (Self::Float(p1), Self::Int(p2)) => Self::Float(p1.mul(f64::from(p2))),
-            (Self::Float(p1), Self::Rational(p2)) => Self::Float(p1.mul(rational_to_float(&p2))),
-            (Self::Float(p1), Self::Complex(p2)) => Self::Complex(Complex::from(p1).mul(p2)),
-
-            // Int vs other
-            (Self::Int(p1), Self::Rational(p2)) => {
-                Self::Rational(Box::new(Mul::mul(BigRational::from(p1), *p2)))
-            }
-            (Self::Int(p1), Self::Float(p2)) => Self::Float(f64::from(p1).mul(p2)),
-            (Self::Int(p1), Self::Complex(p2)) => Self::Complex(Complex::from(p1).mul(p2)),
-
-            // Rational vs other
-            (Self::Rational(p1), Self::Float(p2)) => Self::Float(rational_to_float(&p1).mul(p2)),
-            (Self::Rational(p1), Self::Int(p2)) => {
-                Self::Rational(Box::new(Mul::mul(*p1, BigRational::from(p2))))
-            }
-            (Self::Rational(p1), Self::Complex(p2)) => {
-                Self::Complex(Complex::from(p1.to_f64().unwrap_or(f64::NAN)).div(p2))
-            }
-
-            // Complex vs Other
-            (Self::Complex(p1), Self::Int(p2)) => Self::Complex(Complex::from(p2).mul(p1)),
-            (Self::Complex(p1), Self::Rational(p2)) => {
-                Self::Complex(Complex::from(p2.to_f64().unwrap_or(f64::NAN)).mul(p1))
-            }
-            (Self::Complex(p1), Self::Float(p2)) => Self::Complex(Complex::from(p2).mul(p1)),
-        }
+    fn div(self, rhs: Number) -> Self::Output {
+        &self / &rhs
     }
 }
+impl Div<&Number> for Number {
+    type Output = Number;
 
-impl Rem for Number {
-    type Output = Self;
+    fn div(self, rhs: &Number) -> Self::Output {
+        &self / rhs
+    }
+}
+impl Div<Number> for &Number {
+    type Output = Number;
 
-    fn rem(self, rhs: Self) -> Self::Output {
-        match (self, rhs) {
-            (Self::Int(p1), Self::Int(p2)) => Self::Int(p1.rem(p2)),
-            (Self::Float(p1), Self::Float(p2)) => Self::Float(p1.rem(p2)),
-            (Self::Rational(p1), Self::Rational(p2)) => {
-                Self::Rational(Box::new(Rem::rem(*p1, *p2)))
-            }
-            (Self::Complex(p1), Self::Complex(p2)) => Self::Complex(p1.rem(p2)),
-
-            // Rational vs Int
-            (Self::Rational(p1), Self::Int(p2)) => {
-                Self::Rational(Box::new(Rem::rem(*p1, BigRational::from(p2))))
-            }
-            (Self::Int(p1), Self::Rational(p2)) => {
-                Self::Rational(Box::new(Rem::rem(BigRational::from(p1), *p2)))
-            }
-            // TODO: implement other cases
-            (a, b) => panic!(
-                "remainder between {} and {} is not implemented",
-                a.type_name(),
-                b.type_name()
-            ),
-        }
+    fn div(self, rhs: Number) -> Self::Output {
+        self / &rhs
     }
 }
 
@@ -415,6 +351,22 @@ pub enum EuclideanDivisionError {
 }
 
 impl Number {
+    #[must_use]
+    pub fn complex(re: f64, im: f64) -> Self {
+        Self::Complex(Complex64 { re, im })
+    }
+
+    #[must_use]
+    pub fn float(f: f64) -> Self {
+        Self::Float(f)
+    }
+
+    #[must_use]
+    pub fn rational(rat: BigRational) -> Self {
+        Self::Rational(Box::new(rat))
+    }
+
+    // TODO: change this to &'static str
     fn type_name(&self) -> String {
         match self {
             Self::Int(_) => "int".to_string(),
@@ -539,11 +491,35 @@ impl Number {
         Ok(n)
     }
 
+    pub fn to_complex(&self) -> Complex64 {
+        match self {
+            Number::Int(i) => Complex64::from(i),
+            Number::Float(f) => Complex64::from(f),
+            Number::Rational(r) => rational_to_complex(&r),
+            Number::Complex(c) => *c,
+        }
+    }
+
+    pub fn to_f64(&self) -> Option<f64> {
+        match self {
+            Number::Int(i) => Some(f64::from(i)),
+            Number::Float(f) => Some(*f),
+            Number::Rational(r) => Some(rational_to_float(r)),
+            Number::Complex(_) => None,
+        }
+    }
+
+    pub fn to_rational(&self) -> Option<BigRational> {
+        match self {
+            Number::Int(i) => Some(BigRational::from(i)),
+            Number::Float(_) => None,
+            Number::Rational(r) => Some(BigRational::clone(&**r)),
+            Number::Complex(_) => None,
+        }
+    }
+
     /// Converts this number into a real (complex) number with the imaginary part set to 0.0
-    /// which makes it esy to do comparison on all numbers (and possibly other things)
-    ///
-    /// TODO: in the future we might want to create a new Real type which is the sum of Int and Float
-    ///       in order to better handle `BigInt`s which now lose tons of precision and will yield incorrect results
+    /// which makes it easy to do comparison on all numbers (and possibly other things)
     #[must_use]
     pub fn to_reals(&self) -> (RealNumber, RealNumber) {
         match self {

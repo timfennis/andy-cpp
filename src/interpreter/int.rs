@@ -411,8 +411,20 @@ impl From<Int> for BigRational {
     }
 }
 
+impl From<&Int> for BigRational {
+    fn from(value: &Int) -> Self {
+        Self::from(value.to_bigint())
+    }
+}
+
 impl From<Int> for Complex64 {
     fn from(value: Int) -> Self {
+        Complex64::from(&value)
+    }
+}
+
+impl From<&Int> for Complex64 {
+    fn from(value: &Int) -> Self {
         match value {
             Int::Int64(i) => Self::from(i.to_f64().unwrap_or(f64::INFINITY)),
             Int::BigInt(i) => Self::from(i.to_f64().unwrap_or(f64::INFINITY)),
