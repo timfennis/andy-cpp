@@ -1,3 +1,5 @@
+#![allow(clippy::ptr_arg)]
+
 use crate::interpreter::iterator::{mut_seq_into_iterator, MutableValueIntoIterator};
 use crate::interpreter::sequence::Sequence;
 use crate::{
@@ -566,7 +568,7 @@ mod inner {
             .map(Value::list)
             .collect_vec();
 
-        return Ok(Value::list(out));
+        Ok(Value::list(out))
     }
 }
 

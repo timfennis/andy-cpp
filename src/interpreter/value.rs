@@ -412,7 +412,7 @@ pub enum ConversionError {
     NumberToUsizeError(#[from] NumberToUsizeError),
 }
 
-/// TryFrom implementation to convert a Sequence::Tuple into (Value, Value)
+/// `TryFrom` implementation to convert a `Sequence::Tuple` into (Value, Value)
 /// this is used in the implementation where we iterate over a hashmap
 impl TryFrom<Value> for (Value, Value) {
     type Error = ConversionError;
@@ -584,11 +584,11 @@ pub enum ValueType {
 }
 
 impl ValueType {
-    pub fn supports_vectorization(&self) -> bool {
+    #[must_use] pub fn supports_vectorization(&self) -> bool {
         matches!(self, ValueType::Tuple(values) if values.iter().all(|x| matches!(x, ValueType::Number(_))))
     }
 
-    pub fn supports_vectorization_with(&self, other: &Self) -> bool {
+    #[must_use] pub fn supports_vectorization_with(&self, other: &Self) -> bool {
         matches!((self, other), (ValueType::Tuple(l), ValueType::Tuple(r)) if {
             l.len() == r.len()
                 && self.supports_vectorization()
