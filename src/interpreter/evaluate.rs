@@ -1153,46 +1153,39 @@ where
     BinaryOpError: From<E>,
 {
     let (left_type, right_type) = (left.value_type(), right.value_type());
-    match (left, right) {
-        // both types are tuples, and their type signature is exactly the same and both types support vectorization
-        (Value::Sequence(Sequence::Tuple(l)), Value::Sequence(Sequence::Tuple(r)))
-            if left_type.supports_vectorization_with(&right_type) =>
-        {
-            let mut left_v = Rc::try_unwrap(l).unwrap_or_else(|rc| rc.iter().cloned().collect());
-
-            for (l, r) in left_v.iter_mut().zip(r.iter()) {
-                match (l, r) {
-                    (Value::Number(l), Value::Number(r)) => {
-                        // TODO: remove these clones once we fix operator implementations
-                        *l = match op(l.clone(), r.clone()) {
-                            Ok(v) => v,
-                            Err(_) => {
-                                return Err(BinaryOpError::UndefinedOperation {
-                                    operator,
-                                    left: left_type,
-                                    right: right_type,
-                                })
-                            }
-                        }
-                    }
-                    _ => {
-                        return Err(BinaryOpError::UndefinedOperation {
-                            operator,
-                            left: left_type,
-                            right: right_type,
-                        })
-                    }
-                }
-            }
-
-            Ok(Value::tuple(left_v))
-        }
-        _ => Err(BinaryOpError::UndefinedOperation {
+    let (Value::Sequence(Sequence::Tuple(left_nums)), Value::Sequence(Sequence::Tuple(right_nums))) =
+        (left, right)
+    else {
+        return Err(BinaryOpError::UndefinedOperation {
             operator,
             left: left_type,
             right: right_type,
-        }),
+        });
+    };
+
+    let mut left_vec = Rc::try_unwrap(left_nums).unwrap_or_else(|rc| rc.iter().cloned().collect());
+
+    // Zip the mutable vector with the immutable right side and perform the operations on all elements
+    for (l, r) in left_vec.iter_mut().zip(right_nums.iter()) {
+        if let (Value::Number(l), Value::Number(r)) = (l, r) {
+            // TODO: remove these clones once we fix operator implementations
+            *l = match op(l.clone(), r.clone()) {
+                Ok(v) => v,
+                Err(_) => {
+                    return Err(BinaryOpError::UndefinedOperation {
+                        operator,
+                        left: left_type,
+                        right: right_type,
+                    })
+                }
+            }
+        } else {
+            // We could also consider removing this case, but it's probably better to expose this
+            unreachable!("this case should already be covered by the type checker above")
+        }
     }
+
+    Ok(Value::tuple(left_vec))
 }
 
 #[derive(thiserror::Error, miette::Diagnostic, Debug)]
