@@ -174,7 +174,8 @@ impl ParamType {
             (ParamType::Complex, ValueType::Number(NumberType::Complex)) => Some(0),
             (ParamType::String, ValueType::String) => Some(0),
             (ParamType::List, ValueType::List) => Some(0),
-            (ParamType::Tuple, ValueType::Tuple(_)) => Some(0), // HOW calc here?
+            // TODO: once ParamType supports parameters we can calculate the proper distance to Tuple
+            (ParamType::Tuple, ValueType::Tuple(_)) => Some(0),
             (ParamType::Map, ValueType::Map) => Some(0),
             (ParamType::Iterator, ValueType::Iterator) => Some(0),
             (ParamType::Function, ValueType::Function) => Some(0),
@@ -185,7 +186,8 @@ impl ParamType {
                 ValueType::List
                 | ValueType::String
                 | ValueType::Map
-                | ValueType::Tuple(_) // TODO: how do we calc the distance here
+                // Sequence is always 1 distance to tuple
+                | ValueType::Tuple(_)
                 | ValueType::Iterator,
             ) => Some(1),
             _ => None,
@@ -253,12 +255,12 @@ impl Function {
                     expected: ValueType::Number(NumberType::Float),
                     actual: v.value_type(),
                 }
-                .into()),
+                    .into()),
                 _ => Err(FunctionCallError::ArgumentCountError {
                     expected: 1,
                     actual: 0,
                 }
-                .into()),
+                    .into()),
             },
             Function::GenericFunction { function, .. } => function(args, env),
             Function::Memoized { cache, function } => {
