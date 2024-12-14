@@ -77,7 +77,7 @@ fn match_types_to_signature(types: &[ValueType], signature: &TypeSignature) -> O
             if types.len() == signature.len() {
                 let mut acc = 0;
                 for (a, b) in types.iter().zip(signature.iter()) {
-                    let dist = b.distance(*a)?;
+                    let dist = b.distance(a)?;
                     acc += dist;
                 }
 
@@ -163,7 +163,7 @@ pub enum ParamType {
 }
 
 impl ParamType {
-    fn distance(&self, other: ValueType) -> Option<u32> {
+    fn distance(&self, other: &ValueType) -> Option<u32> {
         #[allow(clippy::match_same_arms)]
         match (self, other) {
             (ParamType::Bool, ValueType::Bool) => Some(0),
@@ -174,7 +174,7 @@ impl ParamType {
             (ParamType::Complex, ValueType::Number(NumberType::Complex)) => Some(0),
             (ParamType::String, ValueType::String) => Some(0),
             (ParamType::List, ValueType::List) => Some(0),
-            (ParamType::Tuple, ValueType::Tuple) => Some(0),
+            (ParamType::Tuple, ValueType::Tuple(_)) => Some(0), // HOW calc here?
             (ParamType::Map, ValueType::Map) => Some(0),
             (ParamType::Iterator, ValueType::Iterator) => Some(0),
             (ParamType::Function, ValueType::Function) => Some(0),
@@ -185,7 +185,7 @@ impl ParamType {
                 ValueType::List
                 | ValueType::String
                 | ValueType::Map
-                | ValueType::Tuple
+                | ValueType::Tuple(_) // TODO: how do we calc the distance here
                 | ValueType::Iterator,
             ) => Some(1),
             _ => None,

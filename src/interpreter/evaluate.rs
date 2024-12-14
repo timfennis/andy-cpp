@@ -1095,36 +1095,42 @@ fn apply_operator(
 }
 
 fn apply_operator_tuple(
-    left: Rc<Vec<Value>>,
-    right: Rc<Vec<Value>>,
+    left: Value,
+    right: Value,
     op: impl Fn(Number, Number) -> Number,
     operator: BinaryOperator,
 ) -> Result<Value, BinaryOpError> {
-    if left.len() != right.len() {
-        return Err(BinaryOpError::InvalidLength(left.len(), right.len()));
-    }
+    let (lt, rt) = (left.value_type(), right.value_type());
+    match (left, right) {
+        (Value::Sequence(Sequence::Tuple(l)), Value::Sequence(Sequence::Tuple(r))) if lt == rt => {
+            let mut left_v = match Rc::try_unwrap(l) {
+                Ok(val) => val,
+                Err(rc) => rc.iter().cloned().collect(),
+            };
 
-    let mut left_v = match Rc::try_unwrap(left) {
-        Ok(val) => val,
-        Err(rc) => rc.iter().cloned().collect(),
-    };
+            for (l, r) in left_v.iter_mut().zip(r.iter()) {
+                match (l, r) {
+                    (Value::Number(l), Value::Number(r)) => {
+                        *l = op(l.clone(), r.clone());
+                    }
+                    (ll, rr) => {
+                        return Err(BinaryOpError::UndefinedOperation {
+                            operator,
+                            left: ll.value_type(),
+                            right: rr.value_type(),
+                        })
+                    }
+                }
+            }
 
-    for (l, r) in left_v.iter_mut().zip(right.iter()) {
-        match (l, r) {
-            (Value::Number(l), Value::Number(r)) => {
-                *l = op(l.clone(), r.clone());
-            }
-            (ll, rr) => {
-                return Err(BinaryOpError::UndefinedOperation {
-                    operator,
-                    left: ll.value_type(),
-                    right: rr.value_type(),
-                })
-            }
+            Ok(Value::tuple(left_v))
         }
+        _ => Err(BinaryOpError::UndefinedOperation {
+            operator,
+            left: lt,
+            right: rt,
+        }),
     }
-
-    Ok(Value::tuple(left_v))
 }
 
 #[derive(thiserror::Error, miette::Diagnostic, Debug)]
