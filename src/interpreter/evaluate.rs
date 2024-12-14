@@ -1082,13 +1082,9 @@ fn apply_operator(
             (needle, Value::Sequence(Sequence::Iterator(iter))) => {
                 let iter = ValueIterator::clone(&*iter.borrow());
                 let c = match iter {
-                    super::iterator::ValueIterator::ValueRange(range) => range.contains(&needle),
-                    super::iterator::ValueIterator::ValueRangeFrom(range) => {
-                        range.contains(&needle)
-                    }
-                    super::iterator::ValueIterator::ValueRangeInclusive(range) => {
-                        range.contains(&needle)
-                    } // For non range iterators the implementation probably has to fallback to a slow scan
+                    ValueIterator::ValueRange(range) => range.contains(&needle),
+                    ValueIterator::ValueRangeFrom(range) => range.contains(&needle),
+                    ValueIterator::ValueRangeInclusive(range) => range.contains(&needle), // For non range iterators the implementation probably has to fallback to a slow scan
                 };
                 Value::from(c)
             }
