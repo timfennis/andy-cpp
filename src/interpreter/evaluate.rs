@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::fmt;
-use std::ops::{BitAnd, BitOr, BitXor, IndexMut, Neg, Not, Rem};
+use std::ops::{Add, BitAnd, BitOr, BitXor, Div, IndexMut, Mul, Neg, Not, Rem, Sub};
 use std::rc::Rc;
 
 use either::Either;
@@ -24,6 +24,7 @@ use crate::interpreter::value::{Value, ValueType};
 use crate::lexer::Span;
 
 use super::iterator::ValueIterator;
+use super::num::into_fallible_operation;
 
 pub type EvaluationResult = Result<Value, FunctionCarrier>;
 
@@ -737,7 +738,7 @@ fn apply_operation_to_value(
     right_value: Value,
     span: Span,
 ) -> Result<Value, FunctionCarrier> {
-    return if let Either::Left(BinaryOperator::Concat) = operation {
+    if let Either::Left(BinaryOperator::Concat) = operation {
         match (value, right_value) {
             (Value::Sequence(Sequence::String(left)), Value::Sequence(Sequence::String(right))) => {
                 if Rc::ptr_eq(left, &right) {
@@ -825,7 +826,7 @@ fn apply_operation_to_value(
             }
         }
         Ok(value.clone())
-    };
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -841,6 +842,7 @@ enum BinaryOpError {
     #[error("operator {operator} failed because one of its operands is invalid")]
     InvalidOperand { operator: BinaryOperator },
 }
+
 #[allow(clippy::too_many_lines)]
 fn apply_operator(
     left: Value,
@@ -885,34 +887,112 @@ fn apply_operator(
         }
         BinaryOperator::Plus => match (left, right) {
             (Value::Number(a), Value::Number(b)) => Value::Number(a + b),
+            (
+                left @ Value::Sequence(Sequence::Tuple(_)),
+                right @ Value::Sequence(Sequence::Tuple(_)),
+            ) => apply_operator_to_tuple::<BinaryOpError>(
+                left,
+                right,
+                into_fallible_operation(Number::add),
+                BinaryOperator::Plus,
+            )?,
             _ => return Err(create_type_error()),
         },
         BinaryOperator::Minus => match (left, right) {
             (Value::Number(a), Value::Number(b)) => Value::Number(a - b),
+
+            (
+                left @ Value::Sequence(Sequence::Tuple(_)),
+                right @ Value::Sequence(Sequence::Tuple(_)),
+            ) => apply_operator_to_tuple::<BinaryOpError>(
+                left,
+                right,
+                into_fallible_operation(Number::sub),
+                BinaryOperator::Minus,
+            )?,
             _ => return Err(create_type_error()),
         },
         BinaryOperator::Multiply => match (left, right) {
             (Value::Number(a), Value::Number(b)) => Value::Number(a * b),
+
+            (
+                left @ Value::Sequence(Sequence::Tuple(_)),
+                right @ Value::Sequence(Sequence::Tuple(_)),
+            ) => apply_operator_to_tuple::<BinaryOpError>(
+                left,
+                right,
+                into_fallible_operation(Number::mul),
+                BinaryOperator::Multiply,
+            )?,
             _ => return Err(create_type_error()),
         },
         BinaryOperator::Divide => match (left, right) {
             (Value::Number(a), Value::Number(b)) => Value::Number(a / b),
+            (
+                left @ Value::Sequence(Sequence::Tuple(_)),
+                right @ Value::Sequence(Sequence::Tuple(_)),
+            ) => apply_operator_to_tuple::<BinaryOpError>(
+                left,
+                right,
+                into_fallible_operation(Number::div),
+                BinaryOperator::Divide,
+            )?,
             _ => return Err(create_type_error()),
         },
         BinaryOperator::FloorDivide => match (left, right) {
             (Value::Number(a), Value::Number(b)) => Value::Number(a.floor_div(b)),
+
+            (
+                left @ Value::Sequence(Sequence::Tuple(_)),
+                right @ Value::Sequence(Sequence::Tuple(_)),
+            ) => apply_operator_to_tuple::<BinaryOpError>(
+                left,
+                right,
+                into_fallible_operation(Number::floor_div),
+                BinaryOperator::FloorDivide,
+            )?,
             _ => return Err(create_type_error()),
         },
         BinaryOperator::CModulo => match (left, right) {
             (Value::Number(a), Value::Number(b)) => Value::Number(a.rem(b)),
+
+            (
+                left @ Value::Sequence(Sequence::Tuple(_)),
+                right @ Value::Sequence(Sequence::Tuple(_)),
+            ) => apply_operator_to_tuple::<BinaryOpError>(
+                left,
+                right,
+                into_fallible_operation(Number::rem),
+                BinaryOperator::CModulo,
+            )?,
             _ => return Err(create_type_error()),
         },
         BinaryOperator::EuclideanModulo => match (left, right) {
             (Value::Number(a), Value::Number(b)) => Value::Number(a.checked_rem_euclid(b)?),
+
+            (
+                left @ Value::Sequence(Sequence::Tuple(_)),
+                right @ Value::Sequence(Sequence::Tuple(_)),
+            ) => apply_operator_to_tuple(
+                left,
+                right,
+                Number::checked_rem_euclid,
+                BinaryOperator::EuclideanModulo,
+            )?,
             _ => return Err(create_type_error()),
         },
         BinaryOperator::Exponent => match (left, right) {
             (Value::Number(a), Value::Number(b)) => Value::Number(a.pow(b)),
+
+            (
+                left @ Value::Sequence(Sequence::Tuple(_)),
+                right @ Value::Sequence(Sequence::Tuple(_)),
+            ) => apply_operator_to_tuple(
+                left,
+                right,
+                into_fallible_operation::<BinaryOpError>(Number::pow),
+                BinaryOperator::Exponent,
+            )?,
             _ => return Err(create_type_error()),
         },
         BinaryOperator::And => match (left, right) {
@@ -1002,13 +1082,9 @@ fn apply_operator(
             (needle, Value::Sequence(Sequence::Iterator(iter))) => {
                 let iter = ValueIterator::clone(&*iter.borrow());
                 let c = match iter {
-                    super::iterator::ValueIterator::ValueRange(range) => range.contains(&needle),
-                    super::iterator::ValueIterator::ValueRangeFrom(range) => {
-                        range.contains(&needle)
-                    }
-                    super::iterator::ValueIterator::ValueRangeInclusive(range) => {
-                        range.contains(&needle)
-                    } // For non range iterators the implementation probably has to fallback to a slow scan
+                    ValueIterator::ValueRange(range) => range.contains(&needle),
+                    ValueIterator::ValueRangeFrom(range) => range.contains(&needle),
+                    ValueIterator::ValueRangeInclusive(range) => range.contains(&needle), // For non range iterators the implementation probably has to fallback to a slow scan
                 };
                 Value::from(c)
             }
@@ -1058,6 +1134,60 @@ fn apply_operator(
     };
 
     Ok(val)
+}
+
+fn apply_operator_to_tuple<E>(
+    left: Value,
+    right: Value,
+    op: impl Fn(Number, Number) -> Result<Number, E>,
+    operator: BinaryOperator,
+) -> Result<Value, BinaryOpError>
+where
+    BinaryOpError: From<E>,
+{
+    let (left_type, right_type) = (left.value_type(), right.value_type());
+
+    if !left_type.supports_vectorization_with(&right_type) {
+        return Err(BinaryOpError::UndefinedOperation {
+            operator,
+            left: left_type,
+            right: right_type,
+        });
+    }
+
+    let (Value::Sequence(Sequence::Tuple(left_nums)), Value::Sequence(Sequence::Tuple(right_nums))) =
+        (left, right)
+    else {
+        return Err(BinaryOpError::UndefinedOperation {
+            operator,
+            left: left_type,
+            right: right_type,
+        });
+    };
+
+    let mut left_vec = Rc::try_unwrap(left_nums).unwrap_or_else(|rc| rc.iter().cloned().collect());
+
+    // Zip the mutable vector with the immutable right side and perform the operations on all elements
+    for (l, r) in left_vec.iter_mut().zip(right_nums.iter()) {
+        if let (Value::Number(l), Value::Number(r)) = (l, r) {
+            // TODO: remove these clones once we fix operator implementations
+            *l = match op(l.clone(), r.clone()) {
+                Ok(v) => v,
+                Err(_) => {
+                    return Err(BinaryOpError::UndefinedOperation {
+                        operator,
+                        left: left_type,
+                        right: right_type,
+                    })
+                }
+            }
+        } else {
+            // We could also consider removing this case, but it's probably better to expose this
+            unreachable!("this case should already be covered by the type checker above")
+        }
+    }
+
+    Ok(Value::tuple(left_vec))
 }
 
 #[derive(thiserror::Error, miette::Diagnostic, Debug)]

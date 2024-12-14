@@ -118,17 +118,7 @@ impl Value {
     /// assert_eq!(val.value_type(), NumberType::Int.into());
     /// ```
     pub fn value_type(&self) -> ValueType {
-        match self {
-            Value::Option(_) => ValueType::Option,
-            Value::Number(n) => ValueType::Number(n.into()),
-            Value::Bool(_) => ValueType::Bool,
-            Value::Sequence(Sequence::String(_)) => ValueType::String,
-            Value::Sequence(Sequence::List(_)) => ValueType::List,
-            Value::Sequence(Sequence::Tuple(_)) => ValueType::Tuple,
-            Value::Function(_) => ValueType::Function,
-            Value::Sequence(Sequence::Map(_, _)) => ValueType::Map,
-            Value::Sequence(Sequence::Iterator(_)) => ValueType::Iterator,
-        }
+        self.into()
     }
 
     #[must_use]
@@ -422,6 +412,8 @@ pub enum ConversionError {
     NumberToUsizeError(#[from] NumberToUsizeError),
 }
 
+/// `TryFrom` implementation to convert a `Sequence::Tuple` into (Value, Value)
+/// this is used in the implementation where we iterate over a hashmap
 impl TryFrom<Value> for (Value, Value) {
     type Error = ConversionError;
 
@@ -578,22 +570,48 @@ impl<'a> TryFrom<&'a mut Value> for &'a Number {
     }
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum ValueType {
     Option, // TODO: add type param
     Number(NumberType),
     Bool,
     String,
     List,
-    Tuple,
+    Tuple(Vec<ValueType>),
     Function,
     Map,
     Iterator,
 }
 
+impl ValueType {
+    #[must_use] pub fn supports_vectorization(&self) -> bool {
+        matches!(self, ValueType::Tuple(values) if values.iter().all(|x| matches!(x, ValueType::Number(_))))
+    }
+
+    #[must_use] pub fn supports_vectorization_with(&self, other: &Self) -> bool {
+        matches!((self, other), (ValueType::Tuple(l), ValueType::Tuple(r)) if {
+            l.len() == r.len()
+                && self.supports_vectorization()
+                && other.supports_vectorization()
+        })
+    }
+}
+
 impl From<&Value> for ValueType {
     fn from(value: &Value) -> Self {
-        value.value_type()
+        match value {
+            Value::Option(_) => ValueType::Option,
+            Value::Number(n) => ValueType::Number(n.into()),
+            Value::Bool(_) => ValueType::Bool,
+            Value::Sequence(Sequence::String(_)) => ValueType::String,
+            Value::Sequence(Sequence::List(_)) => ValueType::List,
+            Value::Sequence(Sequence::Tuple(t)) => {
+                ValueType::Tuple(t.iter().map(Into::into).collect())
+            }
+            Value::Function(_) => ValueType::Function,
+            Value::Sequence(Sequence::Map(_, _)) => ValueType::Map,
+            Value::Sequence(Sequence::Iterator(_)) => ValueType::Iterator,
+        }
     }
 }
 
@@ -605,7 +623,9 @@ impl fmt::Display for ValueType {
             Self::Bool => write!(f, "bool"),
             Self::String => write!(f, "string"),
             Self::List => write!(f, "list"),
-            Self::Tuple => write!(f, "tuple"),
+            Self::Tuple(t) => {
+                write!(f, "tuple<{}>", t.iter().join(", "))
+            }
             Self::Function => write!(f, "function"),
             Self::Map => write!(f, "map"),
             Self::Iterator => write!(f, "iterator"),
