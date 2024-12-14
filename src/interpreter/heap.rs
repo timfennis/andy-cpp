@@ -11,6 +11,15 @@ pub struct CheckedHeap<T> {
     typ: Option<ValueType>,
 }
 
+impl<T> Default for CheckedHeap<T>
+where
+    T: Ord,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T> CheckedHeap<T>
 where
     T: Ord,
@@ -41,10 +50,10 @@ where
             });
         }
 
-        if let Some(typ) = self.typ {
-            if value.value_type() != typ {
+        if let Some(typ) = &self.typ {
+            if &value.value_type() != typ {
                 return Err(HeapError::InvalidValueType {
-                    expected: typ,
+                    expected: typ.clone(),
                     actual: value.value_type(),
                 });
             }
