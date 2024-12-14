@@ -841,11 +841,8 @@ enum BinaryOpError {
     EuclideanDivisionFailed(#[from] EuclideanDivisionError),
     #[error("operator {operator} failed because one of its operands is invalid")]
     InvalidOperand { operator: BinaryOperator },
-    #[error(
-        "couldn't vectorize operation because the operands have different lengths {0} and {1}"
-    )]
-    InvalidLength(usize, usize),
 }
+
 #[allow(clippy::too_many_lines)]
 fn apply_operator(
     left: Value,
@@ -1153,6 +1150,15 @@ where
     BinaryOpError: From<E>,
 {
     let (left_type, right_type) = (left.value_type(), right.value_type());
+
+    if !left_type.supports_vectorization_with(&right_type) {
+        return Err(BinaryOpError::UndefinedOperation {
+            operator,
+            left: left_type,
+            right: right_type,
+        });
+    }
+
     let (Value::Sequence(Sequence::Tuple(left_nums)), Value::Sequence(Sequence::Tuple(right_nums))) =
         (left, right)
     else {
