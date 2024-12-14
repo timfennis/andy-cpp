@@ -583,6 +583,20 @@ pub enum ValueType {
     Iterator,
 }
 
+impl ValueType {
+    pub fn supports_vectorization(&self) -> bool {
+        matches!(self, ValueType::Tuple(values) if values.iter().all(|x| matches!(x, ValueType::Number(_))))
+    }
+
+    pub fn supports_vectorization_with(&self, other: &Self) -> bool {
+        matches!((self, other), (ValueType::Tuple(l), ValueType::Tuple(r)) if {
+            l.len() == r.len()
+                && self.supports_vectorization()
+                && other.supports_vectorization()
+        })
+    }
+}
+
 impl From<&Value> for ValueType {
     fn from(value: &Value) -> Self {
         match value {
@@ -609,7 +623,9 @@ impl fmt::Display for ValueType {
             Self::Bool => write!(f, "bool"),
             Self::String => write!(f, "string"),
             Self::List => write!(f, "list"),
-            Self::Tuple(t) => write!(f, "tuple[{t:?}]",),
+            Self::Tuple(t) => {
+                write!(f, "tuple<{}>", t.iter().join(", "))
+            }
             Self::Function => write!(f, "function"),
             Self::Map => write!(f, "map"),
             Self::Iterator => write!(f, "iterator"),

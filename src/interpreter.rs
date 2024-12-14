@@ -18,7 +18,6 @@ pub mod iterator;
 pub mod num;
 pub mod sequence;
 pub mod value;
-pub mod value_type;
 
 pub struct Interpreter {
     environment: EnvironmentRef,

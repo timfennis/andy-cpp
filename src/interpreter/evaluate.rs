@@ -24,6 +24,7 @@ use crate::interpreter::value::{Value, ValueType};
 use crate::lexer::Span;
 
 use super::iterator::ValueIterator;
+use super::num::into_fallible_operation;
 
 pub type EvaluationResult = Result<Value, FunctionCarrier>;
 
@@ -737,7 +738,7 @@ fn apply_operation_to_value(
     right_value: Value,
     span: Span,
 ) -> Result<Value, FunctionCarrier> {
-    return if let Either::Left(BinaryOperator::Concat) = operation {
+    if let Either::Left(BinaryOperator::Concat) = operation {
         match (value, right_value) {
             (Value::Sequence(Sequence::String(left)), Value::Sequence(Sequence::String(right))) => {
                 if Rc::ptr_eq(left, &right) {
@@ -825,7 +826,7 @@ fn apply_operation_to_value(
             }
         }
         Ok(value.clone())
-    };
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -889,64 +890,112 @@ fn apply_operator(
         }
         BinaryOperator::Plus => match (left, right) {
             (Value::Number(a), Value::Number(b)) => Value::Number(a + b),
-            (Value::Sequence(Sequence::Tuple(left)), Value::Sequence(Sequence::Tuple(right))) => {
-                apply_operator_tuple(left, right, Number::add, BinaryOperator::Plus)?
-            }
+            (
+                left @ Value::Sequence(Sequence::Tuple(_)),
+                right @ Value::Sequence(Sequence::Tuple(_)),
+            ) => apply_operator_to_tuple::<BinaryOpError>(
+                left,
+                right,
+                into_fallible_operation(Number::add),
+                BinaryOperator::Plus,
+            )?,
             _ => return Err(create_type_error()),
         },
         BinaryOperator::Minus => match (left, right) {
             (Value::Number(a), Value::Number(b)) => Value::Number(a - b),
 
-            (Value::Sequence(Sequence::Tuple(left)), Value::Sequence(Sequence::Tuple(right))) => {
-                apply_operator_tuple(left, right, Number::sub, BinaryOperator::Minus)?
-            }
+            (
+                left @ Value::Sequence(Sequence::Tuple(_)),
+                right @ Value::Sequence(Sequence::Tuple(_)),
+            ) => apply_operator_to_tuple::<BinaryOpError>(
+                left,
+                right,
+                into_fallible_operation(Number::sub),
+                BinaryOperator::Minus,
+            )?,
             _ => return Err(create_type_error()),
         },
         BinaryOperator::Multiply => match (left, right) {
             (Value::Number(a), Value::Number(b)) => Value::Number(a * b),
 
-            (Value::Sequence(Sequence::Tuple(left)), Value::Sequence(Sequence::Tuple(right))) => {
-                apply_operator_tuple(left, right, Number::mul, BinaryOperator::Multiply)?
-            }
+            (
+                left @ Value::Sequence(Sequence::Tuple(_)),
+                right @ Value::Sequence(Sequence::Tuple(_)),
+            ) => apply_operator_to_tuple::<BinaryOpError>(
+                left,
+                right,
+                into_fallible_operation(Number::mul),
+                BinaryOperator::Multiply,
+            )?,
             _ => return Err(create_type_error()),
         },
         BinaryOperator::Divide => match (left, right) {
             (Value::Number(a), Value::Number(b)) => Value::Number(a / b),
-            (Value::Sequence(Sequence::Tuple(left)), Value::Sequence(Sequence::Tuple(right))) => {
-                apply_operator_tuple(left, right, Number::div, BinaryOperator::Divide)?
-            }
+            (
+                left @ Value::Sequence(Sequence::Tuple(_)),
+                right @ Value::Sequence(Sequence::Tuple(_)),
+            ) => apply_operator_to_tuple::<BinaryOpError>(
+                left,
+                right,
+                into_fallible_operation(Number::div),
+                BinaryOperator::Divide,
+            )?,
             _ => return Err(create_type_error()),
         },
         BinaryOperator::FloorDivide => match (left, right) {
             (Value::Number(a), Value::Number(b)) => Value::Number(a.floor_div(b)),
 
-            (Value::Sequence(Sequence::Tuple(left)), Value::Sequence(Sequence::Tuple(right))) => {
-                apply_operator_tuple(left, right, Number::floor_div, BinaryOperator::FloorDivide)?
-            }
+            (
+                left @ Value::Sequence(Sequence::Tuple(_)),
+                right @ Value::Sequence(Sequence::Tuple(_)),
+            ) => apply_operator_to_tuple::<BinaryOpError>(
+                left,
+                right,
+                into_fallible_operation(Number::floor_div),
+                BinaryOperator::FloorDivide,
+            )?,
             _ => return Err(create_type_error()),
         },
         BinaryOperator::CModulo => match (left, right) {
             (Value::Number(a), Value::Number(b)) => Value::Number(a.rem(b)),
 
-            (Value::Sequence(Sequence::Tuple(left)), Value::Sequence(Sequence::Tuple(right))) => {
-                apply_operator_tuple(left, right, Number::rem, BinaryOperator::CModulo)?
-            }
+            (
+                left @ Value::Sequence(Sequence::Tuple(_)),
+                right @ Value::Sequence(Sequence::Tuple(_)),
+            ) => apply_operator_to_tuple::<BinaryOpError>(
+                left,
+                right,
+                into_fallible_operation(Number::rem),
+                BinaryOperator::CModulo,
+            )?,
             _ => return Err(create_type_error()),
         },
         BinaryOperator::EuclideanModulo => match (left, right) {
             (Value::Number(a), Value::Number(b)) => Value::Number(a.checked_rem_euclid(b)?),
 
-            (Value::Sequence(Sequence::Tuple(left)), Value::Sequence(Sequence::Tuple(right))) => {
-                todo!()
-            }
+            (
+                left @ Value::Sequence(Sequence::Tuple(_)),
+                right @ Value::Sequence(Sequence::Tuple(_)),
+            ) => apply_operator_to_tuple(
+                left,
+                right,
+                Number::checked_rem_euclid,
+                BinaryOperator::EuclideanModulo,
+            )?,
             _ => return Err(create_type_error()),
         },
         BinaryOperator::Exponent => match (left, right) {
             (Value::Number(a), Value::Number(b)) => Value::Number(a.pow(b)),
 
-            (Value::Sequence(Sequence::Tuple(left)), Value::Sequence(Sequence::Tuple(right))) => {
-                apply_operator_tuple(left, right, Number::pow, BinaryOperator::Exponent)?
-            }
+            (
+                left @ Value::Sequence(Sequence::Tuple(_)),
+                right @ Value::Sequence(Sequence::Tuple(_)),
+            ) => apply_operator_to_tuple(
+                left,
+                right,
+                into_fallible_operation::<BinaryOpError>(Number::pow),
+                BinaryOperator::Exponent,
+            )?,
             _ => return Err(create_type_error()),
         },
         BinaryOperator::And => match (left, right) {
@@ -1094,30 +1143,43 @@ fn apply_operator(
     Ok(val)
 }
 
-fn apply_operator_tuple(
+fn apply_operator_to_tuple<E>(
     left: Value,
     right: Value,
-    op: impl Fn(Number, Number) -> Number,
+    op: impl Fn(Number, Number) -> Result<Number, E>,
     operator: BinaryOperator,
-) -> Result<Value, BinaryOpError> {
-    let (lt, rt) = (left.value_type(), right.value_type());
+) -> Result<Value, BinaryOpError>
+where
+    BinaryOpError: From<E>,
+{
+    let (left_type, right_type) = (left.value_type(), right.value_type());
     match (left, right) {
-        (Value::Sequence(Sequence::Tuple(l)), Value::Sequence(Sequence::Tuple(r))) if lt == rt => {
-            let mut left_v = match Rc::try_unwrap(l) {
-                Ok(val) => val,
-                Err(rc) => rc.iter().cloned().collect(),
-            };
+        // both types are tuples, and their type signature is exactly the same and both types support vectorization
+        (Value::Sequence(Sequence::Tuple(l)), Value::Sequence(Sequence::Tuple(r)))
+            if left_type.supports_vectorization_with(&right_type) =>
+        {
+            let mut left_v = Rc::try_unwrap(l).unwrap_or_else(|rc| rc.iter().cloned().collect());
 
             for (l, r) in left_v.iter_mut().zip(r.iter()) {
                 match (l, r) {
                     (Value::Number(l), Value::Number(r)) => {
-                        *l = op(l.clone(), r.clone());
+                        // TODO: remove these clones once we fix operator implementations
+                        *l = match op(l.clone(), r.clone()) {
+                            Ok(v) => v,
+                            Err(_) => {
+                                return Err(BinaryOpError::UndefinedOperation {
+                                    operator,
+                                    left: left_type,
+                                    right: right_type,
+                                })
+                            }
+                        }
                     }
-                    (ll, rr) => {
+                    _ => {
                         return Err(BinaryOpError::UndefinedOperation {
                             operator,
-                            left: ll.value_type(),
-                            right: rr.value_type(),
+                            left: left_type,
+                            right: right_type,
                         })
                     }
                 }
@@ -1127,8 +1189,8 @@ fn apply_operator_tuple(
         }
         _ => Err(BinaryOpError::UndefinedOperation {
             operator,
-            left: lt,
-            right: rt,
+            left: left_type,
+            right: right_type,
         }),
     }
 }
