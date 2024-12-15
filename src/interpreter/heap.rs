@@ -45,6 +45,10 @@ where
     fn from_heap(heap: BinaryHeap<T>) -> Self {
         Self { heap }
     }
+
+    pub fn into_inner(self) -> BinaryHeap<T> {
+        self.heap
+    }
 }
 
 impl MinHeap {
@@ -86,7 +90,15 @@ impl FromIterator<Value> for MaxHeap {
         MaxHeap::from_heap(iter.into_iter().map(HeapValue).collect::<BinaryHeap<_>>())
     }
 }
+
+#[derive(Clone)]
 pub struct HeapValue(pub Value);
+
+impl From<HeapValue> for Value {
+    fn from(value: HeapValue) -> Self {
+        value.0
+    }
+}
 
 impl Deref for HeapValue {
     type Target = Value;

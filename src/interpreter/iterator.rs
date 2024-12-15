@@ -1,10 +1,16 @@
 //! The implementation of the various iterators in this module were heavily inspired by the ones in
 //! noulith which can be found [here](https://github.com/betaveros/noulith/blob/441d52ea433527b7ada5bc6cabd952f9ae8fb791/src/streams.rs)
 //!
+use super::function::FunctionCarrier;
+use super::int::Int::Int64;
+use super::num::Number;
+use crate::hash_map::HashMap;
+use crate::interpreter::heap::{HeapValue, MaxHeap};
 use crate::interpreter::sequence::Sequence;
 use crate::interpreter::value::{Value, ValueType};
 use self_cell::self_cell;
 use std::cell::{Ref, RefCell};
+use std::collections::BinaryHeap;
 use std::rc::Rc;
 
 #[derive(Clone)]
@@ -135,10 +141,39 @@ pub enum SharedVecIterator<'a, T> {
 impl<T> SharedVecIterator<'_, T> {
     pub fn from_shared_vec(value: &mut Rc<RefCell<Vec<T>>>) -> SharedVecIterator<T> {
         match Rc::get_mut(value) {
+            // This case covers code samples where a list literal is used in a loop like:
+            // ```ndc
+            // for x in [1,2,3,4] {
+            //      print(x);
+            // }
+            // ```
+            // In this case there is only one reference to the vector and we can take ownership
             Some(vec) => SharedVecIterator::IntoIter(vec.take().into_iter()),
             None => SharedVecIterator::RefCellIterator(RefCellIterator {
                 inner: Some(Ref::map(value.borrow(), |it| &it[..])),
             }),
+        }
+    }
+
+    pub fn from_heap(value: &mut Rc<RefCell<MaxHeap>>) -> SharedVecIterator<T>
+    where
+        HeapValue: Into<T>,
+    {
+        match Rc::get_mut(value) {
+            // This case is completely useless for binary heaps since they are always going to be assigned to variables
+            Some(heap) => {
+                let owned_heap: BinaryHeap<HeapValue> = heap.take().into_inner();
+                SharedVecIterator::IntoIter(
+                    owned_heap
+                        .into_sorted_vec()
+                        .into_iter()
+                        // Hope the compiler can make this nice
+                        .map(Into::into)
+                        .collect::<Vec<T>>()
+                        .into_iter(),
+                )
+            }
+            None => todo!("implement this"),
         }
     }
 }
@@ -220,15 +255,6 @@ where
     }
 }
 
-/// Hashmaps
-/// Hashmaps
-/// Hashmaps
-use crate::hash_map::HashMap;
-
-use super::function::FunctionCarrier;
-use super::int::Int::Int64;
-use super::num::Number;
-
 struct HashMapIter<'a>(pub std::collections::hash_map::Iter<'a, Value, Value>);
 
 self_cell! {
@@ -253,7 +279,7 @@ impl Iterator for SharedHashMapIterator<'_> {
     fn next(&mut self) -> Option<Self::Item> {
         let cur = self.with_dependent_mut(|_map, iter| iter.next());
         // Creates copies of the values inside the map
-        cur.map(|cur| Value::Sequence(Sequence::Tuple(Rc::new(vec![cur.0.clone(), cur.1.clone()]))))
+        cur.map(|cur| Value::tuple(vec![cur.0.clone(), cur.1.clone()]))
     }
 }
 
