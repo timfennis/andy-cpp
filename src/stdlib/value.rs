@@ -2,7 +2,6 @@ use andy_cpp_macros::export_module;
 
 #[export_module]
 mod inner {
-    use crate::interpreter::evaluate::EvaluationResult;
     use crate::interpreter::heap::{MaxHeap, MinHeap};
     use crate::interpreter::sequence::Sequence;
     use crate::interpreter::value::Value;
@@ -73,13 +72,12 @@ mod inner {
         }
     }
 
-    pub fn push(seq: &Sequence, val: Value) -> EvaluationResult {
+    pub fn push(seq: &Sequence, val: Value) {
         match seq {
-            Sequence::MinHeap(heap) => heap.borrow_mut().push(val)?,
-            Sequence::MaxHeap(heap) => heap.borrow_mut().push(val)?,
+            Sequence::MinHeap(heap) => heap.borrow_mut().push(val),
+            Sequence::MaxHeap(heap) => heap.borrow_mut().push(val),
             _ => todo!("not implemented"),
         }
-        Ok(Value::unit())
     }
     #[function(name = "MaxHeap")]
     pub fn create_max_heap() -> Value {

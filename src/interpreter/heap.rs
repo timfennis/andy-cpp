@@ -1,14 +1,21 @@
 use crate::interpreter::function::FunctionCarrier;
 use crate::interpreter::value::{Value, ValueType};
 use std::cmp::{Ordering, Reverse};
-use std::collections::binary_heap::Iter;
 use std::collections::BinaryHeap;
+use std::ops::Deref;
 
 pub type MinHeap = CheckedHeap<Reverse<HeapValue>>;
 pub type MaxHeap = CheckedHeap<HeapValue>;
 pub struct CheckedHeap<T> {
     heap: BinaryHeap<T>,
-    typ: Option<ValueType>,
+}
+
+impl<T> Deref for CheckedHeap<T> {
+    type Target = BinaryHeap<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.heap
+    }
 }
 
 impl<T> Default for CheckedHeap<T>
@@ -27,79 +34,31 @@ where
     pub fn new() -> Self {
         Self {
             heap: BinaryHeap::default(),
-            typ: None,
         }
-    }
-
-    pub fn len(&self) -> usize {
-        self.heap.len()
-    }
-
-    pub fn iter(&self) -> Iter<'_, T> {
-        self.heap.iter()
-    }
-
-    pub fn peek(&self) -> Option<&T> {
-        self.heap.peek()
-    }
-
-    fn check_push(&mut self, value: &Value) -> Result<(), HeapError> {
-        if value.value_type() == ValueType::Function {
-            return Err(HeapError::UnsupportedValueType {
-                typ: ValueType::Function,
-            });
-        }
-
-        if let Some(typ) = &self.typ {
-            if &value.value_type() != typ {
-                return Err(HeapError::InvalidValueType {
-                    expected: typ.clone(),
-                    actual: value.value_type(),
-                });
-            }
-        } else {
-            self.typ = Some(value.value_type());
-        }
-
-        Ok(())
     }
 }
 
 impl MinHeap {
-    pub fn push(&mut self, value: Value) -> Result<(), HeapError> {
-        self.check_push(&value)?;
+    pub fn push(&mut self, value: Value) {
         self.heap.push(Reverse(HeapValue(value)));
-        Ok(())
     }
 
     pub fn pop(&mut self) -> Value {
-        let pop = self
-            .heap
+        self.heap
             .pop()
-            .map_or_else(Value::none, |hv| Value::some(hv.0 .0));
-        if self.heap.is_empty() {
-            self.typ = None;
-        }
-        pop
+            .map_or_else(Value::none, |hv| Value::some(hv.0 .0))
     }
 }
 
 impl MaxHeap {
-    pub fn push(&mut self, value: Value) -> Result<(), HeapError> {
-        self.check_push(&value)?;
+    pub fn push(&mut self, value: Value) {
         self.heap.push(HeapValue(value));
-        Ok(())
     }
 
     pub fn pop(&mut self) -> Value {
-        let pop = self
-            .heap
+        self.heap
             .pop()
-            .map_or_else(Value::none, |hv| Value::some(hv.0));
-        if self.heap.is_empty() {
-            self.typ = None;
-        }
-        pop
+            .map_or_else(Value::none, |hv| Value::some(hv.0))
     }
 }
 
@@ -120,9 +79,8 @@ impl PartialOrd for HeapValue {
 
 impl Ord for HeapValue {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.0
-            .partial_cmp(&other.0)
-            .expect("checked heap must guarantee this never happens")
+        self.0.partial_cmp(&other.0).unwrap_or(Ordering::Equal)
+        // .expect("checked heap must guarantee this never happens")
     }
 }
 
