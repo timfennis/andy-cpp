@@ -58,6 +58,10 @@ mod inner {
         }
     }
 
+    pub fn deepcopy(value: &Value) -> Value {
+        value.deepcopy()
+    }
+
     #[function(name = "MinHeap")]
     pub fn create_min_heap() -> Value {
         Value::Sequence(Sequence::MinHeap(Rc::new(RefCell::new(MinHeap::new()))))

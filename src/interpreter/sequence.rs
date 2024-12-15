@@ -37,6 +37,43 @@ impl Sequence {
             Sequence::Deque(deque) => Some(deque.borrow().len()),
         }
     }
+
+    #[must_use]
+    pub fn deepcopy(&self) -> Sequence {
+        match self {
+            Sequence::List(l) => Sequence::List(Rc::new(RefCell::new(
+                l.borrow()
+                    .iter()
+                    .map(Value::deepcopy)
+                    .collect::<Vec<Value>>(),
+            ))),
+            Sequence::Map(m, def) => Sequence::Map(
+                Rc::new(RefCell::new(
+                    m.borrow()
+                        .iter()
+                        .map(|(key, value)| (key.deepcopy(), value.deepcopy()))
+                        .collect::<HashMap<Value, Value>>(),
+                )),
+                def.as_deref().map(|v| Box::new(v.deepcopy())),
+            ),
+            // Since tuple has copy on write semantics we just don't do a deepcopy and nobody will know
+            Sequence::Tuple(t) => Sequence::Tuple(t.clone()),
+            Sequence::MaxHeap(heap) => Sequence::MaxHeap(Rc::new(RefCell::new(
+                heap.borrow()
+                    .iter()
+                    .map(|v| v.deepcopy())
+                    .collect::<MaxHeap>(),
+            ))),
+            Sequence::MinHeap(heap) => Sequence::MinHeap(Rc::new(RefCell::new(
+                heap.borrow()
+                    .iter()
+                    .map(|v| v.0.deepcopy())
+                    .collect::<MinHeap>(),
+            ))),
+            Sequence::String(s) => Sequence::String(Rc::new(RefCell::new(s.borrow().to_string()))),
+            _ => todo!("deepcopy is not yet implemented for this type"),
+        }
+    }
 }
 
 impl PartialEq for Sequence {

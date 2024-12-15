@@ -125,6 +125,15 @@ impl Value {
     pub fn empty_list() -> Value {
         Value::Sequence(Sequence::List(Rc::new(RefCell::new(vec![]))))
     }
+
+    // TODO: writing this is very tedious
+    pub fn deepcopy(&self) -> Value {
+        match self {
+            Value::Sequence(seq) => Value::Sequence(seq.deepcopy()),
+            // For all non non-sequence types we can just use clone since they don't have interior mutability
+            v => v.clone(),
+        }
+    }
 }
 
 impl FallibleOrd for Value {

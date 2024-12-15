@@ -1,24 +1,29 @@
-use crate::interpreter::function::FunctionCarrier;
-use crate::interpreter::value::{Value, ValueType};
+use crate::interpreter::value::Value;
 use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 
-pub type MinHeap = CheckedHeap<Reverse<HeapValue>>;
-pub type MaxHeap = CheckedHeap<HeapValue>;
-pub struct CheckedHeap<T> {
+pub type MinHeap = ManagedHeap<Reverse<HeapValue>>;
+pub type MaxHeap = ManagedHeap<HeapValue>;
+
+pub struct ManagedHeap<T> {
     heap: BinaryHeap<T>,
 }
 
-impl<T> Deref for CheckedHeap<T> {
+impl<T> Deref for ManagedHeap<T> {
     type Target = BinaryHeap<T>;
 
     fn deref(&self) -> &Self::Target {
         &self.heap
     }
 }
+impl<T> DerefMut for ManagedHeap<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.heap
+    }
+}
 
-impl<T> Default for CheckedHeap<T>
+impl<T> Default for ManagedHeap<T>
 where
     T: Ord,
 {
@@ -27,7 +32,7 @@ where
     }
 }
 
-impl<T> CheckedHeap<T>
+impl<T> ManagedHeap<T>
 where
     T: Ord,
 {
@@ -35,6 +40,10 @@ where
         Self {
             heap: BinaryHeap::default(),
         }
+    }
+
+    fn from_heap(heap: BinaryHeap<T>) -> Self {
+        Self { heap }
     }
 }
 
@@ -50,6 +59,16 @@ impl MinHeap {
     }
 }
 
+impl FromIterator<Value> for MinHeap {
+    fn from_iter<T: IntoIterator<Item = Value>>(iter: T) -> Self {
+        MinHeap::from_heap(
+            iter.into_iter()
+                .map(|v| Reverse(HeapValue(v)))
+                .collect::<BinaryHeap<_>>(),
+        )
+    }
+}
+
 impl MaxHeap {
     pub fn push(&mut self, value: Value) {
         self.heap.push(HeapValue(value));
@@ -62,7 +81,26 @@ impl MaxHeap {
     }
 }
 
+impl FromIterator<Value> for MaxHeap {
+    fn from_iter<T: IntoIterator<Item = Value>>(iter: T) -> Self {
+        MaxHeap::from_heap(iter.into_iter().map(HeapValue).collect::<BinaryHeap<_>>())
+    }
+}
 pub struct HeapValue(pub Value);
+
+impl Deref for HeapValue {
+    type Target = Value;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for HeapValue {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
 
 impl PartialEq for HeapValue {
     fn eq(&self, other: &Self) -> bool {
@@ -81,23 +119,5 @@ impl Ord for HeapValue {
     fn cmp(&self, other: &Self) -> Ordering {
         self.0.partial_cmp(&other.0).unwrap_or(Ordering::Equal)
         // .expect("checked heap must guarantee this never happens")
-    }
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum HeapError {
-    // TODO: improve these error messages
-    #[error("This heap can only contain {expected} but you tried to insert {actual}")]
-    InvalidValueType {
-        expected: ValueType,
-        actual: ValueType,
-    },
-    #[error("Values of type {typ} are not supported in this datastructure")]
-    UnsupportedValueType { typ: ValueType },
-}
-
-impl From<HeapError> for FunctionCarrier {
-    fn from(value: HeapError) -> Self {
-        FunctionCarrier::IntoEvaluationError(Box::new(value))
     }
 }
