@@ -584,11 +584,13 @@ pub enum ValueType {
 }
 
 impl ValueType {
-    #[must_use] pub fn supports_vectorization(&self) -> bool {
+    #[must_use]
+    pub fn supports_vectorization(&self) -> bool {
         matches!(self, ValueType::Tuple(values) if values.iter().all(|x| matches!(x, ValueType::Number(_))))
     }
 
-    #[must_use] pub fn supports_vectorization_with(&self, other: &Self) -> bool {
+    #[must_use]
+    pub fn supports_vectorization_with(&self, other: &Self) -> bool {
         matches!((self, other), (ValueType::Tuple(l), ValueType::Tuple(r)) if {
             l.len() == r.len()
                 && self.supports_vectorization()

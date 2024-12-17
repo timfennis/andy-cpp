@@ -9,6 +9,7 @@
 //! | Backward index | -10 | -9 | -8 | -7 | -6 | -5 | -4 | -3 | -2 | -1 |
 //! +----------------+-----+----+----+----+----+----+----+----+----+----+
 
+use super::{evaluate_expression, EvaluationError, IntoEvaluationResult};
 use crate::{
     ast::{Expression, ExpressionLocation},
     interpreter::{
@@ -16,9 +17,8 @@ use crate::{
     },
     lexer::Span,
 };
+use std::cmp::min;
 use std::ops::IndexMut;
-
-use super::{evaluate_expression, EvaluationError, IntoEvaluationResult};
 
 pub enum EvaluatedIndex {
     Index(Value),
@@ -34,7 +34,7 @@ impl EvaluatedIndex {
     pub fn try_into_offset(self, size: usize, span: Span) -> Result<Offset, EvaluationError> {
         Ok(match self {
             EvaluatedIndex::Index(idx) => {
-                Offset::Element(value_to_forward_index_usize(idx, size, span)?)
+                Offset::Element(value_to_bounded_forward_index(idx, size, false, span)?)
             }
             EvaluatedIndex::Slice {
                 from,
@@ -42,13 +42,13 @@ impl EvaluatedIndex {
                 inclusive,
             } => {
                 let from_idx = if let Some(from) = from {
-                    value_to_forward_index_usize(from, size, span)?
+                    value_to_bounded_forward_index(from, size, true, span)?
                 } else {
                     0
                 };
 
                 let to_idx = if let Some(to) = to {
-                    value_to_forward_index_usize(to, size, span)?
+                    value_to_bounded_forward_index(to, size, true, span)?
                 } else {
                     size
                 };
@@ -105,35 +105,49 @@ pub(crate) fn evaluate_as_index(
     })
 }
 
-fn value_to_forward_index_usize(
-    value: Value,
-    size: usize,
-    span: Span,
-) -> Result<usize, EvaluationError> {
-    let index = i64::try_from(value).map_err(|_err| {
+fn invalid_index_err<T>(span: Span) -> impl Fn(T) -> EvaluationError {
+    move |_: T| {
         EvaluationError::with_help(
             "Invalid list index".to_string(),
             span,
             "The value used as a list index is not valid. List indices must be convertible to a signed 64-bit integer. Ensure the index is a valid integer within the range of -2^63 to 2^63-1".to_string(),
         )
-    })?;
+    }
+}
+
+/// This function converts a native Andy C++ `Value` (hopefully a number) into a valid usize index
+/// into a vector of size `size`. The `allow_oob` argument allows the argument to be out of bounds
+/// which is needed when evaluating range expressions.
+fn value_to_bounded_forward_index(
+    value: Value,
+    size: usize,
+    for_slice: bool,
+    span: Span,
+) -> Result<usize, EvaluationError> {
+    let index = i64::try_from(value).map_err(invalid_index_err(span))?;
 
     if index.is_negative() {
         let index = usize::try_from(index.abs())
             .map_err(|_err| EvaluationError::new("invalid index: too large".to_string(), span))?;
 
-        size.checked_sub(index)
-            .ok_or_else(|| EvaluationError::new("index out of bounds".to_string(), span))
+        if for_slice {
+            Ok(size.saturating_sub(index))
+        } else {
+            size.checked_sub(index)
+                .ok_or_else(|| EvaluationError::new("index out of bounds".to_string(), span))
+        }
     } else {
-        let index = usize::try_from(index)
-            .map_err(|_| EvaluationError::syntax_error("kapot".to_string(), span))?;
+        let index = usize::try_from(index).map_err(invalid_index_err(span))?;
+        if for_slice {
+            return Ok(min(index, size));
+        }
+
         if index >= size {
             return Err(EvaluationError::new(
                 "index out of bounds".to_string(),
                 span,
             ));
         }
-
         Ok(index)
     }
 }

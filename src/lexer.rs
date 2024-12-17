@@ -126,7 +126,7 @@ impl Iterator for Lexer<'_> {
                 // lex string
                 ('"', _) => return Some(self.lex_string()),
                 // lex float & int
-                (char, _) if char.is_ascii_digit() => return Some(self.lex_number()), // Lex identifiers and keywords
+                (char, _) if char.is_ascii_digit() => return Some(self.lex_number()),
                 // Identifier or keyword
                 (char, _) if char.is_alphabetic() || char == '_' => {
                     // Because we use the peeked char we consume it from the iterator

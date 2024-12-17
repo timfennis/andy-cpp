@@ -255,12 +255,12 @@ impl Function {
                     expected: ValueType::Number(NumberType::Float),
                     actual: v.value_type(),
                 }
-                    .into()),
+                .into()),
                 _ => Err(FunctionCallError::ArgumentCountError {
                     expected: 1,
                     actual: 0,
                 }
-                    .into()),
+                .into()),
             },
             Function::GenericFunction { function, .. } => function(args, env),
             Function::Memoized { cache, function } => {
