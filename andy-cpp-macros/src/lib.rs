@@ -32,9 +32,10 @@ pub fn export_module(_attr: TokenStream, item: TokenStream) -> TokenStream {
     for item in items {
         match item {
             Item::Fn(f) => {
-                let w = wrap_function(f);
-                declarations.push(w.function_declaration);
-                registrations.push(w.function_registration);
+                for fun in wrap_function(f) {
+                    declarations.push(fun.function_declaration);
+                    registrations.push(fun.function_registration);
+                }
             }
             Item::Use(u) => {
                 uses.push(u);
