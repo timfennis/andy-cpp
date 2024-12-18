@@ -5,12 +5,11 @@ use super::function::FunctionCarrier;
 use super::int::Int::Int64;
 use super::num::Number;
 use crate::hash_map::HashMap;
-use crate::interpreter::heap::{HeapValue, MaxHeap};
+use crate::interpreter::heap::{MaxHeap, MinHeap};
 use crate::interpreter::sequence::Sequence;
 use crate::interpreter::value::{Value, ValueType};
 use self_cell::self_cell;
 use std::cell::{Ref, RefCell};
-use std::collections::BinaryHeap;
 use std::rc::Rc;
 
 #[derive(Clone)]
@@ -38,6 +37,8 @@ pub enum MutableValueIntoIterator<'a> {
     String(SharedStringIterator),
     Map(SharedHashMapIterator<'a>),
     Iterator(Rc<RefCell<ValueIterator>>),
+    MinHeap(MinHeapIterator),
+    MaxHeap(MaxHeapIterator),
 }
 
 impl Iterator for MutableValueIntoIterator<'_> {
@@ -50,6 +51,8 @@ impl Iterator for MutableValueIntoIterator<'_> {
             MutableValueIntoIterator::String(iter) => iter.next(),
             MutableValueIntoIterator::Map(iter) => iter.next(),
             MutableValueIntoIterator::Iterator(iter) => iter.borrow_mut().next(),
+            MutableValueIntoIterator::MinHeap(iter) => iter.next(),
+            MutableValueIntoIterator::MaxHeap(iter) => iter.next(),
         }
     }
 }
@@ -85,15 +88,13 @@ pub fn mut_seq_into_iterator(sequence: &mut Sequence) -> MutableValueIntoIterato
         Sequence::List(list) => {
             MutableValueIntoIterator::List(SharedVecIterator::from_shared_vec(list))
         }
-        Sequence::MinHeap(_list) => {
-            todo!()
+        Sequence::MinHeap(list) => {
+            MutableValueIntoIterator::MinHeap(MinHeapIterator::new(Rc::clone(list)))
         }
-        Sequence::MaxHeap(_list) => {
-            todo!()
+        Sequence::MaxHeap(list) => {
+            MutableValueIntoIterator::MaxHeap(MaxHeapIterator::new(Rc::clone(list)))
         }
-        Sequence::Deque(_deque) => {
-            todo!()
-        }
+        Sequence::Deque(_deque) => todo!(),
         Sequence::Tuple(tup) => MutableValueIntoIterator::Tuple(RcVecIterator::from_rc_vec(tup)),
         Sequence::Map(map, _) => {
             MutableValueIntoIterator::Map(SharedHashMapIterator::from_ref(map))
@@ -154,28 +155,6 @@ impl<T> SharedVecIterator<'_, T> {
             }),
         }
     }
-
-    pub fn from_heap(value: &mut Rc<RefCell<MaxHeap>>) -> SharedVecIterator<T>
-    where
-        HeapValue: Into<T>,
-    {
-        match Rc::get_mut(value) {
-            // This case is completely useless for binary heaps since they are always going to be assigned to variables
-            Some(heap) => {
-                let owned_heap: BinaryHeap<HeapValue> = heap.take().into_inner();
-                SharedVecIterator::IntoIter(
-                    owned_heap
-                        .into_sorted_vec()
-                        .into_iter()
-                        // Hope the compiler can make this nice
-                        .map(Into::into)
-                        .collect::<Vec<T>>()
-                        .into_iter(),
-                )
-            }
-            None => todo!("implement this"),
-        }
-    }
 }
 
 impl<T> Iterator for SharedVecIterator<'_, T>
@@ -187,6 +166,58 @@ where
         match self {
             SharedVecIterator::RefCellIterator(i) => i.next().map(|it| it.to_owned()),
             SharedVecIterator::IntoIter(i) => i.next(),
+        }
+    }
+}
+
+pub struct MaxHeapIterator {
+    heap: Rc<RefCell<MaxHeap>>,
+    idx: usize,
+}
+
+impl Iterator for MaxHeapIterator {
+    type Item = Value;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let heap = self.heap.borrow();
+        if self.idx < heap.len() {
+            let x = &heap.as_slice()[self.idx];
+            self.idx += 1;
+            Some(x.0.clone())
+        } else {
+            None
+        }
+    }
+}
+
+impl MaxHeapIterator {
+    pub fn new(heap: Rc<RefCell<MaxHeap>>) -> MaxHeapIterator {
+        MaxHeapIterator { heap, idx: 0 }
+    }
+}
+
+pub struct MinHeapIterator {
+    heap: Rc<RefCell<MinHeap>>,
+    idx: usize,
+}
+
+impl MinHeapIterator {
+    pub fn new(heap: Rc<RefCell<MinHeap>>) -> MinHeapIterator {
+        MinHeapIterator { heap, idx: 0 }
+    }
+}
+
+impl Iterator for MinHeapIterator {
+    type Item = Value;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let heap = self.heap.borrow();
+        if self.idx < heap.len() {
+            let x = &heap.as_slice()[self.idx];
+            self.idx += 1;
+            Some(x.0 .0.clone())
+        } else {
+            None
         }
     }
 }

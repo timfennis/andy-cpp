@@ -126,7 +126,7 @@ impl Value {
         Value::Sequence(Sequence::List(Rc::new(RefCell::new(vec![]))))
     }
 
-    // TODO: writing this is very tedious
+    #[must_use]
     pub fn deepcopy(&self) -> Value {
         match self {
             Value::Sequence(seq) => Value::Sequence(seq.deepcopy()),

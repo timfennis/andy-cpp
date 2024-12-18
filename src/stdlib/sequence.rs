@@ -151,8 +151,7 @@ mod inner {
             Sequence::Tuple(_) => Err(anyhow!("tuple cannot be sorted in place")),
             Sequence::Map(_, _) => Err(anyhow!("map cannot be sorted in place")),
             Sequence::Iterator(_) => Err(anyhow!("iterator cannot be sorted in place")),
-            Sequence::MaxHeap(_) => Err(anyhow!("heap is already sorted")),
-            Sequence::MinHeap(_) => Err(anyhow!("heap is already sorted")),
+            Sequence::MaxHeap(_) | Sequence::MinHeap(_) => Err(anyhow!("heap is already sorted")),
             Sequence::Deque(_) => Err(anyhow!("deque cannot be sorted in place")),
         }
     }
