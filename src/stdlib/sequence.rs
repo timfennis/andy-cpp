@@ -1,6 +1,6 @@
 #![allow(clippy::ptr_arg)]
 
-use crate::interpreter::iterator::{mut_seq_into_iterator, MutableValueIntoIterator};
+use crate::interpreter::iterator::{mut_seq_to_iterator, MutableValueIntoIterator};
 use crate::interpreter::sequence::Sequence;
 use crate::{
     compare::FallibleOrd,
@@ -166,13 +166,13 @@ mod inner {
     }
 
     pub fn sorted(seq: &mut Sequence) -> anyhow::Result<Value> {
-        let mut list = mut_seq_into_iterator(seq).collect::<Vec<Value>>();
+        let mut list = mut_seq_to_iterator(seq).collect::<Vec<Value>>();
         try_sort_by(&mut list, Value::try_cmp)?;
         Ok(Value::list(list))
     }
 
     pub fn sorted_by(seq: &mut Sequence, comp: &Callable) -> EvaluationResult {
-        let mut list = mut_seq_into_iterator(seq).collect::<Vec<Value>>();
+        let mut list = mut_seq_to_iterator(seq).collect::<Vec<Value>>();
         try_sort_by::<FunctionCarrier>(&mut list, |left, right| {
             let ret = comp.call(&mut [left.clone(), right.clone()])?;
 
@@ -234,7 +234,7 @@ mod inner {
                 out.into()
             }
             seq => Value::list(
-                mut_seq_into_iterator(seq)
+                mut_seq_to_iterator(seq)
                     .enumerate()
                     .map(|(idx, value)| Value::tuple(vec![Value::from(idx), value]))
                     .collect::<Vec<_>>(),
@@ -243,11 +243,11 @@ mod inner {
     }
 
     pub fn fold(seq: &mut Sequence, initial: Value, function: &Callable) -> EvaluationResult {
-        fold_iterator(mut_seq_into_iterator(seq), initial, function)
+        fold_iterator(mut_seq_to_iterator(seq), initial, function)
     }
 
     pub fn reduce(seq: &mut Sequence, function: &Callable) -> EvaluationResult {
-        let mut iterator = mut_seq_into_iterator(seq);
+        let mut iterator = mut_seq_to_iterator(seq);
         let fst = iterator
             .next()
             .ok_or_else(|| anyhow!("first argument to reduce must not be empty"))?;
@@ -256,7 +256,7 @@ mod inner {
     }
 
     pub fn filter(seq: &mut Sequence, predicate: &Callable) -> EvaluationResult {
-        let iterator = mut_seq_into_iterator(seq);
+        let iterator = mut_seq_to_iterator(seq);
         let mut out = Vec::new();
         for element in iterator {
             out.push(element);
@@ -275,7 +275,7 @@ mod inner {
     }
 
     pub fn count(seq: &mut Sequence, predicate: &Callable) -> EvaluationResult {
-        let iterator = mut_seq_into_iterator(seq);
+        let iterator = mut_seq_to_iterator(seq);
         let mut out = 0;
         for element in iterator {
             let result = predicate.call(&mut [element])?;
@@ -292,7 +292,7 @@ mod inner {
     }
 
     pub fn find(seq: &mut Sequence, predicate: &Callable) -> EvaluationResult {
-        let iterator = mut_seq_into_iterator(seq);
+        let iterator = mut_seq_to_iterator(seq);
         for element in iterator {
             let result = predicate.call(&mut [element.clone()])?;
             match result {
@@ -306,7 +306,7 @@ mod inner {
     }
 
     pub fn locate(seq: &mut Sequence, predicate: &Callable) -> EvaluationResult {
-        let iterator = mut_seq_into_iterator(seq);
+        let iterator = mut_seq_to_iterator(seq);
         for (idx, element) in iterator.enumerate() {
             let result = predicate.call(&mut [element])?;
             match result {
@@ -320,7 +320,7 @@ mod inner {
     }
 
     pub fn none(seq: &mut Sequence, function: &Callable) -> EvaluationResult {
-        for item in mut_seq_into_iterator(seq) {
+        for item in mut_seq_to_iterator(seq) {
             match function.call(&mut [item])? {
                 Value::Bool(true) => return Ok(Value::Bool(false)),
                 Value::Bool(false) => {}
@@ -337,7 +337,7 @@ mod inner {
         Ok(Value::Bool(true))
     }
     pub fn all(seq: &mut Sequence, function: &Callable) -> EvaluationResult {
-        for item in mut_seq_into_iterator(seq) {
+        for item in mut_seq_to_iterator(seq) {
             match function.call(&mut [item])? {
                 Value::Bool(true) => {}
                 Value::Bool(false) => return Ok(Value::Bool(false)),
@@ -355,7 +355,7 @@ mod inner {
     }
 
     pub fn any(seq: &mut Sequence, function: &Callable) -> EvaluationResult {
-        for item in mut_seq_into_iterator(seq) {
+        for item in mut_seq_to_iterator(seq) {
             match function.call(&mut [item])? {
                 Value::Bool(true) => return Ok(Value::Bool(true)),
                 Value::Bool(false) => {}
@@ -373,7 +373,7 @@ mod inner {
     }
 
     pub fn map(seq: &mut Sequence, function: &Callable) -> EvaluationResult {
-        let iterator = mut_seq_into_iterator(seq);
+        let iterator = mut_seq_to_iterator(seq);
         let mut out = Vec::new();
 
         for item in iterator {
@@ -387,12 +387,12 @@ mod inner {
         // let iterator = ;
         let mut out = Vec::new();
 
-        for item in mut_seq_into_iterator(seq) {
+        for item in mut_seq_to_iterator(seq) {
             let fnout = function.call(&mut [item])?;
             match fnout {
                 Value::Sequence(mut inner_seq) => {
                     // TODO: would it be (much?) faster if we iterate over the iterator and append the elements individually?
-                    out.extend(mut_seq_into_iterator(&mut inner_seq));
+                    out.extend(mut_seq_to_iterator(&mut inner_seq));
                 }
                 _ => return Err(anyhow!("callable must return a sequence").into()),
             }
@@ -402,7 +402,7 @@ mod inner {
     }
 
     pub fn first_or(seq: &mut Sequence, default: Value) -> Value {
-        let mut iterator = mut_seq_into_iterator(seq);
+        let mut iterator = mut_seq_to_iterator(seq);
         if let Some(item) = iterator.next() {
             item
         } else {
@@ -411,7 +411,7 @@ mod inner {
     }
 
     pub fn first_or_else(seq: &mut Sequence, default: &Callable) -> EvaluationResult {
-        let mut iterator = mut_seq_into_iterator(seq);
+        let mut iterator = mut_seq_to_iterator(seq);
         Ok(if let Some(item) = iterator.next() {
             item
         } else {
@@ -421,7 +421,7 @@ mod inner {
 
     pub fn combinations(seq: &mut Sequence, k: usize) -> Value {
         Value::list(
-            mut_seq_into_iterator(seq)
+            mut_seq_to_iterator(seq)
                 .combinations(k)
                 .map(Value::list)
                 .collect::<Vec<Value>>(),
@@ -430,7 +430,7 @@ mod inner {
 
     pub fn permutations(seq: &mut Sequence, k: usize) -> Value {
         Value::list(
-            mut_seq_into_iterator(seq)
+            mut_seq_to_iterator(seq)
                 .permutations(k)
                 .map(Value::list)
                 .collect::<Vec<Value>>(),
@@ -453,7 +453,7 @@ mod inner {
             );
         }
 
-        let iterator = mut_seq_into_iterator(seq);
+        let iterator = mut_seq_to_iterator(seq);
 
         Value::list(
             iterator
@@ -477,7 +477,7 @@ mod inner {
             );
         }
 
-        let iterator = mut_seq_into_iterator(seq);
+        let iterator = mut_seq_to_iterator(seq);
         let out = iterator.collect::<Vec<_>>();
 
         Value::list(
@@ -488,7 +488,7 @@ mod inner {
     }
 
     pub fn transposed(seq: &mut Sequence) -> EvaluationResult {
-        let mut main = mut_seq_into_iterator(seq).collect::<Vec<_>>();
+        let mut main = mut_seq_to_iterator(seq).collect::<Vec<_>>();
         let mut iterators = Vec::new();
         for iter in &mut main {
             iterators.push(mut_value_to_iterator(iter)?);
@@ -507,7 +507,7 @@ mod inner {
     }
 
     pub fn pairwise(seq: &mut Sequence) -> Vec<Value> {
-        mut_seq_into_iterator(seq)
+        mut_seq_to_iterator(seq)
             .collect::<Vec<_>>()
             .windows(2)
             .map(Value::tuple)
@@ -517,7 +517,7 @@ mod inner {
     // TODO: this implementation probably clones a bit more than it needs to, but it's better tol
     //       have something than nothing
     pub fn circular_tuple_windows(seq: &mut Sequence) -> Vec<Value> {
-        mut_seq_into_iterator(seq)
+        mut_seq_to_iterator(seq)
             .collect::<Vec<_>>()
             .iter()
             .circular_tuple_windows::<(_, _)>()
@@ -527,7 +527,7 @@ mod inner {
 
     #[function(name = "pairwise")]
     pub fn pairwise_map(seq: &mut Sequence, function: &Callable) -> EvaluationResult {
-        let main = mut_seq_into_iterator(seq).collect::<Vec<_>>();
+        let main = mut_seq_to_iterator(seq).collect::<Vec<_>>();
 
         let mut out = Vec::with_capacity(main.len() - 1);
         for (a, b) in main.into_iter().tuple_windows() {
@@ -538,7 +538,7 @@ mod inner {
     }
 
     pub fn windows(seq: &mut Sequence, size: usize) -> Vec<Value> {
-        mut_seq_into_iterator(seq)
+        mut_seq_to_iterator(seq)
             .collect::<Vec<Value>>()
             .windows(size)
             .map(Value::list)
@@ -546,7 +546,7 @@ mod inner {
     }
 
     pub fn subsequences(seq: &mut Sequence) -> Vec<Value> {
-        mut_seq_into_iterator(seq)
+        mut_seq_to_iterator(seq)
             .powerset()
             .map(Value::list)
             .collect::<Vec<Value>>()
@@ -554,7 +554,7 @@ mod inner {
 
     #[function(name = "subsequences")]
     pub fn subsequences_len(seq: &mut Sequence, size: usize) -> Vec<Value> {
-        mut_seq_into_iterator(seq)
+        mut_seq_to_iterator(seq)
             .powerset()
             .filter(|x| x.len() == size)
             .map(Value::list)
@@ -564,7 +564,7 @@ mod inner {
     pub fn multi_cartesian_product(seq: &mut Sequence) -> anyhow::Result<Value> {
         let mut iterators = Vec::new();
 
-        for mut value in mut_seq_into_iterator(seq) {
+        for mut value in mut_seq_to_iterator(seq) {
             let iter = mut_value_to_iterator(&mut value)?.collect_vec().into_iter();
             iterators.push(iter);
         }

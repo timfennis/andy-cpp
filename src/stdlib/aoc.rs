@@ -5,14 +5,14 @@ mod inner {
     use std::rc::Rc;
 
     use crate::hash_map::HashMap;
-    use crate::interpreter::iterator::mut_seq_into_iterator;
+    use crate::interpreter::iterator::mut_seq_to_iterator;
     use crate::interpreter::sequence::Sequence;
     use crate::interpreter::value::Value;
 
     pub fn frequencies(seq: &mut Sequence) -> Value {
         let mut out_map = HashMap::new();
 
-        for item in mut_seq_into_iterator(seq) {
+        for item in mut_seq_to_iterator(seq) {
             *out_map.entry(item).or_insert(0i64) += 1;
         }
 

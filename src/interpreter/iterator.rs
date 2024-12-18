@@ -73,14 +73,14 @@ pub fn mut_value_to_iterator(
     value: &mut Value,
 ) -> Result<MutableValueIntoIterator<'_>, NotIterableError> {
     match value {
-        Value::Sequence(sequence) => Ok(mut_seq_into_iterator(sequence)),
+        Value::Sequence(sequence) => Ok(mut_seq_to_iterator(sequence)),
         value => Err(NotIterableError {
             value_type: value.value_type(),
         }),
     }
 }
 
-pub fn mut_seq_into_iterator(sequence: &mut Sequence) -> MutableValueIntoIterator {
+pub fn mut_seq_to_iterator(sequence: &mut Sequence) -> MutableValueIntoIterator {
     match sequence {
         Sequence::String(string) => {
             MutableValueIntoIterator::String(SharedStringIterator::new(string))
