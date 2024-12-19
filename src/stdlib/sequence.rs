@@ -176,7 +176,6 @@ mod inner {
     }
 
     pub fn len(seq: &Sequence) -> anyhow::Result<usize> {
-        // TODO: determine the type programmatically instead of hardcoding it to iterator (in case we add more types)
         match seq.length() {
             Some(n) => Ok(n),
             None => Err(anyhow!(

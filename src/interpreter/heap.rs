@@ -42,7 +42,7 @@ where
         }
     }
 
-    fn from_heap(heap: BinaryHeap<T>) -> Self {
+    pub fn from_heap(heap: BinaryHeap<T>) -> Self {
         Self { heap }
     }
 

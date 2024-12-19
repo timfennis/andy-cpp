@@ -2,6 +2,7 @@ use andy_cpp_macros::export_module;
 
 #[export_module]
 mod inner {
+    use crate::interpreter::heap::{MaxHeap, MinHeap};
     use crate::interpreter::sequence::Sequence;
     use crate::interpreter::value::Value;
     use std::cell::RefCell;
@@ -68,6 +69,15 @@ mod inner {
             Value::Sequence(Sequence::Iterator(iterator)) => {
                 Value::Sequence(Sequence::Iterator(iterator.clone()))
             }
+            Value::Sequence(Sequence::MaxHeap(heap)) => Value::Sequence(Sequence::MaxHeap(
+                Rc::new(RefCell::new(MaxHeap::from_heap(heap.borrow().to_owned()))),
+            )),
+            Value::Sequence(Sequence::MinHeap(heap)) => Value::Sequence(Sequence::MinHeap(
+                Rc::new(RefCell::new(MinHeap::from_heap(heap.borrow().to_owned()))),
+            )),
+            Value::Sequence(Sequence::Deque(deque)) => Value::Sequence(Sequence::Deque(Rc::new(
+                RefCell::new(deque.borrow().to_owned()),
+            ))),
             Value::Function(f) => Value::from(f.borrow().to_owned()),
         }
     }
