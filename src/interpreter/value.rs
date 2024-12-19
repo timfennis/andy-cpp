@@ -648,20 +648,20 @@ impl From<&Value> for ValueType {
 impl fmt::Display for ValueType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Option => write!(f, "option"),
+            Self::Option => write!(f, "Option"),
             Self::Number(n) => write!(f, "{n}"),
-            Self::Bool => write!(f, "bool"),
-            Self::String => write!(f, "string"),
-            Self::List => write!(f, "list"),
+            Self::Bool => write!(f, "Bool"),
+            Self::String => write!(f, "String"),
+            Self::List => write!(f, "List"),
             Self::Tuple(t) => {
                 write!(f, "tuple<{}>", t.iter().join(", "))
             }
-            Self::Function => write!(f, "function"),
-            Self::Map => write!(f, "map"),
-            Self::Iterator => write!(f, "iterator"),
-            Self::MinHeap => write!(f, "min-heap"),
-            Self::MaxHeap => write!(f, "max-heap"),
-            Self::Deque => write!(f, "deque"),
+            Self::Function => write!(f, "Function"),
+            Self::Map => write!(f, "Map"),
+            Self::Iterator => write!(f, "Iterator"),
+            Self::MinHeap => write!(f, "MinHeap"),
+            Self::MaxHeap => write!(f, "MaxHeap"),
+            Self::Deque => write!(f, "Deque"),
         }
     }
 }
