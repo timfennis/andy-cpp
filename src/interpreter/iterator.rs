@@ -10,6 +10,7 @@ use crate::interpreter::sequence::Sequence;
 use crate::interpreter::value::{Value, ValueType};
 use self_cell::self_cell;
 use std::cell::{Ref, RefCell};
+use std::collections::VecDeque;
 use std::rc::Rc;
 
 #[derive(Clone)]
@@ -39,6 +40,7 @@ pub enum MutableValueIntoIterator<'a> {
     Iterator(Rc<RefCell<ValueIterator>>),
     MinHeap(MinHeapIterator),
     MaxHeap(MaxHeapIterator),
+    Deque(SharedDequeIterator),
 }
 
 impl Iterator for MutableValueIntoIterator<'_> {
@@ -53,6 +55,7 @@ impl Iterator for MutableValueIntoIterator<'_> {
             MutableValueIntoIterator::Iterator(iter) => iter.borrow_mut().next(),
             MutableValueIntoIterator::MinHeap(iter) => iter.next(),
             MutableValueIntoIterator::MaxHeap(iter) => iter.next(),
+            MutableValueIntoIterator::Deque(iter) => iter.next(),
         }
     }
 }
@@ -94,7 +97,9 @@ pub fn mut_seq_to_iterator(sequence: &mut Sequence) -> MutableValueIntoIterator 
         Sequence::MaxHeap(list) => {
             MutableValueIntoIterator::MaxHeap(MaxHeapIterator::new(Rc::clone(list)))
         }
-        Sequence::Deque(_deque) => todo!(),
+        Sequence::Deque(deque) => {
+            MutableValueIntoIterator::Deque(SharedDequeIterator::new(Rc::clone(deque)))
+        }
         Sequence::Tuple(tup) => MutableValueIntoIterator::Tuple(RcVecIterator::from_rc_vec(tup)),
         Sequence::Map(map, _) => {
             MutableValueIntoIterator::Map(SharedHashMapIterator::from_ref(map))
@@ -102,7 +107,6 @@ pub fn mut_seq_to_iterator(sequence: &mut Sequence) -> MutableValueIntoIterator 
         Sequence::Iterator(iter) => MutableValueIntoIterator::Iterator(Rc::clone(iter)),
     }
 }
-
 pub enum RcVecIterator<'a, T> {
     Draining(std::vec::Drain<'a, T>),
     Cloning(std::slice::Iter<'a, T>),
@@ -216,6 +220,30 @@ impl Iterator for MinHeapIterator {
             let x = &heap.as_slice()[self.idx];
             self.idx += 1;
             Some(x.0 .0.clone())
+        } else {
+            None
+        }
+    }
+}
+
+pub struct SharedDequeIterator {
+    deque: Rc<RefCell<VecDeque<Value>>>,
+    idx: usize,
+}
+
+impl SharedDequeIterator {
+    pub fn new(deque: Rc<RefCell<VecDeque<Value>>>) -> SharedDequeIterator {
+        SharedDequeIterator { deque, idx: 0 }
+    }
+}
+
+impl Iterator for SharedDequeIterator {
+    type Item = Value;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let deque = self.deque.borrow();
+        if self.idx > deque.len() {
+            deque.get(self.idx).cloned()
         } else {
             None
         }

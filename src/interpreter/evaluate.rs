@@ -251,7 +251,8 @@ pub(crate) fn evaluate_expression(
                 (value, _) => {
                     return Err(EvaluationError::new(
                         format!(
-                            "mismatched types: expected bool, found {}",
+                            "mismatched types: expected {}, found {}",
+                            ValueType::Bool,
                             ValueType::from(&value)
                         ),
                         span,
@@ -1483,7 +1484,8 @@ fn execute_for_iterations(
             value => {
                 return Err(EvaluationError::type_error(
                     format!(
-                        "mismatched types: expected bool, found {}",
+                        "mismatched types: expected {}, found {}",
+                        ValueType::Bool,
                         ValueType::from(&value)
                     ),
                     span,

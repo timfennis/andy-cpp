@@ -3,4 +3,4 @@ for i in 1 {
     print(i);
 }
 --EXPECT-ERROR--
-int is not iterable
+Int is not iterable

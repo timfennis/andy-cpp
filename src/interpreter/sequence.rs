@@ -160,12 +160,11 @@ impl fmt::Debug for Sequence {
                 write!(f, "}}")
             }
             Sequence::Iterator(_) => {
-                write!(f, "iterator")
+                write!(f, "Iterator")
             }
-            // TODO: create more sensible implementations??
-            Sequence::MaxHeap(_) => write!(f, "max-heap"),
-            Sequence::MinHeap(_) => write!(f, "min-heap"),
-            Sequence::Deque(_) => write!(f, "deque"),
+            Sequence::MaxHeap(h) => write!(f, "MaxHeap(len={})", h.borrow().len()),
+            Sequence::MinHeap(h) => write!(f, "MinHeap(len={})", h.borrow().len()),
+            Sequence::Deque(d) => write!(f, "Deque(len={})", d.borrow().len()),
         }
     }
 }
