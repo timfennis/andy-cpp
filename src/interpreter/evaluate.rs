@@ -37,9 +37,7 @@ pub(crate) fn evaluate_expression(
     let span = expression_location.span;
     let literal: Value = match &expression_location.expression {
         Expression::BoolLiteral(b) => Value::Bool(*b),
-        Expression::StringLiteral(s) => {
-            Value::Sequence(Sequence::String(Rc::new(RefCell::new(s.to_string()))))
-        }
+        Expression::StringLiteral(s) => Value::string(s),
         Expression::Int64Literal(n) => Value::Number(Number::Int(Int::Int64(*n))),
         Expression::BigIntLiteral(n) => Value::Number(Number::Int(Int::BigInt(n.clone()))),
         Expression::Float64Literal(n) => Value::Number(Number::Float(*n)),
@@ -542,6 +540,35 @@ pub(crate) fn evaluate_expression(
                             };
 
                             Value::Sequence(Sequence::Tuple(Rc::new(values.to_vec())))
+                        }
+                    }
+                }
+                Value::Sequence(Sequence::Deque(deque)) => {
+                    let list_length = deque.borrow().len();
+
+                    let index = evaluate_as_index(index_expr, environment)?
+                        .try_into_offset(list_length, index_expr.span)?;
+
+                    match index {
+                        Offset::Element(usize_index) => {
+                            let list = deque.borrow();
+                            let Some(value) = list.get(usize_index) else {
+                                return Err(
+                                    EvaluationError::out_of_bounds(index, index_expr.span).into()
+                                );
+                            };
+                            value.clone()
+                        }
+                        Offset::Range(from_usize, to_usize) => {
+                            let list = deque.borrow();
+                            let out = list
+                                .iter()
+                                .dropping(from_usize)
+                                .take(to_usize - from_usize)
+                                .cloned()
+                                .collect::<Vec<_>>();
+
+                            Value::list(out)
                         }
                     }
                 }
