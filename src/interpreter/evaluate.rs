@@ -765,94 +765,89 @@ fn apply_operation_to_value(
     right_value: Value,
     span: Span,
 ) -> Result<Value, FunctionCarrier> {
-    if let Either::Left(BinaryOperator::Concat) = operation {
-        match (value, right_value) {
-            (Value::Sequence(Sequence::String(left)), Value::Sequence(Sequence::String(right))) => {
-                if Rc::ptr_eq(left, &right) {
-                    let copy = String::from(&*right.borrow());
-                    left.borrow_mut().push_str(&copy);
-                } else {
-                    left.borrow_mut().push_str(&right.borrow());
-                }
-                Ok(Value::Sequence(Sequence::String(left.clone())))
+    match (value, operation, right_value) {
+        (
+            Value::Sequence(Sequence::String(left)),
+            Either::Left(BinaryOperator::Concat),
+            Value::Sequence(Sequence::String(right)),
+        ) => {
+            if Rc::ptr_eq(left, &right) {
+                let copy = String::from(&*right.borrow());
+                left.borrow_mut().push_str(&copy);
+            } else {
+                left.borrow_mut().push_str(&right.borrow());
             }
-            (Value::Sequence(Sequence::List(left)), Value::Sequence(Sequence::List(right))) => {
-                // Special case for when a list is extended with itself
-                // x := [1,2,3]; x ++= x;
-                if Rc::ptr_eq(left, &right) {
-                    let copy = Vec::clone(&*right.borrow());
-                    left.borrow_mut().extend_from_slice(&copy);
-                } else {
-                    left.borrow_mut().extend_from_slice(&right.borrow());
-                };
-                Ok(Value::Sequence(Sequence::List(left.clone())))
-            }
-            (
-                Value::Sequence(Sequence::Tuple(ref mut left)),
-                Value::Sequence(Sequence::Tuple(mut right)),
-            ) => {
-                let right = Rc::make_mut(&mut right);
-                Rc::make_mut(left).append(right);
-                Ok(Value::Sequence(Sequence::Tuple(Rc::clone(left))))
-            }
-            (left, right) => Err(EvaluationError::new(
-                format!(
-                    "cannot apply the ++ operator to {} and {}",
-                    left.value_type(),
-                    right.value_type()
-                ),
-                span,
-            )
-            .into()),
+            Ok(Value::Sequence(Sequence::String(left.clone())))
         }
-    } else if let Either::Left(BinaryOperator::Or) = operation {
-        match (value, right_value) {
-            (
-                Value::Sequence(Sequence::Map(left, default)),
-                Value::Sequence(Sequence::Map(right, _)),
-            ) => {
-                // If right and left are the same we can just do nothing and prevent a borrow checker error later
-                if !Rc::ptr_eq(left, &right) {
-                    match Rc::try_unwrap(right) {
-                        Ok(right) => {
-                            left.borrow_mut().extend(right.take());
-                        }
-                        Err(right) => {
-                            // If we ever figure out how to make the borrow below panic we should add a test and fix it
-                            left.borrow_mut()
-                                .extend(right.borrow().iter().map(|(a, b)| (a.clone(), b.clone())));
-                        }
+
+        (
+            Value::Sequence(Sequence::List(left)),
+            Either::Left(BinaryOperator::Concat),
+            Value::Sequence(Sequence::List(right)),
+        ) => {
+            // Special case for when a list is extended with itself
+            // x := [1,2,3]; x ++= x;
+            if Rc::ptr_eq(left, &right) {
+                let copy = Vec::clone(&*right.borrow());
+                left.borrow_mut().extend_from_slice(&copy);
+            } else {
+                left.borrow_mut().extend_from_slice(&right.borrow());
+            };
+            Ok(Value::Sequence(Sequence::List(left.clone())))
+        }
+
+        (
+            Value::Sequence(Sequence::Tuple(ref mut left)),
+            Either::Left(BinaryOperator::Concat),
+            Value::Sequence(Sequence::Tuple(mut right)),
+        ) => {
+            let right = Rc::make_mut(&mut right);
+            Rc::make_mut(left).append(right);
+            Ok(Value::Sequence(Sequence::Tuple(Rc::clone(left))))
+        }
+
+        (
+            Value::Sequence(Sequence::Map(left, default)),
+            Either::Left(BinaryOperator::Or),
+            Value::Sequence(Sequence::Map(right, _)),
+        ) => {
+            // If right and left are the same we can just do nothing and prevent a borrow checker error later
+            if !Rc::ptr_eq(left, &right) {
+                match Rc::try_unwrap(right) {
+                    Ok(right) => {
+                        left.borrow_mut().extend(right.take());
+                    }
+                    Err(right) => {
+                        // If we ever figure out how to make the borrow below panic we should add a test and fix it
+                        left.borrow_mut()
+                            .extend(right.borrow().iter().map(|(a, b)| (a.clone(), b.clone())));
                     }
                 }
+            }
 
-                return Ok(Value::Sequence(Sequence::Map(
-                    left.clone(),
-                    default.to_owned(),
-                )));
-            }
-            _ => Err(EvaluationError::new(
-                "cannot apply the | operator between these types".to_string(),
-                span,
-            )
-            .into()),
+            Ok(Value::Sequence(Sequence::Map(
+                left.clone(),
+                default.to_owned(),
+            )))
         }
-    } else {
-        let old_value = std::mem::replace(value, Value::unit());
-        match operation {
-            Either::Left(binary_operator) => {
-                *value = apply_operator(old_value, *binary_operator, right_value)
-                    .into_evaluation_result(span)?;
+        (left, operator, right) => {
+            match operator {
+                Either::Left(binary_operator) => {
+                    *left = apply_operator(left.clone(), *binary_operator, right)
+                        .into_evaluation_result(span)?;
+                }
+                Either::Right(identifier) => {
+                    let old_value = std::mem::replace(left, Value::unit());
+                    *left = call_function_by_name(
+                        identifier,
+                        &mut [old_value, right],
+                        environment,
+                        span,
+                    )?;
+                }
             }
-            Either::Right(identifier) => {
-                *value = call_function_by_name(
-                    identifier,
-                    &mut [old_value, right_value],
-                    environment,
-                    span,
-                )?;
-            }
+            Ok(left.clone())
         }
-        Ok(value.clone())
     }
 }
 
