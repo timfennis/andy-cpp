@@ -194,6 +194,8 @@ impl Token {
                 | Self::Tilde
                 | Self::PlusPlus
                 | Self::Diamond
+                | Self::LessLess
+                | Self::GreaterGreater
         )
     }
 }
