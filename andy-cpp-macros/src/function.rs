@@ -38,6 +38,16 @@ pub fn wrap_function(function: syn::ItemFn) -> Vec<WrappedFunction> {
         syn::Visibility::Inherited => panic!("only public functions can be wrapped for now"),
     }
 
+    // If the function has no argument then the cartesian product stuff below doesn't work
+    if function.sig.inputs.is_empty() {
+        return vec![wrap_single(
+            function.clone(),
+            original_identifier,
+            &register_as_function_name,
+            vec![],
+        )];
+    }
+
     // When we call create_temp_variable we can get multiple definitions for a variable
     // For instance when a rust function is `fn foo(list: &[Value])` we can define two internal functions for both Tuple and List
     let functions = function

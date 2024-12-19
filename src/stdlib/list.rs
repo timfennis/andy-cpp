@@ -138,7 +138,7 @@ mod inner {
     pub fn first(list: &[Value]) -> anyhow::Result<Value> {
         list.first()
             .cloned()
-            .ok_or_else(|| anyhow!("the list is empty"))
+            .ok_or_else(|| anyhow!("collection is empty"))
     }
 
     /// Returns a copy of the first element or `unit` if the list is empty.
