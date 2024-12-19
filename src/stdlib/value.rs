@@ -69,7 +69,6 @@ mod inner {
                 Value::Sequence(Sequence::Iterator(iterator.clone()))
             }
             Value::Function(f) => Value::from(f.borrow().to_owned()),
-            _ => todo!("implement cloning for new types"),
         }
     }
 

@@ -230,11 +230,11 @@ impl Hash for Value {
                 }
                 Sequence::MaxHeap(h) => {
                     state.write_u8(10);
-                    Rc::as_ptr(h).hash(state); // TODO: does this make sense?
+                    Rc::as_ptr(h).hash(state);
                 }
                 Sequence::MinHeap(h) => {
                     state.write_u8(11);
-                    Rc::as_ptr(h).hash(state); // TODO: does this make sense?
+                    Rc::as_ptr(h).hash(state);
                 }
                 Sequence::Deque(list) => {
                     state.write_u8(12);

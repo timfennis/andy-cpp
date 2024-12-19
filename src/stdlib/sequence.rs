@@ -98,13 +98,8 @@ mod inner {
                 .peek()
                 .map(|hv| hv.0.clone())
                 .ok_or_else(|| anyhow::anyhow!("empty input to max")),
-            // TODO: can this be improved?
-            Sequence::MinHeap(h) => h
-                .borrow()
-                .iter()
-                .last()
-                .map(|v| v.0 .0.clone())
-                .ok_or_else(|| anyhow::anyhow!("empty input to max")),
+            // I think this is always going to be O(n)
+            Sequence::MinHeap(_) => Err(anyhow::anyhow!("not supported for MinHeap")),
             Sequence::Deque(d) => d.try_borrow()?.iter().try_max(),
         }
     }
@@ -120,13 +115,8 @@ mod inner {
             Sequence::Tuple(l) => l.iter().try_min(),
             Sequence::Map(map, _) => map.borrow().keys().try_min(),
             Sequence::Iterator(iter) => iter.borrow_mut().try_min(),
-            Sequence::MaxHeap(h) => h
-                .borrow()
-                .iter()
-                .last()
-                .map(|hv| hv.0.clone())
-                .ok_or_else(|| anyhow::anyhow!("empty input to max")),
-            // TODO: can this be improved?
+            // I think this is always going to be O(n)
+            Sequence::MaxHeap(_) => Err(anyhow::anyhow!("not supported for MaxHeap")),
             Sequence::MinHeap(h) => h
                 .borrow()
                 .peek()
@@ -187,8 +177,13 @@ mod inner {
 
     pub fn len(seq: &Sequence) -> anyhow::Result<usize> {
         // TODO: determine the type programmatically instead of hardcoding it to iterator (in case we add more types)
-        seq.length()
-            .ok_or_else(|| anyhow!("cannot determine the length of an iterator"))
+        match seq.length() {
+            Some(n) => Ok(n),
+            None => Err(anyhow!(
+                "cannot determine the length of {}",
+                seq.value_type()
+            )),
+        }
     }
 
     pub fn enumerate(seq: &mut Sequence) -> Value {

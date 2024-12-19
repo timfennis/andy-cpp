@@ -1,7 +1,7 @@
 use crate::hash_map::HashMap;
 use crate::interpreter::heap::{MaxHeap, MinHeap};
 use crate::interpreter::iterator::ValueIterator;
-use crate::interpreter::value::Value;
+use crate::interpreter::value::{Value, ValueType};
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
@@ -72,6 +72,19 @@ impl Sequence {
             ))),
             Sequence::String(s) => Sequence::String(Rc::new(RefCell::new(s.borrow().to_string()))),
             _ => todo!("deepcopy is not yet implemented for this type"),
+        }
+    }
+
+    pub fn value_type(&self) -> ValueType {
+        match self {
+            Sequence::String(_) => ValueType::String,
+            Sequence::List(_) => ValueType::List,
+            Sequence::Tuple(t) => ValueType::Tuple(t.iter().map(Value::value_type).collect()),
+            Sequence::Map(_, _) => ValueType::Map,
+            Sequence::Iterator(_) => ValueType::Iterator,
+            Sequence::MaxHeap(_) => ValueType::MaxHeap,
+            Sequence::MinHeap(_) => ValueType::MinHeap,
+            Sequence::Deque(_) => ValueType::Deque,
         }
     }
 }
