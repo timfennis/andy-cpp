@@ -1,7 +1,9 @@
 pub mod aoc;
 pub mod cmp;
+pub mod deque;
 pub mod file;
 pub mod hash_map;
+pub mod heap;
 pub mod list;
 pub mod math;
 pub mod regex;

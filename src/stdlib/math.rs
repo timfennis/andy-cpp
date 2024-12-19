@@ -37,7 +37,7 @@ where
 {
     fn try_product(&mut self) -> anyhow::Result<Number> {
         self.try_fold(Number::from(1), |acc, cur| match cur.borrow() {
-            Value::Number(n) => Ok(acc * n.clone()),
+            Value::Number(n) => Ok(acc * n.clone()), // TODO: we can probably lose this clone
             value => Err(anyhow::anyhow!(
                 "cannot multiply {} and number",
                 value.value_type()
@@ -82,6 +82,10 @@ mod inner {
             Sequence::Tuple(tup) => tup.iter().try_sum(),
             Sequence::Map(map, _) => map.borrow().keys().try_sum(),
             Sequence::Iterator(iter) => iter.borrow_mut().try_sum(),
+            Sequence::MaxHeap(h) => h.borrow().iter().map(|v| v.0.clone()).try_sum(),
+            // TODO: This clone is pretty bad
+            Sequence::MinHeap(h) => h.borrow().iter().map(|v| v.0 .0.clone()).try_sum(),
+            Sequence::Deque(d) => d.borrow().iter().try_sum(),
         }
     }
 
@@ -92,6 +96,10 @@ mod inner {
             Sequence::Tuple(tup) => tup.iter().try_product(),
             Sequence::Map(map, _) => map.borrow().keys().try_product(),
             Sequence::Iterator(iter) => iter.borrow_mut().try_product(),
+            Sequence::MaxHeap(h) => h.borrow().iter().map(|v| v.0.clone()).try_product(),
+            // TODO: This clone is pretty bad
+            Sequence::MinHeap(h) => h.borrow().iter().map(|v| v.0 .0.clone()).try_product(),
+            Sequence::Deque(d) => d.borrow().iter().try_product(),
         }
     }
 

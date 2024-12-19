@@ -1,6 +1,6 @@
 use andy_cpp_macros::export_module;
 
-use crate::interpreter::iterator::mut_seq_into_iterator;
+use crate::interpreter::iterator::mut_seq_to_iterator;
 use crate::interpreter::sequence::Sequence;
 use crate::interpreter::value::Value;
 
@@ -10,7 +10,7 @@ use std::fmt::Write;
 use std::rc::Rc;
 
 pub fn join_to_string(list: &mut Sequence, sep: &str) -> anyhow::Result<String> {
-    let mut iter = mut_seq_into_iterator(list);
+    let mut iter = mut_seq_to_iterator(list);
     match iter.next() {
         None => Ok(String::new()),
         Some(first) => {
