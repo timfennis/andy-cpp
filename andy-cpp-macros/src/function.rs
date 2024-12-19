@@ -131,18 +131,17 @@ struct Argument {
 }
 
 fn into_param_type(ty: &syn::Type) -> TokenStream {
-    if path_ends_with(ty, "Vec") {
-        return quote! { crate::interpreter::function::ParamType::List };
-    }
-
-    if path_ends_with(ty, "DefaultMap")
-        || path_ends_with(ty, "DefaultMapMut")
-        || path_ends_with(ty, "HashMap")
-    {
-        return quote! { crate::interpreter::function::ParamType::Map };
-    }
-
     match ty {
+        ty if path_ends_with(ty, "Vec") => quote! { crate::interpreter::function::ParamType::List },
+        ty if path_ends_with(ty, "VecDeque") => {
+            quote! { crate::interpreter::function::ParamType::Deque }
+        }
+        ty if path_ends_with(ty, "DefaultMap")
+            || path_ends_with(ty, "DefaultMapMut")
+            || path_ends_with(ty, "HashMap") =>
+        {
+            quote! { crate::interpreter::function::ParamType::Map }
+        }
         syn::Type::Reference(syn::TypeReference { elem, .. }) => into_param_type(elem),
         syn::Type::Path(syn::TypePath { path, .. }) => match path {
             _ if path.is_ident("i64") => quote! { crate::interpreter::function::ParamType::Int },
@@ -279,6 +278,36 @@ fn create_temp_variable(
                         panic!("Value #position needed to be a Sequence::List but wasn't");
                     };
                     let #argument_var_name = &mut *#rc_temp_var.try_borrow_mut()?;
+                },
+            });
+        }
+        // The pattern is exactly &mut VecDeque
+        else if is_ref_mut(ty) && path_ends_with(ty, "VecDeque") {
+            let rc_temp_var =
+                syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
+            return Some(Argument {
+                param_type: into_param_type(ty),
+                argument: quote! { #argument_var_name },
+                initialize_code: quote! {
+                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::Deque(#rc_temp_var)) = #argument_var_name else {
+                        panic!("Value #position needed to be a Sequence::List but wasn't");
+                    };
+                    let #argument_var_name = &mut *#rc_temp_var.try_borrow_mut()?;
+                },
+            });
+        }
+        // The pattern is exactly &VecDeque
+        else if is_ref(ty) && path_ends_with(ty, "VecDeque") {
+            let rc_temp_var =
+                syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
+            return Some(Argument {
+                param_type: into_param_type(ty),
+                argument: quote! { #argument_var_name },
+                initialize_code: quote! {
+                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::Deque(#rc_temp_var)) = #argument_var_name else {
+                        panic!("Value #position needed to be a Sequence::List but wasn't");
+                    };
+                    let #argument_var_name = &*#rc_temp_var.try_borrow()?;
                 },
             });
         }

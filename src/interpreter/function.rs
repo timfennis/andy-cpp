@@ -1,4 +1,4 @@
-use std::cell::{BorrowMutError, RefCell};
+use std::cell::{BorrowError, BorrowMutError, RefCell};
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
@@ -182,6 +182,9 @@ impl ParamType {
             (ParamType::Map, ValueType::Map) => Some(0),
             (ParamType::Iterator, ValueType::Iterator) => Some(0),
             (ParamType::Function, ValueType::Function) => Some(0),
+            (ParamType::Deque, ValueType::Deque) => Some(0),
+            (ParamType::MinHeap, ValueType::MinHeap) => Some(0),
+            (ParamType::MaxHeap, ValueType::MaxHeap) => Some(0),
             (ParamType::Any, _) => Some(2),
             (ParamType::Number, ValueType::Number(_)) => Some(1),
             (
@@ -351,6 +354,13 @@ impl From<anyhow::Error> for FunctionCarrier {
 
 impl From<BorrowMutError> for FunctionCarrier {
     fn from(value: BorrowMutError) -> Self {
+        // TODO: maybe this needs a better message
+        Self::IntoEvaluationError(Box::new(value))
+    }
+}
+
+impl From<BorrowError> for FunctionCarrier {
+    fn from(value: BorrowError) -> Self {
         // TODO: maybe this needs a better message
         Self::IntoEvaluationError(Box::new(value))
     }
