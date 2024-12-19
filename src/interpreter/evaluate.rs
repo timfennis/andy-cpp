@@ -23,7 +23,6 @@ use crate::interpreter::sequence::Sequence;
 use crate::interpreter::value::{Value, ValueType};
 use crate::lexer::Span;
 
-use super::iterator::ValueIterator;
 use super::num::into_fallible_operation;
 
 pub type EvaluationResult = Result<Value, FunctionCarrier>;
@@ -38,9 +37,7 @@ pub(crate) fn evaluate_expression(
     let span = expression_location.span;
     let literal: Value = match &expression_location.expression {
         Expression::BoolLiteral(b) => Value::Bool(*b),
-        Expression::StringLiteral(s) => {
-            Value::Sequence(Sequence::String(Rc::new(RefCell::new(s.to_string()))))
-        }
+        Expression::StringLiteral(s) => Value::string(s),
         Expression::Int64Literal(n) => Value::Number(Number::Int(Int::Int64(*n))),
         Expression::BigIntLiteral(n) => Value::Number(Number::Int(Int::BigInt(n.clone()))),
         Expression::Float64Literal(n) => Value::Number(Number::Float(*n)),
@@ -251,7 +248,8 @@ pub(crate) fn evaluate_expression(
                 (value, _) => {
                     return Err(EvaluationError::new(
                         format!(
-                            "mismatched types: expected bool, found {}",
+                            "mismatched types: expected {}, found {}",
+                            ValueType::Bool,
                             ValueType::from(&value)
                         ),
                         span,
@@ -542,6 +540,35 @@ pub(crate) fn evaluate_expression(
                             };
 
                             Value::Sequence(Sequence::Tuple(Rc::new(values.to_vec())))
+                        }
+                    }
+                }
+                Value::Sequence(Sequence::Deque(deque)) => {
+                    let list_length = deque.borrow().len();
+
+                    let index = evaluate_as_index(index_expr, environment)?
+                        .try_into_offset(list_length, index_expr.span)?;
+
+                    match index {
+                        Offset::Element(usize_index) => {
+                            let list = deque.borrow();
+                            let Some(value) = list.get(usize_index) else {
+                                return Err(
+                                    EvaluationError::out_of_bounds(index, index_expr.span).into()
+                                );
+                            };
+                            value.clone()
+                        }
+                        Offset::Range(from_usize, to_usize) => {
+                            let list = deque.borrow();
+                            let out = list
+                                .iter()
+                                .dropping(from_usize)
+                                .take(to_usize - from_usize)
+                                .cloned()
+                                .collect::<Vec<_>>();
+
+                            Value::list(out)
                         }
                     }
                 }
@@ -1066,29 +1093,8 @@ fn apply_operator(
             _ => return Err(create_type_error()),
         },
         BinaryOperator::In => match (left, right) {
-            (
-                Value::Sequence(Sequence::String(needle)),
-                Value::Sequence(Sequence::String(haystack)),
-            ) => haystack.borrow().contains(&*needle.borrow()).into(),
-            (needle, Value::Sequence(Sequence::List(haystack))) => {
-                haystack.borrow().contains(&needle).into()
-            }
-            (needle, Value::Sequence(Sequence::Tuple(haystack))) => {
-                haystack.contains(&needle).into()
-            }
-            (needle, Value::Sequence(Sequence::Map(map, _))) => {
-                map.borrow().contains_key(&needle).into()
-            }
-            (needle, Value::Sequence(Sequence::Iterator(iter))) => {
-                let iter = ValueIterator::clone(&*iter.borrow());
-                let c = match iter {
-                    ValueIterator::ValueRange(range) => range.contains(&needle),
-                    ValueIterator::ValueRangeFrom(range) => range.contains(&needle),
-                    ValueIterator::ValueRangeInclusive(range) => range.contains(&needle), // For non range iterators the implementation probably has to fallback to a slow scan
-                };
-                Value::from(c)
-            }
-            _ => Value::Bool(false),
+            (needle, Value::Sequence(haystack)) => Value::Bool(haystack.contains(&needle)),
+            _ => return Err(create_type_error()),
         },
         BinaryOperator::Concat => match (left, right) {
             (Value::Sequence(Sequence::String(left)), Value::Sequence(Sequence::String(right))) => {
@@ -1483,7 +1489,8 @@ fn execute_for_iterations(
             value => {
                 return Err(EvaluationError::type_error(
                     format!(
-                        "mismatched types: expected bool, found {}",
+                        "mismatched types: expected {}, found {}",
+                        ValueType::Bool,
                         ValueType::from(&value)
                     ),
                     span,

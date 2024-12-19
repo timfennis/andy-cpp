@@ -13,6 +13,7 @@ use crate::lexer::{Lexer, TokenLocation};
 pub mod environment;
 pub mod evaluate;
 pub mod function;
+pub(crate) mod heap;
 pub mod int;
 pub mod iterator;
 pub mod num;

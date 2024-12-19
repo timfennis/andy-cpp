@@ -1,0 +1,9 @@
+--PROGRAM--
+let heap = MaxHeap();
+heap.push(5);
+heap.push(4);
+heap.push(6);
+assert_eq(heap.max, 6);
+print("ok");
+--EXPECT--
+ok

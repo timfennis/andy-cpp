@@ -81,14 +81,16 @@ impl Environment {
         // TODO: move this out of this module to a more general location
         crate::stdlib::aoc::register(&mut env);
         crate::stdlib::cmp::register(&mut env);
+        crate::stdlib::deque::register(&mut env);
         crate::stdlib::file::register(&mut env);
+        crate::stdlib::hash_map::register(&mut env);
+        crate::stdlib::heap::register(&mut env);
         crate::stdlib::list::register(&mut env);
         crate::stdlib::math::f64::register(&mut env);
         crate::stdlib::math::register(&mut env);
         crate::stdlib::regex::register(&mut env);
-        crate::stdlib::sequence::register(&mut env);
         crate::stdlib::sequence::extra::register(&mut env);
-        crate::stdlib::hash_map::register(&mut env);
+        crate::stdlib::sequence::register(&mut env);
         crate::stdlib::string::register(&mut env);
         crate::stdlib::value::register(&mut env);
 

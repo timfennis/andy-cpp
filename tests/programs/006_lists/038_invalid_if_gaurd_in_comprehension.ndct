@@ -1,4 +1,4 @@
 --PROGRAM--
 [x for x in 0..10, if x]
 --EXPECT-ERROR--
-mismatched types: expected bool, found int
+mismatched types: expected Bool, found Int

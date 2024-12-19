@@ -1,0 +1,10 @@
+--PROGRAM--
+assert("foo" in "foobar");
+assert("foobar" in "foobar");
+let a = "test";
+assert(a in a);
+assert("f" in "foobar");
+assert("o" in "foobar");
+print("ok");
+--EXPECT--
+ok
