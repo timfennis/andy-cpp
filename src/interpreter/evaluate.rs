@@ -920,7 +920,7 @@ fn apply_operator(
             ) => apply_operator_to_tuple::<BinaryOpError>(
                 left,
                 right,
-                into_fallible_operation(Number::add),
+                into_fallible_operation(<&Number as Add>::add),
                 BinaryOperator::Plus,
             )?,
             _ => return Err(create_type_error()),
@@ -934,7 +934,7 @@ fn apply_operator(
             ) => apply_operator_to_tuple::<BinaryOpError>(
                 left,
                 right,
-                into_fallible_operation(Number::sub),
+                into_fallible_operation(<&Number as Sub>::sub),
                 BinaryOperator::Minus,
             )?,
             _ => return Err(create_type_error()),
@@ -948,7 +948,7 @@ fn apply_operator(
             ) => apply_operator_to_tuple::<BinaryOpError>(
                 left,
                 right,
-                into_fallible_operation(Number::mul),
+                into_fallible_operation(<&Number as Mul>::mul),
                 BinaryOperator::Multiply,
             )?,
             _ => return Err(create_type_error()),
@@ -961,7 +961,7 @@ fn apply_operator(
             ) => apply_operator_to_tuple::<BinaryOpError>(
                 left,
                 right,
-                into_fallible_operation(Number::div),
+                into_fallible_operation(<&Number as Div>::div),
                 BinaryOperator::Divide,
             )?,
             _ => return Err(create_type_error()),
@@ -975,7 +975,7 @@ fn apply_operator(
             ) => apply_operator_to_tuple::<BinaryOpError>(
                 left,
                 right,
-                into_fallible_operation(Number::floor_div),
+                into_fallible_operation(Number::floor_div_ref),
                 BinaryOperator::FloorDivide,
             )?,
             _ => return Err(create_type_error()),
@@ -989,7 +989,7 @@ fn apply_operator(
             ) => apply_operator_to_tuple::<BinaryOpError>(
                 left,
                 right,
-                into_fallible_operation(Number::rem),
+                into_fallible_operation(<&Number as Rem>::rem),
                 BinaryOperator::CModulo,
             )?,
             _ => return Err(create_type_error()),
@@ -1003,7 +1003,7 @@ fn apply_operator(
             ) => apply_operator_to_tuple(
                 left,
                 right,
-                Number::checked_rem_euclid,
+                Number::checked_rem_euclid_ref,
                 BinaryOperator::EuclideanModulo,
             )?,
             _ => return Err(create_type_error()),
@@ -1011,15 +1011,15 @@ fn apply_operator(
         BinaryOperator::Exponent => match (left, right) {
             (Value::Number(a), Value::Number(b)) => Value::Number(a.pow(b)),
 
-            (
-                left @ Value::Sequence(Sequence::Tuple(_)),
-                right @ Value::Sequence(Sequence::Tuple(_)),
-            ) => apply_operator_to_tuple(
-                left,
-                right,
-                into_fallible_operation::<BinaryOpError>(Number::pow),
-                BinaryOperator::Exponent,
-            )?,
+            // (
+            //     left @ Value::Sequence(Sequence::Tuple(_)),
+            //     right @ Value::Sequence(Sequence::Tuple(_)),
+            // ) => apply_operator_to_tuple(
+            //     left,
+            //     right,
+            //     into_fallible_operation::<BinaryOpError>(&Number::pow),
+            //     BinaryOperator::Exponent,
+            // )?,
             _ => return Err(create_type_error()),
         },
         BinaryOperator::And => match (left, right) {
@@ -1142,10 +1142,10 @@ fn apply_operator(
     Ok(val)
 }
 
-fn apply_operator_to_tuple<E>(
+fn apply_operator_to_tuple<'a, E>(
     left: Value,
     right: Value,
-    op: impl Fn(Number, Number) -> Result<Number, E>,
+    op: impl Fn(&'a Number, &'a Number) -> Result<Number, E>,
     operator: BinaryOperator,
 ) -> Result<Value, BinaryOpError>
 where
@@ -1177,7 +1177,7 @@ where
     for (l, r) in left_vec.iter_mut().zip(right_nums.iter()) {
         if let (Value::Number(l), Value::Number(r)) = (l, r) {
             // TODO: remove these clones once we fix operator implementations
-            *l = match op(l.clone(), r.clone()) {
+            *l = match op(l, r) {
                 Ok(v) => v,
                 Err(_) => {
                     return Err(BinaryOpError::UndefinedOperation {

@@ -373,6 +373,22 @@ impl Number {
         }
     }
 
+    pub fn checked_rem_euclid_ref(&self, rhs: &Self) -> Result<Self, EuclideanDivisionError> {
+        match (self, rhs) {
+            (Self::Int(p1), Self::Int(p2)) => p1
+                .clone()
+                .checked_rem_euclid(&p2)
+                .ok_or(EuclideanDivisionError::OperationFailed)
+                .map(Self::Int),
+
+            (Self::Float(p1), Self::Float(p2)) => Ok(Self::Float(p1.rem_euclid(*p2))),
+            (left, right) => Err(EuclideanDivisionError::UndefinedOperation {
+                left: NumberType::from(left),
+                right: NumberType::from(right),
+            }),
+        }
+    }
+
     pub fn checked_rem_euclid(self, rhs: Self) -> Result<Self, EuclideanDivisionError> {
         match (self, rhs) {
             (Self::Int(p1), Self::Int(p2)) => p1
@@ -394,6 +410,17 @@ impl Number {
             // Handle this case separately because it's faster??
             (Number::Int(Int::Int64(l)), Number::Int(Int::Int64(r))) => {
                 Number::Int(Int::Int64(l.div_euclid(r)))
+            }
+            (l, r) => (l / r).floor(),
+        }
+    }
+
+    #[must_use]
+    pub fn floor_div_ref(&self, rhs: &Self) -> Self {
+        match (self, rhs) {
+            // Handle this case separately because it's faster??
+            (Number::Int(Int::Int64(l)), Number::Int(Int::Int64(r))) => {
+                Number::Int(Int::Int64(l.div_euclid(*r)))
             }
             (l, r) => (l / r).floor(),
         }
@@ -636,9 +663,9 @@ fn rational_to_complex(r: &BigRational) -> Complex<f64> {
     Complex::from(r.to_f64().unwrap_or(f64::NAN))
 }
 
-pub fn into_fallible_operation<E>(
-    op: impl Fn(Number, Number) -> Number,
-) -> impl Fn(Number, Number) -> Result<Number, E> {
+pub fn into_fallible_operation<'a, E>(
+    op: impl Fn(&'a Number, &'a Number) -> Number,
+) -> impl Fn(&'a Number, &'a Number) -> Result<Number, E> {
     move |left, right| Ok(op(left, right))
 }
 
