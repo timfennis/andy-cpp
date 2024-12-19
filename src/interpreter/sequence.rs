@@ -87,6 +87,36 @@ impl Sequence {
             Sequence::Deque(_) => ValueType::Deque,
         }
     }
+
+    #[must_use]
+    pub fn contains(&self, needle: &Value) -> bool {
+        match self {
+            Sequence::String(string) => match needle {
+                Value::Sequence(Sequence::String(needle)) => {
+                    if Rc::ptr_eq(string, needle) {
+                        return true;
+                    }
+
+                    string.borrow().contains(needle.borrow().as_str())
+                }
+                _ => false,
+            },
+            Sequence::List(list) => list.borrow().contains(needle),
+            Sequence::Tuple(tuple) => tuple.contains(needle),
+            Sequence::Map(map, _) => map.borrow().contains_key(needle),
+            Sequence::Iterator(iterator) => {
+                let iter = ValueIterator::clone(&*iterator.borrow());
+                match iter {
+                    ValueIterator::ValueRange(range) => range.contains(needle),
+                    ValueIterator::ValueRangeFrom(range) => range.contains(needle),
+                    ValueIterator::ValueRangeInclusive(range) => range.contains(needle),
+                }
+            }
+            Sequence::MaxHeap(heap) => heap.borrow().iter().any(|v| &v.0 == needle),
+            Sequence::MinHeap(heap) => heap.borrow().iter().any(|v| &v.0 .0 == needle),
+            Sequence::Deque(deque) => deque.borrow().contains(needle),
+        }
+    }
 }
 
 impl PartialEq for Sequence {
