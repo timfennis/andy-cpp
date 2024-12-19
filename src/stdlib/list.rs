@@ -1,6 +1,6 @@
 #[andy_cpp_macros::export_module]
 mod inner {
-    use crate::interpreter::iterator::mut_seq_into_iterator;
+    use crate::interpreter::iterator::mut_seq_to_iterator;
     use crate::interpreter::sequence::Sequence;
     use crate::interpreter::value::Value;
     use itertools::Itertools;
@@ -10,7 +10,7 @@ mod inner {
 
     /// Converts any sequence into a list
     pub fn list(seq: &mut Sequence) -> Vec<Value> {
-        mut_seq_into_iterator(seq).collect::<Vec<_>>()
+        mut_seq_to_iterator(seq).collect::<Vec<_>>()
     }
 
     pub fn contains(list: &[Value], elem: &Value) -> bool {

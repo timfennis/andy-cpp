@@ -125,6 +125,15 @@ impl Value {
     pub fn empty_list() -> Value {
         Value::Sequence(Sequence::List(Rc::new(RefCell::new(vec![]))))
     }
+
+    #[must_use]
+    pub fn deepcopy(&self) -> Value {
+        match self {
+            Value::Sequence(seq) => Value::Sequence(seq.deepcopy()),
+            // For all non non-sequence types we can just use clone since they don't have interior mutability
+            v => v.clone(),
+        }
+    }
 }
 
 impl FallibleOrd for Value {
@@ -219,9 +228,23 @@ impl Hash for Value {
                     state.write_u8(9);
                     Rc::as_ptr(i).hash(state);
                 }
+                Sequence::MaxHeap(h) => {
+                    state.write_u8(10);
+                    Rc::as_ptr(h).hash(state);
+                }
+                Sequence::MinHeap(h) => {
+                    state.write_u8(11);
+                    Rc::as_ptr(h).hash(state);
+                }
+                Sequence::Deque(list) => {
+                    state.write_u8(12);
+                    for item in list.borrow().iter() {
+                        item.hash(state);
+                    }
+                }
             },
             Value::Function(f) => {
-                state.write_u8(9);
+                state.write_u8(13);
                 Rc::as_ptr(f).hash(state);
             }
         }
@@ -292,8 +315,7 @@ impl From<i32> for Value {
 
 impl From<char> for Value {
     fn from(value: char) -> Self {
-        // Haha so many heap allocations and decorators for a single character
-        Self::Sequence(Sequence::String(Rc::new(RefCell::new(String::from(value)))))
+        Value::string(value)
     }
 }
 
@@ -581,6 +603,9 @@ pub enum ValueType {
     Function,
     Map,
     Iterator,
+    MinHeap,
+    MaxHeap,
+    Deque,
 }
 
 impl ValueType {
@@ -613,6 +638,9 @@ impl From<&Value> for ValueType {
             Value::Function(_) => ValueType::Function,
             Value::Sequence(Sequence::Map(_, _)) => ValueType::Map,
             Value::Sequence(Sequence::Iterator(_)) => ValueType::Iterator,
+            Value::Sequence(Sequence::MaxHeap(_)) => ValueType::MaxHeap,
+            Value::Sequence(Sequence::MinHeap(_)) => ValueType::MinHeap,
+            Value::Sequence(Sequence::Deque(_)) => ValueType::Deque,
         }
     }
 }
@@ -620,17 +648,20 @@ impl From<&Value> for ValueType {
 impl fmt::Display for ValueType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Option => write!(f, "option"),
+            Self::Option => write!(f, "Option"),
             Self::Number(n) => write!(f, "{n}"),
-            Self::Bool => write!(f, "bool"),
-            Self::String => write!(f, "string"),
-            Self::List => write!(f, "list"),
+            Self::Bool => write!(f, "Bool"),
+            Self::String => write!(f, "String"),
+            Self::List => write!(f, "List"),
             Self::Tuple(t) => {
                 write!(f, "tuple<{}>", t.iter().join(", "))
             }
-            Self::Function => write!(f, "function"),
-            Self::Map => write!(f, "map"),
-            Self::Iterator => write!(f, "iterator"),
+            Self::Function => write!(f, "Function"),
+            Self::Map => write!(f, "Map"),
+            Self::Iterator => write!(f, "Iterator"),
+            Self::MinHeap => write!(f, "MinHeap"),
+            Self::MaxHeap => write!(f, "MaxHeap"),
+            Self::Deque => write!(f, "Deque"),
         }
     }
 }
@@ -653,7 +684,7 @@ impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Option(Some(v)) => write!(f, "Some({v})"),
-            Self::Option(None) => write!(f, ""),
+            Self::Option(None) => write!(f, "None"),
             Self::Number(n) => write!(f, "{n}"),
             Self::Bool(b) => write!(f, "{b}"),
             Self::Function(_) => {

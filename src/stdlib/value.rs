@@ -7,6 +7,22 @@ mod inner {
     use std::cell::RefCell;
     use std::rc::Rc;
 
+    pub fn ref_count(value: Value) -> usize {
+        match value {
+            Value::Option(_) | Value::Number(_) | Value::Bool(_) => 0,
+            Value::Sequence(seq) => match seq {
+                Sequence::String(rc) => Rc::strong_count(&rc),
+                Sequence::List(rc) => Rc::strong_count(&rc),
+                Sequence::Tuple(rc) => Rc::strong_count(&rc),
+                Sequence::Map(rc, _) => Rc::strong_count(&rc),
+                Sequence::Iterator(rc) => Rc::strong_count(&rc),
+                Sequence::MaxHeap(rc) => Rc::strong_count(&rc),
+                Sequence::MinHeap(rc) => Rc::strong_count(&rc),
+                Sequence::Deque(rc) => Rc::strong_count(&rc),
+            },
+            Value::Function(r) => Rc::strong_count(&r),
+        }
+    }
     #[function(name = "Some")] // <-- fake type constructor
     pub fn some(value: Value) -> Value {
         Value::Option(Some(Box::new(value)))
@@ -54,5 +70,9 @@ mod inner {
             }
             Value::Function(f) => Value::from(f.borrow().to_owned()),
         }
+    }
+
+    pub fn deepcopy(value: &Value) -> Value {
+        value.deepcopy()
     }
 }

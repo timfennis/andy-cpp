@@ -697,10 +697,10 @@ impl From<&Number> for NumberType {
 impl fmt::Display for NumberType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Int => write!(f, "int"),
-            Self::Float => write!(f, "float"),
-            Self::Rational => write!(f, "rational"),
-            Self::Complex => write!(f, "complex"),
+            Self::Int => write!(f, "Int"),
+            Self::Float => write!(f, "Float"),
+            Self::Rational => write!(f, "Rational"),
+            Self::Complex => write!(f, "Complex"),
         }
     }
 }

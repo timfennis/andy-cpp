@@ -1,10 +1,16 @@
 //! The implementation of the various iterators in this module were heavily inspired by the ones in
 //! noulith which can be found [here](https://github.com/betaveros/noulith/blob/441d52ea433527b7ada5bc6cabd952f9ae8fb791/src/streams.rs)
 //!
+use super::function::FunctionCarrier;
+use super::int::Int::Int64;
+use super::num::Number;
+use crate::hash_map::HashMap;
+use crate::interpreter::heap::{MaxHeap, MinHeap};
 use crate::interpreter::sequence::Sequence;
 use crate::interpreter::value::{Value, ValueType};
 use self_cell::self_cell;
 use std::cell::{Ref, RefCell};
+use std::collections::VecDeque;
 use std::rc::Rc;
 
 #[derive(Clone)]
@@ -32,6 +38,9 @@ pub enum MutableValueIntoIterator<'a> {
     String(SharedStringIterator),
     Map(SharedHashMapIterator<'a>),
     Iterator(Rc<RefCell<ValueIterator>>),
+    MinHeap(MinHeapIterator),
+    MaxHeap(MaxHeapIterator),
+    Deque(SharedDequeIterator),
 }
 
 impl Iterator for MutableValueIntoIterator<'_> {
@@ -44,6 +53,9 @@ impl Iterator for MutableValueIntoIterator<'_> {
             MutableValueIntoIterator::String(iter) => iter.next(),
             MutableValueIntoIterator::Map(iter) => iter.next(),
             MutableValueIntoIterator::Iterator(iter) => iter.borrow_mut().next(),
+            MutableValueIntoIterator::MinHeap(iter) => iter.next(),
+            MutableValueIntoIterator::MaxHeap(iter) => iter.next(),
+            MutableValueIntoIterator::Deque(iter) => iter.next(),
         }
     }
 }
@@ -64,20 +76,29 @@ pub fn mut_value_to_iterator(
     value: &mut Value,
 ) -> Result<MutableValueIntoIterator<'_>, NotIterableError> {
     match value {
-        Value::Sequence(sequence) => Ok(mut_seq_into_iterator(sequence)),
+        Value::Sequence(sequence) => Ok(mut_seq_to_iterator(sequence)),
         value => Err(NotIterableError {
             value_type: value.value_type(),
         }),
     }
 }
 
-pub fn mut_seq_into_iterator(sequence: &mut Sequence) -> MutableValueIntoIterator {
+pub fn mut_seq_to_iterator(sequence: &mut Sequence) -> MutableValueIntoIterator {
     match sequence {
         Sequence::String(string) => {
             MutableValueIntoIterator::String(SharedStringIterator::new(string))
         }
         Sequence::List(list) => {
             MutableValueIntoIterator::List(SharedVecIterator::from_shared_vec(list))
+        }
+        Sequence::MinHeap(list) => {
+            MutableValueIntoIterator::MinHeap(MinHeapIterator::new(Rc::clone(list)))
+        }
+        Sequence::MaxHeap(list) => {
+            MutableValueIntoIterator::MaxHeap(MaxHeapIterator::new(Rc::clone(list)))
+        }
+        Sequence::Deque(deque) => {
+            MutableValueIntoIterator::Deque(SharedDequeIterator::new(Rc::clone(deque)))
         }
         Sequence::Tuple(tup) => MutableValueIntoIterator::Tuple(RcVecIterator::from_rc_vec(tup)),
         Sequence::Map(map, _) => {
@@ -86,7 +107,6 @@ pub fn mut_seq_into_iterator(sequence: &mut Sequence) -> MutableValueIntoIterato
         Sequence::Iterator(iter) => MutableValueIntoIterator::Iterator(Rc::clone(iter)),
     }
 }
-
 pub enum RcVecIterator<'a, T> {
     Draining(std::vec::Drain<'a, T>),
     Cloning(std::slice::Iter<'a, T>),
@@ -126,6 +146,13 @@ pub enum SharedVecIterator<'a, T> {
 impl<T> SharedVecIterator<'_, T> {
     pub fn from_shared_vec(value: &mut Rc<RefCell<Vec<T>>>) -> SharedVecIterator<T> {
         match Rc::get_mut(value) {
+            // This case covers code samples where a list literal is used in a loop like:
+            // ```ndc
+            // for x in [1,2,3,4] {
+            //      print(x);
+            // }
+            // ```
+            // In this case there is only one reference to the vector and we can take ownership
             Some(vec) => SharedVecIterator::IntoIter(vec.take().into_iter()),
             None => SharedVecIterator::RefCellIterator(RefCellIterator {
                 inner: Some(Ref::map(value.borrow(), |it| &it[..])),
@@ -143,6 +170,84 @@ where
         match self {
             SharedVecIterator::RefCellIterator(i) => i.next().map(|it| it.to_owned()),
             SharedVecIterator::IntoIter(i) => i.next(),
+        }
+    }
+}
+
+pub struct MaxHeapIterator {
+    heap: Rc<RefCell<MaxHeap>>,
+    idx: usize,
+}
+
+impl Iterator for MaxHeapIterator {
+    type Item = Value;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let heap = self.heap.borrow();
+        if self.idx < heap.len() {
+            let x = &heap.as_slice()[self.idx];
+            self.idx += 1;
+            Some(x.0.clone())
+        } else {
+            None
+        }
+    }
+}
+
+impl MaxHeapIterator {
+    pub fn new(heap: Rc<RefCell<MaxHeap>>) -> MaxHeapIterator {
+        MaxHeapIterator { heap, idx: 0 }
+    }
+}
+
+pub struct MinHeapIterator {
+    heap: Rc<RefCell<MinHeap>>,
+    idx: usize,
+}
+
+impl MinHeapIterator {
+    pub fn new(heap: Rc<RefCell<MinHeap>>) -> MinHeapIterator {
+        MinHeapIterator { heap, idx: 0 }
+    }
+}
+
+impl Iterator for MinHeapIterator {
+    type Item = Value;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let heap = self.heap.borrow();
+        if self.idx < heap.len() {
+            let x = &heap.as_slice()[self.idx];
+            self.idx += 1;
+            Some(x.0 .0.clone())
+        } else {
+            None
+        }
+    }
+}
+
+pub struct SharedDequeIterator {
+    deque: Rc<RefCell<VecDeque<Value>>>,
+    idx: usize,
+}
+
+impl SharedDequeIterator {
+    pub fn new(deque: Rc<RefCell<VecDeque<Value>>>) -> SharedDequeIterator {
+        SharedDequeIterator { deque, idx: 0 }
+    }
+}
+
+impl Iterator for SharedDequeIterator {
+    type Item = Value;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let deque = self.deque.borrow();
+        if self.idx < deque.len() {
+            let out = deque.get(self.idx).cloned();
+            self.idx += 1;
+            out
+        } else {
+            None
         }
     }
 }
@@ -211,15 +316,6 @@ where
     }
 }
 
-/// Hashmaps
-/// Hashmaps
-/// Hashmaps
-use crate::hash_map::HashMap;
-
-use super::function::FunctionCarrier;
-use super::int::Int::Int64;
-use super::num::Number;
-
 struct HashMapIter<'a>(pub std::collections::hash_map::Iter<'a, Value, Value>);
 
 self_cell! {
@@ -244,7 +340,7 @@ impl Iterator for SharedHashMapIterator<'_> {
     fn next(&mut self) -> Option<Self::Item> {
         let cur = self.with_dependent_mut(|_map, iter| iter.next());
         // Creates copies of the values inside the map
-        cur.map(|cur| Value::Sequence(Sequence::Tuple(Rc::new(vec![cur.0.clone(), cur.1.clone()]))))
+        cur.map(|cur| Value::tuple(vec![cur.0.clone(), cur.1.clone()]))
     }
 }
 
