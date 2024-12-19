@@ -142,6 +142,12 @@ fn into_param_type(ty: &syn::Type) -> TokenStream {
         {
             quote! { crate::interpreter::function::ParamType::Map }
         }
+        ty if path_ends_with(ty, "MinHeap") => {
+            quote! { crate::interpreter::function::ParamType::MinHeap }
+        }
+        ty if path_ends_with(ty, "MaxHeap") => {
+            quote! { crate::interpreter::function::ParamType::MaxHeap }
+        }
         syn::Type::Reference(syn::TypeReference { elem, .. }) => into_param_type(elem),
         syn::Type::Path(syn::TypePath { path, .. }) => match path {
             _ if path.is_ident("i64") => quote! { crate::interpreter::function::ParamType::Int },
@@ -306,6 +312,66 @@ fn create_temp_variable(
                 initialize_code: quote! {
                     let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::Deque(#rc_temp_var)) = #argument_var_name else {
                         panic!("Value #position needed to be a Sequence::List but wasn't");
+                    };
+                    let #argument_var_name = &*#rc_temp_var.try_borrow()?;
+                },
+            });
+        }
+        // The pattern is exactly &mut MaxHeap
+        else if is_ref_mut(ty) && path_ends_with(ty, "MaxHeap") {
+            let rc_temp_var =
+                syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
+            return Some(Argument {
+                param_type: into_param_type(ty),
+                argument: quote! { #argument_var_name },
+                initialize_code: quote! {
+                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::MaxHeap(#rc_temp_var)) = #argument_var_name else {
+                        panic!("Value #position needed to be a Sequence::MaxHeap but wasn't");
+                    };
+                    let #argument_var_name = &mut *#rc_temp_var.try_borrow_mut()?;
+                },
+            });
+        }
+        // The pattern is exactly &MaxHeap
+        else if is_ref(ty) && path_ends_with(ty, "MaxHeap") {
+            let rc_temp_var =
+                syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
+            return Some(Argument {
+                param_type: into_param_type(ty),
+                argument: quote! { #argument_var_name },
+                initialize_code: quote! {
+                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::MaxHeap(#rc_temp_var)) = #argument_var_name else {
+                        panic!("Value #position needed to be a Sequence::MaxHeap but wasn't");
+                    };
+                    let #argument_var_name = &*#rc_temp_var.try_borrow()?;
+                },
+            });
+        }
+        // The pattern is exactly &mut MinHeap
+        else if is_ref_mut(ty) && path_ends_with(ty, "MinHeap") {
+            let rc_temp_var =
+                syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
+            return Some(Argument {
+                param_type: into_param_type(ty),
+                argument: quote! { #argument_var_name },
+                initialize_code: quote! {
+                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::MinHeap(#rc_temp_var)) = #argument_var_name else {
+                        panic!("Value #position needed to be a Sequence::MinHeap but wasn't");
+                    };
+                    let #argument_var_name = &mut *#rc_temp_var.try_borrow_mut()?;
+                },
+            });
+        }
+        // The pattern is exactly &MinHeap
+        else if is_ref(ty) && path_ends_with(ty, "MinHeap") {
+            let rc_temp_var =
+                syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
+            return Some(Argument {
+                param_type: into_param_type(ty),
+                argument: quote! { #argument_var_name },
+                initialize_code: quote! {
+                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::MinHeap(#rc_temp_var)) = #argument_var_name else {
+                        panic!("Value #position needed to be a Sequence::MinHeap but wasn't");
                     };
                     let #argument_var_name = &*#rc_temp_var.try_borrow()?;
                 },

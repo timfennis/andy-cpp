@@ -242,8 +242,10 @@ impl Iterator for SharedDequeIterator {
 
     fn next(&mut self) -> Option<Self::Item> {
         let deque = self.deque.borrow();
-        if self.idx > deque.len() {
-            deque.get(self.idx).cloned()
+        if self.idx < deque.len() {
+            let out = deque.get(self.idx).cloned();
+            self.idx += 1;
+            out
         } else {
             None
         }

@@ -56,10 +56,18 @@ impl MinHeap {
         self.heap.push(Reverse(HeapValue(value)));
     }
 
-    pub fn pop(&mut self) -> Value {
-        self.heap
-            .pop()
-            .map_or_else(Value::none, |hv| Value::some(hv.0 .0))
+    pub fn pop(&mut self) -> Option<Value> {
+        self.heap.pop().map(|v| v.0 .0)
+    }
+}
+
+impl MaxHeap {
+    pub fn push(&mut self, value: Value) {
+        self.heap.push(HeapValue(value));
+    }
+
+    pub fn pop(&mut self) -> Option<Value> {
+        self.heap.pop().map(|v| v.0)
     }
 }
 
@@ -70,18 +78,6 @@ impl FromIterator<Value> for MinHeap {
                 .map(|v| Reverse(HeapValue(v)))
                 .collect::<BinaryHeap<_>>(),
         )
-    }
-}
-
-impl MaxHeap {
-    pub fn push(&mut self, value: Value) {
-        self.heap.push(HeapValue(value));
-    }
-
-    pub fn pop(&mut self) -> Value {
-        self.heap
-            .pop()
-            .map_or_else(Value::none, |hv| Value::some(hv.0))
     }
 }
 

@@ -66,4 +66,12 @@ mod inner {
     pub fn maybe_back(deque: &VecDeque<Value>) -> Value {
         deque.back().cloned().map_or_else(Value::none, Value::some)
     }
+
+    pub fn contains(deque: &VecDeque<Value>, val: &Value) -> bool {
+        deque.contains(val)
+    }
+
+    pub fn is_empty(deque: &VecDeque<Value>) -> bool {
+        deque.is_empty()
+    }
 }

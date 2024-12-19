@@ -13,24 +13,38 @@ mod inner {
         Value::Sequence(Sequence::MinHeap(Rc::new(RefCell::new(MinHeap::new()))))
     }
 
-    pub fn pop(seq: &Sequence) -> Value {
-        match seq {
-            Sequence::MinHeap(heap) => heap.borrow_mut().pop(),
-
-            Sequence::MaxHeap(heap) => heap.borrow_mut().pop(),
-            _ => todo!("not implemented"),
-        }
-    }
-
-    pub fn push(seq: &Sequence, val: Value) {
-        match seq {
-            Sequence::MinHeap(heap) => heap.borrow_mut().push(val),
-            Sequence::MaxHeap(heap) => heap.borrow_mut().push(val),
-            _ => todo!("not implemented"),
-        }
-    }
     #[function(name = "MaxHeap")]
     pub fn create_max_heap() -> Value {
         Value::Sequence(Sequence::MaxHeap(Rc::new(RefCell::new(MaxHeap::new()))))
+    }
+
+    #[function(name = "pop?")]
+    pub fn maybe_min_pop(heap: &mut MinHeap) -> Value {
+        heap.pop().map_or_else(Value::none, Value::some)
+    }
+
+    #[function(name = "pop?")]
+    pub fn maybe_max_pop(heap: &mut MaxHeap) -> Value {
+        heap.pop().map_or_else(Value::none, Value::some)
+    }
+
+    #[function(name = "pop")]
+    pub fn min_pop(heap: &mut MinHeap) -> anyhow::Result<Value> {
+        heap.pop().ok_or_else(|| anyhow::anyhow!("heap is empty"))
+    }
+
+    #[function(name = "pop")]
+    pub fn max_pop(heap: &mut MaxHeap) -> anyhow::Result<Value> {
+        heap.pop().ok_or_else(|| anyhow::anyhow!("heap is empty"))
+    }
+
+    #[function(name = "push")]
+    pub fn min_push(heap: &mut MinHeap, value: Value) {
+        heap.push(value);
+    }
+
+    #[function(name = "push")]
+    pub fn max_push(heap: &mut MaxHeap, value: Value) {
+        heap.push(value);
     }
 }
