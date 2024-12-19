@@ -184,13 +184,15 @@ impl Token {
                 | Self::Minus
                 | Self::Asterix
                 | Self::ForwardSlash
-                | Self::PercentPercent
+                | Self::Backslash
                 | Self::Percent
+                | Self::PercentPercent
                 | Self::Identifier(_)
                 | Self::Caret
-                | Self::PlusPlus
                 | Self::Ampersand
                 | Self::Pipe
+                | Self::Tilde
+                | Self::PlusPlus
                 | Self::Diamond
         )
     }
