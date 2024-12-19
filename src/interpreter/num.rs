@@ -246,10 +246,7 @@ macro_rules! impl_binary_operator {
                         right.to_rational().expect("cannot convert to rational"),
                     )),
                     // Integer
-                    (Number::Int(left), Number::Int(right)) => {
-                        // TODO: is this double to owned retard?
-                        Number::Int($intmethod(left.to_owned(), right.to_owned()))
-                    }
+                    (Number::Int(left), Number::Int(right)) => Number::Int($intmethod(left, right)),
                 }
             }
         }

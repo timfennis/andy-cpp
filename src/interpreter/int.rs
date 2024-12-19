@@ -257,6 +257,22 @@ macro_rules! impl_binary_operator {
                 Int::BigInt(self.to_bigint().$method(rhs.to_bigint()))
             }
         }
+        impl std::ops::$trait<Int> for &Int {
+            type Output = Int;
+
+            fn $method(self, rhs: Int) -> Self::Output {
+                match (&self, &rhs) {
+                    (Int::Int64(p1), Int::Int64(p2)) => {
+                        if let Some(s) = p1.$safe_method(*p2) {
+                            Int::Int64(s);
+                        }
+                    }
+                    _ => {}
+                }
+
+                Int::BigInt(self.to_bigint().$method(rhs.to_bigint()))
+            }
+        }
         impl std::ops::$trait<&Int> for &Int {
             type Output = Int;
 
