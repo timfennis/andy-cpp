@@ -1,0 +1,30 @@
+--PROGRAM--
+let d = Deque();
+d.push_front(5);
+d.push_front(4);
+d.push_front(3);
+d.push_back(6);
+d.push_back(7);
+
+let out = [];
+for x in d {
+    out.push(x);
+}
+
+assert_eq(out, list(3..=7));
+assert_eq(d.pop_front(), 3);
+assert_eq(d.pop_back(), 7);
+assert_eq(d.pop_front?(), Some(4));
+assert_eq(d.pop_back?(), Some(6));
+
+assert(d.contains(5));
+assert(not d.contains(69));
+
+let e = Deque();
+assert(e.pop_front?.is_none);
+assert(e.pop_back?.is_none);
+
+print("ok");
+--EXPECT--
+ok
+
