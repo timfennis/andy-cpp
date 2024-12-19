@@ -85,7 +85,7 @@ impl PartialEq for Sequence {
             (Sequence::Map(a, _), Sequence::Map(b, _)) => a == b,
             (Sequence::Deque(a), Sequence::Deque(b)) => a == b,
 
-            // TODO: These implementations are a little sussy
+            // These types can't really be compared for equality so they will just return true if they point to the same memory addr
             (Sequence::MaxHeap(a), Sequence::MaxHeap(b)) => Rc::ptr_eq(a, b),
             (Sequence::MinHeap(a), Sequence::MinHeap(b)) => Rc::ptr_eq(a, b),
             (Sequence::Iterator(a), Sequence::Iterator(b)) => Rc::ptr_eq(a, b),
