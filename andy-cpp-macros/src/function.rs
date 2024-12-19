@@ -1,5 +1,3 @@
-use std::hash::DefaultHasher;
-
 use crate::r#match::{
     is_ref, is_ref_mut, is_ref_of_bigint, is_ref_of_slice_of_value, is_str_ref, is_string,
     path_ends_with,
@@ -334,7 +332,7 @@ fn create_temp_variable(
         else if is_ref_mut(ty) && path_ends_with(ty, "VecDeque") {
             let rc_temp_var =
                 syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
-            return Some(Argument {
+            return vec![Argument {
                 param_type: into_param_type(ty),
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
@@ -343,13 +341,13 @@ fn create_temp_variable(
                     };
                     let #argument_var_name = &mut *#rc_temp_var.try_borrow_mut()?;
                 },
-            });
+            }];
         }
         // The pattern is exactly &VecDeque
         else if is_ref(ty) && path_ends_with(ty, "VecDeque") {
             let rc_temp_var =
                 syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
-            return Some(Argument {
+            return vec![Argument {
                 param_type: into_param_type(ty),
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
@@ -358,13 +356,13 @@ fn create_temp_variable(
                     };
                     let #argument_var_name = &*#rc_temp_var.try_borrow()?;
                 },
-            });
+            }];
         }
         // The pattern is exactly &mut MaxHeap
         else if is_ref_mut(ty) && path_ends_with(ty, "MaxHeap") {
             let rc_temp_var =
                 syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
-            return Some(Argument {
+            return vec![Argument {
                 param_type: into_param_type(ty),
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
@@ -373,13 +371,13 @@ fn create_temp_variable(
                     };
                     let #argument_var_name = &mut *#rc_temp_var.try_borrow_mut()?;
                 },
-            });
+            }];
         }
         // The pattern is exactly &MaxHeap
         else if is_ref(ty) && path_ends_with(ty, "MaxHeap") {
             let rc_temp_var =
                 syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
-            return Some(Argument {
+            return vec![Argument {
                 param_type: into_param_type(ty),
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
@@ -388,13 +386,13 @@ fn create_temp_variable(
                     };
                     let #argument_var_name = &*#rc_temp_var.try_borrow()?;
                 },
-            });
+            }];
         }
         // The pattern is exactly &mut MinHeap
         else if is_ref_mut(ty) && path_ends_with(ty, "MinHeap") {
             let rc_temp_var =
                 syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
-            return Some(Argument {
+            return vec![Argument {
                 param_type: into_param_type(ty),
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
@@ -403,13 +401,13 @@ fn create_temp_variable(
                     };
                     let #argument_var_name = &mut *#rc_temp_var.try_borrow_mut()?;
                 },
-            });
+            }];
         }
         // The pattern is exactly &MinHeap
         else if is_ref(ty) && path_ends_with(ty, "MinHeap") {
             let rc_temp_var =
                 syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
-            return Some(Argument {
+            return vec![Argument {
                 param_type: into_param_type(ty),
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
@@ -418,7 +416,7 @@ fn create_temp_variable(
                     };
                     let #argument_var_name = &*#rc_temp_var.try_borrow()?;
                 },
-            });
+            }];
         }
         // The pattern is exactly &str
         else if is_str_ref(ty) {
@@ -496,7 +494,7 @@ fn create_temp_variable(
         }
         // The pattern is &BigRational
         else if path_ends_with(ty, "BigRational") && is_ref(ty) {
-            return Some(Argument {
+            return vec![Argument {
                 param_type: quote! { crate::interpreter::function::ParamType::Rational },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
@@ -506,7 +504,7 @@ fn create_temp_variable(
 
                     let #argument_var_name = &#argument_var_name.clone();
                 },
-            });
+            }];
         }
         // The pattern is BigRational
         else if path_ends_with(ty, "BigRational") && !is_ref(ty) {
