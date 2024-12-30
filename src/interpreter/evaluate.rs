@@ -590,6 +590,7 @@ pub(crate) fn evaluate_expression(
                             lhs_expr.span.merge(index_expr.span),
                         )?;
 
+                        // TODO: This borrow_mut can fail, handle it better!!
                         dict.borrow_mut().insert(key, default_value.clone());
 
                         Ok(default_value)

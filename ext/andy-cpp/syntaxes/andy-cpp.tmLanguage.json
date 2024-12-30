@@ -37,6 +37,12 @@
           "include": "#keywords"
         },
         {
+          "include": "#variables"
+        },
+        {
+          "include": "#punctuation"
+        },
+        {
           "include": "#comment"
         }
       ]
@@ -134,6 +140,11 @@
           "name": "constant.numeric.decimal.andy-cpp"
         },
         {
+          "comment": "Infinity",
+          "match": "\\bInf\\b",
+          "name": "constant.numeric.infinity.andy-cpp"
+        },
+        {
           "comment": "booleans",
           "name": "constant.language.bool.andy-cpp",
           "match": "\\b(true|false)\\b"
@@ -216,7 +227,7 @@
         {
           "comment": "augmented assignment operators",
           "name": "keyword.operator.assignment.andy-cpp",
-          "match": "((\\+\\+?|-|\\*|/|\\|\\^|&|\\||<<|>>|~|<>)=)"
+          "match": "((\\+\\+?|-|\\*|/|\\|\\^|&|\\||%%?|<<|>>|~|<>)=)"
         },
         {
           "comment": "function augmented assignment opreators",
@@ -229,19 +240,19 @@
           "match": "(?<![<>])=(?!=|>)"
         },
         {
-          "comment": "comparison operators",
-          "name": "keyword.operator.comparison.andy-cpp",
-          "match": "(>=<|<=>|=(=)?(?!>)|!=|<=|(?<!=)>=)"
-        },
-        {
-          "comment": "math operators",
+          "comment": "concatenation operators",
           "name": "keyword.operator.other.andy-cpp",
           "match": "(\\+\\+|<>)"
         },
         {
-          "comment": "math operators",
+          "comment": "binary operators",
           "name": "keyword.operator.arithmetic.andy-cpp",
           "match": "(\\+|\\-|\\*|/(?!\\/)|\\\\|\\^|\\%%?|>>|<<|&(?!&)|\\|(?!\\|)|~)"
+        },
+        {
+          "comment": "comparison operators",
+          "name": "keyword.operator.comparison.andy-cpp",
+          "match": "(>=<|<=>|=(=)?(?!>)|!=|<=|(?<!=)>=|>|<)"
         },
         {
           "name": "punctuation.semicolon.andy-cpp",
@@ -282,6 +293,11 @@
         }
       },
       "patterns": [
+        {
+          "comment": "Key value separator",
+          "name": "punctuation.separator.dictionary.andy-cpp",
+          "match": ":"
+        },
         {
           "include": "#expression"
         }
@@ -345,6 +361,24 @@
           "name": "constant.character.escape.andy-cpp"
         }
       }
+    },
+    "variables": {
+      "patterns": [
+        {
+          "comment": "variables",
+          "name": "variable.other.andy-cpp",
+          "match": "\\b[a-z_][a-z0-9_]*\\b"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "comment": "comma",
+          "name": "punctuation.comma.andy-cpp",
+          "match": ","
+        }
+      ]
     }
   },
   "scopeName": "source.andy-cpp"

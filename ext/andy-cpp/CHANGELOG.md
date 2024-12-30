@@ -1,12 +1,21 @@
 # Change Log
 
-## [v0.0.6] (2024-10-11)
+## [v0.1.0] (2024-12-30)
+
+This release probably still has bugs but it seems to display all 2024 Advent of Code puzzles correctly,
+which is the point of the 0.1.0 release.
+
+- Fixed detection of lots of operators like `<` and `>`
+- `%=` and `%%=` are detected correctly
+- Identify variables and punctuation like `,` and `:`
+
+## [v0.0.6] (2024-12-11)
 
 - Fixed some issues with arbitrary base literals not getting parsed correctly
 - Correctly detect augmented assignment operators like `++=`
 - Detect `<>` and `++` as special non arithmetic operators
 
-## [v0.0.5] (2024-10-11)
+## [v0.0.5] (2024-12-11)
 
 - Fixed an issue with `.` operator's capture groups incorrectly parsing methods as operators
 
