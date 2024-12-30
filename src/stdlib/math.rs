@@ -17,7 +17,7 @@ where
 {
     fn try_sum(&mut self) -> anyhow::Result<Number> {
         self.try_fold(Number::from(0), |acc, cur| match cur.borrow() {
-            Value::Number(n) => Ok(acc + n.clone()),
+            Value::Number(n) => Ok(acc + n),
             value => Err(anyhow::anyhow!(
                 "cannot sum {} and number",
                 value.value_type()
@@ -37,8 +37,7 @@ where
 {
     fn try_product(&mut self) -> anyhow::Result<Number> {
         self.try_fold(Number::from(1), |acc, cur| match cur.borrow() {
-            // TODO: remove this clone once we can do math with references
-            Value::Number(n) => Ok(acc * n.clone()),
+            Value::Number(n) => Ok(acc * n),
             value => Err(anyhow::anyhow!(
                 "cannot multiply {} and number",
                 value.value_type()
