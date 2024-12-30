@@ -17,7 +17,7 @@ mod highlighter;
 #[derive(Parser)]
 #[command(name = "Andy C++")]
 #[command(author = "Tim Fennis <fennis.tim@gmail.com>")]
-#[command(version = "0.1")]
+#[command(version = "0.2.0")]
 #[command(about = "An interpreter for the Andy C++ language")]
 struct Cli {
     file: Option<PathBuf>,

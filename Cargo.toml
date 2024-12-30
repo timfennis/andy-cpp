@@ -4,7 +4,7 @@ members = ["andy-cpp-macros"]
 
 [package]
 name = "ndc"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["Tim Fennis <fennis.tim@gmail.com>"]
 license = "MIT"
