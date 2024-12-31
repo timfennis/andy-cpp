@@ -1,10 +1,10 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use ndc_lib::interpreter::{Interpreter, InterpreterError};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use std::fs;
 use std::path::Path;
-
-use ndc_lib::interpreter::{Interpreter, InterpreterError};
+use std::time::Duration;
 
 fn run_string(input: &str) -> Result<String, InterpreterError> {
     let buf: Vec<u8> = vec![];
@@ -15,6 +15,8 @@ fn run_string(input: &str) -> Result<String, InterpreterError> {
 
 fn math_benches(c: &mut Criterion) {
     let mut group = c.benchmark_group("math");
+    group.warm_up_time(Duration::from_secs(2));
+    group.measurement_time(Duration::from_secs(2));
     let mut rng = ChaCha8Rng::seed_from_u64(31011991);
     let operators = [
         ("+", "addition"),
@@ -99,7 +101,7 @@ fn math_benches(c: &mut Criterion) {
             group.bench_function(format!("{typ} {operator_name}"), |b| {
                 b.iter(|| run_string(&program))
             });
-            println!("{program}");
+            // println!("{program}");
         }
     }
 }
