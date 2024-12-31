@@ -1,4 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use rand::{Rng, SeedableRng};
+use rand_chacha::ChaCha8Rng;
 use std::fs;
 use std::path::Path;
 
@@ -11,7 +13,48 @@ fn run_string(input: &str) -> Result<String, InterpreterError> {
     interpreter.run_str(black_box(input), false)
 }
 
-fn criterion_benchmark(c: &mut Criterion) {
+fn math_benches(c: &mut Criterion) {
+    let mut rng = ChaCha8Rng::seed_from_u64(31011991);
+    let operators = ["+", "-", "*", "/", "\\", "^", "%", "%%"];
+    let types = ["int", "float", "rational", "complex"];
+
+    for typ in types {
+        for operator in operators {
+            let mut program = String::new();
+            for _ in 0..100 {
+                let left = rng.gen_range(-10_000..=10_000);
+                let right = match operator {
+                    "^" => rng.gen_range(1..=25),
+                    "/" => rng.gen_range(1..10_000),
+                    _ => rng.gen_range(-10_000..=10_000),
+                };
+                program.push_str(&match typ {
+                    "int" => format!("{left} {operator} {right};\n"),
+                    "float" => format!("{left}.0 {operator} {right}.0;\n"),
+                    "rational" => format!(
+                        "({left}/{}) {operator} ({right}/{});\n",
+                        rng.gen_range(1..=10_000),
+                        rng.gen_range(1..=10_000),
+                    ),
+                    "complex" => {
+                        format!(
+                            "({left}.0 + {}.0i) {operator} ({right}.0 + {}.0i);\n",
+                            rng.gen_range(-10_000..=10_000),
+                            rng.gen_range(-10_000..=10_000),
+                        )
+                    }
+                    _ => unreachable!(),
+                });
+            }
+
+            c.bench_function(&format!("operator {} {}", operator, typ), |b| {
+                b.iter(|| run_string(&program))
+            });
+            println!("{program}");
+        }
+    }
+}
+fn directory_benches(c: &mut Criterion) {
     let dir = Path::new("benches/programs/");
     let mut names = Vec::new();
     match fs::read_dir(dir) {
@@ -34,5 +77,5 @@ fn criterion_benchmark(c: &mut Criterion) {
     }
 }
 
-criterion_group!(benches, criterion_benchmark);
+criterion_group!(benches, directory_benches, math_benches);
 criterion_main!(benches);
