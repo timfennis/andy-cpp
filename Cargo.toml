@@ -49,5 +49,5 @@ repl = ["dep:rustyline"]
 ahash = ["dep:ahash"]
 
 [[bench]]
-name = "my_benchmark"
+name = "benchmark"
 harness = false
