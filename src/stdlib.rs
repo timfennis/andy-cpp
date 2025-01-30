@@ -8,5 +8,6 @@ pub mod list;
 pub mod math;
 pub mod regex;
 pub mod sequence;
+pub mod serde;
 pub mod string;
 pub mod value;
