@@ -8,7 +8,7 @@ use crate::interpreter::value::Value;
 use anyhow::Context;
 use num::BigInt;
 use num::ToPrimitive;
-use serde_json::{json, Number, Value as JsonValue};
+use serde_json::{json, Map, Number, Value as JsonValue};
 
 impl TryFrom<Value> for JsonValue {
     type Error = anyhow::Error;
@@ -23,7 +23,7 @@ impl TryFrom<Value> for JsonValue {
                     // Ehrmm..
                     crate::interpreter::int::Int::BigInt(big_int) => {
                         Number::from_str(&big_int.to_string())
-                            .map(|n| JsonValue::Number(n))
+                            .map(JsonValue::Number)
                             .context("Cannot convert bigint to string")
                     }
                 },
@@ -49,13 +49,41 @@ impl TryFrom<Value> for JsonValue {
                         .map(|v| v.clone().try_into())
                         .collect::<Result<Vec<_>, _>>()?,
                 )),
-                Sequence::Map(values, value) => {
-                    Ok(JsonValue::Object(values.borrow().iter().map(todo!(""))))
+                Sequence::Map(values, _) => Ok(JsonValue::Object(
+                    values
+                        .borrow()
+                        .iter()
+                        .map(|(key, value)| {
+                            JsonValue::try_from(value.clone()).map(|value| (key.to_string(), value))
+                        })
+                        .collect::<Result<Map<String, JsonValue>, _>>()?,
+                )),
+                Sequence::Iterator(i) => {
+                    let mut i = i.borrow_mut();
+                    let mut out = Vec::new();
+                    for value in i.by_ref() {
+                        out.push(JsonValue::try_from(value)?);
+                    }
+                    Ok(JsonValue::Array(out))
                 }
-                Sequence::Iterator(ref_cell) => todo!(),
-                Sequence::MaxHeap(ref_cell) => todo!(),
-                Sequence::MinHeap(ref_cell) => todo!(),
-                Sequence::Deque(ref_cell) => todo!(),
+                Sequence::MaxHeap(h) => Ok(JsonValue::Array(
+                    h.borrow()
+                        .iter()
+                        .map(|h| JsonValue::try_from(h.0.clone()))
+                        .collect::<Result<Vec<_>, _>>()?,
+                )),
+                Sequence::MinHeap(h) => Ok(JsonValue::Array(
+                    h.borrow()
+                        .iter()
+                        .map(|h| JsonValue::try_from(h.0 .0.clone()))
+                        .collect::<Result<Vec<_>, _>>()?,
+                )),
+                Sequence::Deque(d) => Ok(JsonValue::Array(
+                    d.borrow()
+                        .iter()
+                        .map(|v| JsonValue::try_from(v.clone()))
+                        .collect::<Result<Vec<_>, _>>()?,
+                )),
             },
             Value::Function(_) => Err(anyhow::anyhow!("Unable to serialize function")),
         }
