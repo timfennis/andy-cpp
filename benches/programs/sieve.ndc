@@ -1,0 +1,21 @@
+fn sieve(n) {
+  let primes = [true for _ in 0..(n +1)];
+  primes[0] = false;
+  primes[1] = false;
+  let i = 2;
+  while i <= n {
+    if primes[i]  {
+      let j = i * i;
+      while j <= n {
+        primes[j] = false;
+        j += i;
+      }
+    }
+    i += 1;
+  }
+
+  return primes;
+}
+
+// Find lots of prime numbers
+sieve(10000);
