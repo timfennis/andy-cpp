@@ -13,6 +13,7 @@ fn run_string(input: &str) -> Result<String, InterpreterError> {
     interpreter.run_str(black_box(input), false)
 }
 
+#[allow(unused)]
 fn math_benches(c: &mut Criterion) {
     let mut group = c.benchmark_group("math");
     group.warm_up_time(Duration::from_secs(2));
@@ -41,9 +42,9 @@ fn math_benches(c: &mut Criterion) {
         Right,
     }
     let mut gen = |operand, operation| match (operand, operation) {
-        (Operand::Right, "^") => rng.gen_range(2..=9),
-        (Operand::Right, "/" | "\\" | "%" | "%%") => rng.gen_range(1..=10_000),
-        _ => rng.gen_range(-10_000..=10_000),
+        (Operand::Right, "^") => rng.random_range(2..=9),
+        (Operand::Right, "/" | "\\" | "%" | "%%") => rng.random_range(1..=10_000),
+        _ => rng.random_range(-10_000..=10_000),
     };
     for typ in types {
         for (operator, operator_name) in operators {
@@ -101,7 +102,6 @@ fn math_benches(c: &mut Criterion) {
             group.bench_function(format!("{typ} {operator_name}"), |b| {
                 b.iter(|| run_string(&program))
             });
-            // println!("{program}");
         }
     }
 }
@@ -129,5 +129,5 @@ fn directory_benches(c: &mut Criterion) {
     }
 }
 
-criterion_group!(benches, directory_benches, math_benches);
+criterion_group!(benches, directory_benches);
 criterion_main!(benches);

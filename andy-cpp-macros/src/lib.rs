@@ -29,6 +29,8 @@ pub fn export_module(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut registrations = Vec::new();
     let mut uses = Vec::new();
 
+    // TODO: if we find something that we don't wish to edit we can just copy it over instead of throwing an erreor
+    // TODO: if we find a non-public function we could just copy it over as well?
     for item in items {
         match item {
             Item::Fn(f) => {
