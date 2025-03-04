@@ -6,6 +6,7 @@ pub mod hash_map;
 pub mod heap;
 pub mod list;
 pub mod math;
+pub mod rand;
 pub mod regex;
 pub mod sequence;
 pub mod serde;

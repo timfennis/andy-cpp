@@ -12,7 +12,7 @@ use crate::compare::FallibleOrd;
 use crate::hash_map::DefaultHasher;
 use crate::interpreter::function::{Function, OverloadedFunction};
 use crate::interpreter::int::Int;
-use crate::interpreter::num::{Number, NumberToUsizeError, NumberType};
+use crate::interpreter::num::{Number, NumberToFloatError, NumberToUsizeError, NumberType};
 use crate::interpreter::sequence::Sequence;
 
 use super::iterator::{ValueIterator, ValueRange, ValueRangeFrom, ValueRangeInclusive};
@@ -432,6 +432,9 @@ pub enum ConversionError {
 
     #[error("{0}")]
     NumberToUsizeError(#[from] NumberToUsizeError),
+
+    #[error("{0}")]
+    NumberToFloatError(#[from] NumberToFloatError),
 }
 
 /// `TryFrom` implementation to convert a `Sequence::Tuple` into (Value, Value)
@@ -477,6 +480,20 @@ impl TryFrom<Value> for i64 {
         }
 
         Err(Self::Error::UnsupportedVariant(typ, stringify!(i64)))
+    }
+}
+
+impl TryFrom<&mut Value> for f64 {
+    type Error = ConversionError;
+
+    fn try_from(value: &mut Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Number(n) => Ok((&*n).try_into()?),
+            v => Err(Self::Error::UnsupportedVariant(
+                v.value_type(),
+                stringify!(f64),
+            )),
+        }
     }
 }
 
