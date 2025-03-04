@@ -117,7 +117,7 @@ fn wrap_single(
             },
             ty @ syn::Type::Path(_) if path_ends_with(ty, "Result") => quote! {
                 let value = result.map_err(|err| crate::interpreter::function::FunctionCarrier::IntoEvaluationError(Box::new(err)))?;
-                return Ok(Value::from(value));
+                return Ok(crate::interpreter::value::Value::from(value));
             },
             _ => quote! {
                 let result = crate::interpreter::value::Value::from(result);

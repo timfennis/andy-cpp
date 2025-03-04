@@ -1,0 +1,14 @@
+fn monte_carlo_pi(num_samples) {
+    let inside_circle = 0;
+
+    for _ in 0..num_samples {
+        let x, y = randf(-1, 1), randf(-1, 1);
+        if x ^ 2 + y ^ 2 <= 1 {
+            inside_circle += 1
+        }
+    }
+
+    return (inside_circle / num_samples) * 4;
+}
+
+print(monte_carlo_pi(2_500_000).float)

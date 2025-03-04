@@ -218,6 +218,8 @@ macro_rules! impl_binary_operator {
             type Output = Number;
             fn $method(self, other: $other) -> Number {
                 match (self, other) {
+                    // Integer
+                    (Number::Int(left), Number::Int(right)) => Number::Int($intmethod(left, right)),
                     // Complex
                     (Number::Complex(left), right) => {
                         Number::Complex($complexmethod(left, right.to_complex()))
@@ -245,8 +247,6 @@ macro_rules! impl_binary_operator {
                         left.unbox(),
                         right.to_rational().expect("cannot convert to rational"),
                     )),
-                    // Integer
-                    (Number::Int(left), Number::Int(right)) => Number::Int($intmethod(left, right)),
                 }
             }
         }
@@ -306,6 +306,7 @@ impl_binary_operator_all!(Rem, rem, Rem::rem, Rem::rem, Rem::rem, Rem::rem);
 impl Div<&Number> for &Number {
     type Output = Number;
 
+    /// TODO: always converting operands to rational numbers is needlessly slow in some cases
     fn div(self, rhs: &Number) -> Self::Output {
         match (self.to_rational(), rhs.to_rational()) {
             (Some(left), Some(right)) if !right.is_zero() => Number::rational(left / right),
@@ -488,15 +489,17 @@ impl Number {
         Ok(n)
     }
 
+    #[must_use]
     pub fn to_complex(&self) -> Complex64 {
         match self {
             Number::Int(i) => Complex64::from(i),
             Number::Float(f) => Complex64::from(f),
-            Number::Rational(r) => rational_to_complex(&r),
+            Number::Rational(r) => rational_to_complex(r),
             Number::Complex(c) => *c,
         }
     }
 
+    #[must_use]
     pub fn to_f64(&self) -> Option<f64> {
         match self {
             Number::Int(i) => Some(f64::from(i)),
@@ -506,12 +509,12 @@ impl Number {
         }
     }
 
+    #[must_use]
     pub fn to_rational(&self) -> Option<BigRational> {
         match self {
             Number::Int(i) => Some(BigRational::from(i)),
-            Number::Float(_) => None,
             Number::Rational(r) => Some(BigRational::clone(&**r)),
-            Number::Complex(_) => None,
+            Number::Float(_) | Number::Complex(_) => None,
         }
     }
 
@@ -610,6 +613,51 @@ impl TryFrom<Number> for usize {
             Number::Int(Int::Int64(i)) => Ok(usize::try_from(i)?),
             Number::Int(Int::BigInt(b)) => Ok(usize::try_from(b)?),
             n => Err(NumberToUsizeError::UnsupportedVariant(n.type_name())),
+        }
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum NumberToFloatError {
+    #[error("cannot convert {0} to float")]
+    UnsupportedType(NumberType),
+    #[error("cannot convert {0} to float")]
+    UnsupportedValue(Number),
+}
+
+impl TryFrom<&Number> for f64 {
+    type Error = NumberToFloatError;
+
+    fn try_from(value: &Number) -> Result<Self, Self::Error> {
+        match value {
+            Number::Int(Int::BigInt(bi)) => bi.to_f64(),
+            Number::Int(Int::Int64(i)) => i.to_f64(),
+            Number::Float(f) => Some(*f),
+            Number::Rational(r) => r.to_f64(),
+            _ => return Err(Self::Error::UnsupportedType(NumberType::from(value))),
+        }
+        .ok_or_else(|| Self::Error::UnsupportedValue(value.clone()))
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum NumberToIntError {
+    #[error("cannot convert {0} to int")]
+    UnsupportedType(NumberType),
+    #[error("cannot convert {0} to int")]
+    UnsupportedValue(Number),
+}
+
+impl TryFrom<&Number> for i64 {
+    type Error = NumberToIntError;
+
+    fn try_from(value: &Number) -> Result<Self, Self::Error> {
+        match value {
+            Number::Int(Int::BigInt(bi)) => bi
+                .try_into()
+                .map_err(|_| NumberToIntError::UnsupportedValue(value.clone())),
+            Number::Int(Int::Int64(i)) => Ok(*i),
+            _ => Err(Self::Error::UnsupportedType(NumberType::from(value))),
         }
     }
 }
