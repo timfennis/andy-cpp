@@ -1,0 +1,28 @@
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[package]
+name = "ndc_lib"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+ahash = { workspace = true, optional = true }
+either.workspace = true
+factorial.workspace = true
+ndc_macros.workspace = true
+num.workspace = true
+once_cell.workspace = true
+ordered-float.workspace = true
+rand.workspace = true
+regex.workspace = true
+ryu.workspace = true
+self_cell.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+miette.workspace = true
+itertools.workspace = true
+
+
+[features]
+default = ["ahash"]
+ahash = ["dep:ahash"]

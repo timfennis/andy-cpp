@@ -1,0 +1,12 @@
+[package]
+name = "tests"
+edition.workspace = true
+version.workspace = true
+
+[dev-dependencies]
+ndc_lib.workspace = true
+owo-colors.workspace = true
+
+[[test]]
+name = "ndc_tests"
+path = "src/programs.rs"
