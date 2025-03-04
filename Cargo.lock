@@ -40,16 +40,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "andy-cpp-macros"
-version = "0.1.0"
-dependencies = [
- "itertools 0.14.0",
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
 name = "anes"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -139,6 +129,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "537beee3be4a18fb023b570f80e3ae28003db9167a751266b259926e25539d50"
 dependencies = [
  "backtrace",
+]
+
+[[package]]
+name = "benches"
+version = "0.0.0"
+dependencies = [
+ "criterion",
+ "ndc_lib",
+ "rand",
+ "rand_chacha",
 ]
 
 [[package]]
@@ -555,39 +555,56 @@ dependencies = [
 
 [[package]]
 name = "miniz_oxide"
-version = "0.8.3"
+version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8402cab7aefae129c6977bb0ff1b8fd9a04eb5b51efc50a70bea51cda0c7924"
+checksum = "8e3e04debbb59698c15bacbb6d93584a8c0ca9cc3213cb423d31f760d8843ce5"
 dependencies = [
  "adler2",
 ]
 
 [[package]]
-name = "ndc"
+name = "ndc_bin"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "itertools 0.14.0",
+ "miette",
+ "ndc_lib",
+ "owo-colors",
+ "rustyline",
+]
+
+[[package]]
+name = "ndc_lib"
 version = "0.2.0"
 dependencies = [
  "ahash",
- "andy-cpp-macros",
  "anyhow",
- "clap",
- "criterion",
  "either",
  "factorial",
  "itertools 0.14.0",
  "miette",
+ "ndc_macros",
  "num",
  "once_cell",
  "ordered-float",
- "owo-colors",
  "rand",
- "rand_chacha",
  "regex",
- "rustyline",
  "ryu",
  "self_cell",
- "serde",
  "serde_json",
  "thiserror 2.0.12",
+]
+
+[[package]]
+name = "ndc_macros"
+version = "0.1.0"
+dependencies = [
+ "itertools 0.14.0",
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -912,9 +929,9 @@ dependencies = [
 
 [[package]]
 name = "rustversion"
-version = "1.0.19"
+version = "1.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f7c45b9784283f1b2e7fb61b42047c2fd678ef0960d4f6f1eba131594cc369d4"
+checksum = "eded382c5f5f786b989652c49544c4877d9f015cc22e145a5ea8ea66c2921cd2"
 
 [[package]]
 name = "rustyline"
@@ -1058,13 +1075,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "tests"
+version = "0.2.0"
+dependencies = [
+ "ndc_lib",
+ "owo-colors",
+]
+
+[[package]]
 name = "textwrap"
-version = "0.16.1"
+version = "0.16.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23d434d3f8967a09480fb04132ebe0a3e088c173e6d0ee7897abbdf4eab0f8b9"
+checksum = "c13547615a44dc9c452a8a534638acdf07120d4b6847c8178705da06306a3057"
 dependencies = [
  "unicode-linebreak",
- "unicode-width 0.1.14",
+ "unicode-width 0.2.0",
 ]
 
 [[package]]

@@ -1,0 +1,19 @@
+[package]
+name = "ndc_bin"
+version.workspace = true
+edition.workspace = true
+default-run = "ndc"
+
+[[bin]]
+name = "ndc"
+path = "src/main.rs"
+
+[dependencies]
+ndc_lib.workspace = true
+clap.workspace = true
+rustyline.workspace = true
+owo-colors.workspace = true
+anyhow.workspace = true
+miette.workspace = true
+itertools.workspace = true
+

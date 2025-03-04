@@ -1,0 +1,16 @@
+[package]
+name = "benches"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ndc_lib.workspace = true
+rand.workspace = true
+criterion.workspace = true
+rand_chacha.workspace = true
+
+
+[[bench]]
+name = "benchmark"
+path = "src/benchmark.rs"
+harness = false
