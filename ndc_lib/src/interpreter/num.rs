@@ -684,12 +684,6 @@ fn rational_to_complex(r: &BigRational) -> Complex<f64> {
     Complex::from(r.to_f64().unwrap_or(f64::NAN))
 }
 
-pub fn into_fallible_operation<E>(
-    op: impl Fn(Number, Number) -> Number,
-) -> impl Fn(Number, Number) -> Result<Number, E> {
-    move |left, right| Ok(op(left, right))
-}
-
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum NumberType {
     Int,

@@ -58,6 +58,22 @@ pub enum BinaryOperator {
     ShiftLeft,
 }
 
+impl BinaryOperator {
+    pub fn supports_vectorization(&self) -> bool {
+        matches!(
+            self,
+            Self::Plus
+                | Self::Minus
+                | Self::Multiply
+                | Self::Divide
+                | Self::FloorDivide
+                | Self::CModulo
+                | Self::EuclideanModulo
+                | Self::Exponent
+        )
+    }
+}
+
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 pub enum LogicalOperator {
     And,

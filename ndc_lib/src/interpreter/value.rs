@@ -134,6 +134,12 @@ impl Value {
             v => v.clone(),
         }
     }
+
+    #[must_use]
+    pub fn supports_vectorization_with(&self, other: &Self) -> bool {
+        self.value_type()
+            .supports_vectorization_with(&other.value_type())
+    }
 }
 
 impl FallibleOrd for Value {
@@ -633,11 +639,20 @@ impl ValueType {
 
     #[must_use]
     pub fn supports_vectorization_with(&self, other: &Self) -> bool {
-        matches!((self, other), (Self::Tuple(l), Self::Tuple(r)) if {
-            l.len() == r.len()
-                && self.supports_vectorization()
-                && other.supports_vectorization()
-        })
+        match (self, other) {
+            (Self::Tuple(l), Self::Tuple(r))
+                if {
+                    l.len() == r.len()
+                        && self.supports_vectorization()
+                        && other.supports_vectorization()
+                } =>
+            {
+                true
+            }
+            (Self::Tuple(_), Self::Number(_)) if self.supports_vectorization() => true,
+            (Self::Number(_), Self::Tuple(_)) if other.supports_vectorization() => true,
+            _ => false,
+        }
     }
 }
 
@@ -649,9 +664,7 @@ impl From<&Value> for ValueType {
             Value::Bool(_) => Self::Bool,
             Value::Sequence(Sequence::String(_)) => Self::String,
             Value::Sequence(Sequence::List(_)) => Self::List,
-            Value::Sequence(Sequence::Tuple(t)) => {
-                Self::Tuple(t.iter().map(Into::into).collect())
-            }
+            Value::Sequence(Sequence::Tuple(t)) => Self::Tuple(t.iter().map(Into::into).collect()),
             Value::Function(_) => Self::Function,
             Value::Sequence(Sequence::Map(_, _)) => Self::Map,
             Value::Sequence(Sequence::Iterator(_)) => Self::Iterator,
