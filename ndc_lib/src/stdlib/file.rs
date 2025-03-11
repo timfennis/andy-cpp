@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use crate::interpreter::environment::Environment;
 use crate::interpreter::function::{
-    Function, FunctionCallError, FunctionCarrier, ParamType, TypeSignature,
+    FunctionBody, FunctionCallError, FunctionCarrier, ParamType, TypeSignature,
 };
 use crate::interpreter::sequence::Sequence;
 use crate::interpreter::value::{Value, ValueType};
@@ -13,7 +13,7 @@ use crate::interpreter::value::{Value, ValueType};
 pub fn register(env: &mut Environment) {
     env.declare(
         "print",
-        Value::from(Function::GenericFunction {
+        Value::function(FunctionBody::GenericFunction {
             function: |args, env| {
                 env.borrow_mut()
                     .with_output(|output| {
@@ -36,7 +36,7 @@ pub fn register(env: &mut Environment) {
 
     env.declare(
         "dbg",
-        Value::from(Function::GenericFunction {
+        Value::function(FunctionBody::GenericFunction {
             function: |args, env| {
                 env.borrow_mut()
                     .with_output(|output| {
@@ -58,7 +58,7 @@ pub fn register(env: &mut Environment) {
     );
     env.declare(
         "read_file",
-        Value::from(Function::GenericFunction {
+        Value::function(FunctionBody::GenericFunction {
             function: |args, _env| match args {
                 [Value::Sequence(Sequence::String(s))] => {
                     read_to_string(Path::new(s.borrow().as_str()))

@@ -10,7 +10,7 @@ use num::BigInt;
 
 use crate::compare::FallibleOrd;
 use crate::hash_map::DefaultHasher;
-use crate::interpreter::function::{Function, OverloadedFunction};
+use crate::interpreter::function::OverloadedFunction;
 use crate::interpreter::int::Int;
 use crate::interpreter::num::{Number, NumberToFloatError, NumberToUsizeError, NumberType};
 use crate::interpreter::sequence::Sequence;
@@ -51,6 +51,10 @@ impl Value {
 
     pub(crate) fn some(value: Self) -> Self {
         Self::Option(Some(Box::new(value)))
+    }
+
+    pub(crate) fn function<T: Into<OverloadedFunction>>(source: T) -> Self {
+        Self::Function(Rc::new(RefCell::new(source.into())))
     }
 
     /// If this value is a type of `Sequence` it returns the length of the sequence, otherwise it returns `None`
@@ -346,12 +350,6 @@ impl From<String> for Value {
 impl From<&str> for Value {
     fn from(value: &str) -> Self {
         Self::Sequence(Sequence::String(Rc::new(RefCell::new(value.to_string()))))
-    }
-}
-
-impl From<Function> for Value {
-    fn from(value: Function) -> Self {
-        Self::Function(Rc::new(RefCell::new(OverloadedFunction::from(value))))
     }
 }
 

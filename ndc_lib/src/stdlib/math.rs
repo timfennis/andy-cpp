@@ -181,7 +181,7 @@ mod inner {
 
 pub mod f64 {
     use super::{Environment, Number, ToPrimitive, f64};
-    use crate::interpreter::function::{Function, FunctionCallError, ParamType, TypeSignature};
+    use crate::interpreter::function::{FunctionBody, FunctionCallError, ParamType, TypeSignature};
     use crate::interpreter::int::Int;
     use crate::interpreter::sequence::Sequence;
     use crate::interpreter::value::Value;
@@ -189,42 +189,55 @@ pub mod f64 {
 
     pub fn register(env: &mut Environment) {
         macro_rules! delegate_to_f64 {
-            ($method:ident) => {
-                let function = $crate::interpreter::value::Value::from(
-                    $crate::interpreter::function::Function::SingleNumberFunction {
-                        body: |num: Number| match num {
-                            Number::Int(i) => Number::Float(f64::from(i).$method()),
-                            Number::Float(f) => Number::Float(f.$method()),
-                            Number::Rational(r) => {
-                                Number::Float(r.to_f64().unwrap_or(f64::NAN).$method())
-                            }
-                            Number::Complex(c) => Number::Complex(c.$method()),
+            ($method:ident,$docs:literal) => {
+                let function = $crate::interpreter::value::Value::function(
+                    $crate::interpreter::function::Function::new_with_docs(
+                        $crate::interpreter::function::FunctionBody::SingleNumberFunction {
+                            body: |num: Number| match num {
+                                Number::Int(i) => Number::Float(f64::from(i).$method()),
+                                Number::Float(f) => Number::Float(f.$method()),
+                                Number::Rational(r) => {
+                                    Number::Float(r.to_f64().unwrap_or(f64::NAN).$method())
+                                }
+                                Number::Complex(c) => Number::Complex(c.$method()),
+                            },
                         },
-                    },
+                        String::from($docs),
+                    ),
                 );
                 env.declare(stringify!($method), function);
             };
         }
 
-        delegate_to_f64!(acos);
-        delegate_to_f64!(acosh);
-        delegate_to_f64!(asin);
-        delegate_to_f64!(asinh);
-        delegate_to_f64!(atan);
-        delegate_to_f64!(atanh);
-        delegate_to_f64!(cbrt);
-        delegate_to_f64!(cos);
-        delegate_to_f64!(exp);
-        delegate_to_f64!(ln);
-        delegate_to_f64!(log2);
-        delegate_to_f64!(log10);
-        delegate_to_f64!(sin);
-        delegate_to_f64!(sqrt);
-        delegate_to_f64!(tan);
+        delegate_to_f64!(
+            acos,
+            "Computes the arccosine of a number. Return value is in radians in the range [0, pi] or NaN if the number is outside the range [-1, 1]."
+        );
+        delegate_to_f64!(acosh, "Inverse hyperbolic cosine function.");
+        delegate_to_f64!(
+            asin,
+            "Computes the arcsine of a number. Return value is in radians in the range [-pi/2, pi/2] or NaN if the number is outside the range [-1, 1]."
+        );
+        delegate_to_f64!(asinh, "Inverse hyperbolic sine function.");
+        delegate_to_f64!(
+            atan,
+            "Computes the arctangent of a number. Return value is in radians in the range [-pi/2, pi/2];"
+        );
+        delegate_to_f64!(atanh, "Inverse hyperbolic tangent function.");
+        delegate_to_f64!(cbrt, "Returns the cube root of a number.");
+        delegate_to_f64!(cos, "Computes the cosine of a number (in radians).");
+        delegate_to_f64!(exp, "Returns `e^(arg)`, (the exponential function).");
+        delegate_to_f64!(ln, "Returns the natural logarithm of the number.");
+        delegate_to_f64!(log2, "Returns the base 2 logarithm of the number.");
+        delegate_to_f64!(log10, "Returns the base 10 logarithm of the number.");
+        delegate_to_f64!(sin, "Computes the sine of a number (in radians).");
+        delegate_to_f64!(sqrt, "Returns the square root of a number.");
+        delegate_to_f64!(tan, "Computes the tangent of a number (in radians).");
+        delegate_to_f64!(tanh, "Hyperbolic tangent function.");
 
         env.declare(
             "int",
-            Value::from(Function::GenericFunction {
+            Value::function(FunctionBody::GenericFunction {
                 function: |args, _env| match args {
                     [Value::Number(n)] => Ok(Value::Number(n.to_int_lossy()?)),
                     [Value::Sequence(Sequence::String(s))] => {

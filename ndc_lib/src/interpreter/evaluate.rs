@@ -15,7 +15,7 @@ use crate::ast::{
 use crate::hash_map;
 use crate::hash_map::HashMap;
 use crate::interpreter::environment::{Environment, EnvironmentRef};
-use crate::interpreter::function::{Function, FunctionCarrier, OverloadedFunction};
+use crate::interpreter::function::{Function, FunctionBody, FunctionCarrier, OverloadedFunction};
 use crate::interpreter::int::Int;
 use crate::interpreter::iterator::mut_value_to_iterator;
 use crate::interpreter::num::{EuclideanDivisionError, Number};
@@ -363,14 +363,14 @@ pub(crate) fn evaluate_expression(
                 .map(|it| it.try_into_identifier())
                 .transpose()?;
 
-            let mut user_function = Function::Closure {
+            let mut user_function = FunctionBody::Closure {
                 parameter_names: arguments.try_into_parameters()?,
                 body: body.clone(),
                 environment: environment.clone(),
             };
 
             if *pure {
-                user_function = Function::Memoized {
+                user_function = FunctionBody::Memoized {
                     cache: RefCell::default(),
                     function: Box::new(user_function),
                 }
@@ -379,11 +379,11 @@ pub(crate) fn evaluate_expression(
             if let Some(name) = name {
                 environment
                     .borrow_mut()
-                    .declare_function(name, user_function);
+                    .declare_function(name, Function::new(user_function));
 
                 Value::unit()
             } else {
-                user_function.into()
+                Value::function(user_function)
             }
         }
 

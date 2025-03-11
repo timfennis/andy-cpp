@@ -110,7 +110,7 @@ impl Environment {
         }
 
         // Fallback
-        self.declare(name, Value::from(function));
+        self.declare(name, Value::function(function));
     }
     pub fn declare(&mut self, name: &str, value: Value) {
         self.values.insert(name.into(), RefCell::new(value));

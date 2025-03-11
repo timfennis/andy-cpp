@@ -593,13 +593,14 @@ pub mod extra {
     use itertools::izip;
 
     use crate::interpreter::{
-        environment::Environment, function::Function, iterator::mut_value_to_iterator, value::Value,
+        environment::Environment, function::FunctionBody, iterator::mut_value_to_iterator,
+        value::Value,
     };
 
     pub fn register(env: &mut Environment) {
         env.declare(
             "zip",
-            Value::from(Function::generic(
+            Value::function(FunctionBody::generic(
                 crate::interpreter::function::TypeSignature::Variadic,
                 |args, _env| match args {
                     [_] => Err(anyhow!("zip must be called with 2 or more arguments").into()),
