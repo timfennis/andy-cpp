@@ -753,7 +753,7 @@ fn declare_or_assign_variable(
 }
 
 /// Applies operations like `+` or functions like `max(x, y)` to mutable pointers to values. This is
-/// used to optimize various OpAssign expressions that would otherwise create copies.
+/// used to optimize various `OpAssign` expressions that would otherwise create copies.
 /// ```ndc
 /// x ++= [1,2,3]
 /// // becomes

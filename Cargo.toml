@@ -31,4 +31,4 @@ ryu = "1.0.20"
 self_cell = "1.1.0"
 serde_json = { version = "1.0.140", features = ["arbitrary_precision"] }
 thiserror = "2.0.12"
-
+tap = "1.0.1"

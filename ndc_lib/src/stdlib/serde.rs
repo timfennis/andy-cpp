@@ -8,7 +8,7 @@ use crate::interpreter::value::Value;
 use anyhow::Context;
 use num::BigInt;
 use num::ToPrimitive;
-use serde_json::{json, Map, Number, Value as JsonValue};
+use serde_json::{Map, Number, Value as JsonValue, json};
 
 impl TryFrom<Value> for JsonValue {
     type Error = anyhow::Error;
@@ -75,7 +75,7 @@ impl TryFrom<Value> for JsonValue {
                 Sequence::MinHeap(h) => Ok(Self::Array(
                     h.borrow()
                         .iter()
-                        .map(|h| Self::try_from(h.0 .0.clone()))
+                        .map(|h| Self::try_from(h.0.0.clone()))
                         .collect::<Result<Vec<_>, _>>()?,
                 )),
                 Sequence::Deque(d) => Ok(Self::Array(
@@ -97,13 +97,11 @@ impl TryFrom<JsonValue> for Value {
         Ok(match value {
             JsonValue::Null => Self::unit(),
             JsonValue::Bool(b) => Self::Bool(b),
-            JsonValue::Number(n) => {
-                n.as_str().parse::<BigInt>().map(Self::from).or_else(|_| {
-                    n.as_f64()
-                        .map(Self::from)
-                        .context("Cannot parse number as int or float")
-                })?
-            }
+            JsonValue::Number(n) => n.as_str().parse::<BigInt>().map(Self::from).or_else(|_| {
+                n.as_f64()
+                    .map(Self::from)
+                    .context("Cannot parse number as int or float")
+            })?,
             JsonValue::String(s) => Self::string(s),
             JsonValue::Array(a) => Self::list(
                 a.into_iter()

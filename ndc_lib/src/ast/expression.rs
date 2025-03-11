@@ -3,8 +3,8 @@ use crate::ast::parser::Error as ParseError;
 use crate::interpreter::evaluate::EvaluationError;
 use crate::lexer::Span;
 use either::Either;
-use num::complex::Complex64;
 use num::BigInt;
+use num::complex::Complex64;
 use std::fmt;
 use std::fmt::Formatter;
 use std::rc::Rc;
@@ -186,10 +186,7 @@ impl ExpressionLocation {
                 values: tuple_values,
             } => tuple_values
                 .iter()
-                .map(|it| {
-                    it.try_into_identifier()
-                        .map(ToString::to_string)
-                })
+                .map(|it| it.try_into_identifier().map(ToString::to_string))
                 .collect::<Result<Vec<String>, EvaluationError>>(),
             _ => Err(EvaluationError::syntax_error(
                 "expected a parameter list".to_string(),

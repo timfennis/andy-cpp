@@ -4,6 +4,7 @@ use rand::Rng;
 use rand::distr::Uniform;
 use rand::distr::uniform::SampleUniform;
 use rand::seq::SliceRandom;
+use tap::Tap;
 
 pub fn random_n<N: SampleUniform + std::fmt::Display + Copy>(
     lower: N,
@@ -23,6 +24,10 @@ mod inner {
 
     pub fn shuffle(list: &mut [Value]) {
         list.shuffle(&mut rand::rng());
+    }
+
+    pub fn shuffled(list: &[Value]) -> Vec<Value> {
+        list.to_vec().tap_mut(|v| v.shuffle(&mut rand::rng()))
     }
 
     #[function(name = "randf")]

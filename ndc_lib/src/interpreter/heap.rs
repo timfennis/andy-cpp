@@ -57,7 +57,7 @@ impl MinHeap {
     }
 
     pub fn pop(&mut self) -> Option<Value> {
-        self.heap.pop().map(|v| v.0 .0)
+        self.heap.pop().map(|v| v.0.0)
     }
 }
 

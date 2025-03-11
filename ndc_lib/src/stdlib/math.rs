@@ -52,8 +52,8 @@ mod inner {
     use super::FallibleSum;
     use crate::interpreter::int::Int;
     use crate::interpreter::num::Number;
-    use anyhow::{anyhow, Context};
-    use num::{complex::Complex64, BigInt, BigRational, BigUint, Integer};
+    use anyhow::{Context, anyhow};
+    use num::{BigInt, BigRational, BigUint, Integer, complex::Complex64};
 
     pub fn signum(n: &Number) -> Number {
         n.signum()
@@ -83,7 +83,7 @@ mod inner {
             Sequence::Map(map, _) => map.borrow().keys().try_sum(),
             Sequence::Iterator(iter) => iter.borrow_mut().try_sum(),
             Sequence::MaxHeap(h) => h.borrow().iter().map(|v| &v.0).try_sum(),
-            Sequence::MinHeap(h) => h.borrow().iter().map(|v| &v.0 .0).try_sum(),
+            Sequence::MinHeap(h) => h.borrow().iter().map(|v| &v.0.0).try_sum(),
             Sequence::Deque(d) => d.borrow().iter().try_sum(),
         }
     }
@@ -96,7 +96,7 @@ mod inner {
             Sequence::Map(map, _) => map.borrow().keys().try_product(),
             Sequence::Iterator(iter) => iter.borrow_mut().try_product(),
             Sequence::MaxHeap(h) => h.borrow().iter().map(|v| &v.0).try_product(),
-            Sequence::MinHeap(h) => h.borrow().iter().map(|v| &v.0 .0).try_product(),
+            Sequence::MinHeap(h) => h.borrow().iter().map(|v| &v.0.0).try_product(),
             Sequence::Deque(d) => d.borrow().iter().try_product(),
         }
     }
@@ -180,7 +180,7 @@ mod inner {
 }
 
 pub mod f64 {
-    use super::{f64, Environment, Number, ToPrimitive};
+    use super::{Environment, Number, ToPrimitive, f64};
     use crate::interpreter::function::{Function, FunctionCallError, ParamType, TypeSignature};
     use crate::interpreter::int::Int;
     use crate::interpreter::sequence::Sequence;

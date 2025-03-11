@@ -4,9 +4,9 @@ use std::rc::Rc;
 use either::Either;
 use miette::Diagnostic;
 
+use crate::ast::Expression;
 use crate::ast::expression::{ExpressionLocation, ForBody, ForIteration, Lvalue};
 use crate::ast::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
-use crate::ast::Expression;
 use crate::lexer::{Span, Token, TokenLocation};
 
 pub struct Parser {
@@ -1050,7 +1050,7 @@ impl Parser {
                     "The fn keyword must be last in function declaration".to_string(),
                     span,
                     "This token is not in the right place try changing the order".to_string(),
-                ))
+                ));
             }
             None => {
                 unreachable!("the caller of this method has guaranteed us that there are tokens")
@@ -1075,7 +1075,7 @@ impl Parser {
                         .map_or(fn_token.span, |it| it.span),
                     "The fn token must either start a named function or an anonymous function."
                         .to_string(),
-                ))
+                ));
             }
         };
 

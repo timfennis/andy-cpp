@@ -7,7 +7,7 @@ use crate::ast::ExpressionLocation;
 use crate::hash_map::{DefaultHasher, HashMap};
 use crate::interpreter::environment::{Environment, EnvironmentRef};
 use crate::interpreter::evaluate::{
-    evaluate_expression, ErrorConverter, EvaluationError, EvaluationResult,
+    ErrorConverter, EvaluationError, EvaluationResult, evaluate_expression,
 };
 use crate::interpreter::num::{Number, NumberType};
 use crate::interpreter::sequence::Sequence;
