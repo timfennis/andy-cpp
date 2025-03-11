@@ -15,17 +15,6 @@ pub fn path_ends_with(ty: &syn::Type, ident: &str) -> bool {
         _ => false,
     }
 }
-#[allow(unused)]
-pub fn is_mut_ref_of(ty: &syn::Type, f: fn(&syn::Type) -> bool) -> bool {
-    match ty {
-        syn::Type::Reference(syn::TypeReference {
-            elem,
-            mutability: Some(_),
-            ..
-        }) => f(elem.as_ref()),
-        _ => false,
-    }
-}
 
 pub fn is_ref(ty: &syn::Type) -> bool {
     matches!(
@@ -38,9 +27,27 @@ pub fn is_ref(ty: &syn::Type) -> bool {
 }
 pub fn is_ref_of(ty: &syn::Type, f: fn(&syn::Type) -> bool) -> bool {
     match ty {
-        syn::Type::Reference(syn::TypeReference { elem, .. }) => f(elem.as_ref()),
+        syn::Type::Reference(syn::TypeReference {
+            elem, mutability, ..
+        }) if mutability.is_none() => f(elem.as_ref()),
         _ => false,
     }
+}
+
+pub fn is_ref_mut_of(ty: &syn::Type, f: fn(&syn::Type) -> bool) -> bool {
+    match ty {
+        syn::Type::Reference(syn::TypeReference {
+            elem, mutability, ..
+        }) if mutability.is_some() => f(elem.as_ref()),
+        _ => false,
+    }
+}
+
+pub fn is_ref_mut_of_slice_of_value(ty: &syn::Type) -> bool {
+    is_ref_mut_of(ty, |ty| match ty {
+        syn::Type::Slice(syn::TypeSlice { elem, .. }) => has_path_match(elem.as_ref(), "Value"),
+        _ => false,
+    })
 }
 
 pub fn is_ref_of_slice_of_value(ty: &syn::Type) -> bool {

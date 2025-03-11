@@ -1,8 +1,9 @@
 use anyhow::Context;
 use ndc_macros::export_module;
-use rand::distr::uniform::SampleUniform;
-use rand::distr::Uniform;
 use rand::Rng;
+use rand::distr::Uniform;
+use rand::distr::uniform::SampleUniform;
+use rand::seq::SliceRandom;
 
 pub fn random_n<N: SampleUniform + std::fmt::Display + Copy>(
     lower: N,
@@ -18,6 +19,11 @@ pub fn random_n<N: SampleUniform + std::fmt::Display + Copy>(
 #[export_module]
 mod inner {
     use crate::interpreter::num::Number;
+    use crate::interpreter::value::Value;
+
+    pub fn shuffle(list: &mut [Value]) {
+        list.shuffle(&mut rand::rng());
+    }
 
     #[function(name = "randf")]
     /// Generate a random number between 0 (inclusive) and 1 (exclusive)

@@ -1,6 +1,6 @@
 use crate::r#match::{
-    is_ref, is_ref_mut, is_ref_of_bigint, is_ref_of_slice_of_value, is_str_ref, is_string,
-    path_ends_with,
+    is_ref, is_ref_mut, is_ref_mut_of_slice_of_value, is_ref_of_bigint, is_ref_of_slice_of_value,
+    is_str_ref, is_string, path_ends_with,
 };
 use itertools::Itertools;
 use proc_macro2::TokenStream;
@@ -473,6 +473,21 @@ fn create_temp_variable(
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
                     let #argument_var_name = #argument_var_name.clone();
+                },
+            }];
+        }
+        // The pattern is &mut [Value]
+        else if is_ref_mut_of_slice_of_value(ty) {
+            let rc_temp_var =
+                syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
+            return vec![Argument {
+                param_type: quote! { crate::interpreter::function::ParamType::List },
+                argument: quote! { #argument_var_name },
+                initialize_code: quote! {
+                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::List(#rc_temp_var)) = #argument_var_name else {
+                        panic!("Value #position needed to be a Sequence::List but wasn't");
+                    };
+                    let #argument_var_name = &mut *#rc_temp_var.borrow_mut();
                 },
             }];
         }

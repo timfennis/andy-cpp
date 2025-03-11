@@ -1081,16 +1081,16 @@ fn apply_operation_vectorized(
 ) -> Result<Value, BinaryOpError> {
     let (left_type, right_type) = (left.value_type(), right.value_type());
 
-    // ????
-    let right_len = if let Value::Sequence(Sequence::Tuple(v)) = right {
-        v.len()
-    } else {
-        0
-    };
-
-    let mut left = match left {
-        Value::Sequence(Sequence::Tuple(left)) => left,
-        left @ Value::Number(_) => Rc::new(vec![left; right_len]),
+    let (mut left, right) = match (left, right) {
+        (Value::Sequence(Sequence::Tuple(left)), Value::Sequence(Sequence::Tuple(right))) => {
+            (left, right.as_slice())
+        }
+        (left @ Value::Number(_), Value::Sequence(Sequence::Tuple(right))) => {
+            (Rc::new(vec![left; right.len()]), right.as_slice())
+        }
+        (Value::Sequence(Sequence::Tuple(left)), right @ Value::Number(_)) => {
+            (left, std::slice::from_ref(right))
+        }
         _ => {
             return Err(BinaryOpError::UndefinedOperation {
                 operator,
@@ -1100,19 +1100,7 @@ fn apply_operation_vectorized(
         }
     };
 
-    let right: &[Value] = match right {
-        Value::Sequence(Sequence::Tuple(right)) => right.as_slice(),
-        right @ Value::Number(_) => std::slice::from_ref(right),
-        _ => {
-            return Err(BinaryOpError::UndefinedOperation {
-                operator,
-                left: left_type,
-                right: right_type,
-            });
-        }
-    };
-
-    let left_mut = Rc::make_mut(&mut left);
+    let left_mut: &mut Vec<Value> = Rc::make_mut(&mut left);
 
     // Zip the mutable vector with the immutable right side and perform the operations on all elements
     for (l, r) in left_mut.iter_mut().zip(right.iter().cycle()) {
