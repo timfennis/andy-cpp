@@ -105,7 +105,7 @@ impl StringLexer for Lexer<'_> {
                         None => {
                             return Err(Error::unterminated_string(
                                 self.source.create_span(start_offset),
-                            ))
+                            ));
                         }
                     }
                 }

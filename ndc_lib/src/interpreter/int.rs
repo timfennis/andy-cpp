@@ -1,10 +1,10 @@
 use crate::interpreter::evaluate::EvaluationError;
 use crate::lexer::Span;
+use num::FromPrimitive;
 use num::bigint::{Sign, ToBigInt};
 use num::complex::Complex64;
 use num::traits::CheckedEuclid;
-use num::FromPrimitive;
-use num::{pow::Pow, BigInt, BigRational, Signed, ToPrimitive, Zero};
+use num::{BigInt, BigRational, Signed, ToPrimitive, Zero, pow::Pow};
 use std::cmp::Ordering;
 use std::fmt;
 use std::hash::{Hash, Hasher};

@@ -1,0 +1,36 @@
+
+let vectors = [(x, y) for x in -1..=1, y in -1..=1, if x != 0 or y != 0];
+
+pure fn fade(t) => t * t * t * (t * (t * 6 - 15) + 10);
+
+fn lerp(a, b, t) => a + t * (b - a);
+
+fn gradient(h, x, y) => (vectors[h % 8] * (x, y)).sum
+
+fn perlin(x, y, perm) {
+  let xi, yi = int(x) & 255, int(y) & 255;
+  let xf, yf = x - int(x), y - int(y);
+
+  let u, v = fade(xf), fade(yf);
+
+  let aa = perm[perm[xi] + yi];
+  let ab = perm[perm[xi] + yi + 1];
+  let ba = perm[perm[xi + 1] + yi];
+  let bb = perm[perm[xi + 1] + yi + 1];
+
+  let x1 = lerp(gradient(aa, xf, yf), gradient(ba, xf - 1, yf), u);
+  let x2 = lerp(gradient(ab, xf, yf - 1), gradient(bb, xf - 1, yf - 1), u);
+
+  lerp(x1, x2, v)
+}
+
+fn benchmark_perlin(grid_size) {
+  let perm = list(0..256);
+  perm.shuffle;
+  perm ++= perm;
+
+  [perlin(x / 10.0, y / 10.0, perm) for x in (0..grid_size), y in (0..grid_size)]
+}
+
+let noise = benchmark_perlin(100);
+print("Min:", noise.min, "Max:", noise.max, "Avg:", (noise.sum / noise.len));

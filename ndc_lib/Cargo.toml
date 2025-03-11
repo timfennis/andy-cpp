@@ -6,8 +6,11 @@ version.workspace = true
 
 [dependencies]
 ahash = { workspace = true, optional = true }
+anyhow.workspace = true
 either.workspace = true
 factorial.workspace = true
+itertools.workspace = true
+miette.workspace = true
 ndc_macros.workspace = true
 num.workspace = true
 once_cell.workspace = true
@@ -17,10 +20,8 @@ regex.workspace = true
 ryu.workspace = true
 self_cell.workspace = true
 serde_json.workspace = true
+tap.workspace = true
 thiserror.workspace = true
-anyhow.workspace = true
-miette.workspace = true
-itertools.workspace = true
 
 
 [features]

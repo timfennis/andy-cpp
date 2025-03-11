@@ -668,7 +668,7 @@ impl fmt::Display for Number {
             Self::Int(i) => write!(f, "{i}"),
             Self::Float(ff) => {
                 let mut buffer = ryu::Buffer::new();
-                write!(f, "{}", buffer.format(*ff))
+                f.write_str(buffer.format(*ff))
             }
             Self::Rational(r) => write!(f, "{r}"),
             Self::Complex(r) => write!(f, "{r}"),
@@ -682,12 +682,6 @@ fn rational_to_float(r: &BigRational) -> f64 {
 
 fn rational_to_complex(r: &BigRational) -> Complex<f64> {
     Complex::from(r.to_f64().unwrap_or(f64::NAN))
-}
-
-pub fn into_fallible_operation<E>(
-    op: impl Fn(Number, Number) -> Number,
-) -> impl Fn(Number, Number) -> Result<Number, E> {
-    move |left, right| Ok(op(left, right))
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]

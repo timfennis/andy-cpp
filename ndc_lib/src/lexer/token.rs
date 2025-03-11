@@ -1,5 +1,5 @@
-use num::complex::Complex64;
 use num::BigInt;
+use num::complex::Complex64;
 use std::fmt;
 
 use super::Span;

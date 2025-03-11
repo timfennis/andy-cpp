@@ -90,13 +90,21 @@ fn run_test(path: PathBuf) -> Result<(), std::io::Error> {
 
     if !expect_output.is_empty() && output.trim_end() != expect_output.trim_end() {
         println!(" {}", "ERR".red().bold());
-        panic!("\n\tThere was a problem running {path:?}\n\tActual output {}\n\tdid not match\n\tExpected output {}\n", output.trim_end(), expect_output.trim_end());
+        panic!(
+            "\n\tThere was a problem running {path:?}\n\tActual output {}\n\tdid not match\n\tExpected output {}\n",
+            output.trim_end(),
+            expect_output.trim_end()
+        );
     }
 
     if !expect_error.is_empty() && !actual_error.trim().contains(expect_error.trim()) {
         println!(" {}", "ERR".red().bold());
         (&expect_error, &actual_error);
-        panic!("\n\tThere was a problem running {path:?}\n\tExpected error:\t{}\n\tActual error:\t{}\n",  expect_error.trim_end(), actual_error.trim_end());
+        panic!(
+            "\n\tThere was a problem running {path:?}\n\tExpected error:\t{}\n\tActual error:\t{}\n",
+            expect_error.trim_end(),
+            actual_error.trim_end()
+        );
     }
 
     println!(" {}", "OK".green().bold());

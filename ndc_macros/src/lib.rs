@@ -5,7 +5,7 @@ use proc_macro::TokenStream;
 use quote::quote;
 
 use crate::function::wrap_function;
-use syn::{parse_macro_input, Item};
+use syn::{Item, parse_macro_input};
 
 #[proc_macro_attribute]
 pub fn function(_attr: TokenStream, item: TokenStream) -> TokenStream {
