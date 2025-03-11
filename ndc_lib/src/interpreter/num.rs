@@ -668,7 +668,7 @@ impl fmt::Display for Number {
             Self::Int(i) => write!(f, "{i}"),
             Self::Float(ff) => {
                 let mut buffer = ryu::Buffer::new();
-                write!(f, "{}", buffer.format(*ff))
+                f.write_str(buffer.format(*ff))
             }
             Self::Rational(r) => write!(f, "{r}"),
             Self::Complex(r) => write!(f, "{r}"),
