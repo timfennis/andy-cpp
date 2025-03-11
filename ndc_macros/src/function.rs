@@ -5,6 +5,7 @@ use crate::r#match::{
 use itertools::Itertools;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
+use std::fmt::Write;
 
 pub struct WrappedFunction {
     pub function_declaration: TokenStream,
@@ -17,6 +18,7 @@ pub fn wrap_function(function: &syn::ItemFn) -> Vec<WrappedFunction> {
     let mut register_as_function_name =
         proc_macro2::Literal::string(&original_identifier.to_string());
 
+    let mut docs_buf = String::new();
     for attr in &function.attrs {
         if attr.path().is_ident("function") {
             attr.parse_nested_meta(|meta| {
@@ -29,6 +31,15 @@ pub fn wrap_function(function: &syn::ItemFn) -> Vec<WrappedFunction> {
                 }
             })
             .expect("invalid function attribute");
+        } else if attr.path().is_ident("doc") {
+            if let syn::Meta::NameValue(meta) = &attr.meta {
+                if let syn::Expr::Lit(expr) = &meta.value {
+                    if let syn::Lit::Str(lit_str) = &expr.lit {
+                        writeln!(docs_buf, "{}", lit_str.value().trim())
+                            .expect("failed to write docs");
+                    }
+                }
+            }
         }
     }
 
@@ -46,6 +57,7 @@ pub fn wrap_function(function: &syn::ItemFn) -> Vec<WrappedFunction> {
             &original_identifier,
             &register_as_function_name,
             vec![],
+            &docs_buf,
         )];
     }
 
@@ -65,6 +77,7 @@ pub fn wrap_function(function: &syn::ItemFn) -> Vec<WrappedFunction> {
                 &format_ident!("{}_{}", original_identifier, variation_id),
                 &register_as_function_name,
                 args,
+                &docs_buf,
             )
         })
         .collect::<Vec<_>>();
@@ -80,6 +93,7 @@ fn wrap_single(
     identifier: &syn::Ident,
     register_as_function_name: &proc_macro2::Literal,
     input_arguments: Vec<Argument>,
+    docs: &str,
 ) -> WrappedFunction {
     let inner_ident = format_ident!("{}_inner", identifier);
     let inner = {
@@ -158,12 +172,15 @@ fn wrap_single(
     };
 
     let function_registration = quote! {
-        env.declare_function(#register_as_function_name, crate::interpreter::function::Function::GenericFunction {
-            function: #identifier,
-            type_signature: crate::interpreter::function::TypeSignature::Exact(vec![
-                #(#param_types, )*
-            ]),
-        });
+        env.declare_function(#register_as_function_name, crate::interpreter::function::Function::new_with_docs(
+            crate::interpreter::function::FunctionBody::GenericFunction {
+                function: #identifier,
+                type_signature: crate::interpreter::function::TypeSignature::Exact(vec![
+                    #(#param_types, )*
+                ]),
+            },
+            String::from(#docs),
+        ));
     };
 
     WrappedFunction {
