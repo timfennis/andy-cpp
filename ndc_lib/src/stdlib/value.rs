@@ -17,15 +17,18 @@ mod inner {
         let mut buf = String::new();
 
         for (sig, fun) in func.function.borrow().iter_implementations() {
-            writeln!(
-                buf,
-                "{sig} -> {}",
-                fun.documentation()
-                    .trim()
-                    .lines()
-                    .next()
-                    .unwrap_or_default()
-            )?;
+            let doc_line = fun
+                .documentation()
+                .trim()
+                .lines()
+                .next()
+                .unwrap_or_default();
+
+            if doc_line.is_empty() {
+                writeln!(buf, "{sig}",)?;
+            } else {
+                writeln!(buf, "{sig} -> {}", doc_line)?;
+            }
         }
 
         buf.pop(); // Remove last newline

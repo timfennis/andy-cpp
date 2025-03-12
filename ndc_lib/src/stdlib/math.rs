@@ -181,7 +181,9 @@ mod inner {
 
 pub mod f64 {
     use super::{Environment, Number, ToPrimitive, f64};
-    use crate::interpreter::function::{FunctionBody, FunctionCallError, ParamType, TypeSignature};
+    use crate::interpreter::function::{
+        FunctionBody, FunctionCallError, ParamType, Parameter, TypeSignature,
+    };
     use crate::interpreter::int::Int;
     use crate::interpreter::sequence::Sequence;
     use crate::interpreter::value::Value;
@@ -259,7 +261,7 @@ pub mod f64 {
                     }
                         .into()),
                 },
-                type_signature: TypeSignature::Exact(vec![ParamType::Any]),
+                type_signature: TypeSignature::Exact(vec![Parameter::new("val", ParamType::Any)]),
             }),
         );
     }

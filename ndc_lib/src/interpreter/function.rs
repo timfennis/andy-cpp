@@ -8,12 +8,13 @@ use crate::interpreter::num::{Number, NumberType};
 use crate::interpreter::sequence::Sequence;
 use crate::interpreter::value::{Value, ValueType};
 use crate::lexer::Span;
-use derive_more::with_trait::{Deref, DerefMut};
+use derive_more::with_trait::{Constructor, Deref, DerefMut};
 use itertools::Itertools;
 use std::cell::{BorrowError, BorrowMutError, RefCell};
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
+use tap::Pipe;
 
 /// Callable is a wrapper around a `OverloadedFunction` pointer and the environment to make it
 /// easy to have an executable function as a method signature in the standard library
@@ -91,9 +92,16 @@ impl FunctionBody {
         match self {
             Self::Closure {
                 parameter_names, ..
-            } => TypeSignature::Exact(parameter_names.iter().map(|_| ParamType::Any).collect()),
+            } => TypeSignature::Exact(
+                parameter_names
+                    .iter()
+                    .map(|name| Parameter::new(name, ParamType::Any))
+                    .collect(),
+            ),
             Self::Memoized { cache: _, function } => function.type_signature(),
-            Self::SingleNumberFunction { .. } => TypeSignature::Exact(vec![ParamType::Number]),
+            Self::SingleNumberFunction { .. } => {
+                TypeSignature::Exact(vec![Parameter::new("num", ParamType::Number)])
+            }
             Self::GenericFunction { type_signature, .. } => type_signature.clone(),
         }
     }
@@ -109,8 +117,7 @@ impl FunctionBody {
 
                 let mut env = local_scope.borrow_mut();
                 for (name, value) in parameters.iter().zip(args.iter()) {
-                    //TODO: is this clone a good plan?
-                    env.declare(name, value.clone());
+                    env.declare(name, value.clone()); // NOTE: stores a copy of the value in the environment (which is fine?)
                 }
                 // This drop is very important
                 drop(env);
@@ -121,7 +128,7 @@ impl FunctionBody {
                 }
             }
             Self::SingleNumberFunction { body } => match args {
-                [Value::Number(num)] => Ok(Value::Number((body)(num.clone()))),
+                [Value::Number(num)] => Ok(Value::Number(body(num.clone()))),
                 [v] => Err(FunctionCallError::ArgumentTypeError {
                     expected: ValueType::Number(NumberType::Float),
                     actual: v.value_type(),
@@ -160,7 +167,7 @@ impl FunctionBody {
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum TypeSignature {
     Variadic,
-    Exact(Vec<ParamType>),
+    Exact(Vec<Parameter>),
 }
 
 #[derive(Clone)]
@@ -226,7 +233,7 @@ fn match_types_to_signature(types: &[ValueType], signature: &TypeSignature) -> O
             if types.len() == signature.len() {
                 let mut acc = 0;
                 for (a, b) in types.iter().zip(signature.iter()) {
-                    let dist = b.distance(a)?;
+                    let dist = b.param_type.distance(a)?;
                     acc += dist;
                 }
 
@@ -234,6 +241,21 @@ fn match_types_to_signature(types: &[ValueType], signature: &TypeSignature) -> O
             }
 
             None
+        }
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct Parameter {
+    name: String,
+    param_type: ParamType,
+}
+
+impl Parameter {
+    pub fn new<N: Into<String>>(name: N, param_type: ParamType) -> Self {
+        Self {
+            name: name.into(),
+            param_type,
         }
     }
 }
@@ -422,7 +444,14 @@ impl fmt::Display for TypeSignature {
         write!(f, "fn(")?;
         match self {
             Self::Variadic => write!(f, "*args")?,
-            Self::Exact(params) => write!(f, "{}", params.iter().map(|p| p.as_str()).join(", "))?,
+            Self::Exact(params) => write!(
+                f,
+                "{}",
+                params
+                    .iter()
+                    .map(|p| format!("{}: {}", p.name, p.param_type.as_str()))
+                    .join(", ")
+            )?,
         }
         write!(f, ")")
     }

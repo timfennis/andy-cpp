@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use crate::interpreter::environment::Environment;
 use crate::interpreter::function::{
-    FunctionBody, FunctionCallError, FunctionCarrier, ParamType, TypeSignature,
+    FunctionBody, FunctionCallError, FunctionCarrier, ParamType, Parameter, TypeSignature,
 };
 use crate::interpreter::sequence::Sequence;
 use crate::interpreter::value::{Value, ValueType};
@@ -78,7 +78,10 @@ pub fn register(env: &mut Environment) {
                 }
                 .into()),
             },
-            type_signature: TypeSignature::Exact(vec![ParamType::String]),
+            type_signature: TypeSignature::Exact(vec![Parameter::new(
+                "file_name",
+                ParamType::String,
+            )]),
         }),
     );
 }
