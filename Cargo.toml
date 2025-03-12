@@ -13,6 +13,7 @@ ahash = { version = "0.8.11" }
 anyhow = "1.0.97"
 clap = { version = "4.5.32", features = ["derive"] }
 criterion = { version = "0.5.1", features = ["html_reports"] }
+derive_more = { version = "2.0.1", features = ["deref", "deref_mut", "from"] }
 either = "1.15.0"
 factorial = "0.4.0"
 itertools = "0.14.0"
@@ -30,5 +31,5 @@ rustyline = { version = "15.0.0", features = ["derive"] }
 ryu = "1.0.20"
 self_cell = "1.1.0"
 serde_json = { version = "1.0.140", features = ["arbitrary_precision"] }
-thiserror = "2.0.12"
 tap = "1.0.1"
+thiserror = "2.0.12"
