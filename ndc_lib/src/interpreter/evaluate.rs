@@ -1355,7 +1355,7 @@ fn call_function(
             // TODO: for now we just pass the break from inside the function to outside the function. This would allow some pretty funky code and might introduce weird bugs?
             | FunctionCarrier::Break(_),
         ) => e,
-        Err(carrier @ FunctionCarrier::IntoEvaluationError(_)) => Err(carrier.lift(span)),
+        Err(carrier @ FunctionCarrier::IntoEvaluationError(_)) => Err(carrier.lift_if(span)),
     }
 }
 

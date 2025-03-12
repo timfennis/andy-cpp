@@ -8,11 +8,11 @@ use crate::interpreter::num::{Number, NumberType};
 use crate::interpreter::sequence::Sequence;
 use crate::interpreter::value::{Value, ValueType};
 use crate::lexer::Span;
+use derive_more::with_trait::{Deref, DerefMut};
 use itertools::Itertools;
 use std::cell::{BorrowError, BorrowMutError, RefCell};
 use std::fmt;
 use std::hash::{Hash, Hasher};
-use std::ops::Deref;
 use std::rc::Rc;
 
 /// Callable is a wrapper around a `OverloadedFunction` pointer and the environment to make it
@@ -27,9 +27,11 @@ impl Callable<'_> {
         self.function.borrow().call(args, self.environment)
     }
 }
-#[derive(Clone)]
+#[derive(Clone, Deref, DerefMut)]
 pub struct Function {
     documentation: Option<String>,
+    #[deref]
+    #[deref_mut]
     body: FunctionBody,
 }
 
@@ -49,15 +51,6 @@ impl Function {
     }
     pub fn documentation(&self) -> &str {
         self.documentation.as_deref().unwrap_or_default()
-    }
-}
-
-impl Deref for Function {
-    // TODO: use derive more
-    type Target = FunctionBody;
-
-    fn deref(&self) -> &Self::Target {
-        &self.body
     }
 }
 
@@ -89,6 +82,77 @@ impl FunctionBody {
         Self::GenericFunction {
             type_signature,
             function,
+        }
+    }
+}
+
+impl FunctionBody {
+    fn type_signature(&self) -> TypeSignature {
+        match self {
+            Self::Closure {
+                parameter_names, ..
+            } => TypeSignature::Exact(parameter_names.iter().map(|_| ParamType::Any).collect()),
+            Self::Memoized { cache: _, function } => function.type_signature(),
+            Self::SingleNumberFunction { .. } => TypeSignature::Exact(vec![ParamType::Number]),
+            Self::GenericFunction { type_signature, .. } => type_signature.clone(),
+        }
+    }
+
+    pub fn call(&self, args: &mut [Value], env: &EnvironmentRef) -> EvaluationResult {
+        match self {
+            Self::Closure {
+                body,
+                environment,
+                parameter_names: parameters,
+            } => {
+                let mut local_scope = Environment::new_scope(environment);
+
+                let mut env = local_scope.borrow_mut();
+                for (name, value) in parameters.iter().zip(args.iter()) {
+                    //TODO: is this clone a good plan?
+                    env.declare(name, value.clone());
+                }
+                // This drop is very important
+                drop(env);
+
+                match evaluate_expression(body, &mut local_scope) {
+                    Err(FunctionCarrier::Return(v)) => Ok(v),
+                    r => r,
+                }
+            }
+            Self::SingleNumberFunction { body } => match args {
+                [Value::Number(num)] => Ok(Value::Number((body)(num.clone()))),
+                [v] => Err(FunctionCallError::ArgumentTypeError {
+                    expected: ValueType::Number(NumberType::Float),
+                    actual: v.value_type(),
+                }
+                .into()),
+                _ => Err(FunctionCallError::ArgumentCountError {
+                    expected: 1,
+                    actual: 0,
+                }
+                .into()),
+            },
+            Self::GenericFunction { function, .. } => function(args, env),
+            Self::Memoized { cache, function } => {
+                let mut hasher = DefaultHasher::default();
+                for arg in &*args {
+                    arg.hash(&mut hasher);
+                }
+
+                let key = hasher.finish();
+
+                if !cache.borrow().contains_key(&key) {
+                    let result = function.call(args, env)?;
+                    cache.borrow_mut().insert(key, result);
+                }
+
+                Ok(cache
+                    .borrow()
+                    .get(&key)
+                    .expect("guaranteed to work")
+                    .clone())
+            }
         }
     }
 }
@@ -171,15 +235,6 @@ fn match_types_to_signature(types: &[ValueType], signature: &TypeSignature) -> O
 
             None
         }
-    }
-}
-
-impl fmt::Debug for OverloadedFunction {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for type_signature in self.implementations.keys() {
-            write!(f, "fn({type_signature:?})")?;
-        }
-        Ok(())
     }
 }
 
@@ -294,77 +349,6 @@ impl From<&Value> for ParamType {
     }
 }
 
-impl FunctionBody {
-    fn type_signature(&self) -> TypeSignature {
-        match self {
-            Self::Closure {
-                parameter_names, ..
-            } => TypeSignature::Exact(parameter_names.iter().map(|_| ParamType::Any).collect()),
-            Self::Memoized { cache: _, function } => function.type_signature(),
-            Self::SingleNumberFunction { .. } => TypeSignature::Exact(vec![ParamType::Number]),
-            Self::GenericFunction { type_signature, .. } => type_signature.clone(),
-        }
-    }
-
-    pub fn call(&self, args: &mut [Value], env: &EnvironmentRef) -> EvaluationResult {
-        match self {
-            Self::Closure {
-                body,
-                environment,
-                parameter_names: parameters,
-            } => {
-                let mut local_scope = Environment::new_scope(environment);
-
-                let mut env = local_scope.borrow_mut();
-                for (name, value) in parameters.iter().zip(args.iter()) {
-                    //TODO: is this clone a good plan?
-                    env.declare(name, value.clone());
-                }
-                // This drop is very important
-                drop(env);
-
-                match evaluate_expression(body, &mut local_scope) {
-                    Err(FunctionCarrier::Return(v)) => Ok(v),
-                    r => r,
-                }
-            }
-            Self::SingleNumberFunction { body } => match args {
-                [Value::Number(num)] => Ok(Value::Number((body)(num.clone()))),
-                [v] => Err(FunctionCallError::ArgumentTypeError {
-                    expected: ValueType::Number(NumberType::Float),
-                    actual: v.value_type(),
-                }
-                .into()),
-                _ => Err(FunctionCallError::ArgumentCountError {
-                    expected: 1,
-                    actual: 0,
-                }
-                .into()),
-            },
-            Self::GenericFunction { function, .. } => function(args, env),
-            Self::Memoized { cache, function } => {
-                let mut hasher = DefaultHasher::default();
-                for arg in &*args {
-                    arg.hash(&mut hasher);
-                }
-
-                let key = hasher.finish();
-
-                if !cache.borrow().contains_key(&key) {
-                    let result = function.call(args, env)?;
-                    cache.borrow_mut().insert(key, result);
-                }
-
-                Ok(cache
-                    .borrow()
-                    .get(&key)
-                    .expect("guaranteed to work")
-                    .clone())
-            }
-        }
-    }
-}
-
 #[derive(thiserror::Error, Debug)]
 pub enum FunctionCallError {
     #[error("invalid argument, expected {expected} got {actual}")]
@@ -403,7 +387,7 @@ pub enum FunctionCarrier {
 
 impl FunctionCarrier {
     #[must_use]
-    pub fn lift(self, span: Span) -> Self {
+    pub fn lift_if(self, span: Span) -> Self {
         match self {
             Self::IntoEvaluationError(into) => {
                 Self::EvaluationError(into.as_evaluation_error(span))
