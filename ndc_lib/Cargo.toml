@@ -7,6 +7,7 @@ version.workspace = true
 [dependencies]
 ahash = { workspace = true, optional = true }
 anyhow.workspace = true
+derive_more.workspace = true
 either.workspace = true
 factorial.workspace = true
 itertools.workspace = true
