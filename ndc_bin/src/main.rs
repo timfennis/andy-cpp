@@ -32,7 +32,7 @@ struct Cli {
     context_lines: usize,
 }
 
-pub fn miette_hack<T>(result: Result<T, InterpreterError>) -> miette::Result<T> {
+pub fn into_miette_result<T>(result: Result<T, InterpreterError>) -> miette::Result<T> {
     match result {
         Err(err) => Err(err)?,
         Ok(val) => Ok(val),
@@ -78,7 +78,7 @@ fn main() -> anyhow::Result<()> {
 
         let stdout = std::io::stdout();
         let mut interpreter = Interpreter::new(Box::new(stdout));
-        match miette_hack(interpreter.run_str(&string, cli.debug)) {
+        match into_miette_result(interpreter.run_str(&string, cli.debug)) {
             // we can just ignore successful runs because we have print statements
             Ok(_final_value) => {}
             Err(report) => {
