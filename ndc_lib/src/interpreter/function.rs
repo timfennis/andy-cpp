@@ -8,13 +8,11 @@ use crate::interpreter::num::{Number, NumberType};
 use crate::interpreter::sequence::Sequence;
 use crate::interpreter::value::{Value, ValueType};
 use crate::lexer::Span;
-use derive_more::with_trait::{Constructor, Deref, DerefMut};
 use itertools::Itertools;
 use std::cell::{BorrowError, BorrowMutError, RefCell};
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
-use tap::Pipe;
 
 /// Callable is a wrapper around a `OverloadedFunction` pointer and the environment to make it
 /// easy to have an executable function as a method signature in the standard library
@@ -28,11 +26,9 @@ impl Callable<'_> {
         self.function.borrow().call(args, self.environment)
     }
 }
-#[derive(Clone, Deref, DerefMut)]
+#[derive(Clone)]
 pub struct Function {
     documentation: Option<String>,
-    #[deref]
-    #[deref_mut]
     body: FunctionBody,
 }
 
@@ -52,6 +48,14 @@ impl Function {
     }
     pub fn documentation(&self) -> &str {
         self.documentation.as_deref().unwrap_or_default()
+    }
+
+    pub fn body(&self) -> &FunctionBody {
+        &self.body
+    }
+
+    pub fn type_signature(&self) -> TypeSignature {
+        self.body.type_signature()
     }
 }
 
@@ -201,7 +205,7 @@ impl OverloadedFunction {
         }
 
         if let Some(function) = best {
-            function.call(args, env)
+            function.body().call(args, env)
         } else {
             Err(FunctionCarrier::FunctionNotFound)
         }

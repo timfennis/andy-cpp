@@ -6,7 +6,6 @@ use itertools::Itertools;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use std::fmt::Write;
-use syn::spanned::Spanned;
 
 pub struct WrappedFunction {
     pub function_declaration: TokenStream,
