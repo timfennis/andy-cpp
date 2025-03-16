@@ -17,17 +17,16 @@ mod inner {
         let mut buf = String::new();
 
         for (sig, fun) in func.function.borrow().iter_implementations() {
-            let doc_line = fun
-                .documentation()
-                .trim()
-                .lines()
-                .next()
-                .unwrap_or_default();
-
-            if doc_line.is_empty() {
-                writeln!(buf, "{sig}",)?;
+            if fun.name().is_empty() {
+                write!(buf, "fn({sig})")?;
             } else {
-                writeln!(buf, "{sig} -> {}", doc_line)?;
+                write!(buf, "fn {}({sig})", fun.name())?;
+            }
+
+            if !fun.short_documentation().is_empty() {
+                writeln!(buf, " -> {}", fun.short_documentation())?;
+            } else {
+                writeln!(buf)?;
             }
         }
 

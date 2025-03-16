@@ -182,7 +182,7 @@ mod inner {
 pub mod f64 {
     use super::{Environment, Number, ToPrimitive, f64};
     use crate::interpreter::function::{
-        FunctionBody, FunctionCallError, ParamType, Parameter, TypeSignature,
+        FunctionBody, FunctionBuilder, FunctionCallError, ParamType, Parameter, TypeSignature,
     };
     use crate::interpreter::int::Int;
     use crate::interpreter::sequence::Sequence;
@@ -193,19 +193,22 @@ pub mod f64 {
         macro_rules! delegate_to_f64 {
             ($method:ident,$docs:literal) => {
                 let function = $crate::interpreter::value::Value::function(
-                    $crate::interpreter::function::Function::new_with_docs(
-                        $crate::interpreter::function::FunctionBody::SingleNumberFunction {
-                            body: |num: Number| match num {
-                                Number::Int(i) => Number::Float(f64::from(i).$method()),
-                                Number::Float(f) => Number::Float(f.$method()),
-                                Number::Rational(r) => {
-                                    Number::Float(r.to_f64().unwrap_or(f64::NAN).$method())
-                                }
-                                Number::Complex(c) => Number::Complex(c.$method()),
+                    FunctionBuilder::default()
+                        .body(
+                            $crate::interpreter::function::FunctionBody::SingleNumberFunction {
+                                body: |num: Number| match num {
+                                    Number::Int(i) => Number::Float(f64::from(i).$method()),
+                                    Number::Float(f) => Number::Float(f.$method()),
+                                    Number::Rational(r) => {
+                                        Number::Float(r.to_f64().unwrap_or(f64::NAN).$method())
+                                    }
+                                    Number::Complex(c) => Number::Complex(c.$method()),
+                                },
                             },
-                        },
-                        String::from($docs),
-                    ),
+                        )
+                        .documentation(String::from($docs))
+                        .build()
+                        .unwrap(),
                 );
                 env.declare(stringify!($method), function);
             };

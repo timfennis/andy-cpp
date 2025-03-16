@@ -379,7 +379,7 @@ pub(crate) fn evaluate_expression(
             if let Some(name) = name {
                 environment
                     .borrow_mut()
-                    .declare_function(name, Function::new(user_function));
+                    .declare_function(name, Function::from_body(user_function));
 
                 Value::unit()
             } else {

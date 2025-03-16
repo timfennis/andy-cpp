@@ -8,6 +8,7 @@ use crate::interpreter::num::{Number, NumberType};
 use crate::interpreter::sequence::Sequence;
 use crate::interpreter::value::{Value, ValueType};
 use crate::lexer::Span;
+use derive_builder::Builder;
 use itertools::Itertools;
 use std::cell::{BorrowError, BorrowMutError, RefCell};
 use std::fmt;
@@ -26,28 +27,37 @@ impl Callable<'_> {
         self.function.borrow().call(args, self.environment)
     }
 }
-#[derive(Clone)]
+#[derive(Clone, Builder)]
 pub struct Function {
+    #[builder(default, setter(strip_option))]
+    name: Option<String>,
+    #[builder(default, setter(strip_option))]
     documentation: Option<String>,
     body: FunctionBody,
 }
 
 impl Function {
-    pub fn new(body: FunctionBody) -> Self {
-        Self {
-            documentation: None,
-            body,
-        }
-    }
-
-    pub fn new_with_docs(body: FunctionBody, docs: String) -> Self {
-        Self {
-            documentation: Some(docs),
-            body,
-        }
+    pub fn name(&self) -> &str {
+        self.name.as_deref().unwrap_or_default()
     }
     pub fn documentation(&self) -> &str {
         self.documentation.as_deref().unwrap_or_default()
+    }
+
+    pub fn short_documentation(&self) -> &str {
+        self.documentation()
+            .trim()
+            .lines()
+            .next()
+            .unwrap_or_default()
+    }
+
+    pub fn from_body(body: FunctionBody) -> Self {
+        Self {
+            name: None,
+            documentation: None,
+            body,
+        }
     }
 
     pub fn body(&self) -> &FunctionBody {
@@ -214,7 +224,7 @@ impl OverloadedFunction {
 
 impl From<FunctionBody> for OverloadedFunction {
     fn from(value: FunctionBody) -> Self {
-        Function::new(value).into()
+        Function::from_body(value).into()
     }
 }
 
@@ -445,9 +455,8 @@ impl From<BorrowError> for FunctionCarrier {
 
 impl fmt::Display for TypeSignature {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "fn(")?;
         match self {
-            Self::Variadic => write!(f, "*args")?,
+            Self::Variadic => write!(f, "*args"),
             Self::Exact(params) => write!(
                 f,
                 "{}",
@@ -455,8 +464,7 @@ impl fmt::Display for TypeSignature {
                     .iter()
                     .map(|p| format!("{}: {}", p.name, p.param_type.as_str()))
                     .join(", ")
-            )?,
+            ),
         }
-        write!(f, ")")
     }
 }
