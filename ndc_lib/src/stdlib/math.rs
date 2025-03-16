@@ -208,7 +208,9 @@ pub mod f64 {
                         )
                         .documentation(String::from($docs))
                         .build()
-                        .unwrap(),
+                        .expect(
+                            "expected delegate_to_f64 to always create function object correctly",
+                        ),
                 );
                 env.declare(stringify!($method), function);
             };

@@ -196,7 +196,7 @@ fn wrap_single(
             .name(String::from(#register_as_function_name))
             .documentation(String::from(#docs))
             .build()
-            .unwrap();
+            .expect("expected function creation in proc macro to always succeed");
 
         env.declare_function(#register_as_function_name, func);
     };
