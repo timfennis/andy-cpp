@@ -186,15 +186,19 @@ fn wrap_single(
     };
 
     let function_registration = quote! {
-        env.declare_function(#register_as_function_name, crate::interpreter::function::Function::new_with_docs(
-            crate::interpreter::function::FunctionBody::GenericFunction {
+        let func = crate::interpreter::function::FunctionBuilder::default()
+            .body(crate::interpreter::function::FunctionBody::GenericFunction {
                 function: #identifier,
                 type_signature: crate::interpreter::function::TypeSignature::Exact(vec![
                     #( crate::interpreter::function::Parameter::new(#param_names, #param_types,) ),*
                 ]),
-            },
-            String::from(#docs),
-        ));
+            })
+            .name(String::from(#register_as_function_name))
+            .documentation(String::from(#docs))
+            .build()
+            .unwrap();
+
+        env.declare_function(#register_as_function_name, func);
     };
 
     WrappedFunction {
