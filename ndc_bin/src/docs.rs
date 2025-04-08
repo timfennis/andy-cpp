@@ -1,7 +1,9 @@
 use ndc_lib::interpreter::Interpreter;
 use ndc_lib::interpreter::function::{Parameter, TypeSignature};
 use owo_colors::OwoColorize;
+use std::cmp::Ordering;
 use std::fmt::Write;
+use strsim::normalized_damerau_levenshtein;
 use tap::Tap;
 
 fn chunk_text(text: &str) -> Vec<(String, bool)> {
@@ -28,7 +30,12 @@ fn chunk_text(text: &str) -> Vec<(String, bool)> {
     chunks
 }
 
-pub fn docs(mut stdout: impl std::io::Write) -> anyhow::Result<()> {
+/// Returns `true` if `needle` is a substring of `haystack` or if they are at least 80% similar
+fn string_match(needle: &str, haystack: &str) -> bool {
+    haystack.contains(needle) || normalized_damerau_levenshtein(needle, haystack) > 0.8
+}
+
+pub fn docs(mut stdout: impl std::io::Write, query: Option<&str>) -> anyhow::Result<()> {
     let interpreter = Interpreter::new(Vec::new()); // Discard the output
     let functions = interpreter.environment().borrow().get_all_functions();
 
@@ -43,8 +50,26 @@ pub fn docs(mut stdout: impl std::io::Write) -> anyhow::Result<()> {
     let mut iter = functions
         .into_iter()
         .flat_map(|x| x.implementations().collect::<Vec<_>>())
+        .filter(|(_, func)| {
+            if let Some(query) = query {
+                string_match(query, func.name())
+            } else {
+                true
+            }
+        })
         .collect::<Vec<_>>()
-        .tap_mut(|list| list.sort_by(|(_, l), (_, r)| l.name().cmp(r.name())))
+        .tap_mut(|list| {
+            list.sort_by(|(_, l), (_, r)| {
+                if let Some(query) = query {
+                    normalized_damerau_levenshtein(l.name(), query)
+                        .partial_cmp(&normalized_damerau_levenshtein(r.name(), query))
+                        .unwrap_or(Ordering::Equal)
+                        .reverse()
+                } else {
+                    l.name().cmp(r.name())
+                }
+            })
+        })
         .into_iter()
         .peekable();
 

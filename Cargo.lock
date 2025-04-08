@@ -671,6 +671,7 @@ dependencies = [
  "ndc_lib",
  "owo-colors",
  "rustyline",
+ "strsim",
  "tap",
 ]
 

@@ -16,6 +16,7 @@ criterion = { version = "0.5.1", features = ["html_reports"] }
 derive_more = { version = "2.0.1", features = ["deref", "deref_mut", "from", "constructor"] }
 derive_builder = { version = "0.20.2" }
 either = "1.15.0"
+strsim = "0.11.1"
 factorial = "0.4.0"
 itertools = "0.14.0"
 miette = { version = "7.5.0", features = ["fancy"] }
