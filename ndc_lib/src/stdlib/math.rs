@@ -133,8 +133,7 @@ mod inner {
     }
 
     pub fn abs_diff(left: &Number, right: &Number) -> Number {
-        // TODO: why are we taking references if we just have to clone?!?!?
-        (left.clone().sub(right.clone())).abs()
+        left.sub(right).abs()
     }
 
     pub fn float(value: &Value) -> anyhow::Result<f64> {
@@ -161,6 +160,15 @@ mod inner {
             )),
         }
     }
+
+    /// Converts a given `Value` to an `Int`.
+    ///
+    /// Conversion rules:
+    /// - Integers are unchanged
+    /// - Floating-point numbers have their decimal part truncated
+    /// - Rational numbers are rounded down
+    /// - `true` is converted to `1`, and `false` to `0`
+    /// - Strings are parsed as decimal integers; other representations result in an error
     pub fn int(value: &Value) -> anyhow::Result<Number> {
         match value {
             Value::Number(number) => Ok(number.to_int_lossy()?),
@@ -181,13 +189,7 @@ mod inner {
 
 pub mod f64 {
     use super::{Environment, Number, ToPrimitive, f64};
-    use crate::interpreter::function::{
-        FunctionBody, FunctionBuilder, FunctionCallError, ParamType, Parameter, TypeSignature,
-    };
-    use crate::interpreter::int::Int;
-    use crate::interpreter::sequence::Sequence;
-    use crate::interpreter::value::Value;
-    use num::BigInt;
+    use crate::interpreter::function::FunctionBuilder;
 
     pub fn register(env: &mut Environment) {
         macro_rules! delegate_to_f64 {
@@ -206,6 +208,7 @@ pub mod f64 {
                                 },
                             },
                         )
+                        .name(stringify!($method).to_string())
                         .documentation(String::from($docs))
                         .build()
                         .expect(
@@ -241,33 +244,5 @@ pub mod f64 {
         delegate_to_f64!(sqrt, "Returns the square root of a number.");
         delegate_to_f64!(tan, "Computes the tangent of a number (in radians).");
         delegate_to_f64!(tanh, "Hyperbolic tangent function.");
-
-        env.declare(
-            "int",
-            Value::function(FunctionBody::GenericFunction {
-                function: |args, _env| match args {
-                    [Value::Number(n)] => Ok(Value::Number(n.to_int_lossy()?)),
-                    [Value::Sequence(Sequence::String(s))] => {
-                        let s = s.borrow();
-                        let bi = s.parse::<BigInt>().map_err(|err| {
-                            FunctionCallError::ConvertToNativeTypeError(format!(
-                                "string \"{s}\" cannot be converted into an integer because \"{err}\""
-                            ))
-                        })?;
-                        Ok(Value::Number(Number::Int(Int::BigInt(bi).simplified())))
-                    }
-                    [single_value] => Err(FunctionCallError::ConvertToNativeTypeError(format!(
-                        "cannot convert {single_value} to string"
-                    ))
-                        .into()),
-                    vals => Err(FunctionCallError::ArgumentCountError {
-                        expected: 1,
-                        actual: vals.len(),
-                    }
-                        .into()),
-                },
-                type_signature: TypeSignature::Exact(vec![Parameter::new("val", ParamType::Any)]),
-            }),
-        );
     }
 }

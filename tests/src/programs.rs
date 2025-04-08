@@ -68,7 +68,7 @@ fn run_test(path: PathBuf) -> Result<(), std::io::Error> {
     // For now let's trim end both result and expect to ensure that any trailing line breaks don't cause issues
     print!("Running {path:?}...");
 
-    let mut interpreter = Interpreter::new(Box::<Vec<u8>>::default());
+    let mut interpreter = Interpreter::new(Vec::new());
     let interpreter_result = interpreter.run_str(&program, false);
 
     let program_had_error = interpreter_result.is_err();

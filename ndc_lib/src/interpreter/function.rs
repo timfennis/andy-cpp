@@ -195,7 +195,7 @@ impl OverloadedFunction {
             .insert(function.type_signature(), function);
     }
 
-    pub fn iter_implementations(&self) -> impl Iterator<Item = (TypeSignature, Function)> {
+    pub fn implementations(&self) -> impl Iterator<Item = (TypeSignature, Function)> {
         self.implementations.clone().into_iter()
     }
 
@@ -247,7 +247,7 @@ fn match_types_to_signature(types: &[ValueType], signature: &TypeSignature) -> O
             if types.len() == signature.len() {
                 let mut acc = 0;
                 for (a, b) in types.iter().zip(signature.iter()) {
-                    let dist = b.param_type.distance(a)?;
+                    let dist = b.type_name.distance(a)?;
                     acc += dist;
                 }
 
@@ -261,15 +261,15 @@ fn match_types_to_signature(types: &[ValueType], signature: &TypeSignature) -> O
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct Parameter {
-    name: String,
-    param_type: ParamType,
+    pub name: String,
+    pub type_name: ParamType,
 }
 
 impl Parameter {
     pub fn new<N: Into<String>>(name: N, param_type: ParamType) -> Self {
         Self {
             name: name.into(),
-            param_type,
+            type_name: param_type,
         }
     }
 }
@@ -338,7 +338,7 @@ impl ParamType {
         }
     }
 
-    fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             Self::Any => "Any",
             Self::Bool => "Bool",
@@ -462,7 +462,7 @@ impl fmt::Display for TypeSignature {
                 "{}",
                 params
                     .iter()
-                    .map(|p| format!("{}: {}", p.name, p.param_type.as_str()))
+                    .map(|p| format!("{}: {}", p.name, p.type_name.as_str()))
                     .join(", ")
             ),
         }
