@@ -12,6 +12,7 @@ path = "src/main.rs"
 anyhow.workspace = true
 clap.workspace = true
 itertools.workspace = true
+strsim.workspace = true
 miette.workspace = true
 ndc_lib.workspace = true
 owo-colors.workspace = true

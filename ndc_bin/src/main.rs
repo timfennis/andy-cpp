@@ -37,8 +37,9 @@ enum Command {
     Run { file: Option<PathBuf> },
     /// Output an .ndc file using the built-in syntax highlighting engine
     Highlight { file: PathBuf },
-    /// Output the documentation
-    Docs,
+
+    /// Output the documentation optionally searched using a query string
+    Docs { query: Option<String> },
 
     // This is a fallback case
     #[command(external_subcommand)]
@@ -55,7 +56,7 @@ enum Action {
     RunFile(PathBuf),
     HighlightFile(PathBuf),
     StartRepl,
-    Docs,
+    Docs(Option<String>),
 }
 
 impl TryFrom<Command> for Action {
@@ -66,7 +67,7 @@ impl TryFrom<Command> for Action {
             Command::Run { file: Some(file) } => Self::RunFile(file),
             Command::Run { file: None } => Self::StartRepl,
             Command::Highlight { file } => Self::HighlightFile(file),
-            Command::Docs => Self::Docs,
+            Command::Docs { query } => Self::Docs(query),
             Command::Unknown(args) => {
                 match args.len() {
                     0 => {
@@ -135,7 +136,7 @@ fn main() -> anyhow::Result<()> {
             }
             std::io::stdout().flush()?;
         }
-        Action::Docs => return docs(std::io::stdout()),
+        Action::Docs(query) => return docs(std::io::stdout(), query.as_deref()),
         Action::StartRepl => {
             repl::run(cli.debug)?;
         }
