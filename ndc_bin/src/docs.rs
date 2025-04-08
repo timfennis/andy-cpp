@@ -40,11 +40,20 @@ pub fn docs(mut stdout: impl std::io::Write, query: Option<&str>) -> anyhow::Res
     let functions = interpreter.environment().borrow().get_all_functions();
 
     // let mut stdout = std::io::stdout();
-    let str = format!(
-        "\n{} Function Reference {}\n",
-        "═".repeat(20),
-        "═".repeat(20),
-    );
+    let str = if let Some(query) = query {
+        format!(
+            "\n{} Search results for: {} {}\n",
+            "═".repeat(20),
+            format!("\"{}\"", query).bright_green(),
+            "═".repeat(20),
+        )
+    } else {
+        format!(
+            "\n{} Function Reference {}\n",
+            "═".repeat(20),
+            "═".repeat(20),
+        )
+    };
     writeln!(stdout, "{}", str.bold().white())?;
 
     let mut iter = functions
@@ -103,14 +112,14 @@ pub fn docs(mut stdout: impl std::io::Write, query: Option<&str>) -> anyhow::Res
         let mut documentation = String::new();
         for (chunk, quoted) in chunk_text(function.documentation()) {
             if quoted {
-                write!(documentation, "{}", chunk.bright_white())?;
+                write!(documentation, "{}", chunk.bright_cyan())?;
             } else {
                 write!(documentation, "{}", chunk.bright_green())?;
             }
         }
 
         for line in documentation.lines() {
-            writeln!(stdout, "  {}", line.trim())?;
+            writeln!(stdout, "  {}", line.trim_end_matches('\n'))?;
         }
 
         if documentation.is_empty() {

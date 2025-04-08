@@ -55,22 +55,30 @@ mod inner {
     use anyhow::{Context, anyhow};
     use num::{BigInt, BigRational, BigUint, Integer, complex::Complex64};
 
+    /// Returns the sign of a number.
+    ///
+    /// For `int`, `float`, and `rational` types, this function returns `-1` if the number is negative, `0` if zero, and `1` if positive.
+    /// For complex numbers, it returns the number divided by its magnitude (`z / |z|`) if non-zero, or `0` if the number is `0`.
     pub fn signum(n: &Number) -> Number {
         n.signum()
     }
 
+    /// Returns the real part of a complex number.
     pub fn real(c: Complex64) -> f64 {
         c.re
     }
 
+    /// Returns the imaginary part of a complex number.
     pub fn imag(c: Complex64) -> f64 {
         c.im
     }
 
+    /// Returns the numerator of a rational number.
     pub fn numerator(r: &BigRational) -> BigInt {
         r.numer().clone()
     }
 
+    /// Returns the denominator of a rational number.
     pub fn denominator(r: &BigRational) -> BigInt {
         r.denom().clone()
     }
