@@ -16,7 +16,7 @@ mod inner {
     pub fn docs(func: &Callable<'_>) -> anyhow::Result<String> {
         let mut buf = String::new();
 
-        for (sig, fun) in func.function.borrow().iter_implementations() {
+        for (sig, fun) in func.function.borrow().implementations() {
             if fun.name().is_empty() {
                 write!(buf, "fn({sig})")?;
             } else {

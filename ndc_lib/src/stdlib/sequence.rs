@@ -592,6 +592,7 @@ pub mod extra {
     use anyhow::anyhow;
     use itertools::izip;
 
+    use crate::interpreter::function::FunctionBuilder;
     use crate::interpreter::{
         environment::Environment, function::FunctionBody, iterator::mut_value_to_iterator,
         value::Value,
@@ -600,51 +601,62 @@ pub mod extra {
     pub fn register(env: &mut Environment) {
         env.declare(
             "zip",
-            Value::function(FunctionBody::generic(
-                crate::interpreter::function::TypeSignature::Variadic,
-                |args, _env| match args {
-                    [_] => Err(anyhow!("zip must be called with 2 or more arguments").into()),
-                    [a, b] => {
-                        let a = mut_value_to_iterator(a)?;
-                        let b = mut_value_to_iterator(b)?;
-                        let out = a
-                            .zip(b)
-                            .map(|(a, b)| Value::tuple(vec![a, b]))
-                            .collect::<Vec<Value>>();
-                        Ok(Value::list(out))
-                    }
-                    [a, b, c] => {
-                        let a = mut_value_to_iterator(a)?;
-                        let b = mut_value_to_iterator(b)?;
-                        let c = mut_value_to_iterator(c)?;
-                        let mut out = Vec::new();
-                        for (a, b, c) in izip!(a, b, c) {
-                            out.push(Value::tuple(vec![a, b, c]));
-                        }
-                        Ok(Value::list(out))
-                    }
-                    values => {
-                        // HOLY HEAP ALLOCATION BATMAN!
-                        // This branch can probably lose some heap allocations if I had 50 more IQ points
-                        let mut lists = Vec::with_capacity(values.len());
-                        for value in values.iter_mut() {
-                            lists.push(mut_value_to_iterator(value)?.collect::<Vec<_>>());
-                        }
-                        let out_len = lists.iter().map(Vec::len).min().unwrap();
-                        let mut out = Vec::with_capacity(out_len);
-
-                        for idx in 0..out_len {
-                            let mut tup = Vec::with_capacity(lists.len());
-                            for (list_idx, _) in lists.iter().enumerate() {
-                                tup.insert(list_idx, lists[list_idx][idx].clone());
+            Value::function(
+                FunctionBuilder::default()
+                    .name("zip".to_string())
+                    .documentation(r#"Combines multiple sequences (or iterables) into a single sequence of tuples, where the ith tuple contains the ith element from each input sequence. 
+                    
+                        If the input sequences are of different lengths, the resulting sequence is truncated to the length of the shortest input."#.to_string())
+                    .body(FunctionBody::generic(
+                        crate::interpreter::function::TypeSignature::Variadic,
+                        |args, _env| match args {
+                            [_] => {
+                                Err(anyhow!("zip must be called with 2 or more arguments").into())
                             }
-                            out.insert(idx, Value::tuple(tup));
-                        }
+                            [a, b] => {
+                                let a = mut_value_to_iterator(a)?;
+                                let b = mut_value_to_iterator(b)?;
+                                let out = a
+                                    .zip(b)
+                                    .map(|(a, b)| Value::tuple(vec![a, b]))
+                                    .collect::<Vec<Value>>();
+                                Ok(Value::list(out))
+                            }
+                            [a, b, c] => {
+                                let a = mut_value_to_iterator(a)?;
+                                let b = mut_value_to_iterator(b)?;
+                                let c = mut_value_to_iterator(c)?;
+                                let mut out = Vec::new();
+                                for (a, b, c) in izip!(a, b, c) {
+                                    out.push(Value::tuple(vec![a, b, c]));
+                                }
+                                Ok(Value::list(out))
+                            }
+                            values => {
+                                // HOLY HEAP ALLOCATION BATMAN!
+                                // This branch can probably lose some heap allocations if I had 50 more IQ points
+                                let mut lists = Vec::with_capacity(values.len());
+                                for value in values.iter_mut() {
+                                    lists.push(mut_value_to_iterator(value)?.collect::<Vec<_>>());
+                                }
+                                let out_len = lists.iter().map(Vec::len).min().unwrap();
+                                let mut out = Vec::with_capacity(out_len);
 
-                        Ok(Value::list(out))
-                    }
-                },
-            )),
+                                for idx in 0..out_len {
+                                    let mut tup = Vec::with_capacity(lists.len());
+                                    for (list_idx, _) in lists.iter().enumerate() {
+                                        tup.insert(list_idx, lists[list_idx][idx].clone());
+                                    }
+                                    out.insert(idx, Value::tuple(tup));
+                                }
+
+                                Ok(Value::list(out))
+                            }
+                        },
+                    ))
+                    .build()
+                    .expect("function definitions must be valid"),
+            ),
         );
     }
 }

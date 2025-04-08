@@ -1,17 +1,18 @@
 #![allow(clippy::print_stdout, clippy::print_stderr, clippy::exit)]
 
+use crate::docs::docs;
 use anyhow::{Context, anyhow};
 use clap::{Parser, Subcommand};
+use highlighter::{AndycppHighlighter, AndycppHighlighterState};
+use miette::{NamedSource, highlighters::HighlighterState};
+use ndc_lib::interpreter::{Interpreter, InterpreterError};
 use std::path::PathBuf;
 use std::process;
 use std::{fs, io::Write};
 
-use highlighter::{AndycppHighlighter, AndycppHighlighterState};
-use miette::{NamedSource, highlighters::HighlighterState};
-use ndc_lib::interpreter::{Interpreter, InterpreterError};
-
 mod repl;
 
+mod docs;
 mod highlighter;
 
 #[derive(Parser)]
@@ -36,6 +37,8 @@ enum Command {
     Run { file: Option<PathBuf> },
     /// Output an .ndc file using the built-in syntax highlighting engine
     Highlight { file: PathBuf },
+    /// Output the documentation
+    Docs,
 
     // This is a fallback case
     #[command(external_subcommand)]
@@ -52,6 +55,7 @@ enum Action {
     RunFile(PathBuf),
     HighlightFile(PathBuf),
     StartRepl,
+    Docs,
 }
 
 impl TryFrom<Command> for Action {
@@ -62,6 +66,7 @@ impl TryFrom<Command> for Action {
             Command::Run { file: Some(file) } => Self::RunFile(file),
             Command::Run { file: None } => Self::StartRepl,
             Command::Highlight { file } => Self::HighlightFile(file),
+            Command::Docs => Self::Docs,
             Command::Unknown(args) => {
                 match args.len() {
                     0 => {
@@ -106,7 +111,7 @@ fn main() -> anyhow::Result<()> {
             let string = fs::read_to_string(path)?;
 
             let stdout = std::io::stdout();
-            let mut interpreter = Interpreter::new(Box::new(stdout));
+            let mut interpreter = Interpreter::new(stdout);
             match into_miette_result(interpreter.run_str(&string, cli.debug)) {
                 // we can just ignore successful runs because we have print statements
                 Ok(_final_value) => {}
@@ -130,6 +135,7 @@ fn main() -> anyhow::Result<()> {
             }
             std::io::stdout().flush()?;
         }
+        Action::Docs => return docs(std::io::stdout()),
         Action::StartRepl => {
             repl::run(cli.debug)?;
         }
