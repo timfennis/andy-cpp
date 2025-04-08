@@ -1,10 +1,10 @@
 #![allow(clippy::print_stdout, clippy::print_stderr, clippy::exit)]
 
+use anyhow::{Context, anyhow};
+use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::process;
 use std::{fs, io::Write};
-
-use clap::{Parser, Subcommand};
 
 use highlighter::{AndycppHighlighter, AndycppHighlighterState};
 use miette::{NamedSource, highlighters::HighlighterState};
@@ -23,9 +23,6 @@ struct Cli {
     #[arg(long)]
     debug: bool,
 
-    #[arg(long)]
-    highlight: bool,
-
     #[arg(short = 'C', long, default_value_t = 1)]
     context_lines: usize,
 
@@ -35,13 +32,48 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Execute an .ndc file or start the repl (this default action may be omitted)
     Run { file: Option<PathBuf> },
+    /// Output an .ndc file using the built-in syntax highlighting engine
     Highlight { file: PathBuf },
+
+    // This is a fallback case
+    #[command(external_subcommand)]
+    Unknown(Vec<String>),
 }
 
 impl Default for Command {
     fn default() -> Self {
         Self::Run { file: None }
+    }
+}
+
+enum Action {
+    RunFile(PathBuf),
+    HighlightFile(PathBuf),
+    StartRepl,
+}
+
+impl TryFrom<Command> for Action {
+    type Error = anyhow::Error;
+
+    fn try_from(value: Command) -> Result<Self, Self::Error> {
+        let action = match value {
+            Command::Run { file: Some(file) } => Self::RunFile(file),
+            Command::Run { file: None } => Self::StartRepl,
+            Command::Highlight { file } => Self::HighlightFile(file),
+            Command::Unknown(args) => {
+                match args.len() {
+                    0 => {
+                        // This case should have defaulted to `Command::Run { file: None }`
+                        unreachable!("fallback case reached with 0 arguments (should never happen)")
+                    }
+                    1 => Self::RunFile(args[0].parse::<PathBuf>().context("invalid path")?),
+                    n => return Err(anyhow!("invalid number of arguments: {n}")),
+                }
+            }
+        };
+        Ok(action)
     }
 }
 
@@ -62,19 +94,10 @@ fn main() -> anyhow::Result<()> {
         )
     }))?;
 
-    match cli.command.unwrap_or_default() {
-        Command::Highlight { file: path } => {
-            let string = fs::read_to_string(path)?;
+    let action: Action = cli.command.unwrap_or_default().try_into()?;
 
-            let mut highlighter = AndycppHighlighterState {};
-            let out = highlighter.highlight_line(&string);
-            for styled in out {
-                print!("{}", styled);
-            }
-            std::io::stdout().flush()?;
-        }
-        Command::Run { file: Some(path) } => {
-            // Create a copy of the filename for error reporting later
+    match action {
+        Action::RunFile(path) => {
             let filename = path
                 .file_name()
                 .and_then(|name| name.to_str())
@@ -97,7 +120,17 @@ fn main() -> anyhow::Result<()> {
                 }
             }
         }
-        Command::Run { file: None } => {
+        Action::HighlightFile(path) => {
+            let string = fs::read_to_string(path)?;
+
+            let mut highlighter = AndycppHighlighterState {};
+            let out = highlighter.highlight_line(&string);
+            for styled in out {
+                print!("{}", styled);
+            }
+            std::io::stdout().flush()?;
+        }
+        Action::StartRepl => {
             repl::run(cli.debug)?;
         }
     }
