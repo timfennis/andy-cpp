@@ -10,7 +10,7 @@ use rustyline::{ColorMode, Completer, Editor, Hinter, Validator};
 use std::borrow::Cow;
 
 use crate::highlighter::AndycppHighlighterState;
-use crate::miette_hack;
+use crate::into_miette_result;
 
 #[derive(Helper, Completer, Hinter, Validator)]
 struct RustlylineHelper {}
@@ -44,7 +44,7 @@ pub fn run(debug: bool) -> anyhow::Result<()> {
                 let _ = rl.add_history_entry(line.as_str());
 
                 // Run the line we just read through the interpreter
-                match miette_hack(interpreter.run_str(line.as_str(), debug)) {
+                match into_miette_result(interpreter.run_str(line.as_str(), debug)) {
                     Ok(output) => {
                         if !output.is_empty() {
                             println!("{output}")

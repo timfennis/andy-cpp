@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::process;
 use std::{fs, io::Write};
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 
 use highlighter::{AndycppHighlighter, AndycppHighlighterState};
 use miette::{NamedSource, highlighters::HighlighterState};
@@ -20,8 +20,6 @@ mod highlighter;
 #[command(version = "0.2.0")]
 #[command(about = "An interpreter for the Andy C++ language")]
 struct Cli {
-    file: Option<PathBuf>,
-
     #[arg(long)]
     debug: bool,
 
@@ -30,12 +28,20 @@ struct Cli {
 
     #[arg(short = 'C', long, default_value_t = 1)]
     context_lines: usize,
+
+    #[command(subcommand)]
+    command: Option<Command>,
 }
 
-pub fn miette_hack<T>(result: Result<T, InterpreterError>) -> miette::Result<T> {
-    match result {
-        Err(err) => Err(err)?,
-        Ok(val) => Ok(val),
+#[derive(Subcommand)]
+enum Command {
+    Run { file: Option<PathBuf> },
+    Highlight { file: PathBuf },
+}
+
+impl Default for Command {
+    fn default() -> Self {
+        Self::Run { file: None }
     }
 }
 
@@ -56,44 +62,53 @@ fn main() -> anyhow::Result<()> {
         )
     }))?;
 
-    if let Some(path) = cli.file {
-        // Create a copy of the filename for error reporting later
-        let filename = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .map(|string| string.to_string());
+    match cli.command.unwrap_or_default() {
+        Command::Highlight { file: path } => {
+            let string = fs::read_to_string(path)?;
 
-        let string = fs::read_to_string(path)?;
-
-        if cli.highlight {
             let mut highlighter = AndycppHighlighterState {};
             let out = highlighter.highlight_line(&string);
             for styled in out {
                 print!("{}", styled);
             }
             std::io::stdout().flush()?;
-
-            return Ok(());
         }
+        Command::Run { file: Some(path) } => {
+            // Create a copy of the filename for error reporting later
+            let filename = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(|string| string.to_string());
 
-        let stdout = std::io::stdout();
-        let mut interpreter = Interpreter::new(Box::new(stdout));
-        match miette_hack(interpreter.run_str(&string, cli.debug)) {
-            // we can just ignore successful runs because we have print statements
-            Ok(_final_value) => {}
-            Err(report) => {
-                let source =
-                    NamedSource::new(filename.expect("filename must exist"), string.clone());
-                let report = report.with_source_code(source);
-                eprintln!("{:?}", report);
+            let string = fs::read_to_string(path)?;
 
-                process::exit(1);
+            let stdout = std::io::stdout();
+            let mut interpreter = Interpreter::new(Box::new(stdout));
+            match into_miette_result(interpreter.run_str(&string, cli.debug)) {
+                // we can just ignore successful runs because we have print statements
+                Ok(_final_value) => {}
+                Err(report) => {
+                    let source =
+                        NamedSource::new(filename.expect("filename must exist"), string.clone());
+                    let report = report.with_source_code(source);
+                    eprintln!("{:?}", report);
+
+                    process::exit(1);
+                }
             }
         }
-    } else {
-        repl::run(cli.debug)?;
+        Command::Run { file: None } => {
+            repl::run(cli.debug)?;
+        }
     }
     Ok(())
+}
+
+pub fn into_miette_result<T>(result: Result<T, InterpreterError>) -> miette::Result<T> {
+    match result {
+        Err(err) => Err(err)?,
+        Ok(val) => Ok(val),
+    }
 }
 
 #[cfg(test)]
