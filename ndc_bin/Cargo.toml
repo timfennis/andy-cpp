@@ -9,11 +9,15 @@ name = "ndc"
 path = "src/main.rs"
 
 [dependencies]
-ndc_lib.workspace = true
-clap.workspace = true
-rustyline.workspace = true
-owo-colors.workspace = true
 anyhow.workspace = true
-miette.workspace = true
+clap.workspace = true
 itertools.workspace = true
+strsim.workspace = true
+miette.workspace = true
+ndc_lib.workspace = true
+owo-colors.workspace = true
+rustyline.workspace = true
+tap.workspace = true
+termimad = "0.31.2"
+
 

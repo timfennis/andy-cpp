@@ -126,10 +126,12 @@ impl TryFrom<JsonValue> for Value {
 mod inner {
     use crate::interpreter::value::Value;
 
+    /// Converts a JSON string to a value
     pub fn json_decode(input: &str) -> anyhow::Result<Value> {
         serde_json::from_str::<JsonValue>(input)?.try_into()
     }
 
+    /// Converts the input value to json
     pub fn json_encode(input: Value) -> anyhow::Result<Value> {
         let v: JsonValue = input.try_into()?;
         Ok(Value::string(v.to_string()))
