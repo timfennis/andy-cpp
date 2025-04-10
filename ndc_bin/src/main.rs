@@ -136,7 +136,7 @@ fn main() -> anyhow::Result<()> {
             }
             std::io::stdout().flush()?;
         }
-        Action::Docs(query) => return docs(std::io::stdout(), query.as_deref()),
+        Action::Docs(query) => return docs(query.as_deref()),
         Action::StartRepl => {
             repl::run(cli.debug)?;
         }

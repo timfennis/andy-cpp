@@ -18,5 +18,6 @@ ndc_lib.workspace = true
 owo-colors.workspace = true
 rustyline.workspace = true
 tap.workspace = true
+termimad = "0.31.2"
 
 
