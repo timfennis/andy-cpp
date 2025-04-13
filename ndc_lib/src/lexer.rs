@@ -3,7 +3,6 @@ mod span;
 mod string;
 mod token;
 
-use miette::{Diagnostic, SourceSpan};
 use number::NumberLexer;
 use std::collections::VecDeque;
 use std::str::Chars;
@@ -239,16 +238,17 @@ impl SourceIterator<'_> {
     }
 }
 
-#[derive(Diagnostic, thiserror::Error, Debug)]
+#[cfg_attr(feature = "miette", derive(miette::Diagnostic))]
+#[derive(thiserror::Error, Debug)]
 #[error("{text}")]
-#[diagnostic()]
+#[cfg_attr(feature = "miette", diagnostic())]
 pub struct Error {
     text: String,
 
-    #[label("here")]
+    #[cfg_attr(feature = "miette", label("here"))]
     location: SourceSpan,
 
-    #[help]
+    #[cfg_attr(feature = "miette", help)]
     help_text: Option<String>,
 }
 

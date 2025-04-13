@@ -4,9 +4,9 @@ use std::rc::Rc;
 use either::Either;
 use miette::Diagnostic;
 
-use crate::ast::Expression;
 use crate::ast::expression::{ExpressionLocation, ForBody, ForIteration, Lvalue};
 use crate::ast::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
+use crate::ast::Expression;
 use crate::lexer::{Span, Token, TokenLocation};
 
 pub struct Parser {
@@ -1212,13 +1212,14 @@ impl Parser {
     }
 }
 
-#[derive(thiserror::Error, Diagnostic, Debug)]
+#[cfg_attr(feature = "miette" derive(miette:Diagnostic))]
+#[derive(thiserror::Error, Debug)]
 #[error("{text}")]
 pub struct Error {
     text: String,
-    #[help]
+    #[cfg_attr(feature = "miette", help)]
     help_text: Option<String>,
-    #[label("here")]
+    #[cfg_attr(feature = "miette", label("here"))]
     span: Span,
 }
 

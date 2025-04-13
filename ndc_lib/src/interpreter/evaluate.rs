@@ -56,21 +56,21 @@ pub(crate) fn evaluate_expression(
                         format!("the '!' operator cannot be applied to {}", v.value_type()),
                         span,
                     )
-                    .into());
+                        .into());
                 }
                 (v, UnaryOperator::Neg) => {
                     return Err(EvaluationError::new(
                         format!("{} does not support negation", v.value_type()),
                         span,
                     )
-                    .into());
+                        .into());
                 }
                 (v, UnaryOperator::BitNot) => {
                     return Err(EvaluationError::new(
                         format!("{} does not support bitwise negation", v.value_type()),
                         span,
                     )
-                    .into());
+                        .into());
                 }
             }
         }
@@ -174,7 +174,7 @@ pub(crate) fn evaluate_expression(
                                     "cannot use a range expression as index".to_string(),
                                     span,
                                 )
-                                .into());
+                                    .into());
                             }
                         }
                     }
@@ -204,14 +204,14 @@ pub(crate) fn evaluate_expression(
                             "cannot OpAssign into a string".to_string(),
                             span,
                         )
-                        .into());
+                            .into());
                     }
                     _ => {
                         return Err(EvaluationError::syntax_error(
                             format!("cannot OpAssign an index into a {}", assign_to.value_type()),
                             span,
                         )
-                        .into());
+                            .into());
                     }
                 };
 
@@ -222,7 +222,7 @@ pub(crate) fn evaluate_expression(
                     "cannot use augmented assignment in combination with destructuring".to_string(),
                     span,
                 )
-                .into());
+                    .into());
             }
         },
         Expression::Block { statements } => {
@@ -256,7 +256,7 @@ pub(crate) fn evaluate_expression(
                         ),
                         span,
                     )
-                    .into());
+                        .into());
                 }
             }
         }
@@ -287,7 +287,7 @@ pub(crate) fn evaluate_expression(
                         ),
                         span,
                     )
-                    .into());
+                        .into());
                 }
             }
         }
@@ -311,7 +311,7 @@ pub(crate) fn evaluate_expression(
                         "Expression in a while structure must return a bool".to_string(),
                         span,
                     )
-                    .into());
+                        .into());
                 }
             }
             // drop(local_scope);
@@ -605,7 +605,7 @@ pub(crate) fn evaluate_expression(
                         format!("cannot index into {}", value.value_type()),
                         lhs_expr.span,
                     )
-                    .into());
+                        .into());
                 }
             }
         }
@@ -620,7 +620,7 @@ pub(crate) fn evaluate_expression(
                     "ranges without a lower bound cannot be evaluated into a value".to_string(),
                     span,
                 )
-                .into());
+                    .into());
             };
 
             let range_start = i64::try_from(range_start).into_evaluation_result(span)?;
@@ -645,7 +645,7 @@ pub(crate) fn evaluate_expression(
                     "ranges without a lower bound cannot be evaluated into a value".to_string(),
                     span,
                 )
-                .into());
+                    .into());
             };
 
             let range_start = i64::try_from(range_start).into_evaluation_result(span)?;
@@ -734,7 +734,7 @@ fn declare_or_assign_variable(
                         .to_string(),
                     span,
                 )
-                .into());
+                    .into());
             }
         }
         Lvalue::Index { .. } => {
@@ -745,7 +745,7 @@ fn declare_or_assign_variable(
                 ),
                 span,
             )
-            .into());
+                .into());
         }
     };
 
@@ -1134,13 +1134,15 @@ fn apply_operation_vectorized(
     Ok(Value::Sequence(Sequence::Tuple(left)))
 }
 
-#[derive(thiserror::Error, miette::Diagnostic, Debug)]
+#[cfg_attr(feature = "miette", derive(miette::Diagnostic))]
+#[derive(thiserror::Error, Debug)]
 #[error("{text}")]
 pub struct EvaluationError {
     text: String,
-    #[label("related to this")]
+    #[]
+    #[cfg_attr(feature = "miette", label("related to this"))]
     span: Span,
-    #[help]
+    #[cfg_attr(feature = "miette", help)]
     help_text: Option<String>,
 }
 
@@ -1433,7 +1435,7 @@ fn execute_for_iterations(
                     ),
                     span,
                 )
-                .into());
+                    .into());
             }
         },
     }

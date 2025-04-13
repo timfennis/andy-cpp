@@ -10,7 +10,7 @@ anyhow.workspace = true
 either.workspace = true
 factorial.workspace = true
 itertools.workspace = true
-miette.workspace = true
+miette = { workspace = true, optional = true }
 ndc_macros.workspace = true
 num.workspace = true
 once_cell.workspace = true
@@ -27,3 +27,4 @@ thiserror.workspace = true
 [features]
 default = ["ahash"]
 ahash = ["dep:ahash"]
+miette = ["dep:miette"]

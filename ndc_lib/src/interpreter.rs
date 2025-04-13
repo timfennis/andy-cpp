@@ -94,10 +94,11 @@ impl Interpreter {
     }
 }
 
-#[derive(thiserror::Error, Diagnostic, Debug)]
+#[cfg_attr(feature = "miette", derive(miette:Diagnostic))]
+#[derive(thiserror::Error, Debug)]
 pub enum InterpreterError {
     #[error("Error while lexing source")]
-    #[diagnostic(transparent)]
+    #[cfg_attr(feature = "miette", diagnostic(transparent))]
     Lexer {
         #[from]
         cause: crate::lexer::Error,
