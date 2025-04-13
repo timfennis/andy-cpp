@@ -14,6 +14,9 @@ clap.workspace = true
 rustyline.workspace = true
 owo-colors.workspace = true
 anyhow.workspace = true
-miette.workspace = true
+miette = { workspace = true }
 itertools.workspace = true
 
+[features]
+fancy = ["miette/fancy"]
+repl = []

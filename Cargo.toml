@@ -16,7 +16,7 @@ criterion = { version = "0.5.1", features = ["html_reports"] }
 either = "1.15.0"
 factorial = "0.4.0"
 itertools = "0.14.0"
-miette = { version = "7.5.0", features = ["fancy"] }
+miette = { version = "7.5.0" }
 ndc_lib = { path = "ndc_lib" }
 ndc_macros = { path = "ndc_macros" }
 num = "0.4.3"

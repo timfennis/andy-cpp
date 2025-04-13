@@ -6,12 +6,19 @@ use std::path::PathBuf;
 use std::process;
 use std::{fs, io::Write};
 
+#[cfg(feature = "fancy")]
 use highlighter::{AndycppHighlighter, AndycppHighlighterState};
-use miette::{NamedSource, highlighters::HighlighterState};
+#[cfg(feature = "fancy")]
+use highlighters::HighlighterState;
+
+use miette::NamedSource;
+
 use ndc_lib::interpreter::{Interpreter, InterpreterError};
 
+#[cfg(feature = "repl")]
 mod repl;
 
+#[cfg(feature = "fancy")]
 mod highlighter;
 
 #[derive(Parser)]
@@ -82,6 +89,7 @@ fn main() -> anyhow::Result<()> {
 
     let context_lines = cli.context_lines;
 
+    #[cfg(feature = "fancy")]
     miette::set_hook(Box::new(move |_| {
         Box::new(
             miette::MietteHandlerOpts::new()
@@ -123,15 +131,26 @@ fn main() -> anyhow::Result<()> {
         Action::HighlightFile(path) => {
             let string = fs::read_to_string(path)?;
 
-            let mut highlighter = AndycppHighlighterState {};
-            let out = highlighter.highlight_line(&string);
-            for styled in out {
-                print!("{}", styled);
+            #[cfg(feature = "fancy")]
+            {
+                let mut highlighter = AndycppHighlighterState {};
+                let out = highlighter.highlight_line(&string);
+                for styled in out {
+                    print!("{}", styled);
+                }
+                std::io::stdout().flush()?;
             }
-            std::io::stdout().flush()?;
+            #[cfg(not(feature = "fancy"))]
+            println!("{}", string);
         }
         Action::StartRepl => {
+            #[cfg(feature = "repl")]
             repl::run(cli.debug)?;
+            #[cfg(not(feature = "repl"))]
+            {
+                eprintln!("there is no repl");
+                process::exit(1);
+            }
         }
     }
     Ok(())

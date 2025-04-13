@@ -1,8 +1,8 @@
 use itertools::Itertools;
-use miette::{
-    SpanContents,
-    highlighters::{Highlighter, HighlighterState},
-};
+use miette::SpanContents;
+
+use highlighters::{Highlighter, HighlighterState};
+
 use ndc_lib::lexer::{Lexer, Token};
 use owo_colors::{Rgb, Style, Styled};
 
