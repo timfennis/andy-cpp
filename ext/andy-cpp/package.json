@@ -14,7 +14,26 @@
   "categories": [
     "Programming Languages"
   ],
+  "activationEvents": [
+    "onDebug",
+    "onDebugResolve:andycpp"
+  ],
+  "main": "./out/extension.js",
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "vscode-test"
+  },
   "contributes": {
+    "commands": [
+      {
+        "command": "andy-cpp.runScript",
+        "title": "Run Script"
+      }
+    ],
     "languages": [
       {
         "id": "andy-cpp",
@@ -34,6 +53,47 @@
         "scopeName": "source.andy-cpp",
         "path": "./syntaxes/andy-cpp.tmLanguage.json"
       }
+    ],
+    "debuggers": [
+      {
+        "type": "andy-cpp",
+        "languages": [
+          "andy-cpp"
+        ],
+        "program": "./out/ndcDebug.js",
+        "label": "Andy C++",
+        "configurationAttributes": {
+          "launch": {
+            "required": ["program"],
+            "properties": {
+              "program": {
+                "type": "string",
+                "description": "Path to the Andy C++ file to run",
+                "default": "${file}"
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "andy-cpp",
+            "name": "Run Andy C++ script",
+            "request": "launch",
+            "program": "${file}"
+          }
+        ]
+      }
     ]
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.99.0",
+    "@types/mocha": "^10.0.6",
+    "@types/node": "18.x",
+    "@typescript-eslint/eslint-plugin": "^6.15.0",
+    "@typescript-eslint/parser": "^6.15.0",
+    "eslint": "^8.56.0",
+    "typescript": "^5.3.3",
+    "@vscode/test-cli": "^0.0.4",
+    "@vscode/test-electron": "^2.3.8"
   }
 }

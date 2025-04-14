@@ -336,12 +336,20 @@ pub(crate) fn evaluate_expression(
             } else {
                 let function_as_value = evaluate_expression(function, environment)?;
 
-                try_call_function(
+                match try_call_function(
                     &[RefCell::new(function_as_value)],
                     &mut evaluated_args,
                     environment,
                     span,
-                )
+                ) {
+                    Err(FunctionCarrier::FunctionNotFound) => {
+                        Err(FunctionCarrier::EvaluationError(EvaluationError::new(
+                            "Failed to invoke expression as function possibly because it's not a function".to_string(),
+                            span,
+                        )))
+                    }
+                    el => el,
+                }
             };
         }
         Expression::FunctionDeclaration {
