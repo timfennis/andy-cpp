@@ -1,4 +1,4 @@
-use crate::interpreter::function::Function;
+use crate::interpreter::function::{Function, OverloadedFunction};
 
 use crate::hash_map::HashMap;
 
@@ -61,23 +61,7 @@ impl Environment {
             values: HashMap::default(),
         };
 
-        // TODO: move this out of this module to a more general location
-        crate::stdlib::aoc::register(&mut env);
-        crate::stdlib::cmp::register(&mut env);
-        crate::stdlib::deque::register(&mut env);
-        crate::stdlib::file::register(&mut env);
-        crate::stdlib::hash_map::register(&mut env);
-        crate::stdlib::heap::register(&mut env);
-        crate::stdlib::list::register(&mut env);
-        crate::stdlib::math::f64::register(&mut env);
-        crate::stdlib::math::register(&mut env);
-        crate::stdlib::rand::register(&mut env);
-        crate::stdlib::regex::register(&mut env);
-        crate::stdlib::sequence::extra::register(&mut env);
-        crate::stdlib::sequence::register(&mut env);
-        crate::stdlib::serde::register(&mut env);
-        crate::stdlib::string::register(&mut env);
-        crate::stdlib::value::register(&mut env);
+        crate::stdlib::register(&mut env);
 
         env
     }
@@ -98,6 +82,23 @@ impl Environment {
         values
     }
 
+    #[must_use]
+    pub fn get_all_functions(&self) -> Vec<OverloadedFunction> {
+        let mut values = Vec::new();
+
+        for (_name, value) in &self.values {
+            if let Value::Function(func) = &*value.borrow() {
+                values.push(func.borrow().clone())
+            }
+        }
+
+        if let Some(parent) = &self.parent {
+            values.extend(parent.borrow().get_all_functions());
+        }
+
+        values
+    }
+
     pub fn declare_function(&mut self, name: &str, function: Function) {
         if let Some(existing) = self.values.get(name) {
             // Overload existing function
@@ -110,7 +111,7 @@ impl Environment {
         }
 
         // Fallback
-        self.declare(name, Value::from(function));
+        self.declare(name, Value::function(function));
     }
     pub fn declare(&mut self, name: &str, value: Value) {
         self.values.insert(name.into(), RefCell::new(value));

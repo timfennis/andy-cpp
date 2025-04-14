@@ -9,6 +9,7 @@ mod inner {
     use crate::interpreter::sequence::Sequence;
     use crate::interpreter::value::Value;
 
+    /// Counts the occurrences of each item in a sequence and returns a map with the frequencies.
     pub fn frequencies(seq: &mut Sequence) -> Value {
         let mut out_map = HashMap::new();
 

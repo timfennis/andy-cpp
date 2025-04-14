@@ -1,26 +1,16 @@
 use crate::interpreter::value::Value;
+use derive_more::{Deref, DerefMut};
 use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;
-use std::ops::{Deref, DerefMut};
 
 pub type MinHeap = ManagedHeap<Reverse<HeapValue>>;
 pub type MaxHeap = ManagedHeap<HeapValue>;
 
+#[derive(Deref, DerefMut)]
 pub struct ManagedHeap<T> {
+    #[deref]
+    #[deref_mut]
     heap: BinaryHeap<T>,
-}
-
-impl<T> Deref for ManagedHeap<T> {
-    type Target = BinaryHeap<T>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.heap
-    }
-}
-impl<T> DerefMut for ManagedHeap<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.heap
-    }
 }
 
 impl<T> Default for ManagedHeap<T>
@@ -87,26 +77,12 @@ impl FromIterator<Value> for MaxHeap {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Deref, DerefMut)]
 pub struct HeapValue(pub Value);
 
 impl From<HeapValue> for Value {
     fn from(value: HeapValue) -> Self {
         value.0
-    }
-}
-
-impl Deref for HeapValue {
-    type Target = Value;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for HeapValue {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
     }
 }
 
@@ -126,6 +102,5 @@ impl PartialOrd for HeapValue {
 impl Ord for HeapValue {
     fn cmp(&self, other: &Self) -> Ordering {
         self.0.partial_cmp(&other.0).unwrap_or(Ordering::Equal)
-        // .expect("checked heap must guarantee this never happens")
     }
 }

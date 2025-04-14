@@ -81,6 +81,7 @@ fn try_sort_by<E>(
 mod inner {
     use crate::interpreter::{function::FunctionCarrier, iterator::mut_value_to_iterator};
 
+    /// Returns the highest element in the sequence.
     pub fn max(seq: &Sequence) -> anyhow::Result<Value> {
         match seq {
             Sequence::String(s) => s
@@ -103,6 +104,8 @@ mod inner {
             Sequence::Deque(d) => d.try_borrow()?.iter().try_max(),
         }
     }
+
+    /// Returns the lowest element in the sequence.
     pub fn min(seq: &Sequence) -> anyhow::Result<Value> {
         match seq {
             Sequence::String(s) => s
@@ -126,7 +129,10 @@ mod inner {
         }
     }
 
-    pub fn sort(seq: &Sequence) -> anyhow::Result<Value> {
+    /// Sorts the input sequence in place.
+    ///
+    /// This function only works for strings and lists and will throw errors otherwise.
+    pub fn sort_string(seq: &mut Sequence) -> anyhow::Result<Value> {
         match seq {
             Sequence::String(str) => {
                 let r = &mut *str.borrow_mut();
@@ -146,6 +152,14 @@ mod inner {
         }
     }
 
+    /// Sorts the given sequence using a comparing function in place.
+    ///
+    /// The result of the comparing function is compared to the number `0` to determine the relative ordering such that:
+    /// - for values lower than `0` the first argument is smaller than the second argument
+    /// - for values higher than `0` the first argument is greater than the second argument
+    /// - for values equal to `0` the first argument is equal to the second argument
+    ///
+    /// This function only works for strings and lists and will throw errors otherwise.
     pub fn sort_by(list: &mut Vec<Value>, comp: &Callable<'_>) -> EvaluationResult {
         try_sort_by::<FunctionCarrier>(list, |left, right| {
             let ret = comp.call(&mut [left.clone(), right.clone()])?;
@@ -155,12 +169,19 @@ mod inner {
         Ok(Value::unit())
     }
 
+    /// Returns a sorted copy of the input sequence as a list.
     pub fn sorted(seq: &mut Sequence) -> anyhow::Result<Value> {
         let mut list = mut_seq_to_iterator(seq).collect::<Vec<Value>>();
         try_sort_by(&mut list, Value::try_cmp)?;
         Ok(Value::list(list))
     }
 
+    /// Sorts the given sequence using a comparing function, returning a new list with the elements in the sorted order.
+    ///
+    /// The result of the comparing function is compared to the number `0` to determine the relative ordering such that:
+    /// - for values lower than `0` the first argument is smaller than the second argument
+    /// - for values higher than `0` the first argument is greater than the second argument
+    /// - for values equal to `0` the first argument is equal to the second argument
     pub fn sorted_by(seq: &mut Sequence, comp: &Callable<'_>) -> EvaluationResult {
         let mut list = mut_seq_to_iterator(seq).collect::<Vec<Value>>();
         try_sort_by::<FunctionCarrier>(&mut list, |left, right| {
@@ -171,10 +192,12 @@ mod inner {
         Ok(Value::list(list))
     }
 
+    /// Returns the length of a string in bytes.
     pub fn byte_len(str: &str) -> usize {
         str.len()
     }
 
+    /// Returns the length of the sequence, for strings this returns the number of UTF-8 characters.
     pub fn len(seq: &Sequence) -> anyhow::Result<usize> {
         match seq.length() {
             Some(n) => Ok(n),
@@ -185,6 +208,7 @@ mod inner {
         }
     }
 
+    /// Enumerates the given sequence returning a list of tuples where the first element of the tuple is the index of the element in the input sequence.
     pub fn enumerate(seq: &mut Sequence) -> Value {
         match seq {
             Sequence::String(s) => s
@@ -236,10 +260,12 @@ mod inner {
         }
     }
 
+    /// Reduces/folds the given sequence using the given combining function and a custom initial value.
     pub fn fold(seq: &mut Sequence, initial: Value, function: &Callable<'_>) -> EvaluationResult {
         fold_iterator(mut_seq_to_iterator(seq), initial, function)
     }
 
+    /// Reduces/folds the given sequence using the given combining function.
     pub fn reduce(seq: &mut Sequence, function: &Callable<'_>) -> EvaluationResult {
         let mut iterator = mut_seq_to_iterator(seq);
         let fst = iterator
@@ -249,6 +275,7 @@ mod inner {
         fold_iterator(iterator, fst, function)
     }
 
+    /// Filters the given sequence using the `predicate`.
     pub fn filter(seq: &mut Sequence, predicate: &Callable<'_>) -> EvaluationResult {
         let iterator = mut_seq_to_iterator(seq);
         let mut out = Vec::new();
@@ -268,6 +295,7 @@ mod inner {
         Ok(out.into())
     }
 
+    /// Returns the number of elements in the input sequence for which the given `predicate` returns `true`.
     pub fn count(seq: &mut Sequence, predicate: &Callable<'_>) -> EvaluationResult {
         let iterator = mut_seq_to_iterator(seq);
         let mut out = 0;
@@ -285,6 +313,7 @@ mod inner {
         Ok(out.into())
     }
 
+    /// Returns the value of the first element for which the `predicate` is true for the given input sequence.
     pub fn find(seq: &mut Sequence, predicate: &Callable<'_>) -> EvaluationResult {
         let iterator = mut_seq_to_iterator(seq);
         for element in iterator {
@@ -299,6 +328,7 @@ mod inner {
         Err(anyhow!("find did not find anything").into())
     }
 
+    /// Returns the first index of the element for which the `predicate` is true in the input sequence.
     pub fn locate(seq: &mut Sequence, predicate: &Callable<'_>) -> EvaluationResult {
         let iterator = mut_seq_to_iterator(seq);
         for (idx, element) in iterator.enumerate() {
@@ -313,6 +343,7 @@ mod inner {
         Err(anyhow!("find did not find anything").into())
     }
 
+    /// Returns `true` if the `predicate` is true for none of the elements in `seq`.
     pub fn none(seq: &mut Sequence, function: &Callable<'_>) -> EvaluationResult {
         for item in mut_seq_to_iterator(seq) {
             match function.call(&mut [item])? {
@@ -330,6 +361,7 @@ mod inner {
 
         Ok(Value::Bool(true))
     }
+    /// Returns `true` if the `predicate` is true for all the elements in `seq`.
     pub fn all(seq: &mut Sequence, function: &Callable<'_>) -> EvaluationResult {
         for item in mut_seq_to_iterator(seq) {
             match function.call(&mut [item])? {
@@ -348,9 +380,10 @@ mod inner {
         Ok(Value::Bool(true))
     }
 
-    pub fn any(seq: &mut Sequence, function: &Callable<'_>) -> EvaluationResult {
+    /// Returns `true` if the `predicate` is true for any of the elements in `seq`.
+    pub fn any(seq: &mut Sequence, predicate: &Callable<'_>) -> EvaluationResult {
         for item in mut_seq_to_iterator(seq) {
-            match function.call(&mut [item])? {
+            match predicate.call(&mut [item])? {
                 Value::Bool(true) => return Ok(Value::Bool(true)),
                 Value::Bool(false) => {}
                 v => {
@@ -366,6 +399,7 @@ mod inner {
         Ok(Value::Bool(false))
     }
 
+    /// Applies the function to each element in a sequence returning the result as a list.
     pub fn map(seq: &mut Sequence, function: &Callable<'_>) -> EvaluationResult {
         let iterator = mut_seq_to_iterator(seq);
         let mut out = Vec::new();
@@ -377,6 +411,7 @@ mod inner {
         Ok(Value::from(out))
     }
 
+    /// Applies a function to each item in a sequence, flattens the resulting sequences, and returns a single combined sequence.
     pub fn flat_map(seq: &mut Sequence, function: &Callable<'_>) -> EvaluationResult {
         // let iterator = ;
         let mut out = Vec::new();
@@ -385,16 +420,20 @@ mod inner {
             let fnout = function.call(&mut [item])?;
             match fnout {
                 Value::Sequence(mut inner_seq) => {
-                    // TODO: would it be (much?) faster if we iterate over the iterator and append the elements individually?
                     out.extend(mut_seq_to_iterator(&mut inner_seq));
                 }
-                _ => return Err(anyhow!("callable must return a sequence").into()),
+                _ => {
+                    return Err(
+                        anyhow!("callable argument to flat_map must return a sequence").into(),
+                    );
+                }
             }
         }
 
         Ok(Value::from(out))
     }
 
+    /// Returns the first element of the sequence or the `default` value otherwise.
     pub fn first_or(seq: &mut Sequence, default: Value) -> Value {
         let mut iterator = mut_seq_to_iterator(seq);
         if let Some(item) = iterator.next() {
@@ -404,6 +443,7 @@ mod inner {
         }
     }
 
+    /// Returns the first element of the sequence or the return value of the given function.
     pub fn first_or_else(seq: &mut Sequence, default: &Callable<'_>) -> EvaluationResult {
         let mut iterator = mut_seq_to_iterator(seq);
         Ok(if let Some(item) = iterator.next() {
@@ -413,6 +453,7 @@ mod inner {
         })
     }
 
+    /// Returns the `k` sized combinations of the given sequence `seq` as a list of tuples.
     pub fn combinations(seq: &mut Sequence, k: usize) -> Value {
         Value::list(
             mut_seq_to_iterator(seq)
@@ -422,6 +463,7 @@ mod inner {
         )
     }
 
+    /// Returns the `k` sized permutations of the given sequence `seq` as a list of tuples.
     pub fn permutations(seq: &mut Sequence, k: usize) -> Value {
         Value::list(
             mut_seq_to_iterator(seq)
@@ -431,6 +473,7 @@ mod inner {
         )
     }
 
+    //// Returns al prefixes of a sequence, each as a list.
     pub fn prefixes(seq: &mut Sequence) -> Value {
         // Special case for string which is more efficient and doesn't produce lists of characters
         if let Sequence::String(string) = &seq {
@@ -459,6 +502,7 @@ mod inner {
         )
     }
 
+    /// Returns all suffixes of a sequence, each as a list; for strings, returns all trailing substrings.
     pub fn suffixes(seq: &mut Sequence) -> Value {
         // Special case for string which is more efficient and doesn't produce lists of characters
         if let Sequence::String(string) = &seq {
@@ -481,6 +525,7 @@ mod inner {
         )
     }
 
+    /// Transposes a sequence of sequences, turning rows into columns, and returns the result as a list of lists.
     // TODO: right now transposed always produces a list, it probably should produce whatever the input type was (if possible)
     // TODO: this might not be the expected result for sets (since iterators over sets yield tuples)
     pub fn transposed(seq: &mut Sequence) -> EvaluationResult {
@@ -502,17 +547,10 @@ mod inner {
         }
     }
 
-    pub fn pairwise(seq: &mut Sequence) -> Vec<Value> {
-        mut_seq_to_iterator(seq)
-            .collect::<Vec<_>>()
-            .windows(2)
-            .map(Value::tuple)
-            .collect::<Vec<_>>()
-    }
-
-    // TODO: this implementation probably clones a bit more than it needs to, but it's better tol
-    //       have something than nothing
+    /// Return a list of all windows, wrapping back to the first elements when the window would otherwise exceed the length of source list, producing tuples of size 2.
     pub fn circular_tuple_windows(seq: &mut Sequence) -> Vec<Value> {
+        // TODO: this implementation probably clones a bit more than it needs to, but it's better tol
+        //       have something than nothing
         mut_seq_to_iterator(seq)
             .collect::<Vec<_>>()
             .iter()
@@ -521,6 +559,16 @@ mod inner {
             .collect::<Vec<_>>()
     }
 
+    /// Returns a list of all size-2 windows in `seq`.
+    pub fn pairwise(seq: &mut Sequence) -> Vec<Value> {
+        mut_seq_to_iterator(seq)
+            .collect::<Vec<_>>()
+            .windows(2)
+            .map(Value::tuple)
+            .collect::<Vec<_>>()
+    }
+
+    /// Applies a function to each pair of consecutive elements in a sequence and returns the results as a list.
     #[function(name = "pairwise")]
     pub fn pairwise_map(seq: &mut Sequence, function: &Callable<'_>) -> EvaluationResult {
         let main = mut_seq_to_iterator(seq).collect::<Vec<_>>();
@@ -533,14 +581,19 @@ mod inner {
         Ok(Value::list(out))
     }
 
-    pub fn windows(seq: &mut Sequence, size: usize) -> Vec<Value> {
+    /// Returns a list of all contiguous windows of `length` size. The windows overlap. If the `seq` is shorter than size, the iterator returns no values.
+    pub fn windows(seq: &mut Sequence, length: usize) -> Vec<Value> {
         mut_seq_to_iterator(seq)
             .collect::<Vec<Value>>()
-            .windows(size)
+            .windows(length)
             .map(Value::list)
             .collect()
     }
 
+    /// Return a list that represents the powerset of the elements of `seq`.
+    ///
+    /// The powerset of a set contains all subsets including the empty set and the full input set. A powerset has length `2^n` where `n` is the length of the input set.
+    /// Each list produced by this function represents a subset of the elements in the source sequence.
     pub fn subsequences(seq: &mut Sequence) -> Vec<Value> {
         mut_seq_to_iterator(seq)
             .powerset()
@@ -548,15 +601,42 @@ mod inner {
             .collect::<Vec<Value>>()
     }
 
+    /// Return a list that represents the powerset of the elements of `seq` that are exactly `length` long.
     #[function(name = "subsequences")]
-    pub fn subsequences_len(seq: &mut Sequence, size: usize) -> Vec<Value> {
+    pub fn subsequences_len(seq: &mut Sequence, length: usize) -> Vec<Value> {
         mut_seq_to_iterator(seq)
             .powerset()
-            .filter(|x| x.len() == size)
+            .filter(|x| x.len() == length)
             .map(Value::list)
             .collect::<Vec<Value>>()
     }
 
+    /// Computes the Cartesian product of multiple iterables, returning a list of all possible combinations where each combination contains one element from each iterable.
+    ///
+    /// Example:
+    /// ```ndc
+    /// multi_cartesian_product((1..=3, "abc", [true, false]))
+    /// [
+    ///   [1,"a",true],
+    ///   [1,"a",false],
+    ///   [1,"b",true],
+    ///   [1,"b",false],
+    ///   [1,"c",true],
+    ///   [1,"c",false],
+    ///   [2,"a",true],
+    ///   [2,"a",false],
+    ///   [2,"b",true],
+    ///   [2,"b",false],
+    ///   [2,"c",true],
+    ///   [2,"c",false],
+    ///   [3,"a",true],
+    ///   [3,"a",false],
+    ///   [3,"b",true],
+    ///   [3,"b",false],
+    ///   [3,"c",true],
+    ///   [3,"c",false]
+    /// ]
+    /// ```
     pub fn multi_cartesian_product(seq: &mut Sequence) -> anyhow::Result<Value> {
         let mut iterators = Vec::new();
 
@@ -592,58 +672,69 @@ pub mod extra {
     use anyhow::anyhow;
     use itertools::izip;
 
+    use crate::interpreter::function::FunctionBuilder;
     use crate::interpreter::{
-        environment::Environment, function::Function, iterator::mut_value_to_iterator, value::Value,
+        environment::Environment, function::FunctionBody, iterator::mut_value_to_iterator,
+        value::Value,
     };
 
     pub fn register(env: &mut Environment) {
         env.declare(
             "zip",
-            Value::from(Function::generic(
-                crate::interpreter::function::TypeSignature::Variadic,
-                |args, _env| match args {
-                    [_] => Err(anyhow!("zip must be called with 2 or more arguments").into()),
-                    [a, b] => {
-                        let a = mut_value_to_iterator(a)?;
-                        let b = mut_value_to_iterator(b)?;
-                        let out = a
-                            .zip(b)
-                            .map(|(a, b)| Value::tuple(vec![a, b]))
-                            .collect::<Vec<Value>>();
-                        Ok(Value::list(out))
-                    }
-                    [a, b, c] => {
-                        let a = mut_value_to_iterator(a)?;
-                        let b = mut_value_to_iterator(b)?;
-                        let c = mut_value_to_iterator(c)?;
-                        let mut out = Vec::new();
-                        for (a, b, c) in izip!(a, b, c) {
-                            out.push(Value::tuple(vec![a, b, c]));
-                        }
-                        Ok(Value::list(out))
-                    }
-                    values => {
-                        // HOLY HEAP ALLOCATION BATMAN!
-                        // This branch can probably lose some heap allocations if I had 50 more IQ points
-                        let mut lists = Vec::with_capacity(values.len());
-                        for value in values.iter_mut() {
-                            lists.push(mut_value_to_iterator(value)?.collect::<Vec<_>>());
-                        }
-                        let out_len = lists.iter().map(Vec::len).min().unwrap();
-                        let mut out = Vec::with_capacity(out_len);
-
-                        for idx in 0..out_len {
-                            let mut tup = Vec::with_capacity(lists.len());
-                            for (list_idx, _) in lists.iter().enumerate() {
-                                tup.insert(list_idx, lists[list_idx][idx].clone());
+            Value::function(
+                FunctionBuilder::default()
+                    .name("zip".to_string())
+                    .documentation("Combines multiple sequences (or iterables) into a single sequence of tuples, where the ith tuple contains the ith element from each input sequence.\n\nIf the input sequences are of different lengths, the resulting sequence is truncated to the length of the shortest input.".to_string())
+                    .body(FunctionBody::generic(
+                        crate::interpreter::function::TypeSignature::Variadic,
+                        |args, _env| match args {
+                            [_] => {
+                                Err(anyhow!("zip must be called with 2 or more arguments").into())
                             }
-                            out.insert(idx, Value::tuple(tup));
-                        }
+                            [a, b] => {
+                                let a = mut_value_to_iterator(a)?;
+                                let b = mut_value_to_iterator(b)?;
+                                let out = a
+                                    .zip(b)
+                                    .map(|(a, b)| Value::tuple(vec![a, b]))
+                                    .collect::<Vec<Value>>();
+                                Ok(Value::list(out))
+                            }
+                            [a, b, c] => {
+                                let a = mut_value_to_iterator(a)?;
+                                let b = mut_value_to_iterator(b)?;
+                                let c = mut_value_to_iterator(c)?;
+                                let mut out = Vec::new();
+                                for (a, b, c) in izip!(a, b, c) {
+                                    out.push(Value::tuple(vec![a, b, c]));
+                                }
+                                Ok(Value::list(out))
+                            }
+                            values => {
+                                // HOLY HEAP ALLOCATION BATMAN!
+                                // This branch can probably lose some heap allocations if I had 50 more IQ points
+                                let mut lists = Vec::with_capacity(values.len());
+                                for value in values.iter_mut() {
+                                    lists.push(mut_value_to_iterator(value)?.collect::<Vec<_>>());
+                                }
+                                let out_len = lists.iter().map(Vec::len).min().unwrap();
+                                let mut out = Vec::with_capacity(out_len);
 
-                        Ok(Value::list(out))
-                    }
-                },
-            )),
+                                for idx in 0..out_len {
+                                    let mut tup = Vec::with_capacity(lists.len());
+                                    for (list_idx, _) in lists.iter().enumerate() {
+                                        tup.insert(list_idx, lists[list_idx][idx].clone());
+                                    }
+                                    out.insert(idx, Value::tuple(tup));
+                                }
+
+                                Ok(Value::list(out))
+                            }
+                        },
+                    ))
+                    .build()
+                    .expect("function definitions must be valid"),
+            ),
         );
     }
 }

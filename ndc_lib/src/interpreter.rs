@@ -27,9 +27,12 @@ pub struct Interpreter {
 #[allow(clippy::dbg_macro, clippy::print_stdout, clippy::print_stderr)]
 impl Interpreter {
     #[must_use]
-    pub fn new(dest: Box<dyn InterpreterOutput>) -> Self {
+    pub fn new<T>(dest: T) -> Self
+    where
+        T: InterpreterOutput + 'static,
+    {
         Self {
-            environment: Rc::new(RefCell::new(Environment::new_with_stdlib(dest))),
+            environment: Rc::new(RefCell::new(Environment::new_with_stdlib(Box::new(dest)))),
         }
     }
 

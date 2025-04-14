@@ -55,22 +55,30 @@ mod inner {
     use anyhow::{Context, anyhow};
     use num::{BigInt, BigRational, BigUint, Integer, complex::Complex64};
 
+    /// Returns the sign of a number.
+    ///
+    /// For `int`, `float`, and `rational` types, this function returns `-1` if the number is negative, `0` if zero, and `1` if positive.
+    /// For complex numbers, it returns the number divided by its magnitude (`z / |z|`) if non-zero, or `0` if the number is `0`.
     pub fn signum(n: &Number) -> Number {
         n.signum()
     }
 
+    /// Returns the real part of a complex number.
     pub fn real(c: Complex64) -> f64 {
         c.re
     }
 
+    /// Returns the imaginary part of a complex number.
     pub fn imag(c: Complex64) -> f64 {
         c.im
     }
 
+    /// Returns the numerator of a rational number.
     pub fn numerator(r: &BigRational) -> BigInt {
         r.numer().clone()
     }
 
+    /// Returns the denominator of a rational number.
     pub fn denominator(r: &BigRational) -> BigInt {
         r.denom().clone()
     }
@@ -133,8 +141,7 @@ mod inner {
     }
 
     pub fn abs_diff(left: &Number, right: &Number) -> Number {
-        // TODO: why are we taking references if we just have to clone?!?!?
-        (left.clone().sub(right.clone())).abs()
+        left.sub(right).abs()
     }
 
     pub fn float(value: &Value) -> anyhow::Result<f64> {
@@ -161,6 +168,15 @@ mod inner {
             )),
         }
     }
+
+    /// Converts a given `Value` to an `Int`.
+    ///
+    /// Conversion rules:
+    /// - Integers are unchanged
+    /// - Floating-point numbers have their decimal part truncated
+    /// - Rational numbers are rounded down
+    /// - `true` is converted to `1`, and `false` to `0`
+    /// - Strings are parsed as decimal integers; other representations result in an error
     pub fn int(value: &Value) -> anyhow::Result<Number> {
         match value {
             Value::Number(number) => Ok(number.to_int_lossy()?),
@@ -181,73 +197,60 @@ mod inner {
 
 pub mod f64 {
     use super::{Environment, Number, ToPrimitive, f64};
-    use crate::interpreter::function::{Function, FunctionCallError, ParamType, TypeSignature};
-    use crate::interpreter::int::Int;
-    use crate::interpreter::sequence::Sequence;
-    use crate::interpreter::value::Value;
-    use num::BigInt;
+    use crate::interpreter::function::FunctionBuilder;
 
     pub fn register(env: &mut Environment) {
         macro_rules! delegate_to_f64 {
-            ($method:ident) => {
-                let function = $crate::interpreter::value::Value::from(
-                    $crate::interpreter::function::Function::SingleNumberFunction {
-                        body: |num: Number| match num {
-                            Number::Int(i) => Number::Float(f64::from(i).$method()),
-                            Number::Float(f) => Number::Float(f.$method()),
-                            Number::Rational(r) => {
-                                Number::Float(r.to_f64().unwrap_or(f64::NAN).$method())
-                            }
-                            Number::Complex(c) => Number::Complex(c.$method()),
-                        },
-                    },
+            ($method:ident,$docs:literal) => {
+                let function = $crate::interpreter::value::Value::function(
+                    FunctionBuilder::default()
+                        .body(
+                            $crate::interpreter::function::FunctionBody::SingleNumberFunction {
+                                body: |num: Number| match num {
+                                    Number::Int(i) => Number::Float(f64::from(i).$method()),
+                                    Number::Float(f) => Number::Float(f.$method()),
+                                    Number::Rational(r) => {
+                                        Number::Float(r.to_f64().unwrap_or(f64::NAN).$method())
+                                    }
+                                    Number::Complex(c) => Number::Complex(c.$method()),
+                                },
+                            },
+                        )
+                        .name(stringify!($method).to_string())
+                        .documentation(String::from($docs))
+                        .build()
+                        .expect(
+                            "expected delegate_to_f64 to always create function object correctly",
+                        ),
                 );
                 env.declare(stringify!($method), function);
             };
         }
 
-        delegate_to_f64!(acos);
-        delegate_to_f64!(acosh);
-        delegate_to_f64!(asin);
-        delegate_to_f64!(asinh);
-        delegate_to_f64!(atan);
-        delegate_to_f64!(atanh);
-        delegate_to_f64!(cbrt);
-        delegate_to_f64!(cos);
-        delegate_to_f64!(exp);
-        delegate_to_f64!(ln);
-        delegate_to_f64!(log2);
-        delegate_to_f64!(log10);
-        delegate_to_f64!(sin);
-        delegate_to_f64!(sqrt);
-        delegate_to_f64!(tan);
-
-        env.declare(
-            "int",
-            Value::from(Function::GenericFunction {
-                function: |args, _env| match args {
-                    [Value::Number(n)] => Ok(Value::Number(n.to_int_lossy()?)),
-                    [Value::Sequence(Sequence::String(s))] => {
-                        let s = s.borrow();
-                        let bi = s.parse::<BigInt>().map_err(|err| {
-                            FunctionCallError::ConvertToNativeTypeError(format!(
-                                "string \"{s}\" cannot be converted into an integer because \"{err}\""
-                            ))
-                        })?;
-                        Ok(Value::Number(Number::Int(Int::BigInt(bi).simplified())))
-                    }
-                    [single_value] => Err(FunctionCallError::ConvertToNativeTypeError(format!(
-                        "cannot convert {single_value} to string"
-                    ))
-                        .into()),
-                    vals => Err(FunctionCallError::ArgumentCountError {
-                        expected: 1,
-                        actual: vals.len(),
-                    }
-                        .into()),
-                },
-                type_signature: TypeSignature::Exact(vec![ParamType::Any]),
-            }),
+        delegate_to_f64!(
+            acos,
+            "Computes the arccosine of a number. Return value is in radians in the range [0, pi] or NaN if the number is outside the range [-1, 1]."
         );
+        delegate_to_f64!(acosh, "Inverse hyperbolic cosine function.");
+        delegate_to_f64!(
+            asin,
+            "Computes the arcsine of a number. Return value is in radians in the range [-pi/2, pi/2] or NaN if the number is outside the range [-1, 1]."
+        );
+        delegate_to_f64!(asinh, "Inverse hyperbolic sine function.");
+        delegate_to_f64!(
+            atan,
+            "Computes the arctangent of a number. Return value is in radians in the range [-pi/2, pi/2];"
+        );
+        delegate_to_f64!(atanh, "Inverse hyperbolic tangent function.");
+        delegate_to_f64!(cbrt, "Returns the cube root of a number.");
+        delegate_to_f64!(cos, "Computes the cosine of a number (in radians).");
+        delegate_to_f64!(exp, "Returns `e^(arg)`, (the exponential function).");
+        delegate_to_f64!(ln, "Returns the natural logarithm of the number.");
+        delegate_to_f64!(log2, "Returns the base 2 logarithm of the number.");
+        delegate_to_f64!(log10, "Returns the base 10 logarithm of the number.");
+        delegate_to_f64!(sin, "Computes the sine of a number (in radians).");
+        delegate_to_f64!(sqrt, "Returns the square root of a number.");
+        delegate_to_f64!(tan, "Computes the tangent of a number (in radians).");
+        delegate_to_f64!(tanh, "Hyperbolic tangent function.");
     }
 }
