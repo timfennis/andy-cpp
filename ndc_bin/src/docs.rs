@@ -4,7 +4,6 @@ use std::cmp::Ordering;
 use std::fmt::Write;
 use strsim::normalized_damerau_levenshtein;
 use tap::Tap;
-use termimad::crossterm::style::Color::{Cyan, Green};
 use termimad::crossterm::style::Stylize;
 use termimad::*;
 
