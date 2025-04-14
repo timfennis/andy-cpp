@@ -132,7 +132,7 @@ mod inner {
     /// Sorts the input sequence in place.
     ///
     /// This function only works for strings and lists and will throw errors otherwise.
-    pub fn sort_string(seq: &mut Sequence) -> anyhow::Result<Value> {
+    pub fn sort(seq: &mut Sequence) -> anyhow::Result<Value> {
         match seq {
             Sequence::String(str) => {
                 let r = &mut *str.borrow_mut();
