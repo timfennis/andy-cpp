@@ -340,7 +340,20 @@ mod inner {
             }
         }
 
-        Err(anyhow!("find did not find anything").into())
+        Err(anyhow!("locate did not find anything").into())
+    }
+
+    /// Returns the first index of the element or produces an error
+    #[function(name = "locate")]
+    pub fn locate_element(seq: &mut Sequence, element: &Value) -> EvaluationResult {
+        let iterator = mut_seq_to_iterator(seq);
+        for (idx, el) in iterator.enumerate() {
+            if &el == element {
+                return Ok(Value::from(idx));
+            }
+        }
+
+        Err(anyhow!("locate did not find anything").into())
     }
 
     /// Returns `true` if the `predicate` is true for none of the elements in `seq`.
