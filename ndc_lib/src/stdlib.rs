@@ -15,9 +15,14 @@ pub mod serde;
 pub mod string;
 pub mod value;
 
+#[cfg(feature = "crypto")]
+pub mod crypto;
+
 pub fn register(env: &mut Environment) {
     aoc::register(env);
     cmp::register(env);
+    #[cfg(feature = "crypto")]
+    crypto::register(env);
     deque::register(env);
     file::register(env);
     file::register_variadic(env);
