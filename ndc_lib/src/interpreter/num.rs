@@ -599,7 +599,7 @@ implement_rounding!(round);
 pub enum NumberToUsizeError {
     #[error("cannot convert from {0} to usize")]
     UnsupportedVariant(String),
-    #[error("failed to convert from int because of: '{0}'")]
+    #[error("expected non-negative integer for indexing")]
     FromIntError(#[from] TryFromIntError),
     #[error("failed to convert from bigint to number because of: '{0}'")]
     FromBigIntError(#[from] TryFromBigIntError<BigInt>),
