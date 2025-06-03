@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::fmt;
-use std::ops::{Add, BitAnd, BitOr, BitXor, Div, IndexMut, Mul, Neg, Not, Rem, Sub};
+use std::ops::{Add, BitAnd, BitOr, BitXor, Div, IndexMut, Mul, Rem, Sub};
 use std::rc::Rc;
 
 use either::Either;
@@ -10,7 +10,6 @@ use itertools::Itertools;
 
 use crate::ast::{
     BinaryOperator, Expression, ExpressionLocation, ForBody, ForIteration, LogicalOperator, Lvalue,
-    UnaryOperator,
 };
 use crate::hash_map;
 use crate::hash_map::HashMap;
@@ -18,7 +17,7 @@ use crate::interpreter::environment::{Environment, EnvironmentRef};
 use crate::interpreter::function::{Function, FunctionBody, FunctionCarrier, OverloadedFunction};
 use crate::interpreter::int::Int;
 use crate::interpreter::iterator::mut_value_to_iterator;
-use crate::interpreter::num::{EuclideanDivisionError, Number};
+use crate::interpreter::num::{BinaryOperatorError, Number};
 use crate::interpreter::sequence::Sequence;
 use crate::interpreter::value::{Value, ValueType};
 use crate::lexer::Span;
@@ -40,50 +39,7 @@ pub(crate) fn evaluate_expression(
         Expression::BigIntLiteral(n) => Value::Number(Number::Int(Int::BigInt(n.clone()))),
         Expression::Float64Literal(n) => Value::Number(Number::Float(*n)),
         Expression::ComplexLiteral(n) => Value::Number(Number::Complex(*n)),
-        Expression::Unary {
-            expression: expression_location,
-            operator,
-        } => {
-            let value = evaluate_expression(expression_location, environment)?;
-            match (value, operator) {
-                (Value::Number(n), UnaryOperator::BitNot) => Value::Number(n.not()),
-                (Value::Number(n), UnaryOperator::Neg) => Value::Number(n.neg()),
-                // Just like in C the bitwise negation of `false` is `-1`
-                (Value::Bool(b), UnaryOperator::BitNot) => i64::from(b).not().into(),
-                (Value::Bool(b), UnaryOperator::Not) => Value::Bool(b.not()),
-                (v, UnaryOperator::Not) => {
-                    return Err(EvaluationError::new(
-                        format!("the '!' operator cannot be applied to {}", v.value_type()),
-                        span,
-                    )
-                    .into());
-                }
-                (v, UnaryOperator::Neg) => {
-                    return Err(EvaluationError::new(
-                        format!("{} does not support negation", v.value_type()),
-                        span,
-                    )
-                    .into());
-                }
-                (v, UnaryOperator::BitNot) => {
-                    return Err(EvaluationError::new(
-                        format!("{} does not support bitwise negation", v.value_type()),
-                        span,
-                    )
-                    .into());
-                }
-            }
-        }
-        Expression::Binary {
-            left,
-            operator: operator_token,
-            right,
-        } => {
-            let span = left.span.merge(right.span);
-            let left = evaluate_expression(left, environment)?;
-            let right = evaluate_expression(right, environment)?;
-            apply_operator(left, *operator_token, right).into_evaluation_result(span)?
-        }
+        // Expression::Unary {
         Expression::Grouping(expr) => evaluate_expression(expr, environment)?,
         Expression::VariableDeclaration { l_value, value } => {
             let value = evaluate_expression(value, environment)?;
@@ -861,32 +817,15 @@ fn apply_operation_to_value(
     }
 }
 
-#[derive(thiserror::Error, Debug)]
-enum BinaryOpError {
-    #[error("operator {operator} is not defined for {left} and {right}")]
-    UndefinedOperation {
-        operator: BinaryOperator,
-        left: ValueType,
-        right: ValueType,
-    },
-    #[error(transparent)]
-    EuclideanDivisionFailed(#[from] EuclideanDivisionError),
-    #[error("operator {operator} failed because one of its operands is invalid")]
-    InvalidOperand { operator: BinaryOperator },
-}
-
 #[allow(clippy::too_many_lines)]
 fn apply_operator(
     left: Value,
     operator: BinaryOperator,
     right: Value,
-) -> Result<Value, BinaryOpError> {
+) -> Result<Value, BinaryOperatorError> {
     let (left_type, right_type) = (left.value_type(), right.value_type());
-    let create_type_error = || BinaryOpError::UndefinedOperation {
-        operator,
-        left: left_type,
-        right: right_type,
-    };
+    let create_type_error =
+        || BinaryOperatorError::undefined_operation(operator, left_type, right_type);
 
     if left.supports_vectorization_with(&right) && operator.supports_vectorization() {
         return apply_operation_vectorized(left, &right, operator);
@@ -922,29 +861,29 @@ fn apply_operator(
             }
         }
         BinaryOperator::Plus => match (left, right) {
-            (Value::Number(a), Value::Number(b)) => Value::Number(a + b),
+            (Value::Number(a), Value::Number(b)) => Value::Number(a.add(b)?),
             _ => return Err(create_type_error()),
         },
         BinaryOperator::Minus => match (left, right) {
-            (Value::Number(a), Value::Number(b)) => Value::Number(a - b),
+            (Value::Number(a), Value::Number(b)) => Value::Number(a.sub(b)?),
             _ => return Err(create_type_error()),
         },
         BinaryOperator::Multiply => match (left, right) {
-            (Value::Number(a), Value::Number(b)) => Value::Number(a * b),
+            (Value::Number(a), Value::Number(b)) => Value::Number(a.mul(b)?),
 
             _ => return Err(create_type_error()),
         },
         BinaryOperator::Divide => match (left, right) {
-            (Value::Number(a), Value::Number(b)) => Value::Number(a / b),
+            (Value::Number(a), Value::Number(b)) => Value::Number(a.div(b)?),
             _ => return Err(create_type_error()),
         },
         BinaryOperator::FloorDivide => match (left, right) {
-            (Value::Number(a), Value::Number(b)) => Value::Number(a.floor_div(b)),
+            (Value::Number(a), Value::Number(b)) => Value::Number(a.floor_div(b)?),
 
             _ => return Err(create_type_error()),
         },
         BinaryOperator::CModulo => match (left, right) {
-            (Value::Number(a), Value::Number(b)) => Value::Number(a.rem(b)),
+            (Value::Number(a), Value::Number(b)) => Value::Number(a.rem(b)?),
 
             _ => return Err(create_type_error()),
         },
@@ -954,7 +893,7 @@ fn apply_operator(
             _ => return Err(create_type_error()),
         },
         BinaryOperator::Exponent => match (left, right) {
-            (Value::Number(a), Value::Number(b)) => Value::Number(a.pow(b)),
+            (Value::Number(a), Value::Number(b)) => Value::Number(a.pow(b)?),
 
             (
                 left @ Value::Sequence(Sequence::Tuple(_)),
@@ -1015,20 +954,22 @@ fn apply_operator(
             _ => return Err(create_type_error()),
         },
         BinaryOperator::ShiftRight => match (left, right) {
-            (Value::Number(Number::Int(a)), Value::Number(Number::Int(b))) => {
-                Value::Number(Number::Int(
-                    a.checked_shr(b)
-                        .ok_or(BinaryOpError::InvalidOperand { operator })?,
-                ))
-            }
+            (Value::Number(Number::Int(a)), Value::Number(Number::Int(b))) => Value::Number(
+                Number::Int(a.checked_shr(b).ok_or(BinaryOperatorError::new(format!(
+                    // TODO: check this before merge
+                    "operator {operator} failed because one of its operands is invalid"
+                )))?),
+            ),
             _ => return Err(create_type_error()),
         },
         BinaryOperator::ShiftLeft => match (left, right) {
             (Value::Number(Number::Int(a)), Value::Number(Number::Int(b))) => {
-                Value::Number(Number::Int(
-                    a.checked_shl(b)
-                        .ok_or(BinaryOpError::InvalidOperand { operator })?,
-                ))
+                Value::Number(Number::Int(a.checked_shl(b).ok_or(
+                    BinaryOperatorError::new(format!(
+                        // TODO: check this before merge
+                        "operator {operator} failed because one of its operands is invalid"
+                    )),
+                )?))
             }
             _ => return Err(create_type_error()),
         },
@@ -1086,7 +1027,7 @@ fn apply_operation_vectorized(
     left: Value,
     right: &Value,
     operator: BinaryOperator,
-) -> Result<Value, BinaryOpError> {
+) -> Result<Value, BinaryOperatorError> {
     let (left_type, right_type) = (left.value_type(), right.value_type());
 
     let (mut left, right) = match (left, right) {
@@ -1100,11 +1041,9 @@ fn apply_operation_vectorized(
             (left, std::slice::from_ref(right))
         }
         _ => {
-            return Err(BinaryOpError::UndefinedOperation {
-                operator,
-                left: left_type,
-                right: right_type,
-            });
+            return Err(BinaryOperatorError::undefined_operation(
+                operator, left_type, right_type,
+            ));
         }
     };
 
@@ -1115,22 +1054,20 @@ fn apply_operation_vectorized(
         if let (Value::Number(l), Value::Number(r)) = (l, r) {
             // TODO: can we use AddAssign etc?
             *l = match operator {
-                BinaryOperator::Plus => Number::add(l.clone(), r),
-                BinaryOperator::Minus => Number::sub(l.clone(), r),
-                BinaryOperator::Multiply => Number::mul(l.clone(), r),
-                BinaryOperator::Divide => Number::div(l.clone(), r),
-                BinaryOperator::FloorDivide => Number::floor_div(l.clone(), r.clone()), // Get rid of r.clone?
-                BinaryOperator::CModulo => Number::rem(l.clone(), r),
+                BinaryOperator::Plus => Number::add(l.clone(), r)?,
+                BinaryOperator::Minus => Number::sub(l.clone(), r)?,
+                BinaryOperator::Multiply => Number::mul(l.clone(), r)?,
+                BinaryOperator::Divide => Number::div(l.clone(), r)?,
+                BinaryOperator::FloorDivide => Number::floor_div(l.clone(), r.clone())?, // Get rid of r.clone?
+                BinaryOperator::CModulo => Number::rem(l.clone(), r)?,
                 BinaryOperator::EuclideanModulo => {
                     Number::checked_rem_euclid(l.clone(), r.clone())? // Get rid of r.clone?
                 }
-                BinaryOperator::Exponent => Number::pow(l.clone(), r.clone()), // Get rid of r.clone?
+                BinaryOperator::Exponent => Number::pow(l.clone(), r.clone())?, // Get rid of r.clone?
                 _ => {
-                    return Err(BinaryOpError::UndefinedOperation {
-                        operator,
-                        left: left_type,
-                        right: right_type,
-                    });
+                    return Err(BinaryOperatorError::undefined_operation(
+                        operator, left_type, right_type,
+                    ));
                 }
             };
         } else {

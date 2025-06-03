@@ -4,7 +4,7 @@ use crate::interpreter::environment::{Environment, EnvironmentRef};
 use crate::interpreter::evaluate::{
     ErrorConverter, EvaluationError, EvaluationResult, evaluate_expression,
 };
-use crate::interpreter::num::{Number, NumberType};
+use crate::interpreter::num::{BinaryOperatorError, Number, NumberType};
 use crate::interpreter::sequence::Sequence;
 use crate::interpreter::value::{Value, ValueType};
 use crate::lexer::Span;
@@ -27,6 +27,7 @@ impl Callable<'_> {
         self.function.borrow().call(args, self.environment)
     }
 }
+
 #[derive(Clone, Builder)]
 pub struct Function {
     #[builder(default, setter(strip_option))]
@@ -76,8 +77,11 @@ pub enum FunctionBody {
         body: Rc<ExpressionLocation>,
         environment: EnvironmentRef,
     },
-    SingleNumberFunction {
+    NumericUnaryOp {
         body: fn(number: Number) -> Number,
+    },
+    NumericBinaryOp {
+        body: fn(left: Number, right: Number) -> Result<Number, BinaryOperatorError>,
     },
     GenericFunction {
         type_signature: TypeSignature,
@@ -113,9 +117,13 @@ impl FunctionBody {
                     .collect(),
             ),
             Self::Memoized { cache: _, function } => function.type_signature(),
-            Self::SingleNumberFunction { .. } => {
+            Self::NumericUnaryOp { .. } => {
                 TypeSignature::Exact(vec![Parameter::new("num", ParamType::Number)])
             }
+            Self::NumericBinaryOp { .. } => TypeSignature::Exact(vec![
+                Parameter::new("left", ParamType::Number),
+                Parameter::new("right", ParamType::Number),
+            ]),
             Self::GenericFunction { type_signature, .. } => type_signature.clone(),
         }
     }
@@ -141,16 +149,39 @@ impl FunctionBody {
                     r => r,
                 }
             }
-            Self::SingleNumberFunction { body } => match args {
+            Self::NumericUnaryOp { body } => match args {
                 [Value::Number(num)] => Ok(Value::Number(body(num.clone()))),
                 [v] => Err(FunctionCallError::ArgumentTypeError {
-                    expected: ValueType::Number(NumberType::Float),
+                    expected: ParamType::Number,
                     actual: v.value_type(),
                 }
                 .into()),
-                _ => Err(FunctionCallError::ArgumentCountError {
+                args => Err(FunctionCallError::ArgumentCountError {
                     expected: 1,
-                    actual: 0,
+                    actual: args.len(),
+                }
+                .into()),
+            },
+            Self::NumericBinaryOp { body } => match args {
+                [Value::Number(left), Value::Number(right)] => {
+                    // TODO: we could use references here?
+                    Ok(Value::Number(body(left.clone(), right.clone()).map_err(
+                        |err| FunctionCarrier::IntoEvaluationError(Box::new(err)),
+                    )?))
+                }
+                [Value::Number(_), right] => Err(FunctionCallError::ArgumentTypeError {
+                    expected: ParamType::Number,
+                    actual: right.value_type(),
+                }
+                .into()),
+                [left, _] => Err(FunctionCallError::ArgumentTypeError {
+                    expected: ParamType::Number,
+                    actual: left.value_type(),
+                }
+                .into()),
+                args => Err(FunctionCallError::ArgumentCountError {
+                    expected: 2,
+                    actual: args.len(),
                 }
                 .into()),
             },
@@ -190,6 +221,15 @@ pub struct OverloadedFunction {
 }
 
 impl OverloadedFunction {
+    pub fn from_multiple(functions: Vec<Function>) -> Self {
+        Self {
+            implementations: functions
+                .into_iter()
+                .map(|f| (f.type_signature(), f))
+                .collect(),
+        }
+    }
+
     pub fn add(&mut self, function: Function) {
         self.implementations
             .insert(function.type_signature(), function);
@@ -385,11 +425,37 @@ impl From<&Value> for ParamType {
     }
 }
 
+impl fmt::Display for ParamType {
+    // TODO replace with strum?
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Any => write!(f, "Any"),
+            Self::Bool => write!(f, "Bool"),
+            Self::Function => write!(f, "Function"),
+            Self::Option => write!(f, "Option"),
+            Self::Number => write!(f, "Number"),
+            Self::Float => write!(f, "Float"),
+            Self::Int => write!(f, "Int"),
+            Self::Rational => write!(f, "Rational"),
+            Self::Complex => write!(f, "Complex"),
+            Self::Sequence => write!(f, "Sequence"),
+            Self::List => write!(f, "List"),
+            Self::String => write!(f, "String"),
+            Self::Tuple => write!(f, "Tuple"),
+            Self::Map => write!(f, "Map"),
+            Self::Iterator => write!(f, "Iterator"),
+            Self::MinHeap => write!(f, "MinHeap"),
+            Self::MaxHeap => write!(f, "MaxHeap"),
+            Self::Deque => write!(f, "Deque"),
+        }
+    }
+}
+
 #[derive(thiserror::Error, Debug)]
 pub enum FunctionCallError {
     #[error("invalid argument, expected {expected} got {actual}")]
     ArgumentTypeError {
-        expected: ValueType,
+        expected: ParamType,
         actual: ValueType,
     },
 

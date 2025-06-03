@@ -66,6 +66,12 @@ mod inner {
         list.append(other);
     }
 
+    // TODO: this implementation has pretty terrible performance compared to what we had before
+    #[function(name = "++")]
+    pub fn op_concat(left: &[Value], right: &[Value]) -> Vec<Value> {
+        left.iter().chain(right.iter()).cloned().collect()
+    }
+
     /// Copies elements from `other` to `list` not touching `other`.
     pub fn extend(list: &mut Vec<Value>, other: &[Value]) {
         list.extend_from_slice(other);
