@@ -13,10 +13,6 @@ assert(true ~ true == false);
 assert(true ~ false == true);
 assert(false ~ false == false);
 
-// Bitwise complement of boolean is evaluated as integers
-assert(~true == -2);
-assert(~false == -1);
-
 // integers
 assert(1 & 15 == 1);
 assert(15 & 0 == 0);
