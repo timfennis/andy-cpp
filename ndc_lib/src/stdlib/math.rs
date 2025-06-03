@@ -1,50 +1,52 @@
 use crate::interpreter::environment::Environment;
-use crate::interpreter::num::Number;
+use crate::interpreter::num::{BinaryOperatorError, Number};
 use crate::interpreter::sequence::Sequence;
 use crate::interpreter::value::Value;
 use factorial::Factorial;
 use ndc_macros::export_module;
 use num::ToPrimitive;
+use std::ops::{Add, Mul};
 
-trait FallibleSum<E> {
-    fn try_sum(&mut self) -> Result<Number, E>;
+trait FallibleSum {
+    fn try_sum(&mut self) -> Result<Number, BinaryOperatorError>;
 }
 
-impl<C, T> FallibleSum<anyhow::Error> for C
+impl<C, T> FallibleSum for C
 where
     C: Iterator<Item = T>,
     T: std::borrow::Borrow<Value>,
 {
-    fn try_sum(&mut self) -> anyhow::Result<Number> {
+    fn try_sum(&mut self) -> Result<Number, BinaryOperatorError> {
         self.try_fold(Number::from(0), |acc, cur| match cur.borrow() {
-            Value::Number(n) => Ok(acc + n),
-            value => Err(anyhow::anyhow!(
+            Value::Number(n) => acc.add(n),
+            value => Err(BinaryOperatorError::new(format!(
                 "cannot sum {} and number",
                 value.value_type()
-            )),
+            ))),
         })
     }
 }
 
-trait FallibleProduct<E> {
-    fn try_product(&mut self) -> Result<Number, E>;
+trait FallibleProduct {
+    fn try_product(&mut self) -> Result<Number, BinaryOperatorError>;
 }
 
-impl<C, T> FallibleProduct<anyhow::Error> for C
+impl<C, T> FallibleProduct for C
 where
     C: Iterator<Item = T>,
     T: std::borrow::Borrow<Value>,
 {
-    fn try_product(&mut self) -> anyhow::Result<Number> {
-        self.try_fold(Number::from(1), |acc, cur| match cur.borrow() {
-            Value::Number(n) => Ok(acc * n),
-            value => Err(anyhow::anyhow!(
+    fn try_product(&mut self) -> Result<Number, BinaryOperatorError> {
+        self.try_fold(Number::from(0), |acc, cur| match cur.borrow() {
+            Value::Number(n) => acc.mul(n),
+            value => Err(BinaryOperatorError::new(format!(
                 "cannot multiply {} and number",
                 value.value_type()
-            )),
+            ))),
         })
     }
 }
+
 #[export_module]
 mod inner {
     use std::ops::Sub;
@@ -52,7 +54,7 @@ mod inner {
     use super::FallibleSum;
     use crate::interpreter::int::Int;
     use crate::interpreter::num::Number;
-    use anyhow::{Context, anyhow};
+    use anyhow::Context;
     use num::{BigInt, BigRational, BigUint, Integer, complex::Complex64};
 
     /// Returns the sign of a number.
@@ -85,7 +87,9 @@ mod inner {
 
     pub fn sum(seq: &Sequence) -> anyhow::Result<Number> {
         match seq {
-            Sequence::String(_s) => Err(anyhow!("string cannot be summed")),
+            Sequence::String(_s) => Err(BinaryOperatorError::new(
+                "string cannot be summed".to_string(),
+            )),
             Sequence::List(list) => list.borrow().iter().try_sum(),
             Sequence::Tuple(tup) => tup.iter().try_sum(),
             Sequence::Map(map, _) => map.borrow().keys().try_sum(),
@@ -94,11 +98,14 @@ mod inner {
             Sequence::MinHeap(h) => h.borrow().iter().map(|v| &v.0.0).try_sum(),
             Sequence::Deque(d) => d.borrow().iter().try_sum(),
         }
+        .context("type error while multiplying sequence")
     }
 
     pub fn product(seq: &Sequence) -> anyhow::Result<Number> {
         match seq {
-            Sequence::String(_s) => Err(anyhow!("string cannot be summed")),
+            Sequence::String(_s) => Err(BinaryOperatorError::new(
+                "string cannot be multiplied".to_string(),
+            )),
             Sequence::List(list) => list.borrow().iter().try_product(),
             Sequence::Tuple(tup) => tup.iter().try_product(),
             Sequence::Map(map, _) => map.borrow().keys().try_product(),
@@ -107,6 +114,7 @@ mod inner {
             Sequence::MinHeap(h) => h.borrow().iter().map(|v| &v.0.0).try_product(),
             Sequence::Deque(d) => d.borrow().iter().try_product(),
         }
+        .context("type error while multiplying sequence")
     }
 
     pub fn factorial(a: &BigInt) -> anyhow::Result<BigInt> {
@@ -140,8 +148,8 @@ mod inner {
         number.abs()
     }
 
-    pub fn abs_diff(left: &Number, right: &Number) -> Number {
-        left.sub(right).abs()
+    pub fn abs_diff(left: &Number, right: &Number) -> Result<Number, BinaryOperatorError> {
+        Ok(left.sub(right)?.abs())
     }
 
     pub fn float(value: &Value) -> anyhow::Result<f64> {
@@ -201,15 +209,232 @@ mod inner {
 
 pub mod f64 {
     use super::{Environment, Number, ToPrimitive, f64};
-    use crate::interpreter::function::FunctionBuilder;
+    use crate::interpreter::evaluate::EvaluationResult;
+    use crate::interpreter::function::FunctionCarrier::EvaluationError;
+    use crate::interpreter::function::{
+        FunctionBody, FunctionBuilder, FunctionCarrier, ParamType, Parameter, TypeSignature,
+    };
+    use crate::interpreter::num::BinaryOperatorError;
+    use crate::interpreter::value::Value;
+    use std::cmp::Ordering;
+    use std::ops::Not;
 
     pub fn register(env: &mut Environment) {
+        macro_rules! implement_binary_operator_on_num {
+            ($operator:literal,$method:expr) => {
+                env.declare_global_fn(
+                    FunctionBuilder::default()
+                        .name($operator.to_string())
+                        .body(FunctionBody::NumericBinaryOp { body: $method })
+                        .build()
+                        .expect("must be valid"),
+                );
+            };
+        }
+
+        implement_binary_operator_on_num!("-", std::ops::Sub::sub);
+        implement_binary_operator_on_num!("+", std::ops::Add::add);
+        implement_binary_operator_on_num!("*", std::ops::Mul::mul);
+        implement_binary_operator_on_num!("/", std::ops::Div::div);
+        implement_binary_operator_on_num!("\\", Number::floor_div);
+        implement_binary_operator_on_num!("^", Number::pow);
+        implement_binary_operator_on_num!("%", std::ops::Rem::rem);
+        implement_binary_operator_on_num!("%%", Number::checked_rem_euclid);
+
+        env.declare_global_fn(
+            FunctionBuilder::default()
+                .body(FunctionBody::NumericUnaryOp {
+                    body: std::ops::Neg::neg,
+                })
+                .name("-".to_string())
+                .build()
+                .expect("must succeed"),
+        );
+
+        macro_rules! impl_cmp {
+            ($operator:literal,$expected:pat) => {
+                env.declare_global_fn(
+                    FunctionBuilder::default()
+                        .name($operator.to_string())
+                        .body(FunctionBody::GenericFunction {
+                            type_signature: TypeSignature::Exact(vec![
+                                Parameter::new("left", ParamType::Any),
+                                Parameter::new("right", ParamType::Any),
+                            ]),
+                            function: |values, _env| match values {
+                                [left, right] => match left.partial_cmp(&right) {
+                                    Some($expected) => Ok(Value::Bool(true)),
+                                    Some(_) => Ok(Value::Bool(false)),
+                                    None => Err(anyhow::anyhow!("cannot compare {} and {}",left.value_type(),right.value_type()).into()),
+                                },
+                                _ => unreachable!("the type checker should never invoke this function if the argument count does not match")
+                            },
+                        })
+                        .build()
+                        .expect("must succeed")
+                );
+            };
+        }
+
+        impl_cmp!(">", Ordering::Greater);
+        impl_cmp!(">=", Ordering::Greater | Ordering::Equal);
+        impl_cmp!("==", Ordering::Equal);
+        impl_cmp!("<", Ordering::Less);
+        impl_cmp!("<=", Ordering::Less | Ordering::Equal);
+        impl_cmp!("!=", Ordering::Less | Ordering::Greater);
+
+        env.declare_global_fn(
+            FunctionBuilder::default()
+                .name("<=>".to_string())
+                .body(FunctionBody::GenericFunction {
+                    type_signature: TypeSignature::Exact(vec![
+                        Parameter::new("left", ParamType::Any),
+                        Parameter::new("right", ParamType::Any),
+                    ]),
+                    function: |values, _env| match values {
+                        [left, right] => match left.partial_cmp(&right) {
+                            Some(Ordering::Equal) => Ok(Value::from(0)),
+                            Some(Ordering::Less) => Ok(Value::from(-1)),
+                            Some(Ordering::Greater) => Ok(Value::from(1)),
+                            None => Err(anyhow::anyhow!("cannot compare {} and {}",left.value_type(),right.value_type()).into()),
+                        },
+                        _ => unreachable!("the type checker should never invoke this function if the argument count does not match")
+                    },
+                })
+                .build()
+                .expect("must succeed")
+        );
+
+        env.declare_global_fn(
+            FunctionBuilder::default()
+                .name(">=<".to_string())
+                .body(FunctionBody::GenericFunction {
+                    type_signature: TypeSignature::Exact(vec![
+                        Parameter::new("left", ParamType::Any),
+                        Parameter::new("right", ParamType::Any),
+                    ]),
+                    function: |values, _env| match values {
+                        [left, right] => match left.partial_cmp(&right) {
+                            Some(Ordering::Equal) => Ok(Value::from(0)),
+                            Some(Ordering::Less) => Ok(Value::from(1)),
+                            Some(Ordering::Greater) => Ok(Value::from(-1)),
+                            None => Err(anyhow::anyhow!("cannot compare {} and {}",left.value_type(),right.value_type()).into()),
+                        },
+                        _ => unreachable!("the type checker should never invoke this function if the argument count does not match")
+                    },
+                })
+                .build()
+                .expect("must succeed")
+        );
+
+        macro_rules! impl_bitop {
+            ($operator:literal,$operation:expr) => {
+                env.declare_global_fn(
+                    FunctionBuilder::default()
+                        .name($operator.to_string())
+                        .body(FunctionBody::GenericFunction {
+                            type_signature: TypeSignature::Exact(vec![
+                                Parameter::new("left", ParamType::Bool),
+                                Parameter::new("right", ParamType::Bool),
+                            ]),
+                            function: |values, _env| match values {
+                                [Value::Bool(left), Value::Bool(right)] => Ok(Value::Bool($operation(*left, *right))),
+                                _ => unreachable!("the type checker should never invoke this function if the argument count does not match")
+                            },
+                        })
+                        .build()
+                        .expect("must succeed")
+                );
+                env.declare_global_fn(
+                    FunctionBuilder::default()
+                        .name($operator.to_string())
+                        .body(FunctionBody::GenericFunction {
+                            type_signature: TypeSignature::Exact(vec![
+                                Parameter::new("left", ParamType::Int),
+                                Parameter::new("right", ParamType::Int),
+                            ]),
+                            function: |values, _env| match values {
+                                // TODO: remove this clone
+                                [Value::Number(Number::Int(left)), Value::Number(Number::Int(right))] => Ok(Value::Number(Number::Int($operation(left.clone(), right.clone())))),
+                                _ => unreachable!("the type checker should never invoke this function if the argument count does not match")
+                            },
+                        })
+                        .build()
+                        .expect("must succeed"),
+                );
+            };
+        }
+
+        impl_bitop!("&", std::ops::BitAnd::bitand);
+        impl_bitop!("|", std::ops::BitOr::bitor);
+        impl_bitop!("~", std::ops::BitXor::bitxor);
+
+        env.declare_global_fn(
+            FunctionBuilder::default()
+                .body(FunctionBody::NumericUnaryOp { body: |x| x.not() })
+                .name("~".to_string())
+                .build()
+                .expect("must succeed"),
+        );
+
+        env.declare_global_fn(
+            FunctionBuilder::default()
+                .body(FunctionBody::GenericFunction {
+                    type_signature: TypeSignature::Exact(vec![Parameter::new("value", ParamType::Bool)]),
+                    function: |values, _env| match values {
+                        [Value::Bool(b)] => Ok(Value::Bool(b.not())),
+                        _ => unreachable!("the type checker should never invoke this function if the argument count does not match"),
+                    },
+                })
+                .name("!".to_string())
+                .build()
+                .expect("must succeed")
+        );
+
+        env.declare_global_fn(
+            FunctionBuilder::default()
+                .name(">>".to_string())
+                .body(FunctionBody::GenericFunction {
+                    type_signature: TypeSignature::Exact(vec![
+                        Parameter::new("left", ParamType::Int),
+                        Parameter::new("right", ParamType::Int),
+                    ]),
+                    function: |values, _env| match values {
+                        [Value::Number(Number::Int(left)), Value::Number(Number::Int(right))] => left.clone().checked_shr(right.clone())
+                            .ok_or_else(|| FunctionCarrier::IntoEvaluationError(Box::new(BinaryOperatorError::new("cannot apply >> operator to operands".to_string())))) // TODO: improve error message
+                            .map(|x| Value::Number(Number::Int(x))),
+                        _ => unreachable!("the type checker should never invoke this function if the argument count does not match")
+                    },
+                })
+                .build()
+                .expect("must succeed")
+        );
+
+        env.declare_global_fn(
+            FunctionBuilder::default()
+                .name("<<".to_string())
+                .body(FunctionBody::GenericFunction {
+                    type_signature: TypeSignature::Exact(vec![
+                        Parameter::new("left", ParamType::Int),
+                        Parameter::new("right", ParamType::Int),
+                    ]),
+                    function: |values, _env| match values {
+                        [Value::Number(Number::Int(left)), Value::Number(Number::Int(right))] => left.clone().checked_shl(right.clone())
+                            .ok_or_else(|| FunctionCarrier::IntoEvaluationError(Box::new(BinaryOperatorError::new("cannot apply << operator to operands".to_string())))) // TODO: improve error message
+                            .map(|x| Value::Number(Number::Int(x))),
+                        _ => unreachable!("the type checker should never invoke this function if the argument count does not match")
+                    },
+                })
+                .build()
+                .expect("must succeed")
+        );
+
         macro_rules! delegate_to_f64 {
             ($method:ident,$docs:literal) => {
                 let function = $crate::interpreter::value::Value::function(
                     FunctionBuilder::default()
                         .body(
-                            $crate::interpreter::function::FunctionBody::SingleNumberFunction {
+                            $crate::interpreter::function::FunctionBody::NumericUnaryOp {
                                 body: |num: Number| match num {
                                     Number::Int(i) => Number::Float(f64::from(i).$method()),
                                     Number::Float(f) => Number::Float(f.$method()),
