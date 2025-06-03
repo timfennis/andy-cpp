@@ -9,27 +9,27 @@ version = "0.2.0"
 license = "MIT"
 
 [workspace.dependencies]
-ahash = { version = "0.8.11" }
+ahash = { version = "0.8.12" }
 anyhow = "1.0.98"
-clap = { version = "4.5.37", features = ["derive"] }
-criterion = { version = "0.5.1", features = ["html_reports"] }
+clap = { version = "4.5.39", features = ["derive"] }
+criterion = { version = "0.6.0", features = ["html_reports"] }
 derive_more = { version = "2.0.1", features = ["deref", "deref_mut", "from", "constructor"] }
 derive_builder = { version = "0.20.2" }
 either = "1.15.0"
 strsim = "0.11.1"
 factorial = "0.4.0"
 itertools = "0.14.0"
-miette = { version = "7.5.0", features = ["fancy"] }
+miette = { version = "7.6.0", features = ["fancy"] }
 ndc_lib = { path = "ndc_lib" }
 ndc_macros = { path = "ndc_macros" }
 num = "0.4.3"
 once_cell = "1.21.3"
 ordered-float = "5.0.0"
-owo-colors = "4.2.0"
+owo-colors = "4.2.1"
 rand = "0.9.1"
 rand_chacha = "0.9.0"
 regex = "1.11.1"
-rustyline = { version = "15.0.0", features = ["derive"] }
+rustyline = { version = "16.0.0", features = ["derive"] }
 ryu = "1.0.20"
 self_cell = "1.2.0"
 serde_json = { version = "1.0.140", features = ["arbitrary_precision"] }
