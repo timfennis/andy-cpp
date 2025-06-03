@@ -198,7 +198,7 @@ fn wrap_single(
             .build()
             .expect("expected function creation in proc macro to always succeed");
 
-        env.declare_function(#register_as_function_name, func);
+        env.declare_global_fn(func);
     };
 
     WrappedFunction {

@@ -117,6 +117,33 @@ impl Environment {
         self.values.insert(name.into(), RefCell::new(value));
     }
 
+    /// Declare a function globally using its self-exposed name, if there already exists a function
+    /// with the same name it's simply overloaded.
+    pub fn declare_global_fn(&mut self, function: impl Into<Function>) {
+        let fn_to_add = function.into();
+        let name = fn_to_add.name();
+
+        match self.values.get(name) {
+            Some(v) => {
+                let existing = &mut *v.borrow_mut();
+                match existing {
+                    Value::Function(of) => {
+                        let mut of = of.borrow_mut();
+                        of.add(fn_to_add);
+                    }
+                    // TODO: what should we do in this case
+                    _ => panic!(
+                        "attempting to declare global function under a name that's already taken by a global non-function"
+                    ),
+                }
+            }
+            None => {
+                self.values
+                    .insert(name.into(), RefCell::new(Value::function(fn_to_add)));
+            }
+        }
+    }
+
     pub fn assign(&mut self, name: &str, value: Value) -> bool {
         // Clippy wants us to use self.values.entry(name) but that moves name and breaks the recursive case
         return if self.values.contains_key(name) {

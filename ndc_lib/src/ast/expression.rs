@@ -1,4 +1,4 @@
-use crate::ast::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
+use crate::ast::operator::{BinaryOperator, LogicalOperator};
 use crate::ast::parser::Error as ParseError;
 use crate::interpreter::evaluate::EvaluationError;
 use crate::lexer::Span;
@@ -25,17 +25,7 @@ pub enum Expression {
     BigIntLiteral(BigInt),
     ComplexLiteral(Complex64),
     Identifier(String),
-    //
     Statement(Box<ExpressionLocation>),
-    Unary {
-        operator: UnaryOperator,
-        expression: Box<ExpressionLocation>,
-    },
-    Binary {
-        left: Box<ExpressionLocation>,
-        operator: BinaryOperator,
-        right: Box<ExpressionLocation>,
-    },
     Logical {
         left: Box<ExpressionLocation>,
         operator: LogicalOperator,
@@ -287,24 +277,6 @@ impl fmt::Debug for ExpressionLocation {
             Expression::Statement(expression_location) => f
                 .debug_struct("Statement")
                 .field("expression", &expression_location)
-                .finish(),
-            Expression::Unary {
-                operator,
-                expression,
-            } => f
-                .debug_struct("Unary")
-                .field("operator", operator)
-                .field("expression", expression)
-                .finish(),
-            Expression::Binary {
-                left,
-                operator,
-                right,
-            } => f
-                .debug_struct("Binary")
-                .field("left", left)
-                .field("operator", operator)
-                .field("right", right)
                 .finish(),
             Expression::Logical {
                 left,

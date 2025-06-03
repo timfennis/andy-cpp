@@ -673,6 +673,12 @@ impl From<&Value> for ValueType {
     }
 }
 
+impl From<Number> for ValueType {
+    fn from(value: Number) -> Self {
+        ValueType::Number((&value).into())
+    }
+}
+
 impl fmt::Display for ValueType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
