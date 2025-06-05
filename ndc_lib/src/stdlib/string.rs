@@ -25,6 +25,14 @@ pub fn join_to_string(list: &mut Sequence, sep: &str) -> anyhow::Result<String> 
 
 #[export_module]
 mod inner {
+    use ndc_macros::function;
+
+    /// The string concat operator
+    #[function(name = "<>")]
+    pub fn op_string_concat(left: &Value, right: &Value) -> String {
+        format!("{left}{right}")
+    }
+
     /// Returns the Unicode code point of a 1-length string.
     pub fn ord(string: &str) -> anyhow::Result<i64> {
         if string.chars().count() == 1 {
@@ -76,6 +84,12 @@ mod inner {
     /// Appends `value` to the given string.
     pub fn append(string: &mut String, value: &str) {
         string.push_str(value);
+    }
+
+    // TODO: should we optimize something here?
+    #[function(name = "++")]
+    pub fn concat(left: &str, right: &str) -> String {
+        format!("{left}{right}")
     }
 
     /// Joins elements of the sequence into a single string using `sep` as the separator.

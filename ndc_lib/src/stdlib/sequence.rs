@@ -81,6 +81,11 @@ fn try_sort_by<E>(
 mod inner {
     use crate::interpreter::{function::FunctionCarrier, iterator::mut_value_to_iterator};
 
+    #[function(name = "in")]
+    pub fn op_contains(elem: &Value, seq: &Sequence) -> bool {
+        seq.contains(elem)
+    }
+
     /// Returns the highest element in the sequence.
     pub fn max(seq: &Sequence) -> anyhow::Result<Value> {
         match seq {

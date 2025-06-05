@@ -209,8 +209,6 @@ mod inner {
 
 pub mod f64 {
     use super::{Environment, Number, ToPrimitive, f64};
-    use crate::interpreter::evaluate::EvaluationResult;
-    use crate::interpreter::function::FunctionCarrier::EvaluationError;
     use crate::interpreter::function::{
         FunctionBody, FunctionBuilder, FunctionCarrier, ParamType, Parameter, TypeSignature,
     };
@@ -278,10 +276,42 @@ pub mod f64 {
 
         impl_cmp!(">", Ordering::Greater);
         impl_cmp!(">=", Ordering::Greater | Ordering::Equal);
-        impl_cmp!("==", Ordering::Equal);
         impl_cmp!("<", Ordering::Less);
         impl_cmp!("<=", Ordering::Less | Ordering::Equal);
-        impl_cmp!("!=", Ordering::Less | Ordering::Greater);
+
+        env.declare_global_fn(
+            FunctionBuilder::default()
+                .name("==".to_string())
+                .body(FunctionBody::GenericFunction {
+                    type_signature: TypeSignature::Exact(vec![
+                        Parameter::new("left", ParamType::Any),
+                        Parameter::new("right", ParamType::Any),
+                    ]),
+                    function: |values, _env| match values {
+                        [left, right] => Ok(Value::Bool(left == right)),
+                        _ => unreachable!("the type checker should never invoke this function if the argument count does not match")
+                    },
+                })
+                .build()
+                .expect("must succeed")
+        );
+
+        env.declare_global_fn(
+            FunctionBuilder::default()
+                .name("!=".to_string())
+                .body(FunctionBody::GenericFunction {
+                    type_signature: TypeSignature::Exact(vec![
+                        Parameter::new("left", ParamType::Any),
+                        Parameter::new("right", ParamType::Any),
+                    ]),
+                    function: |values, _env| match values {
+                        [left, right] => Ok(Value::Bool(left != right)),
+                        _ => unreachable!("the type checker should never invoke this function if the argument count does not match")
+                    },
+                })
+                .build()
+                .expect("must succeed")
+        );
 
         env.declare_global_fn(
             FunctionBuilder::default()
@@ -377,19 +407,21 @@ pub mod f64 {
                 .expect("must succeed"),
         );
 
-        env.declare_global_fn(
-            FunctionBuilder::default()
-                .body(FunctionBody::GenericFunction {
-                    type_signature: TypeSignature::Exact(vec![Parameter::new("value", ParamType::Bool)]),
-                    function: |values, _env| match values {
-                        [Value::Bool(b)] => Ok(Value::Bool(b.not())),
-                        _ => unreachable!("the type checker should never invoke this function if the argument count does not match"),
-                    },
-                })
-                .name("!".to_string())
-                .build()
-                .expect("must succeed")
-        );
+        for ident in ["!", "not"] {
+            env.declare_global_fn(
+                FunctionBuilder::default()
+                    .body(FunctionBody::GenericFunction {
+                        type_signature: TypeSignature::Exact(vec![Parameter::new("value", ParamType::Bool)]),
+                        function: |values, _env| match values {
+                            [Value::Bool(b)] => Ok(Value::Bool(b.not())),
+                            _ => unreachable!("the type checker should never invoke this function if the argument count does not match"),
+                        },
+                    })
+                    .name(ident.to_string())
+                    .build()
+                    .expect("must succeed")
+            );
+        }
 
         env.declare_global_fn(
             FunctionBuilder::default()

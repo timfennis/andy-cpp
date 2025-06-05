@@ -66,9 +66,10 @@ mod inner {
         list.append(other);
     }
 
-    // TODO: this implementation has pretty terrible performance compared to what we had before
+    // TODO: ISSUE: this implementation has pretty terrible performance compared to what we had before
     #[function(name = "++")]
     pub fn op_concat(left: &[Value], right: &[Value]) -> Vec<Value> {
+        // TODO: ISSUE: This function always returns a list, even when it's concatenating two tuples
         left.iter().chain(right.iter()).cloned().collect()
     }
 
