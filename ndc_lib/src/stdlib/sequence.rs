@@ -216,33 +216,28 @@ mod inner {
     /// Enumerates the given sequence returning a list of tuples where the first element of the tuple is the index of the element in the input sequence.
     pub fn enumerate(seq: &mut Sequence) -> Value {
         match seq {
-            Sequence::String(s) => s
-                .borrow()
-                .chars()
-                .enumerate()
-                .map(|(index, char)| {
-                    Value::Sequence(Sequence::Tuple(Rc::new(vec![
-                        Value::from(index),
-                        Value::from(char),
-                    ])))
-                })
-                .collect::<Vec<Value>>()
-                .into(),
-            Sequence::Map(map, _) => map
-                .borrow()
-                .iter()
-                .enumerate()
-                .map(|(index, (key, value))| {
-                    Value::Sequence(Sequence::Tuple(Rc::new(vec![
-                        Value::from(index),
+            Sequence::String(s) => Value::list(
+                s.borrow()
+                    .chars()
+                    .enumerate()
+                    .map(|(index, char)| Value::tuple(vec![Value::from(index), Value::from(char)]))
+                    .collect::<Vec<Value>>(),
+            ),
+            Sequence::Map(map, _) => Value::list(
+                map.borrow()
+                    .iter()
+                    .enumerate()
+                    .map(|(index, (key, value))| {
                         Value::Sequence(Sequence::Tuple(Rc::new(vec![
-                            Value::clone(key),
-                            Value::clone(value),
-                        ]))),
-                    ])))
-                })
-                .collect::<Vec<Value>>()
-                .into(),
+                            Value::from(index),
+                            Value::Sequence(Sequence::Tuple(Rc::new(vec![
+                                Value::clone(key),
+                                Value::clone(value),
+                            ]))),
+                        ])))
+                    })
+                    .collect::<Vec<Value>>(),
+            ),
             // TODO: This entire branch is so cringe, why are we even trying to use iterators if we do shit like this
             Sequence::Iterator(rc) => {
                 let mut iter = rc.borrow_mut();
@@ -254,7 +249,7 @@ mod inner {
                     ]))));
                 }
 
-                out.into()
+                Value::list(out)
             }
             seq => Value::list(
                 mut_seq_to_iterator(seq)
@@ -297,7 +292,7 @@ mod inner {
             }
         }
 
-        Ok(out.into())
+        Ok(Value::list(out))
     }
 
     /// Returns the number of elements in the input sequence for which the given `predicate` returns `true`.
@@ -315,7 +310,7 @@ mod inner {
             }
         }
 
-        Ok(out.into())
+        Ok(Value::number(out))
     }
 
     /// Returns the value of the first element for which the `predicate` is true for the given input sequence.
@@ -426,7 +421,7 @@ mod inner {
             out.push(function.call(&mut [item])?);
         }
 
-        Ok(Value::from(out))
+        Ok(Value::list(out))
     }
 
     /// Applies a function to each item in a sequence, flattens the resulting sequences, and returns a single combined sequence.
@@ -448,7 +443,7 @@ mod inner {
             }
         }
 
-        Ok(Value::from(out))
+        Ok(Value::list(out))
     }
 
     /// Returns the first element of the sequence or the `default` value otherwise.
@@ -566,24 +561,28 @@ mod inner {
     }
 
     /// Return a list of all windows, wrapping back to the first elements when the window would otherwise exceed the length of source list, producing tuples of size 2.
-    pub fn circular_tuple_windows(seq: &mut Sequence) -> Vec<Value> {
+    pub fn circular_tuple_windows(seq: &mut Sequence) -> Value {
         // TODO: this implementation probably clones a bit more than it needs to, but it's better tol
         //       have something than nothing
-        mut_seq_to_iterator(seq)
-            .collect::<Vec<_>>()
-            .iter()
-            .circular_tuple_windows::<(_, _)>()
-            .map(|(a, b)| Value::tuple(vec![a.clone(), b.clone()]))
-            .collect::<Vec<_>>()
+        Value::list(
+            mut_seq_to_iterator(seq)
+                .collect::<Vec<_>>()
+                .iter()
+                .circular_tuple_windows::<(_, _)>()
+                .map(|(a, b)| Value::tuple(vec![a.clone(), b.clone()]))
+                .collect::<Vec<_>>(),
+        )
     }
 
     /// Returns a list of all size-2 windows in `seq`.
-    pub fn pairwise(seq: &mut Sequence) -> Vec<Value> {
-        mut_seq_to_iterator(seq)
-            .collect::<Vec<_>>()
-            .windows(2)
-            .map(Value::tuple)
-            .collect::<Vec<_>>()
+    pub fn pairwise(seq: &mut Sequence) -> Value {
+        Value::list(
+            mut_seq_to_iterator(seq)
+                .collect::<Vec<_>>()
+                .windows(2)
+                .map(Value::tuple)
+                .collect::<Vec<_>>(),
+        )
     }
 
     /// Applies a function to each pair of consecutive elements in a sequence and returns the results as a list.
@@ -600,33 +599,39 @@ mod inner {
     }
 
     /// Returns a list of all contiguous windows of `length` size. The windows overlap. If the `seq` is shorter than size, the iterator returns no values.
-    pub fn windows(seq: &mut Sequence, length: usize) -> Vec<Value> {
-        mut_seq_to_iterator(seq)
-            .collect::<Vec<Value>>()
-            .windows(length)
-            .map(Value::list)
-            .collect()
+    pub fn windows(seq: &mut Sequence, length: usize) -> Value {
+        Value::list(
+            mut_seq_to_iterator(seq)
+                .collect::<Vec<Value>>()
+                .windows(length)
+                .map(Value::list)
+                .collect::<Vec<Value>>(),
+        )
     }
 
     /// Return a list that represents the powerset of the elements of `seq`.
     ///
     /// The powerset of a set contains all subsets including the empty set and the full input set. A powerset has length `2^n` where `n` is the length of the input set.
     /// Each list produced by this function represents a subset of the elements in the source sequence.
-    pub fn subsequences(seq: &mut Sequence) -> Vec<Value> {
-        mut_seq_to_iterator(seq)
-            .powerset()
-            .map(Value::list)
-            .collect::<Vec<Value>>()
+    pub fn subsequences(seq: &mut Sequence) -> Value {
+        Value::list(
+            mut_seq_to_iterator(seq)
+                .powerset()
+                .map(Value::list)
+                .collect::<Vec<Value>>(),
+        )
     }
 
     /// Return a list that represents the powerset of the elements of `seq` that are exactly `length` long.
     #[function(name = "subsequences")]
-    pub fn subsequences_len(seq: &mut Sequence, length: usize) -> Vec<Value> {
-        mut_seq_to_iterator(seq)
-            .powerset()
-            .filter(|x| x.len() == length)
-            .map(Value::list)
-            .collect::<Vec<Value>>()
+    pub fn subsequences_len(seq: &mut Sequence, length: usize) -> Value {
+        Value::list(
+            mut_seq_to_iterator(seq)
+                .powerset()
+                .filter(|x| x.len() == length)
+                .map(Value::list)
+                .collect::<Vec<Value>>(),
+        )
     }
 
     /// Computes the Cartesian product of multiple iterables, returning a list of all possible combinations where each combination contains one element from each iterable.

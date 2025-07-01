@@ -405,7 +405,7 @@ pub(crate) fn evaluate_expression(
 
             match &**body {
                 ForBody::Block(_) => Value::unit(),
-                ForBody::List(_) => Value::from(out_values),
+                ForBody::List(_) => Value::list(out_values),
                 ForBody::Map {
                     key: _,
                     value: _,
@@ -479,7 +479,7 @@ pub(crate) fn evaluate_expression(
                                 );
                             };
 
-                            values.to_vec().into()
+                            Value::list(values.to_vec()) // TODO: can we remove to_vec?
                         }
                     }
                 }
@@ -994,9 +994,9 @@ fn apply_operator(
                         // TODO: if there is no benefit to this branch we might as wel remove it
                         let mut new_list = left.borrow().clone();
                         new_list.append(&mut right.borrow_mut());
-                        Value::from(new_list)
+                        Value::list(new_list)
                     }
-                    Err(right) => Value::from(
+                    Err(right) => Value::list(
                         left.borrow()
                             .iter()
                             .chain(right.borrow().iter())

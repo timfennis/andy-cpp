@@ -25,7 +25,6 @@ pub fn join_to_string(list: &mut Sequence, sep: &str) -> anyhow::Result<String> 
 
 #[export_module]
 mod inner {
-    use ndc_macros::function;
 
     /// The string concat operator
     #[function(name = "<>")]
@@ -98,8 +97,8 @@ mod inner {
     }
 
     /// Splits the string into paragraphs, using blank lines as separators.
-    pub fn paragraphs(string: &str) -> Vec<String> {
-        string.split("\n\n").map(ToString::to_string).collect()
+    pub fn paragraphs(string: &str) -> Value {
+        Value::collect_list(string.split("\n\n").map(ToString::to_string))
     }
 
     /// Joins paragraphs into a single string, inserting blank lines between them.
@@ -108,8 +107,8 @@ mod inner {
     }
 
     /// Splits the string into lines, using newline characters as separators.
-    pub fn lines(string: &str) -> Vec<String> {
-        string.lines().map(ToString::to_string).collect()
+    pub fn lines(string: &str) -> Value {
+        Value::collect_list(string.lines().map(ToString::to_string))
     }
 
     /// Joins lines into a single string, inserting newline characters between them.
@@ -118,8 +117,8 @@ mod inner {
     }
 
     /// Splits the string into words, using whitespace as the separator.
-    pub fn words(string: &str) -> Vec<String> {
-        string.split_whitespace().map(ToString::to_string).collect()
+    pub fn words(string: &str) -> Value {
+        Value::collect_list(string.split_whitespace().map(ToString::to_string))
     }
 
     /// Joins words into a single string, separating them with spaces.
@@ -128,8 +127,8 @@ mod inner {
     }
 
     /// Splits the string by whitespace into a list of substrings.
-    pub fn split(string: &str) -> Vec<String> {
-        string.split_whitespace().map(ToString::to_string).collect()
+    pub fn split(string: &str) -> Value {
+        Value::collect_list(string.split_whitespace().map(ToString::to_string))
     }
 
     /// Returns `true` if `haystack` starts with `pat`.
@@ -144,17 +143,20 @@ mod inner {
 
     /// Splits the string using a given pattern as the delimiter.
     #[function(name = "split")]
-    pub fn split_with_pattern(string: &str, pattern: &str) -> Vec<String> {
-        string.split(pattern).map(ToString::to_string).collect()
+    pub fn split_with_pattern(string: &str, pattern: &str) -> Value {
+        Value::list(
+            string
+                .split(pattern)
+                .map(ToString::to_string)
+                .map(Value::string)
+                .collect::<Vec<Value>>(),
+        )
     }
 
     /// Splits the string at the first occurrence of `pattern`, returning a tuple-like value.
     pub fn split_once(string: &str, pattern: &str) -> Value {
         match string.split_once(pattern) {
-            Some((fst, snd)) => Value::Sequence(Sequence::Tuple(Rc::new(vec![
-                Value::from(fst),
-                Value::from(snd),
-            ]))),
+            Some((fst, snd)) => Value::tuple(vec![Value::string(fst), Value::string(snd)]),
             None => Value::unit(),
         }
     }

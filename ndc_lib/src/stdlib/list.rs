@@ -1,7 +1,7 @@
 #[ndc_macros::export_module]
 mod inner {
     use crate::interpreter::iterator::mut_seq_to_iterator;
-    use crate::interpreter::sequence::Sequence;
+    use crate::interpreter::sequence::{ListRepr, Sequence, TupleRepr};
     use crate::interpreter::value::Value;
     use itertools::Itertools;
     use std::rc::Rc;
@@ -9,8 +9,8 @@ mod inner {
     use anyhow::anyhow;
 
     /// Converts any sequence into a list
-    pub fn list(seq: &mut Sequence) -> Vec<Value> {
-        mut_seq_to_iterator(seq).collect::<Vec<_>>()
+    pub fn list(seq: &mut Sequence) -> Value {
+        Value::list(mut_seq_to_iterator(seq).collect::<Vec<_>>())
     }
 
     pub fn contains(list: &[Value], elem: &Value) -> bool {
@@ -66,11 +66,31 @@ mod inner {
         list.append(other);
     }
 
-    // TODO: ISSUE: this implementation has pretty terrible performance compared to what we had before
     #[function(name = "++")]
-    pub fn op_concat(left: &[Value], right: &[Value]) -> Vec<Value> {
-        // TODO: ISSUE: This function always returns a list, even when it's concatenating two tuples
-        left.iter().chain(right.iter()).cloned().collect()
+    pub fn tup_concat(left: TupleRepr, mut right: TupleRepr) -> Value {
+        match Rc::try_unwrap(left) {
+            Ok(mut left) => {
+                left.append(Rc::make_mut(&mut right));
+                Value::tuple(left)
+            }
+            Err(left) => Value::tuple(
+                left.iter()
+                    .chain(right.iter())
+                    .cloned()
+                    .collect::<Vec<Value>>(),
+            ),
+        }
+    }
+
+    #[function(name = "++")]
+    pub fn list_concat(left: ListRepr, right: ListRepr) -> Value {
+        Value::list(
+            left.borrow()
+                .iter()
+                .chain(right.borrow().iter())
+                .cloned()
+                .collect::<Vec<Value>>(),
+        )
     }
 
     /// Copies elements from `other` to `list` not touching `other`.
@@ -111,9 +131,10 @@ mod inner {
         list.remove(0)
     }
 
-    /// Creates a copy of the list with it's elements in reverse order
-    pub fn reversed(list: &[Value]) -> Vec<Value> {
-        list.iter().rev().cloned().collect::<Vec<Value>>()
+    /// Creates a copy of the list with its elements in reverse order
+    /// TODO: how to deal with tuples?
+    pub fn reversed(list: &[Value]) -> Value {
+        Value::list(list.iter().rev().cloned().collect::<Vec<Value>>())
     }
 
     /// Removes all values from the list
@@ -127,12 +148,12 @@ mod inner {
     }
 
     /// Splits the collection into two at the given index.
-    pub fn split_off(list: &mut Vec<Value>, index: usize) -> anyhow::Result<Vec<Value>> {
+    pub fn split_off(list: &mut Vec<Value>, index: usize) -> anyhow::Result<Value> {
         if index > list.len() {
             return Err(anyhow!("index {index} is out of bounds"));
         }
 
-        Ok(list.split_off(index))
+        Ok(Value::list(list.split_off(index)))
     }
 
     /// Shortens the list, keeping the first `len` elements and dropping the rest.
@@ -167,11 +188,13 @@ mod inner {
         list.last().cloned().map_or_else(Value::none, Value::some)
     }
 
-    pub fn cartesian_product(list_a: &[Value], list_b: &[Value]) -> Vec<Value> {
-        list_a
-            .iter()
-            .cartesian_product(list_b)
-            .map(|(a, b)| Value::Sequence(Sequence::Tuple(Rc::new(vec![a.clone(), b.clone()]))))
-            .collect_vec()
+    pub fn cartesian_product(list_a: &[Value], list_b: &[Value]) -> Value {
+        Value::list(
+            list_a
+                .iter()
+                .cartesian_product(list_b)
+                .map(|(a, b)| Value::tuple(vec![a.clone(), b.clone()]))
+                .collect_vec(),
+        )
     }
 }

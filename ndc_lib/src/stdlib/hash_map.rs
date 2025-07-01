@@ -11,14 +11,14 @@ mod inner {
     ///
     /// Note that for a set this will return the values in the set.
     pub fn keys(map: &mut HashMap<Value, Value>) -> Value {
-        map.keys().cloned().collect::<Vec<_>>().into()
+        Value::list(map.keys().cloned().collect::<Vec<_>>())
     }
 
     /// Returns a list of all the values in the map.
     ///
     /// Note that for sets this will return a list of unit types, you should use keys if you want the values in the set.
     pub fn values(map: &mut HashMap<Value, Value>) -> Value {
-        map.values().cloned().collect::<Vec<_>>().into()
+        Value::list(map.values().cloned().collect::<Vec<_>>())
     }
 
     /// Removes a key from the map or a value from a set.
@@ -49,6 +49,7 @@ mod inner {
     /// Returns the union (elements that are in either `left` or `right`) of two maps or sets.
     ///
     /// This is the same as evaluating the expression `left | right`
+    #[function(alias = "|")]
     pub fn union(left: DefaultMap<'_>, right: &HashMap<Value, Value>) -> Value {
         Value::Sequence(Sequence::Map(
             Rc::new(RefCell::new(hash_map::union(left.0, right))),
@@ -59,6 +60,7 @@ mod inner {
     /// Returns the intersection (elements that are in both `left and `right`) of two maps or sets.
     ///
     /// This is the same as evaluating the expression `left & right`.
+    #[function(alias = "&")]
     pub fn intersection(left: DefaultMap<'_>, right: &HashMap<Value, Value>) -> Value {
         Value::Sequence(Sequence::Map(
             Rc::new(RefCell::new(hash_map::intersection(left.0, right))),
@@ -69,6 +71,7 @@ mod inner {
     /// Returns the symmetric difference (elements that are either in `left` or `right` but not both) of two maps or sets.
     ///
     /// This is the same as evaluating the expression `left ~ right`.
+    #[function(alias = "~")]
     pub fn symmetric_difference(left: DefaultMap<'_>, right: &HashMap<Value, Value>) -> Value {
         Value::Sequence(Sequence::Map(
             Rc::new(RefCell::new(hash_map::symmetric_difference(left.0, right))),
