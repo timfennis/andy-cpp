@@ -176,6 +176,18 @@ impl Environment {
         }
     }
 
+    /// Takes the named variable from memory and leaves `Value::unit()` in it's place
+    #[must_use]
+    pub fn take(&self, name: &str) -> Option<Value> {
+        if let Some(v) = self.values.get(name) {
+            Some(std::mem::replace(&mut *v.borrow_mut(), Value::unit()))
+        } else if let Some(parent) = &self.parent {
+            parent.borrow().take(name)
+        } else {
+            None
+        }
+    }
+
     pub fn with_existing<T>(
         &self,
         name: &str,

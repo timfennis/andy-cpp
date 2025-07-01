@@ -308,7 +308,7 @@ impl Parser {
             return Err(Error::with_help(
                 "Invalid assignment target".to_string(),
                 lvalue_span,
-                "Assignment target is not a valid lvalue. Only a few expressions can be assigned a value. Check that the left-hand side of the assignment is a valid target.".to_string()
+                "Assignment target is not a valid lvalue. Only a few expressions can be assigned a value. Check that the left-hand side of the assignment is a valid target.".to_string(),
             ));
         };
 
@@ -347,7 +347,7 @@ impl Parser {
                 Some(Token::EqualsSign) => Err(Error::with_help(
                     "Invalid assignment target".to_string(),
                     maybe_lvalue.span,
-                    "Assignment target is not a valid lvalue. Only a few expressions can be assigned a value. Check that the left-hand side of the assignment is a valid target.".to_string()
+                    "Assignment target is not a valid lvalue. Only a few expressions can be assigned a value. Check that the left-hand side of the assignment is a valid target.".to_string(),
                 )),
                 _ => Ok(maybe_lvalue),
             };
@@ -368,10 +368,13 @@ impl Parser {
                 Ok(assignment_expression.to_location(start.merge(end)))
             }
             Some(Token::OpAssign(inner)) => {
-                let thing = match &inner.token {
-                    Token::Identifier(identifier) => Either::Right(identifier.to_string()),
-                    _ => Either::Left((*inner.clone()).try_into()?),
-                };
+                // let thing = match &inner.token {
+                //     Token::Identifier(identifier) => Either::Right(identifier.to_string()),
+                //     _ => Either::Left((*inner.clone()).try_into()?),
+                // };
+
+                let operation =
+                    Expression::Identifier(inner.token.to_string()).to_location(inner.span);
 
                 self.advance();
                 let expression = self.tuple_expression(Self::single_expression, false)?;
@@ -380,7 +383,7 @@ impl Parser {
                     l_value: Lvalue::try_from(maybe_lvalue)
                         .expect("guaranteed to produce an lvalue"),
                     value: Box::new(expression),
-                    operation: thing,
+                    operation: Box::new(operation),
                 };
 
                 Ok(op_assign.to_location(start.merge(end)))
@@ -1104,7 +1107,10 @@ impl Parser {
         // Next we either expect a body block `{ ... }` or a fat arrow followed by a single expression `=> ...`
 
         let body = match self.peek_current_token() {
-            Some(Token::FatArrow) => { self.advance(); self.single_expression()?},
+            Some(Token::FatArrow) => {
+                self.advance();
+                self.single_expression()?
+            }
             Some(Token::LeftCurlyBracket) => self.block()?,
             Some(token) => {
                 return Err(Error::with_help(

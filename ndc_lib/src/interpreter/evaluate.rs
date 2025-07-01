@@ -78,25 +78,43 @@ pub(crate) fn evaluate_expression(
             operation,
         } => match l_value {
             Lvalue::Variable { identifier } => {
+                let Expression::Identifier(operation) = &operation.expression else {
+                    todo!("OpAssignment operation must be Identifier??");
+                };
+
                 let right_value = evaluate_expression(value, environment)?;
+                let left_value = environment.borrow().take(identifier).unwrap();
+
+                let result = call_function_by_name(
+                    operation,
+                    &mut [left_value, right_value],
+                    environment,
+                    span,
+                )?;
+
+                // Assign the result to l_value
+                declare_or_assign_variable(l_value, result.clone(), false, environment, span)?;
+
+                result
 
                 // We need to use with_existing in this situation to ensure the refcount doesn't
                 // increase which does happen when we `get` something from the environment because
                 // `get` clones the value it returns.
-                environment
-                    .borrow()
-                    .with_existing::<EvaluationResult>(identifier, |existing_value| {
-                        let existing_value = &mut *existing_value.borrow_mut();
-
-                        apply_operation_to_value(
-                            environment,
-                            existing_value,
-                            operation,
-                            right_value,
-                            span,
-                        )
-                    })
-                    .ok_or_else(|| EvaluationError::undefined_variable(identifier, span))??
+                // environment
+                //     .borrow()
+                //     .with_existing::<EvaluationResult>(identifier, |existing_value| {
+                //         // let existing_value = &mut *existing_value.borrow_mut();
+                //
+                //         // TODO: use function call
+                //         // apply_operation_to_value(
+                //         //     environment,
+                //         //     existing_value,
+                //         //     operation,
+                //         //     right_value,
+                //         //     span,
+                //         // )
+                //     })
+                //     .ok_or_else(|| EvaluationError::undefined_variable(identifier, span))??
             }
             Lvalue::Index {
                 value: lhs_expr,
@@ -117,13 +135,15 @@ pub(crate) fn evaluate_expression(
                             Offset::Element(index) => {
                                 let list_item = list.index_mut(index);
 
-                                apply_operation_to_value(
-                                    environment,
-                                    list_item,
-                                    operation,
-                                    right_value,
-                                    span,
-                                )?
+                                // apply_operation_to_value(
+                                //     environment,
+                                //     list_item,
+                                //     operation,
+                                //     right_value,
+                                //     span,
+                                // )?
+
+                                todo!("not implemented")
                             }
                             Offset::Range(_, _) => {
                                 return Err(EvaluationError::syntax_error(
@@ -147,13 +167,14 @@ pub(crate) fn evaluate_expression(
                                 .ok_or_else(|| EvaluationError::key_not_found(&index, span))?
                         };
 
-                        apply_operation_to_value(
-                            environment,
-                            map_entry,
-                            operation,
-                            right_value,
-                            span,
-                        )?
+                        todo!("not implemented")
+                        // apply_operation_to_value(
+                        //     environment,
+                        //     map_entry,
+                        //     operation,
+                        //     right_value,
+                        //     span,
+                        // )?
                     }
                     Value::Sequence(Sequence::String(_)) => {
                         return Err(EvaluationError::new(
@@ -270,7 +291,6 @@ pub(crate) fn evaluate_expression(
                     .into());
                 }
             }
-            // drop(local_scope);
             Value::unit()
         }
         Expression::Call {
@@ -714,107 +734,6 @@ fn declare_or_assign_variable(
     };
 
     Ok(Value::unit())
-}
-
-/// Applies operations like `+` or functions like `max(x, y)` to mutable pointers to values. This is
-/// used to optimize various `OpAssign` expressions that would otherwise create copies.
-/// ```ndc
-/// x ++= [1,2,3]
-/// // becomes
-/// x.append([1,2,3]);
-/// // instead of
-/// x = x ++ [1,2,3]
-/// ``
-fn apply_operation_to_value(
-    environment: &EnvironmentRef,
-    value: &mut Value,
-    operation: &Either<BinaryOperator, String>,
-    right_value: Value,
-    span: Span,
-) -> Result<Value, FunctionCarrier> {
-    match (value, operation, right_value) {
-        (
-            Value::Sequence(Sequence::String(left)),
-            Either::Left(BinaryOperator::Concat),
-            Value::Sequence(Sequence::String(right)),
-        ) => {
-            if Rc::ptr_eq(left, &right) {
-                let copy = String::from(&*right.borrow());
-                left.borrow_mut().push_str(&copy);
-            } else {
-                left.borrow_mut().push_str(&right.borrow());
-            }
-            Ok(Value::Sequence(Sequence::String(left.clone())))
-        }
-
-        (
-            Value::Sequence(Sequence::List(left)),
-            Either::Left(BinaryOperator::Concat),
-            Value::Sequence(Sequence::List(right)),
-        ) => {
-            // Special case for when a list is extended with itself
-            // x := [1,2,3]; x ++= x;
-            if Rc::ptr_eq(left, &right) {
-                let copy = Vec::clone(&*right.borrow());
-                left.borrow_mut().extend_from_slice(&copy);
-            } else {
-                left.borrow_mut().extend_from_slice(&right.borrow());
-            };
-            Ok(Value::Sequence(Sequence::List(left.clone())))
-        }
-
-        (
-            Value::Sequence(Sequence::Tuple(left)),
-            Either::Left(BinaryOperator::Concat),
-            Value::Sequence(Sequence::Tuple(mut right)),
-        ) => {
-            let right = Rc::make_mut(&mut right);
-            Rc::make_mut(left).append(right);
-            Ok(Value::Sequence(Sequence::Tuple(Rc::clone(left))))
-        }
-        (
-            Value::Sequence(Sequence::Map(left, default)),
-            Either::Left(BinaryOperator::Or),
-            Value::Sequence(Sequence::Map(right, _)),
-        ) => {
-            // If right and left are the same we can just do nothing and prevent a borrow checker error later
-            if !Rc::ptr_eq(left, &right) {
-                match Rc::try_unwrap(right) {
-                    Ok(right) => {
-                        left.borrow_mut().extend(right.take());
-                    }
-                    Err(right) => {
-                        // If we ever figure out how to make the borrow below panic we should add a test and fix it
-                        left.borrow_mut()
-                            .extend(right.borrow().iter().map(|(a, b)| (a.clone(), b.clone())));
-                    }
-                }
-            }
-
-            Ok(Value::Sequence(Sequence::Map(
-                left.clone(),
-                default.to_owned(),
-            )))
-        }
-        (left, operator, right) => {
-            match operator {
-                Either::Left(binary_operator) => {
-                    *left = apply_operator(left.clone(), *binary_operator, right)
-                        .into_evaluation_result(span)?;
-                }
-                Either::Right(identifier) => {
-                    let old_value = std::mem::replace(left, Value::unit());
-                    *left = call_function_by_name(
-                        identifier,
-                        &mut [old_value, right],
-                        environment,
-                        span,
-                    )?;
-                }
-            }
-            Ok(left.clone())
-        }
-    }
 }
 
 #[allow(clippy::too_many_lines)]
