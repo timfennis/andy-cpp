@@ -96,25 +96,6 @@ pub(crate) fn evaluate_expression(
                 declare_or_assign_variable(l_value, result.clone(), false, environment, span)?;
 
                 result
-
-                // We need to use with_existing in this situation to ensure the refcount doesn't
-                // increase which does happen when we `get` something from the environment because
-                // `get` clones the value it returns.
-                // environment
-                //     .borrow()
-                //     .with_existing::<EvaluationResult>(identifier, |existing_value| {
-                //         // let existing_value = &mut *existing_value.borrow_mut();
-                //
-                //         // TODO: use function call
-                //         // apply_operation_to_value(
-                //         //     environment,
-                //         //     existing_value,
-                //         //     operation,
-                //         //     right_value,
-                //         //     span,
-                //         // )
-                //     })
-                //     .ok_or_else(|| EvaluationError::undefined_variable(identifier, span))??
             }
             Lvalue::Index {
                 value: lhs_expr,
