@@ -43,7 +43,8 @@ pub enum Expression {
     OpAssignment {
         l_value: Lvalue,
         value: Box<ExpressionLocation>,
-        operation: Either<BinaryOperator, String>,
+        // Should always be an identifier?
+        operation: Box<ExpressionLocation>,
     },
     FunctionDeclaration {
         name: Option<Box<ExpressionLocation>>,
