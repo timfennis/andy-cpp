@@ -6,26 +6,23 @@ use regex::Regex;
 mod inner {
 
     /// Extracts all signed integers from the given string.
-    pub fn nums(haystack: &str) -> Vec<i64> {
+    pub fn nums(haystack: &str) -> Value {
         static RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"-?\d+").unwrap());
 
-        RE.captures_iter(haystack)
-            .filter_map(|cap| {
-                let (full, []) = cap.extract();
-                full.parse::<i64>().ok()
-            })
-            .collect()
+        Value::collect_list(RE.captures_iter(haystack).filter_map(|cap| {
+            let (full, []) = cap.extract();
+            full.parse::<i64>().ok()
+        }))
     }
 
     /// Extracts all unsigned integers from the given string.
-    pub fn unsigned_nums(haystack: &str) -> Vec<i64> {
+    pub fn unsigned_nums(haystack: &str) -> Value {
         static RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\d+").unwrap());
-        RE.captures_iter(haystack)
-            .filter_map(|cap| {
-                let (full, []) = cap.extract();
-                full.parse::<i64>().ok()
-            })
-            .collect()
+
+        Value::collect_list(RE.captures_iter(haystack).filter_map(|cap| {
+            let (full, []) = cap.extract();
+            full.parse::<i64>().ok()
+        }))
     }
 
     /// Returns `true` if the string matches the given regular expression.
@@ -41,15 +38,16 @@ mod inner {
         let list = r
             .captures_iter(haystack)
             .map(|captures| {
-                captures
-                    .iter()
-                    .filter_map(|x| x.map(|x| Value::from(x.as_str())))
-                    .collect::<Vec<_>>()
-                    .into()
+                Value::list(
+                    captures
+                        .iter()
+                        .filter_map(|x| x.map(|x| Value::from(x.as_str())))
+                        .collect::<Vec<_>>(),
+                )
             })
             .collect::<Vec<Value>>();
 
-        Ok(Value::from(list))
+        Ok(Value::list(list))
     }
 
     /// Returns the first capture group from the first match of the regular expression.
@@ -63,9 +61,8 @@ mod inner {
         let list = captures
             .iter()
             .filter_map(|x| x.map(|x| Value::from(x.as_str())))
-            .collect::<Vec<_>>()
-            .into();
+            .collect::<Vec<_>>();
 
-        Ok(list)
+        Ok(Value::list(list))
     }
 }

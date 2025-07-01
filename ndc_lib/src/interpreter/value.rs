@@ -37,6 +37,14 @@ impl Value {
         Self::Sequence(Sequence::List(Rc::new(RefCell::new(data.into()))))
     }
 
+    pub(crate) fn collect_list<I, V>(i: I) -> Self
+    where
+        I: Iterator<Item = V>,
+        V: Into<Value>,
+    {
+        Self::list(i.map(Into::into).collect::<Vec<Value>>())
+    }
+
     pub(crate) fn tuple<V: Into<Vec<Self>>>(data: V) -> Self {
         Self::Sequence(Sequence::Tuple(Rc::new(data.into())))
     }
@@ -55,6 +63,10 @@ impl Value {
 
     pub(crate) fn function<T: Into<OverloadedFunction>>(source: T) -> Self {
         Self::Function(Rc::new(RefCell::new(source.into())))
+    }
+
+    pub(crate) fn number<T: Into<Number>>(source: T) -> Self {
+        Self::Number(source.into())
     }
 
     /// If this value is a type of `Sequence` it returns the length of the sequence, otherwise it returns `None`
@@ -372,15 +384,6 @@ impl<'a> TryFrom<&'a mut Value> for &'a mut Sequence {
 impl<'a> From<&'a mut Value> for &'a Value {
     fn from(value: &'a mut Value) -> Self {
         &*value
-    }
-}
-
-// TODO: is this implementation useful, should it be over an Iterator of some kind instead
-impl<T: Into<Self>> From<Vec<T>> for Value {
-    fn from(value: Vec<T>) -> Self {
-        Self::Sequence(Sequence::List(Rc::new(RefCell::new(
-            value.into_iter().map(Into::into).collect(),
-        ))))
     }
 }
 
