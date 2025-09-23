@@ -169,6 +169,10 @@ mod inner {
         }
     }
 
+    pub fn atan2(y: f64, x: f64) -> f64 {
+        y.atan2(x)
+    }
+
     /// Converts a given `Value` to an `Int`.
     ///
     /// Conversion rules:
