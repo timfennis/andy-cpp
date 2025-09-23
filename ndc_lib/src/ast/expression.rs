@@ -43,14 +43,14 @@ pub enum Expression {
     OpAssignment {
         l_value: Lvalue,
         value: Box<ExpressionLocation>,
-        // Should always be an identifier?
+        // TODO: Should always be an identifier?
         operation: Box<ExpressionLocation>,
     },
     FunctionDeclaration {
         name: Option<Box<ExpressionLocation>>,
         arguments: Box<ExpressionLocation>,
-        body: Rc<ExpressionLocation>, //TODO what happens if we remove the Rc?
-        pure: bool,                   // TODO: maybe have flags instead of booleans?
+        body: Rc<ExpressionLocation>,
+        pure: bool,
     },
     Block {
         statements: Vec<ExpressionLocation>,

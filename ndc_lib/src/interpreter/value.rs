@@ -40,9 +40,9 @@ impl Value {
     pub(crate) fn collect_list<I, V>(i: I) -> Self
     where
         I: Iterator<Item = V>,
-        V: Into<Value>,
+        V: Into<Self>,
     {
-        Self::list(i.map(Into::into).collect::<Vec<Value>>())
+        Self::list(i.map(Into::into).collect::<Vec<Self>>())
     }
 
     pub(crate) fn tuple<V: Into<Vec<Self>>>(data: V) -> Self {
