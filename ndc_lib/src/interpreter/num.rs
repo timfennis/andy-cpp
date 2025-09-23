@@ -109,8 +109,14 @@ impl Hash for Number {
                 }
             }
             Self::Rational(r) => {
-                state.write_u8(3);
-                r.hash(state);
+                if r.is_integer() {
+                    // simplify rational
+                    state.write_u8(1);
+                    Int::BigInt(r.to_integer()).hash(state);
+                } else {
+                    state.write_u8(3);
+                    r.hash(state);
+                }
             }
             Self::Complex(c) => {
                 state.write_u8(4);
