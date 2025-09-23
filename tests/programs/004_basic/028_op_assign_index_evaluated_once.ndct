@@ -1,7 +1,7 @@
 --PROGRAM--
 let i = 0;
 fn idx() {
-let     r = i;
+    let r = i;
     i += 1;
     r
 }

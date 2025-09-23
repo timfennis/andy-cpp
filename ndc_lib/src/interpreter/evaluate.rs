@@ -1,12 +1,12 @@
+use either::Either;
+use index::{Offset, evaluate_as_index, set_at_index};
+use itertools::Itertools;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::fmt;
 use std::ops::{Add, BitAnd, BitOr, BitXor, Div, IndexMut, Mul, Rem, Sub};
 use std::rc::Rc;
-
-use either::Either;
-use index::{Offset, evaluate_as_index, set_at_index};
-use itertools::Itertools;
+use std::thread::spawn;
 
 use crate::ast::{
     BinaryOperator, Expression, ExpressionLocation, ForBody, ForIteration, LogicalOperator, Lvalue,
@@ -14,6 +14,7 @@ use crate::ast::{
 use crate::hash_map;
 use crate::hash_map::HashMap;
 use crate::interpreter::environment::{Environment, EnvironmentRef};
+use crate::interpreter::evaluate::index::EvaluatedIndex;
 use crate::interpreter::function::{Function, FunctionBody, FunctionCarrier, OverloadedFunction};
 use crate::interpreter::int::Int;
 use crate::interpreter::iterator::mut_value_to_iterator;
@@ -76,113 +77,26 @@ pub(crate) fn evaluate_expression(
             l_value,
             value,
             operation,
-        } => match l_value {
-            Lvalue::Variable { identifier } => {
-                let Expression::Identifier(operation) = &operation.expression else {
-                    todo!("OpAssignment operation must be Identifier??");
-                };
+        } => {
+            let Expression::Identifier(operation) = &operation.expression else {
+                todo!("OpAssignment operation must be Identifier??");
+            };
 
-                let right_value = evaluate_expression(value, environment)?;
-                let left_value = environment.borrow().take(identifier).unwrap();
+            let right_value = evaluate_expression(value, environment)?;
+            let left_value = take_lvalue(l_value, span, environment)?; // TODO check span
 
-                let result = call_function_by_name(
-                    operation,
-                    &mut [left_value, right_value],
-                    environment,
-                    span,
-                )?;
+            let result = call_function_by_name(
+                operation,
+                &mut [left_value, right_value],
+                environment,
+                span,
+            )?;
 
-                // Assign the result to l_value
-                declare_or_assign_variable(l_value, result.clone(), false, environment, span)?;
+            // Assign the result to l_value
+            declare_or_assign_variable(l_value, result.clone(), false, environment, span)?;
 
-                result
-            }
-            Lvalue::Index {
-                value: lhs_expr,
-                index: index_expr,
-            } => {
-                let assign_to = evaluate_expression(lhs_expr, environment)?;
-                let new_value = match &assign_to {
-                    Value::Sequence(Sequence::List(list)) => {
-                        // It's important that index and right_value are computed before the list is borrowed
-                        let right_value = evaluate_expression(value, environment)?;
-                        let size = list.try_borrow().into_evaluation_result(span)?.len();
-                        let index = evaluate_as_index(index_expr, environment)?
-                            .try_into_offset(size, index_expr.span)?;
-
-                        let mut list = list.try_borrow_mut().into_evaluation_result(span)?;
-
-                        match index {
-                            Offset::Element(index) => {
-                                let list_item = list.index_mut(index);
-
-                                // apply_operation_to_value(
-                                //     environment,
-                                //     list_item,
-                                //     operation,
-                                //     right_value,
-                                //     span,
-                                // )?
-
-                                todo!("not implemented")
-                            }
-                            Offset::Range(_, _) => {
-                                return Err(EvaluationError::syntax_error(
-                                    "cannot use a range expression as index".to_string(),
-                                    span,
-                                )
-                                .into());
-                            }
-                        }
-                    }
-                    Value::Sequence(Sequence::Map(dict, default)) => {
-                        let right_value = evaluate_expression(value, environment)?;
-                        let index = evaluate_expression(index_expr, environment)?;
-
-                        let mut dict = dict.try_borrow_mut().into_evaluation_result(span)?;
-
-                        let map_entry = if let Some(default) = default {
-                            dict.entry(index).or_insert(Value::clone(default))
-                        } else {
-                            dict.get_mut(&index)
-                                .ok_or_else(|| EvaluationError::key_not_found(&index, span))?
-                        };
-
-                        todo!("not implemented")
-                        // apply_operation_to_value(
-                        //     environment,
-                        //     map_entry,
-                        //     operation,
-                        //     right_value,
-                        //     span,
-                        // )?
-                    }
-                    Value::Sequence(Sequence::String(_)) => {
-                        return Err(EvaluationError::new(
-                            "cannot OpAssign into a string".to_string(),
-                            span,
-                        )
-                        .into());
-                    }
-                    _ => {
-                        return Err(EvaluationError::syntax_error(
-                            format!("cannot OpAssign an index into a {}", assign_to.value_type()),
-                            span,
-                        )
-                        .into());
-                    }
-                };
-
-                new_value
-            }
-            Lvalue::Sequence(_) => {
-                return Err(EvaluationError::syntax_error(
-                    "cannot use augmented assignment in combination with destructuring".to_string(),
-                    span,
-                )
-                .into());
-            }
-        },
+            result
+        }
         Expression::Block { statements } => {
             let mut local_scope = Environment::new_scope(environment);
 
@@ -480,7 +394,7 @@ pub(crate) fn evaluate_expression(
                                 );
                             };
 
-                            Value::list(values.to_vec()) // TODO: can we remove to_vec?
+                            Value::list(values)
                         }
                     }
                 }
@@ -629,6 +543,55 @@ pub(crate) fn evaluate_expression(
     Ok(literal)
 }
 
+fn take_lvalue(
+    lvalue: &Lvalue,
+    lvalue_span: Span,
+    environment: &mut EnvironmentRef,
+) -> EvaluationResult {
+    match lvalue {
+        Lvalue::Variable { identifier } => {
+            let value = environment
+                .borrow()
+                .take(identifier)
+                .ok_or_else(|| EvaluationError::undefined_variable(identifier, lvalue_span))?;
+
+            Ok(value)
+        }
+        Lvalue::Index { value, index } => {
+            let v = evaluate_expression(value, environment)?;
+            let i = evaluate_as_index(index, environment)?;
+            let result = index_into_value(v, i, lvalue_span)?;
+            Ok(result)
+        }
+        Lvalue::Sequence(_) => todo!("sequencing not implemented"),
+    }
+}
+
+fn index_into_value(value: Value, index: EvaluatedIndex, lvalue_span: Span) -> EvaluationResult {
+    match value {
+        Value::Sequence(Sequence::List(list)) => {
+            let size = list.try_borrow().into_evaluation_result(lvalue_span)?.len();
+            let index = index.try_into_offset(size, lvalue_span)?;
+
+            let mut list = list.try_borrow_mut().into_evaluation_result(lvalue_span)?;
+            match index {
+                Offset::Element(index) => {
+                    let list_item = std::mem::replace(list.index_mut(index), Value::unit());
+                    Ok(list_item)
+                }
+                Offset::Range(_, _) => todo!("range expression not implemented here"),
+            }
+        }
+        Value::Sequence(Sequence::Map(map, def)) => todo!(),
+        Value::Sequence(Sequence::String(string)) => todo!(),
+        _ => Err(EvaluationError::syntax_error(
+            format!("cannot OpAssign an index into a {}", value.value_type()),
+            lvalue_span,
+        )
+        .into()),
+    }
+}
+
 fn produce_default_value(
     default: &Value,
     environment: &EnvironmentRef,
@@ -702,15 +665,15 @@ fn declare_or_assign_variable(
                 .into());
             }
         }
-        Lvalue::Index { .. } => {
-            return Err(EvaluationError::syntax_error(
-                format!(
-                    "Can't declare values into {}",
-                    l_value.expression_type_name()
-                ),
-                span,
-            )
-            .into());
+        Lvalue::Index {
+            value: lhs_expr,
+            index,
+        } => {
+            let mut lhs = evaluate_expression(lhs_expr, environment)?;
+
+            let index = evaluate_as_index(index, environment)?;
+
+            set_at_index(&mut lhs, value, index, span)?;
         }
     };
 
