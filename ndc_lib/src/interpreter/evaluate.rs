@@ -6,7 +6,6 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::ops::{Add, BitAnd, BitOr, BitXor, Div, IndexMut, Mul, Rem, Sub};
 use std::rc::Rc;
-use std::thread::spawn;
 
 use crate::ast::{
     BinaryOperator, Expression, ExpressionLocation, ForBody, ForIteration, LogicalOperator, Lvalue,
@@ -14,7 +13,7 @@ use crate::ast::{
 use crate::hash_map;
 use crate::hash_map::HashMap;
 use crate::interpreter::environment::{Environment, EnvironmentRef};
-use crate::interpreter::evaluate::index::EvaluatedIndex;
+use crate::interpreter::evaluate::index::{EvaluatedIndex, get_at_index};
 use crate::interpreter::function::{Function, FunctionBody, FunctionCarrier, OverloadedFunction};
 use crate::interpreter::int::Int;
 use crate::interpreter::iterator::mut_value_to_iterator;
@@ -75,27 +74,49 @@ pub(crate) fn evaluate_expression(
         },
         Expression::OpAssignment {
             l_value,
-            value,
+            value: rhs_value,
             operation,
         } => {
             let Expression::Identifier(operation) = &operation.expression else {
                 todo!("OpAssignment operation must be Identifier??");
             };
+            match l_value {
+                Lvalue::Variable { identifier } => {
+                    let Some(lhs) = environment.borrow_mut().take(identifier) else {
+                        return Err(EvaluationError::undefined_variable(identifier, span).into());
+                    };
+                    let rhs = evaluate_expression(rhs_value, environment)?;
 
-            let right_value = evaluate_expression(value, environment)?;
-            let left_value = take_lvalue(l_value, span, environment)?; // TODO check span
+                    let result =
+                        call_function_by_name(operation, &mut [lhs, rhs], environment, span)?;
 
-            let result = call_function_by_name(
-                operation,
-                &mut [left_value, right_value],
-                environment,
-                span,
-            )?;
+                    environment.borrow_mut().assign(identifier, result);
 
-            // Assign the result to l_value
-            declare_or_assign_variable(l_value, result.clone(), false, environment, span)?;
+                    Value::unit()
+                }
+                Lvalue::Index {
+                    value: lhs_expression,
+                    index: index_expression,
+                } => {
+                    let mut lhs_value = evaluate_expression(lhs_expression, environment)?;
+                    let index = evaluate_as_index(index_expression, environment)?;
+                    let value_at_index = get_at_index(&lhs_value, index.clone(), span)?;
 
-            result
+                    let right_value = evaluate_expression(rhs_value, environment)?;
+
+                    let result = call_function_by_name(
+                        operation,
+                        &mut [value_at_index, right_value],
+                        environment,
+                        span,
+                    )?;
+
+                    set_at_index(&mut lhs_value, result, index, span)?;
+
+                    Value::unit()
+                }
+                Lvalue::Sequence(_) => todo!(),
+            }
         }
         Expression::Block { statements } => {
             let mut local_scope = Environment::new_scope(environment);

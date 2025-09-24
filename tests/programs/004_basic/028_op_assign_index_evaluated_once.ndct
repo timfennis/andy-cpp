@@ -7,6 +7,6 @@ fn idx() {
 
 let unit_list = [0];
 unit_list[idx()] += 10;
-print("val:", unit_list[0], ", invoked:", counter);
+print("val:", unit_list[0],"invoked:", counter);
 --EXPECT--
-val: 10, invoked: 1
+val: 10 invoked: 1
