@@ -1,13 +1,12 @@
 --PROGRAM--
-let i = 0;
+let counter = 0;
 fn idx() {
-    let r = i;
-    i += 1;
-    r
+    counter += 1;
+    0
 }
 
-let foo = [0];
-foo[idx()] += 10;
-print(foo[0], i)
+let unit_list = [0];
+unit_list[idx()] += 10;
+print("val:", unit_list[0], ", invoked:", counter);
 --EXPECT--
-10 1
+val: 10, invoked: 1
