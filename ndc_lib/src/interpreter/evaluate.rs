@@ -74,23 +74,28 @@ pub(crate) fn evaluate_expression(
         },
         Expression::OpAssignment {
             l_value,
-            value: rhs_value,
+            r_value,
             operation,
         } => {
-            let Expression::Identifier(operation) = &operation.expression else {
+            dbg!(l_value, operation, r_value);
+
+            // Identifier may be an operator such as "++"
+            let Expression::Identifier(operation_ident) = &operation.expression else {
                 todo!("OpAssignment operation must be Identifier??");
             };
             match l_value {
                 Lvalue::Variable { identifier } => {
+                    let rhs = evaluate_expression(r_value, environment)?;
                     let Some(lhs) = environment.borrow_mut().take(identifier) else {
                         return Err(EvaluationError::undefined_variable(identifier, span).into());
                     };
-                    let rhs = evaluate_expression(rhs_value, environment)?;
 
+                    // TODO: modify operation_ident into its op-assign counterpart (for example: `++` to `++=`) and check if a special implementation exists?
                     let result =
-                        call_function_by_name(operation, &mut [lhs, rhs], environment, span)?;
+                        call_function_by_name(operation_ident, &mut [lhs, rhs], environment, span)?;
 
-                    environment.borrow_mut().assign(identifier, result);
+                    environment.borrow_mut().assign(identifier, result); // TODO: this messes up semantics
+                    // x = x ++ y
 
                     Value::unit()
                 }
@@ -102,10 +107,10 @@ pub(crate) fn evaluate_expression(
                     let index = evaluate_as_index(index_expression, environment)?;
                     let value_at_index = get_at_index(&lhs_value, index.clone(), span)?;
 
-                    let right_value = evaluate_expression(rhs_value, environment)?;
+                    let right_value = evaluate_expression(r_value, environment)?;
 
                     let result = call_function_by_name(
-                        operation,
+                        operation_ident,
                         &mut [value_at_index, right_value],
                         environment,
                         span,

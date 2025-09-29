@@ -42,7 +42,7 @@ pub enum Expression {
     },
     OpAssignment {
         l_value: Lvalue,
-        value: Box<ExpressionLocation>,
+        r_value: Box<ExpressionLocation>,
         // TODO: Should always be an identifier?
         operation: Box<ExpressionLocation>,
     },
@@ -305,7 +305,7 @@ impl fmt::Debug for ExpressionLocation {
                 .finish(),
             Expression::OpAssignment {
                 l_value,
-                value,
+                r_value: value,
                 operation,
             } => f
                 .debug_struct("OpAssignment")

@@ -84,6 +84,7 @@ mod inner {
 
     #[function(name = "++")]
     pub fn list_concat(left: ListRepr, right: ListRepr) -> Value {
+        // TODO: can we/should we optimize here if Rc::strong_count = 1 for the lhs
         Value::list(
             left.borrow()
                 .iter()
