@@ -1,4 +1,3 @@
-use either::Either;
 use index::{Offset, evaluate_as_index, set_at_index};
 use itertools::Itertools;
 use std::cell::RefCell;
@@ -77,7 +76,7 @@ pub(crate) fn evaluate_expression(
             r_value,
             operation,
         } => {
-            dbg!(l_value, operation, r_value);
+            // dbg!(l_value, operation, r_value);
 
             // Identifier may be an operator such as "++"
             let Expression::Identifier(operation_ident) = &operation.expression else {
@@ -90,11 +89,36 @@ pub(crate) fn evaluate_expression(
                         return Err(EvaluationError::undefined_variable(identifier, span).into());
                     };
 
-                    // TODO: modify operation_ident into its op-assign counterpart (for example: `++` to `++=`) and check if a special implementation exists?
-                    let result =
-                        call_function_by_name(operation_ident, &mut [lhs, rhs], environment, span)?;
+                    let mut arguments = [lhs, rhs];
 
-                    environment.borrow_mut().assign(identifier, result); // TODO: this messes up semantics
+                    // If the identifier is `++` we try to look for a function called `++=` first because we assume that implementation is faster.
+                    let op_assign_ident = format!("{operation_ident}=");
+                    // TODO: since we don't provide the user with operator overloading we could write a faster version of get_all_by_name that just looks in the root scope
+                    let values = environment.borrow().get_all_by_name(&op_assign_ident);
+                    let op_assign_result =
+                        try_call_function_from_values(&values, &mut arguments, environment, span);
+
+                    // Only if there is no function that matches the op_assign signature we continue and try the fallback implementation
+                    match op_assign_result {
+                        Err(FunctionCarrier::FunctionNotFound) => {
+                            // do nothing continue below
+                        }
+                        err @ Err(_) => return err.into_evaluation_result(span),
+                        Ok(value) => {
+                            // At the start of this branch we used `take` to temporarily remove the value from the environment (leaving a unit behind)
+                            // this helps prevent race conditions in case the operator tries to access its environment but it does require us to put back the LHS
+                            environment.borrow_mut().assign(identifier, value);
+
+                            // Op assignment now returns unit
+                            return Ok(Value::unit());
+                        }
+                    }
+
+                    // Execute: `a += b` as `a = a + b`
+                    let result =
+                        call_function_by_name(operation_ident, &mut arguments, environment, span)?;
+
+                    environment.borrow_mut().assign(identifier, result); // TODO: does this mess up semantics??!?
                     // x = x ++ y
 
                     Value::unit()
@@ -120,7 +144,14 @@ pub(crate) fn evaluate_expression(
 
                     Value::unit()
                 }
-                Lvalue::Sequence(_) => todo!(),
+                Lvalue::Sequence(_) => {
+                    return Err(EvaluationError::syntax_error(
+                        "cannot use augmented assignment in combination with destructuring"
+                            .to_string(),
+                        span,
+                    )
+                    .into());
+                }
             }
         }
         Expression::Block { statements } => {
@@ -233,7 +264,7 @@ pub(crate) fn evaluate_expression(
             } else {
                 let function_as_value = evaluate_expression(function, environment)?;
 
-                match try_call_function(
+                match try_call_function_from_values(
                     &[RefCell::new(function_as_value)],
                     &mut evaluated_args,
                     environment,
@@ -1107,6 +1138,13 @@ where
     }
 }
 
+/// Attempt to call a function using its name (like: 'max' or '+')
+///
+/// Arguments:
+///     * `name`: name of the function to lookup in the environment
+///     * `evaluated_args`: a slice of values passed as arguments to the function
+///     * `environment`: the execution environment for the function
+///     * `span`: span of the expression used for error reporting
 fn call_function_by_name(
     name: &str,
     evaluated_args: &mut [Value],
@@ -1114,7 +1152,7 @@ fn call_function_by_name(
     span: Span,
 ) -> EvaluationResult {
     let values = environment.borrow().get_all_by_name(name);
-    let result = try_call_function(&values, evaluated_args, environment, span);
+    let result = try_call_function_from_values(&values, evaluated_args, environment, span);
     if let Err(FunctionCarrier::FunctionNotFound) = result {
         let arguments = evaluated_args.iter().map(Value::value_type).join(", ");
         return Err(FunctionCarrier::EvaluationError(EvaluationError::new(
@@ -1126,12 +1164,15 @@ fn call_function_by_name(
     result
 }
 
-/// Executes a function with some extra steps:
+/// Given a bunch of values (hopefully functions) this function executes the one that matches the
+/// given arguments or returns a `FunctionNotFound` error if non match.
+///
+/// Arguments:
 ///     * `values`: a list of values that are attempted to be executed in the order they appear in
 ///     * `evaluated_args`: a slice of values passed as arguments to the function
 ///     * `environment`: the execution environment for the function
 ///     * `span`: span of the expression used for error reporting
-fn try_call_function(
+fn try_call_function_from_values(
     values: &[RefCell<Value>],
     evaluated_args: &mut [Value],
     environment: &EnvironmentRef,
@@ -1143,10 +1184,12 @@ fn try_call_function(
     //
     // This implies that a less specific function can shadow a more specific function
     //
-    // fn sqrt(n: Float);
-    // {
-    //      fn sqrt(n: Number); // Shadows the sqrt in the parent scope completely
-    // }
+    // ```ndc
+    //   fn sqrt(n: Float) {}
+    //   {
+    //       fn sqrt(n: Number) {} // Shadows the sqrt in the parent scope completely
+    //   }
+    // ```
     for value in values {
         let value = &*value.borrow();
 
