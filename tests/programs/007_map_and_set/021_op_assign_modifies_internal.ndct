@@ -1,0 +1,19 @@
+--PROGRAM--
+// This test validates that using the |= operator modifies the variable in place
+
+let x = %{
+  "foo": 1,
+  "bar": 2,
+};
+
+let y = x;
+
+x |= %{"baz": 3};
+
+assert(x == y);
+assert(x.len == 3);
+assert(y.len == 3);
+
+print("ok")
+--EXPECT--
+ok
