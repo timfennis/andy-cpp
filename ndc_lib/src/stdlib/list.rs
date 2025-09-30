@@ -94,6 +94,35 @@ mod inner {
         )
     }
 
+    #[function(name = "++=")]
+    pub fn list_append_operator(left: ListRepr, right: ListRepr) -> Value {
+        // The ++= operator has 3 implementation paths, this first one is the case where a list extends iteself
+        if Rc::ptr_eq(&left, &right) {
+            left.borrow_mut().extend_from_within(..);
+        } else {
+            match Rc::try_unwrap(right) {
+                // The second path deals with a RHS that has an RC of one, in this case we can drain the RHS which should be faster than copying?
+                Ok(right) => {
+                    left.borrow_mut().append(
+                        &mut right
+                            .try_borrow_mut()
+                            .expect("Failed to borrow_mut in `list_append_operator`"),
+                    );
+                }
+                // The last path is if the RHS has an RC that's higher than 1, in this case we copy all the elements into the LHS
+                Err(right) => {
+                    left.borrow_mut().extend_from_slice(
+                        &right
+                            .try_borrow()
+                            .expect("Failed to borrow in `list_append_operator`"),
+                    );
+                }
+            }
+        }
+
+        Value::Sequence(Sequence::List(left))
+    }
+
     /// Copies elements from `other` to `list` not touching `other`.
     pub fn extend(list: &mut Vec<Value>, other: &[Value]) {
         list.extend_from_slice(other);
