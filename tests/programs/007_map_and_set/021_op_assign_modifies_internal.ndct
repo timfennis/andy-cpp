@@ -14,6 +14,13 @@ assert(x == y);
 assert(x.len == 3);
 assert(y.len == 3);
 
+let z = x;
+
+z &= %{"bar": 10};
+
+assert(x == y and y == z);
+assert(x.len == 1 and y.len == 1 and z.len == 1);
+
 print("ok")
 --EXPECT--
 ok

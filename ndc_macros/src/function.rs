@@ -248,6 +248,9 @@ fn into_param_type(ty: &syn::Type) -> TokenStream {
         ty if path_ends_with(ty, "TupleRepr") => {
             quote! { crate::interpreter::function::ParamType::Tuple }
         }
+        ty if path_ends_with(ty, "MapRepr") => {
+            quote! { crate::interpreter::function::ParamType::Map }
+        }
         syn::Type::Reference(syn::TypeReference { elem, .. }) => into_param_type(elem),
         syn::Type::Path(syn::TypePath { path, .. }) => match path {
             _ if path.is_ident("i64") => quote! { crate::interpreter::function::ParamType::Int },
