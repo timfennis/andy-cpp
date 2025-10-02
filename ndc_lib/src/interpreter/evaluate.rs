@@ -38,7 +38,6 @@ pub(crate) fn evaluate_expression(
         Expression::BigIntLiteral(n) => Value::Number(Number::Int(Int::BigInt(n.clone()))),
         Expression::Float64Literal(n) => Value::Number(Number::Float(*n)),
         Expression::ComplexLiteral(n) => Value::Number(Number::Complex(*n)),
-        // Expression::Unary {
         Expression::Grouping(expr) => evaluate_expression(expr, environment)?,
         Expression::VariableDeclaration { l_value, value } => {
             let value = evaluate_expression(value, environment)?;
@@ -76,8 +75,6 @@ pub(crate) fn evaluate_expression(
             r_value,
             operation,
         } => {
-            // dbg!(l_value, operation, r_value);
-
             // Identifier may be an operator such as "++"
             let Expression::Identifier(operation_ident) = &operation.expression else {
                 todo!("OpAssignment operation must be Identifier??");
@@ -86,6 +83,7 @@ pub(crate) fn evaluate_expression(
                 Lvalue::Variable { identifier } => {
                     let rhs = evaluate_expression(r_value, environment)?;
                     let Some(lhs) = environment.borrow_mut().take(identifier) else {
+                        // TODO: this statement does damage which isn't reverted when for instance we can't find the function
                         return Err(EvaluationError::undefined_variable(identifier, span).into());
                     };
 
@@ -104,14 +102,19 @@ pub(crate) fn evaluate_expression(
                             // do nothing continue below
                         }
                         err @ Err(_) => return err.into_evaluation_result(span),
-                        Ok(value) => {
+                        Ok(x) if x == Value::unit() => {
+                            // TODO is this check to slow
                             // At the start of this branch we used `take` to temporarily remove the value from the environment (leaving a unit behind)
                             // this helps prevent race conditions in case the operator tries to access its environment but it does require us to put back the LHS
-                            environment.borrow_mut().assign(identifier, value);
+                            let [lhs, _] = arguments;
+                            environment.borrow_mut().assign(identifier, lhs);
 
                             // Op assignment now returns unit
                             return Ok(Value::unit());
                         }
+                        Ok(_) => panic!(
+                            "OpAssign implementation is not meant to return a non unit value"
+                        ),
                     }
 
                     // Execute: `a += b` as `a = a + b`

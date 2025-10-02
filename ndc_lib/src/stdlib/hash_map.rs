@@ -1,12 +1,14 @@
 use crate::hash_map;
 use crate::hash_map::HashMap;
-use crate::interpreter::sequence::{DefaultMap, Sequence};
+use crate::hash_map::HashMapExt;
+use crate::interpreter::sequence::{DefaultMap, MapRepr, Sequence};
 use crate::interpreter::value::Value;
 use std::cell::RefCell;
 use std::rc::Rc;
 
 #[ndc_macros::export_module]
 mod inner {
+
     /// Returns a list of all the keys in the map or set.
     ///
     /// Note that for a set this will return the values in the set.
@@ -44,6 +46,57 @@ mod inner {
     #[function(name = "insert")]
     pub fn insert_set(map: &mut HashMap<Value, Value>, key: Value) {
         map.insert(key, Value::unit());
+    }
+
+    #[function(name = "&=")]
+    pub fn intersect_assign(lhs: &mut MapRepr, rhs: &mut MapRepr) {
+        let left_map: &mut HashMap<Value, Value> = &mut lhs
+            .try_borrow_mut()
+            .expect("Failed to mutably borrow the lhs of &= operator");
+
+        left_map.intersection(
+            &*rhs
+                .try_borrow()
+                .expect("Failed borrow the rhs of &= operator"),
+        );
+    }
+
+    #[function(name = "|=")]
+    pub fn union_assign(lhs: &mut MapRepr, rhs: &mut MapRepr) {
+        let left_map: &mut HashMap<Value, Value> = &mut lhs.borrow_mut();
+
+        if Rc::strong_count(rhs) == 1 {
+            // Take ownership
+            let rhs = std::mem::take(&mut *rhs.borrow_mut());
+            left_map.union(rhs);
+        } else {
+            let right = rhs.borrow();
+            for (key, value) in right.iter() {
+                left_map.insert(key.clone(), value.clone());
+            }
+        }
+    }
+
+    #[function(name = "-=")]
+    pub fn difference_assign(lhs: &mut MapRepr, rhs: &mut MapRepr) {
+        let left_map: &mut HashMap<Value, Value> = &mut lhs.borrow_mut();
+
+        left_map.difference(&*rhs.borrow());
+    }
+
+    #[function(name = "~=")]
+    pub fn symmetric_difference_assign(lhs: &mut MapRepr, rhs: &mut MapRepr) {
+        // TODO: is this implementation optimal enough?
+        let diff = hash_map::symmetric_difference(
+            &*lhs
+                .try_borrow()
+                .expect("Failed to borrow the lhs of ~= operator"),
+            &*rhs
+                .try_borrow()
+                .expect("Failed borrow the rhs of ~= operator"),
+        );
+
+        *lhs.borrow_mut() = diff;
     }
 
     /// Returns the union (elements that are in either `left` or `right`) of two maps or sets.
