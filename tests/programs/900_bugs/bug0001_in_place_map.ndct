@@ -1,10 +1,7 @@
 --PROGRAM--
 fn mut_map(list, function) {
-let   len = 0;
-  for item in list { len = len + 1 };
-
-let   index = 0;
-  while index < len {
+  let index = 0;
+  while index < list.len {
     // BUG#0001: this line used to fail because list had a mutable and immutable borrow at the same time
     list[index] = function(list[index]);
     index = index + 1;

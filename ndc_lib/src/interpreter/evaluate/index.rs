@@ -17,9 +17,11 @@ use crate::{
     },
     lexer::Span,
 };
+use itertools::Itertools;
 use std::cmp::min;
 use std::ops::IndexMut;
 
+#[derive(Clone)]
 pub enum EvaluatedIndex {
     Index(Value),
     Slice {
@@ -167,6 +169,69 @@ impl Offset {
     }
 }
 
+pub fn get_at_index(
+    lhs: &Value,
+    index: EvaluatedIndex,
+    span: Span,
+) -> Result<Value, FunctionCarrier> {
+    let Some(size) = lhs.sequence_length() else {
+        return Err(EvaluationError::new(
+            "cannot index into this type because it doesn't have a length".to_string(),
+            span,
+        )
+        .into());
+    };
+
+    match lhs {
+        Value::Sequence(Sequence::List(list)) => {
+            let list = list.borrow();
+            let index = index.try_into_offset(size, span)?;
+
+            match index {
+                Offset::Element(index_usize) => Ok(list[index_usize].clone()),
+                Offset::Range(from_usize, to_usize) => Ok(Value::list(&list[from_usize..to_usize])),
+            }
+        }
+        Value::Sequence(Sequence::String(insertion_target)) => {
+            let index = index.try_into_offset(size, span)?;
+            Ok(Value::string(match index {
+                Offset::Element(e) => insertion_target
+                    .borrow()
+                    .chars()
+                    .nth(e)
+                    .map(|x| String::from(x))
+                    .expect("TODO: fix this unwrap (NOTE: maybe we're guaranteed to succeed??)"),
+                Offset::Range(s, e) => insertion_target
+                    .borrow()
+                    .chars()
+                    .dropping(s)
+                    .take(e)
+                    .collect::<String>(),
+            }))
+        }
+        Value::Sequence(Sequence::Map(map, _)) => {
+            let map = map.try_borrow_mut().into_evaluation_result(span)?;
+
+            let key = match index {
+                EvaluatedIndex::Index(idx) => idx,
+                EvaluatedIndex::Slice { .. } => {
+                    return Err(EvaluationError::syntax_error(
+                        "cannot use range expression as index in map".to_string(),
+                        span,
+                    )
+                    .into());
+                }
+            };
+
+            Ok(map.get(&key).expect("TODO: fix this error").clone())
+        }
+        _ => Err(EvaluationError::syntax_error(
+            format!("cannot insert into {} at index", lhs.value_type()),
+            span,
+        )
+        .into()),
+    }
+}
 pub fn set_at_index(
     lhs: &mut Value,
     rhs: Value,

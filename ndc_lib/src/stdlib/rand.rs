@@ -33,10 +33,12 @@ mod inner {
     /// Returns a copy of the input sequence converted to a list with the elements shuffled in random order.
     ///
     /// Note: this currently does consume iterators
-    pub fn shuffled(list: &mut Sequence) -> Vec<Value> {
-        mut_seq_to_iterator(list)
-            .collect_vec()
-            .tap_mut(|v| v.shuffle(&mut rand::rng()))
+    pub fn shuffled(list: &mut Sequence) -> Value {
+        Value::list(
+            mut_seq_to_iterator(list)
+                .collect_vec()
+                .tap_mut(|v| v.shuffle(&mut rand::rng())),
+        )
     }
 
     #[function(name = "randf")]

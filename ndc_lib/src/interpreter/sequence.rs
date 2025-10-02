@@ -8,14 +8,17 @@ use std::collections::VecDeque;
 use std::fmt;
 use std::rc::Rc;
 
-pub type DefaultMapMut<'a> = (&'a mut HashMap<Value, Value>, Option<Box<Value>>);
 pub type DefaultMap<'a> = (&'a HashMap<Value, Value>, Option<Box<Value>>);
+pub type DefaultMapMut<'a> = (&'a mut HashMap<Value, Value>, Option<Box<Value>>);
+pub type ListRepr = Rc<RefCell<Vec<Value>>>;
+pub type TupleRepr = Rc<Vec<Value>>;
+pub type MapRepr = Rc<RefCell<HashMap<Value, Value>>>;
 
 #[derive(Clone)]
 pub enum Sequence {
     String(Rc<RefCell<String>>),
-    List(Rc<RefCell<Vec<Value>>>),
-    Tuple(Rc<Vec<Value>>),
+    List(ListRepr),
+    Tuple(TupleRepr),
     Map(Rc<RefCell<HashMap<Value, Value>>>, Option<Box<Value>>),
     Iterator(Rc<RefCell<ValueIterator>>),
     MaxHeap(Rc<RefCell<MaxHeap>>),

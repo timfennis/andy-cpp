@@ -1,4 +1,4 @@
-use crate::ast::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
+use crate::ast::operator::{BinaryOperator, LogicalOperator};
 use crate::ast::parser::Error as ParseError;
 use crate::interpreter::evaluate::EvaluationError;
 use crate::lexer::Span;
@@ -25,17 +25,7 @@ pub enum Expression {
     BigIntLiteral(BigInt),
     ComplexLiteral(Complex64),
     Identifier(String),
-    //
     Statement(Box<ExpressionLocation>),
-    Unary {
-        operator: UnaryOperator,
-        expression: Box<ExpressionLocation>,
-    },
-    Binary {
-        left: Box<ExpressionLocation>,
-        operator: BinaryOperator,
-        right: Box<ExpressionLocation>,
-    },
     Logical {
         left: Box<ExpressionLocation>,
         operator: LogicalOperator,
@@ -52,14 +42,15 @@ pub enum Expression {
     },
     OpAssignment {
         l_value: Lvalue,
-        value: Box<ExpressionLocation>,
-        operation: Either<BinaryOperator, String>,
+        r_value: Box<ExpressionLocation>,
+        // TODO: Should always be an identifier?
+        operation: Box<ExpressionLocation>,
     },
     FunctionDeclaration {
         name: Option<Box<ExpressionLocation>>,
         arguments: Box<ExpressionLocation>,
-        body: Rc<ExpressionLocation>, //TODO what happens if we remove the Rc?
-        pure: bool,                   // TODO: maybe have flags instead of booleans?
+        body: Rc<ExpressionLocation>,
+        pure: bool,
     },
     Block {
         statements: Vec<ExpressionLocation>,
@@ -288,24 +279,6 @@ impl fmt::Debug for ExpressionLocation {
                 .debug_struct("Statement")
                 .field("expression", &expression_location)
                 .finish(),
-            Expression::Unary {
-                operator,
-                expression,
-            } => f
-                .debug_struct("Unary")
-                .field("operator", operator)
-                .field("expression", expression)
-                .finish(),
-            Expression::Binary {
-                left,
-                operator,
-                right,
-            } => f
-                .debug_struct("Binary")
-                .field("left", left)
-                .field("operator", operator)
-                .field("right", right)
-                .finish(),
             Expression::Logical {
                 left,
                 operator,
@@ -332,7 +305,7 @@ impl fmt::Debug for ExpressionLocation {
                 .finish(),
             Expression::OpAssignment {
                 l_value,
-                value,
+                r_value: value,
                 operation,
             } => f
                 .debug_struct("OpAssignment")

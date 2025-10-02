@@ -4,16 +4,15 @@ use std::hash::{Hash, Hasher};
 use std::num::TryFromIntError;
 use std::ops::{Add, Div, Mul, Neg, Not, Rem, Sub};
 
+use super::value::ValueType;
+use crate::ast::BinaryOperator;
+use crate::interpreter::evaluate::EvaluationError;
+use crate::interpreter::int::Int;
+use crate::lexer::Span;
 use num::bigint::TryFromBigIntError;
 use num::complex::{Complex64, ComplexFloat};
 use num::{BigInt, BigRational, Complex, FromPrimitive, Signed, ToPrimitive, Zero};
 use ordered_float::OrderedFloat;
-
-use crate::interpreter::evaluate::EvaluationError;
-use crate::interpreter::int::Int;
-use crate::lexer::Span;
-
-use super::value::ValueType;
 
 #[derive(Debug, Clone)]
 pub enum Number {
@@ -74,17 +73,6 @@ impl PartialEq for Number {
 impl Default for Number {
     fn default() -> Self {
         Self::Int(Int::Int64(0))
-    }
-}
-
-impl PartialEq for Int {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::BigInt(left), Self::BigInt(right)) => left == right,
-            (Self::BigInt(left), Self::Int64(right)) => left == &BigInt::from(*right),
-            (Self::Int64(left), Self::BigInt(right)) => &BigInt::from(*left) == right,
-            (Self::Int64(left), Self::Int64(right)) => left == right,
-        }
     }
 }
 
@@ -218,12 +206,39 @@ impl<'a> Unbox for &'a Box<BigRational> {
     }
 }
 
+#[derive(Debug)]
+pub struct BinaryOperatorError(String);
+
+impl fmt::Display for BinaryOperatorError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for BinaryOperatorError {}
+
+impl BinaryOperatorError {
+    pub fn new(message: String) -> Self {
+        Self(message)
+    }
+
+    pub fn undefined_operation(
+        operator: BinaryOperator,
+        left: ValueType,
+        right: ValueType,
+    ) -> Self {
+        Self(format!(
+            "operator {operator} is not defined for {left} and {right}"
+        ))
+    }
+}
+
 macro_rules! impl_binary_operator {
     ($self:ty, $other:ty, $trait:ident, $method:ident,$intmethod:expr,$floatmethod:expr,$rationalmethod:expr,$complexmethod:expr) => {
         impl $trait<$other> for $self {
-            type Output = Number;
-            fn $method(self, other: $other) -> Number {
-                match (self, other) {
+            type Output = Result<Number, BinaryOperatorError>;
+            fn $method(self, other: $other) -> Self::Output {
+                Ok(match (self, other) {
                     // Integer
                     (Number::Int(left), Number::Int(right)) => Number::Int($intmethod(left, right)),
                     // Complex
@@ -253,7 +268,7 @@ macro_rules! impl_binary_operator {
                         left.unbox(),
                         right.to_rational().expect("cannot convert to rational"),
                     )),
-                }
+                })
             }
         }
     };
@@ -325,33 +340,25 @@ impl Div<&Number> for &Number {
 }
 
 impl Div<Self> for Number {
-    type Output = Self;
+    type Output = Result<Self, BinaryOperatorError>;
 
     fn div(self, rhs: Self) -> Self::Output {
-        &self / &rhs
+        Ok(&self / &rhs)
     }
 }
 impl Div<&Self> for Number {
-    type Output = Self;
+    type Output = Result<Self, BinaryOperatorError>;
 
     fn div(self, rhs: &Self) -> Self::Output {
-        &self / rhs
+        Ok(&self / rhs)
     }
 }
 impl Div<Number> for &Number {
-    type Output = Number;
+    type Output = Result<Number, BinaryOperatorError>;
 
     fn div(self, rhs: Number) -> Self::Output {
-        self / &rhs
+        Ok(self / &rhs)
     }
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum EuclideanDivisionError {
-    #[error("euclidean division failed (because division by zero?)")]
-    OperationFailed,
-    #[error("euclidean division is not defined for {left} and {right}")]
-    UndefinedOperation { left: NumberType, right: NumberType },
 }
 
 impl Number {
@@ -380,35 +387,35 @@ impl Number {
         }
     }
 
-    pub fn checked_rem_euclid(self, rhs: Self) -> Result<Self, EuclideanDivisionError> {
+    pub fn checked_rem_euclid(self, rhs: Self) -> Result<Self, BinaryOperatorError> {
         match (self, rhs) {
             (Self::Int(p1), Self::Int(p2)) => p1
                 .checked_rem_euclid(&p2)
-                .ok_or(EuclideanDivisionError::OperationFailed)
+                .ok_or(BinaryOperatorError::new("operation failed".to_string()))
                 .map(Self::Int),
 
             (Self::Float(p1), Self::Float(p2)) => Ok(Self::Float(p1.rem_euclid(p2))),
-            (left, right) => Err(EuclideanDivisionError::UndefinedOperation {
-                left: NumberType::from(&left),
-                right: NumberType::from(&right),
-            }),
+            (left, right) => Err(BinaryOperatorError::undefined_operation(
+                BinaryOperator::EuclideanModulo,
+                ValueType::from(left),
+                ValueType::from(right),
+            )),
         }
     }
 
-    #[must_use]
-    pub fn floor_div(self, rhs: Self) -> Self {
+    pub fn floor_div(self, rhs: Self) -> Result<Self, BinaryOperatorError> {
         match (self, rhs) {
             // Handle this case separately because it's faster??
             (Self::Int(Int::Int64(l)), Self::Int(Int::Int64(r))) => {
-                Self::Int(Int::Int64(l.div_euclid(r)))
+                Ok(Self::Int(Int::Int64(l.div_euclid(r))))
             }
-            (l, r) => (l / r).floor(),
+            (l, r) => Ok(l.div(r)?.floor()),
         }
     }
 
     #[must_use]
-    pub fn pow(self, rhs: Self) -> Self {
-        match (self, rhs) {
+    pub fn pow(self, rhs: Self) -> Result<Self, BinaryOperatorError> {
+        Ok(match (self, rhs) {
             // Int vs others
             (Self::Int(p1), Self::Int(p2)) => {
                 if p2.is_negative() {
@@ -426,7 +433,7 @@ impl Number {
             }
             (Self::Int(p1), Self::Rational(p2)) => {
                 if p2.is_integer() {
-                    return Self::Int(p1.pow(&Int::BigInt(p2.to_integer())));
+                    return Ok(Self::Int(p1.pow(&Int::BigInt(p2.to_integer()))));
                 }
 
                 Self::Float(f64::from(p1).powf(rational_to_float(&p2)))
@@ -439,7 +446,7 @@ impl Number {
             (Self::Rational(p1), Self::Rational(p2)) => {
                 if p2.is_integer() {
                     if let Some(p2) = p2.to_i32() {
-                        return Self::Rational(Box::new(p1.pow(p2)));
+                        return Ok(Self::Rational(Box::new(p1.pow(p2))));
                     }
                 }
 
@@ -465,7 +472,7 @@ impl Number {
             (Self::Complex(p1), Self::Rational(p2)) => {
                 Self::Complex(p1.powc(rational_to_complex(&p2)))
             }
-        }
+        })
     }
 
     /// # Errors

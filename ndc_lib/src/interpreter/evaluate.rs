@@ -1,24 +1,22 @@
+use index::{Offset, evaluate_as_index, set_at_index};
+use itertools::Itertools;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::fmt;
-use std::ops::{Add, BitAnd, BitOr, BitXor, Div, IndexMut, Mul, Neg, Not, Rem, Sub};
+use std::ops::{Add, BitAnd, BitOr, BitXor, Div, IndexMut, Mul, Rem, Sub};
 use std::rc::Rc;
-
-use either::Either;
-use index::{Offset, evaluate_as_index, set_at_index};
-use itertools::Itertools;
 
 use crate::ast::{
     BinaryOperator, Expression, ExpressionLocation, ForBody, ForIteration, LogicalOperator, Lvalue,
-    UnaryOperator,
 };
 use crate::hash_map;
 use crate::hash_map::HashMap;
 use crate::interpreter::environment::{Environment, EnvironmentRef};
+use crate::interpreter::evaluate::index::{EvaluatedIndex, get_at_index};
 use crate::interpreter::function::{Function, FunctionBody, FunctionCarrier, OverloadedFunction};
 use crate::interpreter::int::Int;
 use crate::interpreter::iterator::mut_value_to_iterator;
-use crate::interpreter::num::{EuclideanDivisionError, Number};
+use crate::interpreter::num::{BinaryOperatorError, Number};
 use crate::interpreter::sequence::Sequence;
 use crate::interpreter::value::{Value, ValueType};
 use crate::lexer::Span;
@@ -40,50 +38,6 @@ pub(crate) fn evaluate_expression(
         Expression::BigIntLiteral(n) => Value::Number(Number::Int(Int::BigInt(n.clone()))),
         Expression::Float64Literal(n) => Value::Number(Number::Float(*n)),
         Expression::ComplexLiteral(n) => Value::Number(Number::Complex(*n)),
-        Expression::Unary {
-            expression: expression_location,
-            operator,
-        } => {
-            let value = evaluate_expression(expression_location, environment)?;
-            match (value, operator) {
-                (Value::Number(n), UnaryOperator::BitNot) => Value::Number(n.not()),
-                (Value::Number(n), UnaryOperator::Neg) => Value::Number(n.neg()),
-                // Just like in C the bitwise negation of `false` is `-1`
-                (Value::Bool(b), UnaryOperator::BitNot) => i64::from(b).not().into(),
-                (Value::Bool(b), UnaryOperator::Not) => Value::Bool(b.not()),
-                (v, UnaryOperator::Not) => {
-                    return Err(EvaluationError::new(
-                        format!("the '!' operator cannot be applied to {}", v.value_type()),
-                        span,
-                    )
-                    .into());
-                }
-                (v, UnaryOperator::Neg) => {
-                    return Err(EvaluationError::new(
-                        format!("{} does not support negation", v.value_type()),
-                        span,
-                    )
-                    .into());
-                }
-                (v, UnaryOperator::BitNot) => {
-                    return Err(EvaluationError::new(
-                        format!("{} does not support bitwise negation", v.value_type()),
-                        span,
-                    )
-                    .into());
-                }
-            }
-        }
-        Expression::Binary {
-            left,
-            operator: operator_token,
-            right,
-        } => {
-            let span = left.span.merge(right.span);
-            let left = evaluate_expression(left, environment)?;
-            let right = evaluate_expression(right, environment)?;
-            apply_operator(left, *operator_token, right).into_evaluation_result(span)?
-        }
         Expression::Grouping(expr) => evaluate_expression(expr, environment)?,
         Expression::VariableDeclaration { l_value, value } => {
             let value = evaluate_expression(value, environment)?;
@@ -118,113 +72,91 @@ pub(crate) fn evaluate_expression(
         },
         Expression::OpAssignment {
             l_value,
-            value,
+            r_value,
             operation,
-        } => match l_value {
-            Lvalue::Variable { identifier } => {
-                let right_value = evaluate_expression(value, environment)?;
+        } => {
+            // Identifier may be an operator such as "++"
+            let Expression::Identifier(operation_ident) = &operation.expression else {
+                todo!("OpAssignment operation must be Identifier??");
+            };
+            match l_value {
+                Lvalue::Variable { identifier } => {
+                    let rhs = evaluate_expression(r_value, environment)?;
+                    let Some(lhs) = environment.borrow_mut().take(identifier) else {
+                        // TODO: this statement does damage which isn't reverted when for instance we can't find the function
+                        return Err(EvaluationError::undefined_variable(identifier, span).into());
+                    };
 
-                // We need to use with_existing in this situation to ensure the refcount doesn't
-                // increase which does happen when we `get` something from the environment because
-                // `get` clones the value it returns.
-                environment
-                    .borrow()
-                    .with_existing::<EvaluationResult>(identifier, |existing_value| {
-                        let existing_value = &mut *existing_value.borrow_mut();
+                    let mut arguments = [lhs, rhs];
 
-                        apply_operation_to_value(
-                            environment,
-                            existing_value,
-                            operation,
-                            right_value,
-                            span,
-                        )
-                    })
-                    .ok_or_else(|| EvaluationError::undefined_variable(identifier, span))??
-            }
-            Lvalue::Index {
-                value: lhs_expr,
-                index: index_expr,
-            } => {
-                let assign_to = evaluate_expression(lhs_expr, environment)?;
-                let new_value = match &assign_to {
-                    Value::Sequence(Sequence::List(list)) => {
-                        // It's important that index and right_value are computed before the list is borrowed
-                        let right_value = evaluate_expression(value, environment)?;
-                        let size = list.try_borrow().into_evaluation_result(span)?.len();
-                        let index = evaluate_as_index(index_expr, environment)?
-                            .try_into_offset(size, index_expr.span)?;
+                    // If the identifier is `++` we try to look for a function called `++=` first because we assume that implementation is faster.
+                    let op_assign_ident = format!("{operation_ident}=");
+                    // TODO: since we don't provide the user with operator overloading we could write a faster version of get_all_by_name that just looks in the root scope
+                    let values = environment.borrow().get_all_by_name(&op_assign_ident);
+                    let op_assign_result =
+                        try_call_function_from_values(&values, &mut arguments, environment, span);
 
-                        let mut list = list.try_borrow_mut().into_evaluation_result(span)?;
-
-                        match index {
-                            Offset::Element(index) => {
-                                let list_item = list.index_mut(index);
-
-                                apply_operation_to_value(
-                                    environment,
-                                    list_item,
-                                    operation,
-                                    right_value,
-                                    span,
-                                )?
-                            }
-                            Offset::Range(_, _) => {
-                                return Err(EvaluationError::syntax_error(
-                                    "cannot use a range expression as index".to_string(),
-                                    span,
-                                )
-                                .into());
-                            }
+                    // Only if there is no function that matches the op_assign signature we continue and try the fallback implementation
+                    match op_assign_result {
+                        Err(FunctionCarrier::FunctionNotFound) => {
+                            // do nothing continue below
                         }
-                    }
-                    Value::Sequence(Sequence::Map(dict, default)) => {
-                        let right_value = evaluate_expression(value, environment)?;
-                        let index = evaluate_expression(index_expr, environment)?;
+                        err @ Err(_) => return err.into_evaluation_result(span),
+                        Ok(x) if x == Value::unit() => {
+                            // TODO is this check to slow
+                            // At the start of this branch we used `take` to temporarily remove the value from the environment (leaving a unit behind)
+                            // this helps prevent race conditions in case the operator tries to access its environment but it does require us to put back the LHS
+                            let [lhs, _] = arguments;
+                            environment.borrow_mut().assign(identifier, lhs);
 
-                        let mut dict = dict.try_borrow_mut().into_evaluation_result(span)?;
-
-                        let map_entry = if let Some(default) = default {
-                            dict.entry(index).or_insert(Value::clone(default))
-                        } else {
-                            dict.get_mut(&index)
-                                .ok_or_else(|| EvaluationError::key_not_found(&index, span))?
-                        };
-
-                        apply_operation_to_value(
-                            environment,
-                            map_entry,
-                            operation,
-                            right_value,
-                            span,
-                        )?
+                            // Op assignment now returns unit
+                            return Ok(Value::unit());
+                        }
+                        Ok(_) => panic!(
+                            "OpAssign implementation is not meant to return a non unit value"
+                        ),
                     }
-                    Value::Sequence(Sequence::String(_)) => {
-                        return Err(EvaluationError::new(
-                            "cannot OpAssign into a string".to_string(),
-                            span,
-                        )
-                        .into());
-                    }
-                    _ => {
-                        return Err(EvaluationError::syntax_error(
-                            format!("cannot OpAssign an index into a {}", assign_to.value_type()),
-                            span,
-                        )
-                        .into());
-                    }
-                };
 
-                new_value
+                    // Execute: `a += b` as `a = a + b`
+                    let result =
+                        call_function_by_name(operation_ident, &mut arguments, environment, span)?;
+
+                    environment.borrow_mut().assign(identifier, result); // TODO: does this mess up semantics??!?
+                    // x = x ++ y
+
+                    Value::unit()
+                }
+                Lvalue::Index {
+                    value: lhs_expression,
+                    index: index_expression,
+                } => {
+                    let mut lhs_value = evaluate_expression(lhs_expression, environment)?;
+                    let index = evaluate_as_index(index_expression, environment)?;
+                    let value_at_index = get_at_index(&lhs_value, index.clone(), span)?;
+
+                    let right_value = evaluate_expression(r_value, environment)?;
+
+                    let result = call_function_by_name(
+                        operation_ident,
+                        &mut [value_at_index, right_value],
+                        environment,
+                        span,
+                    )?;
+
+                    set_at_index(&mut lhs_value, result, index, span)?;
+
+                    Value::unit()
+                }
+                Lvalue::Sequence(_) => {
+                    return Err(EvaluationError::syntax_error(
+                        "cannot use augmented assignment in combination with destructuring"
+                            .to_string(),
+                        span,
+                    )
+                    .into());
+                }
             }
-            Lvalue::Sequence(_) => {
-                return Err(EvaluationError::syntax_error(
-                    "cannot use augmented assignment in combination with destructuring".to_string(),
-                    span,
-                )
-                .into());
-            }
-        },
+        }
         Expression::Block { statements } => {
             let mut local_scope = Environment::new_scope(environment);
 
@@ -314,7 +246,6 @@ pub(crate) fn evaluate_expression(
                     .into());
                 }
             }
-            // drop(local_scope);
             Value::unit()
         }
         Expression::Call {
@@ -336,7 +267,7 @@ pub(crate) fn evaluate_expression(
             } else {
                 let function_as_value = evaluate_expression(function, environment)?;
 
-                match try_call_function(
+                match try_call_function_from_values(
                     &[RefCell::new(function_as_value)],
                     &mut evaluated_args,
                     environment,
@@ -449,7 +380,7 @@ pub(crate) fn evaluate_expression(
 
             match &**body {
                 ForBody::Block(_) => Value::unit(),
-                ForBody::List(_) => Value::from(out_values),
+                ForBody::List(_) => Value::list(out_values),
                 ForBody::Map {
                     key: _,
                     value: _,
@@ -523,7 +454,7 @@ pub(crate) fn evaluate_expression(
                                 );
                             };
 
-                            values.to_vec().into()
+                            Value::list(values)
                         }
                     }
                 }
@@ -672,6 +603,55 @@ pub(crate) fn evaluate_expression(
     Ok(literal)
 }
 
+fn take_lvalue(
+    lvalue: &Lvalue,
+    lvalue_span: Span,
+    environment: &mut EnvironmentRef,
+) -> EvaluationResult {
+    match lvalue {
+        Lvalue::Variable { identifier } => {
+            let value = environment
+                .borrow()
+                .take(identifier)
+                .ok_or_else(|| EvaluationError::undefined_variable(identifier, lvalue_span))?;
+
+            Ok(value)
+        }
+        Lvalue::Index { value, index } => {
+            let v = evaluate_expression(value, environment)?;
+            let i = evaluate_as_index(index, environment)?;
+            let result = index_into_value(v, i, lvalue_span)?;
+            Ok(result)
+        }
+        Lvalue::Sequence(_) => todo!("sequencing not implemented"),
+    }
+}
+
+fn index_into_value(value: Value, index: EvaluatedIndex, lvalue_span: Span) -> EvaluationResult {
+    match value {
+        Value::Sequence(Sequence::List(list)) => {
+            let size = list.try_borrow().into_evaluation_result(lvalue_span)?.len();
+            let index = index.try_into_offset(size, lvalue_span)?;
+
+            let mut list = list.try_borrow_mut().into_evaluation_result(lvalue_span)?;
+            match index {
+                Offset::Element(index) => {
+                    let list_item = std::mem::replace(list.index_mut(index), Value::unit());
+                    Ok(list_item)
+                }
+                Offset::Range(_, _) => todo!("range expression not implemented here"),
+            }
+        }
+        Value::Sequence(Sequence::Map(map, def)) => todo!(),
+        Value::Sequence(Sequence::String(string)) => todo!(),
+        _ => Err(EvaluationError::syntax_error(
+            format!("cannot OpAssign an index into a {}", value.value_type()),
+            lvalue_span,
+        )
+        .into()),
+    }
+}
+
 fn produce_default_value(
     default: &Value,
     environment: &EnvironmentRef,
@@ -745,134 +725,19 @@ fn declare_or_assign_variable(
                 .into());
             }
         }
-        Lvalue::Index { .. } => {
-            return Err(EvaluationError::syntax_error(
-                format!(
-                    "Can't declare values into {}",
-                    l_value.expression_type_name()
-                ),
-                span,
-            )
-            .into());
+        Lvalue::Index {
+            value: lhs_expr,
+            index,
+        } => {
+            let mut lhs = evaluate_expression(lhs_expr, environment)?;
+
+            let index = evaluate_as_index(index, environment)?;
+
+            set_at_index(&mut lhs, value, index, span)?;
         }
     };
 
     Ok(Value::unit())
-}
-
-/// Applies operations like `+` or functions like `max(x, y)` to mutable pointers to values. This is
-/// used to optimize various `OpAssign` expressions that would otherwise create copies.
-/// ```ndc
-/// x ++= [1,2,3]
-/// // becomes
-/// x.append([1,2,3]);
-/// // instead of
-/// x = x ++ [1,2,3]
-/// ``
-fn apply_operation_to_value(
-    environment: &EnvironmentRef,
-    value: &mut Value,
-    operation: &Either<BinaryOperator, String>,
-    right_value: Value,
-    span: Span,
-) -> Result<Value, FunctionCarrier> {
-    match (value, operation, right_value) {
-        (
-            Value::Sequence(Sequence::String(left)),
-            Either::Left(BinaryOperator::Concat),
-            Value::Sequence(Sequence::String(right)),
-        ) => {
-            if Rc::ptr_eq(left, &right) {
-                let copy = String::from(&*right.borrow());
-                left.borrow_mut().push_str(&copy);
-            } else {
-                left.borrow_mut().push_str(&right.borrow());
-            }
-            Ok(Value::Sequence(Sequence::String(left.clone())))
-        }
-
-        (
-            Value::Sequence(Sequence::List(left)),
-            Either::Left(BinaryOperator::Concat),
-            Value::Sequence(Sequence::List(right)),
-        ) => {
-            // Special case for when a list is extended with itself
-            // x := [1,2,3]; x ++= x;
-            if Rc::ptr_eq(left, &right) {
-                let copy = Vec::clone(&*right.borrow());
-                left.borrow_mut().extend_from_slice(&copy);
-            } else {
-                left.borrow_mut().extend_from_slice(&right.borrow());
-            };
-            Ok(Value::Sequence(Sequence::List(left.clone())))
-        }
-
-        (
-            Value::Sequence(Sequence::Tuple(left)),
-            Either::Left(BinaryOperator::Concat),
-            Value::Sequence(Sequence::Tuple(mut right)),
-        ) => {
-            let right = Rc::make_mut(&mut right);
-            Rc::make_mut(left).append(right);
-            Ok(Value::Sequence(Sequence::Tuple(Rc::clone(left))))
-        }
-        (
-            Value::Sequence(Sequence::Map(left, default)),
-            Either::Left(BinaryOperator::Or),
-            Value::Sequence(Sequence::Map(right, _)),
-        ) => {
-            // If right and left are the same we can just do nothing and prevent a borrow checker error later
-            if !Rc::ptr_eq(left, &right) {
-                match Rc::try_unwrap(right) {
-                    Ok(right) => {
-                        left.borrow_mut().extend(right.take());
-                    }
-                    Err(right) => {
-                        // If we ever figure out how to make the borrow below panic we should add a test and fix it
-                        left.borrow_mut()
-                            .extend(right.borrow().iter().map(|(a, b)| (a.clone(), b.clone())));
-                    }
-                }
-            }
-
-            Ok(Value::Sequence(Sequence::Map(
-                left.clone(),
-                default.to_owned(),
-            )))
-        }
-        (left, operator, right) => {
-            match operator {
-                Either::Left(binary_operator) => {
-                    *left = apply_operator(left.clone(), *binary_operator, right)
-                        .into_evaluation_result(span)?;
-                }
-                Either::Right(identifier) => {
-                    let old_value = std::mem::replace(left, Value::unit());
-                    *left = call_function_by_name(
-                        identifier,
-                        &mut [old_value, right],
-                        environment,
-                        span,
-                    )?;
-                }
-            }
-            Ok(left.clone())
-        }
-    }
-}
-
-#[derive(thiserror::Error, Debug)]
-enum BinaryOpError {
-    #[error("operator {operator} is not defined for {left} and {right}")]
-    UndefinedOperation {
-        operator: BinaryOperator,
-        left: ValueType,
-        right: ValueType,
-    },
-    #[error(transparent)]
-    EuclideanDivisionFailed(#[from] EuclideanDivisionError),
-    #[error("operator {operator} failed because one of its operands is invalid")]
-    InvalidOperand { operator: BinaryOperator },
 }
 
 #[allow(clippy::too_many_lines)]
@@ -880,13 +745,10 @@ fn apply_operator(
     left: Value,
     operator: BinaryOperator,
     right: Value,
-) -> Result<Value, BinaryOpError> {
+) -> Result<Value, BinaryOperatorError> {
     let (left_type, right_type) = (left.value_type(), right.value_type());
-    let create_type_error = || BinaryOpError::UndefinedOperation {
-        operator,
-        left: left_type,
-        right: right_type,
-    };
+    let create_type_error =
+        || BinaryOperatorError::undefined_operation(operator, left_type, right_type);
 
     if left.supports_vectorization_with(&right) && operator.supports_vectorization() {
         return apply_operation_vectorized(left, &right, operator);
@@ -922,29 +784,29 @@ fn apply_operator(
             }
         }
         BinaryOperator::Plus => match (left, right) {
-            (Value::Number(a), Value::Number(b)) => Value::Number(a + b),
+            (Value::Number(a), Value::Number(b)) => Value::Number(a.add(b)?),
             _ => return Err(create_type_error()),
         },
         BinaryOperator::Minus => match (left, right) {
-            (Value::Number(a), Value::Number(b)) => Value::Number(a - b),
+            (Value::Number(a), Value::Number(b)) => Value::Number(a.sub(b)?),
             _ => return Err(create_type_error()),
         },
         BinaryOperator::Multiply => match (left, right) {
-            (Value::Number(a), Value::Number(b)) => Value::Number(a * b),
+            (Value::Number(a), Value::Number(b)) => Value::Number(a.mul(b)?),
 
             _ => return Err(create_type_error()),
         },
         BinaryOperator::Divide => match (left, right) {
-            (Value::Number(a), Value::Number(b)) => Value::Number(a / b),
+            (Value::Number(a), Value::Number(b)) => Value::Number(a.div(b)?),
             _ => return Err(create_type_error()),
         },
         BinaryOperator::FloorDivide => match (left, right) {
-            (Value::Number(a), Value::Number(b)) => Value::Number(a.floor_div(b)),
+            (Value::Number(a), Value::Number(b)) => Value::Number(a.floor_div(b)?),
 
             _ => return Err(create_type_error()),
         },
         BinaryOperator::CModulo => match (left, right) {
-            (Value::Number(a), Value::Number(b)) => Value::Number(a.rem(b)),
+            (Value::Number(a), Value::Number(b)) => Value::Number(a.rem(b)?),
 
             _ => return Err(create_type_error()),
         },
@@ -954,7 +816,7 @@ fn apply_operator(
             _ => return Err(create_type_error()),
         },
         BinaryOperator::Exponent => match (left, right) {
-            (Value::Number(a), Value::Number(b)) => Value::Number(a.pow(b)),
+            (Value::Number(a), Value::Number(b)) => Value::Number(a.pow(b)?),
 
             (
                 left @ Value::Sequence(Sequence::Tuple(_)),
@@ -1015,20 +877,22 @@ fn apply_operator(
             _ => return Err(create_type_error()),
         },
         BinaryOperator::ShiftRight => match (left, right) {
-            (Value::Number(Number::Int(a)), Value::Number(Number::Int(b))) => {
-                Value::Number(Number::Int(
-                    a.checked_shr(b)
-                        .ok_or(BinaryOpError::InvalidOperand { operator })?,
-                ))
-            }
+            (Value::Number(Number::Int(a)), Value::Number(Number::Int(b))) => Value::Number(
+                Number::Int(a.checked_shr(b).ok_or(BinaryOperatorError::new(format!(
+                    // TODO: check this before merge
+                    "operator {operator} failed because one of its operands is invalid"
+                )))?),
+            ),
             _ => return Err(create_type_error()),
         },
         BinaryOperator::ShiftLeft => match (left, right) {
             (Value::Number(Number::Int(a)), Value::Number(Number::Int(b))) => {
-                Value::Number(Number::Int(
-                    a.checked_shl(b)
-                        .ok_or(BinaryOpError::InvalidOperand { operator })?,
-                ))
+                Value::Number(Number::Int(a.checked_shl(b).ok_or(
+                    BinaryOperatorError::new(format!(
+                        // TODO: check this before merge
+                        "operator {operator} failed because one of its operands is invalid"
+                    )),
+                )?))
             }
             _ => return Err(create_type_error()),
         },
@@ -1053,9 +917,9 @@ fn apply_operator(
                         // TODO: if there is no benefit to this branch we might as wel remove it
                         let mut new_list = left.borrow().clone();
                         new_list.append(&mut right.borrow_mut());
-                        Value::from(new_list)
+                        Value::list(new_list)
                     }
-                    Err(right) => Value::from(
+                    Err(right) => Value::list(
                         left.borrow()
                             .iter()
                             .chain(right.borrow().iter())
@@ -1086,7 +950,7 @@ fn apply_operation_vectorized(
     left: Value,
     right: &Value,
     operator: BinaryOperator,
-) -> Result<Value, BinaryOpError> {
+) -> Result<Value, BinaryOperatorError> {
     let (left_type, right_type) = (left.value_type(), right.value_type());
 
     let (mut left, right) = match (left, right) {
@@ -1100,11 +964,9 @@ fn apply_operation_vectorized(
             (left, std::slice::from_ref(right))
         }
         _ => {
-            return Err(BinaryOpError::UndefinedOperation {
-                operator,
-                left: left_type,
-                right: right_type,
-            });
+            return Err(BinaryOperatorError::undefined_operation(
+                operator, left_type, right_type,
+            ));
         }
     };
 
@@ -1115,22 +977,20 @@ fn apply_operation_vectorized(
         if let (Value::Number(l), Value::Number(r)) = (l, r) {
             // TODO: can we use AddAssign etc?
             *l = match operator {
-                BinaryOperator::Plus => Number::add(l.clone(), r),
-                BinaryOperator::Minus => Number::sub(l.clone(), r),
-                BinaryOperator::Multiply => Number::mul(l.clone(), r),
-                BinaryOperator::Divide => Number::div(l.clone(), r),
-                BinaryOperator::FloorDivide => Number::floor_div(l.clone(), r.clone()), // Get rid of r.clone?
-                BinaryOperator::CModulo => Number::rem(l.clone(), r),
+                BinaryOperator::Plus => Number::add(l.clone(), r)?,
+                BinaryOperator::Minus => Number::sub(l.clone(), r)?,
+                BinaryOperator::Multiply => Number::mul(l.clone(), r)?,
+                BinaryOperator::Divide => Number::div(l.clone(), r)?,
+                BinaryOperator::FloorDivide => Number::floor_div(l.clone(), r.clone())?, // Get rid of r.clone?
+                BinaryOperator::CModulo => Number::rem(l.clone(), r)?,
                 BinaryOperator::EuclideanModulo => {
                     Number::checked_rem_euclid(l.clone(), r.clone())? // Get rid of r.clone?
                 }
-                BinaryOperator::Exponent => Number::pow(l.clone(), r.clone()), // Get rid of r.clone?
+                BinaryOperator::Exponent => Number::pow(l.clone(), r.clone())?, // Get rid of r.clone?
                 _ => {
-                    return Err(BinaryOpError::UndefinedOperation {
-                        operator,
-                        left: left_type,
-                        right: right_type,
-                    });
+                    return Err(BinaryOperatorError::undefined_operation(
+                        operator, left_type, right_type,
+                    ));
                 }
             };
         } else {
@@ -1281,6 +1141,13 @@ where
     }
 }
 
+/// Attempt to call a function using its name (like: 'max' or '+')
+///
+/// Arguments:
+///     * `name`: name of the function to lookup in the environment
+///     * `evaluated_args`: a slice of values passed as arguments to the function
+///     * `environment`: the execution environment for the function
+///     * `span`: span of the expression used for error reporting
 fn call_function_by_name(
     name: &str,
     evaluated_args: &mut [Value],
@@ -1288,7 +1155,7 @@ fn call_function_by_name(
     span: Span,
 ) -> EvaluationResult {
     let values = environment.borrow().get_all_by_name(name);
-    let result = try_call_function(&values, evaluated_args, environment, span);
+    let result = try_call_function_from_values(&values, evaluated_args, environment, span);
     if let Err(FunctionCarrier::FunctionNotFound) = result {
         let arguments = evaluated_args.iter().map(Value::value_type).join(", ");
         return Err(FunctionCarrier::EvaluationError(EvaluationError::new(
@@ -1300,12 +1167,15 @@ fn call_function_by_name(
     result
 }
 
-/// Executes a function with some extra steps:
+/// Given a bunch of values (hopefully functions) this function executes the one that matches the
+/// given arguments or returns a `FunctionNotFound` error if non match.
+///
+/// Arguments:
 ///     * `values`: a list of values that are attempted to be executed in the order they appear in
 ///     * `evaluated_args`: a slice of values passed as arguments to the function
 ///     * `environment`: the execution environment for the function
 ///     * `span`: span of the expression used for error reporting
-fn try_call_function(
+fn try_call_function_from_values(
     values: &[RefCell<Value>],
     evaluated_args: &mut [Value],
     environment: &EnvironmentRef,
@@ -1317,10 +1187,12 @@ fn try_call_function(
     //
     // This implies that a less specific function can shadow a more specific function
     //
-    // fn sqrt(n: Float);
-    // {
-    //      fn sqrt(n: Number); // Shadows the sqrt in the parent scope completely
-    // }
+    // ```ndc
+    //   fn sqrt(n: Float) {}
+    //   {
+    //       fn sqrt(n: Number) {} // Shadows the sqrt in the parent scope completely
+    //   }
+    // ```
     for value in values {
         let value = &*value.borrow();
 

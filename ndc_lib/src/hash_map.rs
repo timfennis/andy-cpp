@@ -10,15 +10,14 @@ pub use std::hash::DefaultHasher;
 
 use std::hash::Hash;
 
-#[allow(dead_code)]
 pub trait HashMapExt<K, V> {
-    fn union(&mut self, right: HashMap<K, V>)
+    fn union(&mut self, right: Self)
     where
         K: Hash + Eq;
-    fn difference(&mut self, right: HashMap<K, V>)
+    fn difference(&mut self, right: &Self)
     where
         K: Hash + Eq;
-    fn intersection(&mut self, right: HashMap<K, V>)
+    fn intersection(&mut self, right: &Self)
     where
         K: Hash + Eq;
 }
@@ -33,14 +32,14 @@ impl<K, V> HashMapExt<K, V> for HashMap<K, V> {
         }
     }
 
-    fn difference(&mut self, other: Self)
+    fn difference(&mut self, other: &Self)
     where
         K: Hash + Eq,
     {
         self.retain(|key, _| !other.contains_key(key));
     }
 
-    fn intersection(&mut self, other: Self)
+    fn intersection(&mut self, other: &Self)
     where
         K: Hash + Eq,
     {
