@@ -43,12 +43,15 @@ impl TryFrom<Value> for JsonValue {
                         .map(|v| v.clone().try_into())
                         .collect::<Result<Vec<_>, _>>()?,
                 )),
-                Sequence::Tuple(values) => Ok(Self::Array(
-                    values
-                        .iter()
-                        .map(|v| v.clone().try_into())
-                        .collect::<Result<Vec<_>, _>>()?,
-                )),
+                Sequence::Tuple(values) => match values.len() {
+                    0 => Ok(Self::Null),
+                    _ => Ok(Self::Array(
+                        values
+                            .iter()
+                            .map(|v| v.clone().try_into())
+                            .collect::<Result<Vec<_>, _>>()?,
+                    )),
+                },
                 Sequence::Map(values, _) => Ok(Self::Object(
                     values
                         .borrow()

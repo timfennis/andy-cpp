@@ -7,6 +7,7 @@ let object = %{
     "object": %{
         "test": [1,2,3]
     },
+    "set": %{1,2,3},
     "list": [1,2,3,4],
     "tuple": (1,2,3),
 };
@@ -20,6 +21,7 @@ let result = %{
     "object": %{
         "test": [1,2,3]
     },
+    "set": %{"1", "2", "3"}, // LMAO this is so lossy
     "list": [1,2,3,4]
 };
 
