@@ -3,7 +3,7 @@ use itertools::Itertools;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::fmt;
-use std::ops::{Add, BitAnd, BitOr, BitXor, Div, IndexMut, Mul, Rem, Sub};
+use std::ops::{Add, BitAnd, BitOr, BitXor, Div, Mul, Rem, Sub};
 use std::rc::Rc;
 
 use crate::ast::{
@@ -12,7 +12,7 @@ use crate::ast::{
 use crate::hash_map;
 use crate::hash_map::HashMap;
 use crate::interpreter::environment::{Environment, EnvironmentRef};
-use crate::interpreter::evaluate::index::{EvaluatedIndex, get_at_index};
+use crate::interpreter::evaluate::index::get_at_index;
 use crate::interpreter::function::{Function, FunctionBody, FunctionCarrier, OverloadedFunction};
 use crate::interpreter::int::Int;
 use crate::interpreter::iterator::mut_value_to_iterator;
@@ -603,55 +603,6 @@ pub(crate) fn evaluate_expression(
     Ok(literal)
 }
 
-fn take_lvalue(
-    lvalue: &Lvalue,
-    lvalue_span: Span,
-    environment: &mut EnvironmentRef,
-) -> EvaluationResult {
-    match lvalue {
-        Lvalue::Variable { identifier } => {
-            let value = environment
-                .borrow()
-                .take(identifier)
-                .ok_or_else(|| EvaluationError::undefined_variable(identifier, lvalue_span))?;
-
-            Ok(value)
-        }
-        Lvalue::Index { value, index } => {
-            let v = evaluate_expression(value, environment)?;
-            let i = evaluate_as_index(index, environment)?;
-            let result = index_into_value(v, i, lvalue_span)?;
-            Ok(result)
-        }
-        Lvalue::Sequence(_) => todo!("sequencing not implemented"),
-    }
-}
-
-fn index_into_value(value: Value, index: EvaluatedIndex, lvalue_span: Span) -> EvaluationResult {
-    match value {
-        Value::Sequence(Sequence::List(list)) => {
-            let size = list.try_borrow().into_evaluation_result(lvalue_span)?.len();
-            let index = index.try_into_offset(size, lvalue_span)?;
-
-            let mut list = list.try_borrow_mut().into_evaluation_result(lvalue_span)?;
-            match index {
-                Offset::Element(index) => {
-                    let list_item = std::mem::replace(list.index_mut(index), Value::unit());
-                    Ok(list_item)
-                }
-                Offset::Range(_, _) => todo!("range expression not implemented here"),
-            }
-        }
-        Value::Sequence(Sequence::Map(map, def)) => todo!(),
-        Value::Sequence(Sequence::String(string)) => todo!(),
-        _ => Err(EvaluationError::syntax_error(
-            format!("cannot OpAssign an index into a {}", value.value_type()),
-            lvalue_span,
-        )
-        .into()),
-    }
-}
-
 fn produce_default_value(
     default: &Value,
     environment: &EnvironmentRef,
@@ -1156,6 +1107,7 @@ fn call_function_by_name(
 ) -> EvaluationResult {
     let values = environment.borrow().get_all_by_name(name);
     let result = try_call_function_from_values(&values, evaluated_args, environment, span);
+
     if let Err(FunctionCarrier::FunctionNotFound) = result {
         let arguments = evaluated_args.iter().map(Value::value_type).join(", ");
         return Err(FunctionCarrier::EvaluationError(EvaluationError::new(

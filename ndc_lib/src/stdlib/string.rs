@@ -6,7 +6,6 @@ use crate::interpreter::value::Value;
 
 use anyhow::{Context, anyhow};
 use std::fmt::Write;
-use std::rc::Rc;
 
 pub fn join_to_string(list: &mut Sequence, sep: &str) -> anyhow::Result<String> {
     let mut iter = mut_seq_to_iterator(list);
