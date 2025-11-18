@@ -1,4 +1,4 @@
-use crate::ast::{BinaryOperator, ExpressionLocation};
+use crate::ast::ExpressionLocation;
 use crate::hash_map::{DefaultHasher, HashMap};
 use crate::interpreter::environment::{Environment, EnvironmentRef};
 use crate::interpreter::evaluate::{
