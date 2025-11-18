@@ -1,7 +1,6 @@
 use std::fmt::Write;
 use std::rc::Rc;
 
-use either::Either;
 use miette::Diagnostic;
 
 use crate::ast::Expression;

@@ -2,4 +2,4 @@
 // This looks valid, but isn't
 (1,1,(1,)) + (1,1,(1,))
 --EXPECT-ERROR--
-+ is not defined for
+no function called '+' found matches the arguments

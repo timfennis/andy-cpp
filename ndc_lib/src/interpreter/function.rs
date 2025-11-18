@@ -1,4 +1,4 @@
-use crate::ast::ExpressionLocation;
+use crate::ast::{BinaryOperator, ExpressionLocation};
 use crate::hash_map::{DefaultHasher, HashMap};
 use crate::interpreter::environment::{Environment, EnvironmentRef};
 use crate::interpreter::evaluate::{
@@ -103,9 +103,6 @@ impl FunctionBody {
             function,
         }
     }
-}
-
-impl FunctionBody {
     fn type_signature(&self) -> TypeSignature {
         match self {
             Self::Closure {
@@ -215,6 +212,30 @@ pub enum TypeSignature {
     Exact(Vec<Parameter>),
 }
 
+impl TypeSignature {
+    /// Matches a list of `ValueTypes` to a type signature. It can return `None` if there is no match or
+    /// `Some(num)` where num is the sum of the distances of the types. The type `Int`, is distance 1
+    /// away from `Number`, and `Number` is 1 distance from `Any`, then `Int` is distance 2 from `Any`.
+    fn calc_type_score(&self, types: &[ValueType]) -> Option<u32> {
+        match self {
+            Self::Variadic => Some(0),
+            Self::Exact(signature) => {
+                if types.len() == signature.len() {
+                    let mut acc = 0;
+                    for (a, b) in types.iter().zip(signature.iter()) {
+                        let dist = b.type_name.distance(a)?;
+                        acc += dist;
+                    }
+
+                    return Some(acc);
+                }
+
+                None
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct OverloadedFunction {
     implementations: HashMap<TypeSignature, Function>,
@@ -242,23 +263,70 @@ impl OverloadedFunction {
     pub fn call(&self, args: &mut [Value], env: &EnvironmentRef) -> EvaluationResult {
         let types: Vec<ValueType> = args.iter().map(ValueType::from).collect();
 
-        let mut best = None;
+        // TODO: handle vectorization here??!
+
+        let mut best_function_match = None;
         let mut best_distance = u32::MAX;
         for (signature, function) in &self.implementations {
-            let Some(cur) = match_types_to_signature(&types, signature) else {
+            let Some(cur) = signature.calc_type_score(&types) else {
                 continue;
             };
             if cur < best_distance {
                 best_distance = cur;
-                best = Some(function);
+                best_function_match = Some(function);
             }
         }
 
-        if let Some(function) = best {
-            function.body().call(args, env)
-        } else {
-            Err(FunctionCarrier::FunctionNotFound)
+        best_function_match
+            .ok_or(FunctionCarrier::FunctionNotFound)
+            .and_then(|function| function.body().call(args, env))
+            .or_else(|err| {
+                if let FunctionCarrier::FunctionNotFound = err {
+                    self.call_vectorized(args, env)
+                } else {
+                    Err(err)
+                }
+            }) // TODO: we dont' want to just always call this but let's figure out when later
+    }
+
+    fn call_vectorized(&self, args: &mut [Value], env: &EnvironmentRef) -> EvaluationResult {
+        let [left, right] = args else {
+            // Vectorized application only works in cases where there are two tuple arguments
+            return Err(FunctionCarrier::FunctionNotFound);
+        };
+
+        if !left.supports_vectorization_with(right) {
+            return Err(FunctionCarrier::FunctionNotFound);
         }
+
+        let (left, right) = match (left, right) {
+            // Both are tuples
+            (Value::Sequence(Sequence::Tuple(left)), Value::Sequence(Sequence::Tuple(right))) => {
+                (left, right.as_slice())
+            }
+            // Left is a number and right is a tuple
+            (left @ Value::Number(_), Value::Sequence(Sequence::Tuple(right))) => (
+                &mut Rc::new(vec![left.clone(); right.len()]),
+                right.as_slice(),
+            ),
+            // Left is a tuple and right is a number
+            (Value::Sequence(Sequence::Tuple(left)), right @ Value::Number(_)) => {
+                (left, std::slice::from_ref(right))
+            }
+            _ => {
+                return Err(FunctionCarrier::FunctionNotFound);
+            }
+        };
+
+        let left_mut: &mut Vec<Value> = Rc::make_mut(left);
+
+        // Zip the mutable vector with the immutable right side and perform the operations on all elements
+        for (l, r) in left_mut.iter_mut().zip(right.iter().cycle()) {
+            // TODO: Fuck this cloning business
+            *l = self.call(&mut [l.clone(), r.clone()], env)?;
+        }
+
+        Ok(Value::Sequence(Sequence::Tuple(left.clone()))) // TODO PLS NO CLONE
     }
 }
 
@@ -273,28 +341,6 @@ impl From<Function> for OverloadedFunction {
         let type_signature = value.type_signature();
         Self {
             implementations: HashMap::from([(type_signature, value)]),
-        }
-    }
-}
-
-/// Matches a list of `ValueTypes` to a type signature. It can return `None` if there is no match or
-/// `Some(num)` where num is the sum of the distances of the types. The type `Int`, is distance 1
-/// away from `Number`, and `Number` is 1 distance from `Any`, then `Int` is distance 2 from `Any`.
-fn match_types_to_signature(types: &[ValueType], signature: &TypeSignature) -> Option<u32> {
-    match signature {
-        TypeSignature::Variadic => Some(0),
-        TypeSignature::Exact(signature) => {
-            if types.len() == signature.len() {
-                let mut acc = 0;
-                for (a, b) in types.iter().zip(signature.iter()) {
-                    let dist = b.type_name.distance(a)?;
-                    acc += dist;
-                }
-
-                return Some(acc);
-            }
-
-            None
         }
     }
 }

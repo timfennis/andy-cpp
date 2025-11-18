@@ -37,7 +37,7 @@ where
     T: std::borrow::Borrow<Value>,
 {
     fn try_product(&mut self) -> Result<Number, BinaryOperatorError> {
-        self.try_fold(Number::from(0), |acc, cur| match cur.borrow() {
+        self.try_fold(Number::from(1), |acc, cur| match cur.borrow() {
             Value::Number(n) => acc.mul(n),
             value => Err(BinaryOperatorError::new(format!(
                 "cannot multiply {} and number",

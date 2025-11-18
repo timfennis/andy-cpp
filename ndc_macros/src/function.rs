@@ -1,7 +1,7 @@
 use crate::convert::{Argument, TypeConverter, build};
 use crate::r#match::{
     is_ref, is_ref_mut, is_ref_mut_of_slice_of_value, is_ref_of_bigint, is_ref_of_slice_of_value,
-    is_str_ref, is_string, path_ends_with,
+    is_str_ref, path_ends_with,
 };
 use itertools::Itertools;
 use proc_macro2::TokenStream;

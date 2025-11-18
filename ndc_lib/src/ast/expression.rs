@@ -1,8 +1,7 @@
-use crate::ast::operator::{BinaryOperator, LogicalOperator};
+use crate::ast::operator::LogicalOperator;
 use crate::ast::parser::Error as ParseError;
 use crate::interpreter::evaluate::EvaluationError;
 use crate::lexer::Span;
-use either::Either;
 use num::BigInt;
 use num::complex::Complex64;
 use std::fmt;

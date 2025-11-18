@@ -1,6 +1,6 @@
 use crate::r#match::{is_ref_mut, is_string, path_ends_with};
-use proc_macro2::{Span, TokenStream};
-use quote::{ToTokens, quote};
+use proc_macro2::TokenStream;
+use quote::quote;
 
 #[derive(Debug, Clone)]
 pub struct Argument {
