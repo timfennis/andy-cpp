@@ -1,22 +1,17 @@
 use index::{Offset, evaluate_as_index, set_at_index};
 use itertools::Itertools;
 use std::cell::RefCell;
-use std::cmp::Ordering;
 use std::fmt;
-use std::ops::{Add, BitAnd, BitOr, BitXor, Div, Mul, Rem, Sub};
 use std::rc::Rc;
 
-use crate::ast::{
-    BinaryOperator, Expression, ExpressionLocation, ForBody, ForIteration, LogicalOperator, Lvalue,
-};
-use crate::hash_map;
+use crate::ast::{Expression, ExpressionLocation, ForBody, ForIteration, LogicalOperator, Lvalue};
 use crate::hash_map::HashMap;
 use crate::interpreter::environment::{Environment, EnvironmentRef};
 use crate::interpreter::evaluate::index::get_at_index;
 use crate::interpreter::function::{Function, FunctionBody, FunctionCarrier, OverloadedFunction};
 use crate::interpreter::int::Int;
 use crate::interpreter::iterator::mut_value_to_iterator;
-use crate::interpreter::num::{BinaryOperatorError, Number};
+use crate::interpreter::num::Number;
 use crate::interpreter::sequence::Sequence;
 use crate::interpreter::value::{Value, ValueType};
 use crate::lexer::Span;
