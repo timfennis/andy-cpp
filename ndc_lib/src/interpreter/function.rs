@@ -160,12 +160,10 @@ impl FunctionBody {
                 .into()),
             },
             Self::NumericBinaryOp { body } => match args {
-                [Value::Number(left), Value::Number(right)] => {
-                    // TODO: we could use references here?
-                    Ok(Value::Number(body(left.clone(), right.clone()).map_err(
-                        |err| FunctionCarrier::IntoEvaluationError(Box::new(err)),
-                    )?))
-                }
+                [Value::Number(left), Value::Number(right)] => Ok(Value::Number(
+                    body(left.clone(), right.clone())
+                        .map_err(|err| FunctionCarrier::IntoEvaluationError(Box::new(err)))?,
+                )),
                 [Value::Number(_), right] => Err(FunctionCallError::ArgumentTypeError {
                     expected: ParamType::Number,
                     actual: right.value_type(),
@@ -263,10 +261,9 @@ impl OverloadedFunction {
     pub fn call(&self, args: &mut [Value], env: &EnvironmentRef) -> EvaluationResult {
         let types: Vec<ValueType> = args.iter().map(ValueType::from).collect();
 
-        // TODO: handle vectorization here??!
-
         let mut best_function_match = None;
         let mut best_distance = u32::MAX;
+
         for (signature, function) in &self.implementations {
             let Some(cur) = signature.calc_type_score(&types) else {
                 continue;
@@ -280,13 +277,14 @@ impl OverloadedFunction {
         best_function_match
             .ok_or(FunctionCarrier::FunctionNotFound)
             .and_then(|function| function.body().call(args, env))
+            // For now if we can't find a specific function we just try to vectorize as a fallback
             .or_else(|err| {
                 if let FunctionCarrier::FunctionNotFound = err {
                     self.call_vectorized(args, env)
                 } else {
                     Err(err)
                 }
-            }) // TODO: we dont' want to just always call this but let's figure out when later
+            })
     }
 
     fn call_vectorized(&self, args: &mut [Value], env: &EnvironmentRef) -> EvaluationResult {
@@ -321,12 +319,12 @@ impl OverloadedFunction {
         let left_mut: &mut Vec<Value> = Rc::make_mut(left);
 
         // Zip the mutable vector with the immutable right side and perform the operations on all elements
+        // TODO: maybe one day figure out how to get rid of all these clones
         for (l, r) in left_mut.iter_mut().zip(right.iter().cycle()) {
-            // TODO: Fuck this cloning business
             *l = self.call(&mut [l.clone(), r.clone()], env)?;
         }
 
-        Ok(Value::Sequence(Sequence::Tuple(left.clone()))) // TODO PLS NO CLONE
+        Ok(Value::Sequence(Sequence::Tuple(left.clone())))
     }
 }
 
@@ -472,28 +470,8 @@ impl From<&Value> for ParamType {
 }
 
 impl fmt::Display for ParamType {
-    // TODO replace with strum?
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Any => write!(f, "Any"),
-            Self::Bool => write!(f, "Bool"),
-            Self::Function => write!(f, "Function"),
-            Self::Option => write!(f, "Option"),
-            Self::Number => write!(f, "Number"),
-            Self::Float => write!(f, "Float"),
-            Self::Int => write!(f, "Int"),
-            Self::Rational => write!(f, "Rational"),
-            Self::Complex => write!(f, "Complex"),
-            Self::Sequence => write!(f, "Sequence"),
-            Self::List => write!(f, "List"),
-            Self::String => write!(f, "String"),
-            Self::Tuple => write!(f, "Tuple"),
-            Self::Map => write!(f, "Map"),
-            Self::Iterator => write!(f, "Iterator"),
-            Self::MinHeap => write!(f, "MinHeap"),
-            Self::MaxHeap => write!(f, "MaxHeap"),
-            Self::Deque => write!(f, "Deque"),
-        }
+        f.write_str(self.as_str())
     }
 }
 
