@@ -68,12 +68,8 @@ pub(crate) fn evaluate_expression(
         Expression::OpAssignment {
             l_value,
             r_value,
-            operation,
+            operation: operation_ident,
         } => {
-            // Identifier may be an operator such as "++"
-            let Expression::Identifier(operation_ident) = &operation.expression else {
-                todo!("OpAssignment operation must be Identifier??");
-            };
             match l_value {
                 Lvalue::Variable { identifier } => {
                     let rhs = evaluate_expression(r_value, environment)?;

@@ -42,8 +42,7 @@ pub enum Expression {
     OpAssignment {
         l_value: Lvalue,
         r_value: Box<ExpressionLocation>,
-        // TODO: Should always be an identifier?
-        operation: Box<ExpressionLocation>,
+        operation: String,
     },
     FunctionDeclaration {
         name: Option<Box<ExpressionLocation>>,
