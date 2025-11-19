@@ -367,13 +367,7 @@ impl Parser {
                 Ok(assignment_expression.to_location(start.merge(end)))
             }
             Some(Token::OpAssign(inner)) => {
-                // let thing = match &inner.token {
-                //     Token::Identifier(identifier) => Either::Right(identifier.to_string()),
-                //     _ => Either::Left((*inner.clone()).try_into()?),
-                // };
-
-                let operation =
-                    Expression::Identifier(inner.token.to_string()).to_location(inner.span);
+                let operation_identifier = inner.token.to_string();
 
                 self.advance();
                 let expression = self.tuple_expression(Self::single_expression, false)?;
@@ -382,7 +376,7 @@ impl Parser {
                     l_value: Lvalue::try_from(maybe_lvalue)
                         .expect("guaranteed to produce an lvalue"),
                     r_value: Box::new(expression),
-                    operation: Box::new(operation),
+                    operation: operation_identifier,
                 };
 
                 Ok(op_assign.to_location(start.merge(end)))
