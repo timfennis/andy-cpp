@@ -149,6 +149,10 @@ impl LanguageServer for Backend {
                 if fun.name().chars().all(|c| c.is_alphanumeric() || c == '?') {
                     Some(CompletionItem {
                         label: fun.name().to_string(),
+                        label_details: Some(CompletionItemLabelDetails {
+                            detail: Some(format!("({sig})")),
+                            description: None,
+                        }),
                         kind: Some(CompletionItemKind::FUNCTION),
                         documentation: Some(Documentation::MarkupContent(MarkupContent { kind: MarkupKind::Markdown, value: fun.documentation().to_string() })),
                         ..Default::default()
