@@ -245,8 +245,10 @@ impl SourceIterator<'_> {
 pub struct Error {
     text: String,
 
+    location: Span,
+
     #[label("here")]
-    location: SourceSpan,
+    location_ss: SourceSpan,
 
     #[help]
     help_text: Option<String>,
@@ -257,7 +259,8 @@ impl Error {
     pub fn text(text: String, source: Span) -> Self {
         Self {
             text,
-            location: source.into(),
+            location: source,
+            location_ss: source.into(),
             help_text: None,
         }
     }
@@ -266,7 +269,8 @@ impl Error {
     pub fn unterminated_string(span: Span) -> Self {
         Self {
             text: "Unterminated string".to_string(),
-            location: span.into(),
+            location: span,
+            location_ss: span.into(),
             help_text: None,
         }
     }
@@ -275,8 +279,13 @@ impl Error {
     pub fn help(text: String, source: Span, help_text: String) -> Self {
         Self {
             text,
-            location: source.into(),
+            location: source,
+            location_ss: source.into(),
             help_text: Some(help_text),
         }
+    }
+
+    pub fn location(&self) -> Span {
+        self.location
     }
 }

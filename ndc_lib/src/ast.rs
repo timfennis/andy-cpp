@@ -6,4 +6,4 @@ pub use expression::{Expression, ExpressionLocation, ForBody, ForIteration, Lval
 pub use operator::{BinaryOperator, LogicalOperator, UnaryOperator};
 
 pub use parser::Error;
-pub(crate) use parser::Parser;
+pub use parser::Parser;

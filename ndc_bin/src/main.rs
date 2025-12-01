@@ -38,6 +38,12 @@ enum Command {
     /// Output an .ndc file using the built-in syntax highlighting engine
     Highlight { file: PathBuf },
 
+    /// Start a language server
+    Lsp {
+        #[arg(long)]
+        stdio: bool,
+    },
+
     /// Output the documentation optionally searched using a query string
     Docs { query: Option<String> },
 
@@ -53,6 +59,7 @@ impl Default for Command {
 }
 
 enum Action {
+    RunLsp,
     RunFile(PathBuf),
     HighlightFile(PathBuf),
     StartRepl,
@@ -66,6 +73,7 @@ impl TryFrom<Command> for Action {
         let action = match value {
             Command::Run { file: Some(file) } => Self::RunFile(file),
             Command::Run { file: None } => Self::StartRepl,
+            Command::Lsp { stdio: _ } => Self::RunLsp,
             Command::Highlight { file } => Self::HighlightFile(file),
             Command::Docs { query } => Self::Docs(query),
             Command::Unknown(args) => {
@@ -140,8 +148,31 @@ fn main() -> anyhow::Result<()> {
         Action::StartRepl => {
             repl::run(cli.debug)?;
         }
+        Action::RunLsp => start_lsp(),
     }
     Ok(())
+}
+
+#[cfg(feature = "lsp")]
+fn start_lsp() {
+    #[allow(
+        clippy::expect_used,
+        clippy::diverging_sub_expression,
+        clippy::needless_return,
+        clippy::unwrap_in_result
+    )]
+    {
+        return tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("Failed building the Runtime")
+            .block_on(async { ndc_lsp::start_lsp().await });
+    }
+}
+
+#[cfg(not(feature = "lsp"))]
+fn start_lsp() {
+    eprintln!("binary not compiled with LSP support");
 }
 
 pub fn into_miette_result<T>(result: Result<T, InterpreterError>) -> miette::Result<T> {
