@@ -13,9 +13,7 @@ print(add(3, 5));
 print(3.add(5));
 ```
 
-Both styles are equivalent, allowing you to choose the one that suits your code best. While such flexibility might feel
-messy in traditional languages, in Andy C++ (a language designed around ease of typing) switching between these
-syntaxes is especially helpful for writing concise and readable code.
+Both styles are equivalent, allowing you to choose the one that suits your code best.
 
 ### Implicit call
 

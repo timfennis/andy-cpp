@@ -25,6 +25,8 @@ Andy C++ has four number types that you should keep in mind when programming.
 | `>=` | Greater or equal | `false` | `true` |
 | `>` | Greater than | `false` | `true` |
 | `!=` | Not equal | `false` | `true` |
+| `<=>` | Compare | `false` | `false` |
+| `>=<` | Reverse compare | `false` | `false` |
 | `<>` | Concatenate string values | `true` | `false` |
 
 Additionally for **integers** the following operations are available:
@@ -43,8 +45,7 @@ Additionally for **integers** the following operations are available:
 Andy C++ uses signed 64-bit integers under the hood to do math. But if you write an expression that would normally overflow it
 automatically switches to a `BitInt` and calculates the result using the [num crate](https://crates.io/crates/num). The advantage
 of this is that you can quickly compute some really big numbers, but the downside is that naive solutions to puzzles like
-[Advent of Code 2022 - Day 11](https://adventofcode.com/2022/day/11) will never throw an error and continue running until the end
-of the universe.
+[Advent of Code 2022 - Day 11](https://adventofcode.com/2022/day/11) will never throw an error and continue running you run out of memory.
 
 ```ndc
 let result = 2 ^ 1024;

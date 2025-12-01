@@ -13,6 +13,7 @@ use tower_lsp::{Client, LanguageServer};
 pub struct Backend {
     pub client: Client,
 }
+
 impl Backend {
     pub fn new(client: Client) -> Self {
         Self { client }
@@ -66,39 +67,6 @@ impl Backend {
         self.client
             .publish_diagnostics(uri.clone(), diagnostics, None)
             .await;
-    }
-}
-
-fn span_into_range(text: &str, span: Span) -> Range {
-    Range {
-        start: position_from_offset(text, span.offset()),
-        end: position_from_offset(text, span.end()),
-    }
-}
-fn position_from_offset(text: &str, offset: usize) -> Position {
-    let mut line = 0;
-    let mut col = 0;
-    let mut byte_count = 0;
-
-    for c in text.chars() {
-        let char_len = c.len_utf8();
-        if byte_count >= offset {
-            break;
-        }
-
-        if c == '\n' {
-            line += 1;
-            col = 0;
-        } else {
-            col += 1;
-        }
-
-        byte_count += char_len;
-    }
-
-    Position {
-        line,
-        character: col,
     }
 }
 
@@ -163,6 +131,19 @@ impl LanguageServer for Backend {
             })
         });
 
+        let items= items.chain(vec![
+            CompletionItem {
+                label: String::from("true"),
+                kind: Some(CompletionItemKind::VALUE),
+                ..Default::default()
+            },
+            CompletionItem {
+                label: String::from("false"),
+                kind: Some(CompletionItemKind::VALUE),
+                ..Default::default()
+            }
+        ].into_iter());
+
         Ok(Some(CompletionResponse::Array(items.collect())))
     }
 
@@ -192,5 +173,39 @@ impl LanguageServer for Backend {
         for change in params.content_changes {
             self.validate(&params.text_document.uri, &change.text).await;
         }
+    }
+}
+
+fn span_into_range(text: &str, span: Span) -> Range {
+    Range {
+        start: position_from_offset(text, span.offset()),
+        end: position_from_offset(text, span.end()),
+    }
+}
+
+fn position_from_offset(text: &str, offset: usize) -> Position {
+    let mut line = 0;
+    let mut col = 0;
+    let mut byte_count = 0;
+
+    for c in text.chars() {
+        let char_len = c.len_utf8();
+        if byte_count >= offset {
+            break;
+        }
+
+        if c == '\n' {
+            line += 1;
+            col = 0;
+        } else {
+            col += 1;
+        }
+
+        byte_count += char_len;
+    }
+
+    Position {
+        line,
+        character: col,
     }
 }

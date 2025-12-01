@@ -1,5 +1,9 @@
 # Change Log
 
+## [v0.2.0] (2025-12-01)
+
+Basic language server support. Runs the interpreter using `ndc lsp` for some basic autocomplete.
+
 ## [v0.1.0] (2024-12-30)
 
 This release probably still has bugs but it seems to display all 2024 Advent of Code puzzles correctly,

@@ -21,6 +21,8 @@ The type system is hierarchical with the root type being `Any`:
     * [Tuple](./types/tuple.md): An immutable list
       * [Unit](./types/unit.md)
     * [Map](./types/map-and-set.md): A hashmap that associates keys with values
+    * [Deque](./types/deque.md): A double ended queue
+    * [MinHeap & MaxHeap](./types/min-max-heap.md): Min/max Heap
     * Iterator: A type that can be consumed and produces values (Currently only used for range expressions like `5..100`)
   * [Function](./types/function.md)
 

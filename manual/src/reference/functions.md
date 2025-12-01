@@ -65,10 +65,10 @@ the full power of functional programming.
 
 ```ndc
 let my_list = [x for x in 1..10];
-let out = my_list.map(fn(x) { x * 10 });
+let out = my_list.map(fn(x) => x * 10);
 ```
 
-In this example, the anonymous function fn(x) { x * 10 } is passed directly to the map method, applying the
+In this example, the anonymous function `fn(x) => x * 10` is passed directly to the map method, applying the
 transformation to each element in my_list.
 
 ## Method call syntax

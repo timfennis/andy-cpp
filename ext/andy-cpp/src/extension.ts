@@ -26,8 +26,6 @@ class Lazy<T> {
 
 
 export function activate(context: vscode.ExtensionContext) {
-  vscode.window.showInformationMessage("Andy C++ extension activated");
-
   const serverOptions: ServerOptions = {
       run:   { command: 'ndc', args: ["lsp"], transport: TransportKind.stdio },
       debug: { command: 'ndc', args: ["lsp"], transport: TransportKind.stdio }

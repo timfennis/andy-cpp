@@ -17,6 +17,20 @@ The advantage is that it's a bit easier to guess that `A` is the 4th character i
 depending on which heart you're using there might be an invisible [Variation Selector](https://en.wikipedia.org/wiki/Variation_Selectors_(Unicode_block))
 after the heart which messes everything up. This specific behavior will probably change in the future.
 
+# Raw strings
+
+You may also define raw strings using this syntax borrowed from rust.
+
+```ndc
+let string = r#"raw string with "" lots of "" quotes"#;
+```
+
+and even
+
+```ndc
+let string = r###"raw string with r#"stop doing this"#"###;
+```
+
 ## Operators
 
 | Operator | Function |
@@ -30,6 +44,8 @@ after the heart which messes everything up. This specific behavior will probably
 | `<` | Less (lexicographically) |
 | `>=` | Greater equals (lexicographically) |
 | `<=` | Less equals (lexicographically) |
+| `<=>` | `-1`, `0`, or `1` (lexicographically) |
+| `>=<` | `-1`, `0`, or `1` (reverse lexicographically) |
 
 > **Note:** The `in` operator checking if the left operand is a substring of the right operand is different from
 > the behavior of `in` on lists.
