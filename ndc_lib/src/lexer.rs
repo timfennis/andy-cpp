@@ -154,7 +154,7 @@ impl Iterator for Lexer<'_> {
                         return Some(Ok(TokenLocation {
                             token: Token::OpAssign(Box::new(TokenLocation {
                                 token: buf.into(),
-                                span: self.source.create_span(start_offset).merge(ident_end_span), // TODO test is
+                                span: self.source.create_span(start_offset).merge(ident_end_span),
                             })),
                             span: self.source.create_span(start_offset),
                         }));

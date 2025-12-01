@@ -30,31 +30,55 @@ impl TryFrom<TokenLocation> for UnaryOperator {
     }
 }
 
-#[derive(Eq, PartialEq, Copy, Clone)]
+#[derive(Eq, PartialEq, Copy, Clone, derive_more::Display)]
 pub enum BinaryOperator {
+    #[display("==")]
     Equality,
+    #[display("!=")]
     Inequality,
+    #[display(">")]
     Greater,
+    #[display(">=")]
     GreaterEquals,
+    #[display("<")]
     Less,
+    #[display("<=")]
     LessEquals,
+    #[display("<=>")]
     Spaceship,
+    #[display(">=<")]
     InverseSpaceship,
+    #[display("+")]
     Plus,
+    #[display("-")]
     Minus,
+    #[display("*")]
     Multiply,
+    #[display("/")]
     Divide,
+    #[display("\\")]
     FloorDivide,
+    #[display("%")]
     CModulo,
+    #[display("%%")]
     EuclideanModulo,
+    #[display("^")]
     Exponent,
+    #[display("&")]
     And,
+    #[display("|")]
     Or,
+    #[display("~")]
     Xor,
+    #[display("++")]
     Concat,
+    #[display("<>")]
     StringConcat,
+    #[display("in")]
     In,
+    #[display(">>")]
     ShiftRight,
+    #[display("<<")]
     ShiftLeft,
 }
 
@@ -147,38 +171,5 @@ impl TryFrom<TokenLocation> for BinaryOperator {
 impl fmt::Debug for BinaryOperator {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{self}")
-    }
-}
-
-// TODO: This actually makes no sense, we should convert it back into a token and then print that?
-impl fmt::Display for BinaryOperator {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let op = match self {
-            Self::Equality => "==",
-            Self::Inequality => "!=",
-            Self::Greater => ">",
-            Self::GreaterEquals => ">=",
-            Self::Less => "<",
-            Self::LessEquals => "<=",
-            Self::Spaceship => "<=>",
-            Self::InverseSpaceship => ">=<",
-            Self::Plus => "+",
-            Self::Minus => "-",
-            Self::Multiply => "*",
-            Self::Divide => "/",
-            Self::FloorDivide => "\\",
-            Self::CModulo => "%",
-            Self::EuclideanModulo => "%%",
-            Self::Exponent => "^",
-            Self::And => "&",
-            Self::Or => "|",
-            Self::Xor => "~",
-            Self::Concat => "++",
-            Self::StringConcat => "<>",
-            Self::In => "in",
-            Self::ShiftRight => ">>",
-            Self::ShiftLeft => "<<",
-        };
-        write!(f, "{op}")
     }
 }

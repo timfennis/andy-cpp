@@ -13,7 +13,7 @@ ahash = { version = "0.8.12" }
 anyhow = "1.0.98"
 clap = { version = "4.5.39", features = ["derive"] }
 criterion = { version = "0.6.0", features = ["html_reports"] }
-derive_more = { version = "2.0.1", features = ["deref", "deref_mut", "from", "constructor"] }
+derive_more = { version = "2.0.1", features = ["deref", "deref_mut", "from", "display", "constructor"] }
 derive_builder = { version = "0.20.2" }
 strsim = "0.11.1"
 factorial = "0.4.0"

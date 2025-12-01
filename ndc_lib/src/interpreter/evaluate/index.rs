@@ -223,7 +223,10 @@ pub fn get_at_index(
                 }
             };
 
-            Ok(map.get(&key).ok_or_else(|| EvaluationError::key_not_found(&key, span))?.clone())
+            Ok(map
+                .get(&key)
+                .ok_or_else(|| EvaluationError::key_not_found(&key, span))?
+                .clone())
         }
         _ => Err(EvaluationError::syntax_error(
             format!("cannot insert into {} at index", lhs.value_type()),

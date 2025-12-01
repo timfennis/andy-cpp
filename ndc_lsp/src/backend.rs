@@ -122,7 +122,10 @@ impl LanguageServer for Backend {
                             description: None,
                         }),
                         kind: Some(CompletionItemKind::FUNCTION),
-                        documentation: Some(Documentation::MarkupContent(MarkupContent { kind: MarkupKind::Markdown, value: fun.documentation().to_string() })),
+                        documentation: Some(Documentation::MarkupContent(MarkupContent {
+                            kind: MarkupKind::Markdown,
+                            value: fun.documentation().to_string(),
+                        })),
                         ..Default::default()
                     })
                 } else {
@@ -131,18 +134,21 @@ impl LanguageServer for Backend {
             })
         });
 
-        let items= items.chain(vec![
-            CompletionItem {
-                label: String::from("true"),
-                kind: Some(CompletionItemKind::VALUE),
-                ..Default::default()
-            },
-            CompletionItem {
-                label: String::from("false"),
-                kind: Some(CompletionItemKind::VALUE),
-                ..Default::default()
-            }
-        ].into_iter());
+        let items = items.chain(
+            vec![
+                CompletionItem {
+                    label: String::from("true"),
+                    kind: Some(CompletionItemKind::VALUE),
+                    ..Default::default()
+                },
+                CompletionItem {
+                    label: String::from("false"),
+                    kind: Some(CompletionItemKind::VALUE),
+                    ..Default::default()
+                },
+            ]
+            .into_iter(),
+        );
 
         Ok(Some(CompletionResponse::Array(items.collect())))
     }
