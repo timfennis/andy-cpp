@@ -1,7 +1,6 @@
 use std::fmt::Write;
 use std::rc::Rc;
 
-use either::Either;
 use miette::Diagnostic;
 
 use crate::ast::Expression;
@@ -166,7 +165,7 @@ impl Parser {
         }
 
         while let Some(token_location) = self.consume_token_if(&extended_valid_tokens) {
-            let (invert, token_location) = if token_location.token == Token::LogicNot {
+            let (invert, operator_token_loc) = if token_location.token == Token::LogicNot {
                 let augmented = self.consume_token_if(valid_tokens).ok_or_else(|| {
                     Error::text(
                         format!(
@@ -185,28 +184,38 @@ impl Parser {
                 (None, token_location)
             };
 
-            let operator: BinaryOperator = token_location.clone().try_into().unwrap_or_else(|_| {
-                panic!(
-                    "cannot convert '{}' into a binary operator",
-                    token_location.token
-                )
-            });
+            let operator: BinaryOperator =
+                operator_token_loc.clone().try_into().unwrap_or_else(|_| {
+                    panic!(
+                        "cannot convert '{}' into a binary operator",
+                        operator_token_loc.token
+                    )
+                });
             let right = next(self)?;
             // IS this new span logic sound?
             let new_span = left.span.merge(right.span);
-            left = Expression::Binary {
-                left: Box::new(left),
-                operator,
-                right: Box::new(right),
+
+            // Is this always the same
+            debug_assert_eq!(operator.to_string(), operator_token_loc.token.to_string());
+
+            left = Expression::Call {
+                function: Box::new(
+                    Expression::Identifier(operator_token_loc.token.to_string())
+                        .to_location(operator_token_loc.span),
+                ),
+                arguments: vec![left, right],
             }
             .to_location(new_span);
 
-            if let Some(invert) = invert {
-                left = Expression::Unary {
-                    expression: Box::new(left),
-                    operator: UnaryOperator::Not,
+            if let Some(not_token) = invert {
+                left = Expression::Call {
+                    function: Box::new(
+                        Expression::Identifier(not_token.token.to_string())
+                            .to_location(not_token.span),
+                    ),
+                    arguments: vec![left],
                 }
-                .to_location(new_span.merge(invert.span));
+                .to_location(new_span.merge(not_token.span));
             }
         }
         Ok(left)
@@ -221,15 +230,18 @@ impl Parser {
         let left = next(self)?;
 
         if let Some(token_location) = self.consume_token_if(valid_tokens) {
+            let operator_span = token_location.span;
             let operator = BinaryOperator::try_from(token_location)
                 .expect("COMPILER ERROR: consume_token_if must guarantee the correct token");
             let right = current(self)?;
 
             let new_span = left.span.merge(right.span);
-            return Ok(Expression::Binary {
-                left: Box::new(left),
-                operator,
-                right: Box::new(right),
+
+            return Ok(Expression::Call {
+                function: Box::new(
+                    Expression::Identifier(operator.to_string()).to_location(operator_span),
+                ),
+                arguments: vec![left, right],
             }
             .to_location(new_span));
         }
@@ -295,7 +307,7 @@ impl Parser {
             return Err(Error::with_help(
                 "Invalid assignment target".to_string(),
                 lvalue_span,
-                "Assignment target is not a valid lvalue. Only a few expressions can be assigned a value. Check that the left-hand side of the assignment is a valid target.".to_string()
+                "Assignment target is not a valid lvalue. Only a few expressions can be assigned a value. Check that the left-hand side of the assignment is a valid target.".to_string(),
             ));
         };
 
@@ -334,7 +346,7 @@ impl Parser {
                 Some(Token::EqualsSign) => Err(Error::with_help(
                     "Invalid assignment target".to_string(),
                     maybe_lvalue.span,
-                    "Assignment target is not a valid lvalue. Only a few expressions can be assigned a value. Check that the left-hand side of the assignment is a valid target.".to_string()
+                    "Assignment target is not a valid lvalue. Only a few expressions can be assigned a value. Check that the left-hand side of the assignment is a valid target.".to_string(),
                 )),
                 _ => Ok(maybe_lvalue),
             };
@@ -355,10 +367,7 @@ impl Parser {
                 Ok(assignment_expression.to_location(start.merge(end)))
             }
             Some(Token::OpAssign(inner)) => {
-                let thing = match &inner.token {
-                    Token::Identifier(identifier) => Either::Right(identifier.to_string()),
-                    _ => Either::Left((*inner.clone()).try_into()?),
-                };
+                let operation_identifier = inner.token.to_string();
 
                 self.advance();
                 let expression = self.tuple_expression(Self::single_expression, false)?;
@@ -366,8 +375,8 @@ impl Parser {
                 let op_assign = Expression::OpAssignment {
                     l_value: Lvalue::try_from(maybe_lvalue)
                         .expect("guaranteed to produce an lvalue"),
-                    value: Box::new(expression),
-                    operation: thing,
+                    r_value: Box::new(expression),
+                    operation: operation_identifier,
                 };
 
                 Ok(op_assign.to_location(start.merge(end)))
@@ -450,17 +459,22 @@ impl Parser {
     // x := not foo in bar
     // ```
     fn logic_not(&mut self) -> Result<ExpressionLocation, Error> {
-        if let Some(token) = self.consume_token_if(&[Token::LogicNot]) {
-            let operator: UnaryOperator = token
+        if let Some(operator_token_loc) = self.consume_token_if(&[Token::LogicNot]) {
+            let operator_span = operator_token_loc.span;
+            let _: UnaryOperator = operator_token_loc
+                .clone()
                 .try_into()
                 .expect("consume_operator_if guaranteed us that this token can be UnaryOperator");
 
             let right = self.logic_not()?;
             let span = right.span;
 
-            Ok(Expression::Unary {
-                operator,
-                expression: Box::new(right),
+            Ok(Expression::Call {
+                function: Box::new(
+                    Expression::Identifier(operator_token_loc.token.to_string())
+                        .to_location(operator_span),
+                ),
+                arguments: vec![right],
             }
             .to_location(span))
         } else {
@@ -571,18 +585,20 @@ impl Parser {
     }
 
     fn tight_unary(&mut self) -> Result<ExpressionLocation, Error> {
-        if let Some(token) = self.consume_token_if(&[Token::Bang, Token::Minus, Token::Tilde]) {
-            let token_span = token.span;
-            let operator: UnaryOperator = token
-                .try_into()
-                .expect("consume_operator_if guaranteed us that the next token is an Operator");
+        if let Some(operator_token_loc) =
+            self.consume_token_if(&[Token::Bang, Token::Minus, Token::Tilde])
+        {
+            let token_span = operator_token_loc.span;
 
             let right = self.tight_unary()?;
             let span = right.span;
 
-            Ok(Expression::Unary {
-                operator,
-                expression: Box::new(right),
+            Ok(Expression::Call {
+                function: Box::new(
+                    Expression::Identifier(operator_token_loc.token.to_string())
+                        .to_location(token_span),
+                ),
+                arguments: vec![right],
             }
             .to_location(span.merge(token_span)))
         } else {
@@ -1084,7 +1100,10 @@ impl Parser {
         // Next we either expect a body block `{ ... }` or a fat arrow followed by a single expression `=> ...`
 
         let body = match self.peek_current_token() {
-            Some(Token::FatArrow) => { self.advance(); self.single_expression()?},
+            Some(Token::FatArrow) => {
+                self.advance();
+                self.single_expression()?
+            }
             Some(Token::LeftCurlyBracket) => self.block()?,
             Some(token) => {
                 return Err(Error::with_help(

@@ -4,7 +4,7 @@ use crate::interpreter::environment::{Environment, EnvironmentRef};
 use crate::interpreter::evaluate::{
     ErrorConverter, EvaluationError, EvaluationResult, evaluate_expression,
 };
-use crate::interpreter::num::{Number, NumberType};
+use crate::interpreter::num::{BinaryOperatorError, Number, NumberType};
 use crate::interpreter::sequence::Sequence;
 use crate::interpreter::value::{Value, ValueType};
 use crate::lexer::Span;
@@ -27,6 +27,7 @@ impl Callable<'_> {
         self.function.borrow().call(args, self.environment)
     }
 }
+
 #[derive(Clone, Builder)]
 pub struct Function {
     #[builder(default, setter(strip_option))]
@@ -76,8 +77,11 @@ pub enum FunctionBody {
         body: Rc<ExpressionLocation>,
         environment: EnvironmentRef,
     },
-    SingleNumberFunction {
+    NumericUnaryOp {
         body: fn(number: Number) -> Number,
+    },
+    NumericBinaryOp {
+        body: fn(left: Number, right: Number) -> Result<Number, BinaryOperatorError>,
     },
     GenericFunction {
         type_signature: TypeSignature,
@@ -99,9 +103,6 @@ impl FunctionBody {
             function,
         }
     }
-}
-
-impl FunctionBody {
     fn type_signature(&self) -> TypeSignature {
         match self {
             Self::Closure {
@@ -113,9 +114,13 @@ impl FunctionBody {
                     .collect(),
             ),
             Self::Memoized { cache: _, function } => function.type_signature(),
-            Self::SingleNumberFunction { .. } => {
+            Self::NumericUnaryOp { .. } => {
                 TypeSignature::Exact(vec![Parameter::new("num", ParamType::Number)])
             }
+            Self::NumericBinaryOp { .. } => TypeSignature::Exact(vec![
+                Parameter::new("left", ParamType::Number),
+                Parameter::new("right", ParamType::Number),
+            ]),
             Self::GenericFunction { type_signature, .. } => type_signature.clone(),
         }
     }
@@ -141,16 +146,37 @@ impl FunctionBody {
                     r => r,
                 }
             }
-            Self::SingleNumberFunction { body } => match args {
+            Self::NumericUnaryOp { body } => match args {
                 [Value::Number(num)] => Ok(Value::Number(body(num.clone()))),
                 [v] => Err(FunctionCallError::ArgumentTypeError {
-                    expected: ValueType::Number(NumberType::Float),
+                    expected: ParamType::Number,
                     actual: v.value_type(),
                 }
                 .into()),
-                _ => Err(FunctionCallError::ArgumentCountError {
+                args => Err(FunctionCallError::ArgumentCountError {
                     expected: 1,
-                    actual: 0,
+                    actual: args.len(),
+                }
+                .into()),
+            },
+            Self::NumericBinaryOp { body } => match args {
+                [Value::Number(left), Value::Number(right)] => Ok(Value::Number(
+                    body(left.clone(), right.clone())
+                        .map_err(|err| FunctionCarrier::IntoEvaluationError(Box::new(err)))?,
+                )),
+                [Value::Number(_), right] => Err(FunctionCallError::ArgumentTypeError {
+                    expected: ParamType::Number,
+                    actual: right.value_type(),
+                }
+                .into()),
+                [left, _] => Err(FunctionCallError::ArgumentTypeError {
+                    expected: ParamType::Number,
+                    actual: left.value_type(),
+                }
+                .into()),
+                args => Err(FunctionCallError::ArgumentCountError {
+                    expected: 2,
+                    actual: args.len(),
                 }
                 .into()),
             },
@@ -184,12 +210,45 @@ pub enum TypeSignature {
     Exact(Vec<Parameter>),
 }
 
+impl TypeSignature {
+    /// Matches a list of `ValueTypes` to a type signature. It can return `None` if there is no match or
+    /// `Some(num)` where num is the sum of the distances of the types. The type `Int`, is distance 1
+    /// away from `Number`, and `Number` is 1 distance from `Any`, then `Int` is distance 2 from `Any`.
+    fn calc_type_score(&self, types: &[ValueType]) -> Option<u32> {
+        match self {
+            Self::Variadic => Some(0),
+            Self::Exact(signature) => {
+                if types.len() == signature.len() {
+                    let mut acc = 0;
+                    for (a, b) in types.iter().zip(signature.iter()) {
+                        let dist = b.type_name.distance(a)?;
+                        acc += dist;
+                    }
+
+                    return Some(acc);
+                }
+
+                None
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct OverloadedFunction {
     implementations: HashMap<TypeSignature, Function>,
 }
 
 impl OverloadedFunction {
+    pub fn from_multiple(functions: Vec<Function>) -> Self {
+        Self {
+            implementations: functions
+                .into_iter()
+                .map(|f| (f.type_signature(), f))
+                .collect(),
+        }
+    }
+
     pub fn add(&mut self, function: Function) {
         self.implementations
             .insert(function.type_signature(), function);
@@ -202,23 +261,70 @@ impl OverloadedFunction {
     pub fn call(&self, args: &mut [Value], env: &EnvironmentRef) -> EvaluationResult {
         let types: Vec<ValueType> = args.iter().map(ValueType::from).collect();
 
-        let mut best = None;
+        let mut best_function_match = None;
         let mut best_distance = u32::MAX;
+
         for (signature, function) in &self.implementations {
-            let Some(cur) = match_types_to_signature(&types, signature) else {
+            let Some(cur) = signature.calc_type_score(&types) else {
                 continue;
             };
             if cur < best_distance {
                 best_distance = cur;
-                best = Some(function);
+                best_function_match = Some(function);
             }
         }
 
-        if let Some(function) = best {
-            function.body().call(args, env)
-        } else {
-            Err(FunctionCarrier::FunctionNotFound)
+        best_function_match
+            .ok_or(FunctionCarrier::FunctionNotFound)
+            .and_then(|function| function.body().call(args, env))
+            // For now if we can't find a specific function we just try to vectorize as a fallback
+            .or_else(|err| {
+                if let FunctionCarrier::FunctionNotFound = err {
+                    self.call_vectorized(args, env)
+                } else {
+                    Err(err)
+                }
+            })
+    }
+
+    fn call_vectorized(&self, args: &mut [Value], env: &EnvironmentRef) -> EvaluationResult {
+        let [left, right] = args else {
+            // Vectorized application only works in cases where there are two tuple arguments
+            return Err(FunctionCarrier::FunctionNotFound);
+        };
+
+        if !left.supports_vectorization_with(right) {
+            return Err(FunctionCarrier::FunctionNotFound);
         }
+
+        let (left, right) = match (left, right) {
+            // Both are tuples
+            (Value::Sequence(Sequence::Tuple(left)), Value::Sequence(Sequence::Tuple(right))) => {
+                (left, right.as_slice())
+            }
+            // Left is a number and right is a tuple
+            (left @ Value::Number(_), Value::Sequence(Sequence::Tuple(right))) => (
+                &mut Rc::new(vec![left.clone(); right.len()]),
+                right.as_slice(),
+            ),
+            // Left is a tuple and right is a number
+            (Value::Sequence(Sequence::Tuple(left)), right @ Value::Number(_)) => {
+                (left, std::slice::from_ref(right))
+            }
+            _ => {
+                return Err(FunctionCarrier::FunctionNotFound);
+            }
+        };
+
+        let left_mut: &mut Vec<Value> = Rc::make_mut(left);
+
+        // Zip the mutable vector with the immutable right side and perform the operations on all elements
+        // TODO: maybe one day figure out how to get rid of all these clones
+        for (l, r) in left_mut.iter_mut().zip(right.iter().cycle()) {
+            *l = self.call(&mut [l.clone(), r.clone()], env)?;
+        }
+
+        Ok(Value::Sequence(Sequence::Tuple(left.clone())))
     }
 }
 
@@ -233,28 +339,6 @@ impl From<Function> for OverloadedFunction {
         let type_signature = value.type_signature();
         Self {
             implementations: HashMap::from([(type_signature, value)]),
-        }
-    }
-}
-
-/// Matches a list of `ValueTypes` to a type signature. It can return `None` if there is no match or
-/// `Some(num)` where num is the sum of the distances of the types. The type `Int`, is distance 1
-/// away from `Number`, and `Number` is 1 distance from `Any`, then `Int` is distance 2 from `Any`.
-fn match_types_to_signature(types: &[ValueType], signature: &TypeSignature) -> Option<u32> {
-    match signature {
-        TypeSignature::Variadic => Some(0),
-        TypeSignature::Exact(signature) => {
-            if types.len() == signature.len() {
-                let mut acc = 0;
-                for (a, b) in types.iter().zip(signature.iter()) {
-                    let dist = b.type_name.distance(a)?;
-                    acc += dist;
-                }
-
-                return Some(acc);
-            }
-
-            None
         }
     }
 }
@@ -385,11 +469,17 @@ impl From<&Value> for ParamType {
     }
 }
 
+impl fmt::Display for ParamType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(thiserror::Error, Debug)]
 pub enum FunctionCallError {
     #[error("invalid argument, expected {expected} got {actual}")]
     ArgumentTypeError {
-        expected: ValueType,
+        expected: ParamType,
         actual: ValueType,
     },
 

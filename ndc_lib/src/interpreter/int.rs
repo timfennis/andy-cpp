@@ -169,7 +169,19 @@ impl Int {
     }
 }
 
+impl PartialEq for Int {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::BigInt(left), Self::BigInt(right)) => left == right,
+            (Self::BigInt(left), Self::Int64(right)) => left == &BigInt::from(*right),
+            (Self::Int64(left), Self::BigInt(right)) => &BigInt::from(*left) == right,
+            (Self::Int64(left), Self::Int64(right)) => left == right,
+        }
+    }
+}
+
 impl Eq for Int {}
+
 impl Ord for Int {
     fn cmp(&self, other: &Self) -> Ordering {
         match (self, other) {
@@ -290,11 +302,11 @@ macro_rules! impl_binary_operator {
         }
     };
 }
-
 impl_binary_operator!(Add, add, checked_add);
 impl_binary_operator!(Sub, sub, checked_sub);
 impl_binary_operator!(Mul, mul, checked_mul);
 impl_binary_operator!(Div, div, checked_div);
+
 impl_binary_operator!(Rem, rem, checked_rem);
 
 impl BitAnd for &Int {

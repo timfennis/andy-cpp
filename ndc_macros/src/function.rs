@@ -1,6 +1,7 @@
+use crate::convert::{Argument, TypeConverter, build};
 use crate::r#match::{
     is_ref, is_ref_mut, is_ref_mut_of_slice_of_value, is_ref_of_bigint, is_ref_of_slice_of_value,
-    is_str_ref, is_string, path_ends_with,
+    is_str_ref, path_ends_with,
 };
 use itertools::Itertools;
 use proc_macro2::TokenStream;
@@ -15,8 +16,9 @@ pub struct WrappedFunction {
 pub fn wrap_function(function: &syn::ItemFn) -> Vec<WrappedFunction> {
     let original_identifier = function.sig.ident.clone();
 
-    let mut register_as_function_name =
-        proc_macro2::Literal::string(&original_identifier.to_string());
+    let mut function_names = vec![proc_macro2::Literal::string(
+        &original_identifier.to_string(),
+    )];
 
     let mut docs_buf = String::new();
     for attr in &function.attrs {
@@ -24,7 +26,11 @@ pub fn wrap_function(function: &syn::ItemFn) -> Vec<WrappedFunction> {
             attr.parse_nested_meta(|meta| {
                 // #[function(name = "...")]
                 if meta.path.is_ident("name") {
-                    register_as_function_name = meta.value()?.parse()?;
+                    function_names = vec![meta.value()?.parse()?];
+                    // register_as_function_name = meta.value()?.parse()?;
+                    Ok(())
+                } else if meta.path.is_ident("alias") {
+                    function_names.push(meta.value()?.parse()?);
                     Ok(())
                 } else {
                     Err(meta.error("unsupported property on function"))
@@ -52,46 +58,57 @@ pub fn wrap_function(function: &syn::ItemFn) -> Vec<WrappedFunction> {
 
     // If the function has no argument then the cartesian product stuff below doesn't work
     if function.sig.inputs.is_empty() {
-        return vec![wrap_single(
-            function.clone(),
-            &original_identifier,
-            &register_as_function_name,
-            vec![],
-            &docs_buf,
-        )];
+        return function_names
+            .iter()
+            .map(|function_name| {
+                wrap_single(
+                    function.clone(),
+                    &original_identifier,
+                    function_name,
+                    vec![],
+                    &docs_buf,
+                )
+            })
+            .collect();
     }
 
     // When we call create_temp_variable we can get multiple definitions for a variable
     // For instance when a rust function is `fn foo(list: &[Value])` we can define two internal functions for both Tuple and List
-    let functions = function
-        .sig
-        .inputs
-        .iter()
-        .enumerate()
-        .map(|(position, fn_arg)| {
-            let name = match fn_arg {
-                syn::FnArg::Receiver(_) => "self".to_string(),
-                syn::FnArg::Typed(syn::PatType { pat, .. }) => match &**pat {
-                    syn::Pat::Ident(syn::PatIdent { ident, .. }) => ident.to_string(),
-                    _ => panic!("don't know how to process this"),
-                },
-            };
-            create_temp_variable(position, fn_arg, &original_identifier, &name)
-        })
-        .multi_cartesian_product()
-        .enumerate()
-        .map(|(variation_id, args)| {
-            wrap_single(
-                function.clone(),
-                &format_ident!("{}_{}", original_identifier, variation_id),
-                &register_as_function_name,
-                args,
-                &docs_buf,
-            )
-        })
-        .collect::<Vec<_>>();
 
-    functions
+    let mut variation_id = 0usize;
+    function_names
+        .iter()
+        .flat_map(|function_name| {
+            function
+                .sig
+                .inputs
+                .iter()
+                .enumerate()
+                .map(|(position, fn_arg)| {
+                    let name = match fn_arg {
+                        syn::FnArg::Receiver(_) => "self".to_string(),
+                        syn::FnArg::Typed(syn::PatType { pat, .. }) => match &**pat {
+                            syn::Pat::Ident(syn::PatIdent { ident, .. }) => ident.to_string(),
+                            _ => panic!("don't know how to process this"),
+                        },
+                    };
+                    create_temp_variable(position, fn_arg, &original_identifier, &name)
+                })
+                .multi_cartesian_product()
+                .map(|args| {
+                    let wrapped = wrap_single(
+                        function.clone(),
+                        &format_ident!("{original_identifier}_{variation_id}"),
+                        function_name,
+                        args,
+                        &docs_buf,
+                    );
+                    variation_id += 1;
+                    wrapped
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect()
 }
 
 /// Wraps an original rust function `function` in an outer function with the identifier `identifier`
@@ -198,21 +215,13 @@ fn wrap_single(
             .build()
             .expect("expected function creation in proc macro to always succeed");
 
-        env.declare_function(#register_as_function_name, func);
+        env.declare_global_fn(func);
     };
 
     WrappedFunction {
         function_declaration,
         function_registration,
     }
-}
-
-#[derive(Debug, Clone)]
-struct Argument {
-    param_type: TokenStream,
-    param_name: TokenStream,
-    argument: TokenStream,
-    initialize_code: TokenStream,
 }
 
 fn into_param_type(ty: &syn::Type) -> TokenStream {
@@ -232,6 +241,15 @@ fn into_param_type(ty: &syn::Type) -> TokenStream {
         }
         ty if path_ends_with(ty, "MaxHeap") => {
             quote! { crate::interpreter::function::ParamType::MaxHeap }
+        }
+        ty if path_ends_with(ty, "ListRepr") => {
+            quote! { crate::interpreter::function::ParamType::List }
+        }
+        ty if path_ends_with(ty, "TupleRepr") => {
+            quote! { crate::interpreter::function::ParamType::Tuple }
+        }
+        ty if path_ends_with(ty, "MapRepr") => {
+            quote! { crate::interpreter::function::ParamType::Map }
         }
         syn::Type::Reference(syn::TypeReference { elem, .. }) => into_param_type(elem),
         syn::Type::Path(syn::TypePath { path, .. }) => match path {
@@ -268,24 +286,18 @@ fn create_temp_variable(
     if let syn::FnArg::Typed(pat_type) = input {
         let ty = &*pat_type.ty;
 
-        // The pattern is exactly &mut String
-        if is_ref_mut(ty) && is_string(ty) {
-            let rc_temp_var =
-                syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
-            return vec![Argument {
-                param_type: quote! { crate::interpreter::function::ParamType::String },
-                param_name: quote! { #original_name },
-                argument: quote! { #argument_var_name },
-                initialize_code: quote! {
-                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::String(#rc_temp_var)) = #argument_var_name else {
-                        panic!("Value #position needed to be a Sequence::String but wasn't");
-                    };
-                    let #argument_var_name = &mut *#rc_temp_var.try_borrow_mut()?;
-                },
-            }];
+        let converters: Vec<Box<dyn TypeConverter>> = build();
+
+        let temp_var = syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
+
+        for converter in converters {
+            if converter.matches(ty) {
+                return converter.convert(temp_var, original_name, argument_var_name);
+            }
         }
+
         // The pattern is Callable
-        else if path_ends_with(ty, "Callable") {
+        if path_ends_with(ty, "Callable") {
             let temp_var = syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
             return vec![Argument {
                 param_type: quote! { crate::interpreter::function::ParamType::Function },
@@ -582,7 +594,7 @@ fn create_temp_variable(
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
                     let crate::interpreter::value::Value::Number(crate::interpreter::num::Number::Rational(#argument_var_name)) = #argument_var_name else {
-                        panic!("VValue #position needs to be Rational but wasn't");
+                        panic!("Value #position needs to be Rational but wasn't");
                     };
 
                     let #argument_var_name = &#argument_var_name.clone();
@@ -612,7 +624,7 @@ fn create_temp_variable(
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
                     let crate::interpreter::value::Value::Number(crate::interpreter::num::Number::Complex(#argument_var_name)) = #argument_var_name else {
-                        panic!("VValue #position needs to be Complex64 but wasn't");
+                        panic!("Value #position needs to be Complex64 but wasn't");
                     };
 
                     let #argument_var_name = #argument_var_name.clone();

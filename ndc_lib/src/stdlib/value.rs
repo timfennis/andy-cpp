@@ -95,8 +95,8 @@ mod inner {
             Value::Option(o) => Value::Option(o.clone()),
             number @ Value::Number(_) => number.clone(),
             Value::Bool(b) => Value::Bool(*b),
-            Value::Sequence(Sequence::String(string)) => Value::from(string.borrow().to_owned()),
-            Value::Sequence(Sequence::List(list)) => Value::from(list.borrow().to_owned()),
+            Value::Sequence(Sequence::String(string)) => Value::string(string.borrow().to_owned()),
+            Value::Sequence(Sequence::List(list)) => Value::list(list.borrow().to_owned()),
             Value::Sequence(Sequence::Map(map, default)) => Value::Sequence(Sequence::Map(
                 Rc::new(RefCell::new(map.borrow().clone())),
                 default.to_owned(),
