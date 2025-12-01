@@ -153,7 +153,6 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[cfg(feature = "lsp")]
 fn start_lsp() {
     #[allow(
         clippy::expect_used,
@@ -168,11 +167,6 @@ fn start_lsp() {
             .expect("Failed building the Runtime")
             .block_on(async { ndc_lsp::start_lsp().await });
     }
-}
-
-#[cfg(not(feature = "lsp"))]
-fn start_lsp() {
-    eprintln!("binary not compiled with LSP support");
 }
 
 pub fn into_miette_result<T>(result: Result<T, InterpreterError>) -> miette::Result<T> {
