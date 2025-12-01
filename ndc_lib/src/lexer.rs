@@ -64,7 +64,7 @@ impl Iterator for Lexer<'_> {
             let third = self.source.peek_n(2);
 
             // Exclude // docs
-            if matches!((first, second), ('/', Some('/'))) {
+            if matches!((first, second), ('/', Some('/')) | ('#', Some('!'))) {
                 self.source.consume(2);
                 // We ran into a doc comment, and we just keep consuming characters as long as we
                 // don't encounter a linebreak
