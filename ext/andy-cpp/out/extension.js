@@ -34,9 +34,12 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.activate = activate;
+exports.deactivate = deactivate;
 const vscode = __importStar(require("vscode"));
+const node_1 = require("vscode-languageclient/node");
 // Adjust this to how your interpreter is invoked
 const interpreterPath = "ndc";
+let client;
 class Lazy {
     initializer;
     _value;
@@ -53,6 +56,20 @@ class Lazy {
     }
 }
 function activate(context) {
+    vscode.window.showInformationMessage("Andy C++ extension activated");
+    const serverOptions = {
+        run: { command: 'ndc', args: ["lsp"], transport: node_1.TransportKind.stdio },
+        debug: { command: 'ndc', args: ["lsp"], transport: node_1.TransportKind.stdio }
+    };
+    const clientOptions = {
+        documentSelector: [{ scheme: 'file', language: 'andy-cpp' }],
+        synchronize: { fileEvents: vscode.workspace.createFileSystemWatcher('**/*.ndc') },
+        outputChannel: vscode.window.createOutputChannel("Andy C++ LSP"),
+        traceOutputChannel: vscode.window.createOutputChannel("Andy C++ LSP Trace"),
+    };
+    client = new node_1.LanguageClient('andy-cpp-lsp', 'Andy C++ LSP', serverOptions, clientOptions);
+    context.subscriptions.push(client);
+    client.start();
     const terminal = new Lazy(() => {
         return vscode.window.terminals.find((terminal) => terminal.name === "Andy C++") || vscode.window.createTerminal("Andy C++");
     });
@@ -75,5 +92,8 @@ function activate(context) {
         terminal.value.sendText(`${interpreterPath} run ${filePath}`);
         terminal.value.show();
     }));
+}
+function deactivate() {
+    return client?.stop();
 }
 //# sourceMappingURL=extension.js.map

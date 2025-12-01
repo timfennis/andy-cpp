@@ -14,7 +14,7 @@ pub struct Parser {
 }
 
 impl Parser {
-    pub(crate) fn from_tokens(tokens: Vec<TokenLocation>) -> Self {
+    pub fn from_tokens(tokens: Vec<TokenLocation>) -> Self {
         Self { tokens, current: 0 }
     }
 
@@ -22,7 +22,7 @@ impl Parser {
     /// # Errors
     /// If the parsing fails which it could do for many different reasons it will return an [Error]. See the variants of
     /// this type for more information about the different kinds of errors.
-    pub(crate) fn parse(&mut self) -> Result<Vec<ExpressionLocation>, Error> {
+    pub fn parse(&mut self) -> Result<Vec<ExpressionLocation>, Error> {
         let is_valid_statement = |expr: &Expression| -> bool {
             matches!(
                 expr,
@@ -1267,6 +1267,10 @@ impl Error {
             span,
             help_text: Some("The token stream ended prematurely. Ensure all blocks, expressions, or statements are properly closed.".to_string()),
         }
+    }
+
+    pub fn location(&self) -> Span {
+        self.span
     }
 }
 
