@@ -200,7 +200,7 @@ pub fn get_at_index(
                     .chars()
                     .nth(e)
                     .map(|x| String::from(x))
-                    .expect("TODO: fix this unwrap (NOTE: maybe we're guaranteed to succeed??)"),
+                    .expect("Safe because bounds were already checked"),
                 Offset::Range(s, e) => insertion_target
                     .borrow()
                     .chars()
@@ -210,7 +210,7 @@ pub fn get_at_index(
             }))
         }
         Value::Sequence(Sequence::Map(map, _)) => {
-            let map = map.try_borrow_mut().into_evaluation_result(span)?;
+            let map = map.try_borrow().into_evaluation_result(span)?;
 
             let key = match index {
                 EvaluatedIndex::Index(idx) => idx,
@@ -223,7 +223,7 @@ pub fn get_at_index(
                 }
             };
 
-            Ok(map.get(&key).expect("TODO: fix this error").clone())
+            Ok(map.get(&key).ok_or_else(|| EvaluationError::key_not_found(&key, span))?.clone())
         }
         _ => Err(EvaluationError::syntax_error(
             format!("cannot insert into {} at index", lhs.value_type()),

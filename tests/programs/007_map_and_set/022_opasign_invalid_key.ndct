@@ -1,0 +1,5 @@
+--PROGRAM--
+let map = %{};
+map["invalid key"] += 3;
+--EXPECT-ERROR--
+Key not found in map: invalid key
