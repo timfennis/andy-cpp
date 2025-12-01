@@ -1,3 +1,6 @@
+use ndc_lib::ast::ExpressionLocation;
+use std::collections::HashMap;
+use tokio::sync::{OnceCell, RwLock};
 use tower_lsp::lsp_types::{
     DidChangeTextDocumentParams, DidOpenTextDocumentParams, InitializeParams, InitializeResult,
     InitializedParams, MessageType, ServerCapabilities, TextDocumentSyncCapability,
@@ -11,11 +14,36 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 
 pub struct Backend {
-    pub client: Client,
+    client: Client,
+    documents: RwLock<HashMap<Url, String>>,
+    global_hovers: Vec<Hover>,
 }
+
+fn parse_str(input: &str) -> Option<Vec<ExpressionLocation>> {
+    let scanner = Lexer::new(input);
+    let tokens = scanner.collect::<Result<Vec<TokenLocation>, _>>().ok()?;
+
+    let mut parser = ndc_lib::ast::Parser::from_tokens(tokens);
+
+    parser.parse().ok()
+}
+
 impl Backend {
     pub fn new(client: Client) -> Self {
-        Self { client }
+        Self {
+            client,
+            documents: RwLock::new(HashMap::default()),
+            global_hovers: prebuild_hover(),
+        }
+    }
+
+    async fn remember_document(&self, url: Url, contents: String) {
+        let mut map = self.documents.write().await;
+        map.insert(url, contents);
+    }
+
+    async fn forget_document(&self, url: &Url) {
+        self.documents.write().await.remove(url);
     }
 
     async fn validate(&self, uri: &Url, text: &str) {
@@ -75,6 +103,7 @@ fn span_into_range(text: &str, span: Span) -> Range {
         end: position_from_offset(text, span.end()),
     }
 }
+
 fn position_from_offset(text: &str, offset: usize) -> Position {
     let mut line = 0;
     let mut col = 0;
@@ -102,6 +131,32 @@ fn position_from_offset(text: &str, offset: usize) -> Position {
     }
 }
 
+fn prebuild_hover() -> Vec<Hover> {
+    let interpreter = Interpreter::new(Vec::new());
+    let env = interpreter.environment();
+    let functions = env.borrow().get_all_functions();
+
+    functions
+        .iter()
+        .flat_map(|f| {
+            f.implementations().filter_map(|(sig, fun)| {
+                // Ignore operators
+                if fun.name().chars().all(|c| c.is_alphanumeric() || c == '?') {
+                    Some(Hover {
+                        contents: HoverContents::Markup(MarkupContent {
+                            kind: MarkupKind::Markdown,
+                            value: format!("{sig}\n\n{}", fun.documentation()),
+                        }),
+                        range: None,
+                    })
+                } else {
+                    None
+                }
+            })
+        })
+        .collect::<Vec<_>>()
+}
+
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, _: InitializeParams) -> JsonRPCResult<InitializeResult> {
@@ -120,6 +175,7 @@ impl LanguageServer for Backend {
                         workspace_diagnostics: false,
                     },
                 )),
+                hover_provider: Some(HoverProviderCapability::Simple(true)),
                 completion_provider: Some(CompletionOptions {
                     resolve_provider: Some(false), // or true if you want to support `completionItem/resolve`
                     trigger_characters: Some(vec![".".to_string()]), // characters that trigger completion
@@ -133,6 +189,55 @@ impl LanguageServer for Backend {
             },
             ..Default::default()
         })
+    }
+
+    async fn initialized(&self, _: InitializedParams) {
+        self.client
+            .log_message(MessageType::INFO, "server initialized")
+            .await;
+    }
+
+    async fn shutdown(&self) -> JsonRPCResult<()> {
+        Ok(())
+    }
+
+    async fn did_open(&self, params: DidOpenTextDocumentParams) {
+        self.validate(&params.text_document.uri, &params.text_document.text)
+            .await;
+        self.remember_document(params.text_document.uri, params.text_document.text)
+            .await;
+    }
+    async fn did_change(&self, params: DidChangeTextDocumentParams) {
+        for change in params.content_changes {
+            self.validate(&params.text_document.uri, &change.text).await;
+            self.remember_document(params.text_document.uri.clone(), change.text)
+                .await;
+        }
+    }
+
+    async fn did_close(&self, params: DidCloseTextDocumentParams) {
+        self.forget_document(&params.text_document.uri).await
+    }
+
+    async fn hover(&self, params: HoverParams) -> JsonRPCResult<Option<Hover>> {
+        let doc = self.documents.read().await;
+
+        let Some(document) = doc.get(&params.text_document_position_params.text_document.uri)
+        else {
+            return Ok(None);
+        };
+
+
+        let Some(parsed_doc) = parse_str(&document) else {
+            return Ok(None);
+        };
+
+        let pos = params.text_document_position_params.position;
+
+        Ok(Some(Hover {
+            contents: HoverContents::Scalar(MarkedString::String(x.to_string())),
+            range: None,
+        }))
     }
 
     async fn completion(
@@ -154,7 +259,10 @@ impl LanguageServer for Backend {
                             description: None,
                         }),
                         kind: Some(CompletionItemKind::FUNCTION),
-                        documentation: Some(Documentation::MarkupContent(MarkupContent { kind: MarkupKind::Markdown, value: fun.documentation().to_string() })),
+                        documentation: Some(Documentation::MarkupContent(MarkupContent {
+                            kind: MarkupKind::Markdown,
+                            value: fun.documentation().to_string(),
+                        })),
                         ..Default::default()
                     })
                 } else {
@@ -172,25 +280,5 @@ impl LanguageServer for Backend {
         item: CompletionItem,
     ) -> Result<CompletionItem, tower_lsp::jsonrpc::Error> {
         Ok(item) // add documentation, detail, etc. if needed
-    }
-
-    async fn initialized(&self, _: InitializedParams) {
-        self.client
-            .log_message(MessageType::INFO, "server initialized")
-            .await;
-    }
-    async fn shutdown(&self) -> JsonRPCResult<()> {
-        Ok(())
-    }
-
-    async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        self.validate(&params.text_document.uri, &params.text_document.text)
-            .await;
-    }
-
-    async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        for change in params.content_changes {
-            self.validate(&params.text_document.uri, &change.text).await;
-        }
     }
 }
