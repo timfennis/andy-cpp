@@ -27,6 +27,14 @@ pub fn register_variadic(env: &mut Environment) {
                         env.borrow_mut()
                             .with_output(|output| {
                                 let mut iter = args.iter().peekable();
+
+                                // If no arguments are passed to the print function just print an empty line
+                                if iter.peek().is_none() {
+                                    writeln!(output)?;
+                                    return Ok(());
+                                }
+
+                                // Otherwise
                                 while let Some(arg) = iter.next() {
                                     if iter.peek().is_some() {
                                         write!(output, "{arg} ")?;
