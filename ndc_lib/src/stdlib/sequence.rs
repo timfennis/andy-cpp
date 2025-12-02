@@ -486,7 +486,7 @@ mod inner {
         )
     }
 
-    //// Returns al prefixes of a sequence, each as a list.
+    /// Returns al prefixes of a sequence, each as a list.
     pub fn prefixes(seq: &mut Sequence) -> Value {
         // Special case for string which is more efficient and doesn't produce lists of characters
         if let Sequence::String(string) = &seq {
@@ -675,6 +675,23 @@ mod inner {
             .collect_vec();
 
         Ok(Value::list(out))
+    }
+
+    /// Split the input sequence into evenly sized chunks. If the input length of the sequence
+    /// is not dividable by the chunk_size the last chunk will contain fewer elements.
+    pub fn chunks(seq: &mut Sequence, chunk_size: usize) -> anyhow::Result<Value> {
+        if chunk_size == 0 {
+            return Err(anyhow!("chunk size must be non-zero"));
+        }
+
+        let iter = mut_seq_to_iterator(seq);
+
+        Ok(Value::list(
+            iter.chunks(chunk_size)
+                .into_iter()
+                .map(|chunk| Value::list(chunk.collect_vec()))
+                .collect_vec(),
+        ))
     }
 }
 

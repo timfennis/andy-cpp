@@ -31,6 +31,11 @@ mod inner {
         format!("{left}{right}")
     }
 
+    /// Returns the provided value as a string
+    pub fn string(value: &Value) -> String {
+        format!("{value}")
+    }
+
     /// Returns the Unicode code point of a 1-length string.
     pub fn ord(string: &str) -> anyhow::Result<i64> {
         if string.chars().count() == 1 {
