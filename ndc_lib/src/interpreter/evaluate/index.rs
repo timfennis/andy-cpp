@@ -199,7 +199,7 @@ pub fn get_at_index(
                     .borrow()
                     .chars()
                     .nth(e)
-                    .map(|x| String::from(x))
+                    .map(String::from)
                     .expect("Safe because bounds were already checked"),
                 Offset::Range(s, e) => insertion_target
                     .borrow()

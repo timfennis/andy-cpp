@@ -444,11 +444,10 @@ impl Number {
                 Self::Rational(Box::new(num::pow::Pow::pow(&*p1, p2.to_bigint())))
             }
             (Self::Rational(p1), Self::Rational(p2)) => {
-                if p2.is_integer() {
-                    if let Some(p2) = p2.to_i32() {
+                if p2.is_integer()
+                    && let Some(p2) = p2.to_i32() {
                         return Ok(Self::Rational(Box::new(p1.pow(p2))));
                     }
-                }
 
                 Self::Float(rational_to_float(&p1).powf(rational_to_float(&p2)))
             }

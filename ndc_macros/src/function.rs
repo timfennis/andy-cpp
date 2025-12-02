@@ -37,16 +37,13 @@ pub fn wrap_function(function: &syn::ItemFn) -> Vec<WrappedFunction> {
                 }
             })
             .expect("invalid function attribute");
-        } else if attr.path().is_ident("doc") {
-            if let syn::Meta::NameValue(meta) = &attr.meta {
-                if let syn::Expr::Lit(expr) = &meta.value {
-                    if let syn::Lit::Str(lit_str) = &expr.lit {
+        } else if attr.path().is_ident("doc")
+            && let syn::Meta::NameValue(meta) = &attr.meta
+                && let syn::Expr::Lit(expr) = &meta.value
+                    && let syn::Lit::Str(lit_str) = &expr.lit {
                         writeln!(docs_buf, "{}", lit_str.value().trim())
                             .expect("failed to write docs");
                     }
-                }
-            }
-        }
     }
 
     match &function.vis {

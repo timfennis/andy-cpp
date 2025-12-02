@@ -7,7 +7,7 @@ use tower_lsp::lsp_types::{
 use ndc_lib::interpreter::Interpreter;
 use ndc_lib::lexer::{Lexer, Span, TokenLocation};
 use tower_lsp::jsonrpc::Result as JsonRPCResult;
-use tower_lsp::lsp_types::*;
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, DiagnosticServerCapabilities, DiagnosticOptions, WorkDoneProgressOptions, CompletionOptions, CompletionParams, CompletionResponse, CompletionItem, CompletionItemLabelDetails, CompletionItemKind, Documentation, MarkupContent, MarkupKind, Range, Position};
 use tower_lsp::{Client, LanguageServer};
 
 pub struct Backend {
@@ -25,7 +25,9 @@ impl Backend {
             .collect::<Result<Vec<TokenLocation>, ndc_lib::lexer::Error>>()
             .map_err(|err| {
                 let span: Span = err.location();
-                let diag = Diagnostic {
+                
+
+                Diagnostic {
                     range: span_into_range(text, span),
                     severity: Some(DiagnosticSeverity::ERROR),
                     code: None,
@@ -35,9 +37,7 @@ impl Backend {
                     related_information: None,
                     tags: None,
                     data: None,
-                };
-
-                diag
+                }
             });
 
         let mut diagnostics = vec![];
@@ -146,8 +146,7 @@ impl LanguageServer for Backend {
                     kind: Some(CompletionItemKind::VALUE),
                     ..Default::default()
                 },
-            ]
-            .into_iter(),
+            ],
         );
 
         Ok(Some(CompletionResponse::Array(items.collect())))

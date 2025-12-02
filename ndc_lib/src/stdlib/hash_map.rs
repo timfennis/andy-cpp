@@ -147,9 +147,7 @@ mod inner {
                 .collect(),
             Sequence::Tuple(rc) => rc.iter().map(|v| (v.to_owned(), Value::unit())).collect(),
             Sequence::Map(rc, _) => rc
-                .borrow()
-                .iter()
-                .map(|(key, _value)| (key.to_owned(), Value::unit()))
+                .borrow().keys().map(|key| (key.to_owned(), Value::unit()))
                 .collect(),
             Sequence::Iterator(rc) => {
                 let mut iter = rc.borrow_mut();

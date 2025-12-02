@@ -480,11 +480,10 @@ impl TryFrom<Value> for i64 {
             return Ok(i);
         }
 
-        if let Value::Number(Number::Int(i)) = value {
-            if let Int::Int64(i) = i.simplified() {
+        if let Value::Number(Number::Int(i)) = value
+            && let Int::Int64(i) = i.simplified() {
                 return Ok(i);
             }
-        }
 
         Err(Self::Error::UnsupportedVariant(typ, stringify!(i64)))
     }
@@ -678,7 +677,7 @@ impl From<&Value> for ValueType {
 
 impl From<Number> for ValueType {
     fn from(value: Number) -> Self {
-        ValueType::Number((&value).into())
+        Self::Number((&value).into())
     }
 }
 
@@ -729,7 +728,7 @@ impl fmt::Display for Value {
                 write!(f, "function")
             }
             // Unit tuple does not print anything
-            Self::Sequence(Sequence::Tuple(t)) if t.len() == 0 => write!(f, ""),
+            Self::Sequence(Sequence::Tuple(t)) if t.is_empty() => write!(f, ""),
             Self::Sequence(s) => write!(f, "{s}"),
         }
     }

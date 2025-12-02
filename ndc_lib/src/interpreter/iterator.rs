@@ -31,7 +31,7 @@ impl Iterator for ValueIterator {
             Self::ValueRange(inner) => inner.next(),
             Self::ValueRangeFrom(inner) => inner.next(),
             Self::ValueRangeInclusive(inner) => inner.next(),
-            ValueIterator::Repeat(inner) => inner.next(),
+            Self::Repeat(inner) => inner.next(),
         }
     }
 }

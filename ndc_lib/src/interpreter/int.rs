@@ -60,11 +60,10 @@ impl Int {
     }
 
     pub fn checked_rem_euclid(self, rhs: &Self) -> Option<Self> {
-        if let (Self::Int64(p1), Self::Int64(p2)) = (&self, &rhs) {
-            if let Some(a) = (*p1).checked_rem_euclid(*p2) {
+        if let (Self::Int64(p1), Self::Int64(p2)) = (&self, &rhs)
+            && let Some(a) = (*p1).checked_rem_euclid(*p2) {
                 return Some(Self::Int64(a));
             }
-        }
 
         self.to_bigint()
             .checked_rem_euclid(&rhs.to_bigint())
