@@ -5,7 +5,7 @@ use std::fmt::Write;
 use strsim::normalized_damerau_levenshtein;
 use tap::Tap;
 use termimad::crossterm::style::Stylize;
-use termimad::{MadSkin, Alignment};
+use termimad::{Alignment, MadSkin};
 
 /// Returns `true` if `needle` is a substring of `haystack` or if they are at least 80% similar
 fn string_match(needle: &str, haystack: &str) -> bool {

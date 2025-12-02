@@ -7,7 +7,12 @@ use tower_lsp::lsp_types::{
 use ndc_lib::interpreter::Interpreter;
 use ndc_lib::lexer::{Lexer, Span, TokenLocation};
 use tower_lsp::jsonrpc::Result as JsonRPCResult;
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, DiagnosticServerCapabilities, DiagnosticOptions, WorkDoneProgressOptions, CompletionOptions, CompletionParams, CompletionResponse, CompletionItem, CompletionItemLabelDetails, CompletionItemKind, Documentation, MarkupContent, MarkupKind, Range, Position};
+use tower_lsp::lsp_types::{
+    CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionOptions,
+    CompletionParams, CompletionResponse, Diagnostic, DiagnosticOptions,
+    DiagnosticServerCapabilities, DiagnosticSeverity, Documentation, MarkupContent, MarkupKind,
+    Position, Range, WorkDoneProgressOptions,
+};
 use tower_lsp::{Client, LanguageServer};
 
 pub struct Backend {
@@ -25,7 +30,6 @@ impl Backend {
             .collect::<Result<Vec<TokenLocation>, ndc_lib::lexer::Error>>()
             .map_err(|err| {
                 let span: Span = err.location();
-                
 
                 Diagnostic {
                     range: span_into_range(text, span),
@@ -134,20 +138,18 @@ impl LanguageServer for Backend {
             })
         });
 
-        let items = items.chain(
-            vec![
-                CompletionItem {
-                    label: String::from("true"),
-                    kind: Some(CompletionItemKind::VALUE),
-                    ..Default::default()
-                },
-                CompletionItem {
-                    label: String::from("false"),
-                    kind: Some(CompletionItemKind::VALUE),
-                    ..Default::default()
-                },
-            ],
-        );
+        let items = items.chain(vec![
+            CompletionItem {
+                label: String::from("true"),
+                kind: Some(CompletionItemKind::VALUE),
+                ..Default::default()
+            },
+            CompletionItem {
+                label: String::from("false"),
+                kind: Some(CompletionItemKind::VALUE),
+                ..Default::default()
+            },
+        ]);
 
         Ok(Some(CompletionResponse::Array(items.collect())))
     }

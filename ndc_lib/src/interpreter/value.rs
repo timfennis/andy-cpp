@@ -481,9 +481,10 @@ impl TryFrom<Value> for i64 {
         }
 
         if let Value::Number(Number::Int(i)) = value
-            && let Int::Int64(i) = i.simplified() {
-                return Ok(i);
-            }
+            && let Int::Int64(i) = i.simplified()
+        {
+            return Ok(i);
+        }
 
         Err(Self::Error::UnsupportedVariant(typ, stringify!(i64)))
     }
