@@ -220,16 +220,4 @@ mod inner {
                 .collect_vec(),
         )
     }
-
-    // pub fn chunks(list: &[Value], chunk_size: usize) -> anyhow::Result<Value> {
-    //     if chunk_size == 0 {
-    //         return Err(anyhow!("chunk size must be non-zero"));
-    //     }
-    //
-    //     Ok(Value::list(
-    //         list.chunks(chunk_size)
-    //             .map(|chunk| Value::list(chunk))
-    //             .collect_vec(),
-    //     ))
-    // }
 }
