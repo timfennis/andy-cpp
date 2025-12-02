@@ -742,9 +742,7 @@ pub mod extra {
     };
 
     pub fn register(env: &mut Environment) {
-        env.declare(
-            "zip",
-            Value::function(
+        env.declare_global_fn(
                 FunctionBuilder::default()
                     .name("zip".to_string())
                     .documentation("Combines multiple sequences (or iterables) into a single sequence of tuples, where the ith tuple contains the ith element from each input sequence.\n\nIf the input sequences are of different lengths, the resulting sequence is truncated to the length of the shortest input.".to_string())
@@ -797,7 +795,6 @@ pub mod extra {
                     ))
                     .build()
                     .expect("function definitions must be valid"),
-            ),
         );
     }
 }

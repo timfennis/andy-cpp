@@ -224,8 +224,8 @@ impl BinaryOperatorError {
 
     pub fn undefined_operation(
         operator: BinaryOperator,
-        left: ValueType,
-        right: ValueType,
+        left: &ValueType,
+        right: &ValueType,
     ) -> Self {
         Self(format!(
             "operator {operator} is not defined for {left} and {right}"
@@ -397,8 +397,8 @@ impl Number {
             (Self::Float(p1), Self::Float(p2)) => Ok(Self::Float(p1.rem_euclid(p2))),
             (left, right) => Err(BinaryOperatorError::undefined_operation(
                 BinaryOperator::EuclideanModulo,
-                ValueType::from(left),
-                ValueType::from(right),
+                &ValueType::from(left),
+                &ValueType::from(right),
             )),
         }
     }

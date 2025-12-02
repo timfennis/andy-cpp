@@ -4,17 +4,20 @@ use crate::interpreter::evaluate::EvaluationError;
 use crate::lexer::Span;
 use num::BigInt;
 use num::complex::Complex64;
-use std::fmt;
-use std::fmt::Formatter;
-use std::rc::Rc;
 
-#[derive(Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
+pub enum ResolvedVar {
+    Captured { depth: usize, slot: usize },
+    Global { slot: usize },
+}
+
+#[derive(Eq, PartialEq, Clone)]
 pub struct ExpressionLocation {
     pub expression: Expression,
     pub span: Span,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Expression {
     // Literals
     BoolLiteral(bool),
@@ -23,7 +26,10 @@ pub enum Expression {
     Float64Literal(f64),
     BigIntLiteral(BigInt),
     ComplexLiteral(Complex64),
-    Identifier(String),
+    Identifier {
+        name: String,
+        resolved: Option<ResolvedVar>,
+    },
     Statement(Box<ExpressionLocation>),
     Logical {
         left: Box<ExpressionLocation>,
@@ -43,11 +49,14 @@ pub enum Expression {
         l_value: Lvalue,
         r_value: Box<ExpressionLocation>,
         operation: String,
+        resolved_assign_operation: Option<ResolvedVar>,
+        resolved_operation: Option<ResolvedVar>,
     },
     FunctionDeclaration {
-        name: Option<Box<ExpressionLocation>>,
+        name: Option<String>,
+        resolved_name: Option<ResolvedVar>,
         arguments: Box<ExpressionLocation>,
-        body: Rc<ExpressionLocation>,
+        body: Box<ExpressionLocation>,
         pure: bool,
     },
     Block {
@@ -100,7 +109,7 @@ pub enum Expression {
     },
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum ForIteration {
     Iteration {
         l_value: Lvalue,
@@ -109,7 +118,7 @@ pub enum ForIteration {
     Guard(ExpressionLocation),
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum ForBody {
     Block(ExpressionLocation),
     List(ExpressionLocation),
@@ -120,11 +129,12 @@ pub enum ForBody {
     },
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Lvalue {
     // Example: `let foo = ...`
-    Variable {
+    Identifier {
         identifier: String,
+        resolved: Option<ResolvedVar>,
     },
     // Example: `foo()[1] = ...`
     Index {
@@ -160,7 +170,7 @@ impl ExpressionLocation {
     /// If this expression cannot be converted into an identifier an `EvaluationError::InvalidExpression` will be returned
     pub fn try_into_identifier(&self) -> Result<&str, EvaluationError> {
         match &self.expression {
-            Expression::Identifier(i) => Ok(i),
+            Expression::Identifier { name, resolved: _ } => Ok(name),
             _ => Err(EvaluationError::syntax_error(
                 "expected identifier".to_string(),
                 self.span,
@@ -201,16 +211,10 @@ impl ExpressionLocation {
 }
 
 impl Lvalue {
-    /// Returns the type name for this Lvalue, this can be used to serialize expression in error messages
-    /// ```
-    /// use ndc_lib::ast::Lvalue;
-    /// let l = Lvalue::Variable { identifier: "foo".to_string() };
-    /// assert_eq!(l.expression_type_name(), "variable");
-    /// ```
     #[must_use]
     pub fn expression_type_name(&self) -> &str {
         match self {
-            Self::Variable { .. } => "variable",
+            Self::Identifier { .. } => "variable",
             Self::Index { .. } => "index expression",
             Self::Sequence(_) => "destructure pattern", // ??
         }
@@ -219,7 +223,7 @@ impl Lvalue {
     #[must_use]
     pub fn can_build_from_expression(expression: &Expression) -> bool {
         match expression {
-            Expression::Identifier(_) | Expression::Index { .. } => true,
+            Expression::Identifier { .. } | Expression::Index { .. } => true,
             Expression::List { values } | Expression::Tuple { values } => values
                 .iter()
                 .all(|el| Self::can_build_from_expression(&el.expression)),
@@ -234,7 +238,12 @@ impl TryFrom<ExpressionLocation> for Lvalue {
 
     fn try_from(value: ExpressionLocation) -> Result<Self, Self::Error> {
         match value.expression {
-            Expression::Identifier(identifier) => Ok(Self::Variable { identifier }),
+            Expression::Identifier {
+                name: identifier, ..
+            } => Ok(Self::Identifier {
+                identifier,
+                resolved: None,
+            }),
             Expression::Index { value, index } => Ok(Self::Index { value, index }),
             Expression::List { values } | Expression::Tuple { values } => Ok(Self::Sequence(
                 values
@@ -249,8 +258,8 @@ impl TryFrom<ExpressionLocation> for Lvalue {
 }
 
 #[allow(clippy::missing_fields_in_debug, clippy::too_many_lines)]
-impl fmt::Debug for ExpressionLocation {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+impl std::fmt::Debug for ExpressionLocation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // write!(f, "{{{:?} at {:?}}}", self.expression, self.span)
         match &self.expression {
             Expression::BoolLiteral(b) => {
@@ -271,9 +280,14 @@ impl fmt::Debug for ExpressionLocation {
                 .debug_struct("CoplexLiteral")
                 .field("value", &complex)
                 .finish(),
-            Expression::Identifier(ident) => {
-                f.debug_struct("Ident").field("value", &ident).finish()
-            }
+            Expression::Identifier {
+                name: ident,
+                resolved,
+            } => f
+                .debug_struct("Ident")
+                .field("value", &ident)
+                .field("resolved", resolved)
+                .finish(),
             Expression::Statement(expression_location) => f
                 .debug_struct("Statement")
                 .field("expression", &expression_location)
@@ -306,20 +320,26 @@ impl fmt::Debug for ExpressionLocation {
                 l_value,
                 r_value: value,
                 operation,
+                resolved_operation,
+                resolved_assign_operation,
             } => f
                 .debug_struct("OpAssignment")
                 .field("l_value", l_value)
                 .field("value", value)
                 .field("operation", operation)
+                .field("resolved_operation", resolved_operation)
+                .field("resolved_assign_operation", resolved_assign_operation)
                 .finish(),
             Expression::FunctionDeclaration {
                 name,
                 arguments,
                 body,
                 pure,
+                resolved_name,
             } => f
                 .debug_struct("FunctionDeclaration")
                 .field("name", name)
+                .field("resolved_name", resolved_name)
                 .field("arguments", arguments)
                 .field("body", body)
                 .field("pure", pure)

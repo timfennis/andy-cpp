@@ -73,6 +73,32 @@ impl TypeConverter for InternalMap {
         }]
     }
 }
+struct InternalString;
+impl TypeConverter for InternalString {
+    fn matches(&self, ty: &syn::Type) -> bool {
+        path_ends_with(ty, "StringRepr")
+    }
+
+    fn convert(
+        &self,
+        temp_var: syn::Ident,
+        original_name: &str,
+        argument_var_name: syn::Ident,
+    ) -> Vec<Argument> {
+        vec![Argument {
+            param_type: quote! { crate::interpreter::function::ParamType::String },
+            param_name: quote! { #original_name },
+            argument: quote! { #argument_var_name },
+            initialize_code: quote! {
+                let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::String(#temp_var)) = #argument_var_name else {
+                    panic!("Value #position needed to be Sequence::List but wasn't");
+                };
+
+                let #argument_var_name = #temp_var;
+            },
+        }]
+    }
+}
 /// Matches `Rc<RefCell<Vec<Value>>>`
 struct InternalList;
 impl TypeConverter for InternalList {
@@ -135,5 +161,6 @@ pub fn build() -> Vec<Box<dyn TypeConverter>> {
         Box::new(MutRefString),
         Box::new(InternalTuple),
         Box::new(InternalMap),
+        Box::new(InternalString),
     ]
 }

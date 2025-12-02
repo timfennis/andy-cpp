@@ -1,25 +1,26 @@
 use crate::interpreter::function::{Function, OverloadedFunction};
 
-use crate::hash_map::HashMap;
-
+use crate::ast::ResolvedVar;
+use crate::interpreter::resolve::LexicalIdentifier;
+use crate::interpreter::value::Value;
 use std::cell::RefCell;
 use std::fmt;
 use std::fmt::Formatter;
 use std::io::{Stdout, Write, stdout};
 use std::rc::Rc;
 
-use crate::interpreter::value::Value;
-
 pub type EnvironmentRef = Rc<RefCell<Environment>>;
 
 pub struct RootEnvironment {
     pub output: Box<dyn InterpreterOutput>,
+    // These are global values
+    global_functions: Vec<OverloadedFunction>,
 }
 
 pub struct Environment {
     root: Rc<RefCell<RootEnvironment>>,
     parent: Option<EnvironmentRef>,
-    values: HashMap<String, RefCell<Value>>,
+    values: Vec<Rc<RefCell<Value>>>,
 }
 
 impl fmt::Debug for Environment {
@@ -53,12 +54,15 @@ impl Environment {
 
     #[must_use]
     pub fn new_with_stdlib(writer: Box<dyn InterpreterOutput>) -> Self {
-        let root = RootEnvironment { output: writer };
+        let root = RootEnvironment {
+            output: writer,
+            global_functions: Default::default(),
+        };
 
         let mut env = Self {
             root: Rc::new(RefCell::new(root)),
             parent: None,
-            values: HashMap::default(),
+            values: Vec::new(),
         };
 
         crate::stdlib::register(&mut env);
@@ -66,27 +70,25 @@ impl Environment {
         env
     }
 
-    #[must_use]
-    pub fn get_all_by_name(&self, name: &str) -> Vec<RefCell<Value>> {
-        let mut values: Vec<RefCell<Value>> = Vec::new();
-
-        if let Some(value) = self.values.get(name) {
-            values.push(value.clone());
-        }
-
-        // TODO: there is probably a much faster implementation possible
-        if let Some(parent) = &self.parent {
-            values.extend(parent.borrow().get_all_by_name(name));
-        }
-
-        values
+    pub fn create_global_scope_mapping(&self) -> Vec<LexicalIdentifier> {
+        self.root
+            .borrow()
+            .global_functions
+            .iter()
+            .filter_map(|function| {
+                function.name().map(|name| LexicalIdentifier::Function {
+                    name: name.to_string(),
+                    arity: function.arity(),
+                })
+            })
+            .collect::<Vec<LexicalIdentifier>>()
     }
 
     #[must_use]
     pub fn get_all_functions(&self) -> Vec<OverloadedFunction> {
         let mut values = Vec::new();
 
-        for (_name, value) in &self.values {
+        for value in &self.values {
             if let Value::Function(func) = &*value.borrow() {
                 values.push(func.borrow().clone())
             }
@@ -99,106 +101,109 @@ impl Environment {
         values
     }
 
-    pub fn declare_function(&mut self, name: &str, function: Function) {
-        if let Some(existing) = self.values.get(name) {
-            // Overload existing function
-            let existing = &*existing.borrow();
-            if let Value::Function(existing_function) = existing {
-                let mut existing_function = existing_function.borrow_mut();
-                existing_function.add(function);
-                return;
+    pub fn set(&mut self, var: ResolvedVar, value: Value) {
+        match var {
+            ResolvedVar::Captured { depth: 0, slot } => {
+                if let Value::Function(value_to_insert) = &value {
+                    if let Some(existing_value) = self.values.get(slot) {
+                        let existing_value = &*existing_value.borrow();
+                        if let Value::Function(func) = existing_value {
+                            func.borrow_mut().merge(&mut value_to_insert.borrow_mut())
+                        }
+                    } else {
+                        self.values.insert(slot, Rc::new(RefCell::new(value)));
+                    }
+
+                    return;
+                }
+
+                if self.values.len() > slot {
+                    self.values[slot] = Rc::new(RefCell::new(value))
+                } else {
+                    self.values.insert(slot, Rc::new(RefCell::new(value)))
+                }
+            }
+
+            // Recursively insert
+            ResolvedVar::Captured { depth, slot } => {
+                self.parent
+                    .clone()
+                    .expect("tried to get parent but failed")
+                    .borrow_mut()
+                    .set(
+                        ResolvedVar::Captured {
+                            depth: depth - 1,
+                            slot,
+                        },
+                        value,
+                    );
+            }
+            ResolvedVar::Global { .. } => {
+                todo!("convert to panic?? you cannot assign to the global scope right?")
             }
         }
-
-        // Fallback
-        self.declare(name, Value::function(function));
-    }
-    pub fn declare(&mut self, name: &str, value: Value) {
-        self.values.insert(name.into(), RefCell::new(value));
     }
 
     /// Declare a function globally using its self-exposed name, if there already exists a function
     /// with the same name it's simply overloaded.
     pub fn declare_global_fn(&mut self, function: impl Into<Function>) {
-        let fn_to_add = function.into();
-        let name = fn_to_add.name();
+        // TODO: we might need to group functions together if they have the same name
 
-        match self.values.get(name) {
-            Some(v) => {
-                let existing = &mut *v.borrow_mut();
-                match existing {
-                    Value::Function(of) => {
-                        let mut of = of.borrow_mut();
-                        of.add(fn_to_add);
-                    }
-                    // TODO: what should we do in this case
-                    _ => panic!(
-                        "attempting to declare global function under a name that's already taken by a global non-function"
-                    ),
-                }
-            }
-            None => {
-                self.values
-                    .insert(name.into(), RefCell::new(Value::function(fn_to_add)));
+        let new_function = function.into();
+
+        let gb = &mut self.root.borrow_mut().global_functions;
+
+        // Try to add it to an existing definition
+        for fun in gb.iter_mut() {
+            if fun.name() == Some(new_function.name()) && fun.arity() == new_function.arity() {
+                fun.add(new_function);
+                return;
             }
         }
+
+        // Create a new definition
+        gb.push(OverloadedFunction::from_multiple(vec![new_function]))
     }
 
-    pub fn assign(&mut self, name: &str, value: Value) -> bool {
-        // Clippy wants us to use self.values.entry(name) but that moves name and breaks the recursive case
-        if self.values.contains_key(name) {
-            self.values.insert(name.to_string(), RefCell::new(value));
-            true
-        } else if let Some(parent) = &self.parent {
-            parent.borrow_mut().assign(name, value)
+    fn get_slot(&self, depth: usize, slot: usize) -> Rc<RefCell<Value>> {
+        if depth == 0 {
+            self.values[slot].clone()
         } else {
-            false
+            self.parent
+                .clone()
+                .expect("expected parent env did not exist")
+                .borrow()
+                .get_slot(depth - 1, slot)
+        }
+    }
+    #[must_use]
+    pub fn get(&self, var: ResolvedVar) -> Rc<RefCell<Value>> {
+        match var {
+            ResolvedVar::Captured { depth, slot } => self.get_slot(depth, slot),
+            ResolvedVar::Global { slot } => Rc::new(RefCell::new(Value::function(
+                self.root.borrow().global_functions[slot].clone(),
+            ))),
         }
     }
 
+    /// Takes the named variable from memory and leaves `Value::unit()` in its place
     #[must_use]
-    pub fn contains(&self, name: &str) -> bool {
-        self.values.contains_key(name)
-            || self
+    pub fn take(&self, var: ResolvedVar) -> Option<Value> {
+        match var {
+            ResolvedVar::Captured { depth: 0, slot } => Some(std::mem::replace(
+                &mut *self.values[slot].borrow_mut(),
+                Value::unit(),
+            )),
+            ResolvedVar::Captured { depth, slot } => self
                 .parent
                 .clone()
-                .is_some_and(|p| p.borrow().contains(name))
-    }
-
-    #[must_use]
-    pub fn get(&self, name: &str) -> Option<RefCell<Value>> {
-        if let Some(v) = self.values.get(name) {
-            Some(v.clone())
-        } else if let Some(parent) = &self.parent {
-            parent.borrow().get(name)
-        } else {
-            None
-        }
-    }
-
-    /// Takes the named variable from memory and leaves `Value::unit()` in it's place
-    #[must_use]
-    pub fn take(&self, name: &str) -> Option<Value> {
-        if let Some(v) = self.values.get(name) {
-            Some(std::mem::replace(&mut *v.borrow_mut(), Value::unit()))
-        } else if let Some(parent) = &self.parent {
-            parent.borrow().take(name)
-        } else {
-            None
-        }
-    }
-
-    pub fn with_existing<T>(
-        &self,
-        name: &str,
-        function: impl FnOnce(&RefCell<Value>) -> T,
-    ) -> Option<T> {
-        if let Some(v) = self.values.get(name) {
-            Some(function(v))
-        } else if let Some(parent) = &self.parent {
-            parent.borrow().with_existing(name, function)
-        } else {
-            None
+                .expect("expected parent env did not exist")
+                .borrow()
+                .take(ResolvedVar::Captured {
+                    depth: depth - 1,
+                    slot,
+                }),
+            ResolvedVar::Global { .. } => panic!("cannot take global variable from environment"),
         }
     }
 
@@ -207,12 +212,8 @@ impl Environment {
         Rc::new(RefCell::new(Self {
             parent: Some(Rc::clone(parent)),
             root: root_ref,
-            values: HashMap::default(),
+            values: Vec::new(),
         }))
-    }
-
-    pub fn reset(&mut self) {
-        self.values.clear();
     }
 }
 
@@ -235,72 +236,5 @@ impl InterpreterOutput for Vec<u8> {
 impl InterpreterOutput for Stdout {
     fn get_output(&self) -> Option<&Vec<u8>> {
         None
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use std::cell::RefCell;
-    use std::rc::Rc;
-
-    use crate::interpreter::environment::Environment;
-
-    #[test]
-    fn create_and_destroy_scope() {
-        let env = Rc::new(RefCell::new(Environment::default()));
-        env.borrow_mut().declare("parent_value", 123.into());
-        env.borrow_mut().declare("mutated_value", 69.into());
-        env.borrow_mut().declare("shadowed", 1.into());
-
-        assert_eq!(
-            *env.borrow().get("parent_value").unwrap().borrow(),
-            123.into()
-        );
-        assert_eq!(
-            *env.borrow().get("mutated_value").unwrap().borrow(),
-            69.into()
-        );
-
-        let scope = Environment::new_scope(&env);
-        scope.borrow_mut().declare("inner_value", 234.into());
-        scope.borrow_mut().declare("shadowed", 2.into());
-        assert!(scope.borrow_mut().assign("mutated_value", 420.into()));
-
-        assert_eq!(
-            *scope.borrow().get("parent_value").unwrap().borrow(),
-            123.into()
-        );
-        assert_eq!(
-            *scope.borrow().get("mutated_value").unwrap().borrow(),
-            420.into()
-        );
-        assert_eq!(
-            *scope.borrow().get("inner_value").unwrap().borrow(),
-            234.into()
-        );
-        assert_eq!(*scope.borrow().get("shadowed").unwrap().borrow(), 2.into());
-
-        drop(scope);
-
-        assert_eq!(
-            *env.borrow().get("parent_value").unwrap().borrow(),
-            123.into(),
-            "original value still exists and hasn't changed"
-        );
-        assert_eq!(
-            *env.borrow().get("mutated_value").unwrap().borrow(),
-            420.into(),
-            "value in the original scope was modified"
-        );
-        assert_eq!(
-            env.borrow().get("inner_value"),
-            None,
-            "a local variable is completely gone"
-        );
-        assert_eq!(
-            *env.borrow().get("shadowed").unwrap().borrow(),
-            1.into(),
-            "a shadowed value reverts back to the value in the original scope"
-        );
     }
 }

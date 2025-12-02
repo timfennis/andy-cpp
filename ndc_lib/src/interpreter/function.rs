@@ -1,4 +1,4 @@
-use crate::ast::ExpressionLocation;
+use crate::ast::{ExpressionLocation, ResolvedVar};
 use crate::hash_map::{DefaultHasher, HashMap};
 use crate::interpreter::environment::{Environment, EnvironmentRef};
 use crate::interpreter::evaluate::{
@@ -38,9 +38,13 @@ pub struct Function {
 }
 
 impl Function {
+    pub fn arity(&self) -> Option<usize> {
+        self.body.arity()
+    }
     pub fn name(&self) -> &str {
         self.name.as_deref().unwrap_or_default()
     }
+
     pub fn documentation(&self) -> &str {
         self.documentation.as_deref().unwrap_or_default()
     }
@@ -74,7 +78,7 @@ impl Function {
 pub enum FunctionBody {
     Closure {
         parameter_names: Vec<String>,
-        body: Rc<ExpressionLocation>,
+        body: Rc<ExpressionLocation>, // TODO: drop Rc?
         environment: EnvironmentRef,
     },
     NumericUnaryOp {
@@ -94,6 +98,17 @@ pub enum FunctionBody {
 }
 
 impl FunctionBody {
+    pub fn arity(&self) -> Option<usize> {
+        match self {
+            Self::Closure {
+                parameter_names, ..
+            } => Some(parameter_names.len()),
+            Self::NumericUnaryOp { .. } => Some(1),
+            Self::NumericBinaryOp { .. } => Some(2),
+            Self::GenericFunction { type_signature, .. } => type_signature.arity(),
+            Self::Memoized { function, .. } => function.arity(),
+        }
+    }
     pub fn generic(
         type_signature: TypeSignature,
         function: fn(&mut [Value], &EnvironmentRef) -> EvaluationResult,
@@ -134,12 +149,21 @@ impl FunctionBody {
             } => {
                 let mut local_scope = Environment::new_scope(environment);
 
-                let mut env = local_scope.borrow_mut();
-                for (name, value) in parameters.iter().zip(args.iter()) {
-                    env.declare(name, value.clone()); // NOTE: stores a copy of the value in the environment (which is fine?)
+                {
+                    let mut env = local_scope.borrow_mut();
+                    for (position, value) in args.iter().enumerate() {
+                        // NOTE: stores a copy of the value in the environment (which is fine?)
+                        // NOTE: we just assume here that the arguments are slotted in order starting at 0
+                        // because why not? Is this a call convention?
+                        env.set(
+                            ResolvedVar::Captured {
+                                depth: 0,
+                                slot: position,
+                            },
+                            value.clone(),
+                        )
+                    }
                 }
-                // This drop is very important
-                drop(env);
 
                 match evaluate_expression(body, &mut local_scope) {
                     Err(FunctionCarrier::Return(v)) => Ok(v),
@@ -232,6 +256,13 @@ impl TypeSignature {
             }
         }
     }
+
+    fn arity(&self) -> Option<usize> {
+        match self {
+            Self::Variadic => None,
+            Self::Exact(args) => Some(args.len()),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -249,6 +280,35 @@ impl OverloadedFunction {
         }
     }
 
+    pub fn arity(&self) -> Option<usize> {
+        let arity = self
+            .implementations
+            .iter()
+            .next()
+            .map(|(sig, _)| sig.arity())
+            .expect("OverloadedFunction is empty"); // TODO: fix this expect?
+
+        debug_assert!(
+            self.implementations
+                .iter()
+                .all(|(sig, _)| sig.arity() == arity),
+            "failed asserting that arity of all functions in OverloadedFunction are equal: {}",
+            self.implementations
+                .values()
+                .map(|fun| fun.name())
+                .join(", ")
+        );
+        arity
+    }
+
+    pub fn name(&self) -> Option<&str> {
+        if let Some((_, ff)) = (&self.implementations).into_iter().next() {
+            return ff.name.as_deref();
+        }
+
+        None
+    }
+
     pub fn add(&mut self, function: Function) {
         self.implementations
             .insert(function.type_signature(), function);
@@ -256,6 +316,14 @@ impl OverloadedFunction {
 
     pub fn implementations(&self) -> impl Iterator<Item = (TypeSignature, Function)> {
         self.implementations.clone().into_iter()
+    }
+
+    /// Ads values from the other overloaded function by draining it
+    pub fn merge(&mut self, other: &mut Self) {
+        for (key, value) in other.implementations.drain() {
+            // TODO: should we error if there is a conflict?
+            self.implementations.insert(key, value);
+        }
     }
 
     pub fn call(&self, args: &mut [Value], env: &EnvironmentRef) -> EvaluationResult {

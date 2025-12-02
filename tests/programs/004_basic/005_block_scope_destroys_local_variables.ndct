@@ -3,5 +3,6 @@
     let x = 5;
 }
 print(x);
+// TODO: figure out why the error is rendered weird in this case
 --EXPECT-ERROR--
-Undefined variable 'x'
+Resolver { cause: IdentifierNotPreviouslyDeclared { ident: "x", span: Span { offset: 25, length: 1 } } }
