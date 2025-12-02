@@ -122,6 +122,7 @@ impl Sequence {
                     ValueIterator::ValueRange(range) => range.contains(needle),
                     ValueIterator::ValueRangeFrom(range) => range.contains(needle),
                     ValueIterator::ValueRangeInclusive(range) => range.contains(needle),
+                    ValueIterator::Repeat(repeat) => &repeat.value == needle,
                 }
             }
             Self::MaxHeap(heap) => heap.borrow().iter().any(|v| &v.0 == needle),

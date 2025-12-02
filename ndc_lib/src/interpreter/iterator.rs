@@ -20,6 +20,7 @@ pub enum ValueIterator {
     ValueRange(ValueRange),
     ValueRangeFrom(ValueRangeFrom),
     ValueRangeInclusive(ValueRangeInclusive),
+    Repeat(Repeat),
 }
 
 impl Iterator for ValueIterator {
@@ -30,6 +31,7 @@ impl Iterator for ValueIterator {
             Self::ValueRange(inner) => inner.next(),
             Self::ValueRangeFrom(inner) => inner.next(),
             Self::ValueRangeInclusive(inner) => inner.next(),
+            ValueIterator::Repeat(inner) => inner.next(),
         }
     }
 }
@@ -354,6 +356,29 @@ impl<'a> Iterator for HashMapIter<'a> {
     }
 }
 
+#[derive(Clone)]
+pub struct Repeat {
+    pub value: Value,
+    pub cur: usize,
+    pub limit: Option<usize>,
+}
+
+impl Iterator for Repeat {
+    type Item = Value;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(times) = self.limit {
+            if self.cur < times {
+                self.cur += 1;
+                Some(self.value.clone())
+            } else {
+                None
+            }
+        } else {
+            Some(self.value.clone())
+        }
+    }
+}
 /// Ranges are a whole thing
 #[derive(Clone)]
 pub struct ValueRange(pub std::ops::Range<i64>);

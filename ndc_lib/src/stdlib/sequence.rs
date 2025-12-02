@@ -79,7 +79,9 @@ fn try_sort_by<E>(
 
 #[export_module]
 mod inner {
+    use crate::interpreter::iterator::{Repeat, ValueIterator};
     use crate::interpreter::{function::FunctionCarrier, iterator::mut_value_to_iterator};
+    use std::cell::RefCell;
 
     #[function(name = "in")]
     pub fn op_contains(elem: &Value, seq: &Sequence) -> bool {
@@ -692,6 +694,27 @@ mod inner {
                 .map(|chunk| Value::list(chunk.collect_vec()))
                 .collect_vec(),
         ))
+    }
+
+    pub fn repeat(value: Value) -> Value {
+        Value::Sequence(Sequence::Iterator(Rc::new(RefCell::new(
+            ValueIterator::Repeat(Repeat {
+                value,
+                cur: 0,
+                limit: None,
+            }),
+        ))))
+    }
+
+    #[function(name = "repeat")]
+    pub fn repeat_times(value: Value, times: usize) -> Value {
+        Value::Sequence(Sequence::Iterator(Rc::new(RefCell::new(
+            ValueIterator::Repeat(Repeat {
+                value,
+                cur: 0,
+                limit: Some(times),
+            }),
+        ))))
     }
 }
 

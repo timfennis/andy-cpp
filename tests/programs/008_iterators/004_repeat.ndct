@@ -1,0 +1,21 @@
+--PROGRAM--
+let xx = repeat(1);
+let limit = 0;
+for x in xx {
+    assert_eq(x, 1);
+    limit +=1 ;
+    if limit == 100 {
+        break; // otherwise infinite loop
+    }
+}
+
+let out = repeat(1, 10).list;
+assert_eq(out.len, 10);
+
+for x in out {
+    assert_eq(x, 1);
+}
+
+print("ok");
+--EXPECT--
+ok
