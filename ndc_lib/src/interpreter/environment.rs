@@ -139,7 +139,7 @@ impl Environment {
                     );
             }
             ResolvedVar::Global { .. } => {
-                todo!("convert to panic?? you cannot assign to the global scope right?")
+                unreachable!("cannot assign value to global")
             }
         }
     }

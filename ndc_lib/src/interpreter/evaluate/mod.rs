@@ -292,9 +292,8 @@ pub(crate) fn evaluate_expression(
                     let result = evaluate_expression(loop_body, environment);
                     match result {
                         Err(FunctionCarrier::Break(value)) => return Ok(value),
-                        Err(FunctionCarrier::Continue) => {}
+                        Err(FunctionCarrier::Continue) | Ok(_) => {}
                         Err(err) => return Err(err),
-                        Ok(_) => {}
                     }
                 } else if lit == Value::Bool(false) {
                     break;
