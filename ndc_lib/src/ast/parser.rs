@@ -1112,13 +1112,10 @@ impl Parser {
         let identifier = match self.peek_current_token() {
             Some(Token::LeftParentheses) => None,
             Some(Token::Identifier(_)) => {
-                // TODO: clean this up
-                let ExpressionLocation {
+                let Ok(ExpressionLocation {
                     expression: Expression::Identifier { name, .. },
                     ..
-                } = self
-                    .require_identifier()
-                    .expect("this is guaranteed to produce an identifier by previous match")
+                }) = self.require_identifier()
                 else {
                     unreachable!("guaranteed to to produce identifier")
                 };

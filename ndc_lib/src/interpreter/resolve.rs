@@ -29,6 +29,7 @@ pub fn resolve_pass(
             resolved,
         } => {
             if ident == "None" {
+                // THIS IS VERY UNHINGED
                 return Ok(());
             }
             let binding = lexical_data.get_binding_any(ident).ok_or_else(|| {

@@ -954,7 +954,7 @@ fn execute_for_iterations(
 
                 if tail.is_empty() {
                     match execute_body(body, &mut scope, out_values) {
-                        Err(FunctionCarrier::Continue) => {},
+                        Err(FunctionCarrier::Continue) => {}
                         Err(error) => return Err(error),
                         Ok(_value) => {}
                     }
