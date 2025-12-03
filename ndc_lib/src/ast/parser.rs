@@ -351,7 +351,6 @@ impl Parser {
             // But to improve error handling and stuff it would be nice if we could check if the next token matches one
             // of the assignment operator and throw an appropriate error.
             return match self.peek_current_token() {
-                // TODO: this really requires a link to the documentation once we have that.
                 Some(Token::EqualsSign) => Err(Error::with_help(
                     "Invalid assignment target".to_string(),
                     maybe_lvalue.span,
@@ -688,7 +687,6 @@ impl Parser {
                     expr = ExpressionLocation {
                         expression: Expression::Call {
                             function: Box::new(
-                                // TODO: probably fix the spans here
                                 Expression::Identifier {
                                     name: identifier,
                                     resolved: None,
