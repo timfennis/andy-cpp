@@ -284,7 +284,7 @@ impl OverloadedFunction {
             .iter()
             .next()
             .map(|(sig, _)| sig.arity())
-            .expect("OverloadedFunction is empty"); // TODO: fix this expect?
+            .expect("OverloadedFunction cannot be empty");
 
         debug_assert!(
             self.implementations
@@ -319,7 +319,10 @@ impl OverloadedFunction {
     /// Ads values from the other overloaded function by draining it
     pub fn merge(&mut self, other: &mut Self) {
         for (key, value) in other.implementations.drain() {
-            // TODO: should we error if there is a conflict?
+            debug_assert!(
+                !self.implementations.contains_key(&key),
+                "conflict while merging OverloadedFunction implementations"
+            );
             self.implementations.insert(key, value);
         }
     }

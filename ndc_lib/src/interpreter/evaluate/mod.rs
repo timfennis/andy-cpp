@@ -367,8 +367,6 @@ pub(crate) fn evaluate_expression(
             }
 
             if let Some(resolved_name) = *resolved_name {
-                // TODO: this is almost certainly wrong because we simply set the function at the location
-                //       in memory but we want to merge it with existing function that may exist
                 environment.borrow_mut().set(
                     resolved_name,
                     Value::function(Function::from_body(user_function)),
@@ -457,7 +455,6 @@ pub(crate) fn evaluate_expression(
                 environment,
             )?));
         }
-        // TODO: for now we just put unit in here so we can improve break functionality later
         Expression::Break => return Err(FunctionCarrier::Break(Value::unit())),
         Expression::Continue => return Err(FunctionCarrier::Continue),
         Expression::Index {
@@ -584,6 +581,7 @@ pub(crate) fn evaluate_expression(
                         )?;
 
                         // TODO: This borrow_mut can fail, handle it better!!
+                        // NOTE: WHEN DOES IT FAIL!?
                         dict.borrow_mut().insert(key, default_value.clone());
 
                         Ok(default_value)

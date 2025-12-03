@@ -104,6 +104,8 @@ impl Environment {
     pub fn set(&mut self, var: ResolvedVar, value: Value) {
         match var {
             ResolvedVar::Captured { depth: 0, slot } => {
+                // This whole mess (special handling for functions) can be removed once we check
+                // types during the resolver pass
                 if let Value::Function(value_to_insert) = &value {
                     if let Some(existing_value) = self.values.get(slot) {
                         let existing_value = &*existing_value.borrow();
@@ -147,8 +149,6 @@ impl Environment {
     /// Declare a function globally using its self-exposed name, if there already exists a function
     /// with the same name it's simply overloaded.
     pub fn declare_global_fn(&mut self, function: impl Into<Function>) {
-        // TODO: we might need to group functions together if they have the same name
-
         let new_function = function.into();
 
         let gb = &mut self.root.borrow_mut().global_functions;
