@@ -4,4 +4,4 @@ fn test() {
 }
 test();
 --EXPECT-ERROR--
-IdentifierNotPreviouslyDeclared
+Identifier n has not previously been declared

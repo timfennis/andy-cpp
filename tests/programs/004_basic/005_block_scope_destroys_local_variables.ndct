@@ -5,4 +5,4 @@
 print(x);
 // TODO: figure out why the error is rendered weird in this case
 --EXPECT-ERROR--
-Resolver { cause: IdentifierNotPreviouslyDeclared { ident: "x", span: Span { offset: 25, length: 1 } } }
+Identifier x has not previously been declared

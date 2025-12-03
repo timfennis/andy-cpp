@@ -2,13 +2,20 @@ use crate::ast::{Expression, ExpressionLocation, ForBody, ForIteration, Lvalue, 
 use crate::lexer::Span;
 
 #[derive(thiserror::Error, miette::Diagnostic, Debug)]
-pub enum ResolveError {
-    #[error("Identifier {ident} has not previously been declared")]
-    IdentifierNotPreviouslyDeclared {
-        ident: String,
-        #[label("related to this")]
-        span: Span,
-    },
+#[error("{text}")]
+pub struct ResolveError {
+    text: String,
+    #[label("related to this")]
+    span: Span,
+}
+
+impl ResolveError {
+    fn identifier_not_previously_declared(ident: &str, span: Span) -> Self {
+        Self {
+            text: format!("Identifier {ident} has not previously been declared"),
+            span,
+        }
+    }
 }
 
 pub fn resolve_pass(
@@ -32,12 +39,9 @@ pub fn resolve_pass(
                 // THIS IS VERY UNHINGED
                 return Ok(());
             }
-            let binding = lexical_data.get_binding_any(ident).ok_or_else(|| {
-                ResolveError::IdentifierNotPreviouslyDeclared {
-                    ident: ident.clone(),
-                    span: *span,
-                }
-            })?;
+            let binding = lexical_data
+                .get_binding_any(ident)
+                .ok_or_else(|| ResolveError::identifier_not_previously_declared(ident, *span))?;
 
             *resolved = Some(binding)
         }
@@ -91,10 +95,9 @@ pub fn resolve_pass(
                 *resolved_operation = Some(binding);
             } else {
                 // For now, we require that the normal operation is present and the special assignment operation is optional
-                return Err(ResolveError::IdentifierNotPreviouslyDeclared {
-                    ident: operation.clone(),
-                    span: *span,
-                });
+                return Err(ResolveError::identifier_not_previously_declared(
+                    operation, *span,
+                ));
             }
         }
         Expression::FunctionDeclaration {
@@ -228,10 +231,7 @@ fn resolve_function_ident_arity(
         // NOTE: for now if we can't find a function that matches we just bind to a variable with that name (if possible)
         //       this fixes some cases until we have full type checking
         .or_else(|| (lexical_data).get_binding_any(name))
-        .ok_or_else(|| ResolveError::IdentifierNotPreviouslyDeclared {
-            ident: name.clone(),
-            span,
-        })?;
+        .ok_or_else(|| ResolveError::identifier_not_previously_declared(name, span))?;
 
     *resolved = Some(binding);
 
@@ -304,10 +304,9 @@ fn resolve_lvalue(
             resolved,
         } => {
             let Some(target) = lexical_data.get_binding(&identifier.clone().into()) else {
-                return Err(ResolveError::IdentifierNotPreviouslyDeclared {
-                    ident: identifier.clone(),
-                    span,
-                });
+                return Err(ResolveError::identifier_not_previously_declared(
+                    identifier, span,
+                ));
             };
 
             *resolved = Some(target);

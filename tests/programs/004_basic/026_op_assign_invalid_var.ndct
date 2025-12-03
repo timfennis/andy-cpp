@@ -2,4 +2,4 @@
 x += 3;
 print(x);
 --EXPECT-ERROR--
-IdentifierNotPreviouslyDeclared
+Identifier x has not previously been declared
