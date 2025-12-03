@@ -503,6 +503,8 @@ pub enum FunctionCarrier {
     Return(Value),
     #[error("not an error")]
     Break(Value),
+    #[error("not an error")]
+    Continue,
     #[error("evaluation error {0}")]
     EvaluationError(#[from] EvaluationError),
     #[error("function does not exist")]

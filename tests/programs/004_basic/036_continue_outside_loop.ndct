@@ -1,0 +1,4 @@
+--PROGRAM--
+continue;
+--EXPECT-ERROR--
+unexpected continue statement outside of loop

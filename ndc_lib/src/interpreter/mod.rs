@@ -89,6 +89,12 @@ impl Interpreter {
                         expr.span,
                     ))?;
                 }
+                Err(FunctionCarrier::Continue) => {
+                    Err(EvaluationError::syntax_error(
+                        "unexpected continue statement outside of loop body".to_string(),
+                        expr.span,
+                    ))?;
+                }
                 Err(FunctionCarrier::EvaluationError(e)) => return Err(InterpreterError::from(e)),
                 _ => {
                     panic!(

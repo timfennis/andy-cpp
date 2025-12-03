@@ -62,6 +62,7 @@ pub enum Token {
     Else,
     Return,
     Break,
+    Continue,
     For,
     In,
     While,
@@ -140,6 +141,7 @@ impl fmt::Display for Token {
             Self::Else => "else",
             Self::Return => "return",
             Self::Break => "break",
+            Self::Continue => "continue",
             Self::For => "for",
             Self::In => "in",
             Self::While => "while",
@@ -320,6 +322,7 @@ impl From<String> for Token {
             "false" => Self::False,
             "return" => Self::Return,
             "break" => Self::Break,
+            "continue" => Self::Continue,
             "pure" => Self::Pure,
             _ => Self::Identifier(value),
         }
