@@ -378,12 +378,12 @@ impl Number {
     }
 
     // TODO: change this to &'static str
-    fn type_name(&self) -> String {
+    fn type_name(&self) -> &'static str {
         match self {
-            Self::Int(_) => "int".to_string(),
-            Self::Float(_) => "float".to_string(),
-            Self::Rational(_) => "rational".to_string(),
-            Self::Complex(_) => "complex".to_string(),
+            Self::Int(_) => "int",
+            Self::Float(_) => "float",
+            Self::Rational(_) => "rational",
+            Self::Complex(_) => "complex",
         }
     }
 
@@ -483,7 +483,6 @@ impl Number {
                 if let Some(bi) = BigInt::from_f64(*f) {
                     Self::Int(Int::BigInt(bi).simplified())
                 } else {
-                    // TODO FIX line 0 column 0
                     return Err(EvaluationError::type_error(
                         format!("cannot convert {f} to int"),
                         Span::new(0, 0), // TODO: fix span creation (move out of this impl)
@@ -610,7 +609,7 @@ implement_rounding!(round);
 #[derive(thiserror::Error, Debug)]
 pub enum NumberToUsizeError {
     #[error("cannot convert from {0} to usize")]
-    UnsupportedVariant(String),
+    UnsupportedVariant(&'static str),
     #[error("expected non-negative integer for indexing")]
     FromIntError(#[from] TryFromIntError),
     #[error("failed to convert from bigint to number because of: '{0}'")]

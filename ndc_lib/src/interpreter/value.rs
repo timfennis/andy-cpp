@@ -188,7 +188,7 @@ impl FallibleOrd for &Value {
     }
 }
 
-// TODO: probably get rid of this and do explicit clones
+// TODO: Remove this and deal with the fallout
 impl From<&Self> for Value {
     fn from(value: &Self) -> Self {
         value.clone()
