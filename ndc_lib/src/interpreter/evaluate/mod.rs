@@ -45,7 +45,7 @@ pub(crate) fn evaluate_expression(
         }
         Expression::VariableDeclaration { l_value, value } => {
             let value = evaluate_expression(value, environment)?;
-            declare_or_assign_variable(l_value, value, true, environment, span)?;
+            declare_or_assign_variable(l_value, value, environment, span)?;
             Value::unit()
         }
         Expression::Assignment {
@@ -54,7 +54,7 @@ pub(crate) fn evaluate_expression(
         } => match l_value {
             l_value @ (Lvalue::Identifier { .. } | Lvalue::Sequence(_)) => {
                 let value = evaluate_expression(value, environment)?;
-                declare_or_assign_variable(l_value, value, false, environment, span)?
+                declare_or_assign_variable(l_value, value, environment, span)?
             }
             Lvalue::Index {
                 value: lhs_expression,
@@ -682,7 +682,6 @@ fn produce_default_value(
 fn declare_or_assign_variable(
     l_value: &Lvalue,
     value: Value,
-    declare: bool,
     environment: &mut EnvironmentRef,
     span: Span,
 ) -> EvaluationResult {
@@ -706,7 +705,7 @@ fn declare_or_assign_variable(
 
             for (l_value, value) in iter.by_ref() {
                 remaining -= 1;
-                declare_or_assign_variable(l_value, value, declare, environment, span)?;
+                declare_or_assign_variable(l_value, value, environment, span)?;
             }
 
             if remaining > 0 || iter.next().is_some() {
@@ -950,7 +949,7 @@ fn execute_for_iterations(
                 // With the current implementation with a new scope declared for every iteration this produces 10 functions
                 // each with their own scope and their own version of `i`, this might potentially be a bit slower though
                 let mut scope = Environment::new_scope(environment);
-                declare_or_assign_variable(l_value, r_value, true, &mut scope, span)?;
+                declare_or_assign_variable(l_value, r_value, &mut scope, span)?;
 
                 if tail.is_empty() {
                     match execute_body(body, &mut scope, out_values) {

@@ -413,7 +413,6 @@ impl Number {
         }
     }
 
-    #[must_use]
     pub fn pow(self, rhs: Self) -> Result<Self, BinaryOperatorError> {
         Ok(match (self, rhs) {
             // Int vs others
