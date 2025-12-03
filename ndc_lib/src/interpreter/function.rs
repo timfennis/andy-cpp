@@ -78,7 +78,7 @@ impl Function {
 pub enum FunctionBody {
     Closure {
         parameter_names: Vec<String>,
-        body: Rc<ExpressionLocation>, // TODO: drop Rc?
+        body: ExpressionLocation,
         environment: EnvironmentRef,
     },
     NumericUnaryOp {

@@ -356,7 +356,7 @@ pub(crate) fn evaluate_expression(
         } => {
             let mut user_function = FunctionBody::Closure {
                 parameter_names: arguments.try_into_parameters()?,
-                body: Rc::new(*body.clone()), // TODO: still need RC here if Expressions are clone now?
+                body: *body.clone(),
                 environment: environment.clone(),
             };
 
