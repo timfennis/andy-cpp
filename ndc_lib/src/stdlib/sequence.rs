@@ -111,6 +111,28 @@ mod inner {
             Sequence::Deque(d) => d.try_borrow()?.iter().try_max(),
         }
     }
+    pub fn max_by_key(seq: &mut Sequence, func: &Callable<'_>) -> EvaluationResult {
+        let mut best_value = None;
+        let mut best_key = None;
+
+        for value in mut_seq_to_iterator(seq) {
+            if let Some(best_key_val) = &best_key {
+                let new_key = func.call(&mut [value.clone()])?;
+                if &new_key > best_key_val {
+                    best_key = Some(new_key);
+                    best_value = Some(value);
+                }
+            } else {
+                best_key = Some(func.call(&mut [value.clone()])?);
+                best_value = Some(value);
+            }
+        }
+
+        match best_value {
+            None => Err(anyhow::anyhow!("empty input to max_by_key"))?,
+            Some(value) => Ok(value),
+        }
+    }
 
     /// Returns the lowest element in the sequence.
     pub fn min(seq: &Sequence) -> anyhow::Result<Value> {
