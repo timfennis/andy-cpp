@@ -22,6 +22,7 @@ pub fn resolve_pass(
         | Expression::Float64Literal(_)
         | Expression::BigIntLiteral(_)
         | Expression::ComplexLiteral(_)
+        | Expression::Continue
         | Expression::Break => { /* nothing to do here */ }
         Expression::Identifier {
             name: ident,
