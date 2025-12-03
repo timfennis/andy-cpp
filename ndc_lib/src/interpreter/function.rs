@@ -143,9 +143,7 @@ impl FunctionBody {
     pub fn call(&self, args: &mut [Value], env: &EnvironmentRef) -> EvaluationResult {
         match self {
             Self::Closure {
-                body,
-                environment,
-                parameter_names: parameters,
+                body, environment, ..
             } => {
                 let mut local_scope = Environment::new_scope(environment);
 

@@ -416,15 +416,6 @@ pub struct LexicalData {
 }
 
 impl LexicalData {
-    pub fn new() -> Self {
-        // NOTE: there is always a global and a local scope
-        Self {
-            current_scope_idx: 0,
-            global_scope: LexicalScope::new(None),
-            scopes: vec![LexicalScope::new(None)],
-        }
-    }
-
     pub fn from_global_scope(global_scope_map: Vec<LexicalIdentifier>) -> Self {
         Self {
             current_scope_idx: 0,
