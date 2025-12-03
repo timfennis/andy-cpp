@@ -86,7 +86,6 @@ mod inner {
 
     #[function(name = "~=")]
     pub fn symmetric_difference_assign(lhs: &mut MapRepr, rhs: &mut MapRepr) {
-        // TODO: is this implementation optimal enough?
         let diff = hash_map::symmetric_difference(
             &*lhs
                 .try_borrow()

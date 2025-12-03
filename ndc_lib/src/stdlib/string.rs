@@ -1,8 +1,9 @@
 use ndc_macros::export_module;
 
 use crate::interpreter::iterator::mut_seq_to_iterator;
-use crate::interpreter::sequence::Sequence;
+use crate::interpreter::sequence::{Sequence, StringRepr};
 use crate::interpreter::value::Value;
+use std::rc::Rc;
 
 use anyhow::{Context, anyhow};
 use std::fmt::Write;
@@ -29,6 +30,16 @@ mod inner {
     #[function(name = "<>")]
     pub fn op_string_concat(left: &Value, right: &Value) -> String {
         format!("{left}{right}")
+    }
+
+    #[function(name = "++=")]
+    pub fn op_list_concat(left: &mut StringRepr, right: &mut StringRepr) {
+        if Rc::ptr_eq(left, right) {
+            let new = right.borrow().repeat(2).clone();
+            *left.borrow_mut() = new;
+        } else {
+            left.borrow_mut().push_str(&right.borrow())
+        }
     }
 
     /// Returns the provided value as a string

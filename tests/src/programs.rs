@@ -99,7 +99,6 @@ fn run_test(path: PathBuf) -> Result<(), std::io::Error> {
 
     if !expect_error.is_empty() && !actual_error.trim().contains(expect_error.trim()) {
         println!(" {}", "ERR".red().bold());
-        (&expect_error, &actual_error);
         panic!(
             "\n\tThere was a problem running {path:?}\n\tExpected error:\t{}\n\tActual error:\t{}\n",
             expect_error.trim_end(),

@@ -118,7 +118,6 @@ impl Iterator for Lexer<'_> {
             match (first, second) {
                 (' ' | '\t' | '\r' | '\n', _) => {
                     self.source.consume(1);
-                    continue 'iterator;
                 }
                 ('r', Some('"' | '#')) => {
                     return Some(self.lex_string_literal());

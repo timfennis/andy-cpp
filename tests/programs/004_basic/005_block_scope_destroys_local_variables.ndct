@@ -3,5 +3,6 @@
     let x = 5;
 }
 print(x);
+// TODO: figure out why the error is rendered weird in this case
 --EXPECT-ERROR--
-Undefined variable 'x'
+Identifier x has not previously been declared

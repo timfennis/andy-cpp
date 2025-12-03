@@ -1,5 +1,4 @@
 use std::fmt::Write;
-use std::rc::Rc;
 
 use miette::Diagnostic;
 
@@ -200,8 +199,11 @@ impl Parser {
 
             left = Expression::Call {
                 function: Box::new(
-                    Expression::Identifier(operator_token_loc.token.to_string())
-                        .to_location(operator_token_loc.span),
+                    Expression::Identifier {
+                        name: operator_token_loc.token.to_string(),
+                        resolved: None,
+                    }
+                    .to_location(operator_token_loc.span),
                 ),
                 arguments: vec![left, right],
             }
@@ -210,8 +212,11 @@ impl Parser {
             if let Some(not_token) = invert {
                 left = Expression::Call {
                     function: Box::new(
-                        Expression::Identifier(not_token.token.to_string())
-                            .to_location(not_token.span),
+                        Expression::Identifier {
+                            name: not_token.token.to_string(),
+                            resolved: None,
+                        }
+                        .to_location(not_token.span),
                     ),
                     arguments: vec![left],
                 }
@@ -239,7 +244,11 @@ impl Parser {
 
             return Ok(Expression::Call {
                 function: Box::new(
-                    Expression::Identifier(operator.to_string()).to_location(operator_span),
+                    Expression::Identifier {
+                        name: operator.to_string(),
+                        resolved: None,
+                    }
+                    .to_location(operator_span),
                 ),
                 arguments: vec![left, right],
             }
@@ -342,7 +351,6 @@ impl Parser {
             // But to improve error handling and stuff it would be nice if we could check if the next token matches one
             // of the assignment operator and throw an appropriate error.
             return match self.peek_current_token() {
-                // TODO: this really requires a link to the documentation once we have that.
                 Some(Token::EqualsSign) => Err(Error::with_help(
                     "Invalid assignment target".to_string(),
                     maybe_lvalue.span,
@@ -377,6 +385,8 @@ impl Parser {
                         .expect("guaranteed to produce an lvalue"),
                     r_value: Box::new(expression),
                     operation: operation_identifier,
+                    resolved_assign_operation: None,
+                    resolved_operation: None,
                 };
 
                 Ok(op_assign.to_location(start.merge(end)))
@@ -471,8 +481,11 @@ impl Parser {
 
             Ok(Expression::Call {
                 function: Box::new(
-                    Expression::Identifier(operator_token_loc.token.to_string())
-                        .to_location(operator_span),
+                    Expression::Identifier {
+                        name: operator_token_loc.token.to_string(),
+                        resolved: None,
+                    }
+                    .to_location(operator_span),
                 ),
                 arguments: vec![right],
             }
@@ -595,8 +608,11 @@ impl Parser {
 
             Ok(Expression::Call {
                 function: Box::new(
-                    Expression::Identifier(operator_token_loc.token.to_string())
-                        .to_location(token_span),
+                    Expression::Identifier {
+                        name: operator_token_loc.token.to_string(),
+                        resolved: None,
+                    }
+                    .to_location(token_span),
                 ),
                 arguments: vec![right],
             }
@@ -642,7 +658,11 @@ impl Parser {
                     let identifier_span = l_value.span;
                     let first_argument_span = expr.span;
                     let identifier = Lvalue::try_from(l_value)?;
-                    let Lvalue::Variable { identifier } = identifier else {
+                    let Lvalue::Identifier {
+                        identifier,
+                        resolved: None,
+                    } = identifier
+                    else {
                         unreachable!("Guaranteed to match by previous call to require_identifier")
                     };
 
@@ -667,8 +687,11 @@ impl Parser {
                     expr = ExpressionLocation {
                         expression: Expression::Call {
                             function: Box::new(
-                                // TODO: probably fix the spans here
-                                Expression::Identifier(identifier).to_location(identifier_span),
+                                Expression::Identifier {
+                                    name: identifier,
+                                    resolved: None,
+                                }
+                                .to_location(identifier_span),
                             ),
                             arguments,
                         },
@@ -936,7 +959,10 @@ impl Parser {
             Token::BigInt(num) => Expression::BigIntLiteral(num),
             Token::Complex(num) => Expression::ComplexLiteral(num),
             Token::String(value) => Expression::StringLiteral(value),
-            Token::Identifier(identifier) => Expression::Identifier(identifier),
+            Token::Identifier(identifier) => Expression::Identifier {
+                name: identifier,
+                resolved: None,
+            },
             _ => {
                 // TODO: this error might not be the best way to describe what's happening here
                 //       figure out if there is a better way to handle errors here.
@@ -1036,7 +1062,7 @@ impl Parser {
         if matches!(
             identifier_expression,
             ExpressionLocation {
-                expression: Expression::Identifier(_),
+                expression: Expression::Identifier { .. },
                 ..
             }
         ) {
@@ -1083,10 +1109,17 @@ impl Parser {
         // fn() { }
         let identifier = match self.peek_current_token() {
             Some(Token::LeftParentheses) => None,
-            Some(Token::Identifier(_)) => Some(
-                self.require_identifier()
-                    .expect("this is guaranteed to produce an identifier by previous match"),
-            ), // MUST BE IDENT
+            Some(Token::Identifier(_)) => {
+                let Ok(ExpressionLocation {
+                    expression: Expression::Identifier { name, .. },
+                    ..
+                }) = self.require_identifier()
+                else {
+                    unreachable!("guaranteed to to produce identifier")
+                };
+
+                Some(name)
+            } // MUST BE IDENT
             Some(_) | None => {
                 return Err(Error::with_help(
                     "Expected identifier or left parentheses to follow fn keyword".to_string(),
@@ -1121,10 +1154,11 @@ impl Parser {
         let span = fn_token.span.merge(body.span);
         Ok(ExpressionLocation {
             expression: Expression::FunctionDeclaration {
-                name: identifier.map(Box::new),
+                name: identifier,
                 arguments: Box::new(argument_list),
-                body: Rc::new(body),
+                body: Box::new(body),
                 pure: is_pure,
+                resolved_name: None,
             },
             span,
         })

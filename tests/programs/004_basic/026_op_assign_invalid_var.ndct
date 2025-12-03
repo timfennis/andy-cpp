@@ -2,4 +2,4 @@
 x += 3;
 print(x);
 --EXPECT-ERROR--
-Undefined variable 'x'
+Identifier x has not previously been declared

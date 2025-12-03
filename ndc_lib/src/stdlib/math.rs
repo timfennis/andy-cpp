@@ -463,28 +463,24 @@ pub mod f64 {
 
         macro_rules! delegate_to_f64 {
             ($method:ident,$docs:literal) => {
-                let function = $crate::interpreter::value::Value::function(
-                    FunctionBuilder::default()
-                        .body(
-                            $crate::interpreter::function::FunctionBody::NumericUnaryOp {
-                                body: |num: Number| match num {
-                                    Number::Int(i) => Number::Float(f64::from(i).$method()),
-                                    Number::Float(f) => Number::Float(f.$method()),
-                                    Number::Rational(r) => {
-                                        Number::Float(r.to_f64().unwrap_or(f64::NAN).$method())
-                                    }
-                                    Number::Complex(c) => Number::Complex(c.$method()),
-                                },
+                let function = FunctionBuilder::default()
+                    .body(
+                        $crate::interpreter::function::FunctionBody::NumericUnaryOp {
+                            body: |num: Number| match num {
+                                Number::Int(i) => Number::Float(f64::from(i).$method()),
+                                Number::Float(f) => Number::Float(f.$method()),
+                                Number::Rational(r) => {
+                                    Number::Float(r.to_f64().unwrap_or(f64::NAN).$method())
+                                }
+                                Number::Complex(c) => Number::Complex(c.$method()),
                             },
-                        )
-                        .name(stringify!($method).to_string())
-                        .documentation(String::from($docs))
-                        .build()
-                        .expect(
-                            "expected delegate_to_f64 to always create function object correctly",
-                        ),
-                );
-                env.declare(stringify!($method), function);
+                        },
+                    )
+                    .name(stringify!($method).to_string())
+                    .documentation(String::from($docs))
+                    .build()
+                    .expect("expected delegate_to_f64 to always create function object correctly");
+                env.declare_global_fn(function);
             };
         }
 

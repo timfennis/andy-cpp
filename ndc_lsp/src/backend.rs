@@ -118,7 +118,11 @@ impl LanguageServer for Backend {
         let items = functions.iter().flat_map(|f| {
             f.implementations().filter_map(|(sig, fun)| {
                 // Ignore operators
-                if fun.name().chars().all(|c| c.is_alphanumeric() || c == '?') {
+                if fun
+                    .name()
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || c == '?' || c == '_')
+                {
                     Some(CompletionItem {
                         label: fun.name().to_string(),
                         label_details: Some(CompletionItemLabelDetails {

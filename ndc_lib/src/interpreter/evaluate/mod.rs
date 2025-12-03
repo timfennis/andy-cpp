@@ -1,13 +1,6 @@
-use index::{Offset, evaluate_as_index, set_at_index};
-use itertools::Itertools;
-use std::cell::RefCell;
-use std::fmt;
-use std::rc::Rc;
-
 use crate::ast::{Expression, ExpressionLocation, ForBody, ForIteration, LogicalOperator, Lvalue};
 use crate::hash_map::HashMap;
 use crate::interpreter::environment::{Environment, EnvironmentRef};
-use crate::interpreter::evaluate::index::get_at_index;
 use crate::interpreter::function::{Function, FunctionBody, FunctionCarrier, OverloadedFunction};
 use crate::interpreter::int::Int;
 use crate::interpreter::iterator::mut_value_to_iterator;
@@ -15,6 +8,12 @@ use crate::interpreter::num::Number;
 use crate::interpreter::sequence::Sequence;
 use crate::interpreter::value::{Value, ValueType};
 use crate::lexer::Span;
+use index::{Offset, evaluate_as_index, get_at_index, set_at_index};
+use itertools::Itertools;
+use log::error;
+use std::cell::RefCell;
+use std::fmt;
+use std::rc::Rc;
 
 pub type EvaluationResult = Result<Value, FunctionCarrier>;
 
@@ -34,18 +33,28 @@ pub(crate) fn evaluate_expression(
         Expression::Float64Literal(n) => Value::Number(Number::Float(*n)),
         Expression::ComplexLiteral(n) => Value::Number(Number::Complex(*n)),
         Expression::Grouping(expr) => evaluate_expression(expr, environment)?,
+        Expression::Identifier { name, resolved } => {
+            if name == "None" {
+                return Ok(Value::none());
+            }
+            environment
+                .borrow()
+                .get(resolved.expect("identifier was not resolved before execution"))
+                .borrow()
+                .clone()
+        }
         Expression::VariableDeclaration { l_value, value } => {
             let value = evaluate_expression(value, environment)?;
-            declare_or_assign_variable(l_value, value, true, environment, span)?;
+            declare_or_assign_variable(l_value, value, environment, span)?;
             Value::unit()
         }
         Expression::Assignment {
             l_value,
             r_value: value,
         } => match l_value {
-            l_value @ (Lvalue::Variable { .. } | Lvalue::Sequence(_)) => {
+            l_value @ (Lvalue::Identifier { .. } | Lvalue::Sequence(_)) => {
                 let value = evaluate_expression(value, environment)?;
-                declare_or_assign_variable(l_value, value, false, environment, span)?
+                declare_or_assign_variable(l_value, value, environment, span)?
             }
             Lvalue::Index {
                 value: lhs_expression,
@@ -68,55 +77,78 @@ pub(crate) fn evaluate_expression(
         Expression::OpAssignment {
             l_value,
             r_value,
-            operation: operation_ident,
+            resolved_assign_operation,
+            resolved_operation,
+            ..
         } => {
+            let mut operations_to_try = [
+                resolved_assign_operation.map(|op| (op, true)),
+                resolved_operation.map(|op| (op, false)),
+            ]
+            .into_iter()
+            .flatten()
+            .peekable();
+
             match l_value {
-                Lvalue::Variable { identifier } => {
+                Lvalue::Identifier {
+                    identifier,
+                    resolved: resolved_l_value,
+                } => {
+                    let resolved_l_value = resolved_l_value.expect("lvalue must be resolved");
                     let rhs = evaluate_expression(r_value, environment)?;
-                    let Some(lhs) = environment.borrow_mut().take(identifier) else {
-                        // TODO: this statement does damage which isn't reverted when for instance we can't find the function
+
+                    // TODO: this statement does damage which isn't reverted when for instance we can't find the function
+                    let Some(lhs) = environment.borrow_mut().take(resolved_l_value) else {
                         return Err(EvaluationError::undefined_variable(identifier, span).into());
                     };
 
                     let mut arguments = [lhs, rhs];
 
-                    // If the identifier is `++` we try to look for a function called `++=` first because we assume that implementation is faster.
-                    let op_assign_ident = format!("{operation_ident}=");
-                    // TODO: since we don't provide the user with operator overloading we could write a faster version of get_all_by_name that just looks in the root scope
-                    let values = environment.borrow().get_all_by_name(&op_assign_ident);
-                    let op_assign_result =
-                        try_call_function_from_values(&values, &mut arguments, environment, span);
+                    while let Some((resolved_op, modified_in_place)) = operations_to_try.next() {
+                        let operation = environment.borrow().get(resolved_op);
+                        let operation_val = &*operation.borrow();
 
-                    // Only if there is no function that matches the op_assign signature we continue and try the fallback implementation
-                    match op_assign_result {
-                        Err(FunctionCarrier::FunctionNotFound) => {
-                            // do nothing continue below
-                        }
-                        err @ Err(_) => return err.into_evaluation_result(span),
-                        Ok(x) if x == Value::unit() => {
-                            // TODO is this check to slow
-                            // At the start of this branch we used `take` to temporarily remove the value from the environment (leaving a unit behind)
-                            // this helps prevent race conditions in case the operator tries to access its environment but it does require us to put back the LHS
-                            let [lhs, _] = arguments;
-                            environment.borrow_mut().assign(identifier, lhs);
+                        let Value::Function(func) = operation_val else {
+                            unreachable!(
+                                "the resolver pass should have guaranteed that the operation points to a function"
+                            );
+                        };
 
-                            // Op assignment now returns unit
-                            return Ok(Value::unit());
+                        let result = match call_function(func, &mut arguments, environment, span) {
+                            Err(FunctionCarrier::FunctionNotFound)
+                                if operations_to_try.peek().is_none() =>
+                            {
+                                let argument_string =
+                                    arguments.iter().map(Value::value_type).join(", ");
+
+                                return Err(FunctionCarrier::EvaluationError(
+                                    EvaluationError::new(
+                                        format!(
+                                            "no function called 'TODO FIGURE OUT NAME' found matches the arguments: ({argument_string})"
+                                        ),
+                                        span,
+                                    ),
+                                ));
+                            }
+                            Err(FunctionCarrier::FunctionNotFound) => continue,
+                            eval_result => eval_result?,
+                        };
+
+                        if modified_in_place {
+                            environment.borrow_mut().set(
+                                resolved_l_value,
+                                std::mem::replace(&mut arguments[0], Value::unit()),
+                            );
+                        } else {
+                            environment.borrow_mut().set(resolved_l_value, result);
                         }
-                        Ok(_) => panic!(
-                            "OpAssign implementation is not meant to return a non unit value"
-                        ),
+
+                        break; // LMAO!?!
                     }
-
-                    // Execute: `a += b` as `a = a + b`
-                    let result =
-                        call_function_by_name(operation_ident, &mut arguments, environment, span)?;
-
-                    environment.borrow_mut().assign(identifier, result); // TODO: does this mess up semantics??!?
-                    // x = x ++ y
 
                     Value::unit()
                 }
+                // NOTE THIS IS AN ABSOLUTE MESS BUT WE'LL FIX IT LATER
                 Lvalue::Index {
                     value: lhs_expression,
                     index: index_expression,
@@ -127,14 +159,51 @@ pub(crate) fn evaluate_expression(
 
                     let right_value = evaluate_expression(r_value, environment)?;
 
-                    let result = call_function_by_name(
-                        operation_ident,
-                        &mut [value_at_index, right_value],
-                        environment,
-                        span,
-                    )?;
+                    while let Some((resolved_operation, modified_in_place)) =
+                        operations_to_try.next()
+                    {
+                        let operation = environment.borrow().get(resolved_operation);
+                        let operation_val = &*operation.borrow();
 
-                    set_at_index(&mut lhs_value, result, index, span)?;
+                        let Value::Function(func) = operation_val else {
+                            unreachable!(
+                                "the resolver pass should have guaranteed that the operation points to a function"
+                            );
+                        };
+
+                        let result = match call_function(
+                            func,
+                            &mut [value_at_index.clone(), right_value.clone()],
+                            environment,
+                            span,
+                        ) {
+                            Err(FunctionCarrier::FunctionNotFound)
+                                if operations_to_try.peek().is_none() =>
+                            {
+                                let argument_string = [value_at_index.clone(), right_value.clone()]
+                                    .iter()
+                                    .map(Value::value_type)
+                                    .join(", ");
+
+                                return Err(FunctionCarrier::EvaluationError(
+                                    EvaluationError::new(
+                                        format!(
+                                            "no function called 'TODO FIGURE OUT NAME' found matches the arguments: ({argument_string})"
+                                        ),
+                                        span,
+                                    ),
+                                ));
+                            }
+                            Err(FunctionCarrier::FunctionNotFound) => continue,
+                            eval_result => eval_result?,
+                        };
+
+                        if !modified_in_place {
+                            set_at_index(&mut lhs_value, result, index.clone(), span)?;
+                        }
+
+                        break;
+                    }
 
                     Value::unit()
                 }
@@ -194,13 +263,11 @@ pub(crate) fn evaluate_expression(
         } => {
             let left = evaluate_expression(left, environment)?;
             match (operator, left) {
-                (LogicalOperator::And, Value::Bool(true)) => {
+                (LogicalOperator::And, Value::Bool(true))
+                | (LogicalOperator::Or, Value::Bool(false)) => {
                     evaluate_expression(right, environment)?
                 }
                 (LogicalOperator::And, Value::Bool(false)) => Value::Bool(false),
-                (LogicalOperator::Or, Value::Bool(false)) => {
-                    evaluate_expression(right, environment)?
-                }
                 (LogicalOperator::Or, Value::Bool(true)) => Value::Bool(true),
                 (LogicalOperator::And | LogicalOperator::Or, value) => {
                     return Err(EvaluationError::new(
@@ -224,9 +291,8 @@ pub(crate) fn evaluate_expression(
                     let result = evaluate_expression(loop_body, environment);
                     match result {
                         Err(FunctionCarrier::Break(value)) => return Ok(value),
-                        Err(FunctionCarrier::Continue) => {}
+                        Err(FunctionCarrier::Continue) | Ok(_) => {}
                         Err(err) => return Err(err),
-                        Ok(_) => {}
                     }
                 } else if lit == Value::Bool(false) {
                     break;
@@ -254,41 +320,42 @@ pub(crate) fn evaluate_expression(
             // environment, or it must be some expression that evaluates to a function.
             // In case the expression is an identifier we get ALL the values that match the identifier
             // ordered by the distance is the scope-hierarchy.
-            return if let Expression::Identifier(identifier) = &function.expression {
-                call_function_by_name(identifier, &mut evaluated_args, environment, span)
-            } else {
-                let function_as_value = evaluate_expression(function, environment)?;
+            let function_as_value = evaluate_expression(function, environment)?;
 
-                match try_call_function_from_values(
-                    &[RefCell::new(function_as_value)],
-                    &mut evaluated_args,
-                    environment,
-                    span,
-                ) {
+            return if let Value::Function(function) = function_as_value {
+                match call_function(&function, &mut evaluated_args, environment, span) {
                     Err(FunctionCarrier::FunctionNotFound) => {
-                        Err(FunctionCarrier::EvaluationError(EvaluationError::new(
-                            "Failed to invoke expression as function possibly because it's not a function".to_string(),
+                        let argument_string =
+                            evaluated_args.iter().map(Value::value_type).join(", ");
+
+                        return Err(FunctionCarrier::EvaluationError(EvaluationError::new(
+                            format!(
+                                "no function called '{}' found matches the arguments: ({argument_string})",
+                                function.borrow().name().unwrap_or("unnamed function")
+                            ),
                             span,
-                        )))
+                        )));
                     }
-                    el => el,
+                    result => result,
                 }
+            } else {
+                Err(FunctionCarrier::EvaluationError(EvaluationError::new(
+                    "Failed to invoke expression as function possibly because it's not a function"
+                        .to_string(),
+                    span,
+                )))
             };
         }
         Expression::FunctionDeclaration {
             arguments,
             body,
-            name,
+            resolved_name,
             pure,
+            ..
         } => {
-            let name = name
-                .as_ref()
-                .map(|it| it.try_into_identifier())
-                .transpose()?;
-
             let mut user_function = FunctionBody::Closure {
                 parameter_names: arguments.try_into_parameters()?,
-                body: body.clone(),
+                body: *body.clone(),
                 environment: environment.clone(),
             };
 
@@ -299,10 +366,11 @@ pub(crate) fn evaluate_expression(
                 }
             }
 
-            if let Some(name) = name {
-                environment
-                    .borrow_mut()
-                    .declare_function(name, Function::from_body(user_function));
+            if let Some(resolved_name) = *resolved_name {
+                environment.borrow_mut().set(
+                    resolved_name,
+                    Value::function(Function::from_body(user_function)),
+                );
 
                 Value::unit()
             } else {
@@ -317,18 +385,6 @@ pub(crate) fn evaluate_expression(
             }
 
             Value::Sequence(Sequence::Tuple(Rc::new(out_values)))
-        }
-        Expression::Identifier(identifier) => {
-            // MAGIC??!
-            if identifier == "None" {
-                return Ok(Value::none());
-            }
-
-            if let Some(value) = environment.borrow().get(identifier) {
-                value.borrow().clone()
-            } else {
-                return Err(EvaluationError::undefined_variable(identifier, span).into());
-            }
         }
         Expression::List { values } => {
             let mut values_out = Vec::with_capacity(values.len());
@@ -399,7 +455,6 @@ pub(crate) fn evaluate_expression(
                 environment,
             )?));
         }
-        // TODO: for now we just put unit in here so we can improve break functionality later
         Expression::Break => return Err(FunctionCarrier::Break(Value::unit())),
         Expression::Continue => return Err(FunctionCarrier::Continue),
         Expression::Index {
@@ -526,6 +581,7 @@ pub(crate) fn evaluate_expression(
                         )?;
 
                         // TODO: This borrow_mut can fail, handle it better!!
+                        // NOTE: WHEN DOES IT FAIL!?
                         dict.borrow_mut().insert(key, default_value.clone());
 
                         Ok(default_value)
@@ -622,30 +678,17 @@ fn produce_default_value(
 fn declare_or_assign_variable(
     l_value: &Lvalue,
     value: Value,
-    declare: bool,
     environment: &mut EnvironmentRef,
     span: Span,
 ) -> EvaluationResult {
     match l_value {
-        Lvalue::Variable { identifier } => {
-            if declare {
-                // If we enable this check we can reuse environments a little bit better and gain some
-                // performance but the downside is that closures behave weirdly. We could probably enable
-                // it if we ensure that closures always close over the previously defined environment
-                // instead of resolving at runtime. Check page 177 of the book for more info.
-                // ^--- I think we did this
-                if environment.borrow().contains(identifier) {
-                    let new_env = Environment::new_scope(environment);
-                    *environment = new_env;
-                }
-                environment.borrow_mut().declare(identifier, value.clone());
-            } else {
-                if !environment.borrow().contains(identifier) {
-                    Err(EvaluationError::undefined_variable(identifier, span))?;
-                }
-
-                environment.borrow_mut().assign(identifier, value.clone());
-            }
+        Lvalue::Identifier {
+            identifier: _,
+            resolved,
+        } => {
+            environment
+                .borrow_mut()
+                .set(resolved.expect("must be resolved"), value.clone());
         }
         Lvalue::Sequence(l_values) => {
             let mut remaining = l_values.len();
@@ -658,7 +701,7 @@ fn declare_or_assign_variable(
 
             for (l_value, value) in iter.by_ref() {
                 remaining -= 1;
-                declare_or_assign_variable(l_value, value, declare, environment, span)?;
+                declare_or_assign_variable(l_value, value, environment, span)?;
             }
 
             if remaining > 0 || iter.next().is_some() {
@@ -824,77 +867,6 @@ where
     }
 }
 
-/// Attempt to call a function using its name (like: 'max' or '+')
-///
-/// Arguments:
-///     * `name`: name of the function to lookup in the environment
-///     * `evaluated_args`: a slice of values passed as arguments to the function
-///     * `environment`: the execution environment for the function
-///     * `span`: span of the expression used for error reporting
-fn call_function_by_name(
-    name: &str,
-    evaluated_args: &mut [Value],
-    environment: &EnvironmentRef,
-    span: Span,
-) -> EvaluationResult {
-    let values = environment.borrow().get_all_by_name(name);
-    let result = try_call_function_from_values(&values, evaluated_args, environment, span);
-
-    if let Err(FunctionCarrier::FunctionNotFound) = result {
-        let arguments = evaluated_args.iter().map(Value::value_type).join(", ");
-        return Err(FunctionCarrier::EvaluationError(EvaluationError::new(
-            format!("no function called '{name}' found matches the arguments: ({arguments})"),
-            span,
-        )));
-    }
-
-    result
-}
-
-/// Given a bunch of values (hopefully functions) this function executes the one that matches the
-/// given arguments or returns a `FunctionNotFound` error if non match.
-///
-/// Arguments:
-///     * `values`: a list of values that are attempted to be executed in the order they appear in
-///     * `evaluated_args`: a slice of values passed as arguments to the function
-///     * `environment`: the execution environment for the function
-///     * `span`: span of the expression used for error reporting
-fn try_call_function_from_values(
-    values: &[RefCell<Value>],
-    evaluated_args: &mut [Value],
-    environment: &EnvironmentRef,
-    span: Span,
-) -> EvaluationResult {
-    // We evaluate all potential function values by first checking if they're a function and
-    // then attempting to call them. If the `OverloadedFunction` returns that there are no
-    // matches we defer to the next value and see if there is a match.
-    //
-    // This implies that a less specific function can shadow a more specific function
-    //
-    // ```ndc
-    //   fn sqrt(n: Float) {}
-    //   {
-    //       fn sqrt(n: Number) {} // Shadows the sqrt in the parent scope completely
-    //   }
-    // ```
-    for value in values {
-        let value = &*value.borrow();
-
-        // Skip all values that aren't functions
-        if let Value::Function(function) = value {
-            let result = call_function(function, evaluated_args, environment, span);
-
-            if let Err(FunctionCarrier::FunctionNotFound) = result {
-                continue;
-            }
-
-            return result;
-        }
-    }
-
-    Err(FunctionCarrier::FunctionNotFound)
-}
-
 fn call_function(
     function: &Rc<RefCell<OverloadedFunction>>,
     evaluated_args: &mut [Value],
@@ -905,9 +877,10 @@ fn call_function(
 
     match result {
         Err(FunctionCarrier::Return(value)) | Ok(value) => Ok(value),
+
         e @ Err(
-            FunctionCarrier::EvaluationError(_)
-            | FunctionCarrier::FunctionNotFound
+            FunctionCarrier::FunctionNotFound
+            | FunctionCarrier::EvaluationError(_)
             // TODO: for now we just pass the break from inside the function to outside the function. This would allow some pretty funky code and might introduce weird bugs?
             | FunctionCarrier::Break(_)
             | FunctionCarrier::Continue
@@ -964,7 +937,7 @@ fn execute_for_iterations(
             let iter = mut_value_to_iterator(&mut sequence).into_evaluation_result(span)?;
 
             for r_value in iter {
-                // In a previous version this scope was lifted outside of the loop and reset for every iteration inside the loop
+                // In a previous version this scope was lifted outside the loop and reset for every iteration inside the loop
                 // in the following code sample this matters (a lot):
                 // ```ndc
                 // [fn(x) { x + i } for i in 0...10]
@@ -972,11 +945,11 @@ fn execute_for_iterations(
                 // With the current implementation with a new scope declared for every iteration this produces 10 functions
                 // each with their own scope and their own version of `i`, this might potentially be a bit slower though
                 let mut scope = Environment::new_scope(environment);
-                declare_or_assign_variable(l_value, r_value, true, &mut scope, span)?;
+                declare_or_assign_variable(l_value, r_value, &mut scope, span)?;
 
                 if tail.is_empty() {
                     match execute_body(body, &mut scope, out_values) {
-                        Err(FunctionCarrier::Continue) => {},
+                        Err(FunctionCarrier::Continue) => {}
                         Err(error) => return Err(error),
                         Ok(_value) => {}
                     }

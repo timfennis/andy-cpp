@@ -1064,9 +1064,9 @@ dependencies = [
 
 [[package]]
 name = "log"
-version = "0.4.28"
+version = "0.4.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34080505efa8e45a4b816c349525ebe327ceaa8559756f0356cba97ef3bf7432"
+checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
 name = "lsp-types"
@@ -1155,7 +1155,7 @@ dependencies = [
 
 [[package]]
 name = "ndc_bin"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -1173,7 +1173,7 @@ dependencies = [
 
 [[package]]
 name = "ndc_lib"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "ahash",
  "anyhow",
@@ -1181,6 +1181,7 @@ dependencies = [
  "derive_more",
  "factorial",
  "itertools 0.14.0",
+ "log",
  "md5",
  "miette",
  "ndc_macros",
@@ -1199,7 +1200,7 @@ dependencies = [
 
 [[package]]
 name = "ndc_lsp"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "ndc_lib",
  "tokio",
@@ -1914,7 +1915,7 @@ dependencies = [
 
 [[package]]
 name = "tests"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "ndc_lib",
  "owo-colors",

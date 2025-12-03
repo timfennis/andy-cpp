@@ -5,7 +5,7 @@ members = ["ndc_macros", "ndc_bin", "ndc_lib", "ndc_lsp", "benches", "tests"]
 [workspace.package]
 edition = "2024"
 publish = false
-version = "0.2.0"
+version = "0.2.1"
 license = "MIT"
 
 [workspace.dependencies]

@@ -1,5 +1,3 @@
-use crate::interpreter::evaluate::EvaluationError;
-use crate::lexer::Span;
 use num::FromPrimitive;
 use num::bigint::{Sign, ToBigInt};
 use num::complex::Complex64;
@@ -402,19 +400,6 @@ impl From<&Int> for f64 {
     }
 }
 
-impl TryFrom<f64> for Int {
-    type Error = EvaluationError;
-    fn try_from(value: f64) -> Result<Self, Self::Error> {
-        let bit_int = BigInt::from_f64(value).ok_or_else(|| {
-            EvaluationError::type_error(
-                format!("cannot convert {value:?} to int"),
-                Span::new(0, 0), // TODO: fix span creation (move out of this impl)
-            )
-        })?;
-        Ok(Self::BigInt(bit_int))
-    }
-}
-
 impl From<Int> for BigInt {
     fn from(value: Int) -> Self {
         match value {
@@ -457,34 +442,6 @@ impl From<&Int> for Complex64 {
             Int::Int64(i) => Self::from(i.to_f64().unwrap_or(f64::INFINITY)),
             Int::BigInt(i) => Self::from(i.to_f64().unwrap_or(f64::INFINITY)),
         }
-    }
-}
-
-impl TryFrom<Int> for i32 {
-    type Error = EvaluationError;
-    fn try_from(value: Int) -> Result<Self, Self::Error> {
-        Ok(match value {
-            Int::Int64(p2) => {
-                if let Some(p2) = p2.to_i32() {
-                    p2
-                } else {
-                    return Err(EvaluationError::type_error(
-                        format!("cannot convert {p2} to 32-bit signed integer"),
-                        Span::new(0, 0), // TODO: fix span creation (move out of this impl)
-                    ));
-                }
-            }
-            Int::BigInt(p2) => {
-                if let Some(p2) = p2.to_i32() {
-                    p2
-                } else {
-                    return Err(EvaluationError::type_error(
-                        format!("cannot convert {p2} to 32-bit signed integer"),
-                        Span::new(0, 0), // TODO: fix span creation (move out of this impl)
-                    ));
-                }
-            }
-        })
     }
 }
 

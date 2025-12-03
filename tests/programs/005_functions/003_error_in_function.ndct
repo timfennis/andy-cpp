@@ -4,4 +4,4 @@ fn test() {
 }
 test();
 --EXPECT-ERROR--
-Undefined variable 'n'
+Identifier n has not previously been declared
