@@ -89,6 +89,7 @@ pub enum Expression {
         value: Box<ExpressionLocation>,
     },
     Break,
+    Continue,
     RangeInclusive {
         start: Option<Box<ExpressionLocation>>,
         end: Option<Box<ExpressionLocation>>,
@@ -374,6 +375,7 @@ impl fmt::Debug for ExpressionLocation {
                 .finish(),
             Expression::Return { value } => f.debug_struct("Return").field("value", value).finish(),
             Expression::Break => f.debug_struct("Break").finish(),
+            Expression::Continue => f.debug_struct("Continue").finish(),
             Expression::RangeInclusive { start, end } => f
                 .debug_struct("RangeInclusive")
                 .field("start", start)

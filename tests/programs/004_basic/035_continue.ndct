@@ -1,0 +1,24 @@
+--PROGRAM--
+let counter = 0;
+for i in 1..100 {
+    if i == 23 {
+        continue;
+    }
+    counter += 1;
+}
+assert_eq(counter, 98);
+
+// Nested break
+let counter = 0;
+for i in 0..50 {
+    for j in 1..5 {
+        if j == 2 { continue; }
+        counter += 1;
+    }
+}
+
+assert_eq(counter, 150);
+
+print("ok");
+--EXPECT--
+ok

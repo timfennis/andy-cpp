@@ -224,6 +224,7 @@ pub(crate) fn evaluate_expression(
                     let result = evaluate_expression(loop_body, environment);
                     match result {
                         Err(FunctionCarrier::Break(value)) => return Ok(value),
+                        Err(FunctionCarrier::Continue) => {}
                         Err(err) => return Err(err),
                         Ok(_) => {}
                     }
@@ -365,6 +366,7 @@ pub(crate) fn evaluate_expression(
 
             match result {
                 Err(FunctionCarrier::Break(break_value)) => return Ok(break_value),
+                Err(FunctionCarrier::Continue) => unreachable!(),
                 Err(err) => return Err(err),
                 Ok(_) => {}
             }
@@ -399,6 +401,7 @@ pub(crate) fn evaluate_expression(
         }
         // TODO: for now we just put unit in here so we can improve break functionality later
         Expression::Break => return Err(FunctionCarrier::Break(Value::unit())),
+        Expression::Continue => return Err(FunctionCarrier::Continue),
         Expression::Index {
             value: lhs_expr,
             index: index_expr,
@@ -906,7 +909,8 @@ fn call_function(
             FunctionCarrier::EvaluationError(_)
             | FunctionCarrier::FunctionNotFound
             // TODO: for now we just pass the break from inside the function to outside the function. This would allow some pretty funky code and might introduce weird bugs?
-            | FunctionCarrier::Break(_),
+            | FunctionCarrier::Break(_)
+            | FunctionCarrier::Continue
         ) => e,
         Err(carrier @ FunctionCarrier::IntoEvaluationError(_)) => Err(carrier.lift_if(span)),
     }
@@ -971,7 +975,11 @@ fn execute_for_iterations(
                 declare_or_assign_variable(l_value, r_value, true, &mut scope, span)?;
 
                 if tail.is_empty() {
-                    execute_body(body, &mut scope, out_values)?;
+                    match execute_body(body, &mut scope, out_values) {
+                        Err(FunctionCarrier::Continue) => {},
+                        Err(error) => return Err(error),
+                        Ok(_value) => {}
+                    }
                 } else {
                     execute_for_iterations(tail, body, out_values, &mut scope, span)?;
                 }

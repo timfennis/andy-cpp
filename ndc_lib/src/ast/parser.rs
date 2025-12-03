@@ -895,6 +895,9 @@ impl Parser {
         } else if let Some(token_location) = self.consume_token_if(&[Token::Break]) {
             let expression = Expression::Break;
             return Ok(expression.to_location(token_location.span));
+        } else if let Some(token_location) = self.consume_token_if(&[Token::Continue]) {
+            let expression = Expression::Continue;
+            return Ok(expression.to_location(token_location.span));
         }
         // matches curly bracketed block expression `{ }`
         else if self.match_token(&[Token::LeftCurlyBracket]).is_some() {
