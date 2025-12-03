@@ -222,7 +222,6 @@ pub(crate) fn evaluate_expression(
 
             let mut value = Value::unit();
             for stm in statements {
-                // TODO: the scope doesn't get dropped if this returns, breaks, or continues
                 value = evaluate_expression(stm, &mut local_scope)?;
             }
 
