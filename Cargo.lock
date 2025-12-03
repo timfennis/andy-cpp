@@ -1155,7 +1155,7 @@ dependencies = [
 
 [[package]]
 name = "ndc_bin"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -1173,7 +1173,7 @@ dependencies = [
 
 [[package]]
 name = "ndc_lib"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "ahash",
  "anyhow",
@@ -1200,7 +1200,7 @@ dependencies = [
 
 [[package]]
 name = "ndc_lsp"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "ndc_lib",
  "tokio",
@@ -1915,7 +1915,7 @@ dependencies = [
 
 [[package]]
 name = "tests"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "ndc_lib",
  "owo-colors",

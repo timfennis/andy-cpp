@@ -86,19 +86,7 @@ impl Environment {
 
     #[must_use]
     pub fn get_all_functions(&self) -> Vec<OverloadedFunction> {
-        let mut values = Vec::new();
-
-        for value in &self.values {
-            if let Value::Function(func) = &*value.borrow() {
-                values.push(func.borrow().clone())
-            }
-        }
-
-        if let Some(parent) = &self.parent {
-            values.extend(parent.borrow().get_all_functions());
-        }
-
-        values
+        self.root.borrow().global_functions.clone()
     }
 
     pub fn set(&mut self, var: ResolvedVar, value: Value) {
