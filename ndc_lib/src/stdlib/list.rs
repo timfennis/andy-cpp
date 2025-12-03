@@ -84,14 +84,19 @@ mod inner {
 
     #[function(name = "++")]
     pub fn list_concat(left: &mut ListRepr, right: &mut ListRepr) -> Value {
-        // TODO: can we/should we optimize here if Rc::strong_count = 1 for the lhs
-        Value::list(
-            left.borrow()
-                .iter()
-                .chain(right.borrow().iter())
-                .cloned()
-                .collect::<Vec<Value>>(),
-        )
+        if Rc::strong_count(left) == 1 {
+            left.borrow_mut().extend_from_slice(&*right.borrow());
+
+            Value::Sequence(Sequence::List(left.clone()))
+        } else {
+            Value::list(
+                left.borrow()
+                    .iter()
+                    .chain(right.borrow().iter())
+                    .cloned()
+                    .collect::<Vec<Value>>(),
+            )
+        }
     }
 
     #[function(name = "++=")]

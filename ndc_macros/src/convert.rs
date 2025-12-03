@@ -146,10 +146,11 @@ impl TypeConverter for InternalTuple {
             argument: quote! { #argument_var_name },
             initialize_code: quote! {
                 let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::Tuple(#temp_var)) = #argument_var_name else {
-                    panic!("blaap");
+                    panic!("Value #position needed to be Sequence::Tuple but wasn't");
                 };
 
-                let #argument_var_name = std::mem::take(#temp_var); // TODO: is std::mem::take appropriate here?
+                // TODO: is std::mem::take appropriate here?
+                let #argument_var_name = std::mem::take(#temp_var);
             },
         }]
     }
