@@ -44,6 +44,10 @@
         "extensions": [
           ".ndc"
         ],
+        "icon": {
+          "dark": "./images/logo.svg",
+          "light": "./images/logo.svg"
+        },
         "configuration": "./language-configuration.json"
       }
     ],
