@@ -20,7 +20,7 @@ pub struct RootEnvironment {
 pub struct Environment {
     root: Rc<RefCell<RootEnvironment>>,
     parent: Option<EnvironmentRef>,
-    values: Vec<Rc<RefCell<Value>>>,
+    values: RefCell<Vec<Value>>,
 }
 
 impl fmt::Debug for Environment {
@@ -29,7 +29,7 @@ impl fmt::Debug for Environment {
             f,
             "Environment[has_parent: {:?}, values.len(): {}]",
             self.parent.is_some(),
-            self.values.len(),
+            self.values.borrow().len(),
         )
     }
 }
@@ -62,7 +62,7 @@ impl Environment {
         let mut env = Self {
             root: Rc::new(RefCell::new(root)),
             parent: None,
-            values: Vec::new(),
+            values: Default::default(),
         };
 
         crate::stdlib::register(&mut env);
@@ -95,22 +95,23 @@ impl Environment {
                 // This whole mess (special handling for functions) can be removed once we check
                 // types during the resolver pass
                 if let Value::Function(value_to_insert) = &value {
-                    if let Some(existing_value) = self.values.get(slot) {
-                        let existing_value = &*existing_value.borrow();
+                    if let Some(existing_value) = self.values.borrow().get(slot) {
                         if let Value::Function(func) = existing_value {
                             func.borrow_mut().merge(&mut value_to_insert.borrow_mut())
                         }
                     } else {
-                        self.values.insert(slot, Rc::new(RefCell::new(value)));
+                        self.values.borrow_mut().insert(slot, value);
                     }
 
                     return;
                 }
 
-                if self.values.len() > slot {
-                    self.values[slot] = Rc::new(RefCell::new(value))
+                let values = &mut *self.values.borrow_mut();
+                if values.len() > slot {
+                    values[slot] = value
                 } else {
-                    self.values.insert(slot, Rc::new(RefCell::new(value)))
+                    debug_assert!(slot == values.len());
+                    values.insert(slot, value) // TODO: push should work here right
                 }
             }
 
@@ -153,24 +154,29 @@ impl Environment {
         gb.push(OverloadedFunction::from_multiple(vec![new_function]))
     }
 
-    fn get_slot(&self, depth: usize, slot: usize) -> Rc<RefCell<Value>> {
+    fn get_copy_from_slot(&self, depth: usize, slot: usize) -> Value {
         if depth == 0 {
-            self.values[slot].clone()
+            self.values
+                .borrow()
+                .get(slot)
+                .expect("slot can't be empty")
+                .clone()
         } else {
             self.parent
                 .clone()
                 .expect("expected parent env did not exist")
                 .borrow()
-                .get_slot(depth - 1, slot)
+                .get_copy_from_slot(depth - 1, slot)
         }
     }
+
     #[must_use]
-    pub fn get(&self, var: ResolvedVar) -> Rc<RefCell<Value>> {
+    pub fn get(&self, var: ResolvedVar) -> Value {
         match var {
-            ResolvedVar::Captured { depth, slot } => self.get_slot(depth, slot),
-            ResolvedVar::Global { slot } => Rc::new(RefCell::new(Value::function(
-                self.root.borrow().global_functions[slot].clone(),
-            ))),
+            ResolvedVar::Captured { depth, slot } => self.get_copy_from_slot(depth, slot),
+            ResolvedVar::Global { slot } => {
+                Value::function(self.root.borrow().global_functions[slot].clone())
+            }
         }
     }
 
@@ -179,7 +185,10 @@ impl Environment {
     pub fn take(&self, var: ResolvedVar) -> Option<Value> {
         match var {
             ResolvedVar::Captured { depth: 0, slot } => Some(std::mem::replace(
-                &mut *self.values[slot].borrow_mut(),
+                self.values
+                    .borrow_mut()
+                    .get_mut(slot)
+                    .expect("slot can't be empty"),
                 Value::unit(),
             )),
             ResolvedVar::Captured { depth, slot } => self
@@ -200,7 +209,7 @@ impl Environment {
         Rc::new(RefCell::new(Self {
             parent: Some(Rc::clone(parent)),
             root: root_ref,
-            values: Vec::new(),
+            values: Default::default(),
         }))
     }
 }

@@ -40,8 +40,6 @@ pub(crate) fn evaluate_expression(
             environment
                 .borrow()
                 .get(resolved.expect("identifier was not resolved before execution"))
-                .borrow()
-                .clone()
         }
         Expression::VariableDeclaration { l_value, value } => {
             let value = evaluate_expression(value, environment)?;
@@ -106,15 +104,14 @@ pub(crate) fn evaluate_expression(
 
                     while let Some((resolved_op, modified_in_place)) = operations_to_try.next() {
                         let operation = environment.borrow().get(resolved_op);
-                        let operation_val = &*operation.borrow();
 
-                        let Value::Function(func) = operation_val else {
+                        let Value::Function(func) = operation else {
                             unreachable!(
                                 "the resolver pass should have guaranteed that the operation points to a function"
                             );
                         };
 
-                        let result = match call_function(func, &mut arguments, environment, span) {
+                        let result = match call_function(&func, &mut arguments, environment, span) {
                             Err(FunctionCarrier::FunctionNotFound)
                                 if operations_to_try.peek().is_none() =>
                             {
@@ -162,8 +159,7 @@ pub(crate) fn evaluate_expression(
                     while let Some((resolved_operation, modified_in_place)) =
                         operations_to_try.next()
                     {
-                        let operation = environment.borrow().get(resolved_operation);
-                        let operation_val = &*operation.borrow();
+                        let operation_val = environment.borrow().get(resolved_operation);
 
                         let Value::Function(func) = operation_val else {
                             unreachable!(
@@ -172,7 +168,7 @@ pub(crate) fn evaluate_expression(
                         };
 
                         let result = match call_function(
-                            func,
+                            &func,
                             &mut [value_at_index.clone(), right_value.clone()],
                             environment,
                             span,
