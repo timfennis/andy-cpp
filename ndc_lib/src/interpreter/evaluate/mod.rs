@@ -312,10 +312,6 @@ pub(crate) fn evaluate_expression(
                 evaluated_args.push(evaluate_expression(argument, environment)?);
             }
 
-            // The Expression in `function` must either be an identifier in which case it will be looked up in the
-            // environment, or it must be some expression that evaluates to a function.
-            // In case the expression is an identifier we get ALL the values that match the identifier
-            // ordered by the distance is the scope-hierarchy.
             let function_as_value = evaluate_expression(function, environment)?;
 
             return if let Value::Function(function) = function_as_value {
