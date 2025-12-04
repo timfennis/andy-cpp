@@ -306,7 +306,7 @@ pub(crate) fn evaluate_expression(
             function,
             arguments,
         } => {
-            let mut evaluated_args = Vec::new();
+            let mut evaluated_args = Vec::with_capacity(arguments.len());
 
             for argument in arguments {
                 evaluated_args.push(evaluate_expression(argument, environment)?);
