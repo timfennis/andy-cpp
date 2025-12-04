@@ -265,7 +265,7 @@ impl TypeSignature {
 
 #[derive(Clone)]
 pub struct OverloadedFunction {
-    implementations: HashMap<TypeSignature, Function>,
+    implementations: Vec<(TypeSignature, Function)>,
 }
 
 impl OverloadedFunction {
@@ -292,8 +292,8 @@ impl OverloadedFunction {
                 .all(|(sig, _)| sig.arity() == arity),
             "failed asserting that arity of all functions in OverloadedFunction are equal: {}",
             self.implementations
-                .values()
-                .map(|fun| fun.name())
+                .iter()
+                .map(|(_, fun)| fun.name())
                 .join(", ")
         );
         arity
@@ -309,7 +309,7 @@ impl OverloadedFunction {
 
     pub fn add(&mut self, function: Function) {
         self.implementations
-            .insert(function.type_signature(), function);
+            .push((function.type_signature(), function))
     }
 
     pub fn implementations(&self) -> impl Iterator<Item = (TypeSignature, Function)> {
@@ -318,18 +318,22 @@ impl OverloadedFunction {
 
     /// Ads values from the other overloaded function by draining it
     pub fn merge(&mut self, other: &mut Self) {
-        for (key, value) in other.implementations.drain() {
+        for (key, value) in other.implementations.drain(..) {
             debug_assert!(
-                !self.implementations.contains_key(&key),
+                self.implementations.iter().all(|(typ, _)| typ != &key),
                 "conflict while merging OverloadedFunction implementations"
             );
-            self.implementations.insert(key, value);
+            self.implementations.push((key, value));
         }
     }
 
     pub fn call(&self, args: &mut [Value], env: &Rc<RefCell<Environment>>) -> EvaluationResult {
         let types: Vec<ValueType> = args.iter().map(ValueType::from).collect();
 
+        // let best_function_match = self
+        //     .implementations
+        //     .iter()
+        //     .max_by_key(|(signature, function)| signature.calc_type_score(&types));
         let mut best_function_match = None;
         let mut best_distance = u32::MAX;
 
@@ -411,7 +415,7 @@ impl From<Function> for OverloadedFunction {
     fn from(value: Function) -> Self {
         let type_signature = value.type_signature();
         Self {
-            implementations: HashMap::from([(type_signature, value)]),
+            implementations: vec![(type_signature, value)],
         }
     }
 }
