@@ -9,8 +9,6 @@ use std::fmt::Formatter;
 use std::io::{Stdout, Write, stdout};
 use std::rc::Rc;
 
-pub type EnvironmentRef = Rc<RefCell<Environment>>;
-
 pub struct RootEnvironment {
     pub output: Box<dyn InterpreterOutput>,
     // These are global values
@@ -19,7 +17,7 @@ pub struct RootEnvironment {
 
 pub struct Environment {
     root: Rc<RefCell<RootEnvironment>>,
-    parent: Option<EnvironmentRef>,
+    parent: Option<Rc<RefCell<Environment>>>,
     values: RefCell<Vec<Value>>,
 }
 
@@ -204,7 +202,7 @@ impl Environment {
         }
     }
 
-    pub fn new_scope(parent: &EnvironmentRef) -> EnvironmentRef {
+    pub fn new_scope(parent: &Rc<RefCell<Environment>>) -> Rc<RefCell<Environment>> {
         let root_ref = Rc::clone(&parent.borrow().root);
         Rc::new(RefCell::new(Self {
             parent: Some(Rc::clone(parent)),

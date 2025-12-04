@@ -1,6 +1,6 @@
 use crate::ast::{Expression, ExpressionLocation, ForBody, ForIteration, LogicalOperator, Lvalue};
 use crate::hash_map::HashMap;
-use crate::interpreter::environment::{Environment, EnvironmentRef};
+use crate::interpreter::environment::Environment;
 use crate::interpreter::function::{Function, FunctionBody, FunctionCarrier, OverloadedFunction};
 use crate::interpreter::int::Int;
 use crate::interpreter::iterator::mut_value_to_iterator;
@@ -22,7 +22,7 @@ mod index;
 #[allow(clippy::too_many_lines)]
 pub(crate) fn evaluate_expression(
     expression_location: &ExpressionLocation,
-    environment: &mut EnvironmentRef,
+    environment: &mut Rc<RefCell<Environment>>,
 ) -> EvaluationResult {
     let span = expression_location.span;
     let literal: Value = match &expression_location.expression {
@@ -651,7 +651,7 @@ pub(crate) fn evaluate_expression(
 
 fn produce_default_value(
     default: &Value,
-    environment: &EnvironmentRef,
+    environment: &Rc<RefCell<Environment>>,
     span: Span,
 ) -> EvaluationResult {
     match default {
@@ -674,7 +674,7 @@ fn produce_default_value(
 fn declare_or_assign_variable(
     l_value: &Lvalue,
     value: Value,
-    environment: &mut EnvironmentRef,
+    environment: &mut Rc<RefCell<Environment>>,
     span: Span,
 ) -> EvaluationResult {
     match l_value {
@@ -866,7 +866,7 @@ where
 fn call_function(
     function: &Rc<RefCell<OverloadedFunction>>,
     evaluated_args: &mut [Value],
-    environment: &EnvironmentRef,
+    environment: &Rc<RefCell<Environment>>,
     span: Span,
 ) -> EvaluationResult {
     let result = function.borrow().call(evaluated_args, environment);
@@ -887,7 +887,7 @@ fn call_function(
 
 fn execute_body(
     body: &ForBody,
-    environment: &mut EnvironmentRef,
+    environment: &mut Rc<RefCell<Environment>>,
     result: &mut Vec<Value>,
 ) -> EvaluationResult {
     match body {
@@ -920,7 +920,7 @@ fn execute_for_iterations(
     iterations: &[ForIteration],
     body: &ForBody,
     out_values: &mut Vec<Value>,
-    environment: &mut EnvironmentRef,
+    environment: &mut Rc<RefCell<Environment>>,
     span: Span,
 ) -> Result<Value, FunctionCarrier> {
     let Some((cur, tail)) = iterations.split_first() else {

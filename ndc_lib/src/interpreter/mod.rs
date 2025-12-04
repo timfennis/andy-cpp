@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::ast::ExpressionLocation;
-use crate::interpreter::environment::{Environment, EnvironmentRef, InterpreterOutput};
+use crate::interpreter::environment::{Environment, InterpreterOutput};
 use crate::interpreter::evaluate::{EvaluationError, evaluate_expression};
 use crate::interpreter::function::FunctionCarrier;
 use crate::interpreter::resolve::{LexicalData, resolve_pass};
@@ -22,7 +22,7 @@ pub mod sequence;
 pub mod value;
 
 pub struct Interpreter {
-    environment: EnvironmentRef,
+    environment: Rc<RefCell<Environment>>,
     lexical_data: LexicalData,
 }
 
@@ -43,7 +43,7 @@ impl Interpreter {
     }
 
     #[must_use]
-    pub fn environment(self) -> EnvironmentRef {
+    pub fn environment(self) -> Rc<RefCell<Environment>> {
         self.environment
     }
 

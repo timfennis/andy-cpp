@@ -10,16 +10,17 @@
 //! +----------------+-----+----+----+----+----+----+----+----+----+----+
 
 use super::{EvaluationError, IntoEvaluationResult, evaluate_expression};
+use crate::interpreter::environment::Environment;
 use crate::{
     ast::{Expression, ExpressionLocation},
-    interpreter::{
-        environment::EnvironmentRef, function::FunctionCarrier, sequence::Sequence, value::Value,
-    },
+    interpreter::{function::FunctionCarrier, sequence::Sequence, value::Value},
     lexer::Span,
 };
 use itertools::Itertools;
+use std::cell::RefCell;
 use std::cmp::min;
 use std::ops::IndexMut;
+use std::rc::Rc;
 
 #[derive(Clone)]
 pub enum EvaluatedIndex {
@@ -63,7 +64,7 @@ impl EvaluatedIndex {
 
 pub(crate) fn evaluate_as_index(
     expression_location: &ExpressionLocation,
-    environment: &mut EnvironmentRef,
+    environment: &mut Rc<RefCell<Environment>>,
 ) -> Result<EvaluatedIndex, FunctionCarrier> {
     let (range_start, range_end, inclusive) = match expression_location.expression {
         Expression::RangeExclusive {

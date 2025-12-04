@@ -181,7 +181,7 @@ fn wrap_single(
     let function_declaration = quote! {
         pub fn #identifier (
             values: &mut [crate::interpreter::value::Value],
-            environment: &crate::interpreter::environment::EnvironmentRef
+            environment: &std::rc::Rc<std::cell::RefCell<crate::interpreter::environment::Environment>>
         ) -> crate::interpreter::evaluate::EvaluationResult {
             // Define the inner function that has the rust type signature
             #[inline]
