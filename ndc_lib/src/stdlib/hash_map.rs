@@ -48,6 +48,11 @@ mod inner {
         map.insert(key, Value::unit());
     }
 
+    /// Returns true if the map or set contains no elements.
+    pub fn is_empty(map: &HashMap<Value, Value>) -> bool {
+        map.is_empty()
+    }
+
     #[function(name = "&=")]
     pub fn intersect_assign(lhs: &mut MapRepr, rhs: &mut MapRepr) {
         let left_map: &mut HashMap<Value, Value> = &mut lhs
