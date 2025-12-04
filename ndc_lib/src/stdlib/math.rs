@@ -197,7 +197,7 @@ mod inner {
             Value::Sequence(Sequence::String(string)) => {
                 let string = string.borrow();
                 let bi = string.parse::<BigInt>()?;
-                Ok(Number::Int(Int::BigInt(bi).simplified()))
+                Ok(Number::Int(Int::BigInt(Box::new(bi)).simplified()))
             }
             value => Err(anyhow::anyhow!(
                 "cannot convert {} to int",

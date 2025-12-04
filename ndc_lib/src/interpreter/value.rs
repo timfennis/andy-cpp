@@ -349,7 +349,7 @@ impl From<usize> for Value {
 
 impl From<BigInt> for Value {
     fn from(value: BigInt) -> Self {
-        Self::Number(Number::Int(Int::BigInt(value)))
+        Self::Number(Number::Int(Int::BigInt(Box::new(value))))
     }
 }
 
@@ -564,7 +564,7 @@ impl TryFrom<Value> for BigInt {
     type Error = ConversionError;
     fn try_from(value: Value) -> Result<Self, Self::Error> {
         match value {
-            Value::Number(Number::Int(Int::BigInt(b))) => Ok(b),
+            Value::Number(Number::Int(Int::BigInt(b))) => Ok(*b),
             Value::Number(Number::Int(Int::Int64(i))) => Ok(Self::from(i)),
             v => Err(ConversionError::UnsupportedVariant(
                 v.value_type(),

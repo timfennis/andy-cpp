@@ -11,7 +11,7 @@ use std::ops::{BitAnd, BitOr, BitXor, Neg, Not, Shl, Shr};
 #[derive(Debug, Clone)]
 pub enum Int {
     Int64(i64),
-    BigInt(BigInt),
+    BigInt(Box<BigInt>),
 }
 
 impl Int {
@@ -22,7 +22,7 @@ impl Int {
             return None;
         }
 
-        BigInt::from_f64(value).map(Int::BigInt)
+        BigInt::from_f64(value).map(|x| Int::BigInt(Box::new(x)))
     }
 
     /// Converts to float to an int only if it's fractal part is zero, otherwise it returns None
@@ -39,7 +39,7 @@ impl Int {
     pub fn to_bigint(&self) -> BigInt {
         match self {
             Self::Int64(i) => BigInt::from(*i),
-            Self::BigInt(b) => b.clone(),
+            Self::BigInt(b) => *b.clone(),
         }
     }
 
@@ -66,6 +66,7 @@ impl Int {
 
         self.to_bigint()
             .checked_rem_euclid(&rhs.to_bigint())
+            .map(Box::new)
             .map(Int::BigInt)
     }
 
@@ -73,7 +74,7 @@ impl Int {
     pub fn checked_shl(self, rhs: Self) -> Option<Self> {
         let rhs: u32 = match rhs {
             Self::Int64(rhs) => rhs.try_into().ok()?,
-            Self::BigInt(rhs) => rhs.try_into().ok()?,
+            Self::BigInt(rhs) => (*rhs).try_into().ok()?,
         };
 
         match self {
@@ -81,10 +82,12 @@ impl Int {
                 if let Some(result) = lhs.checked_shl(rhs) {
                     Some(Self::Int64(result))
                 } else {
-                    Some(Self::BigInt(lhs.to_bigint().expect("cannot fail").shl(rhs)))
+                    Some(Self::BigInt(Box::new(
+                        lhs.to_bigint().expect("cannot fail").shl(rhs),
+                    )))
                 }
             }
-            Self::BigInt(big_int) => Some(Self::BigInt(big_int.shl(rhs))),
+            Self::BigInt(big_int) => Some(Self::BigInt(Box::new(big_int.shl(rhs)))),
         }
     }
 
@@ -92,7 +95,7 @@ impl Int {
     pub fn checked_shr(self, rhs: Self) -> Option<Self> {
         let rhs: u32 = match rhs {
             Self::Int64(rhs) => rhs.try_into().ok()?,
-            Self::BigInt(rhs) => rhs.try_into().ok()?,
+            Self::BigInt(rhs) => (*rhs).try_into().ok()?,
         };
 
         match self {
@@ -100,10 +103,12 @@ impl Int {
                 if let Some(result) = lhs.checked_shr(rhs) {
                     Some(Self::Int64(result))
                 } else {
-                    Some(Self::BigInt(lhs.to_bigint().expect("cannot fail").shr(rhs)))
+                    Some(Self::BigInt(Box::new(
+                        lhs.to_bigint().expect("cannot fail").shr(rhs),
+                    )))
                 }
             }
-            Self::BigInt(big_int) => Some(Self::BigInt(big_int.shr(rhs))),
+            Self::BigInt(big_int) => Some(Self::BigInt(Box::new(big_int.shr(rhs)))),
         }
     }
 
@@ -118,7 +123,7 @@ impl Int {
             Sign::NoSign => Self::Int64(1),
             // This is kinda dumb because if the `rhs` doesn't fit in a u64 we sure as hell aren't
             // going to be able to compute it in finite time
-            Sign::Plus => Self::BigInt(Pow::pow(lhs, rhs.magnitude())),
+            Sign::Plus => Self::BigInt(Box::new(Pow::pow(lhs, rhs.magnitude()))),
         }
     }
 
@@ -171,8 +176,8 @@ impl PartialEq for Int {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::BigInt(left), Self::BigInt(right)) => left == right,
-            (Self::BigInt(left), Self::Int64(right)) => left == &BigInt::from(*right),
-            (Self::Int64(left), Self::BigInt(right)) => &BigInt::from(*left) == right,
+            (Self::BigInt(left), Self::Int64(right)) => **left == BigInt::from(*right),
+            (Self::Int64(left), Self::BigInt(right)) => BigInt::from(*left) == **right,
             (Self::Int64(left), Self::Int64(right)) => left == right,
         }
     }
@@ -184,7 +189,7 @@ impl Ord for Int {
     fn cmp(&self, other: &Self) -> Ordering {
         match (self, other) {
             (Self::Int64(l), Self::BigInt(r)) => BigInt::from(*l).cmp(r),
-            (Self::BigInt(l), Self::Int64(r)) => l.cmp(&BigInt::from(*r)),
+            (Self::BigInt(l), Self::Int64(r)) => (**l).cmp(&BigInt::from(*r)),
             (Self::Int64(l), Self::Int64(r)) => l.cmp(r),
             (Self::BigInt(l), Self::BigInt(r)) => l.cmp(r),
         }
@@ -219,7 +224,7 @@ impl Neg for Int {
     fn neg(self) -> Self::Output {
         match self {
             Self::Int64(i) => Self::Int64(i.neg()),
-            Self::BigInt(i) => Self::BigInt(i.neg()),
+            Self::BigInt(i) => Self::BigInt(Box::new(i.neg())),
         }
     }
 }
@@ -249,7 +254,7 @@ macro_rules! impl_binary_operator {
                     }
                     _ => (),
                 }
-                Int::BigInt(self.to_bigint().$method(rhs.to_bigint()))
+                Int::BigInt(Box::new(self.to_bigint().$method(rhs.to_bigint())))
             }
         }
         impl std::ops::$trait<&Int> for Int {
@@ -264,7 +269,7 @@ macro_rules! impl_binary_operator {
                     }
                     _ => (),
                 }
-                Int::BigInt(self.to_bigint().$method(rhs.to_bigint()))
+                Int::BigInt(Box::new(self.to_bigint().$method(rhs.to_bigint())))
             }
         }
         impl std::ops::$trait<Int> for &Int {
@@ -280,7 +285,7 @@ macro_rules! impl_binary_operator {
                     _ => {}
                 }
 
-                Int::BigInt(self.to_bigint().$method(rhs.to_bigint()))
+                Int::BigInt(Box::new(self.to_bigint().$method(rhs.to_bigint())))
             }
         }
         impl std::ops::$trait<&Int> for &Int {
@@ -295,7 +300,7 @@ macro_rules! impl_binary_operator {
                     }
                     _ => (),
                 }
-                Int::BigInt(self.to_bigint().$method(rhs.to_bigint()))
+                Int::BigInt(Box::new(self.to_bigint().$method(rhs.to_bigint())))
             }
         }
     };
@@ -315,7 +320,7 @@ impl BitAnd for &Int {
             return Int::Int64(p1 & p2);
         }
 
-        Int::BigInt(self.to_bigint().bitand(rhs.to_bigint())).simplified()
+        Int::BigInt(Box::new(self.to_bigint().bitand(rhs.to_bigint()))).simplified()
     }
 }
 
@@ -335,7 +340,7 @@ impl BitOr for &Int {
             return Int::Int64(p1 | p2);
         }
 
-        Int::BigInt(self.to_bigint().bitor(rhs.to_bigint()))
+        Int::BigInt(Box::new(self.to_bigint().bitor(rhs.to_bigint())))
     }
 }
 
@@ -355,7 +360,7 @@ impl BitXor for &Int {
             return Int::Int64(p1 ^ p2);
         }
 
-        Int::BigInt(self.to_bigint().bitxor(rhs.to_bigint())).simplified()
+        Int::BigInt(Box::new(self.to_bigint().bitxor(rhs.to_bigint()))).simplified()
     }
 }
 
@@ -381,7 +386,7 @@ impl From<i64> for Int {
 
 impl From<BigInt> for Int {
     fn from(value: BigInt) -> Self {
-        Self::BigInt(value)
+        Self::BigInt(Box::new(value))
     }
 }
 
@@ -404,7 +409,7 @@ impl From<Int> for BigInt {
     fn from(value: Int) -> Self {
         match value {
             Int::Int64(i) => Self::from(i),
-            Int::BigInt(b) => b,
+            Int::BigInt(b) => *b,
         }
     }
 }
@@ -413,7 +418,7 @@ impl From<&Int> for BigInt {
     fn from(value: &Int) -> Self {
         match value {
             Int::Int64(i) => Self::from(*i),
-            Int::BigInt(b) => b.clone(),
+            Int::BigInt(b) => (**b).clone(),
         }
     }
 }

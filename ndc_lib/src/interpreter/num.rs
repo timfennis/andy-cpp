@@ -100,7 +100,7 @@ impl Hash for Number {
                 if r.is_integer() {
                     // simplify rational
                     state.write_u8(1);
-                    Int::BigInt(r.to_integer()).hash(state);
+                    Int::BigInt(Box::new(r.to_integer())).hash(state);
                 } else {
                     state.write_u8(3);
                     r.hash(state);
@@ -432,7 +432,7 @@ impl Number {
             }
             (Self::Int(p1), Self::Rational(p2)) => {
                 if p2.is_integer() {
-                    return Ok(Self::Int(p1.pow(&Int::BigInt(p2.to_integer()))));
+                    return Ok(Self::Int(p1.pow(&Int::BigInt(Box::new(p2.to_integer())))));
                 }
 
                 Self::Float(f64::from(p1).powf(rational_to_float(&p2)))
@@ -481,7 +481,7 @@ impl Number {
             Self::Int(i) => Self::Int(i.clone()),
             Self::Float(f) => {
                 if let Some(bi) = BigInt::from_f64(*f) {
-                    Self::Int(Int::BigInt(bi).simplified())
+                    Self::Int(Int::BigInt(Box::new(bi)).simplified())
                 } else {
                     return Err(EvaluationError::type_error(
                         format!("cannot convert {f} to int"),
@@ -489,7 +489,7 @@ impl Number {
                     ));
                 }
             }
-            Self::Rational(r) => Self::Int(Int::BigInt(r.to_integer()).simplified()),
+            Self::Rational(r) => Self::Int(Int::BigInt(Box::new(r.to_integer())).simplified()),
             Self::Complex(c) => {
                 return Err(EvaluationError::type_error(
                     format!("cannot convert complex number {c} to int"),
@@ -594,7 +594,9 @@ macro_rules! implement_rounding {
                         }
                     }
                     // TODO: fix bigint -> int
-                    Number::Rational(r) => Number::Int(Int::BigInt(r.$method().to_integer())),
+                    Number::Rational(r) => {
+                        Number::Int(Int::BigInt(Box::new(r.$method().to_integer())))
+                    }
                     Number::Complex(c) => Complex::new(c.re.$method(), c.im.$method()).into(),
                 }
             }
@@ -622,7 +624,7 @@ impl TryFrom<Number> for usize {
     fn try_from(value: Number) -> Result<Self, Self::Error> {
         match value {
             Number::Int(Int::Int64(i)) => Ok(Self::try_from(i)?),
-            Number::Int(Int::BigInt(b)) => Ok(Self::try_from(b)?),
+            Number::Int(Int::BigInt(b)) => Ok(Self::try_from(*b)?),
             n => Err(NumberToUsizeError::UnsupportedVariant(n.type_name())),
         }
     }
@@ -664,7 +666,7 @@ impl TryFrom<&Number> for i64 {
 
     fn try_from(value: &Number) -> Result<Self, Self::Error> {
         match value {
-            Number::Int(Int::BigInt(bi)) => bi
+            Number::Int(Int::BigInt(bi)) => (&**bi)
                 .try_into()
                 .map_err(|_err| NumberToIntError::UnsupportedValue(value.clone())),
             Number::Int(Int::Int64(i)) => Ok(*i),

@@ -29,7 +29,9 @@ pub(crate) fn evaluate_expression(
         Expression::BoolLiteral(b) => Value::Bool(*b),
         Expression::StringLiteral(s) => Value::string(s),
         Expression::Int64Literal(n) => Value::Number(Number::Int(Int::Int64(*n))),
-        Expression::BigIntLiteral(n) => Value::Number(Number::Int(Int::BigInt(n.clone()))),
+        Expression::BigIntLiteral(n) => {
+            Value::Number(Number::Int(Int::BigInt(Box::new(n.clone()))))
+        }
         Expression::Float64Literal(n) => Value::Number(Number::Float(*n)),
         Expression::ComplexLiteral(n) => Value::Number(Number::Complex(*n)),
         Expression::Grouping(expr) => evaluate_expression(expr, environment)?,
