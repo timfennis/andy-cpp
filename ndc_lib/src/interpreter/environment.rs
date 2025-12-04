@@ -18,7 +18,7 @@ pub struct RootEnvironment {
 pub struct Environment {
     root: Rc<RefCell<RootEnvironment>>,
     parent: Option<Rc<RefCell<Environment>>>,
-    values: RefCell<Vec<Value>>,
+    values: Vec<Value>,
 }
 
 impl fmt::Debug for Environment {
@@ -27,7 +27,7 @@ impl fmt::Debug for Environment {
             f,
             "Environment[has_parent: {:?}, values.len(): {}]",
             self.parent.is_some(),
-            self.values.borrow().len(),
+            self.values.len(),
         )
     }
 }
@@ -93,23 +93,24 @@ impl Environment {
                 // This whole mess (special handling for functions) can be removed once we check
                 // types during the resolver pass
                 if let Value::Function(value_to_insert) = &value {
-                    if let Some(existing_value) = self.values.borrow().get(slot) {
+                    if let Some(existing_value) = self.values.get(slot) {
                         if let Value::Function(func) = existing_value {
                             func.borrow_mut().merge(&mut value_to_insert.borrow_mut())
                         }
                     } else {
-                        self.values.borrow_mut().insert(slot, value);
+                        self.values.push(value);
+                        // self.values.insert(slot, value);
                     }
 
                     return;
                 }
 
-                let values = &mut *self.values.borrow_mut();
-                if values.len() > slot {
-                    values[slot] = value
+                if self.values.len() > slot {
+                    self.values[slot] = value
                 } else {
-                    debug_assert!(slot == values.len());
-                    values.insert(slot, value) // TODO: push should work here right
+                    debug_assert!(slot == self.values.len());
+                    // self.values.insert(slot, value) // TODO: push should work here right
+                    self.values.push(value);
                 }
             }
 
@@ -154,11 +155,7 @@ impl Environment {
 
     fn get_copy_from_slot(&self, depth: usize, slot: usize) -> Value {
         if depth == 0 {
-            self.values
-                .borrow()
-                .get(slot)
-                .expect("slot can't be empty")
-                .clone()
+            self.values[slot].clone()
         } else {
             self.parent
                 .clone()
@@ -180,20 +177,17 @@ impl Environment {
 
     /// Takes the named variable from memory and leaves `Value::unit()` in its place
     #[must_use]
-    pub fn take(&self, var: ResolvedVar) -> Option<Value> {
+    pub fn take(&mut self, var: ResolvedVar) -> Option<Value> {
         match var {
             ResolvedVar::Captured { depth: 0, slot } => Some(std::mem::replace(
-                self.values
-                    .borrow_mut()
-                    .get_mut(slot)
-                    .expect("slot can't be empty"),
+                self.values.get_mut(slot).expect("slot can't be empty"),
                 Value::unit(),
             )),
             ResolvedVar::Captured { depth, slot } => self
                 .parent
                 .clone()
                 .expect("expected parent env did not exist")
-                .borrow()
+                .borrow_mut()
                 .take(ResolvedVar::Captured {
                     depth: depth - 1,
                     slot,
