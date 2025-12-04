@@ -148,12 +148,11 @@ impl FunctionBody {
                 let mut local_scope = Environment::new_scope(environment);
 
                 {
-                    let mut env = local_scope.borrow_mut();
                     for (position, value) in args.iter().enumerate() {
                         // NOTE: stores a copy of the value in the environment (which is fine?)
                         // NOTE: we just assume here that the arguments are slotted in order starting at 0
                         // because why not? Is this a call convention?
-                        env.set(
+                        local_scope.set(
                             ResolvedVar::Captured {
                                 depth: 0,
                                 slot: position,
@@ -163,7 +162,8 @@ impl FunctionBody {
                     }
                 }
 
-                match evaluate_expression(body, &mut local_scope) {
+                let local_scope = Rc::new(RefCell::new(local_scope));
+                match evaluate_expression(body, &local_scope) {
                     Err(FunctionCarrier::Return(v)) => Ok(v),
                     r => r,
                 }

@@ -22,7 +22,7 @@ mod index;
 #[allow(clippy::too_many_lines)]
 pub(crate) fn evaluate_expression(
     expression_location: &ExpressionLocation,
-    environment: &mut Rc<RefCell<Environment>>,
+    environment: &Rc<RefCell<Environment>>,
 ) -> EvaluationResult {
     let span = expression_location.span;
     let literal: Value = match &expression_location.expression {
@@ -214,11 +214,11 @@ pub(crate) fn evaluate_expression(
             }
         }
         Expression::Block { statements } => {
-            let mut local_scope = Environment::new_scope(environment);
+            let local_scope = Rc::new(RefCell::new(Environment::new_scope(environment)));
 
             let mut value = Value::unit();
             for stm in statements {
-                value = evaluate_expression(stm, &mut local_scope)?;
+                value = evaluate_expression(stm, &local_scope)?;
             }
 
             drop(local_scope);
@@ -674,7 +674,7 @@ fn produce_default_value(
 fn declare_or_assign_variable(
     l_value: &Lvalue,
     value: Value,
-    environment: &mut Rc<RefCell<Environment>>,
+    environment: &Rc<RefCell<Environment>>,
     span: Span,
 ) -> EvaluationResult {
     match l_value {
@@ -887,7 +887,7 @@ fn call_function(
 
 fn execute_body(
     body: &ForBody,
-    environment: &mut Rc<RefCell<Environment>>,
+    environment: &Rc<RefCell<Environment>>,
     result: &mut Vec<Value>,
 ) -> EvaluationResult {
     match body {
@@ -920,7 +920,7 @@ fn execute_for_iterations(
     iterations: &[ForIteration],
     body: &ForBody,
     out_values: &mut Vec<Value>,
-    environment: &mut Rc<RefCell<Environment>>,
+    environment: &Rc<RefCell<Environment>>,
     span: Span,
 ) -> Result<Value, FunctionCarrier> {
     let Some((cur, tail)) = iterations.split_first() else {
@@ -940,17 +940,17 @@ fn execute_for_iterations(
                 // ```
                 // With the current implementation with a new scope declared for every iteration this produces 10 functions
                 // each with their own scope and their own version of `i`, this might potentially be a bit slower though
-                let mut scope = Environment::new_scope(environment);
-                declare_or_assign_variable(l_value, r_value, &mut scope, span)?;
+                let scope = Rc::new(RefCell::new(Environment::new_scope(environment)));
+                declare_or_assign_variable(l_value, r_value, &scope, span)?;
 
                 if tail.is_empty() {
-                    match execute_body(body, &mut scope, out_values) {
+                    match execute_body(body, &scope, out_values) {
                         Err(FunctionCarrier::Continue) => {}
                         Err(error) => return Err(error),
                         Ok(_value) => {}
                     }
                 } else {
-                    execute_for_iterations(tail, body, out_values, &mut scope, span)?;
+                    execute_for_iterations(tail, body, out_values, &scope, span)?;
                 }
             }
         }

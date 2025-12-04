@@ -64,7 +64,7 @@ impl EvaluatedIndex {
 
 pub(crate) fn evaluate_as_index(
     expression_location: &ExpressionLocation,
-    environment: &mut Rc<RefCell<Environment>>,
+    environment: &Rc<RefCell<Environment>>,
 ) -> Result<EvaluatedIndex, FunctionCarrier> {
     let (range_start, range_end, inclusive) = match expression_location.expression {
         Expression::RangeExclusive {

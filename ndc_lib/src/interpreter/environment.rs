@@ -202,13 +202,13 @@ impl Environment {
         }
     }
 
-    pub fn new_scope(parent: &Rc<RefCell<Environment>>) -> Rc<RefCell<Environment>> {
+    pub fn new_scope(parent: &Rc<RefCell<Self>>) -> Self {
         let root_ref = Rc::clone(&parent.borrow().root);
-        Rc::new(RefCell::new(Self {
-            parent: Some(Rc::clone(parent)),
+        Self {
+            parent: Some(parent.clone()),
             root: root_ref,
             values: Default::default(),
-        }))
+        }
     }
 }
 
