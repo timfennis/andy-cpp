@@ -1,6 +1,6 @@
 use crate::ast::{ExpressionLocation, ResolvedVar};
 use crate::hash_map::{DefaultHasher, HashMap};
-use crate::interpreter::environment::{Environment, EnvironmentRef};
+use crate::interpreter::environment::Environment;
 use crate::interpreter::evaluate::{
     ErrorConverter, EvaluationError, EvaluationResult, evaluate_expression,
 };
@@ -19,7 +19,7 @@ use std::rc::Rc;
 /// easy to have an executable function as a method signature in the standard library
 pub struct Callable<'a> {
     pub function: Rc<RefCell<OverloadedFunction>>,
-    pub environment: &'a EnvironmentRef,
+    pub environment: &'a Rc<RefCell<Environment>>,
 }
 
 impl Callable<'_> {
@@ -79,7 +79,7 @@ pub enum FunctionBody {
     Closure {
         parameter_names: Vec<String>,
         body: ExpressionLocation,
-        environment: EnvironmentRef,
+        environment: Rc<RefCell<Environment>>,
     },
     NumericUnaryOp {
         body: fn(number: Number) -> Number,
@@ -89,7 +89,7 @@ pub enum FunctionBody {
     },
     GenericFunction {
         type_signature: TypeSignature,
-        function: fn(&mut [Value], &EnvironmentRef) -> EvaluationResult,
+        function: fn(&mut [Value], &Rc<RefCell<Environment>>) -> EvaluationResult,
     },
     Memoized {
         cache: RefCell<HashMap<u64, Value>>,
@@ -111,7 +111,7 @@ impl FunctionBody {
     }
     pub fn generic(
         type_signature: TypeSignature,
-        function: fn(&mut [Value], &EnvironmentRef) -> EvaluationResult,
+        function: fn(&mut [Value], &Rc<RefCell<Environment>>) -> EvaluationResult,
     ) -> Self {
         Self::GenericFunction {
             type_signature,
@@ -140,7 +140,7 @@ impl FunctionBody {
         }
     }
 
-    pub fn call(&self, args: &mut [Value], env: &EnvironmentRef) -> EvaluationResult {
+    pub fn call(&self, args: &mut [Value], env: &Rc<RefCell<Environment>>) -> EvaluationResult {
         match self {
             Self::Closure {
                 body, environment, ..
@@ -148,12 +148,11 @@ impl FunctionBody {
                 let mut local_scope = Environment::new_scope(environment);
 
                 {
-                    let mut env = local_scope.borrow_mut();
                     for (position, value) in args.iter().enumerate() {
                         // NOTE: stores a copy of the value in the environment (which is fine?)
                         // NOTE: we just assume here that the arguments are slotted in order starting at 0
                         // because why not? Is this a call convention?
-                        env.set(
+                        local_scope.set(
                             ResolvedVar::Captured {
                                 depth: 0,
                                 slot: position,
@@ -163,7 +162,8 @@ impl FunctionBody {
                     }
                 }
 
-                match evaluate_expression(body, &mut local_scope) {
+                let local_scope = Rc::new(RefCell::new(local_scope));
+                match evaluate_expression(body, &local_scope) {
                     Err(FunctionCarrier::Return(v)) => Ok(v),
                     r => r,
                 }
@@ -327,7 +327,7 @@ impl OverloadedFunction {
         }
     }
 
-    pub fn call(&self, args: &mut [Value], env: &EnvironmentRef) -> EvaluationResult {
+    pub fn call(&self, args: &mut [Value], env: &Rc<RefCell<Environment>>) -> EvaluationResult {
         let types: Vec<ValueType> = args.iter().map(ValueType::from).collect();
 
         let mut best_function_match = None;
@@ -356,7 +356,11 @@ impl OverloadedFunction {
             })
     }
 
-    fn call_vectorized(&self, args: &mut [Value], env: &EnvironmentRef) -> EvaluationResult {
+    fn call_vectorized(
+        &self,
+        args: &mut [Value],
+        env: &Rc<RefCell<Environment>>,
+    ) -> EvaluationResult {
         let [left, right] = args else {
             // Vectorized application only works in cases where there are two tuple arguments
             return Err(FunctionCarrier::FunctionNotFound);

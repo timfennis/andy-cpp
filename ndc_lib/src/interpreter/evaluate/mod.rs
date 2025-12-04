@@ -1,6 +1,6 @@
 use crate::ast::{Expression, ExpressionLocation, ForBody, ForIteration, LogicalOperator, Lvalue};
 use crate::hash_map::HashMap;
-use crate::interpreter::environment::{Environment, EnvironmentRef};
+use crate::interpreter::environment::Environment;
 use crate::interpreter::function::{Function, FunctionBody, FunctionCarrier, OverloadedFunction};
 use crate::interpreter::int::Int;
 use crate::interpreter::iterator::mut_value_to_iterator;
@@ -22,7 +22,7 @@ mod index;
 #[allow(clippy::too_many_lines)]
 pub(crate) fn evaluate_expression(
     expression_location: &ExpressionLocation,
-    environment: &mut EnvironmentRef,
+    environment: &Rc<RefCell<Environment>>,
 ) -> EvaluationResult {
     let span = expression_location.span;
     let literal: Value = match &expression_location.expression {
@@ -40,8 +40,6 @@ pub(crate) fn evaluate_expression(
             environment
                 .borrow()
                 .get(resolved.expect("identifier was not resolved before execution"))
-                .borrow()
-                .clone()
         }
         Expression::VariableDeclaration { l_value, value } => {
             let value = evaluate_expression(value, environment)?;
@@ -106,15 +104,14 @@ pub(crate) fn evaluate_expression(
 
                     while let Some((resolved_op, modified_in_place)) = operations_to_try.next() {
                         let operation = environment.borrow().get(resolved_op);
-                        let operation_val = &*operation.borrow();
 
-                        let Value::Function(func) = operation_val else {
+                        let Value::Function(func) = operation else {
                             unreachable!(
                                 "the resolver pass should have guaranteed that the operation points to a function"
                             );
                         };
 
-                        let result = match call_function(func, &mut arguments, environment, span) {
+                        let result = match call_function(&func, &mut arguments, environment, span) {
                             Err(FunctionCarrier::FunctionNotFound)
                                 if operations_to_try.peek().is_none() =>
                             {
@@ -162,8 +159,7 @@ pub(crate) fn evaluate_expression(
                     while let Some((resolved_operation, modified_in_place)) =
                         operations_to_try.next()
                     {
-                        let operation = environment.borrow().get(resolved_operation);
-                        let operation_val = &*operation.borrow();
+                        let operation_val = environment.borrow().get(resolved_operation);
 
                         let Value::Function(func) = operation_val else {
                             unreachable!(
@@ -172,7 +168,7 @@ pub(crate) fn evaluate_expression(
                         };
 
                         let result = match call_function(
-                            func,
+                            &func,
                             &mut [value_at_index.clone(), right_value.clone()],
                             environment,
                             span,
@@ -218,11 +214,11 @@ pub(crate) fn evaluate_expression(
             }
         }
         Expression::Block { statements } => {
-            let mut local_scope = Environment::new_scope(environment);
+            let local_scope = Rc::new(RefCell::new(Environment::new_scope(environment)));
 
             let mut value = Value::unit();
             for stm in statements {
-                value = evaluate_expression(stm, &mut local_scope)?;
+                value = evaluate_expression(stm, &local_scope)?;
             }
 
             drop(local_scope);
@@ -655,7 +651,7 @@ pub(crate) fn evaluate_expression(
 
 fn produce_default_value(
     default: &Value,
-    environment: &EnvironmentRef,
+    environment: &Rc<RefCell<Environment>>,
     span: Span,
 ) -> EvaluationResult {
     match default {
@@ -678,7 +674,7 @@ fn produce_default_value(
 fn declare_or_assign_variable(
     l_value: &Lvalue,
     value: Value,
-    environment: &mut EnvironmentRef,
+    environment: &Rc<RefCell<Environment>>,
     span: Span,
 ) -> EvaluationResult {
     match l_value {
@@ -870,7 +866,7 @@ where
 fn call_function(
     function: &Rc<RefCell<OverloadedFunction>>,
     evaluated_args: &mut [Value],
-    environment: &EnvironmentRef,
+    environment: &Rc<RefCell<Environment>>,
     span: Span,
 ) -> EvaluationResult {
     let result = function.borrow().call(evaluated_args, environment);
@@ -891,7 +887,7 @@ fn call_function(
 
 fn execute_body(
     body: &ForBody,
-    environment: &mut EnvironmentRef,
+    environment: &Rc<RefCell<Environment>>,
     result: &mut Vec<Value>,
 ) -> EvaluationResult {
     match body {
@@ -924,7 +920,7 @@ fn execute_for_iterations(
     iterations: &[ForIteration],
     body: &ForBody,
     out_values: &mut Vec<Value>,
-    environment: &mut EnvironmentRef,
+    environment: &Rc<RefCell<Environment>>,
     span: Span,
 ) -> Result<Value, FunctionCarrier> {
     let Some((cur, tail)) = iterations.split_first() else {
@@ -944,17 +940,17 @@ fn execute_for_iterations(
                 // ```
                 // With the current implementation with a new scope declared for every iteration this produces 10 functions
                 // each with their own scope and their own version of `i`, this might potentially be a bit slower though
-                let mut scope = Environment::new_scope(environment);
-                declare_or_assign_variable(l_value, r_value, &mut scope, span)?;
+                let scope = Rc::new(RefCell::new(Environment::new_scope(environment)));
+                declare_or_assign_variable(l_value, r_value, &scope, span)?;
 
                 if tail.is_empty() {
-                    match execute_body(body, &mut scope, out_values) {
+                    match execute_body(body, &scope, out_values) {
                         Err(FunctionCarrier::Continue) => {}
                         Err(error) => return Err(error),
                         Ok(_value) => {}
                     }
                 } else {
-                    execute_for_iterations(tail, body, out_values, &mut scope, span)?;
+                    execute_for_iterations(tail, body, out_values, &scope, span)?;
                 }
             }
         }

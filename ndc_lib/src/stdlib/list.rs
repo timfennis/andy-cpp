@@ -85,7 +85,7 @@ mod inner {
     #[function(name = "++")]
     pub fn list_concat(left: &mut ListRepr, right: &mut ListRepr) -> Value {
         if Rc::strong_count(left) == 1 {
-            left.borrow_mut().extend_from_slice(&*right.borrow());
+            left.borrow_mut().extend_from_slice(&right.borrow());
 
             Value::Sequence(Sequence::List(left.clone()))
         } else {
