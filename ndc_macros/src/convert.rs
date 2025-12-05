@@ -127,40 +127,41 @@ impl TypeConverter for InternalList {
     }
 }
 
-/// Matches `Rc<RefCell<Vec<Value>>>`
-struct InternalTuple;
-impl TypeConverter for InternalTuple {
-    fn matches(&self, ty: &syn::Type) -> bool {
-        path_ends_with(ty, "TupleRepr")
-    }
-
-    fn convert(
-        &self,
-        temp_var: syn::Ident,
-        original_name: &str,
-        argument_var_name: syn::Ident,
-    ) -> Vec<Argument> {
-        vec![Argument {
-            param_type: quote! { crate::interpreter::function::StaticType::Tuple },
-            param_name: quote! { #original_name },
-            argument: quote! { #argument_var_name },
-            initialize_code: quote! {
-                let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::Tuple(#temp_var)) = #argument_var_name else {
-                    panic!("Value #position needed to be Sequence::Tuple but wasn't");
-                };
-
-                // TODO: is std::mem::take appropriate here?
-                let #argument_var_name = std::mem::take(#temp_var);
-            },
-        }]
-    }
-}
+// Losing tuple concatenation is a price we might have to pay
+// /// Matches `Rc<RefCell<Vec<Value>>>`
+// struct InternalTuple;
+// impl TypeConverter for InternalTuple {
+//     fn matches(&self, ty: &syn::Type) -> bool {
+//         path_ends_with(ty, "TupleRepr")
+//     }
+//
+//     fn convert(
+//         &self,
+//         temp_var: syn::Ident,
+//         original_name: &str,
+//         argument_var_name: syn::Ident,
+//     ) -> Vec<Argument> {
+//         vec![Argument {
+//             param_type: quote! { crate::interpreter::function::StaticType::Tuple },
+//             param_name: quote! { #original_name },
+//             argument: quote! { #argument_var_name },
+//             initialize_code: quote! {
+//                 let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::Tuple(#temp_var)) = #argument_var_name else {
+//                     panic!("Value #position needed to be Sequence::Tuple but wasn't");
+//                 };
+//
+//                 // TODO: is std::mem::take appropriate here?
+//                 let #argument_var_name = std::mem::take(#temp_var);
+//             },
+//         }]
+//     }
+// }
 
 pub fn build() -> Vec<Box<dyn TypeConverter>> {
     vec![
         Box::new(InternalList),
         Box::new(MutRefString),
-        Box::new(InternalTuple),
+        // Box::new(InternalTuple),
         Box::new(InternalMap),
         Box::new(InternalString),
     ]

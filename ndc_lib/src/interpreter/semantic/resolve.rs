@@ -389,19 +389,14 @@ fn resolve_type(
     match expression {
         Expression::BoolLiteral(_) => StaticType::Bool,
         Expression::StringLiteral(_) => StaticType::String,
-        Expression::Int64Literal(_) => StaticType::Int,
+        Expression::Int64Literal(_) | Expression::BigIntLiteral(_) => StaticType::Int,
         Expression::Float64Literal(_) => StaticType::Float,
-        Expression::BigIntLiteral(_) => StaticType::Int,
         Expression::ComplexLiteral(_) => StaticType::Complex,
-        Expression::Identifier { resolved, name } => {
-            println!("resolving ident {name}");
-            lex_data.get_type(
-                resolved.expect(
-                    "previously mentioned identifier was not resolved during type resolution",
-                ),
-            )
-        }
-        Expression::Statement(_) => StaticType::Tuple, // specifically a unit tuple
+        Expression::Identifier { resolved, name } => lex_data.get_type(
+            resolved
+                .expect("previously mentioned identifier was not resolved during type resolution"),
+        ),
+        Expression::Statement(_) => StaticType::unit(),
         Expression::Logical { .. } => StaticType::Bool,
         Expression::Grouping(expr) => resolve_type(expr, lex_data),
         Expression::VariableDeclaration { .. } => {
@@ -409,44 +404,44 @@ fn resolve_type(
                 false,
                 "trying to get type of variable declaration, does this make sense?"
             );
-            StaticType::Tuple // specifically unit tuple
+            StaticType::unit() // specifically unit tuple
         }
         Expression::Assignment { .. } => {
             // debug_assert!(
             //     false,
             //     "trying to get type of assignment, does this make sense?"
             // );
-            StaticType::Tuple // specifically unit tuple
+            StaticType::unit() // specifically unit tuple
         }
         Expression::OpAssignment { .. } => {
             debug_assert!(
                 false,
                 "trying to get type of op assignment, does this make sense?"
             );
-            StaticType::Tuple // specifically unit tuple
+            StaticType::unit() // specifically unit tuple
         }
         Expression::FunctionDeclaration { .. } => StaticType::Function,
         Expression::Block { statements } => statements
             .iter()
             .last()
-            .map_or(StaticType::Tuple, |last| resolve_type(last, lex_data)),
+            .map_or(StaticType::unit(), |last| resolve_type(last, lex_data)),
         Expression::If {
             on_true, on_false, ..
         } => {
             let on_false_type = on_false
                 .as_ref()
-                .map_or(StaticType::Tuple, |expr| resolve_type(expr, lex_data));
+                .map_or(StaticType::unit(), |expr| resolve_type(expr, lex_data));
 
             assert_eq!(
-                resolve_type(&*on_true, lex_data),
+                resolve_type(on_true, lex_data),
                 on_false_type,
                 "if branches have different types"
             );
             on_false_type
         }
-        Expression::While { .. } => StaticType::Tuple,
+        Expression::While { .. } => StaticType::unit(),
         Expression::For { body, .. } => match &**body {
-            ForBody::Block(_) => StaticType::Tuple,
+            ForBody::Block(_) => StaticType::unit(),
             ForBody::List(_) => StaticType::List,
             ForBody::Map { .. } => StaticType::Map,
         },
@@ -468,7 +463,7 @@ fn resolve_type(
         Expression::List { .. } => StaticType::List,
         Expression::Map { .. } => StaticType::Map,
         Expression::Return { value: expr } => resolve_type(expr, lex_data),
-        Expression::Break => StaticType::Tuple,
+        Expression::Break => StaticType::unit(),
         Expression::Continue => StaticType::Any, // Maybe we need a Never type?
         Expression::RangeInclusive { .. } => StaticType::Iterator,
         Expression::RangeExclusive { .. } => StaticType::Iterator,
@@ -484,7 +479,7 @@ pub enum LexicalIdentifier {
 impl LexicalIdentifier {
     pub fn name(&self) -> &str {
         match self {
-            LexicalIdentifier::Variable { name } | LexicalIdentifier::Function { name, .. } => name,
+            Self::Variable { name } | Self::Function { name, .. } => name,
         }
     }
 }

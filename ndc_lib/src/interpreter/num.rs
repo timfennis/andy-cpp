@@ -4,9 +4,9 @@ use std::hash::{Hash, Hasher};
 use std::num::TryFromIntError;
 use std::ops::{Add, Div, Mul, Neg, Not, Rem, Sub};
 
-use super::value::ValueType;
 use crate::ast::BinaryOperator;
 use crate::interpreter::evaluate::EvaluationError;
+use crate::interpreter::function::StaticType;
 use crate::interpreter::int::Int;
 use crate::lexer::Span;
 use num::bigint::TryFromBigIntError;
@@ -224,8 +224,8 @@ impl BinaryOperatorError {
 
     pub fn undefined_operation(
         operator: BinaryOperator,
-        left: &ValueType,
-        right: &ValueType,
+        left: &StaticType,
+        right: &StaticType,
     ) -> Self {
         Self(format!(
             "operator {operator} is not defined for {left} and {right}"
@@ -377,13 +377,22 @@ impl Number {
         Self::Rational(Box::new(rat))
     }
 
-    // TODO: change this to &'static str
+    #[deprecated = "remove this and just use static_type instead"]
     fn type_name(&self) -> &'static str {
         match self {
             Self::Int(_) => "int",
             Self::Float(_) => "float",
             Self::Rational(_) => "rational",
             Self::Complex(_) => "complex",
+        }
+    }
+
+    pub fn static_type(&self) -> StaticType {
+        match self {
+            Self::Int(_) => StaticType::Int,
+            Self::Float(_) => StaticType::Float,
+            Self::Rational(_) => StaticType::Rational,
+            Self::Complex(_) => StaticType::Complex,
         }
     }
 
@@ -397,8 +406,8 @@ impl Number {
             (Self::Float(p1), Self::Float(p2)) => Ok(Self::Float(p1.rem_euclid(p2))),
             (left, right) => Err(BinaryOperatorError::undefined_operation(
                 BinaryOperator::EuclideanModulo,
-                &ValueType::from(left),
-                &ValueType::from(right),
+                &left.static_type(),
+                &right.static_type(),
             )),
         }
     }
@@ -696,6 +705,7 @@ fn rational_to_complex(r: &BigRational) -> Complex<f64> {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[deprecated = "use static type instead?"]
 pub enum NumberType {
     Int,
     Float,
@@ -703,9 +713,14 @@ pub enum NumberType {
     Complex,
 }
 
-impl From<NumberType> for ValueType {
+impl From<NumberType> for StaticType {
     fn from(value: NumberType) -> Self {
-        Self::Number(value)
+        match value {
+            NumberType::Int => Self::Int,
+            NumberType::Float => Self::Float,
+            NumberType::Rational => Self::Rational,
+            NumberType::Complex => Self::Complex,
+        }
     }
 }
 

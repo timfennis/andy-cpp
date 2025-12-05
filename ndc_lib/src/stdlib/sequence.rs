@@ -367,7 +367,7 @@ mod inner {
                 v => {
                     return Err(anyhow!(format!(
                         "invalid return type, predicate returned {}",
-                        v.value_type()
+                        v.static_type()
                     ))
                     .into());
                 }
@@ -385,7 +385,7 @@ mod inner {
                 v => {
                     return Err(anyhow!(format!(
                         "invalid return type, predicate returned {}",
-                        v.value_type()
+                        v.static_type()
                     ))
                     .into());
                 }
@@ -404,7 +404,7 @@ mod inner {
                 v => {
                     return Err(anyhow!(format!(
                         "invalid return type, predicate returned {}",
-                        v.value_type()
+                        v.static_type()
                     ))
                     .into());
                 }

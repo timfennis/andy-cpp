@@ -1,7 +1,7 @@
 #[ndc_macros::export_module]
 mod inner {
     use crate::interpreter::iterator::mut_seq_to_iterator;
-    use crate::interpreter::sequence::{ListRepr, Sequence, TupleRepr};
+    use crate::interpreter::sequence::{ListRepr, Sequence};
     use crate::interpreter::value::Value;
     use itertools::Itertools;
     use std::rc::Rc;
@@ -66,21 +66,22 @@ mod inner {
         list.append(other);
     }
 
-    #[function(name = "++")]
-    pub fn tup_concat(left: TupleRepr, mut right: TupleRepr) -> Value {
-        match Rc::try_unwrap(left) {
-            Ok(mut left) => {
-                left.append(Rc::make_mut(&mut right));
-                Value::tuple(left)
-            }
-            Err(left) => Value::tuple(
-                left.iter()
-                    .chain(right.iter())
-                    .cloned()
-                    .collect::<Vec<Value>>(),
-            ),
-        }
-    }
+    // A price we have to pay for the type system
+    // #[function(name = "++")]
+    // pub fn tup_concat(left: TupleRepr, mut right: TupleRepr) -> Value {
+    //     match Rc::try_unwrap(left) {
+    //         Ok(mut left) => {
+    //             left.append(Rc::make_mut(&mut right));
+    //             Value::tuple(left)
+    //         }
+    //         Err(left) => Value::tuple(
+    //             left.iter()
+    //                 .chain(right.iter())
+    //                 .cloned()
+    //                 .collect::<Vec<Value>>(),
+    //         ),
+    //     }
+    // }
 
     #[function(name = "++")]
     pub fn list_concat(left: &mut ListRepr, right: &mut ListRepr) -> Value {

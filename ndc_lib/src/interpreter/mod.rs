@@ -72,12 +72,12 @@ impl Interpreter {
         }
 
         // dbg!(&expressions);
-        dbg!(&self.lexical_data);
+        // dbg!(&self.lexical_data);
 
         let final_value = self.interpret(expressions.into_iter())?;
 
         if debug {
-            dbg!(&final_value, final_value.value_type());
+            dbg!(&final_value, final_value.static_type());
         }
 
         Ok(format!("{final_value}"))
@@ -89,7 +89,7 @@ impl Interpreter {
     ) -> Result<Value, InterpreterError> {
         let mut value = Value::unit();
         for expr in expressions {
-            match evaluate_expression(&expr, &mut self.environment) {
+            match evaluate_expression(&expr, &self.environment) {
                 Ok(val) => value = val,
                 Err(FunctionCarrier::Return(_)) => {
                     Err(EvaluationError::syntax_error(

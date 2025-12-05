@@ -230,7 +230,7 @@ pub fn get_at_index(
                 .clone())
         }
         _ => Err(EvaluationError::syntax_error(
-            format!("cannot insert into {} at index", lhs.value_type()),
+            format!("cannot insert into {} at index", lhs.static_type()),
             span,
         )
         .into()),
@@ -294,7 +294,7 @@ pub fn set_at_index(
                 }
             } else {
                 return Err(EvaluationError::syntax_error(
-                    format!("cannot insert {} into a string", rhs.value_type()),
+                    format!("cannot insert {} into a string", rhs.static_type()),
                     span,
                 )
                 .into());
@@ -317,7 +317,7 @@ pub fn set_at_index(
         }
         _ => {
             return Err(EvaluationError::syntax_error(
-                format!("cannot insert into {} at index", lhs.value_type()),
+                format!("cannot insert into {} at index", lhs.static_type()),
                 span,
             )
             .into());

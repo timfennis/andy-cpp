@@ -4,9 +4,9 @@ use crate::interpreter::environment::Environment;
 use crate::interpreter::evaluate::{
     ErrorConverter, EvaluationError, EvaluationResult, evaluate_expression,
 };
-use crate::interpreter::num::{BinaryOperatorError, Number, NumberType};
+use crate::interpreter::num::{BinaryOperatorError, Number};
 use crate::interpreter::sequence::Sequence;
-use crate::interpreter::value::{Value, ValueType};
+use crate::interpreter::value::Value;
 use crate::lexer::Span;
 use derive_builder::Builder;
 use itertools::Itertools;
@@ -172,7 +172,7 @@ impl FunctionBody {
                 [Value::Number(num)] => Ok(Value::Number(body(num.clone()))),
                 [v] => Err(FunctionCallError::ArgumentTypeError {
                     expected: StaticType::Number,
-                    actual: v.value_type(),
+                    actual: v.static_type(),
                 }
                 .into()),
                 args => Err(FunctionCallError::ArgumentCountError {
@@ -188,12 +188,12 @@ impl FunctionBody {
                 )),
                 [Value::Number(_), right] => Err(FunctionCallError::ArgumentTypeError {
                     expected: StaticType::Number,
-                    actual: right.value_type(),
+                    actual: right.static_type(),
                 }
                 .into()),
                 [left, _] => Err(FunctionCallError::ArgumentTypeError {
                     expected: StaticType::Number,
-                    actual: left.value_type(),
+                    actual: left.static_type(),
                 }
                 .into()),
                 args => Err(FunctionCallError::ArgumentCountError {
@@ -236,14 +236,20 @@ impl TypeSignature {
     /// Matches a list of `ValueTypes` to a type signature. It can return `None` if there is no match or
     /// `Some(num)` where num is the sum of the distances of the types. The type `Int`, is distance 1
     /// away from `Number`, and `Number` is 1 distance from `Any`, then `Int` is distance 2 from `Any`.
-    fn calc_type_score(&self, types: &[ValueType]) -> Option<u32> {
+    fn calc_type_score(&self, types: &[StaticType]) -> Option<u32> {
         match self {
             Self::Variadic => Some(0),
             Self::Exact(signature) => {
                 if types.len() == signature.len() {
                     let mut acc = 0;
                     for (a, b) in types.iter().zip(signature.iter()) {
-                        let dist = b.type_name.distance(a)?;
+                        let dist = if a == &b.type_name {
+                            0
+                        } else if a.is_subtype_of(&b.type_name) {
+                            1
+                        } else {
+                            return None;
+                        };
                         acc += dist;
                     }
 
@@ -328,7 +334,7 @@ impl OverloadedFunction {
     }
 
     pub fn call(&self, args: &mut [Value], env: &Rc<RefCell<Environment>>) -> EvaluationResult {
-        let types: Vec<ValueType> = args.iter().map(ValueType::from).collect();
+        let types: Vec<StaticType> = args.iter().map(Value::static_type).collect();
 
         let mut best_function_match = None;
         let mut best_distance = u32::MAX;
@@ -449,7 +455,7 @@ pub enum StaticType {
     Sequence,
     List,
     String,
-    Tuple,
+    Tuple(Vec<StaticType>),
     Map,
     Iterator,
     MinHeap,
@@ -458,40 +464,62 @@ pub enum StaticType {
 }
 
 impl StaticType {
-    fn distance(&self, other: &ValueType) -> Option<u32> {
-        #[allow(clippy::match_same_arms)]
+    #[must_use]
+    pub fn unit() -> Self {
+        Self::Tuple(vec![])
+    }
+
+    #[must_use]
+    pub fn supports_vectorization(&self) -> bool {
+        match self {
+            Self::Tuple(values) => values.iter().all(|v| v.is_number()),
+            _ => false,
+        }
+    }
+
+    pub fn is_number(&self) -> bool {
+        matches!(
+            self,
+            Self::Number | Self::Float | Self::Int | Self::Rational | Self::Complex
+        )
+    }
+
+    #[must_use]
+    pub fn supports_vectorization_with(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::Bool, ValueType::Bool) => Some(0),
-            (Self::Option, ValueType::Option) => Some(0),
-            (Self::Int, ValueType::Number(NumberType::Int)) => Some(0),
-            (Self::Float, ValueType::Number(NumberType::Float)) => Some(0),
-            (Self::Rational, ValueType::Number(NumberType::Rational)) => Some(0),
-            (Self::Complex, ValueType::Number(NumberType::Complex)) => Some(0),
-            (Self::String, ValueType::String) => Some(0),
-            (Self::List, ValueType::List) => Some(0),
-            // TODO: once StaticType supports parameters we can calculate the proper distance to Tuple
-            (Self::Tuple, ValueType::Tuple(_)) => Some(0),
-            (Self::Map, ValueType::Map) => Some(0),
-            (Self::Iterator, ValueType::Iterator) => Some(0),
-            (Self::Function, ValueType::Function) => Some(0),
-            (Self::Deque, ValueType::Deque) => Some(0),
-            (Self::MinHeap, ValueType::MinHeap) => Some(0),
-            (Self::MaxHeap, ValueType::MaxHeap) => Some(0),
-            (Self::Any, _) => Some(2),
-            (Self::Number, ValueType::Number(_)) => Some(1),
+            (Self::Tuple(l), Self::Tuple(r))
+                if {
+                    l.len() == r.len()
+                        && self.supports_vectorization()
+                        && other.supports_vectorization()
+                } =>
+            {
+                true
+            }
+            (tup @ Self::Tuple(_), maybe_num) | (maybe_num, tup @ Self::Tuple(_)) => {
+                tup.supports_vectorization() && maybe_num.is_number()
+            }
+            _ => false,
+        }
+    }
+
+    #[allow(clippy::match_like_matches_macro)]
+    pub fn is_subtype_of(&self, other: &Self) -> bool {
+        match (self, other) {
+            (_, Self::Any) => true,
+            (Self::Int | Self::Rational | Self::Complex | Self::Float, Self::Number) => true,
             (
+                Self::String
+                | Self::List
+                | Self::Deque
+                | Self::MaxHeap
+                | Self::MinHeap
+                | Self::Tuple(_)
+                | Self::Iterator
+                | Self::Map,
                 Self::Sequence,
-                ValueType::List
-                | ValueType::String
-                | ValueType::Map
-                // Sequence is always 1 distance to tuple
-                | ValueType::Tuple(_)
-                | ValueType::Iterator
-                | ValueType::MinHeap
-                | ValueType::MaxHeap
-                | ValueType::Deque,
-            ) => Some(1),
-            _ => None,
+            ) => true,
+            _ => false,
         }
     }
 
@@ -509,35 +537,12 @@ impl StaticType {
             Self::Sequence => "Sequence",
             Self::List => "List",
             Self::String => "String",
-            Self::Tuple => "Tuple",
+            Self::Tuple(_) => "Tuple<...>", // TODO: what do we need alooc
             Self::Map => "Map",
             Self::Iterator => "Iterator",
             Self::MinHeap => "MinHeap",
             Self::MaxHeap => "MaxHeap",
             Self::Deque => "Deque",
-        }
-    }
-}
-
-/// Converts the concrete type of a value to the specific `StaticType`
-impl From<&Value> for StaticType {
-    fn from(value: &Value) -> Self {
-        match value {
-            Value::Option(_) => Self::Option,
-            Value::Number(Number::Rational(_)) => Self::Rational,
-            Value::Number(Number::Complex(_)) => Self::Complex,
-            Value::Number(Number::Int(_)) => Self::Int,
-            Value::Number(Number::Float(_)) => Self::Float,
-            Value::Bool(_) => Self::Bool,
-            Value::Sequence(Sequence::String(_)) => Self::String,
-            Value::Sequence(Sequence::List(_)) => Self::List,
-            Value::Sequence(Sequence::Tuple(_)) => Self::Tuple,
-            Value::Function(_) => Self::Function,
-            Value::Sequence(Sequence::Map(_, _)) => Self::Map,
-            Value::Sequence(Sequence::Iterator(_)) => Self::Iterator,
-            Value::Sequence(Sequence::MaxHeap(_)) => Self::MaxHeap,
-            Value::Sequence(Sequence::MinHeap(_)) => Self::MinHeap,
-            Value::Sequence(Sequence::Deque(_)) => Self::Deque,
         }
     }
 }
@@ -553,7 +558,7 @@ pub enum FunctionCallError {
     #[error("invalid argument, expected {expected} got {actual}")]
     ArgumentTypeError {
         expected: StaticType,
-        actual: ValueType,
+        actual: StaticType,
     },
 
     #[error("invalid argument count, expected {expected} arguments got {actual}")]

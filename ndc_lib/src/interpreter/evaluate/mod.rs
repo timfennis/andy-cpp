@@ -1,12 +1,14 @@
 use crate::ast::{Expression, ExpressionLocation, ForBody, ForIteration, LogicalOperator, Lvalue};
 use crate::hash_map::HashMap;
 use crate::interpreter::environment::Environment;
-use crate::interpreter::function::{Function, FunctionBody, FunctionCarrier, OverloadedFunction};
+use crate::interpreter::function::{
+    Function, FunctionBody, FunctionCarrier, OverloadedFunction, StaticType,
+};
 use crate::interpreter::int::Int;
 use crate::interpreter::iterator::mut_value_to_iterator;
 use crate::interpreter::num::Number;
 use crate::interpreter::sequence::Sequence;
-use crate::interpreter::value::{Value, ValueType};
+use crate::interpreter::value::Value;
 use crate::lexer::Span;
 use index::{Offset, evaluate_as_index, get_at_index, set_at_index};
 use itertools::Itertools;
@@ -116,7 +118,7 @@ pub(crate) fn evaluate_expression(
                                 if operations_to_try.peek().is_none() =>
                             {
                                 let argument_string =
-                                    arguments.iter().map(Value::value_type).join(", ");
+                                    arguments.iter().map(Value::static_type).join(", ");
 
                                 return Err(FunctionCarrier::EvaluationError(
                                     EvaluationError::new(
@@ -178,7 +180,7 @@ pub(crate) fn evaluate_expression(
                             {
                                 let argument_string = [value_at_index.clone(), right_value.clone()]
                                     .iter()
-                                    .map(Value::value_type)
+                                    .map(Value::static_type)
                                     .join(", ");
 
                                 return Err(FunctionCarrier::EvaluationError(
@@ -239,8 +241,8 @@ pub(crate) fn evaluate_expression(
                     return Err(EvaluationError::new(
                         format!(
                             "mismatched types: expected {}, found {}",
-                            ValueType::Bool,
-                            ValueType::from(&value)
+                            StaticType::Bool,
+                            value.static_type()
                         ),
                         span,
                     )
@@ -269,7 +271,7 @@ pub(crate) fn evaluate_expression(
                     return Err(EvaluationError::new(
                         format!(
                             "Cannot apply logical operator to non bool value {}",
-                            ValueType::from(&value)
+                            value.static_type()
                         ),
                         span,
                     )
@@ -322,7 +324,7 @@ pub(crate) fn evaluate_expression(
                 match call_function(&function, &mut evaluated_args, environment, span) {
                     Err(FunctionCarrier::FunctionNotFound) => {
                         let argument_string =
-                            evaluated_args.iter().map(Value::value_type).join(", ");
+                            evaluated_args.iter().map(Value::static_type).join(", ");
 
                         return Err(FunctionCarrier::EvaluationError(EvaluationError::new(
                             format!(
@@ -587,7 +589,7 @@ pub(crate) fn evaluate_expression(
                 }
                 value => {
                     return Err(EvaluationError::new(
-                        format!("cannot index into {}", value.value_type()),
+                        format!("cannot index into {}", value.static_type()),
                         lhs_expr.span,
                     )
                     .into());
@@ -966,8 +968,8 @@ fn execute_for_iterations(
                 return Err(EvaluationError::type_error(
                     format!(
                         "mismatched types: expected {}, found {}",
-                        ValueType::Bool,
-                        ValueType::from(&value)
+                        StaticType::Bool,
+                        value.static_type(),
                     ),
                     span,
                 )

@@ -21,7 +21,7 @@ where
             Value::Number(n) => acc.add(n),
             value => Err(BinaryOperatorError::new(format!(
                 "cannot sum {} and number",
-                value.value_type()
+                value.static_type()
             ))),
         })
     }
@@ -41,7 +41,7 @@ where
             Value::Number(n) => acc.mul(n),
             value => Err(BinaryOperatorError::new(format!(
                 "cannot multiply {} and number",
-                value.value_type()
+                value.static_type()
             ))),
         })
     }
@@ -172,7 +172,7 @@ mod inner {
             }
             value => Err(anyhow::anyhow!(
                 "cannot convert {} to float",
-                value.value_type()
+                value.static_type()
             )),
         }
     }
@@ -201,7 +201,7 @@ mod inner {
             }
             value => Err(anyhow::anyhow!(
                 "cannot convert {} to int",
-                value.value_type()
+                value.static_type()
             )),
         }
     }
@@ -263,7 +263,7 @@ pub mod f64 {
                                 [left, right] => match left.partial_cmp(&right) {
                                     Some($expected) => Ok(Value::Bool(true)),
                                     Some(_) => Ok(Value::Bool(false)),
-                                    None => Err(anyhow::anyhow!("cannot compare {} and {}",left.value_type(),right.value_type()).into()),
+                                    None => Err(anyhow::anyhow!("cannot compare {} and {}",left.static_type(),right.static_type()).into()),
                                 },
                                 _ => unreachable!("the type checker should never invoke this function if the argument count does not match")
                             },
@@ -326,7 +326,7 @@ pub mod f64 {
                             Some(Ordering::Equal) => Ok(Value::from(0)),
                             Some(Ordering::Less) => Ok(Value::from(-1)),
                             Some(Ordering::Greater) => Ok(Value::from(1)),
-                            None => Err(anyhow::anyhow!("cannot compare {} and {}",left.value_type(),right.value_type()).into()),
+                            None => Err(anyhow::anyhow!("cannot compare {} and {}",left.static_type(),right.static_type()).into()),
                         },
                         _ => unreachable!("the type checker should never invoke this function if the argument count does not match")
                     },
@@ -348,7 +348,7 @@ pub mod f64 {
                             Some(Ordering::Equal) => Ok(Value::from(0)),
                             Some(Ordering::Less) => Ok(Value::from(1)),
                             Some(Ordering::Greater) => Ok(Value::from(-1)),
-                            None => Err(anyhow::anyhow!("cannot compare {} and {}",left.value_type(),right.value_type()).into()),
+                            None => Err(anyhow::anyhow!("cannot compare {} and {}",left.static_type(),right.static_type()).into()),
                         },
                         _ => unreachable!("the type checker should never invoke this function if the argument count does not match")
                     },

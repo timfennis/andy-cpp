@@ -244,9 +244,6 @@ fn into_param_type(ty: &syn::Type) -> TokenStream {
         ty if path_ends_with(ty, "ListRepr") => {
             quote! { crate::interpreter::function::StaticType::List }
         }
-        ty if path_ends_with(ty, "TupleRepr") => {
-            quote! { crate::interpreter::function::StaticType::Tuple }
-        }
         ty if path_ends_with(ty, "MapRepr") => {
             quote! { crate::interpreter::function::StaticType::Map }
         }
@@ -572,17 +569,17 @@ fn create_temp_variable(
                         let #argument_var_name = &*#rc_temp_var.borrow();
                     },
                 },
-                Argument {
-                    param_type: quote! { crate::interpreter::function::StaticType::Tuple },
-                    param_name: quote! { #original_name },
-                    argument: quote! { #argument_var_name },
-                    initialize_code: quote! {
-                        let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::Tuple(#rc_temp_var)) = #argument_var_name else {
-                            panic!("Value #position needed to be a Sequence::List but wasn't");
-                        };
-                        let #argument_var_name = &#rc_temp_var;
-                    },
-                },
+                // Argument {
+                //     param_type: quote! { crate::interpreter::function::StaticType::Tuple },
+                //     param_name: quote! { #original_name },
+                //     argument: quote! { #argument_var_name },
+                //     initialize_code: quote! {
+                //         let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::Tuple(#rc_temp_var)) = #argument_var_name else {
+                //             panic!("Value #position needed to be a Sequence::List but wasn't");
+                //         };
+                //         let #argument_var_name = &#rc_temp_var;
+                //     },
+                // },
             ];
         }
         // The pattern is &BigRational
