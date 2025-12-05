@@ -1,1 +1,1 @@
-pub mod resolve;
+pub mod analyser;

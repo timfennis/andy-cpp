@@ -5,7 +5,7 @@ use crate::ast::ExpressionLocation;
 use crate::interpreter::environment::{Environment, InterpreterOutput};
 use crate::interpreter::evaluate::{EvaluationError, evaluate_expression};
 use crate::interpreter::function::FunctionCarrier;
-use crate::interpreter::semantic::resolve::{LexicalData, resolve_pass};
+use crate::interpreter::semantic::analyser::{Analyser, ScopeTree};
 use crate::interpreter::value::Value;
 use crate::lexer::{Lexer, TokenLocation};
 use miette::Diagnostic;
@@ -23,7 +23,7 @@ pub mod value;
 
 pub struct Interpreter {
     environment: Rc<RefCell<Environment>>,
-    lexical_data: LexicalData,
+    analyser: Analyser,
 }
 
 #[allow(clippy::dbg_macro, clippy::print_stdout, clippy::print_stderr)]
@@ -38,7 +38,7 @@ impl Interpreter {
 
         Self {
             environment: Rc::new(RefCell::new(environment)),
-            lexical_data: LexicalData::from_global_scope(hash_map),
+            analyser: Analyser::from_scope_tree(ScopeTree::from_global_scope(hash_map)),
         }
     }
 
@@ -68,7 +68,7 @@ impl Interpreter {
         }
 
         for e in &mut expressions {
-            resolve_pass(e, &mut self.lexical_data)?
+            self.analyser.analyse(e)?
         }
 
         // dbg!(&expressions);
@@ -139,7 +139,7 @@ pub enum InterpreterError {
     #[diagnostic(transparent)]
     Resolver {
         #[from]
-        cause: semantic::resolve::ResolveError,
+        cause: semantic::analyser::ResolveError,
     },
     #[error("Error while executing code")]
     #[diagnostic(transparent)]
