@@ -68,7 +68,7 @@ impl Interpreter {
         }
 
         for e in &mut expressions {
-            self.analyser.analyse(e)?
+            self.analyser.analyse(e)?;
         }
 
         // dbg!(&expressions);
@@ -139,7 +139,7 @@ pub enum InterpreterError {
     #[diagnostic(transparent)]
     Resolver {
         #[from]
-        cause: semantic::analyser::ResolveError,
+        cause: semantic::analyser::AnalysisError,
     },
     #[error("Error while executing code")]
     #[diagnostic(transparent)]

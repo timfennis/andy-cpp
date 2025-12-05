@@ -17,48 +17,51 @@ impl Analyser {
     pub fn analyse(
         &mut self,
         ExpressionLocation { expression, span }: &mut ExpressionLocation,
-    ) -> Result<(), ResolveError> {
+    ) -> Result<StaticType, AnalysisError> {
         match expression {
-            Expression::BoolLiteral(_)
-            | Expression::StringLiteral(_)
-            | Expression::Int64Literal(_)
-            | Expression::Float64Literal(_)
-            | Expression::BigIntLiteral(_)
-            | Expression::ComplexLiteral(_)
-            | Expression::Continue
-            | Expression::Break => { /* nothing to do here */ }
+            Expression::BoolLiteral(_) => Ok(StaticType::Bool),
+            Expression::StringLiteral(_) => Ok(StaticType::String),
+            Expression::Int64Literal(_) => Ok(StaticType::Int),
+            Expression::Float64Literal(_) => Ok(StaticType::Float),
+            Expression::BigIntLiteral(_) => Ok(StaticType::Int),
+            Expression::ComplexLiteral(_) => Ok(StaticType::Complex),
+            Expression::Continue => Ok(StaticType::unit()), // TODO: change to never type?
+            Expression::Break => Ok(StaticType::unit()),
             Expression::Identifier {
                 name: ident,
                 resolved,
             } => {
                 if ident == "None" {
                     // THIS IS VERY UNHINGED
-                    return Ok(());
+                    return Ok(StaticType::Option);
                 }
                 let binding = self.scope_tree.get_binding_any(ident).ok_or_else(|| {
-                    ResolveError::identifier_not_previously_declared(ident, *span)
+                    AnalysisError::identifier_not_previously_declared(ident, *span)
                 })?;
 
-                *resolved = Some(binding)
+                *resolved = Some(binding);
+
+                Ok(self.scope_tree.get_type(binding)) // are we guaranteed to even have a type
             }
             Expression::Statement(inner) => {
                 self.analyse(inner)?;
+                Ok(StaticType::unit())
             }
             Expression::Logical { left, right, .. } => {
-                self.analyse(left)?;
-                self.analyse(right)?;
+                self.analyse(left)?; // TODO: throw error if type does not match bool?
+                self.analyse(right)?; // TODO: throw error if type does not match bool?
+                Ok(StaticType::Bool)
             }
-            Expression::Grouping(expr) => {
-                self.analyse(expr)?;
-            }
+            Expression::Grouping(expr) => self.analyse(expr),
             Expression::VariableDeclaration { l_value, value } => {
-                self.analyse(value)?;
-                let typ = self.resolve_type(value);
+                let typ = self.analyse(value)?;
                 self.resolve_lvalue_declarative(l_value, typ)?;
+                Ok(StaticType::unit()) // TODO: never type here?
             }
             Expression::Assignment { l_value, r_value } => {
                 self.resolve_lvalue(l_value, *span)?;
                 self.analyse(r_value)?;
+                Ok(StaticType::unit())
             }
             Expression::OpAssignment {
                 l_value,
@@ -90,11 +93,13 @@ impl Analyser {
 
                 if let Some(binding) = self.scope_tree.get_binding(&operation_ident) {
                     *resolved_operation = Some(binding);
+
+                    Ok(StaticType::unit())
                 } else {
                     // For now, we require that the normal operation is present and the special assignment operation is optional
-                    return Err(ResolveError::identifier_not_previously_declared(
+                    Err(AnalysisError::identifier_not_previously_declared(
                         operation, *span,
-                    ));
+                    ))
                 }
             }
             Expression::FunctionDeclaration {
@@ -122,13 +127,18 @@ impl Analyser {
 
                 self.analyse(body)?;
                 self.scope_tree.destroy_scope();
+
+                Ok(StaticType::Function)
             }
             Expression::Block { statements } => {
                 self.scope_tree.new_scope();
+                let mut last = None;
                 for s in statements {
-                    self.analyse(s)?;
+                    last = Some(self.analyse(s)?);
                 }
                 self.scope_tree.destroy_scope();
+
+                Ok(last.unwrap_or_else(StaticType::unit))
             }
             Expression::If {
                 condition,
@@ -136,9 +146,27 @@ impl Analyser {
                 on_false,
             } => {
                 self.analyse(condition)?;
-                self.analyse(on_true)?;
-                if let Some(on_false) = on_false {
-                    self.analyse(on_false)?;
+                let true_type = self.analyse(on_true)?;
+                let false_typ = if let Some(on_false) = on_false {
+                    Some(self.analyse(on_false)?)
+                } else {
+                    None
+                };
+
+                if false_typ.is_none() {
+                    if true_type != StaticType::unit() {
+                        // TODO: Emit warning for not using a semicolon in this if
+                    }
+
+                    Ok(StaticType::unit())
+                } else if let Some(false_type) = false_typ
+                    && false_type == true_type
+                {
+                    Ok(true_type)
+                } else {
+                    // TODO: maybe create a warning to show the user they're doing something cursed
+                    // TODO: figure out the nearest common ancestor for true_type and false_type
+                    Ok(StaticType::Any)
                 }
             }
             Expression::While {
@@ -147,27 +175,51 @@ impl Analyser {
             } => {
                 self.analyse(expression)?;
                 self.analyse(loop_body)?;
+                Ok(StaticType::unit())
             }
             Expression::For { iterations, body } => {
                 self.resolve_for_iterations(iterations, body)?;
+
+                match &**body {
+                    // for now this is good enough?
+                    ForBody::Block(_) => Ok(StaticType::unit()),
+                    ForBody::List(_) => Ok(StaticType::List),
+                    ForBody::Map { .. } => Ok(StaticType::Map),
+                }
             }
             Expression::Call {
                 function,
                 arguments,
             } => {
-                self.resolve_function_ident_arity(function, arguments.len(), *span)?;
+                let _the_type_of_the_function_which_doesnt_help_us_now =
+                    self.resolve_function_ident_arity(function, arguments.len(), *span)?;
                 for a in arguments {
                     self.analyse(a)?;
                 }
+                // Maybe we can use _the_type_of_the_function_which_doesnt_help_us_now to find the return value?!?!
+                // TODO: figure out the type
+                Ok(StaticType::Any)
             }
             Expression::Index { index, value } => {
                 self.analyse(index)?;
                 self.analyse(value)?;
+                // TODO: figure out the type here
+                Ok(StaticType::Any)
             }
-            Expression::Tuple { values } | Expression::List { values } => {
+            Expression::Tuple { values } => {
+                let mut types = Vec::with_capacity(values.len());
+                for v in values {
+                    types.push(self.analyse(v)?);
+                }
+
+                Ok(StaticType::Tuple(types))
+            }
+            Expression::List { values } => {
                 for v in values {
                     self.analyse(v)?;
                 }
+
+                Ok(StaticType::List)
             }
             Expression::Map { values, default } => {
                 for (key, value) in values {
@@ -180,9 +232,12 @@ impl Analyser {
                 if let Some(default) = default {
                     self.analyse(default)?;
                 }
+
+                Ok(StaticType::Map)
             }
             Expression::Return { value } => {
                 self.analyse(value)?;
+                Ok(StaticType::unit()) // TODO or never?
             }
             Expression::RangeInclusive { start, end }
             | Expression::RangeExclusive { start, end } => {
@@ -192,17 +247,17 @@ impl Analyser {
                 if let Some(end) = end {
                     self.analyse(end)?;
                 }
+
+                Ok(StaticType::Iterator)
             }
         }
-
-        Ok(())
     }
     fn resolve_function_ident_arity(
         &mut self,
         ident: &mut ExpressionLocation,
         arity: usize,
         span: Span,
-    ) -> Result<(), ResolveError> {
+    ) -> Result<StaticType, AnalysisError> {
         let ExpressionLocation {
             expression: Expression::Identifier { name, resolved },
             ..
@@ -228,17 +283,17 @@ impl Analyser {
             // NOTE: for now if we can't find a function that matches we just bind to a variable with that name (if possible)
             //       this fixes some cases until we have full type checking
             .or_else(|| (self.scope_tree).get_binding_any(name))
-            .ok_or_else(|| ResolveError::identifier_not_previously_declared(name, span))?;
+            .ok_or_else(|| AnalysisError::identifier_not_previously_declared(name, span))?;
 
         *resolved = Some(binding);
 
-        Ok(())
+        Ok(StaticType::Function)
     }
     fn resolve_for_iterations(
         &mut self,
         iterations: &mut [ForIteration],
         body: &mut ForBody,
-    ) -> Result<(), ResolveError> {
+    ) -> Result<(), AnalysisError> {
         let Some((iteration, tail)) = iterations.split_first_mut() else {
             unreachable!("because this function is never called with an empty slice");
         };
@@ -293,14 +348,14 @@ impl Analyser {
         Ok(())
     }
 
-    fn resolve_lvalue(&mut self, lvalue: &mut Lvalue, span: Span) -> Result<(), ResolveError> {
+    fn resolve_lvalue(&mut self, lvalue: &mut Lvalue, span: Span) -> Result<(), AnalysisError> {
         match lvalue {
             Lvalue::Identifier {
                 identifier,
                 resolved,
             } => {
                 let Some(target) = self.scope_tree.get_binding(&identifier.clone().into()) else {
-                    return Err(ResolveError::identifier_not_previously_declared(
+                    return Err(AnalysisError::identifier_not_previously_declared(
                         identifier, span,
                     ));
                 };
@@ -352,7 +407,7 @@ impl Analyser {
         &mut self,
         lvalue: &mut Lvalue,
         typ: StaticType,
-    ) -> Result<(), ResolveError> {
+    ) -> Result<(), AnalysisError> {
         match lvalue {
             Lvalue::Identifier {
                 identifier,
@@ -379,97 +434,93 @@ impl Analyser {
         Ok(())
     }
 
-    fn resolve_type(
-        &mut self,
-        ExpressionLocation { expression, .. }: &ExpressionLocation,
-    ) -> StaticType {
-        match expression {
-            Expression::BoolLiteral(_) | Expression::Logical { .. } => StaticType::Bool,
-            Expression::StringLiteral(_) => StaticType::String,
-            Expression::Int64Literal(_) | Expression::BigIntLiteral(_) => StaticType::Int,
-            Expression::Float64Literal(_) => StaticType::Float,
-            Expression::ComplexLiteral(_) => StaticType::Complex,
-            Expression::Identifier { resolved, name } => {
-                println!(
-                    "resolving name: {name}, {resolved:?}\n\n{}\n\n{:?}",
-                    self.scope_tree.current_scope_idx, self.scope_tree.scopes
-                );
-                self
-                .scope_tree
-                .get_type(resolved.unwrap_or_else(|| {
-                panic!(
-                    "previously mentioned identifier {name} was not resolved during type resolution"
-                )
-            }))
-            }
-            Expression::Statement(_)
-            | Expression::While { .. }
-            | Expression::Break
-            | Expression::Assignment { .. } => StaticType::unit(),
-            Expression::Grouping(expr) | Expression::Return { value: expr } => {
-                self.resolve_type(expr)
-            }
-            Expression::VariableDeclaration { .. } => {
-                debug_assert!(
-                    false,
-                    "trying to get type of variable declaration, does this make sense?"
-                );
-                StaticType::unit() // specifically unit tuple
-            }
-            Expression::OpAssignment { .. } => {
-                debug_assert!(
-                    false,
-                    "trying to get type of op assignment, does this make sense?"
-                );
-                StaticType::unit() // specifically unit tuple
-            }
-            Expression::FunctionDeclaration { .. } => StaticType::Function,
-            Expression::Block { statements } => statements
-                .iter()
-                .last()
-                .map_or(StaticType::unit(), |last| self.resolve_type(last)),
-            Expression::If {
-                on_true, on_false, ..
-            } => {
-                let on_false_type = on_false
-                    .as_ref()
-                    .map_or(StaticType::unit(), |expr| self.resolve_type(expr));
-
-                assert_eq!(
-                    self.resolve_type(on_true),
-                    on_false_type,
-                    "if branches have different types"
-                );
-                on_false_type
-            }
-            Expression::For { body, .. } => match &**body {
-                ForBody::Block(_) => StaticType::unit(),
-                ForBody::List(_) => StaticType::List,
-                ForBody::Map { .. } => StaticType::Map,
-            },
-            Expression::Call {
-                function: _,
-                arguments: _,
-            } => {
-                // TODO: Okay this is actually hard
-                StaticType::Any
-            }
-            Expression::Index { .. } => {
-                // TODO: this is also hard since we don't have generics
-                StaticType::Any
-            }
-            Expression::Tuple { .. } => {
-                // TODO: this is hard
-                StaticType::Any
-            }
-            Expression::List { .. } => StaticType::List,
-            Expression::Map { .. } => StaticType::Map,
-            Expression::Continue => StaticType::Any, // Maybe we need a Never type?
-            Expression::RangeInclusive { .. } | Expression::RangeExclusive { .. } => {
-                StaticType::Iterator
-            }
-        }
-    }
+    // fn resolve_type(
+    //     &mut self,
+    //     ExpressionLocation { expression, .. }: &ExpressionLocation,
+    // ) -> StaticType {
+    //     match expression {
+    //         Expression::BoolLiteral(_) | Expression::Logical { .. } => StaticType::Bool,
+    //         Expression::StringLiteral(_) => StaticType::String,
+    //         Expression::Int64Literal(_) | Expression::BigIntLiteral(_) => StaticType::Int,
+    //         Expression::Float64Literal(_) => StaticType::Float,
+    //         Expression::ComplexLiteral(_) => StaticType::Complex,
+    //         Expression::Identifier { resolved, name } => {
+    //             println!(
+    //                 "resolving name: {name}, {resolved:?}\n\n{}\n\n{:?}",
+    //                 self.scope_tree.current_scope_idx, self.scope_tree.scopes
+    //             );
+    //             self
+    //             .scope_tree
+    //             .get_type(resolved.unwrap_or_else(|| {
+    //             panic!(
+    //                 "previously mentioned identifier {name} was not resolved during type resolution"
+    //             )
+    //         }))
+    //         }
+    //         Expression::Statement(_)
+    //         | Expression::While { .. }
+    //         | Expression::Break
+    //         | Expression::Assignment { .. } => StaticType::unit(),
+    //         Expression::Grouping(expr) | Expression::Return { value: expr } => {
+    //             self.resolve_type(expr)
+    //         }
+    //         Expression::VariableDeclaration { .. } => {
+    //             debug_assert!(
+    //                 false,
+    //                 "trying to get type of variable declaration, does this make sense?"
+    //             );
+    //             StaticType::unit() // specifically unit tuple
+    //         }
+    //         Expression::OpAssignment { .. } => {
+    //             debug_assert!(
+    //                 false,
+    //                 "trying to get type of op assignment, does this make sense?"
+    //             );
+    //             StaticType::unit() // specifically unit tuple
+    //         }
+    //         Expression::FunctionDeclaration { .. } => StaticType::Function,
+    //         Expression::Block { statements } => statements
+    //             .iter()
+    //             .last()
+    //             .map_or(StaticType::unit(), |last| self.resolve_type(last)),
+    //         Expression::If {
+    //             on_true, on_false, ..
+    //         } => {
+    //             let on_false_type = on_false
+    //                 .as_ref()
+    //                 .map_or(StaticType::unit(), |expr| self.resolve_type(expr));
+    //
+    //             assert_eq!(
+    //                 self.resolve_type(on_true),
+    //                 on_false_type,
+    //                 "if branches have different types"
+    //             );
+    //             on_false_type
+    //         }
+    //         Expression::For { body, .. } => ,
+    //         Expression::Call {
+    //             function: _,
+    //             arguments: _,
+    //         } => {
+    //             // TODO: Okay this is actually hard
+    //             StaticType::Any
+    //         }
+    //         Expression::Index { .. } => {
+    //             // TODO: this is also hard since we don't have generics
+    //             StaticType::Any
+    //         }
+    //         Expression::Tuple { .. } => {
+    //             // TODO: this is hard
+    //             StaticType::Any
+    //         }
+    //         Expression::List { .. } => StaticType::List,
+    //         Expression::Map { .. } => StaticType::Map,
+    //         Expression::Continue => StaticType::Any, // Maybe we need a Never type?
+    //         Expression::RangeInclusive { .. } | Expression::RangeExclusive { .. } => {
+    //             StaticType::Iterator
+    //         }
+    //     }
+    // }
 }
 fn extract_argument_arity(arguments: &ExpressionLocation) -> usize {
     let ExpressionLocation {
@@ -656,13 +707,13 @@ impl Scope {
 }
 #[derive(thiserror::Error, miette::Diagnostic, Debug)]
 #[error("{text}")]
-pub struct ResolveError {
+pub struct AnalysisError {
     text: String,
     #[label("related to this")]
     span: Span,
 }
 
-impl ResolveError {
+impl AnalysisError {
     fn identifier_not_previously_declared(ident: &str, span: Span) -> Self {
         Self {
             text: format!("Identifier {ident} has not previously been declared"),
