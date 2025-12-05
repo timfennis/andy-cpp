@@ -389,13 +389,19 @@ impl Analyser {
             Expression::Int64Literal(_) | Expression::BigIntLiteral(_) => StaticType::Int,
             Expression::Float64Literal(_) => StaticType::Float,
             Expression::ComplexLiteral(_) => StaticType::Complex,
-            Expression::Identifier { resolved, name } => self
+            Expression::Identifier { resolved, name } => {
+                println!(
+                    "resolving name: {name}, {resolved:?}\n\n{}\n\n{:?}",
+                    self.scope_tree.current_scope_idx, self.scope_tree.scopes
+                );
+                self
                 .scope_tree
                 .get_type(resolved.unwrap_or_else(|| {
                 panic!(
                     "previously mentioned identifier {name} was not resolved during type resolution"
                 )
-            })),
+            }))
+            }
             Expression::Statement(_)
             | Expression::While { .. }
             | Expression::Break
