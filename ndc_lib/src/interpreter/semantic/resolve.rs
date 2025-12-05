@@ -387,30 +387,30 @@ fn resolve_type(
     lex_data: &mut LexicalData,
 ) -> StaticType {
     match expression {
-        Expression::BoolLiteral(_) => StaticType::Bool,
+        Expression::BoolLiteral(_) | Expression::Logical { .. } => StaticType::Bool,
         Expression::StringLiteral(_) => StaticType::String,
         Expression::Int64Literal(_) | Expression::BigIntLiteral(_) => StaticType::Int,
         Expression::Float64Literal(_) => StaticType::Float,
         Expression::ComplexLiteral(_) => StaticType::Complex,
-        Expression::Identifier { resolved, name } => lex_data.get_type(
-            resolved
-                .expect("previously mentioned identifier was not resolved during type resolution"),
-        ),
-        Expression::Statement(_) => StaticType::unit(),
-        Expression::Logical { .. } => StaticType::Bool,
-        Expression::Grouping(expr) => resolve_type(expr, lex_data),
+        Expression::Identifier { resolved, name } => {
+            lex_data.get_type(resolved.unwrap_or_else(|| {
+                panic!(
+                    "previously mentioned identifier {name} was not resolved during type resolution"
+                )
+            }))
+        }
+        Expression::Statement(_)
+        | Expression::While { .. }
+        | Expression::Break
+        | Expression::Assignment { .. } => StaticType::unit(),
+        Expression::Grouping(expr) | Expression::Return { value: expr } => {
+            resolve_type(expr, lex_data)
+        }
         Expression::VariableDeclaration { .. } => {
             debug_assert!(
                 false,
                 "trying to get type of variable declaration, does this make sense?"
             );
-            StaticType::unit() // specifically unit tuple
-        }
-        Expression::Assignment { .. } => {
-            // debug_assert!(
-            //     false,
-            //     "trying to get type of assignment, does this make sense?"
-            // );
             StaticType::unit() // specifically unit tuple
         }
         Expression::OpAssignment { .. } => {
@@ -439,7 +439,6 @@ fn resolve_type(
             );
             on_false_type
         }
-        Expression::While { .. } => StaticType::unit(),
         Expression::For { body, .. } => match &**body {
             ForBody::Block(_) => StaticType::unit(),
             ForBody::List(_) => StaticType::List,
@@ -462,11 +461,10 @@ fn resolve_type(
         }
         Expression::List { .. } => StaticType::List,
         Expression::Map { .. } => StaticType::Map,
-        Expression::Return { value: expr } => resolve_type(expr, lex_data),
-        Expression::Break => StaticType::unit(),
         Expression::Continue => StaticType::Any, // Maybe we need a Never type?
-        Expression::RangeInclusive { .. } => StaticType::Iterator,
-        Expression::RangeExclusive { .. } => StaticType::Iterator,
+        Expression::RangeInclusive { .. } | Expression::RangeExclusive { .. } => {
+            StaticType::Iterator
+        }
     }
 }
 
