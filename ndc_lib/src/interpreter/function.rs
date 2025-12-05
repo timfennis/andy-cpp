@@ -522,34 +522,30 @@ impl StaticType {
             _ => false,
         }
     }
-
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Any => "Any",
-            Self::Bool => "Bool",
-            Self::Function => "Function",
-            Self::Option => "Option",
-            Self::Number => "Number",
-            Self::Float => "Float",
-            Self::Int => "Int",
-            Self::Rational => "Rational",
-            Self::Complex => "Complex",
-            Self::Sequence => "Sequence",
-            Self::List => "List",
-            Self::String => "String",
-            Self::Tuple(_) => "Tuple<...>", // TODO: what do we need alooc
-            Self::Map => "Map",
-            Self::Iterator => "Iterator",
-            Self::MinHeap => "MinHeap",
-            Self::MaxHeap => "MaxHeap",
-            Self::Deque => "Deque",
-        }
-    }
 }
 
 impl fmt::Display for StaticType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
+        match self {
+            Self::Any => write!(f, "Any"),
+            Self::Bool => write!(f, "Bool"),
+            Self::Function => write!(f, "Function"),
+            Self::Option => write!(f, "Option"),
+            Self::Number => write!(f, "Number"),
+            Self::Float => write!(f, "Float"),
+            Self::Int => write!(f, "Int"),
+            Self::Rational => write!(f, "Rational"),
+            Self::Complex => write!(f, "Complex"),
+            Self::Sequence => write!(f, "Sequence"),
+            Self::List => write!(f, "List"),
+            Self::String => write!(f, "String"),
+            Self::Tuple(tup) => write!(f, "tuple<{}>", tup.iter().join(", ")),
+            Self::Map => write!(f, "Map"),
+            Self::Iterator => write!(f, "Iterator"),
+            Self::MinHeap => write!(f, "MinHeap"),
+            Self::MaxHeap => write!(f, "MaxHeap"),
+            Self::Deque => write!(f, "Deque"),
+        }
     }
 }
 
@@ -632,7 +628,7 @@ impl fmt::Display for TypeSignature {
                 "{}",
                 params
                     .iter()
-                    .map(|p| format!("{}: {}", p.name, p.type_name.as_str()))
+                    .map(|p| format!("{}: {}", p.name, p.type_name))
                     .join(", ")
             ),
         }

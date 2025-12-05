@@ -56,7 +56,11 @@ pub fn docs(query: Option<&str>) -> anyhow::Result<()> {
                 write!(signature, "(")?;
                 let mut param_iter = params.iter().peekable();
                 while let Some(Parameter { name, type_name }) = param_iter.next() {
-                    write!(signature, "*{name}*: **{}**", type_name.as_str().green())?;
+                    write!(
+                        signature,
+                        "*{name}*: **{}**",
+                        format!("{}", type_name).green()
+                    )?;
 
                     if param_iter.peek().is_some() {
                         write!(signature, ", ")?;
