@@ -1,7 +1,7 @@
 use crate::interpreter::function::{Function, OverloadedFunction};
 
 use crate::ast::ResolvedVar;
-use crate::interpreter::resolve::LexicalIdentifier;
+use crate::interpreter::semantic::resolve::LexicalIdentifier;
 use crate::interpreter::value::Value;
 use std::cell::RefCell;
 use std::fmt;

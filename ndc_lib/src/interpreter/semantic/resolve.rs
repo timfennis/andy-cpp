@@ -1,23 +1,6 @@
 use crate::ast::{Expression, ExpressionLocation, ForBody, ForIteration, Lvalue, ResolvedVar};
 use crate::lexer::Span;
 
-#[derive(thiserror::Error, miette::Diagnostic, Debug)]
-#[error("{text}")]
-pub struct ResolveError {
-    text: String,
-    #[label("related to this")]
-    span: Span,
-}
-
-impl ResolveError {
-    fn identifier_not_previously_declared(ident: &str, span: Span) -> Self {
-        Self {
-            text: format!("Identifier {ident} has not previously been declared"),
-            span,
-        }
-    }
-}
-
 pub fn resolve_pass(
     ExpressionLocation { expression, span }: &mut ExpressionLocation,
     lexical_data: &mut LexicalData,
@@ -549,5 +532,21 @@ impl LexicalScope {
         self.identifiers.push(name);
         // Slot is just the length of the list
         self.identifiers.len() - 1
+    }
+}
+#[derive(thiserror::Error, miette::Diagnostic, Debug)]
+#[error("{text}")]
+pub struct ResolveError {
+    text: String,
+    #[label("related to this")]
+    span: Span,
+}
+
+impl ResolveError {
+    fn identifier_not_previously_declared(ident: &str, span: Span) -> Self {
+        Self {
+            text: format!("Identifier {ident} has not previously been declared"),
+            span,
+        }
     }
 }

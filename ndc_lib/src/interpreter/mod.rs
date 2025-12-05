@@ -5,7 +5,7 @@ use crate::ast::ExpressionLocation;
 use crate::interpreter::environment::{Environment, InterpreterOutput};
 use crate::interpreter::evaluate::{EvaluationError, evaluate_expression};
 use crate::interpreter::function::FunctionCarrier;
-use crate::interpreter::resolve::{LexicalData, resolve_pass};
+use crate::interpreter::semantic::resolve::{LexicalData, resolve_pass};
 use crate::interpreter::value::Value;
 use crate::lexer::{Lexer, TokenLocation};
 use miette::Diagnostic;
@@ -17,7 +17,7 @@ pub(crate) mod heap;
 pub mod int;
 pub mod iterator;
 pub mod num;
-mod resolve;
+pub mod semantic;
 pub mod sequence;
 pub mod value;
 
@@ -139,7 +139,7 @@ pub enum InterpreterError {
     #[diagnostic(transparent)]
     Resolver {
         #[from]
-        cause: resolve::ResolveError,
+        cause: semantic::resolve::ResolveError,
     },
     #[error("Error while executing code")]
     #[diagnostic(transparent)]
