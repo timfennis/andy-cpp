@@ -1157,6 +1157,7 @@ impl Parser {
                 name: identifier,
                 parameters: Box::new(argument_list),
                 body: Box::new(body),
+                return_type: None, // At some point in the future we could use type declarations here to insert the type (return type inference is cringe anyway)
                 pure: is_pure,
                 resolved_name: None,
             },

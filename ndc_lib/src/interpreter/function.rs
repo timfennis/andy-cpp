@@ -72,6 +72,9 @@ impl Function {
     pub fn type_signature(&self) -> TypeSignature {
         self.body.type_signature()
     }
+    pub fn return_type(&self) -> &StaticType {
+        self.body.return_type()
+    }
 }
 
 #[derive(Clone)]
@@ -79,6 +82,7 @@ pub enum FunctionBody {
     Closure {
         parameter_names: Vec<String>,
         body: ExpressionLocation,
+        return_type: StaticType,
         environment: Rc<RefCell<Environment>>,
     },
     NumericUnaryOp {
@@ -89,6 +93,7 @@ pub enum FunctionBody {
     },
     GenericFunction {
         type_signature: TypeSignature,
+        return_type: StaticType,
         function: fn(&mut [Value], &Rc<RefCell<Environment>>) -> EvaluationResult,
     },
     Memoized {
@@ -111,13 +116,16 @@ impl FunctionBody {
     }
     pub fn generic(
         type_signature: TypeSignature,
+        return_type: StaticType,
         function: fn(&mut [Value], &Rc<RefCell<Environment>>) -> EvaluationResult,
     ) -> Self {
         Self::GenericFunction {
             type_signature,
+            return_type,
             function,
         }
     }
+
     fn type_signature(&self) -> TypeSignature {
         match self {
             Self::Closure {
@@ -140,6 +148,15 @@ impl FunctionBody {
         }
     }
 
+    pub fn return_type(&self) -> &StaticType {
+        match self {
+            FunctionBody::Closure { return_type, .. } => return_type,
+            FunctionBody::NumericUnaryOp { .. } => &StaticType::Number,
+            FunctionBody::NumericBinaryOp { .. } => &StaticType::Number,
+            FunctionBody::GenericFunction { return_type, .. } => return_type,
+            FunctionBody::Memoized { function, .. } => function.return_type(),
+        }
+    }
     pub fn call(&self, args: &mut [Value], env: &Rc<RefCell<Environment>>) -> EvaluationResult {
         match self {
             Self::Closure {

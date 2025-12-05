@@ -267,6 +267,7 @@ pub mod f64 {
                                 },
                                 _ => unreachable!("the type checker should never invoke this function if the argument count does not match")
                             },
+                            return_type: StaticType::Bool,
                         })
                         .build()
                         .expect("must succeed")
@@ -291,6 +292,7 @@ pub mod f64 {
                         [left, right] => Ok(Value::Bool(left == right)),
                         _ => unreachable!("the type checker should never invoke this function if the argument count does not match")
                     },
+                    return_type: StaticType::Bool,
                 })
                 .build()
                 .expect("must succeed")
@@ -308,6 +310,7 @@ pub mod f64 {
                         [left, right] => Ok(Value::Bool(left != right)),
                         _ => unreachable!("the type checker should never invoke this function if the argument count does not match")
                     },
+                    return_type: StaticType::Bool,
                 })
                 .build()
                 .expect("must succeed")
@@ -330,6 +333,7 @@ pub mod f64 {
                         },
                         _ => unreachable!("the type checker should never invoke this function if the argument count does not match")
                     },
+                    return_type: StaticType::Int,
                 })
                 .build()
                 .expect("must succeed")
@@ -352,6 +356,7 @@ pub mod f64 {
                         },
                         _ => unreachable!("the type checker should never invoke this function if the argument count does not match")
                     },
+                    return_type: StaticType::Int,
                 })
                 .build()
                 .expect("must succeed")
@@ -371,6 +376,7 @@ pub mod f64 {
                                 [Value::Bool(left), Value::Bool(right)] => Ok(Value::Bool($operation(*left, *right))),
                                 _ => unreachable!("the type checker should never invoke this function if the argument count does not match")
                             },
+                            return_type: StaticType::Bool,
                         })
                         .build()
                         .expect("must succeed")
@@ -388,6 +394,7 @@ pub mod f64 {
                                 [Value::Number(Number::Int(left)), Value::Number(Number::Int(right))] => Ok(Value::Number(Number::Int($operation(left.clone(), right.clone())))),
                                 _ => unreachable!("the type checker should never invoke this function if the argument count does not match")
                             },
+                            return_type: StaticType::Int,
                         })
                         .build()
                         .expect("must succeed"),
@@ -416,6 +423,7 @@ pub mod f64 {
                             [Value::Bool(b)] => Ok(Value::Bool(b.not())),
                             _ => unreachable!("the type checker should never invoke this function if the argument count does not match"),
                         },
+                        return_type: StaticType::Bool,
                     })
                     .name(ident.to_string())
                     .build()
@@ -437,6 +445,7 @@ pub mod f64 {
                             .map(|x| Value::Number(Number::Int(x))),
                         _ => unreachable!("the type checker should never invoke this function if the argument count does not match")
                     },
+                    return_type: StaticType::Int,
                 })
                 .build()
                 .expect("must succeed")
@@ -456,6 +465,7 @@ pub mod f64 {
                             .map(|x| Value::Number(Number::Int(x))),
                         _ => unreachable!("the type checker should never invoke this function if the argument count does not match")
                     },
+                    return_type: StaticType::Int,
                 })
                 .build()
                 .expect("must succeed")

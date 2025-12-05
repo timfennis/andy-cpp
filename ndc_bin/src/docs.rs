@@ -67,14 +67,16 @@ pub fn docs(query: Option<&str>) -> anyhow::Result<()> {
                     }
                 }
 
-                writeln!(signature, ")")?;
+                write!(signature, ")")?;
             }
         }
         let name = function.name();
         let documentation = function.documentation().trim();
+        let return_type = function.return_type();
         let markdown = format!(
-            "---\n\n## **{}**{signature}\n{documentation}{}",
+            "---\n\n## **{}**{signature} -> {}\n\n{documentation}{}",
             name.green(),
+            format!("{}", return_type).green().bold(),
             if documentation.is_empty() { "" } else { "\n\n" }
         );
 

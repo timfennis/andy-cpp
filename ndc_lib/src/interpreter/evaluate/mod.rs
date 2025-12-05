@@ -348,12 +348,14 @@ pub(crate) fn evaluate_expression(
             parameters: arguments,
             body,
             resolved_name,
+            return_type,
             pure,
             ..
         } => {
             let mut user_function = FunctionBody::Closure {
                 parameter_names: arguments.try_into_parameters()?,
                 body: *body.clone(),
+                return_type: return_type.clone().unwrap_or_else(StaticType::unit),
                 environment: environment.clone(),
             };
 

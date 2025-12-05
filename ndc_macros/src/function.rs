@@ -53,6 +53,9 @@ pub fn wrap_function(function: &syn::ItemFn) -> Vec<WrappedFunction> {
         }
     }
 
+    // TODO: CONTINUE HERE
+    let return_type = quote! { crate::interpreter::function::StaticType::Any }; // RIP ROP RAP
+
     // If the function has no argument then the cartesian product stuff below doesn't work
     if function.sig.inputs.is_empty() {
         return function_names
@@ -63,6 +66,7 @@ pub fn wrap_function(function: &syn::ItemFn) -> Vec<WrappedFunction> {
                     &original_identifier,
                     function_name,
                     vec![],
+                    return_type.clone(),
                     &docs_buf,
                 )
             })
@@ -71,7 +75,6 @@ pub fn wrap_function(function: &syn::ItemFn) -> Vec<WrappedFunction> {
 
     // When we call create_temp_variable we can get multiple definitions for a variable
     // For instance when a rust function is `fn foo(list: &[Value])` we can define two internal functions for both Tuple and List
-
     let mut variation_id = 0usize;
     function_names
         .iter()
@@ -98,6 +101,7 @@ pub fn wrap_function(function: &syn::ItemFn) -> Vec<WrappedFunction> {
                         &format_ident!("{original_identifier}_{variation_id}"),
                         function_name,
                         args,
+                        return_type.clone(),
                         &docs_buf,
                     );
                     variation_id += 1;
@@ -116,6 +120,7 @@ fn wrap_single(
     identifier: &syn::Ident,
     register_as_function_name: &proc_macro2::Literal,
     input_arguments: Vec<Argument>,
+    return_type: TokenStream,
     docs: &str,
 ) -> WrappedFunction {
     let inner_ident = format_ident!("{}_inner", identifier);
@@ -206,6 +211,7 @@ fn wrap_single(
                 type_signature: crate::interpreter::function::TypeSignature::Exact(vec![
                     #( crate::interpreter::function::Parameter::new(#param_names, #param_types,) ),*
                 ]),
+                return_type: #return_type,
             })
             .name(String::from(#register_as_function_name))
             .documentation(String::from(#docs))
