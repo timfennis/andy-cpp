@@ -56,8 +56,8 @@ pub fn resolve_pass(
             resolve_pass(expr, lexical_data)?;
         }
         Expression::VariableDeclaration { l_value, value } => {
-            resolve_lvalue_declarative(l_value, lexical_data)?;
             resolve_pass(value, lexical_data)?;
+            resolve_lvalue_declarative(l_value, lexical_data)?;
         }
         Expression::Assignment { l_value, r_value } => {
             resolve_lvalue(l_value, *span, lexical_data)?;
@@ -118,7 +118,7 @@ pub fn resolve_pass(
                 {
                     Some(binding)
                 } else {
-                    Some(lexical_data.create_binding(function_ident))
+                    Some(lexical_data.create_local_binding(function_ident))
                 }
             }
 
@@ -358,9 +358,11 @@ fn resolve_arguments_declarative(
             panic!("expected tuple values to be ident");
         };
 
-        *resolved = Some(lexical_data.create_binding(LexicalIdentifier::Variable {
-            name: (*name).clone(),
-        }));
+        *resolved = Some(
+            lexical_data.create_local_binding(LexicalIdentifier::Variable {
+                name: (*name).clone(),
+            }),
+        );
     }
 }
 fn resolve_lvalue_declarative(
@@ -372,9 +374,11 @@ fn resolve_lvalue_declarative(
             identifier,
             resolved,
         } => {
-            *resolved = Some(lexical_data.create_binding(LexicalIdentifier::Variable {
-                name: (*identifier).clone(),
-            }));
+            *resolved = Some(
+                lexical_data.create_local_binding(LexicalIdentifier::Variable {
+                    name: (*identifier).clone(),
+                }),
+            );
         }
         Lvalue::Index { index, value } => {
             resolve_pass(index, lexical_data)?;
@@ -484,7 +488,7 @@ impl LexicalData {
         }
     }
 
-    fn create_binding(&mut self, ident: LexicalIdentifier) -> ResolvedVar {
+    fn create_local_binding(&mut self, ident: LexicalIdentifier) -> ResolvedVar {
         ResolvedVar::Captured {
             slot: self.scopes[self.current_scope_idx].allocate(ident),
             depth: 0,
@@ -543,7 +547,7 @@ impl LexicalScope {
 
     fn allocate(&mut self, name: LexicalIdentifier) -> usize {
         self.identifiers.push(name);
-        // Slot is just th elength of the list
+        // Slot is just the length of the list
         self.identifiers.len() - 1
     }
 }

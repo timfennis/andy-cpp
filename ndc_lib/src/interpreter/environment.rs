@@ -155,6 +155,10 @@ impl Environment {
 
     fn get_copy_from_slot(&self, depth: usize, slot: usize) -> Value {
         if depth == 0 {
+            assert!(
+                self.values.len() > slot,
+                "failed to take item out of slot {slot} because it was empty"
+            );
             self.values[slot].clone()
         } else {
             self.parent
