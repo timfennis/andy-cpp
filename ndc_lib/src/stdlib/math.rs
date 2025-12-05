@@ -210,7 +210,7 @@ mod inner {
 pub mod f64 {
     use super::{Environment, Number, ToPrimitive, f64};
     use crate::interpreter::function::{
-        FunctionBody, FunctionBuilder, FunctionCarrier, ParamType, Parameter, TypeSignature,
+        FunctionBody, FunctionBuilder, FunctionCarrier, Parameter, StaticType, TypeSignature,
     };
     use crate::interpreter::num::BinaryOperatorError;
     use crate::interpreter::value::Value;
@@ -256,8 +256,8 @@ pub mod f64 {
                         .name($operator.to_string())
                         .body(FunctionBody::GenericFunction {
                             type_signature: TypeSignature::Exact(vec![
-                                Parameter::new("left", ParamType::Any),
-                                Parameter::new("right", ParamType::Any),
+                                Parameter::new("left", StaticType::Any),
+                                Parameter::new("right", StaticType::Any),
                             ]),
                             function: |values, _env| match values {
                                 [left, right] => match left.partial_cmp(&right) {
@@ -284,8 +284,8 @@ pub mod f64 {
                 .name("==".to_string())
                 .body(FunctionBody::GenericFunction {
                     type_signature: TypeSignature::Exact(vec![
-                        Parameter::new("left", ParamType::Any),
-                        Parameter::new("right", ParamType::Any),
+                        Parameter::new("left", StaticType::Any),
+                        Parameter::new("right", StaticType::Any),
                     ]),
                     function: |values, _env| match values {
                         [left, right] => Ok(Value::Bool(left == right)),
@@ -301,8 +301,8 @@ pub mod f64 {
                 .name("!=".to_string())
                 .body(FunctionBody::GenericFunction {
                     type_signature: TypeSignature::Exact(vec![
-                        Parameter::new("left", ParamType::Any),
-                        Parameter::new("right", ParamType::Any),
+                        Parameter::new("left", StaticType::Any),
+                        Parameter::new("right", StaticType::Any),
                     ]),
                     function: |values, _env| match values {
                         [left, right] => Ok(Value::Bool(left != right)),
@@ -318,8 +318,8 @@ pub mod f64 {
                 .name("<=>".to_string())
                 .body(FunctionBody::GenericFunction {
                     type_signature: TypeSignature::Exact(vec![
-                        Parameter::new("left", ParamType::Any),
-                        Parameter::new("right", ParamType::Any),
+                        Parameter::new("left", StaticType::Any),
+                        Parameter::new("right", StaticType::Any),
                     ]),
                     function: |values, _env| match values {
                         [left, right] => match left.partial_cmp(&right) {
@@ -340,8 +340,8 @@ pub mod f64 {
                 .name(">=<".to_string())
                 .body(FunctionBody::GenericFunction {
                     type_signature: TypeSignature::Exact(vec![
-                        Parameter::new("left", ParamType::Any),
-                        Parameter::new("right", ParamType::Any),
+                        Parameter::new("left", StaticType::Any),
+                        Parameter::new("right", StaticType::Any),
                     ]),
                     function: |values, _env| match values {
                         [left, right] => match left.partial_cmp(&right) {
@@ -364,8 +364,8 @@ pub mod f64 {
                         .name($operator.to_string())
                         .body(FunctionBody::GenericFunction {
                             type_signature: TypeSignature::Exact(vec![
-                                Parameter::new("left", ParamType::Bool),
-                                Parameter::new("right", ParamType::Bool),
+                                Parameter::new("left", StaticType::Bool),
+                                Parameter::new("right", StaticType::Bool),
                             ]),
                             function: |values, _env| match values {
                                 [Value::Bool(left), Value::Bool(right)] => Ok(Value::Bool($operation(*left, *right))),
@@ -380,8 +380,8 @@ pub mod f64 {
                         .name($operator.to_string())
                         .body(FunctionBody::GenericFunction {
                             type_signature: TypeSignature::Exact(vec![
-                                Parameter::new("left", ParamType::Int),
-                                Parameter::new("right", ParamType::Int),
+                                Parameter::new("left", StaticType::Int),
+                                Parameter::new("right", StaticType::Int),
                             ]),
                             function: |values, _env| match values {
                                 // TODO: remove this clone
@@ -411,7 +411,7 @@ pub mod f64 {
             env.declare_global_fn(
                 FunctionBuilder::default()
                     .body(FunctionBody::GenericFunction {
-                        type_signature: TypeSignature::Exact(vec![Parameter::new("value", ParamType::Bool)]),
+                        type_signature: TypeSignature::Exact(vec![Parameter::new("value", StaticType::Bool)]),
                         function: |values, _env| match values {
                             [Value::Bool(b)] => Ok(Value::Bool(b.not())),
                             _ => unreachable!("the type checker should never invoke this function if the argument count does not match"),
@@ -428,8 +428,8 @@ pub mod f64 {
                 .name(">>".to_string())
                 .body(FunctionBody::GenericFunction {
                     type_signature: TypeSignature::Exact(vec![
-                        Parameter::new("left", ParamType::Int),
-                        Parameter::new("right", ParamType::Int),
+                        Parameter::new("left", StaticType::Int),
+                        Parameter::new("right", StaticType::Int),
                     ]),
                     function: |values, _env| match values {
                         [Value::Number(Number::Int(left)), Value::Number(Number::Int(right))] => left.clone().checked_shr(right.clone())
@@ -447,8 +447,8 @@ pub mod f64 {
                 .name("<<".to_string())
                 .body(FunctionBody::GenericFunction {
                     type_signature: TypeSignature::Exact(vec![
-                        Parameter::new("left", ParamType::Int),
-                        Parameter::new("right", ParamType::Int),
+                        Parameter::new("left", StaticType::Int),
+                        Parameter::new("right", StaticType::Int),
                     ]),
                     function: |values, _env| match values {
                         [Value::Number(Number::Int(left)), Value::Number(Number::Int(right))] => left.clone().checked_shl(right.clone())

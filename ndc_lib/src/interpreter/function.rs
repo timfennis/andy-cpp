@@ -125,16 +125,16 @@ impl FunctionBody {
             } => TypeSignature::Exact(
                 parameter_names
                     .iter()
-                    .map(|name| Parameter::new(name, ParamType::Any))
+                    .map(|name| Parameter::new(name, StaticType::Any))
                     .collect(),
             ),
             Self::Memoized { cache: _, function } => function.type_signature(),
             Self::NumericUnaryOp { .. } => {
-                TypeSignature::Exact(vec![Parameter::new("num", ParamType::Number)])
+                TypeSignature::Exact(vec![Parameter::new("num", StaticType::Number)])
             }
             Self::NumericBinaryOp { .. } => TypeSignature::Exact(vec![
-                Parameter::new("left", ParamType::Number),
-                Parameter::new("right", ParamType::Number),
+                Parameter::new("left", StaticType::Number),
+                Parameter::new("right", StaticType::Number),
             ]),
             Self::GenericFunction { type_signature, .. } => type_signature.clone(),
         }
@@ -171,7 +171,7 @@ impl FunctionBody {
             Self::NumericUnaryOp { body } => match args {
                 [Value::Number(num)] => Ok(Value::Number(body(num.clone()))),
                 [v] => Err(FunctionCallError::ArgumentTypeError {
-                    expected: ParamType::Number,
+                    expected: StaticType::Number,
                     actual: v.value_type(),
                 }
                 .into()),
@@ -187,12 +187,12 @@ impl FunctionBody {
                         .map_err(|err| FunctionCarrier::IntoEvaluationError(Box::new(err)))?,
                 )),
                 [Value::Number(_), right] => Err(FunctionCallError::ArgumentTypeError {
-                    expected: ParamType::Number,
+                    expected: StaticType::Number,
                     actual: right.value_type(),
                 }
                 .into()),
                 [left, _] => Err(FunctionCallError::ArgumentTypeError {
-                    expected: ParamType::Number,
+                    expected: StaticType::Number,
                     actual: left.value_type(),
                 }
                 .into()),
@@ -419,11 +419,11 @@ impl From<Function> for OverloadedFunction {
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct Parameter {
     pub name: String,
-    pub type_name: ParamType,
+    pub type_name: StaticType,
 }
 
 impl Parameter {
-    pub fn new<N: Into<String>>(name: N, param_type: ParamType) -> Self {
+    pub fn new<N: Into<String>>(name: N, param_type: StaticType) -> Self {
         Self {
             name: name.into(),
             type_name: param_type,
@@ -432,7 +432,7 @@ impl Parameter {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub enum ParamType {
+pub enum StaticType {
     Any,
     Bool,
     Function,
@@ -457,7 +457,7 @@ pub enum ParamType {
     Deque,
 }
 
-impl ParamType {
+impl StaticType {
     fn distance(&self, other: &ValueType) -> Option<u32> {
         #[allow(clippy::match_same_arms)]
         match (self, other) {
@@ -469,7 +469,7 @@ impl ParamType {
             (Self::Complex, ValueType::Number(NumberType::Complex)) => Some(0),
             (Self::String, ValueType::String) => Some(0),
             (Self::List, ValueType::List) => Some(0),
-            // TODO: once ParamType supports parameters we can calculate the proper distance to Tuple
+            // TODO: once StaticType supports parameters we can calculate the proper distance to Tuple
             (Self::Tuple, ValueType::Tuple(_)) => Some(0),
             (Self::Map, ValueType::Map) => Some(0),
             (Self::Iterator, ValueType::Iterator) => Some(0),
@@ -519,8 +519,8 @@ impl ParamType {
     }
 }
 
-/// Converts the concrete type of a value to the specific `ParamType`
-impl From<&Value> for ParamType {
+/// Converts the concrete type of a value to the specific `StaticType`
+impl From<&Value> for StaticType {
     fn from(value: &Value) -> Self {
         match value {
             Value::Option(_) => Self::Option,
@@ -542,7 +542,7 @@ impl From<&Value> for ParamType {
     }
 }
 
-impl fmt::Display for ParamType {
+impl fmt::Display for StaticType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
@@ -552,7 +552,7 @@ impl fmt::Display for ParamType {
 pub enum FunctionCallError {
     #[error("invalid argument, expected {expected} got {actual}")]
     ArgumentTypeError {
-        expected: ParamType,
+        expected: StaticType,
         actual: ValueType,
     },
 

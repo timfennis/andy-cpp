@@ -1,6 +1,5 @@
 use crate::ast::{Expression, ExpressionLocation, ForBody, ForIteration, Lvalue, ResolvedVar};
-use crate::interpreter::function::{ParamType, Parameter};
-use crate::interpreter::value::ValueType;
+use crate::interpreter::function::StaticType;
 use crate::lexer::Span;
 use itertools::Itertools;
 
@@ -43,7 +42,7 @@ pub fn resolve_pass(
         }
         Expression::VariableDeclaration { l_value, value } => {
             resolve_pass(value, lexical_data)?;
-            resolve_lvalue_declarative(l_value, lexical_data)?;
+            resolve_lvalue_declarative(l_value, resolve_type(value, lexical_data), lexical_data)?;
         }
         Expression::Assignment { l_value, r_value } => {
             resolve_lvalue(l_value, *span, lexical_data)?;
@@ -101,7 +100,7 @@ pub fn resolve_pass(
 
                 *resolved_name = Some(
                     lexical_data
-                        .get_or_create_local_binding(function_ident.clone(), ValueType::Function),
+                        .get_or_create_local_binding(function_ident.clone(), StaticType::Function),
                 )
             }
 
@@ -233,8 +232,11 @@ fn resolve_for_iterations(
     match iteration {
         ForIteration::Iteration { l_value, sequence } => {
             resolve_pass(sequence, lexical_data)?;
+
             lexical_data.new_scope();
-            resolve_lvalue_declarative(l_value, lexical_data)?;
+
+            // TODO: inferring this as any is a massive cop-out
+            resolve_lvalue_declarative(l_value, StaticType::Any, lexical_data)?;
             do_destroy = true;
         }
         ForIteration::Guard(expr) => {
@@ -345,12 +347,13 @@ fn resolve_parameters_declarative(
             LexicalIdentifier::Variable {
                 name: (*name).clone(),
             },
-            ParamType::Any,
+            StaticType::Any,
         ));
     }
 }
 fn resolve_lvalue_declarative(
     lvalue: &mut Lvalue,
+    typ: StaticType,
     lexical_data: &mut LexicalData,
 ) -> Result<(), ResolveError> {
     match lvalue {
@@ -358,11 +361,12 @@ fn resolve_lvalue_declarative(
             identifier,
             resolved,
         } => {
-            *resolved = Some(
-                lexical_data.create_local_binding(LexicalIdentifier::Variable {
+            *resolved = Some(lexical_data.create_local_binding(
+                LexicalIdentifier::Variable {
                     name: (*identifier).clone(),
-                }),
-            );
+                },
+                typ,
+            ));
         }
         Lvalue::Index { index, value } => {
             resolve_pass(index, lexical_data)?;
@@ -370,12 +374,105 @@ fn resolve_lvalue_declarative(
         }
         Lvalue::Sequence(seq) => {
             for sub_lvalue in seq {
-                resolve_lvalue_declarative(sub_lvalue, lexical_data)?
+                resolve_lvalue_declarative(sub_lvalue, typ.clone(), lexical_data)?
             }
         }
     }
 
     Ok(())
+}
+
+fn resolve_type(
+    ExpressionLocation { expression, .. }: &ExpressionLocation,
+    lex_data: &mut LexicalData,
+) -> StaticType {
+    match expression {
+        Expression::BoolLiteral(_) => StaticType::Bool,
+        Expression::StringLiteral(_) => StaticType::String,
+        Expression::Int64Literal(_) => StaticType::Int,
+        Expression::Float64Literal(_) => StaticType::Float,
+        Expression::BigIntLiteral(_) => StaticType::Int,
+        Expression::ComplexLiteral(_) => StaticType::Complex,
+        Expression::Identifier { resolved, name } => {
+            println!("resolving ident {name}");
+            lex_data.get_type(
+                resolved.expect(
+                    "previously mentioned identifier was not resolved during type resolution",
+                ),
+            )
+        }
+        Expression::Statement(_) => StaticType::Tuple, // specifically a unit tuple
+        Expression::Logical { .. } => StaticType::Bool,
+        Expression::Grouping(expr) => resolve_type(expr, lex_data),
+        Expression::VariableDeclaration { .. } => {
+            debug_assert!(
+                false,
+                "trying to get type of variable declaration, does this make sense?"
+            );
+            StaticType::Tuple // specifically unit tuple
+        }
+        Expression::Assignment { .. } => {
+            // debug_assert!(
+            //     false,
+            //     "trying to get type of assignment, does this make sense?"
+            // );
+            StaticType::Tuple // specifically unit tuple
+        }
+        Expression::OpAssignment { .. } => {
+            debug_assert!(
+                false,
+                "trying to get type of op assignment, does this make sense?"
+            );
+            StaticType::Tuple // specifically unit tuple
+        }
+        Expression::FunctionDeclaration { .. } => StaticType::Function,
+        Expression::Block { statements } => statements
+            .iter()
+            .last()
+            .map_or(StaticType::Tuple, |last| resolve_type(last, lex_data)),
+        Expression::If {
+            on_true, on_false, ..
+        } => {
+            let on_false_type = on_false
+                .as_ref()
+                .map_or(StaticType::Tuple, |expr| resolve_type(expr, lex_data));
+
+            assert_eq!(
+                resolve_type(&*on_true, lex_data),
+                on_false_type,
+                "if branches have different types"
+            );
+            on_false_type
+        }
+        Expression::While { .. } => StaticType::Tuple,
+        Expression::For { body, .. } => match &**body {
+            ForBody::Block(_) => StaticType::Tuple,
+            ForBody::List(_) => StaticType::List,
+            ForBody::Map { .. } => StaticType::Map,
+        },
+        Expression::Call {
+            function: _,
+            arguments: _,
+        } => {
+            // TODO: Okay this is actually hard
+            StaticType::Any
+        }
+        Expression::Index { .. } => {
+            // TODO: this is also hard since we don't have generics
+            StaticType::Any
+        }
+        Expression::Tuple { .. } => {
+            // TODO: this is hard
+            StaticType::Any
+        }
+        Expression::List { .. } => StaticType::List,
+        Expression::Map { .. } => StaticType::Map,
+        Expression::Return { value: expr } => resolve_type(expr, lex_data),
+        Expression::Break => StaticType::Tuple,
+        Expression::Continue => StaticType::Any, // Maybe we need a Never type?
+        Expression::RangeInclusive { .. } => StaticType::Iterator,
+        Expression::RangeExclusive { .. } => StaticType::Iterator,
+    }
 }
 
 #[derive(Debug, Hash, Eq, PartialEq, Clone)]
@@ -419,10 +516,29 @@ impl LexicalData {
                 //TODO: maybe the line below is more of temporary solution
                 identifiers: global_scope_map
                     .into_iter()
-                    .map(|x| (x, ValueType::Function))
+                    .map(|x| (x, StaticType::Function))
                     .collect_vec(),
             },
             scopes: vec![LexicalScope::new(None)],
+        }
+    }
+
+    fn get_type(&self, res: ResolvedVar) -> StaticType {
+        // dbg!(self, res);
+        match res {
+            ResolvedVar::Captured { slot, depth } => {
+                let mut scope_idx = self.current_scope_idx;
+                let mut depth = depth;
+                while depth > 0 {
+                    depth -= 1;
+                    scope_idx = self.scopes[scope_idx]
+                        .parent_idx
+                        .expect("parent_idx was None while traversing the scope tree");
+                }
+                self.scopes[scope_idx].identifiers[slot].1.clone()
+            }
+            // for now all globals are functions
+            ResolvedVar::Global { .. } => StaticType::Function,
         }
     }
 
@@ -444,12 +560,12 @@ impl LexicalData {
     fn get_or_create_local_binding(
         &mut self,
         ident: LexicalIdentifier,
-        value_type: ValueType,
+        typ: StaticType,
     ) -> ResolvedVar {
         ResolvedVar::Captured {
             slot: self.scopes[self.current_scope_idx]
                 .get_slot(&ident)
-                .unwrap_or_else(|| self.scopes[self.current_scope_idx].allocate(ident, value_type)),
+                .unwrap_or_else(|| self.scopes[self.current_scope_idx].allocate(ident, typ)),
             depth: 0,
         }
     }
@@ -490,9 +606,9 @@ impl LexicalData {
         }
     }
 
-    fn create_local_binding(&mut self, ident: LexicalIdentifier, vtype: ValueType) -> ResolvedVar {
+    fn create_local_binding(&mut self, ident: LexicalIdentifier, typ: StaticType) -> ResolvedVar {
         ResolvedVar::Captured {
-            slot: self.scopes[self.current_scope_idx].allocate(ident, vtype),
+            slot: self.scopes[self.current_scope_idx].allocate(ident, typ),
             depth: 0,
         }
     }
@@ -501,7 +617,7 @@ impl LexicalData {
 #[derive(Debug)]
 struct LexicalScope {
     parent_idx: Option<usize>,
-    identifiers: Vec<(LexicalIdentifier, ValueType)>,
+    identifiers: Vec<(LexicalIdentifier, StaticType)>,
 }
 
 impl LexicalScope {
@@ -518,21 +634,14 @@ impl LexicalScope {
             .rposition(|(ident, _)| ident.name() == find_ident)
     }
 
-    /// Either returns the slot in this current scope or creates a new one
-    #[deprecated = "use get_slot_by_ident instead"]
-    pub fn get_or_allocate(&mut self, ident: LexicalIdentifier) -> usize {
-        self.get_slot(&ident)
-            .unwrap_or_else(|| self.allocate(ident, todo!("we don't know")))
-    }
-
     fn get_slot(&mut self, find_ident: &LexicalIdentifier) -> Option<usize> {
         self.identifiers
             .iter()
             .rposition(|(ident, _type)| ident == find_ident)
     }
 
-    fn allocate(&mut self, name: LexicalIdentifier, vtype: ValueType) -> usize {
-        self.identifiers.push((name, vtype));
+    fn allocate(&mut self, name: LexicalIdentifier, typ: StaticType) -> usize {
+        self.identifiers.push((name, typ));
         // Slot is just the length of the list minus one
         self.identifiers.len() - 1
     }

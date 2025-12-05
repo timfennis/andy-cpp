@@ -33,7 +33,7 @@ impl TypeConverter for MutRefString {
         argument_var_name: syn::Ident,
     ) -> Vec<Argument> {
         vec![Argument {
-            param_type: quote! { crate::interpreter::function::ParamType::String },
+            param_type: quote! { crate::interpreter::function::StaticType::String },
             param_name: quote! { #original_name },
             argument: quote! { #argument_var_name },
             initialize_code: quote! {
@@ -60,7 +60,7 @@ impl TypeConverter for InternalMap {
         argument_var_name: syn::Ident,
     ) -> Vec<Argument> {
         vec![Argument {
-            param_type: quote! { crate::interpreter::function::ParamType::Map },
+            param_type: quote! { crate::interpreter::function::StaticType::Map },
             param_name: quote! { #original_name },
             argument: quote! { #argument_var_name },
             initialize_code: quote! {
@@ -86,7 +86,7 @@ impl TypeConverter for InternalString {
         argument_var_name: syn::Ident,
     ) -> Vec<Argument> {
         vec![Argument {
-            param_type: quote! { crate::interpreter::function::ParamType::String },
+            param_type: quote! { crate::interpreter::function::StaticType::String },
             param_name: quote! { #original_name },
             argument: quote! { #argument_var_name },
             initialize_code: quote! {
@@ -113,7 +113,7 @@ impl TypeConverter for InternalList {
         argument_var_name: syn::Ident,
     ) -> Vec<Argument> {
         vec![Argument {
-            param_type: quote! { crate::interpreter::function::ParamType::List },
+            param_type: quote! { crate::interpreter::function::StaticType::List },
             param_name: quote! { #original_name },
             argument: quote! { #argument_var_name },
             initialize_code: quote! {
@@ -141,7 +141,7 @@ impl TypeConverter for InternalTuple {
         argument_var_name: syn::Ident,
     ) -> Vec<Argument> {
         vec![Argument {
-            param_type: quote! { crate::interpreter::function::ParamType::Tuple },
+            param_type: quote! { crate::interpreter::function::StaticType::Tuple },
             param_name: quote! { #original_name },
             argument: quote! { #argument_var_name },
             initialize_code: quote! {
