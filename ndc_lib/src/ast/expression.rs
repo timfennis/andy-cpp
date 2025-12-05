@@ -55,7 +55,7 @@ pub enum Expression {
     FunctionDeclaration {
         name: Option<String>,
         resolved_name: Option<ResolvedVar>,
-        arguments: Box<ExpressionLocation>,
+        parameters: Box<ExpressionLocation>,
         body: Box<ExpressionLocation>,
         pure: bool,
     },
@@ -332,7 +332,7 @@ impl std::fmt::Debug for ExpressionLocation {
                 .finish(),
             Expression::FunctionDeclaration {
                 name,
-                arguments,
+                parameters: arguments,
                 body,
                 pure,
                 resolved_name,

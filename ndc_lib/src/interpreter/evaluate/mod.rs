@@ -343,7 +343,7 @@ pub(crate) fn evaluate_expression(
             };
         }
         Expression::FunctionDeclaration {
-            arguments,
+            parameters: arguments,
             body,
             resolved_name,
             pure,

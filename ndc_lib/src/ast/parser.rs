@@ -1155,7 +1155,7 @@ impl Parser {
         Ok(ExpressionLocation {
             expression: Expression::FunctionDeclaration {
                 name: identifier,
-                arguments: Box::new(argument_list),
+                parameters: Box::new(argument_list),
                 body: Box::new(body),
                 pure: is_pure,
                 resolved_name: None,

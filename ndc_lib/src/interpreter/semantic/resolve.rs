@@ -1,5 +1,8 @@
 use crate::ast::{Expression, ExpressionLocation, ForBody, ForIteration, Lvalue, ResolvedVar};
+use crate::interpreter::function::{ParamType, Parameter};
+use crate::interpreter::value::ValueType;
 use crate::lexer::Span;
+use itertools::Itertools;
 
 pub fn resolve_pass(
     ExpressionLocation { expression, span }: &mut ExpressionLocation,
@@ -86,27 +89,24 @@ pub fn resolve_pass(
         Expression::FunctionDeclaration {
             name,
             resolved_name,
-            arguments,
+            parameters,
             body,
             ..
         } => {
             if let Some(name) = name {
                 let function_ident = LexicalIdentifier::Function {
                     name: (*name).clone(),
-                    arity: Some(extract_argument_arity(arguments)),
+                    arity: Some(extract_argument_arity(parameters)),
                 };
 
-                *resolved_name = if let Some(binding) =
-                    lexical_data.get_or_create_local_binding(function_ident.clone())
-                {
-                    Some(binding)
-                } else {
-                    Some(lexical_data.create_local_binding(function_ident))
-                }
+                *resolved_name = Some(
+                    lexical_data
+                        .get_or_create_local_binding(function_ident.clone(), ValueType::Function),
+                )
             }
 
             lexical_data.new_scope();
-            resolve_arguments_declarative(arguments, lexical_data);
+            resolve_parameters_declarative(parameters, lexical_data);
 
             resolve_pass(body, lexical_data)?;
             lexical_data.destroy_scope();
@@ -320,7 +320,7 @@ fn extract_argument_arity(arguments: &ExpressionLocation) -> usize {
     values.len()
 }
 /// Resolve expressions as arguments to a function and return the function arity
-fn resolve_arguments_declarative(
+fn resolve_parameters_declarative(
     arguments: &mut ExpressionLocation,
     lexical_data: &mut LexicalData,
 ) {
@@ -341,11 +341,12 @@ fn resolve_arguments_declarative(
             panic!("expected tuple values to be ident");
         };
 
-        *resolved = Some(
-            lexical_data.create_local_binding(LexicalIdentifier::Variable {
+        *resolved = Some(lexical_data.create_local_binding(
+            LexicalIdentifier::Variable {
                 name: (*name).clone(),
-            }),
-        );
+            },
+            ParamType::Any,
+        ));
     }
 }
 fn resolve_lvalue_declarative(
@@ -383,6 +384,14 @@ pub enum LexicalIdentifier {
     Function { name: String, arity: Option<usize> },
 }
 
+impl LexicalIdentifier {
+    pub fn name(&self) -> &str {
+        match self {
+            LexicalIdentifier::Variable { name } | LexicalIdentifier::Function { name, .. } => name,
+        }
+    }
+}
+
 impl From<&str> for LexicalIdentifier {
     fn from(value: &str) -> Self {
         Self::Variable { name: value.into() }
@@ -407,7 +416,11 @@ impl LexicalData {
             current_scope_idx: 0,
             global_scope: LexicalScope {
                 parent_idx: None,
-                identifiers: global_scope_map,
+                //TODO: maybe the line below is more of temporary solution
+                identifiers: global_scope_map
+                    .into_iter()
+                    .map(|x| (x, ValueType::Function))
+                    .collect_vec(),
             },
             scopes: vec![LexicalScope::new(None)],
         }
@@ -428,11 +441,17 @@ impl LexicalData {
         self.current_scope_idx = next;
     }
 
-    fn get_or_create_local_binding(&mut self, ident: LexicalIdentifier) -> Option<ResolvedVar> {
-        Some(ResolvedVar::Captured {
-            slot: self.scopes[self.current_scope_idx].get_or_allocate(ident),
+    fn get_or_create_local_binding(
+        &mut self,
+        ident: LexicalIdentifier,
+        value_type: ValueType,
+    ) -> ResolvedVar {
+        ResolvedVar::Captured {
+            slot: self.scopes[self.current_scope_idx]
+                .get_slot(&ident)
+                .unwrap_or_else(|| self.scopes[self.current_scope_idx].allocate(ident, value_type)),
             depth: 0,
-        })
+        }
     }
 
     fn get_binding_any(&mut self, ident: &str) -> Option<ResolvedVar> {
@@ -458,22 +477,22 @@ impl LexicalData {
         let mut scope_ptr = self.current_scope_idx;
 
         loop {
-            if let Some(slot) = self.scopes[scope_ptr].get_slot_by_identifier(name) {
+            if let Some(slot) = self.scopes[scope_ptr].get_slot(name) {
                 return Some(ResolvedVar::Captured { slot, depth });
             } else if let Some(parent_idx) = self.scopes[scope_ptr].parent_idx {
                 depth += 1;
                 scope_ptr = parent_idx;
             } else {
                 return Some(ResolvedVar::Global {
-                    slot: self.global_scope.get_slot_by_identifier(name)?,
+                    slot: self.global_scope.get_slot(name)?,
                 });
             }
         }
     }
 
-    fn create_local_binding(&mut self, ident: LexicalIdentifier) -> ResolvedVar {
+    fn create_local_binding(&mut self, ident: LexicalIdentifier, vtype: ValueType) -> ResolvedVar {
         ResolvedVar::Captured {
-            slot: self.scopes[self.current_scope_idx].allocate(ident),
+            slot: self.scopes[self.current_scope_idx].allocate(ident, vtype),
             depth: 0,
         }
     }
@@ -482,7 +501,7 @@ impl LexicalData {
 #[derive(Debug)]
 struct LexicalScope {
     parent_idx: Option<usize>,
-    identifiers: Vec<LexicalIdentifier>,
+    identifiers: Vec<(LexicalIdentifier, ValueType)>,
 }
 
 impl LexicalScope {
@@ -494,43 +513,27 @@ impl LexicalScope {
     }
 
     pub fn get_slot_by_name(&self, find_ident: &str) -> Option<usize> {
-        for (slot, ident_in_scope) in self.identifiers.iter().enumerate().rev() {
-            let name_in_scope = match ident_in_scope {
-                LexicalIdentifier::Variable { name } | LexicalIdentifier::Function { name, .. } => {
-                    name
-                }
-            };
-
-            if name_in_scope == find_ident {
-                return Some(slot);
-            }
-        }
-
-        None
+        self.identifiers
+            .iter()
+            .rposition(|(ident, _)| ident.name() == find_ident)
     }
 
     /// Either returns the slot in this current scope or creates a new one
+    #[deprecated = "use get_slot_by_ident instead"]
     pub fn get_or_allocate(&mut self, ident: LexicalIdentifier) -> usize {
-        if let Some(idx) = self.get_slot_by_identifier(&ident) {
-            idx
-        } else {
-            self.allocate(ident)
-        }
+        self.get_slot(&ident)
+            .unwrap_or_else(|| self.allocate(ident, todo!("we don't know")))
     }
 
-    fn get_slot_by_identifier(&mut self, find_ident: &LexicalIdentifier) -> Option<usize> {
-        for (slot, ident_in_scope) in self.identifiers.iter().enumerate().rev() {
-            if ident_in_scope == find_ident {
-                return Some(slot);
-            }
-        }
-
-        None
+    fn get_slot(&mut self, find_ident: &LexicalIdentifier) -> Option<usize> {
+        self.identifiers
+            .iter()
+            .rposition(|(ident, _type)| ident == find_ident)
     }
 
-    fn allocate(&mut self, name: LexicalIdentifier) -> usize {
-        self.identifiers.push(name);
-        // Slot is just the length of the list
+    fn allocate(&mut self, name: LexicalIdentifier, vtype: ValueType) -> usize {
+        self.identifiers.push((name, vtype));
+        // Slot is just the length of the list minus one
         self.identifiers.len() - 1
     }
 }
