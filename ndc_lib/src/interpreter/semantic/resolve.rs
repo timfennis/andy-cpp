@@ -433,8 +433,8 @@ fn resolve_type(
                 .map_or(StaticType::unit(), |expr| resolve_type(expr, lex_data));
 
             assert_eq!(
-                resolve_type(on_true, lex_data),
-                on_false_type,
+                &resolve_type(on_true, lex_data),
+                &on_false_type,
                 "if branches have different types"
             );
             on_false_type

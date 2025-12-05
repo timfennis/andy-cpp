@@ -377,16 +377,6 @@ impl Number {
         Self::Rational(Box::new(rat))
     }
 
-    #[deprecated = "remove this and just use static_type instead"]
-    fn type_name(&self) -> &'static str {
-        match self {
-            Self::Int(_) => "int",
-            Self::Float(_) => "float",
-            Self::Rational(_) => "rational",
-            Self::Complex(_) => "complex",
-        }
-    }
-
     pub fn static_type(&self) -> StaticType {
         match self {
             Self::Int(_) => StaticType::Int,
@@ -618,7 +608,7 @@ implement_rounding!(round);
 #[derive(thiserror::Error, Debug)]
 pub enum NumberToUsizeError {
     #[error("cannot convert from {0} to usize")]
-    UnsupportedVariant(&'static str),
+    UnsupportedVariant(StaticType),
     #[error("expected non-negative integer for indexing")]
     FromIntError(#[from] TryFromIntError),
     #[error("failed to convert from bigint to number because of: '{0}'")]
@@ -632,7 +622,7 @@ impl TryFrom<Number> for usize {
         match value {
             Number::Int(Int::Int64(i)) => Ok(Self::try_from(i)?),
             Number::Int(Int::BigInt(b)) => Ok(Self::try_from(b)?),
-            n => Err(NumberToUsizeError::UnsupportedVariant(n.type_name())),
+            n => Err(NumberToUsizeError::UnsupportedVariant(n.static_type())),
         }
     }
 }
@@ -640,7 +630,7 @@ impl TryFrom<Number> for usize {
 #[derive(thiserror::Error, Debug)]
 pub enum NumberToFloatError {
     #[error("cannot convert {0} to float")]
-    UnsupportedType(NumberType),
+    UnsupportedType(StaticType),
     #[error("cannot convert {0} to float")]
     UnsupportedValue(Number),
 }
@@ -654,7 +644,7 @@ impl TryFrom<&Number> for f64 {
             Number::Int(Int::Int64(i)) => i.to_f64(),
             Number::Float(f) => Some(*f),
             Number::Rational(r) => r.to_f64(),
-            _ => return Err(Self::Error::UnsupportedType(NumberType::from(value))),
+            _ => return Err(Self::Error::UnsupportedType(value.static_type())),
         }
         .ok_or_else(|| Self::Error::UnsupportedValue(value.clone()))
     }
@@ -663,7 +653,7 @@ impl TryFrom<&Number> for f64 {
 #[derive(thiserror::Error, Debug)]
 pub enum NumberToIntError {
     #[error("cannot convert {0} to int")]
-    UnsupportedType(NumberType),
+    UnsupportedType(StaticType),
     #[error("cannot convert {0} to int")]
     UnsupportedValue(Number),
 }
@@ -677,7 +667,7 @@ impl TryFrom<&Number> for i64 {
                 .try_into()
                 .map_err(|_err| NumberToIntError::UnsupportedValue(value.clone())),
             Number::Int(Int::Int64(i)) => Ok(*i),
-            _ => Err(Self::Error::UnsupportedType(NumberType::from(value))),
+            _ => Err(Self::Error::UnsupportedType(value.static_type())),
         }
     }
 }
@@ -711,37 +701,4 @@ pub enum NumberType {
     Float,
     Rational,
     Complex,
-}
-
-impl From<NumberType> for StaticType {
-    fn from(value: NumberType) -> Self {
-        match value {
-            NumberType::Int => Self::Int,
-            NumberType::Float => Self::Float,
-            NumberType::Rational => Self::Rational,
-            NumberType::Complex => Self::Complex,
-        }
-    }
-}
-
-impl From<&Number> for NumberType {
-    fn from(value: &Number) -> Self {
-        match value {
-            Number::Int(_) => Self::Int,
-            Number::Float(_) => Self::Float,
-            Number::Rational(_) => Self::Rational,
-            Number::Complex(_) => Self::Complex,
-        }
-    }
-}
-
-impl fmt::Display for NumberType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Int => write!(f, "Int"),
-            Self::Float => write!(f, "Float"),
-            Self::Rational => write!(f, "Rational"),
-            Self::Complex => write!(f, "Complex"),
-        }
-    }
 }
