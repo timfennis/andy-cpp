@@ -134,9 +134,9 @@ mod inner {
         serde_json::from_str::<JsonValue>(input)?.try_into()
     }
 
-    /// Converts the input value to json
-    pub fn json_encode(input: Value) -> anyhow::Result<Value> {
+    /// Converts the input value to JSON
+    pub fn json_encode(input: Value) -> anyhow::Result<String> {
         let v: JsonValue = input.try_into()?;
-        Ok(Value::string(v.to_string()))
+        Ok(v.to_string())
     }
 }

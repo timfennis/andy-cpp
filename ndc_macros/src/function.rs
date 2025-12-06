@@ -182,6 +182,9 @@ fn map_type_path(p: &syn::TypePath) -> TokenStream {
         "MaxHeap" => {
             quote::quote! { crate::interpreter::function::StaticType::MaxHeap }
         }
+        "Iterator" => {
+            quote::quote! { crate::interpreter::function::StaticType::Iterator }
+        }
         "Option" => {
             // TODO: in the future add generic types
             quote::quote! { crate::interpreter::function::StaticType::Option }

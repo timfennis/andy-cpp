@@ -112,6 +112,7 @@ mod inner {
     }
 
     /// Splits the string into paragraphs, using blank lines as separators.
+    #[function(return_type = Vec<String>)]
     pub fn paragraphs(string: &str) -> Value {
         Value::collect_list(string.split("\n\n").map(ToString::to_string))
     }
@@ -122,6 +123,7 @@ mod inner {
     }
 
     /// Splits the string into lines, using newline characters as separators.
+    #[function(return_type = Vec<String>)]
     pub fn lines(string: &str) -> Value {
         Value::collect_list(string.lines().map(ToString::to_string))
     }
@@ -132,6 +134,7 @@ mod inner {
     }
 
     /// Splits the string into words, using whitespace as the separator.
+    #[function(return_type = Vec<String>)]
     pub fn words(string: &str) -> Value {
         Value::collect_list(string.split_whitespace().map(ToString::to_string))
     }
@@ -142,6 +145,7 @@ mod inner {
     }
 
     /// Splits the string by whitespace into a list of substrings.
+    #[function(return_type = Vec<String>)]
     pub fn split(string: &str) -> Value {
         Value::collect_list(string.split_whitespace().map(ToString::to_string))
     }
@@ -157,7 +161,7 @@ mod inner {
     }
 
     /// Splits the string using a given pattern as the delimiter.
-    #[function(name = "split")]
+    #[function(name = "split", return_type = Vec<String>)]
     pub fn split_with_pattern(string: &str, pattern: &str) -> Value {
         Value::list(
             string
@@ -169,6 +173,7 @@ mod inner {
     }
 
     /// Splits the string at the first occurrence of `pattern`, returning a tuple-like value.
+    #[function(name = "split", return_type = (String, String))]
     pub fn split_once(string: &str, pattern: &str) -> Value {
         match string.split_once(pattern) {
             Some((fst, snd)) => Value::tuple(vec![Value::string(fst), Value::string(snd)]),

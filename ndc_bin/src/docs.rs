@@ -50,7 +50,7 @@ pub fn docs(query: Option<&str>) -> anyhow::Result<()> {
         let mut signature = String::new();
         match type_sig {
             TypeSignature::Variadic => {
-                writeln!(signature, "(*args**)")?;
+                write!(signature, "(*args**)")?;
             }
             TypeSignature::Exact(params) => {
                 write!(signature, "(")?;

@@ -56,29 +56,31 @@ mod inner {
     }
 
     /// Creates a new instance of `Some`
-    #[function(name = "Some")] // <-- fake type constructor
+    #[function(name = "Some", return_type = Option<Value>)] // <-- fake type constructor
     pub fn some(value: Value) -> Value {
         Value::Option(Some(Box::new(value)))
     }
 
     /// Creates a new instance of `None`
+    #[function(return_type = Option)]
     pub fn none() -> Value {
         Value::Option(None)
     }
 
     /// Returns true if the argument is Some<T>
-    pub fn is_some(value: &Value) -> Value {
-        Value::Bool(matches!(value, Value::Option(Some(_))))
+    pub fn is_some(value: &Value) -> bool {
+        matches!(value, Value::Option(Some(_)))
     }
 
     /// Returns true if the argument is None
-    pub fn is_none(value: &Value) -> Value {
-        Value::Bool(matches!(value, Value::Option(None)))
+    pub fn is_none(value: &Value) -> bool {
+        matches!(value, Value::Option(None))
     }
 
     /// Extracts the value from an Option or errors if it's either None or a non-Option type
     ///
     /// Note: this function should take an Option as parameter
+    // TODO: the type of value should be `Option<Value>` but the macro crate probably doesn't support that yet
     pub fn unwrap(value: Value) -> anyhow::Result<Value> {
         match value {
             Value::Option(Some(val)) => Ok(*val),

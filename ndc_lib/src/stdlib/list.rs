@@ -9,6 +9,7 @@ mod inner {
     use anyhow::anyhow;
 
     /// Converts any sequence into a list
+    #[function(return_type = Vec<Value>)]
     pub fn list(seq: &mut Sequence) -> Value {
         Value::list(mut_seq_to_iterator(seq).collect::<Vec<_>>())
     }
@@ -34,12 +35,12 @@ mod inner {
         }
     }
 
-    pub fn insert(list: &mut Vec<Value>, index: usize, elem: Value) -> anyhow::Result<Value> {
+    pub fn insert(list: &mut Vec<Value>, index: usize, elem: Value) -> anyhow::Result<()> {
         if index > list.len() {
             return Err(anyhow!("index {index} is out of bounds"));
         }
         list.insert(index, elem);
-        Ok(Value::unit())
+        Ok(())
     }
 
     /// Removes and returns the element at position `index` within the list, shifting all elements after it to the left.
@@ -161,7 +162,7 @@ mod inner {
     }
 
     /// Creates a copy of the list with its elements in reverse order
-    /// TODO: how to deal with tuples?
+    #[function(return_type = Vec<Value>)]
     pub fn reversed(list: &[Value]) -> Value {
         Value::list(list.iter().rev().cloned().collect::<Vec<Value>>())
     }
@@ -217,6 +218,7 @@ mod inner {
         list.last().cloned().map_or_else(Value::none, Value::some)
     }
 
+    #[function(return_type = Vec<(Value, Value)>)]
     pub fn cartesian_product(list_a: &[Value], list_b: &[Value]) -> Value {
         Value::list(
             list_a

@@ -586,6 +586,7 @@ mod inner {
     }
 
     /// Return a list of all windows, wrapping back to the first elements when the window would otherwise exceed the length of source list, producing tuples of size 2.
+    #[function(return_type = Vec<(Value, Value)>)]
     pub fn circular_tuple_windows(seq: &mut Sequence) -> Value {
         // TODO: this implementation probably clones a bit more than it needs to, but it's better tol
         //       have something than nothing
@@ -600,6 +601,7 @@ mod inner {
     }
 
     /// Returns a list of all size-2 windows in `seq`.
+    #[function(return_type = Vec<(Value, Value)>)]
     pub fn pairwise(seq: &mut Sequence) -> Value {
         Value::list(
             mut_seq_to_iterator(seq)
@@ -612,6 +614,7 @@ mod inner {
 
     /// Applies a function to each pair of consecutive elements in a sequence and returns the results as a list.
     #[function(name = "pairwise")]
+    #[function(return_type = Vec<(Value, Value)>)]
     pub fn pairwise_map(seq: &mut Sequence, function: &Callable<'_>) -> EvaluationResult {
         let main = mut_seq_to_iterator(seq).collect::<Vec<_>>();
 
@@ -624,6 +627,7 @@ mod inner {
     }
 
     /// Returns a list of all contiguous windows of `length` size. The windows overlap. If the `seq` is shorter than size, the iterator returns no values.
+    #[function(return_type = Vec<Vec<Value>>)]
     pub fn windows(seq: &mut Sequence, length: usize) -> Value {
         Value::list(
             mut_seq_to_iterator(seq)
@@ -638,6 +642,7 @@ mod inner {
     ///
     /// The powerset of a set contains all subsets including the empty set and the full input set. A powerset has length `2^n` where `n` is the length of the input set.
     /// Each list produced by this function represents a subset of the elements in the source sequence.
+    #[function(return_type = Vec<Vec<Value>>)]
     pub fn subsequences(seq: &mut Sequence) -> Value {
         Value::list(
             mut_seq_to_iterator(seq)
@@ -649,6 +654,7 @@ mod inner {
 
     /// Return a list that represents the powerset of the elements of `seq` that are exactly `length` long.
     #[function(name = "subsequences")]
+    #[function(return_type = Vec<Vec<Value>>)]
     pub fn subsequences_len(seq: &mut Sequence, length: usize) -> Value {
         Value::list(
             mut_seq_to_iterator(seq)
@@ -685,6 +691,7 @@ mod inner {
     ///   [3,"c",false]
     /// ]
     /// ```
+    #[function(return_type = Vec<Vec<Value>>)]
     pub fn multi_cartesian_product(seq: &mut Sequence) -> anyhow::Result<Value> {
         let mut iterators = Vec::new();
 
@@ -704,6 +711,7 @@ mod inner {
 
     /// Split the input sequence into evenly sized chunks. If the input length of the sequence
     /// is not dividable by the chunk_size the last chunk will contain fewer elements.
+    #[function(return_type = Vec<Vec<Value>>)]
     pub fn chunks(seq: &mut Sequence, chunk_size: usize) -> anyhow::Result<Value> {
         if chunk_size == 0 {
             return Err(anyhow!("chunk size must be non-zero"));
@@ -719,6 +727,7 @@ mod inner {
         ))
     }
 
+    #[function(return_type = Iterator<Value>)]
     pub fn repeat(value: Value) -> Value {
         Value::Sequence(Sequence::Iterator(Rc::new(RefCell::new(
             ValueIterator::Repeat(Repeat {
@@ -729,7 +738,7 @@ mod inner {
         ))))
     }
 
-    #[function(name = "repeat")]
+    #[function(name = "repeat", return_type = Iterator<Value>)]
     pub fn repeat_times(value: Value, times: usize) -> Value {
         Value::Sequence(Sequence::Iterator(Rc::new(RefCell::new(
             ValueIterator::Repeat(Repeat {
