@@ -1,4 +1,6 @@
-use crate::ast::{Expression, ExpressionLocation, ForBody, ForIteration, Lvalue, ResolvedVar};
+use crate::ast::{
+    Binding, Expression, ExpressionLocation, ForBody, ForIteration, Lvalue, ResolvedVar,
+};
 use crate::interpreter::function::StaticType;
 use crate::lexer::Span;
 use itertools::Itertools;
@@ -39,7 +41,7 @@ impl Analyser {
                     AnalysisError::identifier_not_previously_declared(ident, *span)
                 })?;
 
-                *resolved = Some(binding);
+                *resolved = Binding::Resolved(binding);
 
                 Ok(self.scope_tree.get_type(binding).clone())
             }
@@ -90,8 +92,10 @@ impl Analyser {
                     Ok(StaticType::unit())
                 } else {
                     // For now, we require that the normal operation is present and the special assignment operation is optional
-                    Err(AnalysisError::identifier_not_previously_declared(
-                        operation, *span,
+                    Err(AnalysisError::function_not_found(
+                        operation,
+                        &op_assign_arg_types,
+                        *span,
                     ))
                 }
             }
@@ -275,12 +279,34 @@ impl Analyser {
         let binding = self
             .scope_tree
             .get_function_binding(name, argument_types)
-            // TODO: instead of throwing an error we can emit a dynamic binding
+            .map(|binding| Binding::Resolved(binding))
+            .or_else(|| {
+                let loose_bindings = self
+                    .scope_tree
+                    .get_function_bindings_loose(name, argument_types);
+
+                if loose_bindings.is_empty() {
+                    return None;
+                }
+
+                Some(Binding::Dynamic(loose_bindings))
+            })
             .ok_or_else(|| AnalysisError::function_not_found(name, argument_types, span))?;
 
-        *resolved = Some(binding);
+        let out_type = match &binding {
+            Binding::None => unreachable!("should return error before this happens"),
+            Binding::Resolved(res) => self.scope_tree.get_type(*res).clone(),
 
-        Ok(self.scope_tree.get_type(binding).clone())
+            // TODO: are we just going to lie about the type or is this just how truthful we can be
+            Binding::Dynamic(_) => StaticType::Function {
+                parameters: None,
+                return_type: Box::new(StaticType::Any),
+            },
+        };
+
+        *resolved = binding;
+
+        Ok(out_type)
     }
     fn resolve_for_iterations(
         &mut self,
@@ -371,7 +397,7 @@ impl Analyser {
                 identifier,
                 resolved,
             } => {
-                let Some(target) = self.scope_tree.get_binding_any(&identifier) else {
+                let Some(target) = self.scope_tree.get_binding_any(identifier) else {
                     return Err(AnalysisError::identifier_not_previously_declared(
                         identifier, span,
                     ));
@@ -414,9 +440,9 @@ impl Analyser {
 
             // TODO: big challenge how do we figure out the function parameter types?
             //       it seems like this is something we need an HM like system for!?
-            *resolved = Some(
+            *resolved = Binding::Resolved(
                 self.scope_tree
-                    .create_local_binding(name.to_string(), StaticType::Any),
+                    .create_local_binding((*name).to_string(), StaticType::Any),
             );
         }
     }
@@ -448,95 +474,8 @@ impl Analyser {
 
         Ok(())
     }
-
-    // fn resolve_type(
-    //     &mut self,
-    //     ExpressionLocation { expression, .. }: &ExpressionLocation,
-    // ) -> StaticType {
-    //     match expression {
-    //         Expression::BoolLiteral(_) | Expression::Logical { .. } => StaticType::Bool,
-    //         Expression::StringLiteral(_) => StaticType::String,
-    //         Expression::Int64Literal(_) | Expression::BigIntLiteral(_) => StaticType::Int,
-    //         Expression::Float64Literal(_) => StaticType::Float,
-    //         Expression::ComplexLiteral(_) => StaticType::Complex,
-    //         Expression::Identifier { resolved, name } => {
-    //             println!(
-    //                 "resolving name: {name}, {resolved:?}\n\n{}\n\n{:?}",
-    //                 self.scope_tree.current_scope_idx, self.scope_tree.scopes
-    //             );
-    //             self
-    //             .scope_tree
-    //             .get_type(resolved.unwrap_or_else(|| {
-    //             panic!(
-    //                 "previously mentioned identifier {name} was not resolved during type resolution"
-    //             )
-    //         }))
-    //         }
-    //         Expression::Statement(_)
-    //         | Expression::While { .. }
-    //         | Expression::Break
-    //         | Expression::Assignment { .. } => StaticType::unit(),
-    //         Expression::Grouping(expr) | Expression::Return { value: expr } => {
-    //             self.resolve_type(expr)
-    //         }
-    //         Expression::VariableDeclaration { .. } => {
-    //             debug_assert!(
-    //                 false,
-    //                 "trying to get type of variable declaration, does this make sense?"
-    //             );
-    //             StaticType::unit() // specifically unit tuple
-    //         }
-    //         Expression::OpAssignment { .. } => {
-    //             debug_assert!(
-    //                 false,
-    //                 "trying to get type of op assignment, does this make sense?"
-    //             );
-    //             StaticType::unit() // specifically unit tuple
-    //         }
-    //         Expression::FunctionDeclaration { .. } => StaticType::Function,
-    //         Expression::Block { statements } => statements
-    //             .iter()
-    //             .last()
-    //             .map_or(StaticType::unit(), |last| self.resolve_type(last)),
-    //         Expression::If {
-    //             on_true, on_false, ..
-    //         } => {
-    //             let on_false_type = on_false
-    //                 .as_ref()
-    //                 .map_or(StaticType::unit(), |expr| self.resolve_type(expr));
-    //
-    //             assert_eq!(
-    //                 self.resolve_type(on_true),
-    //                 on_false_type,
-    //                 "if branches have different types"
-    //             );
-    //             on_false_type
-    //         }
-    //         Expression::For { body, .. } => ,
-    //         Expression::Call {
-    //             function: _,
-    //             arguments: _,
-    //         } => {
-    //             // TODO: Okay this is actually hard
-    //             StaticType::Any
-    //         }
-    //         Expression::Index { .. } => {
-    //             // TODO: this is also hard since we don't have generics
-    //             StaticType::Any
-    //         }
-    //         Expression::Tuple { .. } => {
-    //             // TODO: this is hard
-    //             StaticType::Any
-    //         }
-    //         Expression::List { .. } => StaticType::List,
-    //         Expression::Map { .. } => StaticType::Map,
-    //         Expression::Continue => StaticType::Any, // Maybe we need a Never type?
-    //         Expression::RangeInclusive { .. } | Expression::RangeExclusive { .. } => {
-    //             StaticType::Iterator
-    //         }
-    //     }
-    // }
 }
+
 fn extract_argument_arity(arguments: &ExpressionLocation) -> usize {
     let ExpressionLocation {
         expression: Expression::Tuple { values },
@@ -619,9 +558,32 @@ impl ScopeTree {
         }
     }
 
-    fn get_function_binding(&mut self, ident: &str, sig: &[StaticType]) -> Option<ResolvedVar> {
-        // println!("get function binding {ident} {sig:?}");
+    fn get_function_bindings_loose(&mut self, ident: &str, sig: &[StaticType]) -> Vec<ResolvedVar> {
+        let mut depth = 0;
+        let mut scope_ptr = self.current_scope_idx;
 
+        loop {
+            let candidates = self.scopes[scope_ptr].find_function_candidates(ident, sig);
+            if !candidates.is_empty() {
+                return candidates
+                    .into_iter()
+                    .map(|slot| ResolvedVar::Captured { slot, depth })
+                    .collect();
+            } else if let Some(parent_idx) = self.scopes[scope_ptr].parent_idx {
+                depth += 1;
+                scope_ptr = parent_idx;
+            } else {
+                return self
+                    .global_scope
+                    .find_function_candidates(ident, sig)
+                    .into_iter()
+                    .map(|slot| ResolvedVar::Global { slot })
+                    .collect();
+            }
+        }
+    }
+
+    fn get_function_binding(&mut self, ident: &str, sig: &[StaticType]) -> Option<ResolvedVar> {
         let mut depth = 0;
         let mut scope_ptr = self.current_scope_idx;
 
@@ -667,12 +629,42 @@ impl Scope {
             .rposition(|(ident, _)| ident == find_ident)
     }
 
-    fn find_function(&mut self, find_ident: &str, find_typ: &[StaticType]) -> Option<usize> {
+    fn find_function_candidates(&self, find_ident: &str, find_types: &[StaticType]) -> Vec<usize> {
+        self.identifiers.iter()
+            .enumerate()
+            .rev()
+            .filter_map(|(slot, (ident, typ))| {
+                if ident != find_ident {
+                    return None;
+                }
+
+                // If the thing is not a function we're not interested
+                let StaticType::Function { parameters, .. } = typ else {
+                    return None;
+                };
+
+                let Some(param_types) = parameters else {
+                    // If this branch happens then the function we're matching against is variadic meaning it's always a match
+                    debug_assert!(false, "we should never be calling find_function_candidates if there were variadic matches");
+                    // TODO: Change to unreachable?
+                    return Some(slot);
+                };
+
+                let is_good = param_types.len() == find_types.len()
+                    && param_types.iter().zip(find_types.iter()).all(|(typ_1, typ_2)| !typ_1.is_incompatible_with(typ_2));
+
+                is_good.then_some(slot)
+            })
+            .collect()
+    }
+    fn find_function(&self, find_ident: &str, find_types: &[StaticType]) -> Option<usize> {
         self.identifiers.iter().rposition(|(ident, typ)| {
+            // If the name doesn't match we're not interested
             if ident != find_ident {
                 return false;
             }
 
+            // If the thing is not a function we're not interested
             let StaticType::Function { parameters, .. } = typ else {
                 return false;
             };
@@ -682,9 +674,8 @@ impl Scope {
                 return true;
             };
 
-            ident == find_ident
-                && param_types.len() == find_typ.len()
-                && find_typ
+            param_types.len() == find_types.len()
+                && find_types
                     .iter()
                     .zip(param_types.iter())
                     .all(|(typ1, typ2)| typ1.is_compatible_with(typ2))
@@ -716,7 +707,7 @@ impl AnalysisError {
     fn function_not_found(ident: &str, types: &[StaticType], span: Span) -> Self {
         Self {
             text: format!(
-                "No function named '{ident}' found that matches the arguments {}",
+                "No function called '{ident}' found that matches the arguments {}",
                 types.iter().join(", ")
             ),
             span,

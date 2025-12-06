@@ -6,6 +6,13 @@ use crate::lexer::Span;
 use num::BigInt;
 use num::complex::Complex64;
 
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub enum Binding {
+    None,
+    Resolved(ResolvedVar),
+    Dynamic(Vec<ResolvedVar>), // figure it out at runtime
+}
+
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub enum ResolvedVar {
     Captured { depth: usize, slot: usize },
@@ -29,7 +36,7 @@ pub enum Expression {
     ComplexLiteral(Complex64),
     Identifier {
         name: String,
-        resolved: Option<ResolvedVar>,
+        resolved: Binding,
     },
     Statement(Box<ExpressionLocation>),
     Logical {

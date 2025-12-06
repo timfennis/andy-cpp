@@ -547,6 +547,11 @@ impl StaticType {
         }
     }
 
+    // BRUH
+    pub fn is_incompatible_with(&self, other: &Self) -> bool {
+        !self.is_compatible_with(other) && !other.is_compatible_with(self)
+    }
+
     #[allow(clippy::match_same_arms)]
     pub fn is_compatible_with(&self, other: &Self) -> bool {
         match (self, other) {

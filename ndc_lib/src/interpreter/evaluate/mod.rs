@@ -1,4 +1,6 @@
-use crate::ast::{Expression, ExpressionLocation, ForBody, ForIteration, LogicalOperator, Lvalue};
+use crate::ast::{
+    Binding, Expression, ExpressionLocation, ForBody, ForIteration, LogicalOperator, Lvalue,
+};
 use crate::hash_map::HashMap;
 use crate::interpreter::environment::Environment;
 use crate::interpreter::function::{
@@ -12,7 +14,6 @@ use crate::interpreter::value::Value;
 use crate::lexer::Span;
 use index::{Offset, evaluate_as_index, get_at_index, set_at_index};
 use itertools::Itertools;
-use log::error;
 use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
@@ -39,9 +40,12 @@ pub(crate) fn evaluate_expression(
             if name == "None" {
                 return Ok(Value::none());
             }
-            environment
-                .borrow()
-                .get(resolved.expect("identifier was not resolved before execution"))
+
+            match resolved {
+                Binding::None => panic!("binding not resolved at runtime"),
+                Binding::Resolved(resolved) => environment.borrow().get(*resolved),
+                Binding::Dynamic(_) => panic!("attempted to evaluate dynamic binding"),
+            }
         }
         Expression::VariableDeclaration { l_value, value } => {
             let value = evaluate_expression(value, environment)?;
@@ -318,7 +322,34 @@ pub(crate) fn evaluate_expression(
             // environment, or it must be some expression that evaluates to a function.
             // In case the expression is an identifier we get ALL the values that match the identifier
             // ordered by the distance is the scope-hierarchy.
-            let function_as_value = evaluate_expression(function, environment)?;
+            let function_as_value = if let ExpressionLocation {
+                expression:
+                    Expression::Identifier {
+                        resolved: Binding::Dynamic(dynamic_binding),
+                        ..
+                    },
+                ..
+            } = &**function
+            {
+                dynamic_binding
+                    .iter()
+                    .find_map(|binding| {
+                        let value = environment.borrow().get(*binding);
+                        let Value::Function(..) = value else {
+                            panic!("dynamic binding resolved to non-function type at runtime");
+                        };
+
+                        Some(value)
+                    })
+                    .ok_or_else(|| {
+                        FunctionCarrier::EvaluationError(EvaluationError::new(
+                            "dynamic binding failed to produce a useful function".to_string(),
+                            span,
+                        ))
+                    })?
+            } else {
+                evaluate_expression(function, environment)?
+            };
 
             return if let Value::Function(function) = function_as_value {
                 match call_function(&function, &mut evaluated_args, environment, span) {
