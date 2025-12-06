@@ -37,6 +37,17 @@ pub struct Function {
     body: FunctionBody,
 }
 
+impl fmt::Debug for Function {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Function(name={}, sig={})",
+            self.name(),
+            self.type_signature()
+        )
+    }
+}
+
 impl Function {
     pub fn arity(&self) -> Option<usize> {
         self.body.arity()
@@ -287,7 +298,7 @@ impl TypeSignature {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct OverloadedFunction {
     implementations: HashMap<TypeSignature, Function>,
 }

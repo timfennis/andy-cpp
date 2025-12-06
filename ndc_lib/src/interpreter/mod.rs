@@ -34,11 +34,11 @@ impl Interpreter {
         T: InterpreterOutput + 'static,
     {
         let environment = Environment::new_with_stdlib(Box::new(dest));
-        let hash_map = environment.create_global_scope_mapping();
+        let global_identifiers = environment.get_global_identifiers();
 
         Self {
             environment: Rc::new(RefCell::new(environment)),
-            analyser: Analyser::from_scope_tree(ScopeTree::from_global_scope(hash_map)),
+            analyser: Analyser::from_scope_tree(ScopeTree::from_global_scope(global_identifiers)),
         }
     }
 
@@ -72,7 +72,7 @@ impl Interpreter {
         }
 
         // dbg!(&expressions);
-        // dbg!(&self.lexical_data);
+        // dbg!(&self.analyser);
 
         let final_value = self.interpret(expressions.into_iter())?;
 

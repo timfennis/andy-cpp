@@ -12,8 +12,7 @@ use std::rc::Rc;
 pub struct RootEnvironment {
     pub output: Box<dyn InterpreterOutput>,
     // These are global values
-    global_functions: Vec<OverloadedFunction>,
-    global_functions2: Vec<Function>,
+    global_functions: Vec<Function>,
 }
 
 pub struct Environment {
@@ -56,7 +55,6 @@ impl Environment {
         let root = RootEnvironment {
             output: writer,
             global_functions: Default::default(),
-            global_functions2: Default::default(),
         };
 
         let mut env = Self {
@@ -70,23 +68,21 @@ impl Environment {
         env
     }
 
-    pub fn create_global_scope_mapping(&self) -> Vec<LexicalIdentifier> {
+    pub fn get_global_identifiers(&self) -> Vec<LexicalIdentifier> {
         self.root
             .borrow()
             .global_functions
             .iter()
-            .filter_map(|function| {
-                function.name().map(|name| LexicalIdentifier::Function {
-                    name: name.to_string(),
-                    arity: function.arity(),
-                })
+            .map(|function| {
+                debug_assert_ne!(function.name(), "");
+                LexicalIdentifier::from_function(function)
             })
             .collect::<Vec<LexicalIdentifier>>()
     }
 
     #[must_use]
     pub fn get_all_functions(&self) -> Vec<Function> {
-        self.root.borrow().global_functions2.clone()
+        self.root.borrow().global_functions.clone()
     }
 
     pub fn set(&mut self, var: ResolvedVar, value: Value) {
@@ -141,21 +137,7 @@ impl Environment {
 
         let root: &mut RootEnvironment = &mut self.root.borrow_mut();
 
-        root.global_functions2.push(new_function.clone());
-
-        // TODO: the code below can be removed one day
-
-        // Try to add it to an existing definition
-        for fun in root.global_functions.iter_mut() {
-            if fun.name() == Some(new_function.name()) && fun.arity() == new_function.arity() {
-                fun.add(new_function);
-                return;
-            }
-        }
-
-        // Create a new definition
-        root.global_functions
-            .push(OverloadedFunction::from_multiple(vec![new_function]))
+        root.global_functions.push(new_function.clone());
     }
 
     fn get_copy_from_slot(&self, depth: usize, slot: usize) -> Value {
