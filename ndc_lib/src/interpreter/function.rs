@@ -572,6 +572,7 @@ impl StaticType {
                 | Self::Map,
                 Self::Sequence,
             ) => true,
+            (Self::Function { .. }, Self::Function { .. }) => true, // TODO: just saying all functions are compatible is lazy!!!
             _ => false,
         }
     }
