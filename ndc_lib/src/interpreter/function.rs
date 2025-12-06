@@ -114,6 +114,7 @@ impl FunctionBody {
             Self::Memoized { function, .. } => function.arity(),
         }
     }
+
     pub fn generic(
         type_signature: TypeSignature,
         return_type: StaticType,
@@ -556,7 +557,8 @@ impl fmt::Display for StaticType {
             Self::Sequence => write!(f, "Sequence"),
             Self::List => write!(f, "List"),
             Self::String => write!(f, "String"),
-            Self::Tuple(tup) => write!(f, "tuple<{}>", tup.iter().join(", ")),
+            Self::Tuple(tup) if tup.is_empty() => write!(f, "()"),
+            Self::Tuple(tup) => write!(f, "Tuple<{}>", tup.iter().join(", ")),
             Self::Map => write!(f, "Map"),
             Self::Iterator => write!(f, "Iterator"),
             Self::MinHeap => write!(f, "MinHeap"),

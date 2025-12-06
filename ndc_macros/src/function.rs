@@ -7,6 +7,7 @@ use itertools::Itertools;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use std::fmt::Write;
+use syn::spanned::Spanned;
 
 pub struct WrappedFunction {
     pub function_declaration: TokenStream,
@@ -20,7 +21,7 @@ pub fn wrap_function(function: &syn::ItemFn) -> Vec<WrappedFunction> {
         &original_identifier.to_string(),
     )];
 
-    let mut docs_buf = String::new();
+    let mut documentation_buffer = String::new();
     for attr in &function.attrs {
         if attr.path().is_ident("function") {
             attr.parse_nested_meta(|meta| {
@@ -42,7 +43,8 @@ pub fn wrap_function(function: &syn::ItemFn) -> Vec<WrappedFunction> {
             && let syn::Expr::Lit(expr) = &meta.value
             && let syn::Lit::Str(lit_str) = &expr.lit
         {
-            writeln!(docs_buf, "{}", lit_str.value().trim()).expect("failed to write docs");
+            writeln!(documentation_buffer, "{}", lit_str.value().trim())
+                .expect("failed to write docs");
         }
     }
 
@@ -54,7 +56,7 @@ pub fn wrap_function(function: &syn::ItemFn) -> Vec<WrappedFunction> {
     }
 
     // TODO: CONTINUE HERE
-    let return_type = quote! { crate::interpreter::function::StaticType::Any }; // RIP ROP RAP
+    let return_type = map_return_type(&function.sig.output);
 
     // If the function has no argument then the cartesian product stuff below doesn't work
     if function.sig.inputs.is_empty() {
@@ -67,7 +69,7 @@ pub fn wrap_function(function: &syn::ItemFn) -> Vec<WrappedFunction> {
                     function_name,
                     vec![],
                     return_type.clone(),
-                    &docs_buf,
+                    &documentation_buffer,
                 )
             })
             .collect();
@@ -102,7 +104,7 @@ pub fn wrap_function(function: &syn::ItemFn) -> Vec<WrappedFunction> {
                         function_name,
                         args,
                         return_type.clone(),
-                        &docs_buf,
+                        &documentation_buffer,
                     );
                     variation_id += 1;
                     wrapped
@@ -110,6 +112,69 @@ pub fn wrap_function(function: &syn::ItemFn) -> Vec<WrappedFunction> {
                 .collect::<Vec<_>>()
         })
         .collect()
+}
+
+fn map_return_type(output: &syn::ReturnType) -> TokenStream {
+    let convert = build();
+    match output {
+        syn::ReturnType::Default => {
+            // in case return type is not specified (for closures rust defaults to type inference which doesn't help us here)
+            quote! { crate::interpreter::function::StaticType::Tuple(vec![]) }
+        }
+        syn::ReturnType::Type(_, ty) => map_type(ty),
+    }
+}
+
+fn map_type(ty: &syn::Type) -> TokenStream {
+    match ty {
+        syn::Type::Path(p) => map_type_path(p),
+        syn::Type::Reference(r) => map_type(r.elem.as_ref()),
+        // add more variants when needed
+        _ => quote::quote! { crate::interpreter::function::StaticType::Any },
+    }
+}
+
+fn map_type_path(p: &syn::TypePath) -> TokenStream {
+    let segment = p.path.segments.last().unwrap();
+
+    match segment.ident.to_string().as_str() {
+        // Primitive single identifiers
+        "i32" | "i64" | "isize" | "u32" | "u64" => {
+            quote::quote! { crate::interpreter::function::StaticType::Int }
+        }
+        "f32" | "f64" => {
+            quote::quote! { crate::interpreter::function::StaticType::Float }
+        }
+        "bool" => {
+            quote::quote! { crate::interpreter::function::StaticType::Bool }
+        }
+        "String" | "str" => {
+            quote::quote! { crate::interpreter::function::StaticType::String }
+        }
+
+        // Generic wrappers like anyhow::Result<T>, std::result::Result<T>
+        // "HashMap" =>
+        "Result" => match &segment.arguments {
+            syn::PathArguments::AngleBracketed(args) => {
+                // Extract the first generic argument
+                if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
+                    // Recurse on T
+                    map_type(inner_ty)
+                } else {
+                    panic!("Result without generic arguments");
+                }
+            }
+
+            _ => {
+                panic!("Result return type found without syn::PathArguments::AngleBracketed");
+            }
+        },
+
+        // Fallback
+        _ => {
+            quote::quote! { crate::interpreter::function::StaticType::Any }
+        }
+    }
 }
 
 /// Wraps an original rust function `function` in an outer function with the identifier `identifier`

@@ -12,6 +12,7 @@ pub struct Argument {
 }
 pub trait TypeConverter {
     fn matches(&self, ty: &syn::Type) -> bool;
+    fn static_type(&self) -> TokenStream;
     fn convert(
         &self,
         temp_var: syn::Ident,
@@ -26,6 +27,10 @@ impl TypeConverter for MutRefString {
         is_ref_mut(ty) && is_string(ty)
     }
 
+    fn static_type(&self) -> TokenStream {
+        quote! { crate::interpreter::function::StaticType::String }
+    }
+
     fn convert(
         &self,
         temp_var: syn::Ident,
@@ -33,7 +38,7 @@ impl TypeConverter for MutRefString {
         argument_var_name: syn::Ident,
     ) -> Vec<Argument> {
         vec![Argument {
-            param_type: quote! { crate::interpreter::function::StaticType::String },
+            param_type: self.static_type(),
             param_name: quote! { #original_name },
             argument: quote! { #argument_var_name },
             initialize_code: quote! {
@@ -53,6 +58,10 @@ impl TypeConverter for InternalMap {
         path_ends_with(ty, "MapRepr")
     }
 
+    fn static_type(&self) -> TokenStream {
+        quote! { crate::interpreter::function::StaticType::Map }
+    }
+
     fn convert(
         &self,
         temp_var: syn::Ident,
@@ -60,7 +69,7 @@ impl TypeConverter for InternalMap {
         argument_var_name: syn::Ident,
     ) -> Vec<Argument> {
         vec![Argument {
-            param_type: quote! { crate::interpreter::function::StaticType::Map },
+            param_type: self.static_type(),
             param_name: quote! { #original_name },
             argument: quote! { #argument_var_name },
             initialize_code: quote! {
@@ -79,6 +88,10 @@ impl TypeConverter for InternalString {
         path_ends_with(ty, "StringRepr")
     }
 
+    fn static_type(&self) -> TokenStream {
+        quote! { crate::interpreter::function::StaticType::String }
+    }
+
     fn convert(
         &self,
         temp_var: syn::Ident,
@@ -86,7 +99,7 @@ impl TypeConverter for InternalString {
         argument_var_name: syn::Ident,
     ) -> Vec<Argument> {
         vec![Argument {
-            param_type: quote! { crate::interpreter::function::StaticType::String },
+            param_type: self.static_type(),
             param_name: quote! { #original_name },
             argument: quote! { #argument_var_name },
             initialize_code: quote! {
@@ -106,6 +119,10 @@ impl TypeConverter for InternalList {
         path_ends_with(ty, "ListRepr")
     }
 
+    fn static_type(&self) -> TokenStream {
+        quote! { crate::interpreter::function::StaticType::List }
+    }
+
     fn convert(
         &self,
         temp_var: syn::Ident,
@@ -113,7 +130,7 @@ impl TypeConverter for InternalList {
         argument_var_name: syn::Ident,
     ) -> Vec<Argument> {
         vec![Argument {
-            param_type: quote! { crate::interpreter::function::StaticType::List },
+            param_type: self.static_type(),
             param_name: quote! { #original_name },
             argument: quote! { #argument_var_name },
             initialize_code: quote! {
