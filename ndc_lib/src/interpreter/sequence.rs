@@ -1,7 +1,8 @@
 use crate::hash_map::HashMap;
+use crate::interpreter::function::StaticType;
 use crate::interpreter::heap::{MaxHeap, MinHeap};
 use crate::interpreter::iterator::ValueIterator;
-use crate::interpreter::value::{Value, ValueType};
+use crate::interpreter::value::Value;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
@@ -88,16 +89,16 @@ impl Sequence {
         }
     }
 
-    pub fn value_type(&self) -> ValueType {
+    pub fn value_type(&self) -> StaticType {
         match self {
-            Self::String(_) => ValueType::String,
-            Self::List(_) => ValueType::List,
-            Self::Tuple(t) => ValueType::Tuple(t.iter().map(Value::value_type).collect()),
-            Self::Map(_, _) => ValueType::Map,
-            Self::Iterator(_) => ValueType::Iterator,
-            Self::MaxHeap(_) => ValueType::MaxHeap,
-            Self::MinHeap(_) => ValueType::MinHeap,
-            Self::Deque(_) => ValueType::Deque,
+            Self::String(_) => StaticType::String,
+            Self::List(_) => StaticType::List,
+            Self::Tuple(t) => StaticType::Tuple(t.iter().map(Value::static_type).collect()),
+            Self::Map(_, _) => StaticType::Map,
+            Self::Iterator(_) => StaticType::Iterator,
+            Self::MaxHeap(_) => StaticType::MaxHeap,
+            Self::MinHeap(_) => StaticType::MinHeap,
+            Self::Deque(_) => StaticType::Deque,
         }
     }
 

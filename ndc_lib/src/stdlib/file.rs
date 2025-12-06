@@ -1,5 +1,7 @@
 use crate::interpreter::environment::Environment;
-use crate::interpreter::function::{FunctionBody, FunctionBuilder, FunctionCarrier, TypeSignature};
+use crate::interpreter::function::{
+    FunctionBody, FunctionBuilder, FunctionCarrier, StaticType, TypeSignature,
+};
 use crate::interpreter::value::Value;
 use ndc_macros::export_module;
 use std::fs::read_to_string;
@@ -46,6 +48,7 @@ pub fn register_variadic(env: &mut Environment) {
                     Ok(Value::unit())
                 },
                 type_signature: TypeSignature::Variadic,
+                return_type: StaticType::unit(),
             })
             .build()
             .expect("function definition defined in code must be valid"),
@@ -73,6 +76,7 @@ pub fn register_variadic(env: &mut Environment) {
                     Ok(Value::unit())
                 },
                 type_signature: TypeSignature::Variadic,
+                return_type: StaticType::unit(),
             })
             .build()
             .expect("function definition defined in code must be valid"),

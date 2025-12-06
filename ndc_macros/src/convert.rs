@@ -12,6 +12,7 @@ pub struct Argument {
 }
 pub trait TypeConverter {
     fn matches(&self, ty: &syn::Type) -> bool;
+    fn static_type(&self) -> TokenStream;
     fn convert(
         &self,
         temp_var: syn::Ident,
@@ -26,6 +27,10 @@ impl TypeConverter for MutRefString {
         is_ref_mut(ty) && is_string(ty)
     }
 
+    fn static_type(&self) -> TokenStream {
+        quote! { crate::interpreter::function::StaticType::String }
+    }
+
     fn convert(
         &self,
         temp_var: syn::Ident,
@@ -33,7 +38,7 @@ impl TypeConverter for MutRefString {
         argument_var_name: syn::Ident,
     ) -> Vec<Argument> {
         vec![Argument {
-            param_type: quote! { crate::interpreter::function::ParamType::String },
+            param_type: self.static_type(),
             param_name: quote! { #original_name },
             argument: quote! { #argument_var_name },
             initialize_code: quote! {
@@ -53,6 +58,10 @@ impl TypeConverter for InternalMap {
         path_ends_with(ty, "MapRepr")
     }
 
+    fn static_type(&self) -> TokenStream {
+        quote! { crate::interpreter::function::StaticType::Map }
+    }
+
     fn convert(
         &self,
         temp_var: syn::Ident,
@@ -60,7 +69,7 @@ impl TypeConverter for InternalMap {
         argument_var_name: syn::Ident,
     ) -> Vec<Argument> {
         vec![Argument {
-            param_type: quote! { crate::interpreter::function::ParamType::Map },
+            param_type: self.static_type(),
             param_name: quote! { #original_name },
             argument: quote! { #argument_var_name },
             initialize_code: quote! {
@@ -79,6 +88,10 @@ impl TypeConverter for InternalString {
         path_ends_with(ty, "StringRepr")
     }
 
+    fn static_type(&self) -> TokenStream {
+        quote! { crate::interpreter::function::StaticType::String }
+    }
+
     fn convert(
         &self,
         temp_var: syn::Ident,
@@ -86,7 +99,7 @@ impl TypeConverter for InternalString {
         argument_var_name: syn::Ident,
     ) -> Vec<Argument> {
         vec![Argument {
-            param_type: quote! { crate::interpreter::function::ParamType::String },
+            param_type: self.static_type(),
             param_name: quote! { #original_name },
             argument: quote! { #argument_var_name },
             initialize_code: quote! {
@@ -106,6 +119,10 @@ impl TypeConverter for InternalList {
         path_ends_with(ty, "ListRepr")
     }
 
+    fn static_type(&self) -> TokenStream {
+        quote! { crate::interpreter::function::StaticType::List }
+    }
+
     fn convert(
         &self,
         temp_var: syn::Ident,
@@ -113,7 +130,7 @@ impl TypeConverter for InternalList {
         argument_var_name: syn::Ident,
     ) -> Vec<Argument> {
         vec![Argument {
-            param_type: quote! { crate::interpreter::function::ParamType::List },
+            param_type: self.static_type(),
             param_name: quote! { #original_name },
             argument: quote! { #argument_var_name },
             initialize_code: quote! {
@@ -127,40 +144,41 @@ impl TypeConverter for InternalList {
     }
 }
 
-/// Matches `Rc<RefCell<Vec<Value>>>`
-struct InternalTuple;
-impl TypeConverter for InternalTuple {
-    fn matches(&self, ty: &syn::Type) -> bool {
-        path_ends_with(ty, "TupleRepr")
-    }
-
-    fn convert(
-        &self,
-        temp_var: syn::Ident,
-        original_name: &str,
-        argument_var_name: syn::Ident,
-    ) -> Vec<Argument> {
-        vec![Argument {
-            param_type: quote! { crate::interpreter::function::ParamType::Tuple },
-            param_name: quote! { #original_name },
-            argument: quote! { #argument_var_name },
-            initialize_code: quote! {
-                let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::Tuple(#temp_var)) = #argument_var_name else {
-                    panic!("Value #position needed to be Sequence::Tuple but wasn't");
-                };
-
-                // TODO: is std::mem::take appropriate here?
-                let #argument_var_name = std::mem::take(#temp_var);
-            },
-        }]
-    }
-}
+// Losing tuple concatenation is a price we might have to pay
+// /// Matches `Rc<RefCell<Vec<Value>>>`
+// struct InternalTuple;
+// impl TypeConverter for InternalTuple {
+//     fn matches(&self, ty: &syn::Type) -> bool {
+//         path_ends_with(ty, "TupleRepr")
+//     }
+//
+//     fn convert(
+//         &self,
+//         temp_var: syn::Ident,
+//         original_name: &str,
+//         argument_var_name: syn::Ident,
+//     ) -> Vec<Argument> {
+//         vec![Argument {
+//             param_type: quote! { crate::interpreter::function::StaticType::Tuple },
+//             param_name: quote! { #original_name },
+//             argument: quote! { #argument_var_name },
+//             initialize_code: quote! {
+//                 let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::Tuple(#temp_var)) = #argument_var_name else {
+//                     panic!("Value #position needed to be Sequence::Tuple but wasn't");
+//                 };
+//
+//                 // TODO: is std::mem::take appropriate here?
+//                 let #argument_var_name = std::mem::take(#temp_var);
+//             },
+//         }]
+//     }
+// }
 
 pub fn build() -> Vec<Box<dyn TypeConverter>> {
     vec![
         Box::new(InternalList),
         Box::new(MutRefString),
-        Box::new(InternalTuple),
+        // Box::new(InternalTuple),
         Box::new(InternalMap),
         Box::new(InternalString),
     ]

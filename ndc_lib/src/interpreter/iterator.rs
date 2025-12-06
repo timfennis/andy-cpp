@@ -3,13 +3,13 @@
 //! The implementation of the various iterators in this module were heavily inspired by the ones in
 //! noulith which can be found [here](https://github.com/betaveros/noulith/blob/441d52ea433527b7ada5bc6cabd952f9ae8fb791/src/streams.rs)
 //!
-use super::function::FunctionCarrier;
+use super::function::{FunctionCarrier, StaticType};
 use super::int::Int::Int64;
 use super::num::Number;
 use crate::hash_map::HashMap;
 use crate::interpreter::heap::{MaxHeap, MinHeap};
 use crate::interpreter::sequence::Sequence;
-use crate::interpreter::value::{Value, ValueType};
+use crate::interpreter::value::Value;
 use self_cell::self_cell;
 use std::cell::{Ref, RefCell};
 use std::collections::VecDeque;
@@ -67,7 +67,7 @@ impl Iterator for MutableValueIntoIterator<'_> {
 #[derive(thiserror::Error, Debug)]
 #[error("{} is not iterable", .value_type)]
 pub struct NotIterableError {
-    value_type: ValueType,
+    value_type: StaticType,
 }
 
 impl From<NotIterableError> for FunctionCarrier {
@@ -82,7 +82,7 @@ pub fn mut_value_to_iterator(
     match value {
         Value::Sequence(sequence) => Ok(mut_seq_to_iterator(sequence)),
         value => Err(NotIterableError {
-            value_type: value.value_type(),
+            value_type: value.static_type(),
         }),
     }
 }

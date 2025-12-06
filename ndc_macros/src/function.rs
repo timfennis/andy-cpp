@@ -20,7 +20,9 @@ pub fn wrap_function(function: &syn::ItemFn) -> Vec<WrappedFunction> {
         &original_identifier.to_string(),
     )];
 
-    let mut docs_buf = String::new();
+    let mut return_type = None;
+
+    let mut documentation_buffer = String::new();
     for attr in &function.attrs {
         if attr.path().is_ident("function") {
             attr.parse_nested_meta(|meta| {
@@ -32,6 +34,10 @@ pub fn wrap_function(function: &syn::ItemFn) -> Vec<WrappedFunction> {
                 } else if meta.path.is_ident("alias") {
                     function_names.push(meta.value()?.parse()?);
                     Ok(())
+                } else if meta.path.is_ident("return_type") {
+                    let value: syn::Type = meta.value()?.parse()?;
+                    return_type = Some(map_type(&value));
+                    Ok(())
                 } else {
                     Err(meta.error("unsupported property on function"))
                 }
@@ -42,9 +48,12 @@ pub fn wrap_function(function: &syn::ItemFn) -> Vec<WrappedFunction> {
             && let syn::Expr::Lit(expr) = &meta.value
             && let syn::Lit::Str(lit_str) = &expr.lit
         {
-            writeln!(docs_buf, "{}", lit_str.value().trim()).expect("failed to write docs");
+            writeln!(documentation_buffer, "{}", lit_str.value().trim())
+                .expect("failed to write docs");
         }
     }
+
+    let return_type = return_type.unwrap_or_else(|| map_return_type(&function.sig.output));
 
     match &function.vis {
         syn::Visibility::Public(_) => {}
@@ -63,7 +72,8 @@ pub fn wrap_function(function: &syn::ItemFn) -> Vec<WrappedFunction> {
                     &original_identifier,
                     function_name,
                     vec![],
-                    &docs_buf,
+                    &return_type,
+                    &documentation_buffer,
                 )
             })
             .collect();
@@ -71,7 +81,6 @@ pub fn wrap_function(function: &syn::ItemFn) -> Vec<WrappedFunction> {
 
     // When we call create_temp_variable we can get multiple definitions for a variable
     // For instance when a rust function is `fn foo(list: &[Value])` we can define two internal functions for both Tuple and List
-
     let mut variation_id = 0usize;
     function_names
         .iter()
@@ -98,7 +107,8 @@ pub fn wrap_function(function: &syn::ItemFn) -> Vec<WrappedFunction> {
                         &format_ident!("{original_identifier}_{variation_id}"),
                         function_name,
                         args,
-                        &docs_buf,
+                        &return_type,
+                        &documentation_buffer,
                     );
                     variation_id += 1;
                     wrapped
@@ -106,6 +116,103 @@ pub fn wrap_function(function: &syn::ItemFn) -> Vec<WrappedFunction> {
                 .collect::<Vec<_>>()
         })
         .collect()
+}
+
+fn map_return_type(output: &syn::ReturnType) -> TokenStream {
+    match output {
+        syn::ReturnType::Default => {
+            // in case return type is not specified (for closures rust defaults to type inference which doesn't help us here)
+            quote! { crate::interpreter::function::StaticType::Tuple(vec![]) }
+        }
+        syn::ReturnType::Type(_, ty) => map_type(ty),
+    }
+}
+
+fn map_type(ty: &syn::Type) -> TokenStream {
+    match ty {
+        syn::Type::Path(p) => map_type_path(p),
+        syn::Type::Reference(r) => map_type(r.elem.as_ref()),
+        syn::Type::Tuple(t) => {
+            let inner = t.elems.iter().map(map_type);
+            quote::quote! {
+                crate::interpreter::function::StaticType::Tuple(vec![
+                    #(#inner),*
+                ])
+            }
+        }
+        _ => {
+            panic!("unmapped type: {ty:?}");
+        }
+    }
+}
+
+fn map_type_path(p: &syn::TypePath) -> TokenStream {
+    let segment = p.path.segments.last().unwrap();
+
+    match segment.ident.to_string().as_str() {
+        // Primitive single identifiers
+        "i32" | "i64" | "isize" | "u32" | "u64" | "usize" | "BigInt" => {
+            quote::quote! { crate::interpreter::function::StaticType::Int }
+        }
+        "f32" | "f64" => {
+            quote::quote! { crate::interpreter::function::StaticType::Float }
+        }
+        "bool" => {
+            quote::quote! { crate::interpreter::function::StaticType::Bool }
+        }
+        "String" | "str" => {
+            quote::quote! { crate::interpreter::function::StaticType::String }
+        }
+
+        "Vec" => {
+            quote::quote! { crate::interpreter::function::StaticType::List }
+        }
+        "DefaultMap" | "HashMap" => {
+            quote::quote! { crate::interpreter::function::StaticType::Map }
+        }
+        "Number" => {
+            quote::quote! { crate::interpreter::function::StaticType::Number }
+        }
+        "VecDeque" => {
+            quote::quote! { crate::interpreter::function::StaticType::Deque }
+        }
+        "MinHeap" => {
+            quote::quote! { crate::interpreter::function::StaticType::MinHeap }
+        }
+        "MaxHeap" => {
+            quote::quote! { crate::interpreter::function::StaticType::MaxHeap }
+        }
+        "Iterator" => {
+            quote::quote! { crate::interpreter::function::StaticType::Iterator }
+        }
+        "Option" => {
+            // TODO: in the future add generic types
+            quote::quote! { crate::interpreter::function::StaticType::Option }
+        }
+        // Generic wrappers like anyhow::Result<T>, std::result::Result<T>
+        "Result" => match &segment.arguments {
+            syn::PathArguments::AngleBracketed(args) => {
+                // Extract the first generic argument
+                if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
+                    // Recurse on T
+                    map_type(inner_ty)
+                } else {
+                    panic!("Result without generic arguments");
+                }
+            }
+
+            _ => {
+                panic!("Result return type found without syn::PathArguments::AngleBracketed");
+            }
+        },
+        "Value" | "EvaluationResult" => {
+            quote::quote! { crate::interpreter::function::StaticType::Any }
+        }
+        // Fallback
+        unmatched => {
+            panic!("Cannot map type string \"{unmatched}\" to StaticType");
+        }
+    }
 }
 
 /// Wraps an original rust function `function` in an outer function with the identifier `identifier`
@@ -116,6 +223,7 @@ fn wrap_single(
     identifier: &syn::Ident,
     register_as_function_name: &proc_macro2::Literal,
     input_arguments: Vec<Argument>,
+    return_type: &TokenStream,
     docs: &str,
 ) -> WrappedFunction {
     let inner_ident = format_ident!("{}_inner", identifier);
@@ -206,6 +314,7 @@ fn wrap_single(
                 type_signature: crate::interpreter::function::TypeSignature::Exact(vec![
                     #( crate::interpreter::function::Parameter::new(#param_names, #param_types,) ),*
                 ]),
+                return_type: #return_type,
             })
             .name(String::from(#register_as_function_name))
             .documentation(String::from(#docs))
@@ -223,53 +332,57 @@ fn wrap_single(
 
 fn into_param_type(ty: &syn::Type) -> TokenStream {
     match ty {
-        ty if path_ends_with(ty, "Vec") => quote! { crate::interpreter::function::ParamType::List },
+        ty if path_ends_with(ty, "Vec") => {
+            quote! { crate::interpreter::function::StaticType::List }
+        }
         ty if path_ends_with(ty, "VecDeque") => {
-            quote! { crate::interpreter::function::ParamType::Deque }
+            quote! { crate::interpreter::function::StaticType::Deque }
         }
         ty if path_ends_with(ty, "DefaultMap")
             || path_ends_with(ty, "DefaultMapMut")
             || path_ends_with(ty, "HashMap") =>
         {
-            quote! { crate::interpreter::function::ParamType::Map }
+            quote! { crate::interpreter::function::StaticType::Map }
         }
         ty if path_ends_with(ty, "MinHeap") => {
-            quote! { crate::interpreter::function::ParamType::MinHeap }
+            quote! { crate::interpreter::function::StaticType::MinHeap }
         }
         ty if path_ends_with(ty, "MaxHeap") => {
-            quote! { crate::interpreter::function::ParamType::MaxHeap }
+            quote! { crate::interpreter::function::StaticType::MaxHeap }
         }
         ty if path_ends_with(ty, "ListRepr") => {
-            quote! { crate::interpreter::function::ParamType::List }
-        }
-        ty if path_ends_with(ty, "TupleRepr") => {
-            quote! { crate::interpreter::function::ParamType::Tuple }
+            quote! { crate::interpreter::function::StaticType::List }
         }
         ty if path_ends_with(ty, "MapRepr") => {
-            quote! { crate::interpreter::function::ParamType::Map }
+            quote! { crate::interpreter::function::StaticType::Map }
         }
         syn::Type::Reference(syn::TypeReference { elem, .. }) => into_param_type(elem),
         syn::Type::Path(syn::TypePath { path, .. }) => match path {
-            _ if path.is_ident("i64") => quote! { crate::interpreter::function::ParamType::Int },
-            _ if path.is_ident("usize") => quote! { crate::interpreter::function::ParamType::Int },
-            _ if path.is_ident("f64") => quote! { crate::interpreter::function::ParamType::Float },
-            _ if path.is_ident("bool") => quote! { crate::interpreter::function::ParamType::Bool },
+            _ if path.is_ident("i64") => quote! { crate::interpreter::function::StaticType::Int },
+            _ if path.is_ident("usize") => quote! { crate::interpreter::function::StaticType::Int },
+            _ if path.is_ident("f64") => quote! { crate::interpreter::function::StaticType::Float },
+            _ if path.is_ident("bool") => quote! { crate::interpreter::function::StaticType::Bool },
             _ if path.is_ident("Value") => {
-                quote! { crate::interpreter::function::ParamType::Any }
+                quote! { crate::interpreter::function::StaticType::Any }
             }
             _ if path.is_ident("Number") => {
-                quote! { crate::interpreter::function::ParamType::Number }
+                quote! { crate::interpreter::function::StaticType::Number }
             }
             _ if path.is_ident("Sequence") => {
-                quote! { crate::interpreter::function::ParamType::Sequence }
+                quote! { crate::interpreter::function::StaticType::Sequence }
             }
             _ if path.is_ident("Callable") => {
-                quote! { crate::interpreter::function::ParamType::Function }
+                quote! {
+                    crate::interpreter::function::StaticType::Function {
+                        parameters: None,
+                        return_type: Box::new(crate::interpreter::function::StaticType::Any)
+                    }
+                }
             }
-            _ => panic!("Don't know how to convert Path into ParamType\n\n{path:?}"),
+            _ => panic!("Don't know how to convert Path into StaticType\n\n{path:?}"),
         },
-        syn::Type::ImplTrait(_) => quote! { crate::interpreter::function::ParamType::Iterator },
-        x => panic!("Don't know how to convert {x:?} into ParamType"),
+        syn::Type::ImplTrait(_) => quote! { crate::interpreter::function::StaticType::Iterator },
+        x => panic!("Don't know how to convert {x:?} into StaticType"),
     }
 }
 
@@ -297,7 +410,13 @@ fn create_temp_variable(
         if path_ends_with(ty, "Callable") {
             let temp_var = syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
             return vec![Argument {
-                param_type: quote! { crate::interpreter::function::ParamType::Function },
+                param_type: quote! {
+                    // TODO: how are we going to figure out the exact type of function here
+                    crate::interpreter::function::StaticType::Function {
+                        parameters: None,
+                        return_type: Box::new(crate::interpreter::function::StaticType::Any)
+                    }
+                },
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
@@ -316,7 +435,7 @@ fn create_temp_variable(
             let rc_temp_var =
                 syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
             return vec![Argument {
-                param_type: quote! { crate::interpreter::function::ParamType::Map },
+                param_type: quote! { crate::interpreter::function::StaticType::Map },
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
@@ -332,7 +451,7 @@ fn create_temp_variable(
             let rc_temp_var =
                 syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
             return vec![Argument {
-                param_type: quote! { crate::interpreter::function::ParamType::Map },
+                param_type: quote! { crate::interpreter::function::StaticType::Map },
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
@@ -348,7 +467,7 @@ fn create_temp_variable(
             let rc_temp_var =
                 syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
             return vec![Argument {
-                param_type: quote! { crate::interpreter::function::ParamType::Map },
+                param_type: quote! { crate::interpreter::function::StaticType::Map },
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
@@ -364,7 +483,7 @@ fn create_temp_variable(
             let rc_temp_var =
                 syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
             return vec![Argument {
-                param_type: quote! { crate::interpreter::function::ParamType::Map },
+                param_type: quote! { crate::interpreter::function::StaticType::Map },
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
@@ -381,7 +500,7 @@ fn create_temp_variable(
             let rc_temp_var =
                 syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
             return vec![Argument {
-                param_type: quote! { crate::interpreter::function::ParamType::List },
+                param_type: quote! { crate::interpreter::function::StaticType::List },
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
@@ -493,7 +612,7 @@ fn create_temp_variable(
             let rc_temp_var =
                 syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
             return vec![Argument {
-                param_type: quote! { crate::interpreter::function::ParamType::String },
+                param_type: quote! { crate::interpreter::function::StaticType::String },
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
@@ -509,7 +628,7 @@ fn create_temp_variable(
         else if is_ref_of_bigint(ty) {
             let big_int = syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
             return vec![Argument {
-                param_type: quote! { crate::interpreter::function::ParamType::Int },
+                param_type: quote! { crate::interpreter::function::StaticType::Int },
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
@@ -530,7 +649,7 @@ fn create_temp_variable(
         // If we need an owned Value
         else if path_ends_with(ty, "Value") && !is_ref(ty) {
             return vec![Argument {
-                param_type: quote! { crate::interpreter::function::ParamType::Any },
+                param_type: quote! { crate::interpreter::function::StaticType::Any },
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
@@ -543,7 +662,7 @@ fn create_temp_variable(
             let rc_temp_var =
                 syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
             return vec![Argument {
-                param_type: quote! { crate::interpreter::function::ParamType::List },
+                param_type: quote! { crate::interpreter::function::StaticType::List },
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
@@ -560,7 +679,7 @@ fn create_temp_variable(
                 syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
             return vec![
                 Argument {
-                    param_type: quote! { crate::interpreter::function::ParamType::List },
+                    param_type: quote! { crate::interpreter::function::StaticType::List },
                     param_name: quote! { #original_name },
                     argument: quote! { #argument_var_name },
                     initialize_code: quote! {
@@ -570,23 +689,23 @@ fn create_temp_variable(
                         let #argument_var_name = &*#rc_temp_var.borrow();
                     },
                 },
-                Argument {
-                    param_type: quote! { crate::interpreter::function::ParamType::Tuple },
-                    param_name: quote! { #original_name },
-                    argument: quote! { #argument_var_name },
-                    initialize_code: quote! {
-                        let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::Tuple(#rc_temp_var)) = #argument_var_name else {
-                            panic!("Value #position needed to be a Sequence::List but wasn't");
-                        };
-                        let #argument_var_name = &#rc_temp_var;
-                    },
-                },
+                // Argument {
+                //     param_type: quote! { crate::interpreter::function::StaticType::Tuple },
+                //     param_name: quote! { #original_name },
+                //     argument: quote! { #argument_var_name },
+                //     initialize_code: quote! {
+                //         let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::Tuple(#rc_temp_var)) = #argument_var_name else {
+                //             panic!("Value #position needed to be a Sequence::List but wasn't");
+                //         };
+                //         let #argument_var_name = &#rc_temp_var;
+                //     },
+                // },
             ];
         }
         // The pattern is &BigRational
         else if path_ends_with(ty, "BigRational") && is_ref(ty) {
             return vec![Argument {
-                param_type: quote! { crate::interpreter::function::ParamType::Rational },
+                param_type: quote! { crate::interpreter::function::StaticType::Rational },
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
@@ -601,7 +720,7 @@ fn create_temp_variable(
         // The pattern is BigRational
         else if path_ends_with(ty, "BigRational") && !is_ref(ty) {
             return vec![Argument {
-                param_type: quote! { crate::interpreter::function::ParamType::Rational },
+                param_type: quote! { crate::interpreter::function::StaticType::Rational },
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
@@ -616,7 +735,7 @@ fn create_temp_variable(
         // The pattern is Complex64
         else if path_ends_with(ty, "Complex64") && !is_ref(ty) {
             return vec![Argument {
-                param_type: quote! { crate::interpreter::function::ParamType::Complex },
+                param_type: quote! { crate::interpreter::function::StaticType::Complex },
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {

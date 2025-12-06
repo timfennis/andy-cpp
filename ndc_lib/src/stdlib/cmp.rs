@@ -7,18 +7,18 @@ mod inner {
     use std::cmp::Ordering;
 
     /// Produces an error if the argument is not true.
-    pub fn assert(value: bool) -> anyhow::Result<Value> {
+    pub fn assert(value: bool) -> anyhow::Result<()> {
         if value {
-            Ok(Value::unit())
+            Ok(())
         } else {
             Err(anyhow!("failed asserting that argument is true"))
         }
     }
 
     /// Produces an error if the arguments aren't equal to each other.
-    pub fn assert_eq(left: &Value, right: &Value) -> anyhow::Result<Value> {
+    pub fn assert_eq(left: &Value, right: &Value) -> anyhow::Result<()> {
         if left == right {
-            Ok(Value::unit())
+            Ok(())
         } else {
             Err(anyhow!(format!(
                 "failed asserting that {left} equals {right}"
@@ -27,21 +27,21 @@ mod inner {
     }
 
     /// Produces an error if the arguments are equal to each other.
-    pub fn assert_ne(left: &Value, right: &Value) -> anyhow::Result<Value> {
+    pub fn assert_ne(left: &Value, right: &Value) -> anyhow::Result<()> {
         if left == right {
             Err(anyhow!(format!(
                 "failed asserting that {left} does not equal {right}"
             )))
         } else {
-            Ok(Value::unit())
+            Ok(())
         }
     }
 
     /// Produces the error specified by the `message` parameter if the `value` argument is not true.
     #[function(name = "assert")]
-    pub fn assert_with_message(value: bool, message: &str) -> anyhow::Result<Value> {
+    pub fn assert_with_message(value: bool, message: &str) -> anyhow::Result<()> {
         if value {
-            Ok(Value::unit())
+            Ok(())
         } else {
             Err(anyhow!(message.to_string()))
         }

@@ -4,9 +4,9 @@ use crate::interpreter::environment::Environment;
 use crate::interpreter::evaluate::{
     ErrorConverter, EvaluationError, EvaluationResult, evaluate_expression,
 };
-use crate::interpreter::num::{BinaryOperatorError, Number, NumberType};
+use crate::interpreter::num::{BinaryOperatorError, Number};
 use crate::interpreter::sequence::Sequence;
-use crate::interpreter::value::{Value, ValueType};
+use crate::interpreter::value::Value;
 use crate::lexer::Span;
 use derive_builder::Builder;
 use itertools::Itertools;
@@ -35,6 +35,17 @@ pub struct Function {
     #[builder(default, setter(strip_option))]
     documentation: Option<String>,
     body: FunctionBody,
+}
+
+impl fmt::Debug for Function {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Function(name={}, sig={})",
+            self.name(),
+            self.type_signature()
+        )
+    }
 }
 
 impl Function {
@@ -72,6 +83,21 @@ impl Function {
     pub fn type_signature(&self) -> TypeSignature {
         self.body.type_signature()
     }
+    pub fn return_type(&self) -> &StaticType {
+        self.body.return_type()
+    }
+
+    pub fn static_type(&self) -> StaticType {
+        StaticType::Function {
+            parameters: match self.body.type_signature() {
+                TypeSignature::Variadic => None,
+                TypeSignature::Exact(types) => {
+                    Some(types.iter().map(|x| x.type_name.clone()).collect())
+                }
+            },
+            return_type: Box::new(self.body.return_type().clone()),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -79,6 +105,7 @@ pub enum FunctionBody {
     Closure {
         parameter_names: Vec<String>,
         body: ExpressionLocation,
+        return_type: StaticType,
         environment: Rc<RefCell<Environment>>,
     },
     NumericUnaryOp {
@@ -89,6 +116,7 @@ pub enum FunctionBody {
     },
     GenericFunction {
         type_signature: TypeSignature,
+        return_type: StaticType,
         function: fn(&mut [Value], &Rc<RefCell<Environment>>) -> EvaluationResult,
     },
     Memoized {
@@ -109,15 +137,19 @@ impl FunctionBody {
             Self::Memoized { function, .. } => function.arity(),
         }
     }
+
     pub fn generic(
         type_signature: TypeSignature,
+        return_type: StaticType,
         function: fn(&mut [Value], &Rc<RefCell<Environment>>) -> EvaluationResult,
     ) -> Self {
         Self::GenericFunction {
             type_signature,
+            return_type,
             function,
         }
     }
+
     fn type_signature(&self) -> TypeSignature {
         match self {
             Self::Closure {
@@ -125,21 +157,30 @@ impl FunctionBody {
             } => TypeSignature::Exact(
                 parameter_names
                     .iter()
-                    .map(|name| Parameter::new(name, ParamType::Any))
+                    .map(|name| Parameter::new(name, StaticType::Any))
                     .collect(),
             ),
             Self::Memoized { cache: _, function } => function.type_signature(),
             Self::NumericUnaryOp { .. } => {
-                TypeSignature::Exact(vec![Parameter::new("num", ParamType::Number)])
+                TypeSignature::Exact(vec![Parameter::new("num", StaticType::Number)])
             }
             Self::NumericBinaryOp { .. } => TypeSignature::Exact(vec![
-                Parameter::new("left", ParamType::Number),
-                Parameter::new("right", ParamType::Number),
+                Parameter::new("left", StaticType::Number),
+                Parameter::new("right", StaticType::Number),
             ]),
             Self::GenericFunction { type_signature, .. } => type_signature.clone(),
         }
     }
 
+    pub fn return_type(&self) -> &StaticType {
+        match self {
+            Self::Closure { return_type, .. } | Self::GenericFunction { return_type, .. } => {
+                return_type
+            }
+            Self::NumericUnaryOp { .. } | Self::NumericBinaryOp { .. } => &StaticType::Number,
+            Self::Memoized { function, .. } => function.return_type(),
+        }
+    }
     pub fn call(&self, args: &mut [Value], env: &Rc<RefCell<Environment>>) -> EvaluationResult {
         match self {
             Self::Closure {
@@ -171,8 +212,8 @@ impl FunctionBody {
             Self::NumericUnaryOp { body } => match args {
                 [Value::Number(num)] => Ok(Value::Number(body(num.clone()))),
                 [v] => Err(FunctionCallError::ArgumentTypeError {
-                    expected: ParamType::Number,
-                    actual: v.value_type(),
+                    expected: StaticType::Number,
+                    actual: v.static_type(),
                 }
                 .into()),
                 args => Err(FunctionCallError::ArgumentCountError {
@@ -187,13 +228,13 @@ impl FunctionBody {
                         .map_err(|err| FunctionCarrier::IntoEvaluationError(Box::new(err)))?,
                 )),
                 [Value::Number(_), right] => Err(FunctionCallError::ArgumentTypeError {
-                    expected: ParamType::Number,
-                    actual: right.value_type(),
+                    expected: StaticType::Number,
+                    actual: right.static_type(),
                 }
                 .into()),
                 [left, _] => Err(FunctionCallError::ArgumentTypeError {
-                    expected: ParamType::Number,
-                    actual: left.value_type(),
+                    expected: StaticType::Number,
+                    actual: left.static_type(),
                 }
                 .into()),
                 args => Err(FunctionCallError::ArgumentCountError {
@@ -236,14 +277,20 @@ impl TypeSignature {
     /// Matches a list of `ValueTypes` to a type signature. It can return `None` if there is no match or
     /// `Some(num)` where num is the sum of the distances of the types. The type `Int`, is distance 1
     /// away from `Number`, and `Number` is 1 distance from `Any`, then `Int` is distance 2 from `Any`.
-    fn calc_type_score(&self, types: &[ValueType]) -> Option<u32> {
+    fn calc_type_score(&self, types: &[StaticType]) -> Option<u32> {
         match self {
             Self::Variadic => Some(0),
             Self::Exact(signature) => {
                 if types.len() == signature.len() {
                     let mut acc = 0;
                     for (a, b) in types.iter().zip(signature.iter()) {
-                        let dist = b.type_name.distance(a)?;
+                        let dist = if a == &b.type_name {
+                            0
+                        } else if a.is_compatible_with(&b.type_name) {
+                            1
+                        } else {
+                            return None;
+                        };
                         acc += dist;
                     }
 
@@ -263,7 +310,7 @@ impl TypeSignature {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct OverloadedFunction {
     implementations: HashMap<TypeSignature, Function>,
 }
@@ -328,7 +375,7 @@ impl OverloadedFunction {
     }
 
     pub fn call(&self, args: &mut [Value], env: &Rc<RefCell<Environment>>) -> EvaluationResult {
-        let types: Vec<ValueType> = args.iter().map(ValueType::from).collect();
+        let types: Vec<StaticType> = args.iter().map(Value::static_type).collect();
 
         let mut best_function_match = None;
         let mut best_distance = u32::MAX;
@@ -419,11 +466,11 @@ impl From<Function> for OverloadedFunction {
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct Parameter {
     pub name: String,
-    pub type_name: ParamType,
+    pub type_name: StaticType,
 }
 
 impl Parameter {
-    pub fn new<N: Into<String>>(name: N, param_type: ParamType) -> Self {
+    pub fn new<N: Into<String>>(name: N, param_type: StaticType) -> Self {
         Self {
             name: name.into(),
             type_name: param_type,
@@ -432,10 +479,13 @@ impl Parameter {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub enum ParamType {
+pub enum StaticType {
     Any,
     Bool,
-    Function,
+    Function {
+        parameters: Option<Vec<StaticType>>,
+        return_type: Box<StaticType>,
+    },
     Option,
 
     // Numbers
@@ -449,7 +499,7 @@ pub enum ParamType {
     Sequence,
     List,
     String,
-    Tuple,
+    Tuple(Vec<StaticType>),
     Map,
     Iterator,
     MinHeap,
@@ -457,94 +507,104 @@ pub enum ParamType {
     Deque,
 }
 
-impl ParamType {
-    fn distance(&self, other: &ValueType) -> Option<u32> {
-        #[allow(clippy::match_same_arms)]
-        match (self, other) {
-            (Self::Bool, ValueType::Bool) => Some(0),
-            (Self::Option, ValueType::Option) => Some(0),
-            (Self::Int, ValueType::Number(NumberType::Int)) => Some(0),
-            (Self::Float, ValueType::Number(NumberType::Float)) => Some(0),
-            (Self::Rational, ValueType::Number(NumberType::Rational)) => Some(0),
-            (Self::Complex, ValueType::Number(NumberType::Complex)) => Some(0),
-            (Self::String, ValueType::String) => Some(0),
-            (Self::List, ValueType::List) => Some(0),
-            // TODO: once ParamType supports parameters we can calculate the proper distance to Tuple
-            (Self::Tuple, ValueType::Tuple(_)) => Some(0),
-            (Self::Map, ValueType::Map) => Some(0),
-            (Self::Iterator, ValueType::Iterator) => Some(0),
-            (Self::Function, ValueType::Function) => Some(0),
-            (Self::Deque, ValueType::Deque) => Some(0),
-            (Self::MinHeap, ValueType::MinHeap) => Some(0),
-            (Self::MaxHeap, ValueType::MaxHeap) => Some(0),
-            (Self::Any, _) => Some(2),
-            (Self::Number, ValueType::Number(_)) => Some(1),
-            (
-                Self::Sequence,
-                ValueType::List
-                | ValueType::String
-                | ValueType::Map
-                // Sequence is always 1 distance to tuple
-                | ValueType::Tuple(_)
-                | ValueType::Iterator
-                | ValueType::MinHeap
-                | ValueType::MaxHeap
-                | ValueType::Deque,
-            ) => Some(1),
-            _ => None,
-        }
+impl StaticType {
+    #[must_use]
+    pub fn unit() -> Self {
+        Self::Tuple(vec![])
     }
 
-    pub fn as_str(&self) -> &'static str {
+    #[must_use]
+    pub fn supports_vectorization(&self) -> bool {
         match self {
-            Self::Any => "Any",
-            Self::Bool => "Bool",
-            Self::Function => "Function",
-            Self::Option => "Option",
-            Self::Number => "Number",
-            Self::Float => "Float",
-            Self::Int => "Int",
-            Self::Rational => "Rational",
-            Self::Complex => "Complex",
-            Self::Sequence => "Sequence",
-            Self::List => "List",
-            Self::String => "String",
-            Self::Tuple => "Tuple",
-            Self::Map => "Map",
-            Self::Iterator => "Iterator",
-            Self::MinHeap => "MinHeap",
-            Self::MaxHeap => "MaxHeap",
-            Self::Deque => "Deque",
+            Self::Tuple(values) => values.iter().all(|v| v.is_number()),
+            _ => false,
+        }
+    }
+
+    pub fn is_number(&self) -> bool {
+        matches!(
+            self,
+            Self::Number | Self::Float | Self::Int | Self::Rational | Self::Complex
+        )
+    }
+
+    #[must_use]
+    pub fn supports_vectorization_with(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Tuple(l), Self::Tuple(r))
+                if {
+                    l.len() == r.len()
+                        && self.supports_vectorization()
+                        && other.supports_vectorization()
+                } =>
+            {
+                true
+            }
+            (tup @ Self::Tuple(_), maybe_num) | (maybe_num, tup @ Self::Tuple(_)) => {
+                tup.supports_vectorization() && maybe_num.is_number()
+            }
+            _ => false,
+        }
+    }
+
+    #[allow(clippy::match_same_arms)]
+    pub fn is_compatible_with(&self, other: &Self) -> bool {
+        match (self, other) {
+            (a, b) if a == b => true,
+            (_, Self::Any) => true,
+            (
+                Self::Number | Self::Int | Self::Rational | Self::Complex | Self::Float,
+                Self::Number,
+            ) => true,
+            (
+                Self::String
+                | Self::List
+                | Self::Deque
+                | Self::MaxHeap
+                | Self::MinHeap
+                | Self::Tuple(_)
+                | Self::Iterator
+                | Self::Map,
+                Self::Sequence,
+            ) => true,
+            _ => false,
         }
     }
 }
 
-/// Converts the concrete type of a value to the specific `ParamType`
-impl From<&Value> for ParamType {
-    fn from(value: &Value) -> Self {
-        match value {
-            Value::Option(_) => Self::Option,
-            Value::Number(Number::Rational(_)) => Self::Rational,
-            Value::Number(Number::Complex(_)) => Self::Complex,
-            Value::Number(Number::Int(_)) => Self::Int,
-            Value::Number(Number::Float(_)) => Self::Float,
-            Value::Bool(_) => Self::Bool,
-            Value::Sequence(Sequence::String(_)) => Self::String,
-            Value::Sequence(Sequence::List(_)) => Self::List,
-            Value::Sequence(Sequence::Tuple(_)) => Self::Tuple,
-            Value::Function(_) => Self::Function,
-            Value::Sequence(Sequence::Map(_, _)) => Self::Map,
-            Value::Sequence(Sequence::Iterator(_)) => Self::Iterator,
-            Value::Sequence(Sequence::MaxHeap(_)) => Self::MaxHeap,
-            Value::Sequence(Sequence::MinHeap(_)) => Self::MinHeap,
-            Value::Sequence(Sequence::Deque(_)) => Self::Deque,
-        }
-    }
-}
-
-impl fmt::Display for ParamType {
+impl fmt::Display for StaticType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
+        match self {
+            Self::Any => write!(f, "Any"),
+            Self::Bool => write!(f, "Bool"),
+            Self::Function {
+                parameters,
+                return_type,
+            } => write!(
+                f,
+                "Function({}) -> {return_type}",
+                parameters
+                    .as_deref()
+                    .map(|p| p.iter().join(", "))
+                    .unwrap_or(String::from("*"))
+            ),
+            Self::Option => write!(f, "Option"),
+            Self::Number => write!(f, "Number"),
+            Self::Float => write!(f, "Float"),
+            Self::Int => write!(f, "Int"),
+            Self::Rational => write!(f, "Rational"),
+            Self::Complex => write!(f, "Complex"),
+            Self::Sequence => write!(f, "Sequence"),
+            Self::List => write!(f, "List"),
+            Self::String => write!(f, "String"),
+            Self::Tuple(tup) if tup.is_empty() => write!(f, "()"),
+            Self::Tuple(tup) => write!(f, "Tuple<{}>", tup.iter().join(", ")),
+            Self::Map => write!(f, "Map"),
+            Self::Iterator => write!(f, "Iterator"),
+            Self::MinHeap => write!(f, "MinHeap"),
+            Self::MaxHeap => write!(f, "MaxHeap"),
+            Self::Deque => write!(f, "Deque"),
+        }
     }
 }
 
@@ -552,8 +612,8 @@ impl fmt::Display for ParamType {
 pub enum FunctionCallError {
     #[error("invalid argument, expected {expected} got {actual}")]
     ArgumentTypeError {
-        expected: ParamType,
-        actual: ValueType,
+        expected: StaticType,
+        actual: StaticType,
     },
 
     #[error("invalid argument count, expected {expected} arguments got {actual}")]
@@ -627,7 +687,7 @@ impl fmt::Display for TypeSignature {
                 "{}",
                 params
                     .iter()
-                    .map(|p| format!("{}: {}", p.name, p.type_name.as_str()))
+                    .map(|p| format!("{}: {}", p.name, p.type_name))
                     .join(", ")
             ),
         }

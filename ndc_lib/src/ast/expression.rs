@@ -1,6 +1,7 @@
 use crate::ast::operator::LogicalOperator;
 use crate::ast::parser::Error as ParseError;
 use crate::interpreter::evaluate::EvaluationError;
+use crate::interpreter::function::StaticType;
 use crate::lexer::Span;
 use num::BigInt;
 use num::complex::Complex64;
@@ -55,8 +56,9 @@ pub enum Expression {
     FunctionDeclaration {
         name: Option<String>,
         resolved_name: Option<ResolvedVar>,
-        arguments: Box<ExpressionLocation>,
+        parameters: Box<ExpressionLocation>,
         body: Box<ExpressionLocation>,
+        return_type: Option<StaticType>,
         pure: bool,
     },
     Block {
@@ -332,7 +334,8 @@ impl std::fmt::Debug for ExpressionLocation {
                 .finish(),
             Expression::FunctionDeclaration {
                 name,
-                arguments,
+                parameters,
+                return_type,
                 body,
                 pure,
                 resolved_name,
@@ -340,7 +343,8 @@ impl std::fmt::Debug for ExpressionLocation {
                 .debug_struct("FunctionDeclaration")
                 .field("name", name)
                 .field("resolved_name", resolved_name)
-                .field("arguments", arguments)
+                .field("parameters", parameters)
+                .field("return_type", return_type)
                 .field("body", body)
                 .field("pure", pure)
                 .finish(),

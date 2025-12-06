@@ -1,7 +1,6 @@
-use crate::interpreter::function::{Function, OverloadedFunction};
+use crate::interpreter::function::{Function, StaticType};
 
 use crate::ast::ResolvedVar;
-use crate::interpreter::resolve::LexicalIdentifier;
 use crate::interpreter::value::Value;
 use std::cell::RefCell;
 use std::fmt;
@@ -12,7 +11,7 @@ use std::rc::Rc;
 pub struct RootEnvironment {
     pub output: Box<dyn InterpreterOutput>,
     // These are global values
-    global_functions: Vec<OverloadedFunction>,
+    global_functions: Vec<Function>,
 }
 
 pub struct Environment {
@@ -68,22 +67,17 @@ impl Environment {
         env
     }
 
-    pub fn create_global_scope_mapping(&self) -> Vec<LexicalIdentifier> {
+    pub fn get_global_identifiers(&self) -> Vec<(String, StaticType)> {
         self.root
             .borrow()
             .global_functions
             .iter()
-            .filter_map(|function| {
-                function.name().map(|name| LexicalIdentifier::Function {
-                    name: name.to_string(),
-                    arity: function.arity(),
-                })
-            })
-            .collect::<Vec<LexicalIdentifier>>()
+            .map(|function| (function.name().to_string(), function.static_type()))
+            .collect::<Vec<(String, StaticType)>>()
     }
 
     #[must_use]
-    pub fn get_all_functions(&self) -> Vec<OverloadedFunction> {
+    pub fn get_all_functions(&self) -> Vec<Function> {
         self.root.borrow().global_functions.clone()
     }
 
@@ -99,7 +93,6 @@ impl Environment {
                         }
                     } else {
                         self.values.push(value);
-                        // self.values.insert(slot, value);
                     }
 
                     return;
@@ -109,7 +102,6 @@ impl Environment {
                     self.values[slot] = value
                 } else {
                     debug_assert!(slot == self.values.len());
-                    // self.values.insert(slot, value) // TODO: push should work here right
                     self.values.push(value);
                 }
             }
@@ -139,18 +131,9 @@ impl Environment {
     pub fn declare_global_fn(&mut self, function: impl Into<Function>) {
         let new_function = function.into();
 
-        let gb = &mut self.root.borrow_mut().global_functions;
+        let root: &mut RootEnvironment = &mut self.root.borrow_mut();
 
-        // Try to add it to an existing definition
-        for fun in gb.iter_mut() {
-            if fun.name() == Some(new_function.name()) && fun.arity() == new_function.arity() {
-                fun.add(new_function);
-                return;
-            }
-        }
-
-        // Create a new definition
-        gb.push(OverloadedFunction::from_multiple(vec![new_function]))
+        root.global_functions.push(new_function.clone());
     }
 
     fn get_copy_from_slot(&self, depth: usize, slot: usize) -> Value {

@@ -1,7 +1,7 @@
 #[ndc_macros::export_module]
 mod inner {
     use crate::interpreter::iterator::mut_seq_to_iterator;
-    use crate::interpreter::sequence::{ListRepr, Sequence, TupleRepr};
+    use crate::interpreter::sequence::{ListRepr, Sequence};
     use crate::interpreter::value::Value;
     use itertools::Itertools;
     use std::rc::Rc;
@@ -9,6 +9,7 @@ mod inner {
     use anyhow::anyhow;
 
     /// Converts any sequence into a list
+    #[function(return_type = Vec<Value>)]
     pub fn list(seq: &mut Sequence) -> Value {
         Value::list(mut_seq_to_iterator(seq).collect::<Vec<_>>())
     }
@@ -34,12 +35,12 @@ mod inner {
         }
     }
 
-    pub fn insert(list: &mut Vec<Value>, index: usize, elem: Value) -> anyhow::Result<Value> {
+    pub fn insert(list: &mut Vec<Value>, index: usize, elem: Value) -> anyhow::Result<()> {
         if index > list.len() {
             return Err(anyhow!("index {index} is out of bounds"));
         }
         list.insert(index, elem);
-        Ok(Value::unit())
+        Ok(())
     }
 
     /// Removes and returns the element at position `index` within the list, shifting all elements after it to the left.
@@ -66,21 +67,22 @@ mod inner {
         list.append(other);
     }
 
-    #[function(name = "++")]
-    pub fn tup_concat(left: TupleRepr, mut right: TupleRepr) -> Value {
-        match Rc::try_unwrap(left) {
-            Ok(mut left) => {
-                left.append(Rc::make_mut(&mut right));
-                Value::tuple(left)
-            }
-            Err(left) => Value::tuple(
-                left.iter()
-                    .chain(right.iter())
-                    .cloned()
-                    .collect::<Vec<Value>>(),
-            ),
-        }
-    }
+    // A price we have to pay for the type system
+    // #[function(name = "++")]
+    // pub fn tup_concat(left: TupleRepr, mut right: TupleRepr) -> Value {
+    //     match Rc::try_unwrap(left) {
+    //         Ok(mut left) => {
+    //             left.append(Rc::make_mut(&mut right));
+    //             Value::tuple(left)
+    //         }
+    //         Err(left) => Value::tuple(
+    //             left.iter()
+    //                 .chain(right.iter())
+    //                 .cloned()
+    //                 .collect::<Vec<Value>>(),
+    //         ),
+    //     }
+    // }
 
     #[function(name = "++")]
     pub fn list_concat(left: &mut ListRepr, right: &mut ListRepr) -> Value {
@@ -142,7 +144,7 @@ mod inner {
         list.pop().unwrap_or(Value::unit())
     }
 
-    #[function(name = "pop_left?")]
+    #[function(name = "pop_left?", return_type = Option<Value>)]
     pub fn maybe_pop_left(list: &mut Vec<Value>) -> Value {
         if list.is_empty() {
             return Value::none();
@@ -160,7 +162,7 @@ mod inner {
     }
 
     /// Creates a copy of the list with its elements in reverse order
-    /// TODO: how to deal with tuples?
+    #[function(return_type = Vec<Value>)]
     pub fn reversed(list: &[Value]) -> Value {
         Value::list(list.iter().rev().cloned().collect::<Vec<Value>>())
     }
@@ -216,6 +218,7 @@ mod inner {
         list.last().cloned().map_or_else(Value::none, Value::some)
     }
 
+    #[function(return_type = Vec<(Value, Value)>)]
     pub fn cartesian_product(list_a: &[Value], list_b: &[Value]) -> Value {
         Value::list(
             list_a

@@ -8,22 +8,22 @@ mod inner {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    #[function(name = "MinHeap")]
+    #[function(name = "MinHeap", return_type = MinHeap)]
     pub fn create_min_heap() -> Value {
         Value::Sequence(Sequence::MinHeap(Rc::new(RefCell::new(MinHeap::new()))))
     }
 
-    #[function(name = "MaxHeap")]
+    #[function(name = "MaxHeap", return_type = MaxHeap)]
     pub fn create_max_heap() -> Value {
         Value::Sequence(Sequence::MaxHeap(Rc::new(RefCell::new(MaxHeap::new()))))
     }
 
-    #[function(name = "pop?")]
+    #[function(name = "pop?", return_type = Option<Value>)]
     pub fn maybe_min_pop(heap: &mut MinHeap) -> Value {
         heap.pop().map_or_else(Value::none, Value::some)
     }
 
-    #[function(name = "pop?")]
+    #[function(name = "pop?", return_type = Option<Value>)]
     pub fn maybe_max_pop(heap: &mut MaxHeap) -> Value {
         heap.pop().map_or_else(Value::none, Value::some)
     }

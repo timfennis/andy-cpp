@@ -11,7 +11,7 @@ mod inner {
     /// Creates a new `Deque` type.
     ///
     /// The `Deque` type allows the user to quickly append and remove elements from both the start and the end of the list.
-    #[function(name = "Deque")]
+    #[function(name = "Deque", return_type = VecDeque)]
     pub fn create_deque() -> Value {
         Value::Sequence(Sequence::Deque(Rc::new(RefCell::new(VecDeque::new()))))
     }
@@ -34,7 +34,7 @@ mod inner {
     }
 
     /// Removes and returns the first element of the `deque` as an `Option` returning `None` if the queue is empty.
-    #[function(name = "pop_front?")]
+    #[function(name = "pop_front?", return_type = Option<Value>)]
     pub fn maybe_pop_front(deque: &mut VecDeque<Value>) -> Value {
         deque.pop_front().map_or_else(Value::none, Value::some)
     }
@@ -47,7 +47,7 @@ mod inner {
     }
 
     /// Removes and returns the last element of the `deque` as an `Option` returning `None` if the queue is empty.
-    #[function(name = "pop_back?")]
+    #[function(name = "pop_back?", return_type = Option<Value>)]
     pub fn maybe_pop_back(deque: &mut VecDeque<Value>) -> Value {
         deque.pop_back().map_or_else(Value::none, Value::some)
     }
@@ -61,7 +61,7 @@ mod inner {
     }
 
     /// Returns (but does not remove) the first element of the `deque` as an `Option` returning `None` if the queue is empty.
-    #[function(name = "front?")]
+    #[function(name = "front?", return_type = Option<Value>)]
     pub fn maybe_front(deque: &VecDeque<Value>) -> Value {
         deque.front().cloned().map_or_else(Value::none, Value::some)
     }
@@ -75,7 +75,7 @@ mod inner {
     }
 
     /// Returns (but does not remove) the last element of the `deque` as an `Option` returning `None` if the queue is empty.
-    #[function(name = "back?")]
+    #[function(name = "back?", return_type = Option<Value>)]
     pub fn maybe_back(deque: &VecDeque<Value>) -> Value {
         deque.back().cloned().map_or_else(Value::none, Value::some)
     }
@@ -91,8 +91,7 @@ mod inner {
     }
 
     /// Removes all elements from the `deque`
-    pub fn clear(deque: &mut VecDeque<Value>) -> Value {
+    pub fn clear(deque: &mut VecDeque<Value>) {
         deque.clear();
-        Value::unit()
     }
 }

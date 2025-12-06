@@ -139,24 +139,26 @@ mod inner {
     /// Sorts the input sequence in place.
     ///
     /// This function only works for strings and lists and will throw errors otherwise.
-    pub fn sort(seq: &mut Sequence) -> anyhow::Result<Value> {
+    pub fn sort(seq: &mut Sequence) -> anyhow::Result<()> {
         match seq {
             Sequence::String(str) => {
                 let r = &mut *str.borrow_mut();
                 *r = r.chars().sorted().collect::<String>();
-                Ok(Value::unit())
             }
             Sequence::List(list) => {
                 let mut m = list.borrow_mut();
                 try_sort_by(&mut m, Value::try_cmp)?;
-                Ok(Value::unit())
             }
-            Sequence::Tuple(_) => Err(anyhow!("tuple cannot be sorted in place")),
-            Sequence::Map(_, _) => Err(anyhow!("map cannot be sorted in place")),
-            Sequence::Iterator(_) => Err(anyhow!("iterator cannot be sorted in place")),
-            Sequence::MaxHeap(_) | Sequence::MinHeap(_) => Err(anyhow!("heap is already sorted")),
-            Sequence::Deque(_) => Err(anyhow!("deque cannot be sorted in place")),
+            Sequence::Tuple(_) => return Err(anyhow!("tuple cannot be sorted in place")),
+            Sequence::Map(_, _) => return Err(anyhow!("map cannot be sorted in place")),
+            Sequence::Iterator(_) => return Err(anyhow!("iterator cannot be sorted in place")),
+            Sequence::MaxHeap(_) | Sequence::MinHeap(_) => {
+                return Err(anyhow!("heap is already sorted"));
+            }
+            Sequence::Deque(_) => return Err(anyhow!("deque cannot be sorted in place")),
         }
+
+        Ok(())
     }
 
     /// Sorts the given sequence using a comparing function in place.
@@ -167,6 +169,7 @@ mod inner {
     /// - for values equal to `0` the first argument is equal to the second argument
     ///
     /// This function only works for strings and lists and will throw errors otherwise.
+    #[function(return_type = ())]
     pub fn sort_by(list: &mut Vec<Value>, comp: &Callable<'_>) -> EvaluationResult {
         try_sort_by::<FunctionCarrier>(list, |left, right| {
             let ret = comp.call(&mut [left.clone(), right.clone()])?;
@@ -177,6 +180,7 @@ mod inner {
     }
 
     /// Returns a sorted copy of the input sequence as a list.
+    #[function(return_type = Vec<Value>)]
     pub fn sorted(seq: &mut Sequence) -> anyhow::Result<Value> {
         let mut list = mut_seq_to_iterator(seq).collect::<Vec<Value>>();
         try_sort_by(&mut list, Value::try_cmp)?;
@@ -189,6 +193,7 @@ mod inner {
     /// - for values lower than `0` the first argument is smaller than the second argument
     /// - for values higher than `0` the first argument is greater than the second argument
     /// - for values equal to `0` the first argument is equal to the second argument
+    #[function(return_type = Vec<Value>)]
     pub fn sorted_by(seq: &mut Sequence, comp: &Callable<'_>) -> EvaluationResult {
         let mut list = mut_seq_to_iterator(seq).collect::<Vec<Value>>();
         try_sort_by::<FunctionCarrier>(&mut list, |left, right| {
@@ -216,6 +221,8 @@ mod inner {
     }
 
     /// Enumerates the given sequence returning a list of tuples where the first element of the tuple is the index of the element in the input sequence.
+
+    #[function(return_type = Vec<(i64, Value)>)]
     pub fn enumerate(seq: &mut Sequence) -> Value {
         match seq {
             Sequence::String(s) => Value::list(
@@ -263,11 +270,13 @@ mod inner {
     }
 
     /// Reduces/folds the given sequence using the given combining function and a custom initial value.
+    #[function(return_type = Vec<_>)]
     pub fn fold(seq: &mut Sequence, initial: Value, function: &Callable<'_>) -> EvaluationResult {
         fold_iterator(mut_seq_to_iterator(seq), initial, function)
     }
 
     /// Reduces/folds the given sequence using the given combining function.
+    #[function(return_type = Value)]
     pub fn reduce(seq: &mut Sequence, function: &Callable<'_>) -> EvaluationResult {
         let mut iterator = mut_seq_to_iterator(seq);
         let fst = iterator
@@ -278,6 +287,7 @@ mod inner {
     }
 
     /// Filters the given sequence using the `predicate`.
+    #[function(return_type = Vec<_>)]
     pub fn filter(seq: &mut Sequence, predicate: &Callable<'_>) -> EvaluationResult {
         let iterator = mut_seq_to_iterator(seq);
         let mut out = Vec::new();
@@ -298,6 +308,7 @@ mod inner {
     }
 
     /// Returns the number of elements in the input sequence for which the given `predicate` returns `true`.
+    #[function(return_type = i64)]
     pub fn count(seq: &mut Sequence, predicate: &Callable<'_>) -> EvaluationResult {
         let iterator = mut_seq_to_iterator(seq);
         let mut out = 0;
@@ -316,6 +327,7 @@ mod inner {
     }
 
     /// Returns the value of the first element for which the `predicate` is true for the given input sequence.
+    #[function(return_type = Value)]
     pub fn find(seq: &mut Sequence, predicate: &Callable<'_>) -> EvaluationResult {
         let iterator = mut_seq_to_iterator(seq);
         for element in iterator {
@@ -331,6 +343,7 @@ mod inner {
     }
 
     /// Returns the first index of the element for which the `predicate` is true in the input sequence.
+    #[function(return_type = usize)]
     pub fn locate(seq: &mut Sequence, predicate: &Callable<'_>) -> EvaluationResult {
         let iterator = mut_seq_to_iterator(seq);
         for (idx, element) in iterator.enumerate() {
@@ -346,7 +359,7 @@ mod inner {
     }
 
     /// Returns the first index of the element or produces an error
-    #[function(name = "locate")]
+    #[function(name = "locate", return_type = usize)]
     pub fn locate_element(seq: &mut Sequence, element: &Value) -> EvaluationResult {
         let iterator = mut_seq_to_iterator(seq);
         for (idx, el) in iterator.enumerate() {
@@ -359,6 +372,7 @@ mod inner {
     }
 
     /// Returns `true` if the `predicate` is true for none of the elements in `seq`.
+    #[function(return_type = bool)]
     pub fn none(seq: &mut Sequence, function: &Callable<'_>) -> EvaluationResult {
         for item in mut_seq_to_iterator(seq) {
             match function.call(&mut [item])? {
@@ -367,7 +381,7 @@ mod inner {
                 v => {
                     return Err(anyhow!(format!(
                         "invalid return type, predicate returned {}",
-                        v.value_type()
+                        v.static_type()
                     ))
                     .into());
                 }
@@ -377,6 +391,7 @@ mod inner {
         Ok(Value::Bool(true))
     }
     /// Returns `true` if the `predicate` is true for all the elements in `seq`.
+    #[function(return_type = bool)]
     pub fn all(seq: &mut Sequence, function: &Callable<'_>) -> EvaluationResult {
         for item in mut_seq_to_iterator(seq) {
             match function.call(&mut [item])? {
@@ -385,7 +400,7 @@ mod inner {
                 v => {
                     return Err(anyhow!(format!(
                         "invalid return type, predicate returned {}",
-                        v.value_type()
+                        v.static_type()
                     ))
                     .into());
                 }
@@ -396,6 +411,7 @@ mod inner {
     }
 
     /// Returns `true` if the `predicate` is true for any of the elements in `seq`.
+    #[function(return_type = bool)]
     pub fn any(seq: &mut Sequence, predicate: &Callable<'_>) -> EvaluationResult {
         for item in mut_seq_to_iterator(seq) {
             match predicate.call(&mut [item])? {
@@ -404,7 +420,7 @@ mod inner {
                 v => {
                     return Err(anyhow!(format!(
                         "invalid return type, predicate returned {}",
-                        v.value_type()
+                        v.static_type()
                     ))
                     .into());
                 }
@@ -415,6 +431,7 @@ mod inner {
     }
 
     /// Applies the function to each element in a sequence returning the result as a list.
+    #[function(return_type = Vec<_>)]
     pub fn map(seq: &mut Sequence, function: &Callable<'_>) -> EvaluationResult {
         let iterator = mut_seq_to_iterator(seq);
         let mut out = Vec::new();
@@ -427,6 +444,7 @@ mod inner {
     }
 
     /// Applies a function to each item in a sequence, flattens the resulting sequences, and returns a single combined sequence.
+    #[function(return_type = Vec<_>)]
     pub fn flat_map(seq: &mut Sequence, function: &Callable<'_>) -> EvaluationResult {
         // let iterator = ;
         let mut out = Vec::new();
@@ -469,6 +487,7 @@ mod inner {
     }
 
     /// Returns the `k` sized combinations of the given sequence `seq` as a list of tuples.
+    #[function(return_type = Vec<_>)]
     pub fn combinations(seq: &mut Sequence, k: usize) -> Value {
         Value::list(
             mut_seq_to_iterator(seq)
@@ -479,6 +498,7 @@ mod inner {
     }
 
     /// Returns the `k` sized permutations of the given sequence `seq` as a list of tuples.
+    #[function(return_type = Vec<_>)]
     pub fn permutations(seq: &mut Sequence, k: usize) -> Value {
         Value::list(
             mut_seq_to_iterator(seq)
@@ -489,6 +509,7 @@ mod inner {
     }
 
     /// Returns al prefixes of a sequence, each as a list.
+    #[function(return_type = Vec<_>)]
     pub fn prefixes(seq: &mut Sequence) -> Value {
         // Special case for string which is more efficient and doesn't produce lists of characters
         if let Sequence::String(string) = &seq {
@@ -518,6 +539,7 @@ mod inner {
     }
 
     /// Returns all suffixes of a sequence, each as a list; for strings, returns all trailing substrings.
+    #[function(return_type = Vec<_>)]
     pub fn suffixes(seq: &mut Sequence) -> Value {
         // Special case for string which is more efficient and doesn't produce lists of characters
         if let Sequence::String(string) = &seq {
@@ -543,6 +565,7 @@ mod inner {
     /// Transposes a sequence of sequences, turning rows into columns, and returns the result as a list of lists.
     // TODO: right now transposed always produces a list, it probably should produce whatever the input type was (if possible)
     // TODO: this might not be the expected result for sets (since iterators over sets yield tuples)
+    #[function(return_type = Vec<_>)]
     pub fn transposed(seq: &mut Sequence) -> EvaluationResult {
         let mut main = mut_seq_to_iterator(seq).collect::<Vec<_>>();
         let mut iterators = Vec::new();
@@ -563,6 +586,7 @@ mod inner {
     }
 
     /// Return a list of all windows, wrapping back to the first elements when the window would otherwise exceed the length of source list, producing tuples of size 2.
+    #[function(return_type = Vec<(Value, Value)>)]
     pub fn circular_tuple_windows(seq: &mut Sequence) -> Value {
         // TODO: this implementation probably clones a bit more than it needs to, but it's better tol
         //       have something than nothing
@@ -577,6 +601,7 @@ mod inner {
     }
 
     /// Returns a list of all size-2 windows in `seq`.
+    #[function(return_type = Vec<(Value, Value)>)]
     pub fn pairwise(seq: &mut Sequence) -> Value {
         Value::list(
             mut_seq_to_iterator(seq)
@@ -589,6 +614,7 @@ mod inner {
 
     /// Applies a function to each pair of consecutive elements in a sequence and returns the results as a list.
     #[function(name = "pairwise")]
+    #[function(return_type = Vec<(Value, Value)>)]
     pub fn pairwise_map(seq: &mut Sequence, function: &Callable<'_>) -> EvaluationResult {
         let main = mut_seq_to_iterator(seq).collect::<Vec<_>>();
 
@@ -601,6 +627,7 @@ mod inner {
     }
 
     /// Returns a list of all contiguous windows of `length` size. The windows overlap. If the `seq` is shorter than size, the iterator returns no values.
+    #[function(return_type = Vec<Vec<Value>>)]
     pub fn windows(seq: &mut Sequence, length: usize) -> Value {
         Value::list(
             mut_seq_to_iterator(seq)
@@ -615,6 +642,7 @@ mod inner {
     ///
     /// The powerset of a set contains all subsets including the empty set and the full input set. A powerset has length `2^n` where `n` is the length of the input set.
     /// Each list produced by this function represents a subset of the elements in the source sequence.
+    #[function(return_type = Vec<Vec<Value>>)]
     pub fn subsequences(seq: &mut Sequence) -> Value {
         Value::list(
             mut_seq_to_iterator(seq)
@@ -626,6 +654,7 @@ mod inner {
 
     /// Return a list that represents the powerset of the elements of `seq` that are exactly `length` long.
     #[function(name = "subsequences")]
+    #[function(return_type = Vec<Vec<Value>>)]
     pub fn subsequences_len(seq: &mut Sequence, length: usize) -> Value {
         Value::list(
             mut_seq_to_iterator(seq)
@@ -662,6 +691,7 @@ mod inner {
     ///   [3,"c",false]
     /// ]
     /// ```
+    #[function(return_type = Vec<Vec<Value>>)]
     pub fn multi_cartesian_product(seq: &mut Sequence) -> anyhow::Result<Value> {
         let mut iterators = Vec::new();
 
@@ -681,6 +711,7 @@ mod inner {
 
     /// Split the input sequence into evenly sized chunks. If the input length of the sequence
     /// is not dividable by the chunk_size the last chunk will contain fewer elements.
+    #[function(return_type = Vec<Vec<Value>>)]
     pub fn chunks(seq: &mut Sequence, chunk_size: usize) -> anyhow::Result<Value> {
         if chunk_size == 0 {
             return Err(anyhow!("chunk size must be non-zero"));
@@ -696,6 +727,7 @@ mod inner {
         ))
     }
 
+    #[function(return_type = Iterator<Value>)]
     pub fn repeat(value: Value) -> Value {
         Value::Sequence(Sequence::Iterator(Rc::new(RefCell::new(
             ValueIterator::Repeat(Repeat {
@@ -706,7 +738,7 @@ mod inner {
         ))))
     }
 
-    #[function(name = "repeat")]
+    #[function(name = "repeat", return_type = Iterator<Value>)]
     pub fn repeat_times(value: Value, times: usize) -> Value {
         Value::Sequence(Sequence::Iterator(Rc::new(RefCell::new(
             ValueIterator::Repeat(Repeat {
@@ -735,7 +767,7 @@ pub mod extra {
     use anyhow::anyhow;
     use itertools::izip;
 
-    use crate::interpreter::function::FunctionBuilder;
+    use crate::interpreter::function::{FunctionBuilder, StaticType};
     use crate::interpreter::{
         environment::Environment, function::FunctionBody, iterator::mut_value_to_iterator,
         value::Value,
@@ -748,6 +780,7 @@ pub mod extra {
                     .documentation("Combines multiple sequences (or iterables) into a single sequence of tuples, where the ith tuple contains the ith element from each input sequence.\n\nIf the input sequences are of different lengths, the resulting sequence is truncated to the length of the shortest input.".to_string())
                     .body(FunctionBody::generic(
                         crate::interpreter::function::TypeSignature::Variadic,
+                        StaticType::List,
                         |args, _env| match args {
                             [_] => {
                                 Err(anyhow!("zip must be called with 2 or more arguments").into())

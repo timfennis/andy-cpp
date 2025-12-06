@@ -5,7 +5,7 @@ use crate::ast::ExpressionLocation;
 use crate::interpreter::environment::{Environment, InterpreterOutput};
 use crate::interpreter::evaluate::{EvaluationError, evaluate_expression};
 use crate::interpreter::function::FunctionCarrier;
-use crate::interpreter::resolve::{LexicalData, resolve_pass};
+use crate::interpreter::semantic::analyser::{Analyser, ScopeTree};
 use crate::interpreter::value::Value;
 use crate::lexer::{Lexer, TokenLocation};
 use miette::Diagnostic;
@@ -17,13 +17,13 @@ pub(crate) mod heap;
 pub mod int;
 pub mod iterator;
 pub mod num;
-mod resolve;
+pub mod semantic;
 pub mod sequence;
 pub mod value;
 
 pub struct Interpreter {
     environment: Rc<RefCell<Environment>>,
-    lexical_data: LexicalData,
+    analyser: Analyser,
 }
 
 #[allow(clippy::dbg_macro, clippy::print_stdout, clippy::print_stderr)]
@@ -34,11 +34,11 @@ impl Interpreter {
         T: InterpreterOutput + 'static,
     {
         let environment = Environment::new_with_stdlib(Box::new(dest));
-        let hash_map = environment.create_global_scope_mapping();
+        let global_identifiers = environment.get_global_identifiers();
 
         Self {
             environment: Rc::new(RefCell::new(environment)),
-            lexical_data: LexicalData::from_global_scope(hash_map),
+            analyser: Analyser::from_scope_tree(ScopeTree::from_global_scope(global_identifiers)),
         }
     }
 
@@ -68,16 +68,16 @@ impl Interpreter {
         }
 
         for e in &mut expressions {
-            resolve_pass(e, &mut self.lexical_data)?
+            self.analyser.analyse(e)?;
         }
 
         // dbg!(&expressions);
-        // dbg!(&self.lexical_data);
+        // dbg!(&self.analyser);
 
         let final_value = self.interpret(expressions.into_iter())?;
 
         if debug {
-            dbg!(&final_value, final_value.value_type());
+            dbg!(&final_value, final_value.static_type());
         }
 
         Ok(format!("{final_value}"))
@@ -89,7 +89,7 @@ impl Interpreter {
     ) -> Result<Value, InterpreterError> {
         let mut value = Value::unit();
         for expr in expressions {
-            match evaluate_expression(&expr, &mut self.environment) {
+            match evaluate_expression(&expr, &self.environment) {
                 Ok(val) => value = val,
                 Err(FunctionCarrier::Return(_)) => {
                     Err(EvaluationError::syntax_error(
@@ -135,11 +135,11 @@ pub enum InterpreterError {
         #[from]
         cause: crate::ast::Error,
     },
-    #[error("Error during resolver pass")]
+    #[error("Error during static analysis")]
     #[diagnostic(transparent)]
     Resolver {
         #[from]
-        cause: resolve::ResolveError,
+        cause: semantic::analyser::AnalysisError,
     },
     #[error("Error while executing code")]
     #[diagnostic(transparent)]
