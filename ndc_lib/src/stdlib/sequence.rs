@@ -565,6 +565,7 @@ mod inner {
     /// Transposes a sequence of sequences, turning rows into columns, and returns the result as a list of lists.
     // TODO: right now transposed always produces a list, it probably should produce whatever the input type was (if possible)
     // TODO: this might not be the expected result for sets (since iterators over sets yield tuples)
+    #[function(return_type = Vec<_>)]
     pub fn transposed(seq: &mut Sequence) -> EvaluationResult {
         let mut main = mut_seq_to_iterator(seq).collect::<Vec<_>>();
         let mut iterators = Vec::new();
