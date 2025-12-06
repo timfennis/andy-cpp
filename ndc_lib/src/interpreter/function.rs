@@ -151,11 +151,11 @@ impl FunctionBody {
 
     pub fn return_type(&self) -> &StaticType {
         match self {
-            FunctionBody::Closure { return_type, .. } => return_type,
-            FunctionBody::NumericUnaryOp { .. } => &StaticType::Number,
-            FunctionBody::NumericBinaryOp { .. } => &StaticType::Number,
-            FunctionBody::GenericFunction { return_type, .. } => return_type,
-            FunctionBody::Memoized { function, .. } => function.return_type(),
+            Self::Closure { return_type, .. } | Self::GenericFunction { return_type, .. } => {
+                return_type
+            }
+            Self::NumericUnaryOp { .. } | Self::NumericBinaryOp { .. } => &StaticType::Number,
+            Self::Memoized { function, .. } => function.return_type(),
         }
     }
     pub fn call(&self, args: &mut [Value], env: &Rc<RefCell<Environment>>) -> EvaluationResult {

@@ -173,7 +173,7 @@ mod inner {
     }
 
     /// Splits the string at the first occurrence of `pattern`, returning a tuple-like value.
-    #[function(name = "split", return_type = (String, String))]
+    #[function(return_type = (String, String))]
     pub fn split_once(string: &str, pattern: &str) -> Value {
         match string.split_once(pattern) {
             Some((fst, snd)) => Value::tuple(vec![Value::string(fst), Value::string(snd)]),

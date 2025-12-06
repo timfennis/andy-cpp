@@ -72,7 +72,7 @@ pub fn wrap_function(function: &syn::ItemFn) -> Vec<WrappedFunction> {
                     &original_identifier,
                     function_name,
                     vec![],
-                    return_type.clone(),
+                    &return_type,
                     &documentation_buffer,
                 )
             })
@@ -107,7 +107,7 @@ pub fn wrap_function(function: &syn::ItemFn) -> Vec<WrappedFunction> {
                         &format_ident!("{original_identifier}_{variation_id}"),
                         function_name,
                         args,
-                        return_type.clone(),
+                        &return_type,
                         &documentation_buffer,
                     );
                     variation_id += 1;
@@ -223,7 +223,7 @@ fn wrap_single(
     identifier: &syn::Ident,
     register_as_function_name: &proc_macro2::Literal,
     input_arguments: Vec<Argument>,
-    return_type: TokenStream,
+    return_type: &TokenStream,
     docs: &str,
 ) -> WrappedFunction {
     let inner_ident = format_ident!("{}_inner", identifier);

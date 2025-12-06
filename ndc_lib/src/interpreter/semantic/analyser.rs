@@ -21,12 +21,10 @@ impl Analyser {
         match expression {
             Expression::BoolLiteral(_) => Ok(StaticType::Bool),
             Expression::StringLiteral(_) => Ok(StaticType::String),
-            Expression::Int64Literal(_) => Ok(StaticType::Int),
+            Expression::Int64Literal(_) | Expression::BigIntLiteral(_) => Ok(StaticType::Int),
             Expression::Float64Literal(_) => Ok(StaticType::Float),
-            Expression::BigIntLiteral(_) => Ok(StaticType::Int),
             Expression::ComplexLiteral(_) => Ok(StaticType::Complex),
-            Expression::Continue => Ok(StaticType::unit()), // TODO: change to never type?
-            Expression::Break => Ok(StaticType::unit()),
+            Expression::Continue | Expression::Break => Ok(StaticType::unit()), // TODO: change to never type?
             Expression::Identifier {
                 name: ident,
                 resolved,
