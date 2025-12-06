@@ -12,6 +12,7 @@ mod inner {
     /// Returns a list of all the keys in the map or set.
     ///
     /// Note that for a set this will return the values in the set.
+    #[function(return_type = Vec<_>)]
     pub fn keys(map: &mut HashMap<Value, Value>) -> Value {
         Value::list(map.keys().cloned().collect::<Vec<_>>())
     }
@@ -19,6 +20,7 @@ mod inner {
     /// Returns a list of all the values in the map.
     ///
     /// Note that for sets this will return a list of unit types, you should use keys if you want the values in the set.
+    #[function(return_type = Vec<_>)]
     pub fn values(map: &mut HashMap<Value, Value>) -> Value {
         Value::list(map.values().cloned().collect::<Vec<_>>())
     }
@@ -106,7 +108,7 @@ mod inner {
     /// Returns the union (elements that are in either `left` or `right`) of two maps or sets.
     ///
     /// This is the same as evaluating the expression `left | right`
-    #[function(alias = "|")]
+    #[function(alias = "|", return_type = DefaultMap<'_>)]
     pub fn union(left: DefaultMap<'_>, right: &HashMap<Value, Value>) -> Value {
         Value::Sequence(Sequence::Map(
             Rc::new(RefCell::new(hash_map::union(left.0, right))),
@@ -117,7 +119,7 @@ mod inner {
     /// Returns the intersection (elements that are in both `left and `right`) of two maps or sets.
     ///
     /// This is the same as evaluating the expression `left & right`.
-    #[function(alias = "&")]
+    #[function(alias = "&", return_type = DefaultMap<'_>)]
     pub fn intersection(left: DefaultMap<'_>, right: &HashMap<Value, Value>) -> Value {
         Value::Sequence(Sequence::Map(
             Rc::new(RefCell::new(hash_map::intersection(left.0, right))),
@@ -128,7 +130,7 @@ mod inner {
     /// Returns the symmetric difference (elements that are either in `left` or `right` but not both) of two maps or sets.
     ///
     /// This is the same as evaluating the expression `left ~ right`.
-    #[function(alias = "~")]
+    #[function(alias = "~", return_type = DefaultMap<'_>)]
     pub fn symmetric_difference(left: DefaultMap<'_>, right: &HashMap<Value, Value>) -> Value {
         Value::Sequence(Sequence::Map(
             Rc::new(RefCell::new(hash_map::symmetric_difference(left.0, right))),
@@ -137,6 +139,7 @@ mod inner {
     }
 
     /// Converts the given sequence to set.
+    #[function(return_type = DefaultMap<'_>)]
     pub fn set(seq: &mut Sequence) -> Value {
         let out: HashMap<Value, Value> = match seq {
             Sequence::String(rc) => rc

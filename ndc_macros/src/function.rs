@@ -7,7 +7,6 @@ use itertools::Itertools;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use std::fmt::Write;
-use syn::spanned::Spanned;
 
 pub struct WrappedFunction {
     pub function_declaration: TokenStream,
@@ -21,6 +20,8 @@ pub fn wrap_function(function: &syn::ItemFn) -> Vec<WrappedFunction> {
         &original_identifier.to_string(),
     )];
 
+    let mut return_type = None;
+
     let mut documentation_buffer = String::new();
     for attr in &function.attrs {
         if attr.path().is_ident("function") {
@@ -32,6 +33,10 @@ pub fn wrap_function(function: &syn::ItemFn) -> Vec<WrappedFunction> {
                     Ok(())
                 } else if meta.path.is_ident("alias") {
                     function_names.push(meta.value()?.parse()?);
+                    Ok(())
+                } else if meta.path.is_ident("return_type") {
+                    let value: syn::Type = meta.value()?.parse()?;
+                    return_type = Some(map_type(&value));
                     Ok(())
                 } else {
                     Err(meta.error("unsupported property on function"))
@@ -48,15 +53,14 @@ pub fn wrap_function(function: &syn::ItemFn) -> Vec<WrappedFunction> {
         }
     }
 
+    let return_type = return_type.unwrap_or_else(|| map_return_type(&function.sig.output));
+
     match &function.vis {
         syn::Visibility::Public(_) => {}
         syn::Visibility::Restricted(_) | syn::Visibility::Inherited => {
             panic!("only public functions can be wrapped for now")
         }
     }
-
-    // TODO: CONTINUE HERE
-    let return_type = map_return_type(&function.sig.output);
 
     // If the function has no argument then the cartesian product stuff below doesn't work
     if function.sig.inputs.is_empty() {
@@ -115,7 +119,6 @@ pub fn wrap_function(function: &syn::ItemFn) -> Vec<WrappedFunction> {
 }
 
 fn map_return_type(output: &syn::ReturnType) -> TokenStream {
-    let convert = build();
     match output {
         syn::ReturnType::Default => {
             // in case return type is not specified (for closures rust defaults to type inference which doesn't help us here)
@@ -129,8 +132,17 @@ fn map_type(ty: &syn::Type) -> TokenStream {
     match ty {
         syn::Type::Path(p) => map_type_path(p),
         syn::Type::Reference(r) => map_type(r.elem.as_ref()),
-        // add more variants when needed
-        _ => quote::quote! { crate::interpreter::function::StaticType::Any },
+        syn::Type::Tuple(t) => {
+            let inner = t.elems.iter().map(map_type);
+            quote::quote! {
+                crate::interpreter::function::StaticType::Tuple(vec![
+                    #(#inner),*
+                ])
+            }
+        }
+        _ => {
+            panic!("unmapped type: {ty:?}");
+        }
     }
 }
 
@@ -139,7 +151,7 @@ fn map_type_path(p: &syn::TypePath) -> TokenStream {
 
     match segment.ident.to_string().as_str() {
         // Primitive single identifiers
-        "i32" | "i64" | "isize" | "u32" | "u64" => {
+        "i32" | "i64" | "isize" | "u32" | "u64" | "usize" | "BigInt" => {
             quote::quote! { crate::interpreter::function::StaticType::Int }
         }
         "f32" | "f64" => {
@@ -152,8 +164,29 @@ fn map_type_path(p: &syn::TypePath) -> TokenStream {
             quote::quote! { crate::interpreter::function::StaticType::String }
         }
 
+        "Vec" => {
+            quote::quote! { crate::interpreter::function::StaticType::List }
+        }
+        "DefaultMap" | "HashMap" => {
+            quote::quote! { crate::interpreter::function::StaticType::Map }
+        }
+        "Number" => {
+            quote::quote! { crate::interpreter::function::StaticType::Number }
+        }
+        "VecDeque" => {
+            quote::quote! { crate::interpreter::function::StaticType::Deque }
+        }
+        "MinHeap" => {
+            quote::quote! { crate::interpreter::function::StaticType::MinHeap }
+        }
+        "MaxHeap" => {
+            quote::quote! { crate::interpreter::function::StaticType::MaxHeap }
+        }
+        "Option" => {
+            // TODO: in the future add generic types
+            quote::quote! { crate::interpreter::function::StaticType::Option }
+        }
         // Generic wrappers like anyhow::Result<T>, std::result::Result<T>
-        // "HashMap" =>
         "Result" => match &segment.arguments {
             syn::PathArguments::AngleBracketed(args) => {
                 // Extract the first generic argument
@@ -169,10 +202,12 @@ fn map_type_path(p: &syn::TypePath) -> TokenStream {
                 panic!("Result return type found without syn::PathArguments::AngleBracketed");
             }
         },
-
-        // Fallback
-        _ => {
+        "Value" | "EvaluationResult" => {
             quote::quote! { crate::interpreter::function::StaticType::Any }
+        }
+        // Fallback
+        unmatched => {
+            panic!("Cannot map type string \"{unmatched}\" to StaticType");
         }
     }
 }

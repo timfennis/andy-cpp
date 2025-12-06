@@ -6,6 +6,7 @@ use regex::Regex;
 mod inner {
 
     /// Extracts all signed integers from the given string.
+    #[function(return_type = Vec<i64>)]
     pub fn nums(haystack: &str) -> Value {
         static RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"-?\d+").unwrap());
 
@@ -16,6 +17,7 @@ mod inner {
     }
 
     /// Extracts all unsigned integers from the given string.
+    #[function(return_type = Vec<i64>)]
     pub fn unsigned_nums(haystack: &str) -> Value {
         static RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\d+").unwrap());
 
@@ -32,6 +34,7 @@ mod inner {
     }
 
     /// Returns all capture groups from the first match of the regular expression.
+    #[function(return_type = Vec<String>)]
     pub fn captures(haystack: &str, regex: &str) -> Result<Value, regex::Error> {
         let r = Regex::new(regex)?;
 
@@ -51,6 +54,7 @@ mod inner {
     }
 
     /// Returns the first capture group from the first match of the regular expression.
+    #[function(return_type = Vec<String>)]
     pub fn capture_once(haystack: &str, regex: &str) -> Result<Value, regex::Error> {
         let r = Regex::new(regex)?;
 

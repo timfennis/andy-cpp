@@ -143,7 +143,7 @@ mod inner {
         list.pop().unwrap_or(Value::unit())
     }
 
-    #[function(name = "pop_left?")]
+    #[function(name = "pop_left?", return_type = Option<Value>)]
     pub fn maybe_pop_left(list: &mut Vec<Value>) -> Value {
         if list.is_empty() {
             return Value::none();
