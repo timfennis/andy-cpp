@@ -135,7 +135,14 @@ impl Value {
             Self::Sequence(Sequence::Tuple(t)) => {
                 StaticType::Tuple(t.iter().map(Self::static_type).collect())
             }
-            Self::Function(_) => StaticType::Function,
+            // TODO: temporary until we get rid of OverloadedFunction
+            Self::Function(fun) => fun
+                .borrow()
+                .implementations()
+                .next()
+                .expect("TODO: implement function")
+                .1
+                .static_type(),
             Self::Sequence(Sequence::Map(_, _)) => StaticType::Map,
             Self::Sequence(Sequence::Iterator(_)) => StaticType::Iterator,
             Self::Sequence(Sequence::MaxHeap(_)) => StaticType::MaxHeap,

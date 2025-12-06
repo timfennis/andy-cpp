@@ -372,7 +372,12 @@ fn into_param_type(ty: &syn::Type) -> TokenStream {
                 quote! { crate::interpreter::function::StaticType::Sequence }
             }
             _ if path.is_ident("Callable") => {
-                quote! { crate::interpreter::function::StaticType::Function }
+                quote! {
+                    crate::interpreter::function::StaticType::Function {
+                        parameters: None,
+                        return_type: Box::new(crate::interpreter::function::StaticType::Any)
+                    }
+                }
             }
             _ => panic!("Don't know how to convert Path into StaticType\n\n{path:?}"),
         },
@@ -405,7 +410,13 @@ fn create_temp_variable(
         if path_ends_with(ty, "Callable") {
             let temp_var = syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
             return vec![Argument {
-                param_type: quote! { crate::interpreter::function::StaticType::Function },
+                param_type: quote! {
+                    // TODO: how are we going to figure out the exact type of function here
+                    crate::interpreter::function::StaticType::Function {
+                        parameters: None,
+                        return_type: Box::new(crate::interpreter::function::StaticType::Any)
+                    }
+                },
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {

@@ -1,7 +1,6 @@
-use crate::interpreter::function::{Function, OverloadedFunction};
+use crate::interpreter::function::{Function, StaticType};
 
 use crate::ast::ResolvedVar;
-use crate::interpreter::semantic::analyser::LexicalIdentifier;
 use crate::interpreter::value::Value;
 use std::cell::RefCell;
 use std::fmt;
@@ -68,16 +67,13 @@ impl Environment {
         env
     }
 
-    pub fn get_global_identifiers(&self) -> Vec<LexicalIdentifier> {
+    pub fn get_global_identifiers(&self) -> Vec<(String, StaticType)> {
         self.root
             .borrow()
             .global_functions
             .iter()
-            .map(|function| {
-                debug_assert_ne!(function.name(), "");
-                LexicalIdentifier::from_function(function)
-            })
-            .collect::<Vec<LexicalIdentifier>>()
+            .map(|function| (function.name().to_string(), function.static_type()))
+            .collect::<Vec<(String, StaticType)>>()
     }
 
     #[must_use]

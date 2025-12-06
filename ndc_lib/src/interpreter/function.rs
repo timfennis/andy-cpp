@@ -86,6 +86,18 @@ impl Function {
     pub fn return_type(&self) -> &StaticType {
         self.body.return_type()
     }
+
+    pub fn static_type(&self) -> StaticType {
+        StaticType::Function {
+            parameters: match self.body.type_signature() {
+                TypeSignature::Variadic => None,
+                TypeSignature::Exact(types) => {
+                    Some(types.iter().map(|x| x.type_name.clone()).collect())
+                }
+            },
+            return_type: Box::new(self.body.return_type().clone()),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -274,7 +286,7 @@ impl TypeSignature {
                     for (a, b) in types.iter().zip(signature.iter()) {
                         let dist = if a == &b.type_name {
                             0
-                        } else if a.is_subtype_of(&b.type_name) {
+                        } else if a.is_compatible_with(&b.type_name) {
                             1
                         } else {
                             return None;
@@ -470,7 +482,10 @@ impl Parameter {
 pub enum StaticType {
     Any,
     Bool,
-    Function,
+    Function {
+        parameters: Option<Vec<StaticType>>,
+        return_type: Box<StaticType>,
+    },
     Option,
 
     // Numbers
@@ -532,11 +547,15 @@ impl StaticType {
         }
     }
 
-    #[allow(clippy::match_like_matches_macro)]
-    pub fn is_subtype_of(&self, other: &Self) -> bool {
+    #[allow(clippy::match_same_arms)]
+    pub fn is_compatible_with(&self, other: &Self) -> bool {
         match (self, other) {
+            (a, b) if a == b => true,
             (_, Self::Any) => true,
-            (Self::Int | Self::Rational | Self::Complex | Self::Float, Self::Number) => true,
+            (
+                Self::Number | Self::Int | Self::Rational | Self::Complex | Self::Float,
+                Self::Number,
+            ) => true,
             (
                 Self::String
                 | Self::List
@@ -558,7 +577,17 @@ impl fmt::Display for StaticType {
         match self {
             Self::Any => write!(f, "Any"),
             Self::Bool => write!(f, "Bool"),
-            Self::Function => write!(f, "Function"),
+            Self::Function {
+                parameters,
+                return_type,
+            } => write!(
+                f,
+                "Function({}) -> {return_type}",
+                parameters
+                    .as_deref()
+                    .map(|p| p.iter().join(", "))
+                    .unwrap_or(String::from("*"))
+            ),
             Self::Option => write!(f, "Option"),
             Self::Number => write!(f, "Number"),
             Self::Float => write!(f, "Float"),

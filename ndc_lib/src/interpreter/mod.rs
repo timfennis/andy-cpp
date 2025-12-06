@@ -135,7 +135,7 @@ pub enum InterpreterError {
         #[from]
         cause: crate::ast::Error,
     },
-    #[error("Error during resolver pass")]
+    #[error("Error during static analysis")]
     #[diagnostic(transparent)]
     Resolver {
         #[from]

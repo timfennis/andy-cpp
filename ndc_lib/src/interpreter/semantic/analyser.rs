@@ -1,5 +1,5 @@
 use crate::ast::{Expression, ExpressionLocation, ForBody, ForIteration, Lvalue, ResolvedVar};
-use crate::interpreter::function::{Function, StaticType, TypeSignature};
+use crate::interpreter::function::StaticType;
 use crate::lexer::Span;
 use itertools::Itertools;
 use std::iter::repeat;
@@ -41,7 +41,7 @@ impl Analyser {
 
                 *resolved = Some(binding);
 
-                Ok(self.scope_tree.get_type(binding)) // are we guaranteed to even have a type
+                Ok(self.scope_tree.get_type(binding).clone())
             }
             Expression::Statement(inner) => {
                 self.analyse(inner)?;
@@ -72,27 +72,19 @@ impl Analyser {
             } => {
                 let left_type = self.resolve_lvalue_as_ident(l_value, *span)?;
                 let right_type = self.analyse(r_value)?;
-                let op_assign_arg_types = Some(vec![left_type, right_type]);
+                let op_assign_arg_types = vec![left_type, right_type];
 
-                // In this future should be able to use our type system to figure out which specific
-                // instance of the function we need. When this is the case we can stop inserting both
-                // versions in the OpAssignment expression and just figure out the correct one or error
-                // if there is none
-                let op_assign_ident = LexicalIdentifier::Function {
-                    name: format!("{operation}="),
-                    signature: op_assign_arg_types.clone(), // TODO: we should be able to remove this
-                };
-
-                if let Some(binding) = self.scope_tree.get_binding(&op_assign_ident) {
+                if let Some(binding) = self
+                    .scope_tree
+                    .get_function_binding(&format!("{operation}="), &op_assign_arg_types)
+                {
                     *resolved_assign_operation = Some(binding);
                 }
 
-                let operation_ident = LexicalIdentifier::Function {
-                    name: (*operation).clone(),
-                    signature: op_assign_arg_types,
-                };
-
-                if let Some(binding) = self.scope_tree.get_binding(&operation_ident) {
+                if let Some(binding) = self
+                    .scope_tree
+                    .get_function_binding(&operation, &op_assign_arg_types)
+                {
                     *resolved_operation = Some(binding);
 
                     Ok(StaticType::unit())
@@ -110,31 +102,31 @@ impl Analyser {
                 body,
                 ..
             } => {
-                if let Some(name) = name {
-                    let function_ident = LexicalIdentifier::Function {
-                        name: (*name).clone(),
-                        // TODO: figuring out the type signature of function declarations is the rest of the owl
-                        signature: Some(
-                            repeat(StaticType::Any)
-                                .take(extract_argument_arity(parameters))
-                                .collect(),
-                        ),
-                    };
-
-                    *resolved_name =
-                        Some(self.scope_tree.get_or_create_local_binding(
-                            function_ident.clone(),
-                            StaticType::Function,
-                        ))
-                }
+                // TODO: figuring out the type signature of function declarations is the rest of the owl
+                let param_types: Vec<StaticType> = repeat(StaticType::Any)
+                    .take(extract_argument_arity(parameters))
+                    .collect();
 
                 self.scope_tree.new_scope();
                 self.resolve_parameters_declarative(parameters);
 
-                self.analyse(body)?;
+                let return_type = self.analyse(body)?;
                 self.scope_tree.destroy_scope();
 
-                Ok(StaticType::Function)
+                let function_type = StaticType::Function {
+                    parameters: Some(param_types.clone()),
+                    return_type: Box::new(return_type),
+                };
+
+                if let Some(name) = name {
+                    // TODO: is this correct, for now we just always create a new binding, we could also produce an error if we are generating a conflicting binding
+                    *resolved_name = Some(
+                        self.scope_tree
+                            .create_local_binding(name.clone(), function_type.clone()),
+                    );
+                }
+
+                Ok(function_type)
             }
             Expression::Block { statements } => {
                 self.scope_tree.new_scope();
@@ -202,10 +194,15 @@ impl Analyser {
                     type_sig.push(self.analyse(a)?);
                 }
 
-                let function =
-                    self.resolve_function_with_argument_types(function, &type_sig, *span)?;
+                let StaticType::Function { return_type, .. } =
+                    self.resolve_function_with_argument_types(function, &type_sig, *span)?
+                else {
+                    unreachable!(
+                        "resolve_function_with_argument_types should guarantee us a function type"
+                    );
+                };
 
-                Ok(StaticType::Any)
+                Ok(*return_type)
             }
             Expression::Index { index, value } => {
                 self.analyse(index)?;
@@ -277,26 +274,13 @@ impl Analyser {
 
         let binding = self
             .scope_tree
-            .get_binding(&LexicalIdentifier::Function {
-                name: name.clone(),                       // TODO: get rid of clone
-                signature: Some(argument_types.to_vec()), // TODO: get rid of to_vec
-            })
-            // NOTE: we don't have to look for variadic functions (I think)
-            // If no match was found we look for a variadic function with the given name
-            // .or_else(|| {
-            //     self.scope_tree.get_binding(&LexicalIdentifier::Function {
-            //         name: name.clone(),
-            //         signature: None,
-            //     })
-            // })
-            // NOTE: for now if we can't find a function that matches we just bind to a variable with that name (if possible)
-            //       this fixes some cases until we have full type checking
-            // .or_else(|| (self.scope_tree).get_binding_any(name))
-            .ok_or_else(|| AnalysisError::function_not_found(name, &argument_types, span))?;
+            .get_function_binding(name, argument_types)
+            // TODO: instead of throwing an error we can emit a dynamic binding
+            .ok_or_else(|| AnalysisError::function_not_found(name, argument_types, span))?;
 
         *resolved = Some(binding);
 
-        Ok(StaticType::Function)
+        Ok(self.scope_tree.get_type(binding).clone())
     }
     fn resolve_for_iterations(
         &mut self,
@@ -370,7 +354,7 @@ impl Analyser {
             return Err(AnalysisError::lvalue_required_to_be_single_identifier(span));
         };
 
-        let Some(target) = self.scope_tree.get_binding(&identifier.clone().into()) else {
+        let Some(target) = self.scope_tree.get_binding_any(&identifier) else {
             return Err(AnalysisError::identifier_not_previously_declared(
                 identifier, span,
             ));
@@ -378,7 +362,7 @@ impl Analyser {
 
         *resolved = Some(target);
 
-        Ok(self.scope_tree.get_type(target))
+        Ok(self.scope_tree.get_type(target).clone())
     }
 
     fn resolve_lvalue(&mut self, lvalue: &mut Lvalue, span: Span) -> Result<(), AnalysisError> {
@@ -387,7 +371,7 @@ impl Analyser {
                 identifier,
                 resolved,
             } => {
-                let Some(target) = self.scope_tree.get_binding(&identifier.clone().into()) else {
+                let Some(target) = self.scope_tree.get_binding_any(&identifier) else {
                     return Err(AnalysisError::identifier_not_previously_declared(
                         identifier, span,
                     ));
@@ -428,12 +412,12 @@ impl Analyser {
                 panic!("expected tuple values to be ident");
             };
 
-            *resolved = Some(self.scope_tree.create_local_binding(
-                LexicalIdentifier::Variable {
-                    name: (*name).clone(),
-                },
-                StaticType::Any,
-            ));
+            // TODO: big challenge how do we figure out the function parameter types?
+            //       it seems like this is something we need an HM like system for!?
+            *resolved = Some(
+                self.scope_tree
+                    .create_local_binding(name.to_string(), StaticType::Any),
+            );
         }
     }
     fn resolve_lvalue_declarative(
@@ -446,12 +430,10 @@ impl Analyser {
                 identifier,
                 resolved,
             } => {
-                *resolved = Some(self.scope_tree.create_local_binding(
-                    LexicalIdentifier::Variable {
-                        name: (*identifier).clone(),
-                    },
-                    typ,
-                ));
+                *resolved = Some(
+                    self.scope_tree
+                        .create_local_binding(identifier.clone(), typ),
+                );
             }
             Lvalue::Index { index, value } => {
                 self.analyse(index)?;
@@ -567,103 +549,6 @@ fn extract_argument_arity(arguments: &ExpressionLocation) -> usize {
     values.len()
 }
 
-#[derive(Debug, Hash, Eq, PartialEq, Clone)]
-pub enum LexicalIdentifier {
-    Variable {
-        name: String,
-    },
-    Function {
-        name: String,
-        signature: Option<Vec<StaticType>>,
-    },
-}
-
-impl LexicalIdentifier {
-    pub fn is_subtype_match(&self, other: &Self) -> bool {
-        match (self, other) {
-            (
-                LexicalIdentifier::Variable { name: name_a },
-                LexicalIdentifier::Variable { name: name_b },
-            ) => name_a == name_b,
-
-            (
-                LexicalIdentifier::Function { name: name_a, .. },
-                LexicalIdentifier::Variable { name: name_b },
-            ) => name_a == name_b,
-            (
-                LexicalIdentifier::Variable { name: name_a },
-                LexicalIdentifier::Function { name: name_b, .. },
-            ) => name_a == name_b,
-            (
-                LexicalIdentifier::Function {
-                    name: name_a,
-                    signature: signature_a,
-                },
-                LexicalIdentifier::Function {
-                    name: name_b,
-                    signature: signature_b,
-                },
-            ) => {
-                if name_a != name_b {
-                    return false;
-                }
-
-                println!("---------------------------------------------");
-                dbg!(name_a, name_b, signature_a, signature_b);
-
-                let signature_a = signature_a
-                    .as_deref()
-                    .expect("the lookup side of a function match must not be variadic");
-
-                let Some(signature_b) = signature_b else {
-                    return true;
-                };
-
-                if signature_a.len() != signature_b.len() {
-                    return false;
-                }
-
-                for (a, b) in signature_a.iter().zip(signature_b.iter()) {
-                    if !a.is_subtype_of(b) {
-                        return false;
-                    }
-                }
-
-                true
-            }
-        }
-    }
-
-    pub fn from_function(function: &Function) -> Self {
-        debug_assert!(!function.name().is_empty());
-        Self::Function {
-            name: function.name().to_string(), // TODO: what if name is empty?
-            signature: match function.type_signature() {
-                TypeSignature::Variadic => None,
-                TypeSignature::Exact(params) => {
-                    Some(params.into_iter().map(|param| param.type_name).collect())
-                }
-            },
-        }
-    }
-    pub fn name(&self) -> &str {
-        match self {
-            Self::Variable { name } | Self::Function { name, .. } => name,
-        }
-    }
-}
-
-impl From<&str> for LexicalIdentifier {
-    fn from(value: &str) -> Self {
-        Self::Variable { name: value.into() }
-    }
-}
-impl From<String> for LexicalIdentifier {
-    fn from(value: String) -> Self {
-        Self::Variable { name: value }
-    }
-}
-
 #[derive(Debug)]
 pub struct ScopeTree {
     current_scope_idx: usize,
@@ -672,22 +557,18 @@ pub struct ScopeTree {
 }
 
 impl ScopeTree {
-    pub fn from_global_scope(global_scope_map: Vec<LexicalIdentifier>) -> Self {
+    pub fn from_global_scope(global_scope_map: Vec<(String, StaticType)>) -> Self {
         Self {
             current_scope_idx: 0,
             global_scope: Scope {
                 parent_idx: None,
-                //TODO: maybe the line below is more of temporary solution
-                identifiers: global_scope_map
-                    .into_iter()
-                    .map(|x| (x, StaticType::Function))
-                    .collect_vec(),
+                identifiers: global_scope_map,
             },
             scopes: vec![Scope::new(None)],
         }
     }
 
-    fn get_type(&self, res: ResolvedVar) -> StaticType {
+    fn get_type(&self, res: ResolvedVar) -> &StaticType {
         match res {
             ResolvedVar::Captured { slot, depth } => {
                 let mut scope_idx = self.current_scope_idx;
@@ -698,10 +579,10 @@ impl ScopeTree {
                         .parent_idx
                         .expect("parent_idx was None while traversing the scope tree");
                 }
-                self.scopes[scope_idx].identifiers[slot].1.clone()
+                &self.scopes[scope_idx].identifiers[slot].1
             }
             // for now all globals are functions
-            ResolvedVar::Global { .. } => StaticType::Function,
+            ResolvedVar::Global { slot } => &self.global_scope.identifiers[slot].1,
         }
     }
 
@@ -720,56 +601,45 @@ impl ScopeTree {
         self.current_scope_idx = next;
     }
 
-    fn get_or_create_local_binding(
-        &mut self,
-        ident: LexicalIdentifier,
-        typ: StaticType,
-    ) -> ResolvedVar {
-        ResolvedVar::Captured {
-            slot: self.scopes[self.current_scope_idx]
-                .get_slot(&ident)
-                .unwrap_or_else(|| self.scopes[self.current_scope_idx].allocate(ident, typ)),
-            depth: 0,
-        }
-    }
-
     fn get_binding_any(&mut self, ident: &str) -> Option<ResolvedVar> {
         let mut depth = 0;
         let mut scope_ptr = self.current_scope_idx;
 
         loop {
-            if let Some(slot) = self.scopes[scope_ptr].get_slot_by_name(ident) {
+            if let Some(slot) = self.scopes[scope_ptr].find_slot_by_name(ident) {
                 return Some(ResolvedVar::Captured { slot, depth });
             } else if let Some(parent_idx) = self.scopes[scope_ptr].parent_idx {
                 depth += 1;
                 scope_ptr = parent_idx;
             } else {
                 return Some(ResolvedVar::Global {
-                    slot: self.global_scope.get_slot_by_name(ident)?,
+                    slot: self.global_scope.find_slot_by_name(ident)?,
                 });
             }
         }
     }
 
-    fn get_binding(&mut self, lexical_ident: &LexicalIdentifier) -> Option<ResolvedVar> {
+    fn get_function_binding(&mut self, ident: &str, sig: &[StaticType]) -> Option<ResolvedVar> {
+        // println!("get function binding {ident} {sig:?}");
+
         let mut depth = 0;
         let mut scope_ptr = self.current_scope_idx;
 
         loop {
-            if let Some(slot) = self.scopes[scope_ptr].get_slot(lexical_ident) {
+            if let Some(slot) = self.scopes[scope_ptr].find_function(ident, sig) {
                 return Some(ResolvedVar::Captured { slot, depth });
             } else if let Some(parent_idx) = self.scopes[scope_ptr].parent_idx {
                 depth += 1;
                 scope_ptr = parent_idx;
             } else {
                 return Some(ResolvedVar::Global {
-                    slot: self.global_scope.get_slot(lexical_ident)?,
+                    slot: self.global_scope.find_function(ident, sig)?,
                 });
             }
         }
     }
 
-    fn create_local_binding(&mut self, ident: LexicalIdentifier, typ: StaticType) -> ResolvedVar {
+    fn create_local_binding(&mut self, ident: String, typ: StaticType) -> ResolvedVar {
         ResolvedVar::Captured {
             slot: self.scopes[self.current_scope_idx].allocate(ident, typ),
             depth: 0,
@@ -780,7 +650,7 @@ impl ScopeTree {
 #[derive(Debug)]
 struct Scope {
     parent_idx: Option<usize>,
-    identifiers: Vec<(LexicalIdentifier, StaticType)>,
+    identifiers: Vec<(String, StaticType)>,
 }
 
 impl Scope {
@@ -791,19 +661,37 @@ impl Scope {
         }
     }
 
-    pub fn get_slot_by_name(&self, find_ident: &str) -> Option<usize> {
+    pub fn find_slot_by_name(&self, find_ident: &str) -> Option<usize> {
         self.identifiers
             .iter()
-            .rposition(|(ident, _)| ident.name() == find_ident)
+            .rposition(|(ident, _)| ident == find_ident)
     }
 
-    fn get_slot(&mut self, find_ident: &LexicalIdentifier) -> Option<usize> {
-        self.identifiers
-            .iter()
-            .rposition(|(ident, _type)| find_ident.is_subtype_match(ident))
+    fn find_function(&mut self, find_ident: &str, find_typ: &[StaticType]) -> Option<usize> {
+        self.identifiers.iter().rposition(|(ident, typ)| {
+            if ident != find_ident {
+                return false;
+            }
+
+            let StaticType::Function { parameters, .. } = typ else {
+                return false;
+            };
+
+            let Some(param_types) = parameters else {
+                // If this branch happens then the function we're matching against is variadic meaning it's always a match
+                return true;
+            };
+
+            ident == find_ident
+                && param_types.len() == find_typ.len()
+                && find_typ
+                    .iter()
+                    .zip(param_types.iter())
+                    .all(|(typ1, typ2)| typ1.is_compatible_with(typ2))
+        })
     }
 
-    fn allocate(&mut self, name: LexicalIdentifier, typ: StaticType) -> usize {
+    fn allocate(&mut self, name: String, typ: StaticType) -> usize {
         self.identifiers.push((name, typ));
         // Slot is just the length of the list minus one
         self.identifiers.len() - 1
@@ -818,14 +706,14 @@ pub struct AnalysisError {
 }
 
 impl AnalysisError {
-    fn lvalue_required_to_be_single_identifier(span: Span) -> AnalysisError {
+    fn lvalue_required_to_be_single_identifier(span: Span) -> Self {
         Self {
             text: "This lvalue is required to be a single identifier".to_string(),
             span,
         }
     }
 
-    fn function_not_found(ident: &str, types: &[StaticType], span: Span) -> AnalysisError {
+    fn function_not_found(ident: &str, types: &[StaticType], span: Span) -> Self {
         Self {
             text: format!(
                 "No function named '{ident}' found that matches the arguments {}",
