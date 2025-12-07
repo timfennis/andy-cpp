@@ -84,20 +84,6 @@ impl Environment {
     pub fn set(&mut self, var: ResolvedVar, value: Value) {
         match var {
             ResolvedVar::Captured { depth: 0, slot } => {
-                // This whole mess (special handling for functions) can be removed once we check
-                // types during the resolver pass
-                if let Value::Function(value_to_insert) = &value {
-                    if let Some(existing_value) = self.values.get(slot) {
-                        if let Value::Function(func) = existing_value {
-                            func.borrow_mut().merge(&mut value_to_insert.borrow_mut())
-                        }
-                    } else {
-                        self.values.push(value);
-                    }
-
-                    return;
-                }
-
                 if self.values.len() > slot {
                     self.values[slot] = value
                 } else {

@@ -10,7 +10,7 @@ use num::BigInt;
 
 use crate::compare::FallibleOrd;
 use crate::hash_map::DefaultHasher;
-use crate::interpreter::function::{OverloadedFunction, StaticType};
+use crate::interpreter::function::{Function, StaticType};
 use crate::interpreter::int::Int;
 use crate::interpreter::num::{Number, NumberToFloatError, NumberToUsizeError};
 use crate::interpreter::sequence::Sequence;
@@ -25,10 +25,13 @@ pub enum Value {
     Number(Number),
     Bool(bool),
     Sequence(Sequence),
-    Function(Rc<RefCell<OverloadedFunction>>),
+    Function(Rc<RefCell<Function>>),
 }
 
 impl Value {
+    pub(crate) fn function(function: Function) -> Self {
+        Self::Function(Rc::new(RefCell::new(function)))
+    }
     pub(crate) fn string<S: Into<String>>(string: S) -> Self {
         Self::Sequence(Sequence::String(Rc::new(RefCell::new(string.into()))))
     }
@@ -59,10 +62,6 @@ impl Value {
 
     pub(crate) fn some(value: Self) -> Self {
         Self::Option(Some(Box::new(value)))
-    }
-
-    pub(crate) fn function<T: Into<OverloadedFunction>>(source: T) -> Self {
-        Self::Function(Rc::new(RefCell::new(source.into())))
     }
 
     pub(crate) fn number<T: Into<Number>>(source: T) -> Self {
@@ -136,13 +135,7 @@ impl Value {
                 StaticType::Tuple(t.iter().map(Self::static_type).collect())
             }
             // TODO: temporary until we get rid of OverloadedFunction
-            Self::Function(fun) => fun
-                .borrow()
-                .implementations()
-                .next()
-                .expect("TODO: implement function")
-                .1
-                .static_type(),
+            Self::Function(fun) => fun.borrow().static_type(),
             Self::Sequence(Sequence::Map(_, _)) => StaticType::Map,
             Self::Sequence(Sequence::Iterator(_)) => StaticType::Iterator,
             Self::Sequence(Sequence::MaxHeap(_)) => StaticType::MaxHeap,
@@ -410,12 +403,6 @@ impl From<Number> for Value {
 impl From<Sequence> for Value {
     fn from(value: Sequence) -> Self {
         Self::Sequence(value)
-    }
-}
-
-impl From<OverloadedFunction> for Value {
-    fn from(value: OverloadedFunction) -> Self {
-        Self::Function(Rc::new(RefCell::new(value)))
     }
 }
 

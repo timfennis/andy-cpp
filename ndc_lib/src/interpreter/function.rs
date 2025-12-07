@@ -18,7 +18,7 @@ use std::rc::Rc;
 /// Callable is a wrapper around a `OverloadedFunction` pointer and the environment to make it
 /// easy to have an executable function as a method signature in the standard library
 pub struct Callable<'a> {
-    pub function: Rc<RefCell<OverloadedFunction>>,
+    pub function: Rc<RefCell<Function>>,
     pub environment: &'a Rc<RefCell<Environment>>,
 }
 
@@ -97,6 +97,58 @@ impl Function {
             },
             return_type: Box::new(self.body.return_type().clone()),
         }
+    }
+
+    pub(crate) fn call(
+        &self,
+        args: &mut [Value],
+        env: &Rc<RefCell<Environment>>,
+    ) -> EvaluationResult {
+        self.body.call(args, env)
+    }
+
+    fn call_vectorized(
+        &self,
+        args: &mut [Value],
+        env: &Rc<RefCell<Environment>>,
+    ) -> EvaluationResult {
+        let [left, right] = args else {
+            // Vectorized application only works in cases where there are two tuple arguments
+            return Err(FunctionCarrier::FunctionNotFound);
+        };
+
+        if !left.supports_vectorization_with(right) {
+            return Err(FunctionCarrier::FunctionNotFound);
+        }
+
+        let (left, right) = match (left, right) {
+            // Both are tuples
+            (Value::Sequence(Sequence::Tuple(left)), Value::Sequence(Sequence::Tuple(right))) => {
+                (left, right.as_slice())
+            }
+            // Left is a number and right is a tuple
+            (left @ Value::Number(_), Value::Sequence(Sequence::Tuple(right))) => (
+                &mut Rc::new(vec![left.clone(); right.len()]),
+                right.as_slice(),
+            ),
+            // Left is a tuple and right is a number
+            (Value::Sequence(Sequence::Tuple(left)), right @ Value::Number(_)) => {
+                (left, std::slice::from_ref(right))
+            }
+            _ => {
+                return Err(FunctionCarrier::FunctionNotFound);
+            }
+        };
+
+        let left_mut: &mut Vec<Value> = Rc::make_mut(left);
+
+        // Zip the mutable vector with the immutable right side and perform the operations on all elements
+        // TODO: maybe one day figure out how to get rid of all these clones
+        for (l, r) in left_mut.iter_mut().zip(right.iter().cycle()) {
+            *l = self.call(&mut [l.clone(), r.clone()], env)?;
+        }
+
+        Ok(Value::Sequence(Sequence::Tuple(left.clone())))
     }
 }
 
@@ -309,160 +361,6 @@ impl TypeSignature {
         }
     }
 }
-
-#[derive(Clone, Debug)]
-pub struct OverloadedFunction {
-    implementations: HashMap<TypeSignature, Function>,
-}
-
-impl OverloadedFunction {
-    pub fn from_multiple(functions: Vec<Function>) -> Self {
-        Self {
-            implementations: functions
-                .into_iter()
-                .map(|f| (f.type_signature(), f))
-                .collect(),
-        }
-    }
-
-    pub fn arity(&self) -> Option<usize> {
-        let arity = self
-            .implementations
-            .iter()
-            .next()
-            .map(|(sig, _)| sig.arity())
-            .expect("OverloadedFunction cannot be empty");
-
-        debug_assert!(
-            self.implementations
-                .iter()
-                .all(|(sig, _)| sig.arity() == arity),
-            "failed asserting that arity of all functions in OverloadedFunction are equal: {}",
-            self.implementations
-                .values()
-                .map(|fun| fun.name())
-                .join(", ")
-        );
-        arity
-    }
-
-    pub fn name(&self) -> Option<&str> {
-        if let Some((_, ff)) = (&self.implementations).into_iter().next() {
-            return ff.name.as_deref();
-        }
-
-        None
-    }
-
-    pub fn add(&mut self, function: Function) {
-        self.implementations
-            .insert(function.type_signature(), function);
-    }
-
-    pub fn implementations(&self) -> impl Iterator<Item = (TypeSignature, Function)> {
-        self.implementations.clone().into_iter()
-    }
-
-    /// Ads values from the other overloaded function by draining it
-    pub fn merge(&mut self, other: &mut Self) {
-        for (key, value) in other.implementations.drain() {
-            debug_assert!(
-                !self.implementations.contains_key(&key),
-                "conflict while merging OverloadedFunction implementations"
-            );
-            self.implementations.insert(key, value);
-        }
-    }
-
-    pub fn call(&self, args: &mut [Value], env: &Rc<RefCell<Environment>>) -> EvaluationResult {
-        let types: Vec<StaticType> = args.iter().map(Value::static_type).collect();
-
-        let mut best_function_match = None;
-        let mut best_distance = u32::MAX;
-
-        for (signature, function) in &self.implementations {
-            let Some(cur) = signature.calc_type_score(&types) else {
-                continue;
-            };
-            if cur < best_distance {
-                best_distance = cur;
-                best_function_match = Some(function);
-            }
-        }
-
-        best_function_match
-            .ok_or(FunctionCarrier::FunctionNotFound)
-            .and_then(|function| function.body().call(args, env))
-            // For now if we can't find a specific function we just try to vectorize as a fallback
-            .or_else(|err| {
-                if let FunctionCarrier::FunctionNotFound = err {
-                    self.call_vectorized(args, env)
-                } else {
-                    Err(err)
-                }
-            })
-    }
-
-    fn call_vectorized(
-        &self,
-        args: &mut [Value],
-        env: &Rc<RefCell<Environment>>,
-    ) -> EvaluationResult {
-        let [left, right] = args else {
-            // Vectorized application only works in cases where there are two tuple arguments
-            return Err(FunctionCarrier::FunctionNotFound);
-        };
-
-        if !left.supports_vectorization_with(right) {
-            return Err(FunctionCarrier::FunctionNotFound);
-        }
-
-        let (left, right) = match (left, right) {
-            // Both are tuples
-            (Value::Sequence(Sequence::Tuple(left)), Value::Sequence(Sequence::Tuple(right))) => {
-                (left, right.as_slice())
-            }
-            // Left is a number and right is a tuple
-            (left @ Value::Number(_), Value::Sequence(Sequence::Tuple(right))) => (
-                &mut Rc::new(vec![left.clone(); right.len()]),
-                right.as_slice(),
-            ),
-            // Left is a tuple and right is a number
-            (Value::Sequence(Sequence::Tuple(left)), right @ Value::Number(_)) => {
-                (left, std::slice::from_ref(right))
-            }
-            _ => {
-                return Err(FunctionCarrier::FunctionNotFound);
-            }
-        };
-
-        let left_mut: &mut Vec<Value> = Rc::make_mut(left);
-
-        // Zip the mutable vector with the immutable right side and perform the operations on all elements
-        // TODO: maybe one day figure out how to get rid of all these clones
-        for (l, r) in left_mut.iter_mut().zip(right.iter().cycle()) {
-            *l = self.call(&mut [l.clone(), r.clone()], env)?;
-        }
-
-        Ok(Value::Sequence(Sequence::Tuple(left.clone())))
-    }
-}
-
-impl From<FunctionBody> for OverloadedFunction {
-    fn from(value: FunctionBody) -> Self {
-        Function::from_body(value).into()
-    }
-}
-
-impl From<Function> for OverloadedFunction {
-    fn from(value: Function) -> Self {
-        let type_signature = value.type_signature();
-        Self {
-            implementations: HashMap::from([(type_signature, value)]),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct Parameter {
     pub name: String,

@@ -16,18 +16,19 @@ mod inner {
     pub fn docs(func: &Callable<'_>) -> anyhow::Result<String> {
         let mut buf = String::new();
 
-        for (sig, fun) in func.function.borrow().implementations() {
-            if fun.name().is_empty() {
-                write!(buf, "fn({sig})")?;
-            } else {
-                write!(buf, "fn {}({sig})", fun.name())?;
-            }
+        let sig = func.function.borrow().type_signature();
+        let fun = func.function.borrow();
 
-            if !fun.short_documentation().is_empty() {
-                writeln!(buf, " -> {}", fun.short_documentation())?;
-            } else {
-                writeln!(buf)?;
-            }
+        if fun.name().is_empty() {
+            write!(buf, "fn({sig})")?;
+        } else {
+            write!(buf, "fn {}({sig})", fun.name())?;
+        }
+
+        if !fun.short_documentation().is_empty() {
+            writeln!(buf, " -> {}", fun.short_documentation())?;
+        } else {
+            writeln!(buf)?;
         }
 
         buf.pop(); // Remove last newline
@@ -118,7 +119,8 @@ mod inner {
             Value::Sequence(Sequence::Deque(deque)) => Value::Sequence(Sequence::Deque(Rc::new(
                 RefCell::new(deque.borrow().to_owned()),
             ))),
-            Value::Function(f) => Value::from(f.borrow().to_owned()),
+            // TODO: for function should deepcopy have some special behavior
+            Value::Function(f) => Value::Function(f.clone()),
         }
     }
 

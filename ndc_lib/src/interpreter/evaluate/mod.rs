@@ -4,9 +4,7 @@ use crate::ast::{
 };
 use crate::hash_map::HashMap;
 use crate::interpreter::environment::Environment;
-use crate::interpreter::function::{
-    Function, FunctionBody, FunctionCarrier, OverloadedFunction, StaticType,
-};
+use crate::interpreter::function::{Function, FunctionBody, FunctionCarrier, StaticType};
 use crate::interpreter::int::Int;
 use crate::interpreter::iterator::mut_value_to_iterator;
 use crate::interpreter::num::Number;
@@ -349,7 +347,7 @@ pub(crate) fn evaluate_expression(
                         return Err(FunctionCarrier::EvaluationError(EvaluationError::new(
                             format!(
                                 "no function called '{}' found matches the arguments: ({argument_string})",
-                                function.borrow().name().unwrap_or("unnamed function")
+                                function.borrow().name()
                             ),
                             span,
                         )));
@@ -389,12 +387,13 @@ pub(crate) fn evaluate_expression(
             if let Some(resolved_name) = *resolved_name {
                 environment.borrow_mut().set(
                     resolved_name,
+                    // TODO: put name in declaration?
                     Value::function(Function::from_body(user_function)),
                 );
 
                 Value::unit()
             } else {
-                Value::function(user_function)
+                Value::function(Function::from_body(user_function))
             }
         }
 
@@ -888,7 +887,7 @@ where
 }
 
 fn call_function(
-    function: &Rc<RefCell<OverloadedFunction>>,
+    function: &Rc<RefCell<Function>>,
     evaluated_args: &mut [Value],
     environment: &Rc<RefCell<Environment>>,
     span: Span,
@@ -1039,16 +1038,12 @@ fn resolve_dynamic_binding(
                     panic!("dynamic binding resolved to non-function type at runtime");
                 };
 
-                let (_signature, fun) = fun
-                    .borrow()
-                    .implementations()
-                    .next()
-                    .expect("must have one implementation");
-
                 // Find the first function that matches
-                fun.static_type()
-                    .is_fn_and_matches(&arg_types)
-                    .then_some(value)
+                if fun.borrow().static_type().is_fn_and_matches(&arg_types) {
+                    Some(value)
+                } else {
+                    None
+                }
             }),
     }
 }
