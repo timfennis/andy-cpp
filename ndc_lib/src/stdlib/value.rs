@@ -63,7 +63,7 @@ mod inner {
     }
 
     /// Creates a new instance of `None`
-    #[function(return_type = Option)]
+    #[function(return_type = Option<_>)]
     pub fn none() -> Value {
         Value::Option(None)
     }

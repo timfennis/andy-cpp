@@ -126,21 +126,67 @@ impl Value {
     #[must_use]
     pub fn static_type(&self) -> StaticType {
         match self {
-            Self::Option(_) => StaticType::Option,
+            Self::Option(c) => StaticType::Option(Box::new(
+                c.as_deref()
+                    .map(Value::static_type)
+                    .unwrap_or(StaticType::Any),
+            )),
             Self::Number(number) => number.static_type(),
             Self::Bool(_) => StaticType::Bool,
+
             Self::Sequence(Sequence::String(_)) => StaticType::String,
-            Self::Sequence(Sequence::List(_)) => StaticType::List,
+            // I predict that defaulting to Any is going to make us very sad one day
+            Self::Sequence(Sequence::List(l)) => StaticType::List(Box::new(
+                l.borrow()
+                    .iter()
+                    .next()
+                    .map(|i| i.static_type())
+                    .unwrap_or(StaticType::Any),
+            )),
             Self::Sequence(Sequence::Tuple(t)) => {
-                StaticType::Tuple(t.iter().map(Self::static_type).collect())
+                StaticType::Tuple(t.iter().map(Value::static_type).collect())
             }
-            // TODO: temporary until we get rid of OverloadedFunction
+            Self::Sequence(Sequence::Map(map, _)) => StaticType::Map {
+                key: Box::new(
+                    map.borrow()
+                        .keys()
+                        .next()
+                        .map(Value::static_type)
+                        .unwrap_or(StaticType::Any),
+                ),
+                value: Box::new(
+                    map.borrow()
+                        .values()
+                        .next()
+                        .map(Value::static_type)
+                        .unwrap_or(StaticType::Any),
+                ),
+            },
+            Self::Sequence(Sequence::Iterator(_)) => {
+                todo!("we cannot determine the type of an iterator without nuking the iterator")
+            }
+            Self::Sequence(Sequence::MaxHeap(heap)) => StaticType::MaxHeap(Box::new(
+                heap.borrow()
+                    .iter()
+                    .max()
+                    .map(|elem| elem.0.static_type())
+                    .unwrap_or(StaticType::Any),
+            )),
+            Self::Sequence(Sequence::MinHeap(heap)) => StaticType::MaxHeap(Box::new(
+                heap.borrow()
+                    .iter()
+                    .min()
+                    .map(|elem| elem.0.0.static_type())
+                    .unwrap_or(StaticType::Any),
+            )),
+            Self::Sequence(Sequence::Deque(d)) => StaticType::Deque(Box::new(
+                d.borrow()
+                    .iter()
+                    .next()
+                    .map(Value::static_type)
+                    .unwrap_or(StaticType::Any),
+            )),
             Self::Function(fun) => fun.borrow().static_type(),
-            Self::Sequence(Sequence::Map(_, _)) => StaticType::Map,
-            Self::Sequence(Sequence::Iterator(_)) => StaticType::Iterator,
-            Self::Sequence(Sequence::MaxHeap(_)) => StaticType::MaxHeap,
-            Self::Sequence(Sequence::MinHeap(_)) => StaticType::MinHeap,
-            Self::Sequence(Sequence::Deque(_)) => StaticType::Deque,
         }
     }
 

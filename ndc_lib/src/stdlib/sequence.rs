@@ -215,7 +215,7 @@ mod inner {
             Some(n) => Ok(n),
             None => Err(anyhow!(
                 "cannot determine the length of {}",
-                seq.value_type()
+                seq.static_type()
             )),
         }
     }

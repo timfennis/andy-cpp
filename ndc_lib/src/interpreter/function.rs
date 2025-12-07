@@ -384,7 +384,7 @@ pub enum StaticType {
         parameters: Option<Vec<StaticType>>,
         return_type: Box<StaticType>,
     },
-    Option,
+    Option(Box<StaticType>),
 
     // Numbers
     Number,
@@ -394,15 +394,18 @@ pub enum StaticType {
     Complex,
 
     // Sequences
-    Sequence,
-    List,
+    Sequence(Box<StaticType>),
+    List(Box<StaticType>),
     String,
     Tuple(Vec<StaticType>),
-    Map,
-    Iterator,
-    MinHeap,
-    MaxHeap,
-    Deque,
+    Map {
+        key: Box<StaticType>,
+        value: Box<StaticType>,
+    },
+    Iterator(Box<StaticType>),
+    MinHeap(Box<StaticType>),
+    MaxHeap(Box<StaticType>),
+    Deque(Box<StaticType>),
 }
 
 impl StaticType {
@@ -459,22 +462,37 @@ impl StaticType {
                 Self::Number | Self::Int | Self::Rational | Self::Complex | Self::Float,
                 Self::Number,
             ) => true,
+            (Self::String, seq @ Self::Sequence(_)) => seq
+                .element_type()
+                .map(|elem| elem == StaticType::String)
+                .unwrap_or(false),
+            // Todo: This currently forces an exact match which we can relax
+            (map @ Self::Map { .. }, Self::Sequence(tup)) => map
+                .get_iteration_type()
+                .map(|elem| elem.is_compatible_with(tup))
+                .unwrap_or(false),
             (
-                Self::String
-                | Self::List
-                | Self::Deque
-                | Self::MaxHeap
-                | Self::MinHeap
-                | Self::Tuple(_)
-                | Self::Iterator
-                | Self::Map,
-                Self::Sequence,
-            ) => true,
+                // | Self::Tuple(_)
+                // | Self::Map,
+                Self::List(a)
+                | Self::Deque(a)
+                | Self::MaxHeap(a)
+                | Self::MinHeap(a)
+                | Self::Iterator(a),
+                Self::Sequence(b),
+            ) => a.is_compatible_with(b),
             (Self::Function { .. }, Self::Function { .. }) => true, // TODO: just saying all functions are compatible is lazy!!!
             _ => false,
         }
     }
 
+    pub fn get_iteration_type(&self) -> Option<StaticType> {
+        if let StaticType::Map { key, value } = self {
+            return Some(StaticType::Tuple(vec![*key.clone(), *value.clone()]));
+        }
+
+        self.element_type()
+    }
     pub fn element_type(&self) -> Option<StaticType> {
         match self {
             StaticType::Any
@@ -483,20 +501,20 @@ impl StaticType {
             | StaticType::Float
             | StaticType::Function { .. }
             | StaticType::Int
-            | StaticType::MaxHeap
-            | StaticType::MinHeap
             | StaticType::Number
-            | StaticType::Option
-            | StaticType::Rational
-            | StaticType::Sequence => None,
-            StaticType::List => todo!("return whatever list is generic over here"),
+            | StaticType::Rational => None,
+            StaticType::List(elem)
+            | StaticType::Deque(elem)
+            | StaticType::Iterator(elem)
+            | StaticType::MaxHeap(elem)
+            | StaticType::MinHeap(elem)
+            | StaticType::Option(elem)
+            | StaticType::Map { value: elem, .. }
+            | StaticType::Sequence(elem) => Some(*elem.clone()),
             StaticType::String => Some(StaticType::String),
             StaticType::Tuple(_) => todo!(
                 "we either have to disallow indexing in to tuples, or we have to figure out some way to determine the index"
             ),
-            StaticType::Map => todo!("return value type of map"),
-            StaticType::Iterator => todo!("return value type of iterator"),
-            StaticType::Deque => todo!("return type of deque"),
         }
     }
 
@@ -520,25 +538,24 @@ impl StaticType {
 
     pub fn unpack(&self) -> Option<Box<dyn Iterator<Item = &Self> + '_>> {
         match self {
-            // TODO: this type implementation for list is WRONG!
-            Self::List | Self::Any => Some(Box::new(std::iter::repeat(&Self::Any))),
+            Self::Any => todo!("unpacking any, why what when where how"),
+            Self::List(elem)
+            | Self::Sequence(elem)
+            | Self::Iterator(elem)
+            | Self::MinHeap(elem)
+            | Self::MaxHeap(elem)
+            | Self::Deque(elem) => Some(Box::new(std::iter::repeat(&**elem))),
             Self::Tuple(types) => Some(Box::new(types.iter())),
-
             Self::Bool
             | Self::Function { .. }
-            | Self::Option
+            | Self::Option(_)
             | Self::Number
             | Self::Float
             | Self::Int
             | Self::Rational
             | Self::Complex
-            | Self::Sequence
             | Self::String
-            | Self::Map
-            | Self::Iterator
-            | Self::MinHeap
-            | Self::MaxHeap
-            | Self::Deque => None,
+            | Self::Map { .. } => None,
         }
     }
 }
@@ -559,22 +576,22 @@ impl fmt::Display for StaticType {
                     .map(|p| p.iter().join(", "))
                     .unwrap_or(String::from("*"))
             ),
-            Self::Option => write!(f, "Option"),
+            Self::Option(elem) => write!(f, "Option<{elem}>"),
             Self::Number => write!(f, "Number"),
             Self::Float => write!(f, "Float"),
             Self::Int => write!(f, "Int"),
             Self::Rational => write!(f, "Rational"),
             Self::Complex => write!(f, "Complex"),
-            Self::Sequence => write!(f, "Sequence"),
-            Self::List => write!(f, "List"),
+            Self::Sequence(elem) => write!(f, "Sequence<{elem}>"),
+            Self::List(elem) => write!(f, "List<{elem}>"),
             Self::String => write!(f, "String"),
             Self::Tuple(tup) if tup.is_empty() => write!(f, "()"),
             Self::Tuple(tup) => write!(f, "Tuple<{}>", tup.iter().join(", ")),
-            Self::Map => write!(f, "Map"),
-            Self::Iterator => write!(f, "Iterator"),
-            Self::MinHeap => write!(f, "MinHeap"),
-            Self::MaxHeap => write!(f, "MaxHeap"),
-            Self::Deque => write!(f, "Deque"),
+            Self::Map { key, value } => write!(f, "Map<{key}, {value}>"),
+            Self::Iterator(elem) => write!(f, "Iterator<{elem}>"),
+            Self::MinHeap(elem) => write!(f, "MinHeap<{elem}>"),
+            Self::MaxHeap(elem) => write!(f, "MaxHeap<{elem}>"),
+            Self::Deque(elem) => write!(f, "Deque<{elem}>"),
         }
     }
 }

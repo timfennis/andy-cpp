@@ -33,8 +33,8 @@ impl Analyser {
                 resolved,
             } => {
                 if ident == "None" {
-                    // THIS IS VERY UNHINGED
-                    return Ok(StaticType::Option);
+                    // TODO: we're going to need something like HM to infer the type of option here, maybe force type annotations?
+                    return Ok(StaticType::Option(Box::new(StaticType::Any)));
                 }
                 let binding = self.scope_tree.get_binding_any(ident).ok_or_else(|| {
                     AnalysisError::identifier_not_previously_declared(ident, *span)
@@ -170,14 +170,7 @@ impl Analyser {
                 Ok(StaticType::unit())
             }
             Expression::For { iterations, body } => {
-                self.resolve_for_iterations(iterations, body, *span)?;
-
-                match &**body {
-                    // for now this is good enough?
-                    ForBody::Block(_) => Ok(StaticType::unit()),
-                    ForBody::List(_) => Ok(StaticType::List),
-                    ForBody::Map { .. } => Ok(StaticType::Map),
-                }
+                Ok(self.resolve_for_iterations(iterations, body, *span)?)
             }
             Expression::Call {
                 function,
@@ -215,17 +208,42 @@ impl Analyser {
                 Ok(StaticType::Tuple(types))
             }
             Expression::List { values } => {
-                for v in values {
-                    self.analyse(v)?;
-                }
+                let element_type = self.analyse_multiple_expression_with_same_type(values, span)?;
 
-                Ok(StaticType::List)
+                // TODO: for now if we encounter an empty list expression we say the list is generic over Any but this clearly is not a good solution
+                Ok(StaticType::List(Box::new(
+                    element_type.unwrap_or(StaticType::Any),
+                )))
             }
             Expression::Map { values, default } => {
+                let mut key_type = None;
+                let mut value_type = None;
                 for (key, value) in values {
-                    self.analyse(key)?;
+                    if let Some(key_type) = &key_type {
+                        let next_type = self.analyse(key)?;
+                        if &next_type != key_type {
+                            return Err(AnalysisError::incompatible_list_element(
+                                key_type.clone(),
+                                next_type,
+                                *span,
+                            ));
+                        }
+                    } else {
+                        key_type = Some(self.analyse(key)?);
+                    }
                     if let Some(value) = value {
-                        self.analyse(value)?;
+                        if let Some(value_type) = &value_type {
+                            let next_type = self.analyse(value)?;
+                            if &next_type != value_type {
+                                return Err(AnalysisError::incompatible_list_element(
+                                    value_type.clone(),
+                                    next_type,
+                                    *span,
+                                ));
+                            }
+                        } else {
+                            value_type = Some(self.analyse(value)?);
+                        }
                     }
                 }
 
@@ -233,7 +251,11 @@ impl Analyser {
                     self.analyse(default)?;
                 }
 
-                Ok(StaticType::Map)
+                // TODO: defaulting to Any here is surely going to bite us later
+                Ok(StaticType::Map {
+                    key: Box::new(key_type.unwrap_or(StaticType::Any)),
+                    value: Box::new(value_type.unwrap_or_else(StaticType::unit)),
+                })
             }
             Expression::Return { value } => {
                 self.analyse(value)?;
@@ -248,7 +270,7 @@ impl Analyser {
                     self.analyse(end)?;
                 }
 
-                Ok(StaticType::Iterator)
+                Ok(StaticType::Iterator(Box::new(StaticType::Int)))
             }
         }
     }
@@ -296,7 +318,7 @@ impl Analyser {
         iterations: &mut [ForIteration],
         body: &mut ForBody,
         span: Span,
-    ) -> Result<(), AnalysisError> {
+    ) -> Result<StaticType, AnalysisError> {
         let Some((iteration, tail)) = iterations.split_first_mut() else {
             unreachable!("because this function is never called with an empty slice");
         };
@@ -310,45 +332,51 @@ impl Analyser {
 
                 // TODO: when we give type parameters to all instances of sequence we can correctly infer StaticType::Any in this postition
                 self.resolve_lvalue_declarative(l_value, StaticType::Any, span)?;
-                do_destroy = true;
+                do_destroy = true; // TODO: why is this correct
             }
             ForIteration::Guard(expr) => {
                 self.analyse(expr)?;
             }
         }
 
-        if !tail.is_empty() {
+        let out_type = if !tail.is_empty() {
             self.resolve_for_iterations(tail, body, span)?
         } else {
             match body {
                 ForBody::Block(block) => {
                     self.analyse(block)?;
+                    StaticType::unit()
                 }
-                ForBody::List(list) => {
-                    self.analyse(list)?;
-                }
+                ForBody::List(list) => StaticType::List(Box::new(self.analyse(list)?)),
                 ForBody::Map {
                     key,
                     value,
                     default,
                 } => {
-                    self.analyse(key)?;
-                    if let Some(value) = value {
-                        self.analyse(value)?;
-                    }
+                    let key_type = self.analyse(key)?;
+                    let value_type = if let Some(value) = value {
+                        self.analyse(value)?
+                    } else {
+                        StaticType::unit()
+                    };
 
                     if let Some(default) = default {
                         self.analyse(default)?;
                     }
+
+                    StaticType::Map {
+                        key: Box::new(key_type),
+                        value: Box::new(value_type),
+                    }
                 }
             }
-        }
+        };
 
         if do_destroy {
             self.scope_tree.destroy_scope();
         }
 
-        Ok(())
+        Ok(out_type)
     }
 
     fn resolve_single_lvalue(
@@ -475,6 +503,32 @@ impl Analyser {
         }
 
         Ok(())
+    }
+    fn analyse_multiple_expression_with_same_type(
+        &mut self,
+        expressions: &mut Vec<ExpressionLocation>,
+        span: &mut Span,
+    ) -> Result<Option<StaticType>, AnalysisError> {
+        let mut element_type = None;
+
+        for expression in expressions {
+            if let Some(element_type) = &element_type {
+                let following_type = self.analyse(expression)?;
+
+                if &following_type != element_type {
+                    // We don't have to allow this right now, we could just widen the type until it's Any and call it a day
+                    return Err(AnalysisError::incompatible_list_element(
+                        element_type.clone(),
+                        following_type,
+                        *span,
+                    ));
+                }
+            } else {
+                element_type = Some(self.analyse(expression)?);
+            }
+        }
+
+        Ok(element_type)
     }
 }
 
@@ -693,7 +747,21 @@ pub struct AnalysisError {
     span: Span,
 }
 
+impl AnalysisError {}
+
 impl AnalysisError {
+    fn incompatible_list_element(
+        list_type: StaticType,
+        next_element_type: StaticType,
+        span: Span,
+    ) -> AnalysisError {
+        Self {
+            text: format!(
+                "Invalid list expression: not allowed to mix {list_type} with {next_element_type}"
+            ),
+            span,
+        }
+    }
     fn unable_to_index_into(typ: StaticType, span: Span) -> Self {
         Self {
             text: format!("Unable to index into {typ}"),

@@ -89,17 +89,13 @@ impl Sequence {
         }
     }
 
-    pub fn value_type(&self) -> StaticType {
-        match self {
-            Self::String(_) => StaticType::String,
-            Self::List(_) => StaticType::List,
-            Self::Tuple(t) => StaticType::Tuple(t.iter().map(Value::static_type).collect()),
-            Self::Map(_, _) => StaticType::Map,
-            Self::Iterator(_) => StaticType::Iterator,
-            Self::MaxHeap(_) => StaticType::MaxHeap,
-            Self::MinHeap(_) => StaticType::MinHeap,
-            Self::Deque(_) => StaticType::Deque,
-        }
+    /// Reflexively determine the type this value at runtime.
+    ///
+    /// Note: If a collection type is generic over a single parameter we'll attempt to peek into the
+    ///       list and determine the type of the parameter that way, but if the list is empty we just return Any
+    /// Note: This function is not very performant and should be used as little as possible.
+    pub fn static_type(&self) -> StaticType {
+        match self {}
     }
 
     #[must_use]

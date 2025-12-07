@@ -140,17 +140,29 @@ fn map_type(ty: &syn::Type) -> TokenStream {
                 ])
             }
         }
+        syn::Type::Infer(x) => {
+            quote::quote! { crate::interpreter::function::StaticType::Any }
+        }
         _ => {
             panic!("unmapped type: {ty:?}");
         }
     }
 }
 
+#[allow(clippy::single_match_else)]
 fn map_type_path(p: &syn::TypePath) -> TokenStream {
     let segment = p.path.segments.last().unwrap();
 
+    let make_map_fallback = || {
+        quote::quote! {
+            crate::interpreter::function::StaticType::Map {
+                key: Box::new(crate::interpreter::function::StaticType::Any),
+                value: Box::new(crate::interpreter::function::StaticType::Any)
+            }
+        }
+    };
+
     match segment.ident.to_string().as_str() {
-        // Primitive single identifiers
         "i32" | "i64" | "isize" | "u32" | "u64" | "usize" | "BigInt" => {
             quote::quote! { crate::interpreter::function::StaticType::Int }
         }
@@ -163,55 +175,128 @@ fn map_type_path(p: &syn::TypePath) -> TokenStream {
         "String" | "str" => {
             quote::quote! { crate::interpreter::function::StaticType::String }
         }
-
-        "Vec" => {
-            quote::quote! { crate::interpreter::function::StaticType::List }
-        }
-        "DefaultMap" | "HashMap" => {
-            quote::quote! { crate::interpreter::function::StaticType::Map }
-        }
-        "Number" => {
-            quote::quote! { crate::interpreter::function::StaticType::Number }
-        }
-        "VecDeque" => {
-            quote::quote! { crate::interpreter::function::StaticType::Deque }
-        }
-        "MinHeap" => {
-            quote::quote! { crate::interpreter::function::StaticType::MinHeap }
-        }
-        "MaxHeap" => {
-            quote::quote! { crate::interpreter::function::StaticType::MaxHeap }
-        }
-        "Iterator" => {
-            quote::quote! { crate::interpreter::function::StaticType::Iterator }
-        }
-        "Option" => {
-            // TODO: in the future add generic types
-            quote::quote! { crate::interpreter::function::StaticType::Option }
-        }
-        // Generic wrappers like anyhow::Result<T>, std::result::Result<T>
+        "Vec" | "List" => match &segment.arguments {
+            syn::PathArguments::AngleBracketed(args) => {
+                let inner = args.args.first().expect("Vec<> requires inner type");
+                if let syn::GenericArgument::Type(inner_ty) = inner {
+                    let mapped = map_type(inner_ty);
+                    quote::quote! { crate::interpreter::function::StaticType::List(Box::new(#mapped)) }
+                } else {
+                    panic!("Vec inner not a type");
+                }
+            }
+            _ => {
+                quote::quote! { crate::interpreter::function::StaticType::List(Box::new(crate::interpreter::function::StaticType::Any)) }
+            }
+        },
+        "VecDeque" | "Deque" => match &segment.arguments {
+            syn::PathArguments::AngleBracketed(args) => {
+                let inner = args.args.first().expect("VecDeque<> requires inner type");
+                if let syn::GenericArgument::Type(inner_ty) = inner {
+                    let mapped = map_type(inner_ty);
+                    quote::quote! { crate::interpreter::function::StaticType::Deque(Box::new(#mapped)) }
+                } else {
+                    panic!("VecDeque inner not a type");
+                }
+            }
+            _ => quote::quote! {
+                crate::interpreter::function::StaticType::Deque(Box::new(
+                    crate::interpreter::function::StaticType::Any
+                ))
+            },
+        },
+        "DefaultMap" | "HashMap" | "Map" => match &segment.arguments {
+            syn::PathArguments::AngleBracketed(args) => {
+                let mut iter = args.args.iter();
+                let Some(key) = iter.next() else {
+                    return make_map_fallback();
+                };
+                let Some(val) = iter.next() else {
+                    return make_map_fallback();
+                };
+                let key_ty = match key {
+                    syn::GenericArgument::Type(t) => t,
+                    _ => panic!("Invalid map key"),
+                };
+                let val_ty = match val {
+                    syn::GenericArgument::Type(t) => t,
+                    _ => panic!("Invalid map value"),
+                };
+                let key_mapped = map_type(key_ty);
+                let val_mapped = map_type(val_ty);
+                quote::quote! { crate::interpreter::function::StaticType::Map { key: Box::new(#key_mapped), value: Box::new(#val_mapped) } }
+            }
+            _ => make_map_fallback(),
+        },
+        "MinHeap" => match &segment.arguments {
+            syn::PathArguments::AngleBracketed(args) => {
+                let inner = args.args.first().expect("MinHeap requires inner");
+                if let syn::GenericArgument::Type(inner_ty) = inner {
+                    let mapped = map_type(inner_ty);
+                    quote::quote! { crate::interpreter::function::StaticType::MinHeap(Box::new(#mapped)) }
+                } else {
+                    panic!("MinHeap inner invalid");
+                }
+            }
+            _ => quote::quote! {
+                crate::interpreter::function::StaticType::MinHeap(Box::new(
+                    crate::interpreter::function::StaticType::Any
+                ))
+            },
+        },
+        "MaxHeap" => match &segment.arguments {
+            syn::PathArguments::AngleBracketed(args) => {
+                let inner = args.args.first().expect("MaxHeap requires inner");
+                if let syn::GenericArgument::Type(inner_ty) = inner {
+                    let mapped = map_type(inner_ty);
+                    quote::quote! { crate::interpreter::function::StaticType::MaxHeap(Box::new(#mapped)) }
+                } else {
+                    panic!("MaxHeap inner invalid");
+                }
+            }
+            _ => panic!("MaxHeap without generics"),
+        },
+        "Iterator" => match &segment.arguments {
+            syn::PathArguments::AngleBracketed(args) => {
+                let inner = args.args.first().expect("Iterator requires inner");
+                if let syn::GenericArgument::Type(inner_ty) = inner {
+                    let mapped = map_type(inner_ty);
+                    quote::quote! { crate::interpreter::function::StaticType::Iterator(Box::new(#mapped)) }
+                } else {
+                    panic!("Iterator inner invalid");
+                }
+            }
+            _ => {
+                quote::quote! { crate::interpreter::function::StaticType::Iterator(Box::new(crate::interpreter::function::StaticType::Any)) }
+            }
+        },
+        "Option" => match &segment.arguments {
+            syn::PathArguments::AngleBracketed(args) => {
+                let inner = args.args.first().expect("Option requires inner type");
+                if let syn::GenericArgument::Type(inner_ty) = inner {
+                    let mapped = map_type(inner_ty);
+                    quote::quote! { crate::interpreter::function::StaticType::Option(Box::new(#mapped)) }
+                } else {
+                    panic!("Option inner invalid");
+                }
+            }
+            _ => panic!("Option without generics"),
+        },
         "Result" => match &segment.arguments {
             syn::PathArguments::AngleBracketed(args) => {
-                // Extract the first generic argument
                 if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
-                    // Recurse on T
                     map_type(inner_ty)
                 } else {
                     panic!("Result without generic arguments");
                 }
             }
-
-            _ => {
-                panic!("Result return type found without syn::PathArguments::AngleBracketed");
-            }
+            _ => panic!("Result without angle bracketed args"),
         },
+        "Number" => quote::quote! { crate::interpreter::function::StaticType::Number },
         "Value" | "EvaluationResult" => {
             quote::quote! { crate::interpreter::function::StaticType::Any }
         }
-        // Fallback
-        unmatched => {
-            panic!("Cannot map type string \"{unmatched}\" to StaticType");
-        }
+        unmatched => panic!("Cannot map type string '{unmatched}' to StaticType"),
     }
 }
 
