@@ -56,7 +56,7 @@ impl Analyser {
             Expression::Grouping(expr) => self.analyse(expr),
             Expression::VariableDeclaration { l_value, value } => {
                 let typ = self.analyse(value)?;
-                self.resolve_lvalue_declarative(l_value, typ)?;
+                self.resolve_lvalue_declarative(l_value, typ, *span)?;
                 Ok(StaticType::unit()) // TODO: never type here?
             }
             Expression::Assignment { l_value, r_value } => {
@@ -170,7 +170,7 @@ impl Analyser {
                 Ok(StaticType::unit())
             }
             Expression::For { iterations, body } => {
-                self.resolve_for_iterations(iterations, body)?;
+                self.resolve_for_iterations(iterations, body, *span)?;
 
                 match &**body {
                     // for now this is good enough?
@@ -293,6 +293,7 @@ impl Analyser {
         &mut self,
         iterations: &mut [ForIteration],
         body: &mut ForBody,
+        span: Span,
     ) -> Result<(), AnalysisError> {
         let Some((iteration, tail)) = iterations.split_first_mut() else {
             unreachable!("because this function is never called with an empty slice");
@@ -305,8 +306,8 @@ impl Analyser {
 
                 self.scope_tree.new_scope();
 
-                // TODO: inferring this as any is a massive cop-out
-                self.resolve_lvalue_declarative(l_value, StaticType::Any)?;
+                // TODO: when we give type parameters to all instances of sequence we can correctly infer StaticType::Any in this postition
+                self.resolve_lvalue_declarative(l_value, StaticType::Any, span)?;
                 do_destroy = true;
             }
             ForIteration::Guard(expr) => {
@@ -315,7 +316,7 @@ impl Analyser {
         }
 
         if !tail.is_empty() {
-            self.resolve_for_iterations(tail, body)?
+            self.resolve_for_iterations(tail, body, span)?
         } else {
             match body {
                 ForBody::Block(block) => {
@@ -431,6 +432,7 @@ impl Analyser {
         &mut self,
         lvalue: &mut Lvalue,
         typ: StaticType,
+        span: Span,
     ) -> Result<(), AnalysisError> {
         match lvalue {
             Lvalue::Identifier {
@@ -447,8 +449,15 @@ impl Analyser {
                 self.analyse(value)?;
             }
             Lvalue::Sequence(seq) => {
-                for sub_lvalue in seq {
-                    self.resolve_lvalue_declarative(sub_lvalue, typ.clone())?
+                let sub_types = typ
+                    .unpack()
+                    .ok_or_else(|| AnalysisError::unable_to_unpack_type(&typ, span))?;
+                for (sub_lvalue, sub_lvalue_type) in seq.iter_mut().zip(sub_types) {
+                    self.resolve_lvalue_declarative(
+                        sub_lvalue,
+                        sub_lvalue_type.clone(),
+                        /* todo: figure out how to narrow this span */ span,
+                    )?
                 }
             }
         }
@@ -673,6 +682,12 @@ pub struct AnalysisError {
 }
 
 impl AnalysisError {
+    fn unable_to_unpack_type(typ: &StaticType, span: Span) -> Self {
+        Self {
+            text: format!("Invalid unpacking of {typ}"),
+            span,
+        }
+    }
     fn lvalue_required_to_be_single_identifier(span: Span) -> Self {
         Self {
             text: "This lvalue is required to be a single identifier".to_string(),

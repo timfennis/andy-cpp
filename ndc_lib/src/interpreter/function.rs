@@ -594,6 +594,30 @@ impl StaticType {
                 .zip(param_types.iter())
                 .all(|(typ1, typ2)| typ1.is_compatible_with(typ2))
     }
+
+    pub fn unpack(&self) -> Option<Box<dyn Iterator<Item = &Self> + '_>> {
+        match self {
+            // TODO: this type implementation for list is WRONG!
+            Self::List | Self::Any => Some(Box::new(std::iter::repeat(&Self::Any))),
+            Self::Tuple(types) => Some(Box::new(types.iter())),
+
+            Self::Bool
+            | Self::Function { .. }
+            | Self::Option
+            | Self::Number
+            | Self::Float
+            | Self::Int
+            | Self::Rational
+            | Self::Complex
+            | Self::Sequence
+            | Self::String
+            | Self::Map
+            | Self::Iterator
+            | Self::MinHeap
+            | Self::MaxHeap
+            | Self::Deque => None,
+        }
+    }
 }
 
 impl fmt::Display for StaticType {
