@@ -4,8 +4,8 @@ use crate::ast::{
 use crate::interpreter::function::StaticType;
 use crate::lexer::Span;
 use itertools::Itertools;
+use std::fmt::{Debug, Formatter};
 
-#[derive(Debug)]
 pub struct Analyser {
     scope_tree: ScopeTree,
 }
@@ -71,7 +71,7 @@ impl Analyser {
                 resolved_assign_operation,
                 resolved_operation,
             } => {
-                let left_type = self.resolve_lvalue_as_ident(l_value, *span)?;
+                let left_type = self.resolve_single_lvalue(l_value, *span)?;
                 let right_type = self.analyse(r_value)?;
                 let arg_types = vec![left_type, right_type];
 
@@ -200,9 +200,11 @@ impl Analyser {
             }
             Expression::Index { index, value } => {
                 self.analyse(index)?;
-                self.analyse(value)?;
-                // TODO: figure out the type here
-                Ok(StaticType::Any)
+                let container_type = self.analyse(value)?;
+
+                container_type
+                    .element_type()
+                    .ok_or_else(|| AnalysisError::unable_to_index_into(container_type, *span))
             }
             Expression::Tuple { values } => {
                 let mut types = Vec::with_capacity(values.len());
@@ -349,28 +351,38 @@ impl Analyser {
         Ok(())
     }
 
-    fn resolve_lvalue_as_ident(
+    fn resolve_single_lvalue(
         &mut self,
         lvalue: &mut Lvalue,
         span: Span,
     ) -> Result<StaticType, AnalysisError> {
-        let Lvalue::Identifier {
-            identifier,
-            resolved,
-        } = lvalue
-        else {
-            return Err(AnalysisError::lvalue_required_to_be_single_identifier(span));
-        };
+        match lvalue {
+            Lvalue::Identifier {
+                identifier,
+                resolved,
+            } => {
+                let Some(target) = self.scope_tree.get_binding_any(identifier) else {
+                    return Err(AnalysisError::identifier_not_previously_declared(
+                        identifier, span,
+                    ));
+                };
 
-        let Some(target) = self.scope_tree.get_binding_any(&identifier) else {
-            return Err(AnalysisError::identifier_not_previously_declared(
-                identifier, span,
-            ));
-        };
+                *resolved = Some(target);
 
-        *resolved = Some(target);
+                Ok(self.scope_tree.get_type(target).clone())
+            }
+            Lvalue::Index { index, value } => {
+                self.analyse(index)?;
+                let type_of_index_target = self.analyse(value)?;
 
-        Ok(self.scope_tree.get_type(target).clone())
+                type_of_index_target
+                    .element_type()
+                    .ok_or_else(|| AnalysisError::unable_to_index_into(type_of_index_target, span))
+            }
+            Lvalue::Sequence(_) => {
+                Err(AnalysisError::lvalue_required_to_be_single_identifier(span))
+            }
+        }
     }
 
     fn resolve_lvalue(&mut self, lvalue: &mut Lvalue, span: Span) -> Result<(), AnalysisError> {
@@ -682,6 +694,12 @@ pub struct AnalysisError {
 }
 
 impl AnalysisError {
+    fn unable_to_index_into(typ: StaticType, span: Span) -> Self {
+        Self {
+            text: format!("Unable to index into {typ}"),
+            span,
+        }
+    }
     fn unable_to_unpack_type(typ: &StaticType, span: Span) -> Self {
         Self {
             text: format!("Invalid unpacking of {typ}"),
@@ -710,5 +728,16 @@ impl AnalysisError {
             text: format!("Identifier {ident} has not previously been declared"),
             span,
         }
+    }
+}
+
+impl Debug for Analyser {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        writeln!(f)?;
+        for (id, scope) in self.scope_tree.scopes.iter().enumerate() {
+            writeln!(f, "{id}: {scope:?}")?;
+        }
+
+        Ok(())
     }
 }

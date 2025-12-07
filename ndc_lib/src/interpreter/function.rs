@@ -475,6 +475,31 @@ impl StaticType {
         }
     }
 
+    pub fn element_type(&self) -> Option<StaticType> {
+        match self {
+            StaticType::Any
+            | StaticType::Bool
+            | StaticType::Complex
+            | StaticType::Float
+            | StaticType::Function { .. }
+            | StaticType::Int
+            | StaticType::MaxHeap
+            | StaticType::MinHeap
+            | StaticType::Number
+            | StaticType::Option
+            | StaticType::Rational
+            | StaticType::Sequence => None,
+            StaticType::List => todo!("return whatever list is generic over here"),
+            StaticType::String => Some(StaticType::String),
+            StaticType::Tuple(_) => todo!(
+                "we either have to disallow indexing in to tuples, or we have to figure out some way to determine the index"
+            ),
+            StaticType::Map => todo!("return value type of map"),
+            StaticType::Iterator => todo!("return value type of iterator"),
+            StaticType::Deque => todo!("return type of deque"),
+        }
+    }
+
     pub fn is_fn_and_matches(&self, types: &[Self]) -> bool {
         // If the thing is not a function we're not interested
         let Self::Function { parameters, .. } = self else {
