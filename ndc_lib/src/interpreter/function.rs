@@ -277,7 +277,7 @@ impl TypeSignature {
     /// Matches a list of `ValueTypes` to a type signature. It can return `None` if there is no match or
     /// `Some(num)` where num is the sum of the distances of the types. The type `Int`, is distance 1
     /// away from `Number`, and `Number` is 1 distance from `Any`, then `Int` is distance 2 from `Any`.
-    fn calc_type_score(&self, types: &[StaticType]) -> Option<u32> {
+    pub fn calc_type_score(&self, types: &[StaticType]) -> Option<u32> {
         match self {
             Self::Variadic => Some(0),
             Self::Exact(signature) => {
@@ -575,6 +575,24 @@ impl StaticType {
             (Self::Function { .. }, Self::Function { .. }) => true, // TODO: just saying all functions are compatible is lazy!!!
             _ => false,
         }
+    }
+
+    pub fn is_fn_and_matches(&self, types: &[Self]) -> bool {
+        // If the thing is not a function we're not interested
+        let Self::Function { parameters, .. } = self else {
+            return false;
+        };
+
+        let Some(param_types) = parameters else {
+            // If this branch happens then the function we're matching against is variadic meaning it's always a match
+            return true;
+        };
+
+        param_types.len() == types.len()
+            && types
+                .iter()
+                .zip(param_types.iter())
+                .all(|(typ1, typ2)| typ1.is_compatible_with(typ2))
     }
 }
 

@@ -1,5 +1,6 @@
 use crate::ast::{
     Binding, Expression, ExpressionLocation, ForBody, ForIteration, LogicalOperator, Lvalue,
+    ResolvedVar,
 };
 use crate::hash_map::HashMap;
 use crate::interpreter::environment::Environment;
@@ -85,14 +86,6 @@ pub(crate) fn evaluate_expression(
             resolved_operation,
             ..
         } => {
-            let mut operations_to_try = [
-                resolved_assign_operation.map(|op| (op, true)),
-                resolved_operation.map(|op| (op, false)),
-            ]
-            .into_iter()
-            .flatten()
-            .peekable();
-
             match l_value {
                 Lvalue::Identifier {
                     identifier,
@@ -106,11 +99,24 @@ pub(crate) fn evaluate_expression(
                         return Err(EvaluationError::undefined_variable(identifier, span).into());
                     };
 
+                    let types = [lhs.static_type(), rhs.static_type()];
                     let mut arguments = [lhs, rhs];
 
-                    while let Some((resolved_op, modified_in_place)) = operations_to_try.next() {
-                        let operation = environment.borrow().get(resolved_op);
+                    let mut operations_to_try = [
+                        (
+                            resolve_dynamic_binding(resolved_assign_operation, &types, environment),
+                            true,
+                        ),
+                        (
+                            resolve_dynamic_binding(resolved_operation, &types, environment),
+                            false,
+                        ),
+                    ]
+                    .into_iter()
+                    .filter_map(|(value, in_place)| value.map(|value| (value, in_place)))
+                    .peekable();
 
+                    while let Some((operation, modified_in_place)) = operations_to_try.next() {
                         let Value::Function(func) = operation else {
                             unreachable!(
                                 "the resolver pass should have guaranteed that the operation points to a function"
@@ -162,11 +168,22 @@ pub(crate) fn evaluate_expression(
 
                     let right_value = evaluate_expression(r_value, environment)?;
 
-                    while let Some((resolved_operation, modified_in_place)) =
-                        operations_to_try.next()
-                    {
-                        let operation_val = environment.borrow().get(resolved_operation);
+                    let types = [value_at_index.static_type(), right_value.static_type()];
+                    let mut operations_to_try = [
+                        (
+                            resolve_dynamic_binding(resolved_assign_operation, &types, environment),
+                            true,
+                        ),
+                        (
+                            resolve_dynamic_binding(resolved_operation, &types, environment),
+                            false,
+                        ),
+                    ]
+                    .into_iter()
+                    .filter_map(|(value, in_place)| value.map(|value| (value, in_place)))
+                    .peekable();
 
+                    while let Some((operation_val, modified_in_place)) = operations_to_try.next() {
                         let Value::Function(func) = operation_val else {
                             unreachable!(
                                 "the resolver pass should have guaranteed that the operation points to a function"
@@ -313,43 +330,15 @@ pub(crate) fn evaluate_expression(
             arguments,
         } => {
             let mut evaluated_args = Vec::new();
+            let mut arg_types = Vec::new();
 
             for argument in arguments {
-                evaluated_args.push(evaluate_expression(argument, environment)?);
+                let arg = evaluate_expression(argument, environment)?;
+                arg_types.push(arg.static_type());
+                evaluated_args.push(arg);
             }
 
-            // The Expression in `function` must either be an identifier in which case it will be looked up in the
-            // environment, or it must be some expression that evaluates to a function.
-            // In case the expression is an identifier we get ALL the values that match the identifier
-            // ordered by the distance is the scope-hierarchy.
-            let function_as_value = if let ExpressionLocation {
-                expression:
-                    Expression::Identifier {
-                        resolved: Binding::Dynamic(dynamic_binding),
-                        ..
-                    },
-                ..
-            } = &**function
-            {
-                dynamic_binding
-                    .iter()
-                    .find_map(|binding| {
-                        let value = environment.borrow().get(*binding);
-                        let Value::Function(..) = value else {
-                            panic!("dynamic binding resolved to non-function type at runtime");
-                        };
-
-                        Some(value)
-                    })
-                    .ok_or_else(|| {
-                        FunctionCarrier::EvaluationError(EvaluationError::new(
-                            "dynamic binding failed to produce a useful function".to_string(),
-                            span,
-                        ))
-                    })?
-            } else {
-                evaluate_expression(function, environment)?
-            };
+            let function_as_value = evaluate_as_function(function, &arg_types, environment)?;
 
             return if let Value::Function(function) = function_as_value {
                 match call_function(&function, &mut evaluated_args, environment, span) {
@@ -1012,4 +1001,54 @@ fn execute_for_iterations(
     }
 
     Ok(Value::unit())
+}
+
+fn evaluate_as_function(
+    function_expression: &ExpressionLocation,
+    arg_types: &[StaticType],
+    environment: &Rc<RefCell<Environment>>,
+) -> EvaluationResult {
+    let ExpressionLocation { expression, .. } = function_expression;
+
+    if let Expression::Identifier { resolved, .. } = expression {
+        resolve_dynamic_binding(resolved, &arg_types, environment).ok_or_else(|| {
+            FunctionCarrier::EvaluationError(EvaluationError::new(
+                "dynamic binding failed to produce a useful function".to_string(),
+                function_expression.span,
+            ))
+        })
+    } else {
+        evaluate_expression(function_expression, environment)
+    }
+}
+
+fn resolve_dynamic_binding(
+    binding: &Binding,
+    arg_types: &[StaticType],
+    environment: &Rc<RefCell<Environment>>,
+) -> Option<Value> {
+    match binding {
+        Binding::None => None,
+        Binding::Resolved(var) => Some(environment.borrow().get(*var)),
+        Binding::Dynamic(dynamic_binding) => dynamic_binding
+            .iter() // TODO: should we consider the binding order?
+            .find_map(|binding| {
+                let value = environment.borrow().get(*binding);
+
+                let Value::Function(fun) = &value else {
+                    panic!("dynamic binding resolved to non-function type at runtime");
+                };
+
+                let (_signature, fun) = fun
+                    .borrow()
+                    .implementations()
+                    .next()
+                    .expect("must have one implementation");
+
+                // Find the first function that matches
+                fun.static_type()
+                    .is_fn_and_matches(&arg_types)
+                    .then_some(value)
+            }),
+    }
 }

@@ -4,7 +4,6 @@ use crate::ast::{
 use crate::interpreter::function::StaticType;
 use crate::lexer::Span;
 use itertools::Itertools;
-use std::iter::repeat;
 
 #[derive(Debug)]
 pub struct Analyser {
@@ -74,30 +73,20 @@ impl Analyser {
             } => {
                 let left_type = self.resolve_lvalue_as_ident(l_value, *span)?;
                 let right_type = self.analyse(r_value)?;
-                let op_assign_arg_types = vec![left_type, right_type];
+                let arg_types = vec![left_type, right_type];
 
-                if let Some(binding) = self
+                *resolved_assign_operation = self
                     .scope_tree
-                    .get_function_binding(&format!("{operation}="), &op_assign_arg_types)
-                {
-                    *resolved_assign_operation = Some(binding);
+                    .resolve_function2(&format!("{operation}="), &arg_types);
+                *resolved_operation = self.scope_tree.resolve_function2(operation, &arg_types);
+
+                if let Binding::None = resolved_operation {
+                    return Err(AnalysisError::function_not_found(
+                        operation, &arg_types, *span,
+                    ));
                 }
 
-                if let Some(binding) = self
-                    .scope_tree
-                    .get_function_binding(&operation, &op_assign_arg_types)
-                {
-                    *resolved_operation = Some(binding);
-
-                    Ok(StaticType::unit())
-                } else {
-                    // For now, we require that the normal operation is present and the special assignment operation is optional
-                    Err(AnalysisError::function_not_found(
-                        operation,
-                        &op_assign_arg_types,
-                        *span,
-                    ))
-                }
+                Ok(StaticType::unit())
             }
             Expression::FunctionDeclaration {
                 name,
@@ -107,9 +96,9 @@ impl Analyser {
                 ..
             } => {
                 // TODO: figuring out the type signature of function declarations is the rest of the owl
-                let param_types: Vec<StaticType> = repeat(StaticType::Any)
-                    .take(extract_argument_arity(parameters))
-                    .collect();
+                let param_types: Vec<StaticType> =
+                    std::iter::repeat_n(StaticType::Any, extract_argument_arity(parameters))
+                        .collect();
 
                 self.scope_tree.new_scope();
                 self.resolve_parameters_declarative(parameters);
@@ -123,7 +112,8 @@ impl Analyser {
                 };
 
                 if let Some(name) = name {
-                    // TODO: is this correct, for now we just always create a new binding, we could also produce an error if we are generating a conflicting binding
+                    // TODO: is this correct, for now we just always create a new binding, we could
+                    //       also produce an error if we are generating a conflicting binding
                     *resolved_name = Some(
                         self.scope_tree
                             .create_local_binding(name.clone(), function_type.clone()),
@@ -149,19 +139,19 @@ impl Analyser {
             } => {
                 self.analyse(condition)?;
                 let true_type = self.analyse(on_true)?;
-                let false_typ = if let Some(on_false) = on_false {
+                let false_type = if let Some(on_false) = on_false {
                     Some(self.analyse(on_false)?)
                 } else {
                     None
                 };
 
-                if false_typ.is_none() {
+                if false_type.is_none() {
                     if true_type != StaticType::unit() {
                         // TODO: Emit warning for not using a semicolon in this if
                     }
 
                     Ok(StaticType::unit())
-                } else if let Some(false_type) = false_typ
+                } else if let Some(false_type) = false_type
                     && false_type == true_type
                 {
                     Ok(true_type)
@@ -276,25 +266,16 @@ impl Analyser {
             return self.analyse(ident);
         };
 
-        let binding = self
-            .scope_tree
-            .get_function_binding(name, argument_types)
-            .map(|binding| Binding::Resolved(binding))
-            .or_else(|| {
-                let loose_bindings = self
-                    .scope_tree
-                    .get_function_bindings_loose(name, argument_types);
-
-                if loose_bindings.is_empty() {
-                    return None;
-                }
-
-                Some(Binding::Dynamic(loose_bindings))
-            })
-            .ok_or_else(|| AnalysisError::function_not_found(name, argument_types, span))?;
+        let binding = self.scope_tree.resolve_function2(name, argument_types);
 
         let out_type = match &binding {
-            Binding::None => unreachable!("should return error before this happens"),
+            Binding::None => {
+                return Err(AnalysisError::function_not_found(
+                    name,
+                    argument_types,
+                    span,
+                ));
+            }
             Binding::Resolved(res) => self.scope_tree.get_type(*res).clone(),
 
             // TODO: are we just going to lie about the type or is this just how truthful we can be
@@ -558,7 +539,7 @@ impl ScopeTree {
         }
     }
 
-    fn get_function_bindings_loose(&mut self, ident: &str, sig: &[StaticType]) -> Vec<ResolvedVar> {
+    fn resolve_function_dynamic(&mut self, ident: &str, sig: &[StaticType]) -> Vec<ResolvedVar> {
         let mut depth = 0;
         let mut scope_ptr = self.current_scope_idx;
 
@@ -583,7 +564,21 @@ impl ScopeTree {
         }
     }
 
-    fn get_function_binding(&mut self, ident: &str, sig: &[StaticType]) -> Option<ResolvedVar> {
+    fn resolve_function2(&mut self, ident: &str, sig: &[StaticType]) -> Binding {
+        self.resolve_function(ident, sig)
+            .map(Binding::Resolved)
+            .or_else(|| {
+                let loose_bindings = self.resolve_function_dynamic(ident, sig);
+
+                if loose_bindings.is_empty() {
+                    return None;
+                }
+
+                Some(Binding::Dynamic(loose_bindings))
+            })
+            .unwrap_or(Binding::None)
+    }
+    fn resolve_function(&mut self, ident: &str, sig: &[StaticType]) -> Option<ResolvedVar> {
         let mut depth = 0;
         let mut scope_ptr = self.current_scope_idx;
 
@@ -658,28 +653,9 @@ impl Scope {
             .collect()
     }
     fn find_function(&self, find_ident: &str, find_types: &[StaticType]) -> Option<usize> {
-        self.identifiers.iter().rposition(|(ident, typ)| {
-            // If the name doesn't match we're not interested
-            if ident != find_ident {
-                return false;
-            }
-
-            // If the thing is not a function we're not interested
-            let StaticType::Function { parameters, .. } = typ else {
-                return false;
-            };
-
-            let Some(param_types) = parameters else {
-                // If this branch happens then the function we're matching against is variadic meaning it's always a match
-                return true;
-            };
-
-            param_types.len() == find_types.len()
-                && find_types
-                    .iter()
-                    .zip(param_types.iter())
-                    .all(|(typ1, typ2)| typ1.is_compatible_with(typ2))
-        })
+        self.identifiers
+            .iter()
+            .rposition(|(ident, typ)| ident == find_ident && typ.is_fn_and_matches(find_types))
     }
 
     fn allocate(&mut self, name: String, typ: StaticType) -> usize {

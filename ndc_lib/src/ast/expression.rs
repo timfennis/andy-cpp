@@ -57,8 +57,8 @@ pub enum Expression {
         l_value: Lvalue,
         r_value: Box<ExpressionLocation>,
         operation: String,
-        resolved_assign_operation: Option<ResolvedVar>,
-        resolved_operation: Option<ResolvedVar>,
+        resolved_assign_operation: Binding,
+        resolved_operation: Binding,
     },
     FunctionDeclaration {
         name: Option<String>,

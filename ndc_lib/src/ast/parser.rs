@@ -385,8 +385,8 @@ impl Parser {
                         .expect("guaranteed to produce an lvalue"),
                     r_value: Box::new(expression),
                     operation: operation_identifier,
-                    resolved_assign_operation: None,
-                    resolved_operation: None,
+                    resolved_assign_operation: Binding::None,
+                    resolved_operation: Binding::None,
                 };
 
                 Ok(op_assign.to_location(start.merge(end)))
