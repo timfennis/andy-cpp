@@ -140,7 +140,7 @@ fn map_type(ty: &syn::Type) -> TokenStream {
                 ])
             }
         }
-        syn::Type::Infer(x) => {
+        syn::Type::Infer(_) => {
             quote::quote! { crate::interpreter::function::StaticType::Any }
         }
         _ => {
@@ -152,15 +152,6 @@ fn map_type(ty: &syn::Type) -> TokenStream {
 #[allow(clippy::single_match_else)]
 fn map_type_path(p: &syn::TypePath) -> TokenStream {
     let segment = p.path.segments.last().unwrap();
-
-    let make_map_fallback = || {
-        quote::quote! {
-            crate::interpreter::function::StaticType::Map {
-                key: Box::new(crate::interpreter::function::StaticType::Any),
-                value: Box::new(crate::interpreter::function::StaticType::Any)
-            }
-        }
-    };
 
     match segment.ident.to_string().as_str() {
         "i32" | "i64" | "isize" | "u32" | "u64" | "usize" | "BigInt" => {
@@ -209,10 +200,10 @@ fn map_type_path(p: &syn::TypePath) -> TokenStream {
             syn::PathArguments::AngleBracketed(args) => {
                 let mut iter = args.args.iter();
                 let Some(key) = iter.next() else {
-                    return make_map_fallback();
+                    return temp_create_map_any();
                 };
                 let Some(val) = iter.next() else {
-                    return make_map_fallback();
+                    return temp_create_map_any();
                 };
                 let key_ty = match key {
                     syn::GenericArgument::Type(t) => t,
@@ -226,7 +217,7 @@ fn map_type_path(p: &syn::TypePath) -> TokenStream {
                 let val_mapped = map_type(val_ty);
                 quote::quote! { crate::interpreter::function::StaticType::Map { key: Box::new(#key_mapped), value: Box::new(#val_mapped) } }
             }
-            _ => make_map_fallback(),
+            _ => temp_create_map_any(),
         },
         "MinHeap" => match &segment.arguments {
             syn::PathArguments::AngleBracketed(args) => {
@@ -418,29 +409,27 @@ fn wrap_single(
 fn into_param_type(ty: &syn::Type) -> TokenStream {
     match ty {
         ty if path_ends_with(ty, "Vec") => {
-            quote! { crate::interpreter::function::StaticType::List }
+            quote! { crate::interpreter::function::StaticType::List(Box::new(crate::interpreter::function::StaticType::Any)) }
         }
         ty if path_ends_with(ty, "VecDeque") => {
-            quote! { crate::interpreter::function::StaticType::Deque }
+            quote! { crate::interpreter::function::StaticType::Deque(Box::new(crate::interpreter::function::StaticType::Any)) }
         }
         ty if path_ends_with(ty, "DefaultMap")
             || path_ends_with(ty, "DefaultMapMut")
             || path_ends_with(ty, "HashMap") =>
         {
-            quote! { crate::interpreter::function::StaticType::Map }
+            temp_create_map_any()
         }
         ty if path_ends_with(ty, "MinHeap") => {
-            quote! { crate::interpreter::function::StaticType::MinHeap }
+            quote! { crate::interpreter::function::StaticType::MinHeap(Box::new(crate::interpreter::function::StaticType::Any)) }
         }
         ty if path_ends_with(ty, "MaxHeap") => {
-            quote! { crate::interpreter::function::StaticType::MaxHeap }
+            quote! { crate::interpreter::function::StaticType::MaxHeap(Box::new(crate::interpreter::function::StaticType::Any)) }
         }
         ty if path_ends_with(ty, "ListRepr") => {
-            quote! { crate::interpreter::function::StaticType::List }
+            quote! { crate::interpreter::function::StaticType::List(Box::new(crate::interpreter::function::StaticType::Any)) }
         }
-        ty if path_ends_with(ty, "MapRepr") => {
-            quote! { crate::interpreter::function::StaticType::Map }
-        }
+        ty if path_ends_with(ty, "MapRepr") => temp_create_map_any(),
         syn::Type::Reference(syn::TypeReference { elem, .. }) => into_param_type(elem),
         syn::Type::Path(syn::TypePath { path, .. }) => match path {
             _ if path.is_ident("i64") => quote! { crate::interpreter::function::StaticType::Int },
@@ -454,7 +443,7 @@ fn into_param_type(ty: &syn::Type) -> TokenStream {
                 quote! { crate::interpreter::function::StaticType::Number }
             }
             _ if path.is_ident("Sequence") => {
-                quote! { crate::interpreter::function::StaticType::Sequence }
+                quote! { crate::interpreter::function::StaticType::Sequence(Box::new(crate::interpreter::function::StaticType::Any)) }
             }
             _ if path.is_ident("Callable") => {
                 quote! {
@@ -466,7 +455,9 @@ fn into_param_type(ty: &syn::Type) -> TokenStream {
             }
             _ => panic!("Don't know how to convert Path into StaticType\n\n{path:?}"),
         },
-        syn::Type::ImplTrait(_) => quote! { crate::interpreter::function::StaticType::Iterator },
+        syn::Type::ImplTrait(_) => {
+            quote! { crate::interpreter::function::StaticType::Iterator(Box::new(crate::interpreter::function::StaticType::Any)) }
+        }
         x => panic!("Don't know how to convert {x:?} into StaticType"),
     }
 }
@@ -520,7 +511,7 @@ fn create_temp_variable(
             let rc_temp_var =
                 syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
             return vec![Argument {
-                param_type: quote! { crate::interpreter::function::StaticType::Map },
+                param_type: temp_create_map_any(),
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
@@ -536,7 +527,7 @@ fn create_temp_variable(
             let rc_temp_var =
                 syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
             return vec![Argument {
-                param_type: quote! { crate::interpreter::function::StaticType::Map },
+                param_type: temp_create_map_any(),
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
@@ -552,7 +543,7 @@ fn create_temp_variable(
             let rc_temp_var =
                 syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
             return vec![Argument {
-                param_type: quote! { crate::interpreter::function::StaticType::Map },
+                param_type: temp_create_map_any(),
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
@@ -568,7 +559,7 @@ fn create_temp_variable(
             let rc_temp_var =
                 syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
             return vec![Argument {
-                param_type: quote! { crate::interpreter::function::StaticType::Map },
+                param_type: temp_create_map_any(),
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
@@ -585,7 +576,7 @@ fn create_temp_variable(
             let rc_temp_var =
                 syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
             return vec![Argument {
-                param_type: quote! { crate::interpreter::function::StaticType::List },
+                param_type: quote! { crate::interpreter::function::StaticType::List(Box::new(crate::interpreter::function::StaticType::Any)) },
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
@@ -747,7 +738,7 @@ fn create_temp_variable(
             let rc_temp_var =
                 syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
             return vec![Argument {
-                param_type: quote! { crate::interpreter::function::StaticType::List },
+                param_type: quote! { crate::interpreter::function::StaticType::List(Box::new(crate::interpreter::function::StaticType::Any)) },
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
@@ -764,7 +755,7 @@ fn create_temp_variable(
                 syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
             return vec![
                 Argument {
-                    param_type: quote! { crate::interpreter::function::StaticType::List },
+                    param_type: quote! { crate::interpreter::function::StaticType::List(Box::new(crate::interpreter::function::StaticType::Any)) },
                     param_name: quote! { #original_name },
                     argument: quote! { #argument_var_name },
                     initialize_code: quote! {
@@ -878,4 +869,14 @@ fn create_temp_variable(
     }
 
     panic!("Not sure how to handle receivers");
+}
+
+// TODO: just adding Any as type here is lazy AF but CBA fixing generics
+pub fn temp_create_map_any() -> TokenStream {
+    quote! {
+       crate::interpreter::function::StaticType::Map {
+           key: Box::new(crate::interpreter::function::StaticType::Any),
+           value: Box::new(crate::interpreter::function::StaticType::Any)
+       }
+    }
 }

@@ -1,6 +1,5 @@
 use crate::ast::{
     Binding, Expression, ExpressionLocation, ForBody, ForIteration, LogicalOperator, Lvalue,
-    ResolvedVar,
 };
 use crate::hash_map::HashMap;
 use crate::interpreter::environment::Environment;
@@ -1010,7 +1009,7 @@ fn evaluate_as_function(
     let ExpressionLocation { expression, .. } = function_expression;
 
     if let Expression::Identifier { resolved, .. } = expression {
-        resolve_dynamic_binding(resolved, &arg_types, environment).ok_or_else(|| {
+        resolve_dynamic_binding(resolved, arg_types, environment).ok_or_else(|| {
             FunctionCarrier::EvaluationError(EvaluationError::new(
                 "dynamic binding failed to produce a useful function".to_string(),
                 function_expression.span,
@@ -1039,7 +1038,7 @@ fn resolve_dynamic_binding(
                 };
 
                 // Find the first function that matches
-                if fun.borrow().static_type().is_fn_and_matches(&arg_types) {
+                if fun.borrow().static_type().is_fn_and_matches(arg_types) {
                     Some(value)
                 } else {
                     None

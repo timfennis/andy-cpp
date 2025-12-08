@@ -140,26 +140,20 @@ impl Analyser {
                 self.analyse(condition)?;
                 let true_type = self.analyse(on_true)?;
                 let false_type = if let Some(on_false) = on_false {
-                    Some(self.analyse(on_false)?)
+                    self.analyse(on_false)?
                 } else {
-                    None
+                    StaticType::unit()
                 };
 
-                if false_type.is_none() {
-                    if true_type != StaticType::unit() {
-                        // TODO: Emit warning for not using a semicolon in this if
-                    }
-
-                    Ok(StaticType::unit())
-                } else if let Some(false_type) = false_type
-                    && false_type == true_type
-                {
-                    Ok(true_type)
-                } else {
-                    // TODO: maybe create a warning to show the user they're doing something cursed
-                    // TODO: figure out the nearest common ancestor for true_type and false_type
-                    Ok(StaticType::Any)
+                if true_type != StaticType::unit() {
+                    // TODO: Emit warning for not using a semicolon in this if
                 }
+
+                if true_type != false_type {
+                    // TODO maybe show warning?
+                }
+
+                Ok(true_type.lub(&false_type))
             }
             Expression::While {
                 expression,
@@ -196,8 +190,8 @@ impl Analyser {
                 let container_type = self.analyse(value)?;
 
                 container_type
-                    .element_type()
-                    .ok_or_else(|| AnalysisError::unable_to_index_into(container_type, *span))
+                    .index_element_type()
+                    .ok_or_else(|| AnalysisError::unable_to_index_into(&container_type, *span))
             }
             Expression::Tuple { values } => {
                 let mut types = Vec::with_capacity(values.len());
@@ -404,8 +398,8 @@ impl Analyser {
                 let type_of_index_target = self.analyse(value)?;
 
                 type_of_index_target
-                    .element_type()
-                    .ok_or_else(|| AnalysisError::unable_to_index_into(type_of_index_target, span))
+                    .index_element_type()
+                    .ok_or_else(|| AnalysisError::unable_to_index_into(&type_of_index_target, span))
             }
             Lvalue::Sequence(_) => {
                 Err(AnalysisError::lvalue_required_to_be_single_identifier(span))
@@ -492,6 +486,7 @@ impl Analyser {
                 let sub_types = typ
                     .unpack()
                     .ok_or_else(|| AnalysisError::unable_to_unpack_type(&typ, span))?;
+
                 for (sub_lvalue, sub_lvalue_type) in seq.iter_mut().zip(sub_types) {
                     self.resolve_lvalue_declarative(
                         sub_lvalue,
@@ -762,7 +757,7 @@ impl AnalysisError {
             span,
         }
     }
-    fn unable_to_index_into(typ: StaticType, span: Span) -> Self {
+    fn unable_to_index_into(typ: &StaticType, span: Span) -> Self {
         Self {
             text: format!("Unable to index into {typ}"),
             span,

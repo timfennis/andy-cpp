@@ -43,6 +43,60 @@ impl Sequence {
         }
     }
 
+    pub fn static_type(&self) -> StaticType {
+        match self {
+            Self::String(_) => StaticType::String,
+            // I predict that defaulting to Any is going to make us very sad one day
+            Self::List(l) => StaticType::List(Box::new(
+                l.borrow()
+                    .iter()
+                    .next()
+                    .map(|i| i.static_type())
+                    .unwrap_or(StaticType::Any),
+            )),
+            Self::Tuple(t) => StaticType::Tuple(t.iter().map(Value::static_type).collect()),
+            Self::Map(map, _) => StaticType::Map {
+                key: Box::new(
+                    map.borrow()
+                        .keys()
+                        .next()
+                        .map(Value::static_type)
+                        .unwrap_or(StaticType::Any),
+                ),
+                value: Box::new(
+                    map.borrow()
+                        .values()
+                        .next()
+                        .map(Value::static_type)
+                        .unwrap_or(StaticType::Any),
+                ),
+            },
+            Self::Iterator(_) => {
+                todo!("we cannot determine the type of an iterator without nuking the iterator")
+            }
+            Self::MaxHeap(heap) => StaticType::MaxHeap(Box::new(
+                heap.borrow()
+                    .iter()
+                    .max()
+                    .map(|elem| elem.0.static_type())
+                    .unwrap_or(StaticType::Any),
+            )),
+            Self::MinHeap(heap) => StaticType::MaxHeap(Box::new(
+                heap.borrow()
+                    .iter()
+                    .min()
+                    .map(|elem| elem.0.0.static_type())
+                    .unwrap_or(StaticType::Any),
+            )),
+            Self::Deque(d) => StaticType::Deque(Box::new(
+                d.borrow()
+                    .iter()
+                    .next()
+                    .map(Value::static_type)
+                    .unwrap_or(StaticType::Any),
+            )),
+        }
+    }
     #[must_use]
     pub fn deepcopy(&self) -> Self {
         match self {
@@ -87,15 +141,6 @@ impl Sequence {
                 Self::Iterator(Rc::new(RefCell::new(ValueIterator::clone(&*i.borrow())))) // ???
             }
         }
-    }
-
-    /// Reflexively determine the type this value at runtime.
-    ///
-    /// Note: If a collection type is generic over a single parameter we'll attempt to peek into the
-    ///       list and determine the type of the parameter that way, but if the list is empty we just return Any
-    /// Note: This function is not very performant and should be used as little as possible.
-    pub fn static_type(&self) -> StaticType {
-        match self {}
     }
 
     #[must_use]

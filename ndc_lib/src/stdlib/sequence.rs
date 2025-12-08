@@ -780,7 +780,7 @@ pub mod extra {
                     .documentation("Combines multiple sequences (or iterables) into a single sequence of tuples, where the ith tuple contains the ith element from each input sequence.\n\nIf the input sequences are of different lengths, the resulting sequence is truncated to the length of the shortest input.".to_string())
                     .body(FunctionBody::generic(
                         crate::interpreter::function::TypeSignature::Variadic,
-                        StaticType::List,
+                        StaticType::List(Box::new(StaticType::Tuple(vec![StaticType::Any, StaticType::Any]))),
                         |args, _env| match args {
                             [_] => {
                                 Err(anyhow!("zip must be called with 2 or more arguments").into())

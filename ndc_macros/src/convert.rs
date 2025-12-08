@@ -1,3 +1,4 @@
+use crate::function::temp_create_map_any;
 use crate::r#match::{is_ref_mut, is_string, path_ends_with};
 use proc_macro2::TokenStream;
 use quote::quote;
@@ -59,7 +60,7 @@ impl TypeConverter for InternalMap {
     }
 
     fn static_type(&self) -> TokenStream {
-        quote! { crate::interpreter::function::StaticType::Map }
+        temp_create_map_any()
     }
 
     fn convert(
@@ -120,7 +121,12 @@ impl TypeConverter for InternalList {
     }
 
     fn static_type(&self) -> TokenStream {
-        quote! { crate::interpreter::function::StaticType::List }
+        // TODO: just hardcoding Any here is lazy
+        quote! {
+            crate::interpreter::function::StaticType::List(Box::new(
+                crate::interpreter::function::StaticType::Any
+            ))
+        }
     }
 
     fn convert(
