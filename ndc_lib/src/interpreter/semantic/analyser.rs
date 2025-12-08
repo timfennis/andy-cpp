@@ -651,6 +651,7 @@ impl ScopeTree {
             })
             .unwrap_or(Binding::None)
     }
+
     fn resolve_function(&mut self, ident: &str, sig: &[StaticType]) -> Option<ResolvedVar> {
         let mut depth = 0;
         let mut scope_ptr = self.current_scope_idx;
@@ -782,7 +783,7 @@ impl AnalysisError {
     fn function_not_found(ident: &str, types: &[StaticType], span: Span) -> Self {
         Self {
             text: format!(
-                "No function called '{ident}' found that matches the arguments {}",
+                "No function called '{ident}' found that matches the arguments '{}'",
                 types.iter().join(", ")
             ),
             span,
