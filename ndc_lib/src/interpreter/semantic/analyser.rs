@@ -182,9 +182,9 @@ impl Analyser {
                 let StaticType::Function { return_type, .. } =
                     self.resolve_function_with_argument_types(function, &type_sig, *span)?
                 else {
-                    unreachable!(
-                        "resolve_function_with_argument_types should guarantee us a function type"
-                    );
+                    // If we couldn't resolve the identifier to a function we have to just assume that
+                    // whatever identifier we did find is a function at runtime and will return Any
+                    return Ok(StaticType::Any);
                 };
 
                 Ok(*return_type)
@@ -649,6 +649,8 @@ impl ScopeTree {
 
                 Some(Binding::Dynamic(loose_bindings))
             })
+            // If we can't find any function in scope that could match, we just default to an identifier.
+            .or_else(|| self.get_binding_any(ident).map(Binding::Resolved))
             .unwrap_or(Binding::None)
     }
 

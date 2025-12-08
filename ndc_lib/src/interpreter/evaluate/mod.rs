@@ -355,8 +355,10 @@ pub(crate) fn evaluate_expression(
                 }
             } else {
                 Err(FunctionCarrier::EvaluationError(EvaluationError::new(
-                    "Failed to invoke expression as function possibly because it's not a function"
-                        .to_string(),
+                    format!(
+                        "Unable to invoke {} as a function.",
+                        function_as_value.static_type()
+                    ),
                     span,
                 )))
             };
