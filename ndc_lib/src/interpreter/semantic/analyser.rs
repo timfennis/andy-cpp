@@ -103,7 +103,11 @@ impl Analyser {
                 self.scope_tree.new_scope();
                 self.resolve_parameters_declarative(parameters);
 
-                let return_type = self.analyse(body)?;
+                // TODO: instead of just hardcoding the return type of every function to StaticType::Any
+                //       we should somehow collect all the returns that were encountered while analysing
+                //       the body and then figuring out the LUB.
+                self.analyse(body)?;
+                let return_type = StaticType::Any;
                 self.scope_tree.destroy_scope();
 
                 let function_type = StaticType::Function {
@@ -251,10 +255,9 @@ impl Analyser {
                     value: Box::new(value_type.unwrap_or_else(StaticType::unit)),
                 })
             }
-            Expression::Return { value } => {
-                self.analyse(value)?;
-                Ok(StaticType::unit()) // TODO or never?
-            }
+            // Return evaluates to the type of the expression it returns, which makes type checking easier!
+            // Actually it doesn't seem to make it any easier
+            Expression::Return { value } => self.analyse(value),
             Expression::RangeInclusive { start, end }
             | Expression::RangeExclusive { start, end } => {
                 if let Some(start) = start {
