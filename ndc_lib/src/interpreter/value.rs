@@ -84,6 +84,7 @@ impl Value {
     // Note: this method is called `try_into_iter` but it doesn't always create an iterator over
     //       the original value. In most cases you get an iterator over a copy of the data.
     #[must_use]
+    #[deprecated = "use try_into_vec"]
     pub fn try_into_iter(self) -> Option<impl Iterator<Item = Self>> {
         match self {
             Self::Sequence(Sequence::List(list)) => match Rc::try_unwrap(list) {
@@ -118,6 +119,30 @@ impl Value {
                         .collect_vec()
                         .into_iter(),
                 ),
+            },
+            _ => None,
+        }
+    }
+
+    pub fn try_into_vec(self) -> Option<Vec<Self>> {
+        match self {
+            Self::Sequence(Sequence::List(list)) => match Rc::try_unwrap(list) {
+                // This short circuit is almost certainly wrong because take will panic if list is borrowed
+                Ok(list) => Some(list.into_inner()),
+                Err(list) => Some(Vec::clone(&*list.borrow())),
+            },
+            Self::Sequence(Sequence::Tuple(list)) => match Rc::try_unwrap(list) {
+                Ok(list) => Some(list),
+                Err(list) => Some(Vec::clone(&list)),
+            },
+            Self::Sequence(Sequence::Map(map, _)) => {
+                Some(map.borrow().keys().cloned().collect_vec())
+            }
+            Self::Sequence(Sequence::String(string)) => match Rc::try_unwrap(string) {
+                // This implementation is peak retard, we don't want collect_vec here
+                // ^-- WTF: is this comment, we collect_vec here anyways?
+                Ok(string) => Some(string.into_inner().chars().map(Self::from).collect_vec()),
+                Err(string) => Some(string.borrow().chars().map(Self::from).collect_vec()),
             },
             _ => None,
         }

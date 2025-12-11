@@ -71,9 +71,9 @@ impl Sequence {
                         .unwrap_or(StaticType::Any),
                 ),
             },
-            Self::Iterator(_) => {
-                todo!("we cannot determine the type of an iterator without nuking the iterator")
-            }
+            // TODO: we can't infer the type of iterators at runtime, unless we implement peek (CNA WE?)
+            Self::Iterator(_) => StaticType::Iterator(Box::new(StaticType::Any)),
+
             Self::MaxHeap(heap) => StaticType::MaxHeap(Box::new(
                 heap.borrow()
                     .iter()
@@ -81,7 +81,7 @@ impl Sequence {
                     .map(|elem| elem.0.static_type())
                     .unwrap_or(StaticType::Any),
             )),
-            Self::MinHeap(heap) => StaticType::MaxHeap(Box::new(
+            Self::MinHeap(heap) => StaticType::MinHeap(Box::new(
                 heap.borrow()
                     .iter()
                     .min()

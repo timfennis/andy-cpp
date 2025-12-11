@@ -206,7 +206,7 @@ impl Analyser {
                 Ok(StaticType::Tuple(types))
             }
             Expression::List { values } => {
-                let element_type = self.analyse_multiple_expression_with_same_type(values, span)?;
+                let element_type = self.analyse_multiple_expression_with_same_type(values)?;
 
                 // TODO: for now if we encounter an empty list expression we say the list is generic over Any but this clearly is not a good solution
                 Ok(StaticType::List(Box::new(
@@ -214,30 +214,24 @@ impl Analyser {
                 )))
             }
             Expression::Map { values, default } => {
-                let mut key_type = None;
-                let mut value_type = None;
+                let mut key_type: Option<StaticType> = None;
+                let mut value_type: Option<StaticType> = None;
                 for (key, value) in values {
-                    if let Some(key_type) = &key_type {
+                    // let map = %{
+                    //     "key": 1,
+                    //     10: 1,
+                    // }
+                    if let Some(key_type) = &mut key_type {
                         let next_type = self.analyse(key)?;
-                        if &next_type != key_type {
-                            return Err(AnalysisError::incompatible_list_element(
-                                key_type.clone(),
-                                next_type,
-                                *span,
-                            ));
-                        }
+                        *key_type = key_type.lub(&next_type);
                     } else {
                         key_type = Some(self.analyse(key)?);
                     }
                     if let Some(value) = value {
-                        if let Some(value_type) = &value_type {
+                        if let Some(value_type) = &mut value_type {
                             let next_type = self.analyse(value)?;
                             if &next_type != value_type {
-                                return Err(AnalysisError::incompatible_list_element(
-                                    value_type.clone(),
-                                    next_type,
-                                    *span,
-                                ));
+                                *value_type = value_type.lub(&next_type);
                             }
                         } else {
                             value_type = Some(self.analyse(value)?);
@@ -286,6 +280,8 @@ impl Analyser {
             // invoking a value like `get_function()()` so in this case we just continue like normal?
             return self.analyse(ident);
         };
+
+        // println!("resolve fn {name} {}", argument_types.iter().join(", "));
 
         let binding = self.scope_tree.resolve_function2(name, argument_types);
 
@@ -505,22 +501,14 @@ impl Analyser {
     fn analyse_multiple_expression_with_same_type(
         &mut self,
         expressions: &mut Vec<ExpressionLocation>,
-        span: &mut Span,
     ) -> Result<Option<StaticType>, AnalysisError> {
-        let mut element_type = None;
+        let mut element_type: Option<StaticType> = None;
 
         for expression in expressions {
-            if let Some(element_type) = &element_type {
+            if let Some(element_type) = &mut element_type {
                 let following_type = self.analyse(expression)?;
 
-                if &following_type != element_type {
-                    // We don't have to allow this right now, we could just widen the type until it's Any and call it a day
-                    return Err(AnalysisError::incompatible_list_element(
-                        element_type.clone(),
-                        following_type,
-                        *span,
-                    ));
-                }
+                *element_type = element_type.lub(&following_type);
             } else {
                 element_type = Some(self.analyse(expression)?);
             }
@@ -650,23 +638,27 @@ impl ScopeTree {
                 Some(Binding::Dynamic(loose_bindings))
             })
             // If we can't find any function in scope that could match, we just default to an identifier.
-            .or_else(|| self.get_binding_any(ident).map(Binding::Resolved))
+            // TODO: no this fucks everything
+            .or_else(|| {
+                self.get_binding_any(ident)
+                    .map(|resolved| Binding::Dynamic(vec![resolved]))
+            })
             .unwrap_or(Binding::None)
     }
 
-    fn resolve_function(&mut self, ident: &str, sig: &[StaticType]) -> Option<ResolvedVar> {
+    fn resolve_function(&mut self, ident: &str, arg_types: &[StaticType]) -> Option<ResolvedVar> {
         let mut depth = 0;
         let mut scope_ptr = self.current_scope_idx;
 
         loop {
-            if let Some(slot) = self.scopes[scope_ptr].find_function(ident, sig) {
+            if let Some(slot) = self.scopes[scope_ptr].find_function(ident, arg_types) {
                 return Some(ResolvedVar::Captured { slot, depth });
             } else if let Some(parent_idx) = self.scopes[scope_ptr].parent_idx {
                 depth += 1;
                 scope_ptr = parent_idx;
             } else {
                 return Some(ResolvedVar::Global {
-                    slot: self.global_scope.find_function(ident, sig)?,
+                    slot: self.global_scope.find_function(ident, arg_types)?,
                 });
             }
         }
@@ -751,18 +743,6 @@ pub struct AnalysisError {
 impl AnalysisError {}
 
 impl AnalysisError {
-    fn incompatible_list_element(
-        list_type: StaticType,
-        next_element_type: StaticType,
-        span: Span,
-    ) -> AnalysisError {
-        Self {
-            text: format!(
-                "Invalid list expression: not allowed to mix {list_type} with {next_element_type}"
-            ),
-            span,
-        }
-    }
     fn unable_to_index_into(typ: &StaticType, span: Span) -> Self {
         Self {
             text: format!("Unable to index into {typ}"),

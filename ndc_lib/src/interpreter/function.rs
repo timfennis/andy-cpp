@@ -99,12 +99,27 @@ impl Function {
         }
     }
 
-    pub(crate) fn call(
+    pub fn call(&self, args: &mut [Value], env: &Rc<RefCell<Environment>>) -> EvaluationResult {
+        let result = self.body.call(args, env);
+
+        match result {
+            Err(FunctionCarrier::Return(value)) | Ok(value) => Ok(value),
+            e => e,
+        }
+    }
+
+    pub fn call_checked(
         &self,
         args: &mut [Value],
         env: &Rc<RefCell<Environment>>,
     ) -> EvaluationResult {
-        self.body.call(args, env)
+        let arg_types = args.iter().map(|arg| arg.static_type()).collect::<Vec<_>>();
+
+        if self.static_type().is_fn_and_matches(&arg_types) {
+            self.call(args, env)
+        } else {
+            Err(FunctionCarrier::FunctionTypeMismatch)
+        }
     }
 
     fn call_vectorized(
@@ -394,7 +409,7 @@ pub enum StaticType {
     Rational,
     Complex,
 
-    // Sequences
+    // Sequences List<Int> -> List<Number>
     Sequence(Box<StaticType>),
     List(Box<StaticType>),
     String,
@@ -420,8 +435,7 @@ impl StaticType {
     /// - `Sequence<T>` > sequence types with element type T
     /// - Generic types are covariant in their type parameters
     /// - Function parameters are **contravariant**, returns are **covariant**
-    #[allow(clippy::unnested_or_patterns)]
-    pub fn is_subtype(&self, other: &StaticType) -> bool {
+    pub fn is_subtype(&self, other: &Self) -> bool {
         // Any is the universal supertype
         if matches!(other, Self::Any) {
             return true;
@@ -432,6 +446,8 @@ impl StaticType {
             return false;
         }
 
+        #[allow(clippy::match_same_arms)]
+        #[allow(clippy::unnested_or_patterns)]
         match (self, other) {
             // Reflexivity: every type is a subtype of itself
             _ if self == other => true,
@@ -519,6 +535,7 @@ impl StaticType {
         }
     }
 
+    //
     /// Computes the Least Upper Bound (join) of two types.
     ///
     /// The LUB is the most specific type that is a supertype of both inputs.
@@ -789,6 +806,7 @@ impl StaticType {
             | Self::MaxHeap(elem)
             | Self::Deque(elem) => Some(Box::new(std::iter::repeat(&**elem))),
             Self::Tuple(types) => Some(Box::new(types.iter())),
+            Self::String => Some(Box::new(std::iter::repeat(&Self::String))),
             Self::Bool
             | Self::Function { .. }
             | Self::Option(_)
@@ -797,7 +815,6 @@ impl StaticType {
             | Self::Int
             | Self::Rational
             | Self::Complex
-            | Self::String
             | Self::Map { .. } => None,
         }
     }
@@ -872,7 +889,7 @@ pub enum FunctionCarrier {
     #[error("evaluation error {0}")]
     EvaluationError(#[from] EvaluationError),
     #[error("function does not exist")]
-    FunctionNotFound, // This error has specific handling behavior and needs its own variant
+    FunctionTypeMismatch, // This error has specific handling behavior and needs its own variant
     #[error("unconverted evaluation error")]
     IntoEvaluationError(Box<dyn ErrorConverter>),
 }

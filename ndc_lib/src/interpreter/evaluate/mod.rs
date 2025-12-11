@@ -119,9 +119,9 @@ pub(crate) fn evaluate_expression(
                                 "the resolver pass should have guaranteed that the operation points to a function"
                             );
                         };
-
-                        let result = match call_function(&func, &mut arguments, environment, span) {
-                            Err(FunctionCarrier::FunctionNotFound)
+                        // (&func, &mut arguments, environment, span)
+                        let result = match func.borrow().call_checked(&mut arguments, environment) {
+                            Err(FunctionCarrier::FunctionTypeMismatch)
                                 if operations_to_try.peek().is_none() =>
                             {
                                 let argument_string =
@@ -136,7 +136,10 @@ pub(crate) fn evaluate_expression(
                                     ),
                                 ));
                             }
-                            Err(FunctionCarrier::FunctionNotFound) => continue,
+                            Err(FunctionCarrier::FunctionTypeMismatch) => continue,
+                            Err(carrier @ FunctionCarrier::IntoEvaluationError(_)) => {
+                                return Err(carrier.lift_if(span));
+                            }
                             eval_result => eval_result?,
                         };
 
@@ -187,30 +190,28 @@ pub(crate) fn evaluate_expression(
                             );
                         };
 
-                        let result = match call_function(
-                            &func,
+                        let result = match func.borrow().call_checked(
                             &mut [value_at_index.clone(), right_value.clone()],
                             environment,
-                            span,
                         ) {
-                            Err(FunctionCarrier::FunctionNotFound)
+                            Err(FunctionCarrier::FunctionTypeMismatch)
                                 if operations_to_try.peek().is_none() =>
                             {
-                                let argument_string = [value_at_index.clone(), right_value.clone()]
-                                    .iter()
-                                    .map(Value::static_type)
-                                    .join(", ");
-
                                 return Err(FunctionCarrier::EvaluationError(
                                     EvaluationError::new(
                                         format!(
-                                            "no function called 'TODO FIGURE OUT NAME' found matches the arguments: ({argument_string})"
+                                            "no function called 'TODO FIGURE OUT NAME' found matches the arguments: ({}, {})",
+                                            value_at_index.static_type(),
+                                            right_value.static_type()
                                         ),
                                         span,
                                     ),
                                 ));
                             }
-                            Err(FunctionCarrier::FunctionNotFound) => continue,
+                            Err(FunctionCarrier::FunctionTypeMismatch) => continue,
+                            Err(carrier @ FunctionCarrier::IntoEvaluationError(_)) => {
+                                return Err(carrier.lift_if(span));
+                            }
                             eval_result => eval_result?,
                         };
 
@@ -338,21 +339,8 @@ pub(crate) fn evaluate_expression(
             let function_as_value = evaluate_as_function(function, &arg_types, environment)?;
 
             return if let Value::Function(function) = function_as_value {
-                match call_function(&function, &mut evaluated_args, environment, span) {
-                    Err(FunctionCarrier::FunctionNotFound) => {
-                        let argument_string =
-                            evaluated_args.iter().map(Value::static_type).join(", ");
-
-                        return Err(FunctionCarrier::EvaluationError(EvaluationError::new(
-                            format!(
-                                "no function called '{}' found matches the arguments: ({argument_string})",
-                                function.borrow().name()
-                            ),
-                            span,
-                        )));
-                    }
-                    result => result,
-                }
+                // Here we should be able to call without checking types
+                function.borrow().call(&mut evaluated_args, environment)
             } else {
                 Err(FunctionCarrier::EvaluationError(EvaluationError::new(
                     format!(
@@ -680,8 +668,8 @@ fn produce_default_value(
 ) -> EvaluationResult {
     match default {
         Value::Function(function) => {
-            match call_function(function, &mut [], environment, span) {
-                Err(FunctionCarrier::FunctionNotFound) => {
+            match function.borrow().call_checked(&mut [], environment) {
+                Err(FunctionCarrier::FunctionTypeMismatch) => {
                     Err(FunctionCarrier::EvaluationError(EvaluationError::new(
                         "default function is not callable without arguments".to_string(),
                         span,
@@ -711,26 +699,25 @@ fn declare_or_assign_variable(
                 .set(resolved.expect("must be resolved"), value.clone());
         }
         Lvalue::Sequence(l_values) => {
-            let mut remaining = l_values.len();
-            let mut iter = l_values.iter().zip(value.try_into_iter().ok_or_else(|| {
+            let r_values = value.try_into_vec().ok_or_else(|| {
                 FunctionCarrier::EvaluationError(EvaluationError::syntax_error(
                     "failed to unpack non iterable value into pattern".to_string(),
                     span,
                 ))
-            })?);
+            })?;
 
-            for (l_value, value) in iter.by_ref() {
-                remaining -= 1;
-                declare_or_assign_variable(l_value, value, environment, span)?;
-            }
-
-            if remaining > 0 || iter.next().is_some() {
+            if l_values.len() != r_values.len() {
                 return Err(EvaluationError::syntax_error(
                     "failed to unpack value into pattern because the lengths do not match"
                         .to_string(),
                     span,
                 )
                 .into());
+            }
+            let mut iter = l_values.iter().zip(r_values);
+
+            for (l_value, value) in iter.by_ref() {
+                declare_or_assign_variable(l_value, value, environment, span)?;
             }
         }
         Lvalue::Index {
@@ -884,28 +871,6 @@ where
 {
     fn into_evaluation_result(self, span: Span) -> Result<R, FunctionCarrier> {
         self.map_err(|err| FunctionCarrier::EvaluationError(err.as_evaluation_error(span)))
-    }
-}
-
-fn call_function(
-    function: &Rc<RefCell<Function>>,
-    evaluated_args: &mut [Value],
-    environment: &Rc<RefCell<Environment>>,
-    span: Span,
-) -> EvaluationResult {
-    let result = function.borrow().call(evaluated_args, environment);
-
-    match result {
-        Err(FunctionCarrier::Return(value)) | Ok(value) => Ok(value),
-
-        e @ Err(
-            FunctionCarrier::FunctionNotFound
-            | FunctionCarrier::EvaluationError(_)
-            // TODO: for now we just pass the break from inside the function to outside the function. This would allow some pretty funky code and might introduce weird bugs?
-            | FunctionCarrier::Break(_)
-            | FunctionCarrier::Continue
-        ) => e,
-        Err(carrier @ FunctionCarrier::IntoEvaluationError(_)) => Err(carrier.lift_if(span)),
     }
 }
 
