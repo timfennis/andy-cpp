@@ -435,6 +435,8 @@ impl StaticType {
     /// - `Sequence<T>` > sequence types with element type T
     /// - Generic types are covariant in their type parameters
     /// - Function parameters are **contravariant**, returns are **covariant**
+    ///
+    /// Note: this function probably doesn't handle variadic functions correctly
     pub fn is_subtype(&self, other: &Self) -> bool {
         // Any is the universal supertype
         if matches!(other, Self::Any) {
@@ -783,16 +785,15 @@ impl StaticType {
             return false;
         };
 
-        let Some(param_types) = parameters else {
+        let Some(_) = parameters else {
             // If this branch happens then the function we're matching against is variadic meaning it's always a match
             return true;
         };
 
-        param_types.len() == types.len()
-            && types
-                .iter()
-                .zip(param_types.iter())
-                .all(|(typ1, typ2)| typ1.is_subtype(typ2))
+        self.is_subtype(&Self::Function {
+            parameters: Some(types.to_vec()),
+            return_type: Box::new(Self::Any),
+        })
     }
 
     pub fn unpack(&self) -> Option<Box<dyn Iterator<Item = &Self> + '_>> {

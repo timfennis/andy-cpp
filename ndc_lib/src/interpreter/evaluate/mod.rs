@@ -991,7 +991,10 @@ fn evaluate_as_function(
     if let Expression::Identifier { resolved, .. } = expression {
         resolve_dynamic_binding(resolved, arg_types, environment).ok_or_else(|| {
             FunctionCarrier::EvaluationError(EvaluationError::new(
-                "dynamic binding failed to produce a useful function".to_string(),
+                format!(
+                    "Failed to find a function that can handle the arguments ({}) at runtime",
+                    arg_types.iter().join(", ")
+                ),
                 function_expression.span,
             ))
         })
