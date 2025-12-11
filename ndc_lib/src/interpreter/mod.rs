@@ -110,7 +110,7 @@ impl Interpreter {
                     ))?;
                 }
                 Err(FunctionCarrier::EvaluationError(e)) => return Err(InterpreterError::from(e)),
-                _ => {
+                r => {
                     panic!(
                         "internal error: unhandled function carrier variant returned from evaluate_expression"
                     );

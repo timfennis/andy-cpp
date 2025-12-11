@@ -340,7 +340,10 @@ pub(crate) fn evaluate_expression(
 
             return if let Value::Function(function) = function_as_value {
                 // Here we should be able to call without checking types
-                function.borrow().call(&mut evaluated_args, environment)
+                function
+                    .borrow()
+                    .call(&mut evaluated_args, environment)
+                    .add_span(span)
             } else {
                 Err(FunctionCarrier::EvaluationError(EvaluationError::new(
                     format!(
@@ -856,6 +859,16 @@ where
             span,
             help_text: None,
         }
+    }
+}
+
+pub trait LiftEvaluationResult<R> {
+    fn add_span(self, span: Span) -> Result<R, FunctionCarrier>;
+}
+
+impl<R> LiftEvaluationResult<R> for Result<R, FunctionCarrier> {
+    fn add_span(self, span: Span) -> Self {
+        self.map_err(|err| err.lift_if(span))
     }
 }
 
