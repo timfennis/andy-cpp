@@ -16,8 +16,8 @@ mod inner {
     pub fn docs(func: &Callable<'_>) -> anyhow::Result<String> {
         let mut buf = String::new();
 
-        let sig = func.function.borrow().type_signature();
-        let fun = func.function.borrow();
+        let sig = func.function.type_signature();
+        let fun = &func.function;
 
         if fun.name().is_empty() {
             write!(buf, "fn({sig})")?;

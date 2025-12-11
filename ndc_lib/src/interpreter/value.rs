@@ -25,12 +25,12 @@ pub enum Value {
     Number(Number),
     Bool(bool),
     Sequence(Sequence),
-    Function(Rc<RefCell<Function>>),
+    Function(Rc<Function>),
 }
 
 impl Value {
     pub(crate) fn function(function: Function) -> Self {
-        Self::Function(Rc::new(RefCell::new(function)))
+        Self::Function(Rc::new(function))
     }
     pub(crate) fn string<S: Into<String>>(string: S) -> Self {
         Self::Sequence(Sequence::String(Rc::new(RefCell::new(string.into()))))
@@ -158,7 +158,7 @@ impl Value {
             Self::Bool(_) => StaticType::Bool,
 
             Self::Sequence(s) => s.static_type(),
-            Self::Function(fun) => fun.borrow().static_type(),
+            Self::Function(fun) => fun.static_type(),
         }
     }
 

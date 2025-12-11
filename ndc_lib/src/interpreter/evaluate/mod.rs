@@ -120,7 +120,7 @@ pub(crate) fn evaluate_expression(
                             );
                         };
                         // (&func, &mut arguments, environment, span)
-                        let result = match func.borrow().call_checked(&mut arguments, environment) {
+                        let result = match func.call_checked(&mut arguments, environment) {
                             Err(FunctionCarrier::FunctionTypeMismatch)
                                 if operations_to_try.peek().is_none() =>
                             {
@@ -190,7 +190,7 @@ pub(crate) fn evaluate_expression(
                             );
                         };
 
-                        let result = match func.borrow().call_checked(
+                        let result = match func.call_checked(
                             &mut [value_at_index.clone(), right_value.clone()],
                             environment,
                         ) {
@@ -328,31 +328,13 @@ pub(crate) fn evaluate_expression(
             arguments,
         } => {
             let mut evaluated_args = Vec::new();
-            let mut arg_types = Vec::new();
 
             for argument in arguments {
                 let arg = evaluate_expression(argument, environment)?;
-                arg_types.push(arg.static_type());
                 evaluated_args.push(arg);
             }
 
-            let function_as_value = evaluate_as_function(function, &arg_types, environment)?;
-
-            return if let Value::Function(function) = function_as_value {
-                // Here we should be able to call without checking types
-                function
-                    .borrow()
-                    .call(&mut evaluated_args, environment)
-                    .add_span(span)
-            } else {
-                Err(FunctionCarrier::EvaluationError(EvaluationError::new(
-                    format!(
-                        "Unable to invoke {} as a function.",
-                        function_as_value.static_type()
-                    ),
-                    span,
-                )))
-            };
+            let function_as_value = resolve_and_call(function, evaluated_args, environment, span)?;
         }
         Expression::FunctionDeclaration {
             parameters: arguments,
@@ -671,7 +653,7 @@ fn produce_default_value(
 ) -> EvaluationResult {
     match default {
         Value::Function(function) => {
-            match function.borrow().call_checked(&mut [], environment) {
+            match function.call_checked(&mut [], environment) {
                 Err(FunctionCarrier::FunctionTypeMismatch) => {
                     Err(FunctionCarrier::EvaluationError(EvaluationError::new(
                         "default function is not callable without arguments".to_string(),
@@ -887,7 +869,7 @@ where
     }
 }
 
-fn execute_body(
+fn execute_for_body(
     body: &ForBody,
     environment: &Rc<RefCell<Environment>>,
     result: &mut Vec<Value>,
@@ -946,7 +928,7 @@ fn execute_for_iterations(
                 declare_or_assign_variable(l_value, r_value, &scope, span)?;
 
                 if tail.is_empty() {
-                    match execute_body(body, &scope, out_values) {
+                    match execute_for_body(body, &scope, out_values) {
                         Err(FunctionCarrier::Continue) => {}
                         Err(error) => return Err(error),
                         Ok(_value) => {}
@@ -958,7 +940,7 @@ fn execute_for_iterations(
         }
         ForIteration::Guard(guard) => match evaluate_expression(guard, environment)? {
             Value::Bool(true) if tail.is_empty() => {
-                execute_body(body, environment, out_values)?;
+                execute_for_body(body, environment, out_values)?;
             }
             Value::Bool(true) => {
                 execute_for_iterations(tail, body, out_values, environment, span)?;
@@ -981,15 +963,61 @@ fn execute_for_iterations(
     Ok(Value::unit())
 }
 
-fn evaluate_as_function(
+// fn evaluate_as_function(
+//     function_expression: &ExpressionLocation,
+//     arg_types: &[StaticType],
+//     environment: &Rc<RefCell<Environment>>,
+// ) -> EvaluationResult {
+//     let ExpressionLocation { expression, .. } = function_expression;
+//
+//     if let Expression::Identifier { resolved, .. } = expression {
+//         resolve_dynamic_binding(resolved, arg_types, environment).ok_or_else(|| {
+//             FunctionCarrier::EvaluationError(EvaluationError::new(
+//                 format!(
+//                     "Failed to find a function that can handle the arguments ({}) at runtime",
+//                     arg_types.iter().join(", ")
+//                 ),
+//                 function_expression.span,
+//             ))
+//         })
+//     } else {
+//         evaluate_expression(function_expression, environment)
+//     }
+// }
+
+fn resolve_and_call(
     function_expression: &ExpressionLocation,
-    arg_types: &[StaticType],
+    mut args: Vec<Value>,
     environment: &Rc<RefCell<Environment>>,
+    span: Span,
 ) -> EvaluationResult {
+    ////////////////////////////
     let ExpressionLocation { expression, .. } = function_expression;
 
-    if let Expression::Identifier { resolved, .. } = expression {
-        resolve_dynamic_binding(resolved, arg_types, environment).ok_or_else(|| {
+    let function_as_value = if let Expression::Identifier { resolved, .. } = expression {
+        let arg_types = args.iter().map(|arg| arg.static_type()).collect::<Vec<_>>();
+
+        let opt = match resolved {
+            Binding::None => None,
+            Binding::Resolved(var) => Some(environment.borrow().get(*var)),
+            Binding::Dynamic(dynamic_binding) => dynamic_binding
+                .iter() // TODO: should we consider the binding order?
+                .find_map(|binding| {
+                    let value = environment.borrow().get(*binding);
+
+                    let Value::Function(fun) = &value else {
+                        panic!("dynamic binding resolved to non-function type at runtime");
+                    };
+
+                    // Find the first function that matches
+                    if fun.static_type().is_fn_and_matches(&arg_types) {
+                        return Some(value);
+                    }
+
+                    None
+                }),
+        };
+        opt.ok_or_else(|| {
             FunctionCarrier::EvaluationError(EvaluationError::new(
                 format!(
                     "Failed to find a function that can handle the arguments ({}) at runtime",
@@ -997,9 +1025,26 @@ fn evaluate_as_function(
                 ),
                 function_expression.span,
             ))
-        })
+        })?
     } else {
-        evaluate_expression(function_expression, environment)
+        evaluate_expression(function_expression, environment)?
+    };
+
+    ////////////////////////////
+    ////////////////////////////
+    ////////////////////////////
+
+    if let Value::Function(function) = function_as_value {
+        // Here we should be able to call without checking types
+        function.call(&mut args, environment).add_span(span)
+    } else {
+        Err(FunctionCarrier::EvaluationError(EvaluationError::new(
+            format!(
+                "Unable to invoke {} as a function.",
+                function_as_value.static_type()
+            ),
+            span,
+        )))
     }
 }
 
@@ -1021,11 +1066,11 @@ fn resolve_dynamic_binding(
                 };
 
                 // Find the first function that matches
-                if fun.borrow().static_type().is_fn_and_matches(arg_types) {
-                    Some(value)
-                } else {
-                    None
+                if fun.static_type().is_fn_and_matches(arg_types) {
+                    return Some(value);
                 }
+
+                None
             }),
     }
 }

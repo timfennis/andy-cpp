@@ -18,13 +18,13 @@ use std::rc::Rc;
 /// Callable is a wrapper around a `OverloadedFunction` pointer and the environment to make it
 /// easy to have an executable function as a method signature in the standard library
 pub struct Callable<'a> {
-    pub function: Rc<RefCell<Function>>,
+    pub function: Rc<Function>,
     pub environment: &'a Rc<RefCell<Environment>>,
 }
 
 impl Callable<'_> {
     pub fn call(&self, args: &mut [Value]) -> EvaluationResult {
-        self.function.borrow().call(args, self.environment)
+        self.function.call(args, self.environment)
     }
 }
 
