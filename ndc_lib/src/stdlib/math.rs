@@ -21,7 +21,7 @@ where
             Value::Number(n) => acc.add(n),
             value => Err(BinaryOperatorError::new(format!(
                 "cannot sum {} and number",
-                value.value_type()
+                value.static_type()
             ))),
         })
     }
@@ -41,7 +41,7 @@ where
             Value::Number(n) => acc.mul(n),
             value => Err(BinaryOperatorError::new(format!(
                 "cannot multiply {} and number",
-                value.value_type()
+                value.static_type()
             ))),
         })
     }
@@ -172,7 +172,7 @@ mod inner {
             }
             value => Err(anyhow::anyhow!(
                 "cannot convert {} to float",
-                value.value_type()
+                value.static_type()
             )),
         }
     }
@@ -201,7 +201,7 @@ mod inner {
             }
             value => Err(anyhow::anyhow!(
                 "cannot convert {} to int",
-                value.value_type()
+                value.static_type()
             )),
         }
     }
@@ -210,7 +210,7 @@ mod inner {
 pub mod f64 {
     use super::{Environment, Number, ToPrimitive, f64};
     use crate::interpreter::function::{
-        FunctionBody, FunctionBuilder, FunctionCarrier, ParamType, Parameter, TypeSignature,
+        FunctionBody, FunctionBuilder, FunctionCarrier, Parameter, StaticType, TypeSignature,
     };
     use crate::interpreter::num::BinaryOperatorError;
     use crate::interpreter::value::Value;
@@ -256,17 +256,18 @@ pub mod f64 {
                         .name($operator.to_string())
                         .body(FunctionBody::GenericFunction {
                             type_signature: TypeSignature::Exact(vec![
-                                Parameter::new("left", ParamType::Any),
-                                Parameter::new("right", ParamType::Any),
+                                Parameter::new("left", StaticType::Any),
+                                Parameter::new("right", StaticType::Any),
                             ]),
                             function: |values, _env| match values {
                                 [left, right] => match left.partial_cmp(&right) {
                                     Some($expected) => Ok(Value::Bool(true)),
                                     Some(_) => Ok(Value::Bool(false)),
-                                    None => Err(anyhow::anyhow!("cannot compare {} and {}",left.value_type(),right.value_type()).into()),
+                                    None => Err(anyhow::anyhow!("cannot compare {} and {}",left.static_type(),right.static_type()).into()),
                                 },
                                 _ => unreachable!("the type checker should never invoke this function if the argument count does not match")
                             },
+                            return_type: StaticType::Bool,
                         })
                         .build()
                         .expect("must succeed")
@@ -284,13 +285,14 @@ pub mod f64 {
                 .name("==".to_string())
                 .body(FunctionBody::GenericFunction {
                     type_signature: TypeSignature::Exact(vec![
-                        Parameter::new("left", ParamType::Any),
-                        Parameter::new("right", ParamType::Any),
+                        Parameter::new("left", StaticType::Any),
+                        Parameter::new("right", StaticType::Any),
                     ]),
                     function: |values, _env| match values {
                         [left, right] => Ok(Value::Bool(left == right)),
                         _ => unreachable!("the type checker should never invoke this function if the argument count does not match")
                     },
+                    return_type: StaticType::Bool,
                 })
                 .build()
                 .expect("must succeed")
@@ -301,13 +303,14 @@ pub mod f64 {
                 .name("!=".to_string())
                 .body(FunctionBody::GenericFunction {
                     type_signature: TypeSignature::Exact(vec![
-                        Parameter::new("left", ParamType::Any),
-                        Parameter::new("right", ParamType::Any),
+                        Parameter::new("left", StaticType::Any),
+                        Parameter::new("right", StaticType::Any),
                     ]),
                     function: |values, _env| match values {
                         [left, right] => Ok(Value::Bool(left != right)),
                         _ => unreachable!("the type checker should never invoke this function if the argument count does not match")
                     },
+                    return_type: StaticType::Bool,
                 })
                 .build()
                 .expect("must succeed")
@@ -318,18 +321,19 @@ pub mod f64 {
                 .name("<=>".to_string())
                 .body(FunctionBody::GenericFunction {
                     type_signature: TypeSignature::Exact(vec![
-                        Parameter::new("left", ParamType::Any),
-                        Parameter::new("right", ParamType::Any),
+                        Parameter::new("left", StaticType::Any),
+                        Parameter::new("right", StaticType::Any),
                     ]),
                     function: |values, _env| match values {
                         [left, right] => match left.partial_cmp(&right) {
                             Some(Ordering::Equal) => Ok(Value::from(0)),
                             Some(Ordering::Less) => Ok(Value::from(-1)),
                             Some(Ordering::Greater) => Ok(Value::from(1)),
-                            None => Err(anyhow::anyhow!("cannot compare {} and {}",left.value_type(),right.value_type()).into()),
+                            None => Err(anyhow::anyhow!("cannot compare {} and {}",left.static_type(),right.static_type()).into()),
                         },
                         _ => unreachable!("the type checker should never invoke this function if the argument count does not match")
                     },
+                    return_type: StaticType::Int,
                 })
                 .build()
                 .expect("must succeed")
@@ -340,18 +344,19 @@ pub mod f64 {
                 .name(">=<".to_string())
                 .body(FunctionBody::GenericFunction {
                     type_signature: TypeSignature::Exact(vec![
-                        Parameter::new("left", ParamType::Any),
-                        Parameter::new("right", ParamType::Any),
+                        Parameter::new("left", StaticType::Any),
+                        Parameter::new("right", StaticType::Any),
                     ]),
                     function: |values, _env| match values {
                         [left, right] => match left.partial_cmp(&right) {
                             Some(Ordering::Equal) => Ok(Value::from(0)),
                             Some(Ordering::Less) => Ok(Value::from(1)),
                             Some(Ordering::Greater) => Ok(Value::from(-1)),
-                            None => Err(anyhow::anyhow!("cannot compare {} and {}",left.value_type(),right.value_type()).into()),
+                            None => Err(anyhow::anyhow!("cannot compare {} and {}",left.static_type(),right.static_type()).into()),
                         },
                         _ => unreachable!("the type checker should never invoke this function if the argument count does not match")
                     },
+                    return_type: StaticType::Int,
                 })
                 .build()
                 .expect("must succeed")
@@ -364,13 +369,14 @@ pub mod f64 {
                         .name($operator.to_string())
                         .body(FunctionBody::GenericFunction {
                             type_signature: TypeSignature::Exact(vec![
-                                Parameter::new("left", ParamType::Bool),
-                                Parameter::new("right", ParamType::Bool),
+                                Parameter::new("left", StaticType::Bool),
+                                Parameter::new("right", StaticType::Bool),
                             ]),
                             function: |values, _env| match values {
                                 [Value::Bool(left), Value::Bool(right)] => Ok(Value::Bool($operation(*left, *right))),
                                 _ => unreachable!("the type checker should never invoke this function if the argument count does not match")
                             },
+                            return_type: StaticType::Bool,
                         })
                         .build()
                         .expect("must succeed")
@@ -380,14 +386,15 @@ pub mod f64 {
                         .name($operator.to_string())
                         .body(FunctionBody::GenericFunction {
                             type_signature: TypeSignature::Exact(vec![
-                                Parameter::new("left", ParamType::Int),
-                                Parameter::new("right", ParamType::Int),
+                                Parameter::new("left", StaticType::Int),
+                                Parameter::new("right", StaticType::Int),
                             ]),
                             function: |values, _env| match values {
                                 // TODO: remove this clone
                                 [Value::Number(Number::Int(left)), Value::Number(Number::Int(right))] => Ok(Value::Number(Number::Int($operation(left.clone(), right.clone())))),
                                 _ => unreachable!("the type checker should never invoke this function if the argument count does not match")
                             },
+                            return_type: StaticType::Int,
                         })
                         .build()
                         .expect("must succeed"),
@@ -411,11 +418,12 @@ pub mod f64 {
             env.declare_global_fn(
                 FunctionBuilder::default()
                     .body(FunctionBody::GenericFunction {
-                        type_signature: TypeSignature::Exact(vec![Parameter::new("value", ParamType::Bool)]),
+                        type_signature: TypeSignature::Exact(vec![Parameter::new("value", StaticType::Bool)]),
                         function: |values, _env| match values {
                             [Value::Bool(b)] => Ok(Value::Bool(b.not())),
                             _ => unreachable!("the type checker should never invoke this function if the argument count does not match"),
                         },
+                        return_type: StaticType::Bool,
                     })
                     .name(ident.to_string())
                     .build()
@@ -428,8 +436,8 @@ pub mod f64 {
                 .name(">>".to_string())
                 .body(FunctionBody::GenericFunction {
                     type_signature: TypeSignature::Exact(vec![
-                        Parameter::new("left", ParamType::Int),
-                        Parameter::new("right", ParamType::Int),
+                        Parameter::new("left", StaticType::Int),
+                        Parameter::new("right", StaticType::Int),
                     ]),
                     function: |values, _env| match values {
                         [Value::Number(Number::Int(left)), Value::Number(Number::Int(right))] => left.clone().checked_shr(right.clone())
@@ -437,6 +445,7 @@ pub mod f64 {
                             .map(|x| Value::Number(Number::Int(x))),
                         _ => unreachable!("the type checker should never invoke this function if the argument count does not match")
                     },
+                    return_type: StaticType::Int,
                 })
                 .build()
                 .expect("must succeed")
@@ -447,8 +456,8 @@ pub mod f64 {
                 .name("<<".to_string())
                 .body(FunctionBody::GenericFunction {
                     type_signature: TypeSignature::Exact(vec![
-                        Parameter::new("left", ParamType::Int),
-                        Parameter::new("right", ParamType::Int),
+                        Parameter::new("left", StaticType::Int),
+                        Parameter::new("right", StaticType::Int),
                     ]),
                     function: |values, _env| match values {
                         [Value::Number(Number::Int(left)), Value::Number(Number::Int(right))] => left.clone().checked_shl(right.clone())
@@ -456,6 +465,7 @@ pub mod f64 {
                             .map(|x| Value::Number(Number::Int(x))),
                         _ => unreachable!("the type checker should never invoke this function if the argument count does not match")
                     },
+                    return_type: StaticType::Int,
                 })
                 .build()
                 .expect("must succeed")

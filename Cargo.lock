@@ -1181,7 +1181,6 @@ dependencies = [
  "derive_more",
  "factorial",
  "itertools 0.14.0",
- "log",
  "md5",
  "miette",
  "ndc_macros",

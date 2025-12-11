@@ -16,18 +16,19 @@ mod inner {
     pub fn docs(func: &Callable<'_>) -> anyhow::Result<String> {
         let mut buf = String::new();
 
-        for (sig, fun) in func.function.borrow().implementations() {
-            if fun.name().is_empty() {
-                write!(buf, "fn({sig})")?;
-            } else {
-                write!(buf, "fn {}({sig})", fun.name())?;
-            }
+        let sig = func.function.type_signature();
+        let fun = &func.function;
 
-            if !fun.short_documentation().is_empty() {
-                writeln!(buf, " -> {}", fun.short_documentation())?;
-            } else {
-                writeln!(buf)?;
-            }
+        if fun.name().is_empty() {
+            write!(buf, "fn({sig})")?;
+        } else {
+            write!(buf, "fn {}({sig})", fun.name())?;
+        }
+
+        if !fun.short_documentation().is_empty() {
+            writeln!(buf, " -> {}", fun.short_documentation())?;
+        } else {
+            writeln!(buf)?;
         }
 
         buf.pop(); // Remove last newline
@@ -56,29 +57,31 @@ mod inner {
     }
 
     /// Creates a new instance of `Some`
-    #[function(name = "Some")] // <-- fake type constructor
+    #[function(name = "Some", return_type = Option<Value>)] // <-- fake type constructor
     pub fn some(value: Value) -> Value {
         Value::Option(Some(Box::new(value)))
     }
 
     /// Creates a new instance of `None`
+    #[function(return_type = Option<_>)]
     pub fn none() -> Value {
         Value::Option(None)
     }
 
     /// Returns true if the argument is Some<T>
-    pub fn is_some(value: &Value) -> Value {
-        Value::Bool(matches!(value, Value::Option(Some(_))))
+    pub fn is_some(value: &Value) -> bool {
+        matches!(value, Value::Option(Some(_)))
     }
 
     /// Returns true if the argument is None
-    pub fn is_none(value: &Value) -> Value {
-        Value::Bool(matches!(value, Value::Option(None)))
+    pub fn is_none(value: &Value) -> bool {
+        matches!(value, Value::Option(None))
     }
 
     /// Extracts the value from an Option or errors if it's either None or a non-Option type
     ///
     /// Note: this function should take an Option as parameter
+    // TODO: the type of value should be `Option<Value>` but the macro crate probably doesn't support that yet
     pub fn unwrap(value: Value) -> anyhow::Result<Value> {
         match value {
             Value::Option(Some(val)) => Ok(*val),
@@ -116,7 +119,8 @@ mod inner {
             Value::Sequence(Sequence::Deque(deque)) => Value::Sequence(Sequence::Deque(Rc::new(
                 RefCell::new(deque.borrow().to_owned()),
             ))),
-            Value::Function(f) => Value::from(f.borrow().to_owned()),
+            // TODO: for function should deepcopy have some special behavior
+            Value::Function(f) => Value::Function(f.clone()),
         }
     }
 

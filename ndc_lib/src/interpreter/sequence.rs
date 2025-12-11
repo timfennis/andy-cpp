@@ -1,7 +1,8 @@
 use crate::hash_map::HashMap;
+use crate::interpreter::function::StaticType;
 use crate::interpreter::heap::{MaxHeap, MinHeap};
 use crate::interpreter::iterator::ValueIterator;
-use crate::interpreter::value::{Value, ValueType};
+use crate::interpreter::value::Value;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
@@ -42,6 +43,60 @@ impl Sequence {
         }
     }
 
+    pub fn static_type(&self) -> StaticType {
+        match self {
+            Self::String(_) => StaticType::String,
+            // I predict that defaulting to Any is going to make us very sad one day
+            Self::List(l) => StaticType::List(Box::new(
+                l.borrow()
+                    .iter()
+                    .next()
+                    .map(|i| i.static_type())
+                    .unwrap_or(StaticType::Any),
+            )),
+            Self::Tuple(t) => StaticType::Tuple(t.iter().map(Value::static_type).collect()),
+            Self::Map(map, _) => StaticType::Map {
+                key: Box::new(
+                    map.borrow()
+                        .keys()
+                        .next()
+                        .map(Value::static_type)
+                        .unwrap_or(StaticType::Any),
+                ),
+                value: Box::new(
+                    map.borrow()
+                        .values()
+                        .next()
+                        .map(Value::static_type)
+                        .unwrap_or(StaticType::Any),
+                ),
+            },
+            // TODO: we can't infer the type of iterators at runtime, unless we implement peek (CNA WE?)
+            Self::Iterator(_) => StaticType::Iterator(Box::new(StaticType::Any)),
+
+            Self::MaxHeap(heap) => StaticType::MaxHeap(Box::new(
+                heap.borrow()
+                    .iter()
+                    .max()
+                    .map(|elem| elem.0.static_type())
+                    .unwrap_or(StaticType::Any),
+            )),
+            Self::MinHeap(heap) => StaticType::MinHeap(Box::new(
+                heap.borrow()
+                    .iter()
+                    .min()
+                    .map(|elem| elem.0.0.static_type())
+                    .unwrap_or(StaticType::Any),
+            )),
+            Self::Deque(d) => StaticType::Deque(Box::new(
+                d.borrow()
+                    .iter()
+                    .next()
+                    .map(Value::static_type)
+                    .unwrap_or(StaticType::Any),
+            )),
+        }
+    }
     #[must_use]
     pub fn deepcopy(&self) -> Self {
         match self {
@@ -85,19 +140,6 @@ impl Sequence {
             Self::Iterator(i) => {
                 Self::Iterator(Rc::new(RefCell::new(ValueIterator::clone(&*i.borrow())))) // ???
             }
-        }
-    }
-
-    pub fn value_type(&self) -> ValueType {
-        match self {
-            Self::String(_) => ValueType::String,
-            Self::List(_) => ValueType::List,
-            Self::Tuple(t) => ValueType::Tuple(t.iter().map(Value::value_type).collect()),
-            Self::Map(_, _) => ValueType::Map,
-            Self::Iterator(_) => ValueType::Iterator,
-            Self::MaxHeap(_) => ValueType::MaxHeap,
-            Self::MinHeap(_) => ValueType::MinHeap,
-            Self::Deque(_) => ValueType::Deque,
         }
     }
 

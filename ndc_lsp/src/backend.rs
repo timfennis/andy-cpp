@@ -115,30 +115,24 @@ impl LanguageServer for Backend {
         let env = interpreter.environment();
         let functions = env.borrow().get_all_functions();
 
-        let items = functions.iter().flat_map(|f| {
-            f.implementations().filter_map(|(sig, fun)| {
-                // Ignore operators
-                if fun
-                    .name()
-                    .chars()
-                    .all(|c| c.is_alphanumeric() || c == '?' || c == '_')
-                {
-                    Some(CompletionItem {
-                        label: fun.name().to_string(),
-                        label_details: Some(CompletionItemLabelDetails {
-                            detail: Some(format!("({sig})")),
-                            description: None,
-                        }),
-                        kind: Some(CompletionItemKind::FUNCTION),
-                        documentation: Some(Documentation::MarkupContent(MarkupContent {
-                            kind: MarkupKind::Markdown,
-                            value: fun.documentation().to_string(),
-                        })),
-                        ..Default::default()
-                    })
-                } else {
-                    None
-                }
+        let items = functions.iter().filter_map(|fun| {
+            // Ignore operators
+            if !is_normal_ident(fun.name()) {
+                return None;
+            }
+
+            Some(CompletionItem {
+                label: fun.name().to_string(),
+                label_details: Some(CompletionItemLabelDetails {
+                    detail: Some(format!("({})", fun.type_signature())),
+                    description: Some(fun.return_type().to_string()),
+                }),
+                kind: Some(CompletionItemKind::FUNCTION),
+                documentation: Some(Documentation::MarkupContent(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: fun.documentation().to_string(),
+                })),
+                ..Default::default()
             })
         });
 
@@ -219,4 +213,10 @@ fn position_from_offset(text: &str, offset: usize) -> Position {
         line,
         character: col,
     }
+}
+
+fn is_normal_ident(input: &str) -> bool {
+    input
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '?' || c == '_')
 }

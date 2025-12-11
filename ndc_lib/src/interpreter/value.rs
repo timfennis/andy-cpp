@@ -10,9 +10,9 @@ use num::BigInt;
 
 use crate::compare::FallibleOrd;
 use crate::hash_map::DefaultHasher;
-use crate::interpreter::function::OverloadedFunction;
+use crate::interpreter::function::{Function, StaticType};
 use crate::interpreter::int::Int;
-use crate::interpreter::num::{Number, NumberToFloatError, NumberToUsizeError, NumberType};
+use crate::interpreter::num::{Number, NumberToFloatError, NumberToUsizeError};
 use crate::interpreter::sequence::Sequence;
 
 use super::iterator::{ValueIterator, ValueRange, ValueRangeFrom, ValueRangeInclusive};
@@ -25,10 +25,13 @@ pub enum Value {
     Number(Number),
     Bool(bool),
     Sequence(Sequence),
-    Function(Rc<RefCell<OverloadedFunction>>),
+    Function(Rc<Function>),
 }
 
 impl Value {
+    pub(crate) fn function(function: Function) -> Self {
+        Self::Function(Rc::new(function))
+    }
     pub(crate) fn string<S: Into<String>>(string: S) -> Self {
         Self::Sequence(Sequence::String(Rc::new(RefCell::new(string.into()))))
     }
@@ -61,10 +64,6 @@ impl Value {
         Self::Option(Some(Box::new(value)))
     }
 
-    pub(crate) fn function<T: Into<OverloadedFunction>>(source: T) -> Self {
-        Self::Function(Rc::new(RefCell::new(source.into())))
-    }
-
     pub(crate) fn number<T: Into<Number>>(source: T) -> Self {
         Self::Number(source.into())
     }
@@ -85,6 +84,7 @@ impl Value {
     // Note: this method is called `try_into_iter` but it doesn't always create an iterator over
     //       the original value. In most cases you get an iterator over a copy of the data.
     #[must_use]
+    #[deprecated = "use try_into_vec"]
     pub fn try_into_iter(self) -> Option<impl Iterator<Item = Self>> {
         match self {
             Self::Sequence(Sequence::List(list)) => match Rc::try_unwrap(list) {
@@ -124,17 +124,42 @@ impl Value {
         }
     }
 
+    pub fn try_into_vec(self) -> Option<Vec<Self>> {
+        match self {
+            Self::Sequence(Sequence::List(list)) => match Rc::try_unwrap(list) {
+                // This short circuit is almost certainly wrong because take will panic if list is borrowed
+                Ok(list) => Some(list.into_inner()),
+                Err(list) => Some(Vec::clone(&*list.borrow())),
+            },
+            Self::Sequence(Sequence::Tuple(list)) => match Rc::try_unwrap(list) {
+                Ok(list) => Some(list),
+                Err(list) => Some(Vec::clone(&list)),
+            },
+            Self::Sequence(Sequence::Map(map, _)) => {
+                Some(map.borrow().keys().cloned().collect_vec())
+            }
+            Self::Sequence(Sequence::String(string)) => match Rc::try_unwrap(string) {
+                // This implementation is peak retard, we don't want collect_vec here
+                // ^-- WTF: is this comment, we collect_vec here anyways?
+                Ok(string) => Some(string.into_inner().chars().map(Self::from).collect_vec()),
+                Err(string) => Some(string.borrow().chars().map(Self::from).collect_vec()),
+            },
+            _ => None,
+        }
+    }
+
     #[must_use]
-    /// Returns the `ValueType` associated with this value
-    /// ```
-    /// # use ndc_lib::interpreter::value::Value;
-    /// # use ndc_lib::interpreter::value::ValueType;
-    /// # use ndc_lib::interpreter::num::NumberType;
-    /// let val = Value::from(1);
-    /// assert_eq!(val.value_type(), NumberType::Int.into());
-    /// ```
-    pub fn value_type(&self) -> ValueType {
-        self.into()
+    pub fn static_type(&self) -> StaticType {
+        match self {
+            Self::Option(c) => StaticType::Option(Box::new(
+                c.as_deref().map_or(StaticType::Any, Self::static_type),
+            )),
+            Self::Number(number) => number.static_type(),
+            Self::Bool(_) => StaticType::Bool,
+
+            Self::Sequence(s) => s.static_type(),
+            Self::Function(fun) => fun.static_type(),
+        }
     }
 
     #[must_use]
@@ -153,8 +178,8 @@ impl Value {
 
     #[must_use]
     pub fn supports_vectorization_with(&self, other: &Self) -> bool {
-        self.value_type()
-            .supports_vectorization_with(&other.value_type())
+        self.static_type()
+            .supports_vectorization_with(&other.static_type())
     }
 }
 
@@ -166,8 +191,8 @@ impl FallibleOrd for Value {
         self.partial_cmp(other).ok_or_else(|| {
             anyhow::anyhow!(
                 "{} cannot be compared to {}",
-                self.value_type(),
-                other.value_type()
+                self.static_type(),
+                other.static_type()
             )
         })
     }
@@ -181,8 +206,8 @@ impl FallibleOrd for &Value {
         self.partial_cmp(other).ok_or_else(|| {
             anyhow::anyhow!(
                 "{} cannot be compared to {}",
-                self.value_type(),
-                other.value_type()
+                self.static_type(),
+                other.static_type()
             )
         })
     }
@@ -399,12 +424,6 @@ impl From<Sequence> for Value {
     }
 }
 
-impl From<OverloadedFunction> for Value {
-    fn from(value: OverloadedFunction) -> Self {
-        Self::Function(Rc::new(RefCell::new(value)))
-    }
-}
-
 impl From<RangeInclusive<i64>> for Value {
     fn from(value: RangeInclusive<i64>) -> Self {
         Self::from(ValueIterator::ValueRangeInclusive(ValueRangeInclusive(
@@ -432,7 +451,7 @@ impl From<Range<i64>> for Value {
 #[derive(thiserror::Error, Debug)]
 pub enum ConversionError {
     #[error("Cannot convert {0} into {1}")]
-    UnsupportedVariant(ValueType, &'static str),
+    UnsupportedVariant(StaticType, &'static str),
 
     #[error("Cannot into {0} because the length is incorrect")]
     IncorrectLength(&'static str),
@@ -452,7 +471,7 @@ impl TryFrom<Value> for (Value, Value) {
     fn try_from(value: Value) -> Result<Self, Self::Error> {
         let Value::Sequence(Sequence::Tuple(tuple)) = value else {
             return Err(ConversionError::UnsupportedVariant(
-                value.value_type(),
+                value.static_type(),
                 stringify!((Value, Value)),
             ));
         };
@@ -475,7 +494,7 @@ impl TryFrom<Value> for i64 {
     type Error = ConversionError;
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
-        let typ = value.value_type();
+        let typ = value.static_type();
         if let Value::Number(Number::Int(Int::Int64(i))) = value {
             return Ok(i);
         }
@@ -497,7 +516,7 @@ impl TryFrom<&mut Value> for f64 {
         match value {
             Value::Number(n) => Ok((&*n).try_into()?),
             v => Err(Self::Error::UnsupportedVariant(
-                v.value_type(),
+                v.static_type(),
                 stringify!(f64),
             )),
         }
@@ -511,7 +530,7 @@ impl TryFrom<&mut Value> for i64 {
         match value {
             Value::Number(Number::Int(Int::Int64(i))) => Ok(*i),
             v => Err(Self::Error::UnsupportedVariant(
-                v.value_type(),
+                v.static_type(),
                 stringify!(i64),
             )),
         }
@@ -525,7 +544,7 @@ impl TryFrom<&mut Value> for bool {
         match value {
             Value::Bool(bool) => Ok(*bool),
             v => Err(Self::Error::UnsupportedVariant(
-                v.value_type(),
+                v.static_type(),
                 stringify!(bool),
             )),
         }
@@ -539,7 +558,7 @@ impl TryFrom<Value> for usize {
         match value {
             Value::Number(n) => Ok(Self::try_from(n)?),
             v => Err(Self::Error::UnsupportedVariant(
-                v.value_type(),
+                v.static_type(),
                 stringify!(usize),
             )),
         }
@@ -553,7 +572,7 @@ impl TryFrom<Value> for Number {
         match value {
             Value::Number(n) => Ok(n),
             v => Err(ConversionError::UnsupportedVariant(
-                v.value_type(),
+                v.static_type(),
                 stringify!(Number),
             )),
         }
@@ -567,7 +586,7 @@ impl TryFrom<Value> for BigInt {
             Value::Number(Number::Int(Int::BigInt(b))) => Ok(b),
             Value::Number(Number::Int(Int::Int64(i))) => Ok(Self::from(i)),
             v => Err(ConversionError::UnsupportedVariant(
-                v.value_type(),
+                v.static_type(),
                 stringify!(BigInt),
             )),
         }
@@ -581,7 +600,7 @@ impl TryFrom<&mut Value> for usize {
         match value {
             Value::Number(number) => Ok(Self::try_from(number.clone())?),
             v => Err(ConversionError::UnsupportedVariant(
-                v.value_type(),
+                v.static_type(),
                 stringify!(usize),
             )),
         }
@@ -595,7 +614,7 @@ impl<'a> TryFrom<&'a mut Value> for &'a Sequence {
         match value {
             Value::Sequence(seq) => Ok(seq),
             v => Err(ConversionError::UnsupportedVariant(
-                v.value_type(),
+                v.static_type(),
                 stringify!(&Sequence),
             )),
         }
@@ -609,96 +628,9 @@ impl<'a> TryFrom<&'a mut Value> for &'a Number {
         match value {
             Value::Number(n) => Ok(n),
             v => Err(ConversionError::UnsupportedVariant(
-                v.value_type(),
+                v.static_type(),
                 "&Number",
             )),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub enum ValueType {
-    Option, // TODO: add type param
-    Number(NumberType),
-    Bool,
-    String,
-    List,
-    Tuple(Vec<ValueType>),
-    Function,
-    Map,
-    Iterator,
-    MinHeap,
-    MaxHeap,
-    Deque,
-}
-
-impl ValueType {
-    #[must_use]
-    pub fn supports_vectorization(&self) -> bool {
-        matches!(self, Self::Tuple(values) if values.iter().all(|x| matches!(x, Self::Number(_))))
-    }
-
-    #[must_use]
-    pub fn supports_vectorization_with(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Tuple(l), Self::Tuple(r))
-                if {
-                    l.len() == r.len()
-                        && self.supports_vectorization()
-                        && other.supports_vectorization()
-                } =>
-            {
-                true
-            }
-            (Self::Tuple(_), Self::Number(_)) if self.supports_vectorization() => true,
-            (Self::Number(_), Self::Tuple(_)) if other.supports_vectorization() => true,
-            _ => false,
-        }
-    }
-}
-
-impl From<&Value> for ValueType {
-    fn from(value: &Value) -> Self {
-        match value {
-            Value::Option(_) => Self::Option,
-            Value::Number(n) => Self::Number(n.into()),
-            Value::Bool(_) => Self::Bool,
-            Value::Sequence(Sequence::String(_)) => Self::String,
-            Value::Sequence(Sequence::List(_)) => Self::List,
-            Value::Sequence(Sequence::Tuple(t)) => Self::Tuple(t.iter().map(Into::into).collect()),
-            Value::Function(_) => Self::Function,
-            Value::Sequence(Sequence::Map(_, _)) => Self::Map,
-            Value::Sequence(Sequence::Iterator(_)) => Self::Iterator,
-            Value::Sequence(Sequence::MaxHeap(_)) => Self::MaxHeap,
-            Value::Sequence(Sequence::MinHeap(_)) => Self::MinHeap,
-            Value::Sequence(Sequence::Deque(_)) => Self::Deque,
-        }
-    }
-}
-
-impl From<Number> for ValueType {
-    fn from(value: Number) -> Self {
-        Self::Number((&value).into())
-    }
-}
-
-impl fmt::Display for ValueType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Option => write!(f, "Option"),
-            Self::Number(n) => write!(f, "{n}"),
-            Self::Bool => write!(f, "Bool"),
-            Self::String => write!(f, "String"),
-            Self::List => write!(f, "List"),
-            Self::Tuple(t) => {
-                write!(f, "tuple<{}>", t.iter().join(", "))
-            }
-            Self::Function => write!(f, "Function"),
-            Self::Map => write!(f, "Map"),
-            Self::Iterator => write!(f, "Iterator"),
-            Self::MinHeap => write!(f, "MinHeap"),
-            Self::MaxHeap => write!(f, "MaxHeap"),
-            Self::Deque => write!(f, "Deque"),
         }
     }
 }

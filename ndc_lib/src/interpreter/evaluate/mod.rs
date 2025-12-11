@@ -1,16 +1,17 @@
-use crate::ast::{Expression, ExpressionLocation, ForBody, ForIteration, LogicalOperator, Lvalue};
+use crate::ast::{
+    Binding, Expression, ExpressionLocation, ForBody, ForIteration, LogicalOperator, Lvalue,
+};
 use crate::hash_map::HashMap;
 use crate::interpreter::environment::Environment;
-use crate::interpreter::function::{Function, FunctionBody, FunctionCarrier, OverloadedFunction};
+use crate::interpreter::function::{Function, FunctionBody, FunctionCarrier, StaticType};
 use crate::interpreter::int::Int;
 use crate::interpreter::iterator::mut_value_to_iterator;
 use crate::interpreter::num::Number;
 use crate::interpreter::sequence::Sequence;
-use crate::interpreter::value::{Value, ValueType};
+use crate::interpreter::value::Value;
 use crate::lexer::Span;
 use index::{Offset, evaluate_as_index, get_at_index, set_at_index};
 use itertools::Itertools;
-use log::error;
 use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
@@ -37,9 +38,12 @@ pub(crate) fn evaluate_expression(
             if name == "None" {
                 return Ok(Value::none());
             }
-            environment
-                .borrow()
-                .get(resolved.expect("identifier was not resolved before execution"))
+
+            match resolved {
+                Binding::None => panic!("binding not resolved at runtime"),
+                Binding::Resolved(resolved) => environment.borrow().get(*resolved),
+                Binding::Dynamic(_) => panic!("attempted to evaluate dynamic binding"),
+            }
         }
         Expression::VariableDeclaration { l_value, value } => {
             let value = evaluate_expression(value, environment)?;
@@ -79,14 +83,6 @@ pub(crate) fn evaluate_expression(
             resolved_operation,
             ..
         } => {
-            let mut operations_to_try = [
-                resolved_assign_operation.map(|op| (op, true)),
-                resolved_operation.map(|op| (op, false)),
-            ]
-            .into_iter()
-            .flatten()
-            .peekable();
-
             match l_value {
                 Lvalue::Identifier {
                     identifier,
@@ -100,23 +96,36 @@ pub(crate) fn evaluate_expression(
                         return Err(EvaluationError::undefined_variable(identifier, span).into());
                     };
 
+                    let types = [lhs.static_type(), rhs.static_type()];
                     let mut arguments = [lhs, rhs];
 
-                    while let Some((resolved_op, modified_in_place)) = operations_to_try.next() {
-                        let operation = environment.borrow().get(resolved_op);
+                    let mut operations_to_try = [
+                        (
+                            resolve_dynamic_binding(resolved_assign_operation, &types, environment),
+                            true,
+                        ),
+                        (
+                            resolve_dynamic_binding(resolved_operation, &types, environment),
+                            false,
+                        ),
+                    ]
+                    .into_iter()
+                    .filter_map(|(value, in_place)| value.map(|value| (value, in_place)))
+                    .peekable();
 
+                    while let Some((operation, modified_in_place)) = operations_to_try.next() {
                         let Value::Function(func) = operation else {
                             unreachable!(
                                 "the resolver pass should have guaranteed that the operation points to a function"
                             );
                         };
-
-                        let result = match call_function(&func, &mut arguments, environment, span) {
-                            Err(FunctionCarrier::FunctionNotFound)
+                        // (&func, &mut arguments, environment, span)
+                        let result = match func.call_checked(&mut arguments, environment) {
+                            Err(FunctionCarrier::FunctionTypeMismatch)
                                 if operations_to_try.peek().is_none() =>
                             {
                                 let argument_string =
-                                    arguments.iter().map(Value::value_type).join(", ");
+                                    arguments.iter().map(Value::static_type).join(", ");
 
                                 return Err(FunctionCarrier::EvaluationError(
                                     EvaluationError::new(
@@ -127,7 +136,10 @@ pub(crate) fn evaluate_expression(
                                     ),
                                 ));
                             }
-                            Err(FunctionCarrier::FunctionNotFound) => continue,
+                            Err(FunctionCarrier::FunctionTypeMismatch) => continue,
+                            Err(carrier @ FunctionCarrier::IntoEvaluationError(_)) => {
+                                return Err(carrier.lift_if(span));
+                            }
                             eval_result => eval_result?,
                         };
 
@@ -156,41 +168,50 @@ pub(crate) fn evaluate_expression(
 
                     let right_value = evaluate_expression(r_value, environment)?;
 
-                    while let Some((resolved_operation, modified_in_place)) =
-                        operations_to_try.next()
-                    {
-                        let operation_val = environment.borrow().get(resolved_operation);
+                    let types = [value_at_index.static_type(), right_value.static_type()];
+                    let mut operations_to_try = [
+                        (
+                            resolve_dynamic_binding(resolved_assign_operation, &types, environment),
+                            true,
+                        ),
+                        (
+                            resolve_dynamic_binding(resolved_operation, &types, environment),
+                            false,
+                        ),
+                    ]
+                    .into_iter()
+                    .filter_map(|(value, in_place)| value.map(|value| (value, in_place)))
+                    .peekable();
 
+                    while let Some((operation_val, modified_in_place)) = operations_to_try.next() {
                         let Value::Function(func) = operation_val else {
                             unreachable!(
                                 "the resolver pass should have guaranteed that the operation points to a function"
                             );
                         };
 
-                        let result = match call_function(
-                            &func,
+                        let result = match func.call_checked(
                             &mut [value_at_index.clone(), right_value.clone()],
                             environment,
-                            span,
                         ) {
-                            Err(FunctionCarrier::FunctionNotFound)
+                            Err(FunctionCarrier::FunctionTypeMismatch)
                                 if operations_to_try.peek().is_none() =>
                             {
-                                let argument_string = [value_at_index.clone(), right_value.clone()]
-                                    .iter()
-                                    .map(Value::value_type)
-                                    .join(", ");
-
                                 return Err(FunctionCarrier::EvaluationError(
                                     EvaluationError::new(
                                         format!(
-                                            "no function called 'TODO FIGURE OUT NAME' found matches the arguments: ({argument_string})"
+                                            "no function called 'TODO FIGURE OUT NAME' found matches the arguments: ({}, {})",
+                                            value_at_index.static_type(),
+                                            right_value.static_type()
                                         ),
                                         span,
                                     ),
                                 ));
                             }
-                            Err(FunctionCarrier::FunctionNotFound) => continue,
+                            Err(FunctionCarrier::FunctionTypeMismatch) => continue,
+                            Err(carrier @ FunctionCarrier::IntoEvaluationError(_)) => {
+                                return Err(carrier.lift_if(span));
+                            }
                             eval_result => eval_result?,
                         };
 
@@ -239,8 +260,8 @@ pub(crate) fn evaluate_expression(
                     return Err(EvaluationError::new(
                         format!(
                             "mismatched types: expected {}, found {}",
-                            ValueType::Bool,
-                            ValueType::from(&value)
+                            StaticType::Bool,
+                            value.static_type()
                         ),
                         span,
                     )
@@ -269,7 +290,7 @@ pub(crate) fn evaluate_expression(
                     return Err(EvaluationError::new(
                         format!(
                             "Cannot apply logical operator to non bool value {}",
-                            ValueType::from(&value)
+                            value.static_type()
                         ),
                         span,
                     )
@@ -309,49 +330,24 @@ pub(crate) fn evaluate_expression(
             let mut evaluated_args = Vec::new();
 
             for argument in arguments {
-                evaluated_args.push(evaluate_expression(argument, environment)?);
+                let arg = evaluate_expression(argument, environment)?;
+                evaluated_args.push(arg);
             }
 
-            // The Expression in `function` must either be an identifier in which case it will be looked up in the
-            // environment, or it must be some expression that evaluates to a function.
-            // In case the expression is an identifier we get ALL the values that match the identifier
-            // ordered by the distance is the scope-hierarchy.
-            let function_as_value = evaluate_expression(function, environment)?;
-
-            return if let Value::Function(function) = function_as_value {
-                match call_function(&function, &mut evaluated_args, environment, span) {
-                    Err(FunctionCarrier::FunctionNotFound) => {
-                        let argument_string =
-                            evaluated_args.iter().map(Value::value_type).join(", ");
-
-                        return Err(FunctionCarrier::EvaluationError(EvaluationError::new(
-                            format!(
-                                "no function called '{}' found matches the arguments: ({argument_string})",
-                                function.borrow().name().unwrap_or("unnamed function")
-                            ),
-                            span,
-                        )));
-                    }
-                    result => result,
-                }
-            } else {
-                Err(FunctionCarrier::EvaluationError(EvaluationError::new(
-                    "Failed to invoke expression as function possibly because it's not a function"
-                        .to_string(),
-                    span,
-                )))
-            };
+            let function_as_value = resolve_and_call(function, evaluated_args, environment, span)?;
         }
         Expression::FunctionDeclaration {
-            arguments,
+            parameters: arguments,
             body,
             resolved_name,
+            return_type,
             pure,
             ..
         } => {
             let mut user_function = FunctionBody::Closure {
                 parameter_names: arguments.try_into_parameters()?,
                 body: *body.clone(),
+                return_type: return_type.clone().unwrap_or_else(StaticType::unit),
                 environment: environment.clone(),
             };
 
@@ -365,12 +361,13 @@ pub(crate) fn evaluate_expression(
             if let Some(resolved_name) = *resolved_name {
                 environment.borrow_mut().set(
                     resolved_name,
+                    // TODO: put name in declaration?
                     Value::function(Function::from_body(user_function)),
                 );
 
                 Value::unit()
             } else {
-                Value::function(user_function)
+                Value::function(Function::from_body(user_function))
             }
         }
 
@@ -587,7 +584,7 @@ pub(crate) fn evaluate_expression(
                 }
                 value => {
                     return Err(EvaluationError::new(
-                        format!("cannot index into {}", value.value_type()),
+                        format!("cannot index into {}", value.static_type()),
                         lhs_expr.span,
                     )
                     .into());
@@ -656,8 +653,8 @@ fn produce_default_value(
 ) -> EvaluationResult {
     match default {
         Value::Function(function) => {
-            match call_function(function, &mut [], environment, span) {
-                Err(FunctionCarrier::FunctionNotFound) => {
+            match function.call_checked(&mut [], environment) {
+                Err(FunctionCarrier::FunctionTypeMismatch) => {
                     Err(FunctionCarrier::EvaluationError(EvaluationError::new(
                         "default function is not callable without arguments".to_string(),
                         span,
@@ -687,26 +684,25 @@ fn declare_or_assign_variable(
                 .set(resolved.expect("must be resolved"), value.clone());
         }
         Lvalue::Sequence(l_values) => {
-            let mut remaining = l_values.len();
-            let mut iter = l_values.iter().zip(value.try_into_iter().ok_or_else(|| {
+            let r_values = value.try_into_vec().ok_or_else(|| {
                 FunctionCarrier::EvaluationError(EvaluationError::syntax_error(
                     "failed to unpack non iterable value into pattern".to_string(),
                     span,
                 ))
-            })?);
+            })?;
 
-            for (l_value, value) in iter.by_ref() {
-                remaining -= 1;
-                declare_or_assign_variable(l_value, value, environment, span)?;
-            }
-
-            if remaining > 0 || iter.next().is_some() {
+            if l_values.len() != r_values.len() {
                 return Err(EvaluationError::syntax_error(
                     "failed to unpack value into pattern because the lengths do not match"
                         .to_string(),
                     span,
                 )
                 .into());
+            }
+            let mut iter = l_values.iter().zip(r_values);
+
+            for (l_value, value) in iter.by_ref() {
+                declare_or_assign_variable(l_value, value, environment, span)?;
             }
         }
         Lvalue::Index {
@@ -848,6 +844,16 @@ where
     }
 }
 
+pub trait LiftEvaluationResult<R> {
+    fn add_span(self, span: Span) -> Result<R, FunctionCarrier>;
+}
+
+impl<R> LiftEvaluationResult<R> for Result<R, FunctionCarrier> {
+    fn add_span(self, span: Span) -> Self {
+        self.map_err(|err| err.lift_if(span))
+    }
+}
+
 // NOTE: this is called `IntoEvaluationResult` but it actually only takes care of the error part of an evaluation result.
 // `EvaluationResult` always wants the `Ok` type to be `Value` but this converter doesn't care.
 pub trait IntoEvaluationResult<R> {
@@ -863,29 +869,7 @@ where
     }
 }
 
-fn call_function(
-    function: &Rc<RefCell<OverloadedFunction>>,
-    evaluated_args: &mut [Value],
-    environment: &Rc<RefCell<Environment>>,
-    span: Span,
-) -> EvaluationResult {
-    let result = function.borrow().call(evaluated_args, environment);
-
-    match result {
-        Err(FunctionCarrier::Return(value)) | Ok(value) => Ok(value),
-
-        e @ Err(
-            FunctionCarrier::FunctionNotFound
-            | FunctionCarrier::EvaluationError(_)
-            // TODO: for now we just pass the break from inside the function to outside the function. This would allow some pretty funky code and might introduce weird bugs?
-            | FunctionCarrier::Break(_)
-            | FunctionCarrier::Continue
-        ) => e,
-        Err(carrier @ FunctionCarrier::IntoEvaluationError(_)) => Err(carrier.lift_if(span)),
-    }
-}
-
-fn execute_body(
+fn execute_for_body(
     body: &ForBody,
     environment: &Rc<RefCell<Environment>>,
     result: &mut Vec<Value>,
@@ -944,7 +928,7 @@ fn execute_for_iterations(
                 declare_or_assign_variable(l_value, r_value, &scope, span)?;
 
                 if tail.is_empty() {
-                    match execute_body(body, &scope, out_values) {
+                    match execute_for_body(body, &scope, out_values) {
                         Err(FunctionCarrier::Continue) => {}
                         Err(error) => return Err(error),
                         Ok(_value) => {}
@@ -956,7 +940,7 @@ fn execute_for_iterations(
         }
         ForIteration::Guard(guard) => match evaluate_expression(guard, environment)? {
             Value::Bool(true) if tail.is_empty() => {
-                execute_body(body, environment, out_values)?;
+                execute_for_body(body, environment, out_values)?;
             }
             Value::Bool(true) => {
                 execute_for_iterations(tail, body, out_values, environment, span)?;
@@ -966,8 +950,8 @@ fn execute_for_iterations(
                 return Err(EvaluationError::type_error(
                     format!(
                         "mismatched types: expected {}, found {}",
-                        ValueType::Bool,
-                        ValueType::from(&value)
+                        StaticType::Bool,
+                        value.static_type(),
                     ),
                     span,
                 )
@@ -977,4 +961,116 @@ fn execute_for_iterations(
     }
 
     Ok(Value::unit())
+}
+
+// fn evaluate_as_function(
+//     function_expression: &ExpressionLocation,
+//     arg_types: &[StaticType],
+//     environment: &Rc<RefCell<Environment>>,
+// ) -> EvaluationResult {
+//     let ExpressionLocation { expression, .. } = function_expression;
+//
+//     if let Expression::Identifier { resolved, .. } = expression {
+//         resolve_dynamic_binding(resolved, arg_types, environment).ok_or_else(|| {
+//             FunctionCarrier::EvaluationError(EvaluationError::new(
+//                 format!(
+//                     "Failed to find a function that can handle the arguments ({}) at runtime",
+//                     arg_types.iter().join(", ")
+//                 ),
+//                 function_expression.span,
+//             ))
+//         })
+//     } else {
+//         evaluate_expression(function_expression, environment)
+//     }
+// }
+
+fn resolve_and_call(
+    function_expression: &ExpressionLocation,
+    mut args: Vec<Value>,
+    environment: &Rc<RefCell<Environment>>,
+    span: Span,
+) -> EvaluationResult {
+    ////////////////////////////
+    let ExpressionLocation { expression, .. } = function_expression;
+
+    let function_as_value = if let Expression::Identifier { resolved, .. } = expression {
+        let arg_types = args.iter().map(|arg| arg.static_type()).collect::<Vec<_>>();
+
+        let opt = match resolved {
+            Binding::None => None,
+            Binding::Resolved(var) => Some(environment.borrow().get(*var)),
+            Binding::Dynamic(dynamic_binding) => dynamic_binding
+                .iter() // TODO: should we consider the binding order?
+                .find_map(|binding| {
+                    let value = environment.borrow().get(*binding);
+
+                    let Value::Function(fun) = &value else {
+                        panic!("dynamic binding resolved to non-function type at runtime");
+                    };
+
+                    // Find the first function that matches
+                    if fun.static_type().is_fn_and_matches(&arg_types) {
+                        return Some(value);
+                    }
+
+                    None
+                }),
+        };
+        opt.ok_or_else(|| {
+            FunctionCarrier::EvaluationError(EvaluationError::new(
+                format!(
+                    "Failed to find a function that can handle the arguments ({}) at runtime",
+                    arg_types.iter().join(", ")
+                ),
+                function_expression.span,
+            ))
+        })?
+    } else {
+        evaluate_expression(function_expression, environment)?
+    };
+
+    ////////////////////////////
+    ////////////////////////////
+    ////////////////////////////
+
+    if let Value::Function(function) = function_as_value {
+        // Here we should be able to call without checking types
+        function.call(&mut args, environment).add_span(span)
+    } else {
+        Err(FunctionCarrier::EvaluationError(EvaluationError::new(
+            format!(
+                "Unable to invoke {} as a function.",
+                function_as_value.static_type()
+            ),
+            span,
+        )))
+    }
+}
+
+fn resolve_dynamic_binding(
+    binding: &Binding,
+    arg_types: &[StaticType],
+    environment: &Rc<RefCell<Environment>>,
+) -> Option<Value> {
+    match binding {
+        Binding::None => None,
+        Binding::Resolved(var) => Some(environment.borrow().get(*var)),
+        Binding::Dynamic(dynamic_binding) => dynamic_binding
+            .iter() // TODO: should we consider the binding order?
+            .find_map(|binding| {
+                let value = environment.borrow().get(*binding);
+
+                let Value::Function(fun) = &value else {
+                    panic!("dynamic binding resolved to non-function type at runtime");
+                };
+
+                // Find the first function that matches
+                if fun.static_type().is_fn_and_matches(arg_types) {
+                    return Some(value);
+                }
+
+                None
+            }),
+    }
 }

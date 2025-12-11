@@ -18,8 +18,7 @@ pub fn docs(query: Option<&str>) -> anyhow::Result<()> {
 
     let matched_functions = functions
         .into_iter()
-        .flat_map(|x| x.implementations().collect::<Vec<_>>())
-        .filter(|(_, func)| {
+        .filter(|func| {
             if let Some(query) = query {
                 string_match(query, func.name())
             } else {
@@ -28,7 +27,7 @@ pub fn docs(query: Option<&str>) -> anyhow::Result<()> {
         })
         .collect::<Vec<_>>()
         .tap_mut(|list| {
-            list.sort_by(|(_, l), (_, r)| {
+            list.sort_by(|l, r| {
                 if let Some(query) = query {
                     normalized_damerau_levenshtein(l.name(), query)
                         .partial_cmp(&normalized_damerau_levenshtein(r.name(), query))
@@ -46,31 +45,38 @@ pub fn docs(query: Option<&str>) -> anyhow::Result<()> {
     skin.headers[1].align = Alignment::Left;
     skin.headers[2].align = Alignment::Left;
 
-    for (type_sig, function) in matched_functions {
+    for function in matched_functions {
         let mut signature = String::new();
+        let type_sig = function.type_signature();
         match type_sig {
             TypeSignature::Variadic => {
-                writeln!(signature, "(*args**)")?;
+                write!(signature, "(*args**)")?;
             }
             TypeSignature::Exact(params) => {
                 write!(signature, "(")?;
                 let mut param_iter = params.iter().peekable();
                 while let Some(Parameter { name, type_name }) = param_iter.next() {
-                    write!(signature, "*{name}*: **{}**", type_name.as_str().green())?;
+                    write!(
+                        signature,
+                        "*{name}*: **{}**",
+                        format!("{}", type_name).green()
+                    )?;
 
                     if param_iter.peek().is_some() {
                         write!(signature, ", ")?;
                     }
                 }
 
-                writeln!(signature, ")")?;
+                write!(signature, ")")?;
             }
         }
         let name = function.name();
         let documentation = function.documentation().trim();
+        let return_type = function.return_type();
         let markdown = format!(
-            "---\n\n## **{}**{signature}\n{documentation}{}",
+            "---\n\n## **{}**{signature} -> {}\n\n{documentation}{}",
             name.green(),
+            format!("{}", return_type).green().bold(),
             if documentation.is_empty() { "" } else { "\n\n" }
         );
 

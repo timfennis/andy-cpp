@@ -3,7 +3,7 @@ use std::fmt::Write;
 use miette::Diagnostic;
 
 use crate::ast::Expression;
-use crate::ast::expression::{ExpressionLocation, ForBody, ForIteration, Lvalue};
+use crate::ast::expression::{Binding, ExpressionLocation, ForBody, ForIteration, Lvalue};
 use crate::ast::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
 use crate::lexer::{Span, Token, TokenLocation};
 
@@ -201,7 +201,7 @@ impl Parser {
                 function: Box::new(
                     Expression::Identifier {
                         name: operator_token_loc.token.to_string(),
-                        resolved: None,
+                        resolved: Binding::None,
                     }
                     .to_location(operator_token_loc.span),
                 ),
@@ -214,7 +214,7 @@ impl Parser {
                     function: Box::new(
                         Expression::Identifier {
                             name: not_token.token.to_string(),
-                            resolved: None,
+                            resolved: Binding::None,
                         }
                         .to_location(not_token.span),
                     ),
@@ -246,7 +246,7 @@ impl Parser {
                 function: Box::new(
                     Expression::Identifier {
                         name: operator.to_string(),
-                        resolved: None,
+                        resolved: Binding::None,
                     }
                     .to_location(operator_span),
                 ),
@@ -385,8 +385,8 @@ impl Parser {
                         .expect("guaranteed to produce an lvalue"),
                     r_value: Box::new(expression),
                     operation: operation_identifier,
-                    resolved_assign_operation: None,
-                    resolved_operation: None,
+                    resolved_assign_operation: Binding::None,
+                    resolved_operation: Binding::None,
                 };
 
                 Ok(op_assign.to_location(start.merge(end)))
@@ -483,7 +483,7 @@ impl Parser {
                 function: Box::new(
                     Expression::Identifier {
                         name: operator_token_loc.token.to_string(),
-                        resolved: None,
+                        resolved: Binding::None,
                     }
                     .to_location(operator_span),
                 ),
@@ -610,7 +610,7 @@ impl Parser {
                 function: Box::new(
                     Expression::Identifier {
                         name: operator_token_loc.token.to_string(),
-                        resolved: None,
+                        resolved: Binding::None,
                     }
                     .to_location(token_span),
                 ),
@@ -689,7 +689,7 @@ impl Parser {
                             function: Box::new(
                                 Expression::Identifier {
                                     name: identifier,
-                                    resolved: None,
+                                    resolved: Binding::None,
                                 }
                                 .to_location(identifier_span),
                             ),
@@ -961,7 +961,7 @@ impl Parser {
             Token::String(value) => Expression::StringLiteral(value),
             Token::Identifier(identifier) => Expression::Identifier {
                 name: identifier,
-                resolved: None,
+                resolved: Binding::None,
             },
             _ => {
                 // TODO: this error might not be the best way to describe what's happening here
@@ -1155,8 +1155,9 @@ impl Parser {
         Ok(ExpressionLocation {
             expression: Expression::FunctionDeclaration {
                 name: identifier,
-                arguments: Box::new(argument_list),
+                parameters: Box::new(argument_list),
                 body: Box::new(body),
+                return_type: None, // At some point in the future we could use type declarations here to insert the type (return type inference is cringe anyway)
                 pure: is_pure,
                 resolved_name: None,
             },

@@ -1,9 +1,17 @@
 use crate::ast::operator::LogicalOperator;
 use crate::ast::parser::Error as ParseError;
 use crate::interpreter::evaluate::EvaluationError;
+use crate::interpreter::function::StaticType;
 use crate::lexer::Span;
 use num::BigInt;
 use num::complex::Complex64;
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub enum Binding {
+    None,
+    Resolved(ResolvedVar),
+    Dynamic(Vec<ResolvedVar>), // figure it out at runtime
+}
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub enum ResolvedVar {
@@ -28,7 +36,7 @@ pub enum Expression {
     ComplexLiteral(Complex64),
     Identifier {
         name: String,
-        resolved: Option<ResolvedVar>,
+        resolved: Binding,
     },
     Statement(Box<ExpressionLocation>),
     Logical {
@@ -49,14 +57,15 @@ pub enum Expression {
         l_value: Lvalue,
         r_value: Box<ExpressionLocation>,
         operation: String,
-        resolved_assign_operation: Option<ResolvedVar>,
-        resolved_operation: Option<ResolvedVar>,
+        resolved_assign_operation: Binding,
+        resolved_operation: Binding,
     },
     FunctionDeclaration {
         name: Option<String>,
         resolved_name: Option<ResolvedVar>,
-        arguments: Box<ExpressionLocation>,
+        parameters: Box<ExpressionLocation>,
         body: Box<ExpressionLocation>,
+        return_type: Option<StaticType>,
         pure: bool,
     },
     Block {
@@ -332,7 +341,8 @@ impl std::fmt::Debug for ExpressionLocation {
                 .finish(),
             Expression::FunctionDeclaration {
                 name,
-                arguments,
+                parameters,
+                return_type,
                 body,
                 pure,
                 resolved_name,
@@ -340,7 +350,8 @@ impl std::fmt::Debug for ExpressionLocation {
                 .debug_struct("FunctionDeclaration")
                 .field("name", name)
                 .field("resolved_name", resolved_name)
-                .field("arguments", arguments)
+                .field("parameters", parameters)
+                .field("return_type", return_type)
                 .field("body", body)
                 .field("pure", pure)
                 .finish(),
