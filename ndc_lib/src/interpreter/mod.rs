@@ -72,7 +72,7 @@ impl Interpreter {
         }
 
         // dbg!(&expressions);
-        dbg!(&self.analyser);
+        // dbg!(&self.analyser);
 
         let final_value = self.interpret(expressions.into_iter())?;
 

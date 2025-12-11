@@ -114,12 +114,13 @@ impl Function {
     ) -> EvaluationResult {
         let [left, right] = args else {
             // Vectorized application only works in cases where there are two tuple arguments
-            return Err(FunctionCarrier::FunctionNotFound);
+            panic!("incorrect argument count for vectorization should have been handled by caller");
         };
 
-        if !left.supports_vectorization_with(right) {
-            return Err(FunctionCarrier::FunctionNotFound);
-        }
+        // TODO: let caller handle checks?
+        // if !left.supports_vectorization_with(right) {
+        //     return Err(FunctionCarrier::FunctionNotFound);
+        // }
 
         let (left, right) = match (left, right) {
             // Both are tuples
@@ -136,7 +137,7 @@ impl Function {
                 (left, std::slice::from_ref(right))
             }
             _ => {
-                return Err(FunctionCarrier::FunctionNotFound);
+                panic!("caller should handle all checks before vectorizing")
             }
         };
 
@@ -924,6 +925,7 @@ impl fmt::Display for TypeSignature {
     }
 }
 
+#[allow(unused_imports)]
 mod test {
     use super::*;
 
