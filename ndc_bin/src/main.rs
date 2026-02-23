@@ -34,7 +34,13 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Execute an .ndc file or start the repl (this default action may be omitted)
-    Run { file: Option<PathBuf> },
+    Run {
+        /// A path to the source to execute
+        file: Option<PathBuf>,
+        /// The source code to execute
+        #[arg(short = 'e')]
+        source: Option<String>,
+    },
     /// Output an .ndc file using the built-in syntax highlighting engine
     Highlight { file: PathBuf },
 
@@ -54,13 +60,17 @@ enum Command {
 
 impl Default for Command {
     fn default() -> Self {
-        Self::Run { file: None }
+        Self::Run {
+            file: None,
+            source: None,
+        }
     }
 }
 
 enum Action {
     RunLsp,
     RunFile(PathBuf),
+    RunSource(String),
     HighlightFile(PathBuf),
     StartRepl,
     Docs(Option<String>),
@@ -71,8 +81,22 @@ impl TryFrom<Command> for Action {
 
     fn try_from(value: Command) -> Result<Self, Self::Error> {
         let action = match value {
-            Command::Run { file: Some(file) } => Self::RunFile(file),
-            Command::Run { file: None } => Self::StartRepl,
+            Command::Run {
+                file: Some(file),
+                source: None,
+            } => Self::RunFile(file),
+            Command::Run {
+                file: None,
+                source: Some(source),
+            } => Self::RunSource(source),
+            Command::Run {
+                file: Some(_),
+                source: Some(_),
+            } => return Err(anyhow!("not allowed to pass both source and a file")),
+            Command::Run {
+                file: None,
+                source: None,
+            } => Self::StartRepl,
             Command::Lsp { stdio: _ } => Self::RunLsp,
             Command::Highlight { file } => Self::HighlightFile(file),
             Command::Docs { query } => Self::Docs(query),
@@ -127,6 +151,19 @@ fn main() -> anyhow::Result<()> {
                 Err(report) => {
                     let source =
                         NamedSource::new(filename.expect("filename must exist"), string.clone());
+                    let report = report.with_source_code(source);
+                    eprintln!("{:?}", report);
+
+                    process::exit(1);
+                }
+            }
+        }
+        Action::RunSource(source) => {
+            let stdout = std::io::stdout();
+            let mut interpreter = Interpreter::new(stdout);
+            match into_miette_result(interpreter.run_str(&source, cli.debug)) {
+                Ok(_final_value) => {}
+                Err(report) => {
                     let report = report.with_source_code(source);
                     eprintln!("{:?}", report);
 
