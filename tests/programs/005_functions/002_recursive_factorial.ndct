@@ -1,12 +1,12 @@
 --PROGRAM--
-fn factorial(n) {
+fn fac(n) {
   if n == 0 {
     1
   } else {
-    n * factorial(n - 1)
+    n * fac(n - 1)
   }
 }
 
-print(factorial(10));
+print(fac(10));
 --EXPECT--
 3628800

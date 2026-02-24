@@ -100,14 +100,25 @@ impl Analyser {
                     std::iter::repeat_n(StaticType::Any, extract_argument_arity(parameters))
                         .collect();
 
+                // Pre-register the function before analysing its body so recursive calls can
+                // resolve the name. The return type is unknown at this point so we use Any.
+                let pre_slot = if let Some(name) = name {
+                    let placeholder = StaticType::Function {
+                        parameters: Some(param_types.clone()),
+                        return_type: Box::new(StaticType::Any),
+                    };
+                    Some(self.scope_tree.create_local_binding(name.clone(), placeholder))
+                } else {
+                    None
+                };
+
                 self.scope_tree.new_scope();
                 self.resolve_parameters_declarative(parameters);
 
                 // TODO: instead of just hardcoding the return type of every function to StaticType::Any
                 //       we should somehow collect all the returns that were encountered while analysing
                 //       the body and then figuring out the LUB.
-                self.analyse(body)?;
-                let return_type = StaticType::Any;
+                let return_type = self.analyse(body)?;
                 self.scope_tree.destroy_scope();
 
                 let function_type = StaticType::Function {
@@ -115,13 +126,11 @@ impl Analyser {
                     return_type: Box::new(return_type),
                 };
 
-                if let Some(name) = name {
+                if let Some(slot) = pre_slot {
                     // TODO: is this correct, for now we just always create a new binding, we could
                     //       also produce an error if we are generating a conflicting binding
-                    *resolved_name = Some(
-                        self.scope_tree
-                            .create_local_binding(name.clone(), function_type.clone()),
-                    );
+                    self.scope_tree.update_binding_type(slot, function_type.clone());
+                    *resolved_name = Some(slot);
                 }
 
                 Ok(function_type)
@@ -656,14 +665,22 @@ impl ScopeTree {
 
         loop {
             let slots = self.scopes[scope_ptr].find_all_slots_by_name(ident);
-            results.extend(slots.into_iter().map(|slot| ResolvedVar::Captured { slot, depth }));
+            results.extend(
+                slots
+                    .into_iter()
+                    .map(|slot| ResolvedVar::Captured { slot, depth }),
+            );
 
             if let Some(parent_idx) = self.scopes[scope_ptr].parent_idx {
                 depth += 1;
                 scope_ptr = parent_idx;
             } else {
                 let global_slots = self.global_scope.find_all_slots_by_name(ident);
-                results.extend(global_slots.into_iter().map(|slot| ResolvedVar::Global { slot }));
+                results.extend(
+                    global_slots
+                        .into_iter()
+                        .map(|slot| ResolvedVar::Global { slot }),
+                );
                 break;
             }
         }
@@ -695,6 +712,21 @@ impl ScopeTree {
             depth: 0,
         }
     }
+
+    fn update_binding_type(&mut self, var: ResolvedVar, new_type: StaticType) {
+        let ResolvedVar::Captured { slot, depth } = var else {
+            panic!("update_binding_type called with a global binding");
+        };
+        let mut scope_idx = self.current_scope_idx;
+        let mut remaining = depth;
+        while remaining > 0 {
+            remaining -= 1;
+            scope_idx = self.scopes[scope_idx]
+                .parent_idx
+                .expect("parent_idx was None while traversing the scope tree");
+        }
+        self.scopes[scope_idx].identifiers[slot].1 = new_type;
+    }
 }
 
 #[derive(Debug)]
@@ -722,7 +754,11 @@ impl Scope {
             .iter()
             .enumerate()
             .filter_map(|(slot, (ident, _))| {
-                if ident == find_ident { Some(slot) } else { None }
+                if ident == find_ident {
+                    Some(slot)
+                } else {
+                    None
+                }
             })
             .collect()
     }
