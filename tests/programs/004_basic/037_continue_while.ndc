@@ -7,4 +7,3 @@ while i < 100 {
 }
 
 assert_eq(sum, 5020);
-print("ok");

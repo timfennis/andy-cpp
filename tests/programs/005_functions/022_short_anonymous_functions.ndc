@@ -4,4 +4,3 @@ assert_eq(square(5), 25);
 // Assert that this expression produces a tuple
 let tuple = fn(x) => x, 2;
 assert_eq(tuple.len(), 2);
-print(tuple);

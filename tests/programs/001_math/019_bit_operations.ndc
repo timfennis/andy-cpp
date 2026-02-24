@@ -29,4 +29,3 @@ assert(~1234 == ~~-1235); // LOL
 // bigintegers
 assert((2^65) | (2^65) == (2^65));
 
-print("ok");

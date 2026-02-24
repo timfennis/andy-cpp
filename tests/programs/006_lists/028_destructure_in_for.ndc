@@ -12,4 +12,3 @@ for key, value in map {
 }
 
 assert(set == %{0,1,2,3,"foo","bar","baz","quux"});
-print("ok");

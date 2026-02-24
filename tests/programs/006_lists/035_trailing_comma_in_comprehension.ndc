@@ -1,3 +1,2 @@
 let a = [x for x in 0..10];
 assert(a == [x for x in 0..10,]);
-print("ok");

@@ -1,4 +1,3 @@
 let d = %{0: []};
 // CHANGED in PR#70 OpAssignement now evaluates to unit
 assert((d[0] ++= [1,2,3]) == ());
-print("ok");

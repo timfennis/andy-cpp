@@ -3,4 +3,3 @@ fn foo(bar) {
 }
 
 foo(5);
-print("ok");

@@ -20,4 +20,3 @@ z &= %{"bar": 10};
 assert(x == y and y == z);
 assert(x.len == 1 and y.len == 1 and z.len == 1);
 
-print("ok");

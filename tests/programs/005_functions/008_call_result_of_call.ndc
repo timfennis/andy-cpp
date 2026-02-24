@@ -1,9 +1,9 @@
 fn say_hi() {
-    print("hi");
+    "hi"
 }
 
 fn create_hi() {
     say_hi
 };
 
-create_hi()();
+assert_eq(create_hi()(), "hi");

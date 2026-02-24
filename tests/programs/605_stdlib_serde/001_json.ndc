@@ -25,4 +25,3 @@ let result = %{
 };
 
 assert_eq(result, object.json_encode.json_decode);
-print("ok");

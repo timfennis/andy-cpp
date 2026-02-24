@@ -4,4 +4,3 @@ assert(0xDEADDEADDEADDEADDEAD == 1051572691647698727460525);
 // Underscores are allowed
 assert(0xf_Ff_dead ==  268426925);
 
-print("ok");

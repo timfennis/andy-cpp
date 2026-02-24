@@ -1,3 +1,2 @@
 let s = "Ohana means 👪";
 assert("👪" == s[-1]);
-print("ok");

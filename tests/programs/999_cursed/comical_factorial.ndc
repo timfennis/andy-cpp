@@ -4,4 +4,3 @@ while n > 1 {
     v *= n;
 }
 assert_eq(v, 100.factorial);
-print("ok");

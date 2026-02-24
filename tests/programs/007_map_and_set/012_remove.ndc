@@ -6,4 +6,3 @@ let map = %{"foo": "bar", "bar": "baz"};
 map.remove("bar");
 assert(map == %{"foo": "bar"});
 
-print("ok");

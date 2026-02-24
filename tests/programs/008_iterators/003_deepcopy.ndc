@@ -5,4 +5,3 @@ let t = 0;
 for ii in i { t += 1 }; // NOOP
 for jj in j { t += 1 }; // should still count up
 assert_eq(t, 9);
-print("ok");

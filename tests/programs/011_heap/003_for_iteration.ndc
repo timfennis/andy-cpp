@@ -16,4 +16,3 @@ fn test(heap) {
 
 test(MinHeap());
 test(MaxHeap());
-print("ok");

@@ -1,4 +1,3 @@
 let map = %{:0, 0: 10};
 assert(map[0] == 10);
 assert(map[1] == 0);
-print("ok");

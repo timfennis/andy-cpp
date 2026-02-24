@@ -13,4 +13,3 @@ assert("The quick brown fox jumps over the lazy dog." == string[0..=-1]);
 // Test with unbound ranges
 assert("The quick brown fox jumps over the lazy dog." == string[0..]);
 
-print("ok");

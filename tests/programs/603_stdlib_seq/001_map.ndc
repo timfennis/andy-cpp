@@ -12,4 +12,3 @@ assert_eq(
     %{"foof", "barf", "bazf"}
 );
 
-print("ok");

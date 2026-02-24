@@ -14,4 +14,3 @@ let     value = tuple[1];
 }
 assert(ksum == 6);
 assert(vsum == 600);
-print("ok");

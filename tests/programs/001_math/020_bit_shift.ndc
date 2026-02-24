@@ -20,4 +20,3 @@ let g = 0xF0;        // Hex: 0xF0 (Binary: 11110000)
 let h = g >> 4;      // Hex: 0x0F (Binary: 00001111)
 assert_eq(h, 0x0F);
 
-print("ok");

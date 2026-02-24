@@ -4,4 +4,3 @@ assert_eq(3, m.len());
 let s = %{1, 1.0};
 assert_eq(1, s.len());
 
-print("ok");

@@ -16,9 +16,7 @@ let hashmap = %{
 };
 
 fn expect(key, value) {
-    if hashmap[key] != value {
-        print(value, "expected but was", hashmap[key]);
-    }
+    assert_eq(hashmap[key], value);
 }
 
 expect("foo", 1);
@@ -34,4 +32,3 @@ expect(%{1,2,3}, 10);
 expect([1,2,3], 11);
 expect(%{"foo": "bar"}, 12);
 expect((1,2,3), 13);
-print("ok");

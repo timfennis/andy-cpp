@@ -23,4 +23,3 @@ let e = Deque();
 assert(e.pop_front?.is_none);
 assert(e.pop_back?.is_none);
 
-print("ok");

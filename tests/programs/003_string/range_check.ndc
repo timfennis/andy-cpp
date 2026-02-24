@@ -4,4 +4,3 @@ let a = "test";
 assert(a in a);
 assert("f" in "foobar");
 assert("o" in "foobar");
-print("ok");

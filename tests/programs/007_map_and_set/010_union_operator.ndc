@@ -6,4 +6,3 @@ let set = %{1,2,3};
 set |= %{2,3,4};
 assert(set == %{4,3,2,1});
 
-print("ok");

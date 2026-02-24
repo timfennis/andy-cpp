@@ -3,4 +3,3 @@ assert_eq(%{1,2,3}.sum(), 6);
 assert_eq(%{1: "foo", 2: "bar", 3: "baz"}.sum(), 6);
 assert_eq((1,2,3,4).sum(), 10);
 assert_eq([1,2,3,4,5].sum(), 15);
-print("ok");

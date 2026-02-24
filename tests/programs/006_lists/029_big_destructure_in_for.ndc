@@ -15,4 +15,3 @@ for (x, y), [a, b, c] in map {
 assert(s == 6);
 assert(ss == 45);
 
-print("ok");

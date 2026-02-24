@@ -3,7 +3,6 @@ assert_eq("foo" <> 123, "foo123");
 assert_eq(123 <> 123, "123123");
 assert(123 <> 123 == "123123");
 assert_eq("list: " <> [x for x in 1..=3], "list: [1,2,3]");
-print((1,2,3) <> 5);
 let string = "hello ";
 string <>= "world!";
 assert_eq(string, "hello world!");

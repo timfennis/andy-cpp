@@ -1,4 +1,5 @@
 let list = [1,2,3];
 let list2 = list;
 list2[0] = 999;
-print(list, list2);
+assert_eq(list[0], 999);
+assert_eq(list2[0], 999);

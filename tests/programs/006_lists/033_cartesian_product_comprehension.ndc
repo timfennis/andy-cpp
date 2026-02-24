@@ -3,4 +3,3 @@ assert(out.len() == 100);
 assert(out[0] == 1);
 assert(out[99] == 100);
 assert(out.sum() == 3025);
-print("ok");

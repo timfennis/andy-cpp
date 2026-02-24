@@ -12,4 +12,3 @@ assert_eq(example_paragraphs.lines().unlines(), example_paragraphs);
 
 assert_eq("the quick brown fox".words().join(", "), "the, quick, brown, fox");
 
-print("ok");

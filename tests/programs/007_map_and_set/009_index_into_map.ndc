@@ -6,4 +6,3 @@ let d = %{
 assert(d[1] == "one");
 assert(d[2] == "two");
 assert(d[3] == "three");
-print("ok");

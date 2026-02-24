@@ -11,4 +11,3 @@ assert(def[49]);
 assert(!def[59]);
 assert(!def[1010101]);
 assert(!def["haha"]);
-print("ok");

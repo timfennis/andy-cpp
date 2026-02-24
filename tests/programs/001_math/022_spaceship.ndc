@@ -74,4 +74,3 @@ assert_eq((5 / 3) >=< (7 / 4), 1);
 assert_eq((1 + 2i) >=< (2 + 3i), 1);
 assert_eq(true >=< false, -1);
 assert_eq(false >=< true, 1);
-print("ok");

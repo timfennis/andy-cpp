@@ -1,2 +1,1 @@
 let x = %{"foo": "bar"};
-print("ok");

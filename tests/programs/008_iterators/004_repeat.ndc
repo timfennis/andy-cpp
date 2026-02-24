@@ -15,4 +15,3 @@ for x in out {
     assert_eq(x, 1);
 }
 
-print("ok");

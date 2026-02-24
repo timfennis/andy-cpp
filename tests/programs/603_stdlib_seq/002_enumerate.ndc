@@ -4,4 +4,3 @@ let out = my_list.enumerate();
 assert_eq(out[0], (0, "Foo"));
 assert_eq(out[1], (1, "Bar"));
 assert_eq(out[2], (2, "Baz"));
-print("ok");

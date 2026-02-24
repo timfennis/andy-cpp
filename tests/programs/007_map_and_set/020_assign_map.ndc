@@ -1,4 +1,3 @@
 let map = %{};
 map["test"] = "hi";
 assert(map["test"] == "hi");
-print("ok");

@@ -19,4 +19,3 @@ assert(NaN > Inf);
 assert(Inf > -Inf);
 assert(NaN == -NaN, "nan equals negative nan");
 
-print("ok");
