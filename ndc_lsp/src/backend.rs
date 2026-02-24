@@ -9,9 +9,8 @@ use ndc_lib::lexer::{Lexer, Span, TokenLocation};
 use tower_lsp::jsonrpc::Result as JsonRPCResult;
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionOptions,
-    CompletionParams, CompletionResponse, Diagnostic, DiagnosticOptions,
-    DiagnosticServerCapabilities, DiagnosticSeverity, Documentation, MarkupContent, MarkupKind,
-    Position, Range, WorkDoneProgressOptions,
+    CompletionParams, CompletionResponse, Diagnostic, DiagnosticSeverity, Documentation,
+    MarkupContent, MarkupKind, Position, Range, WorkDoneProgressOptions,
 };
 use tower_lsp::{Client, LanguageServer};
 
@@ -81,16 +80,6 @@ impl LanguageServer for Backend {
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
                     TextDocumentSyncKind::FULL,
-                )),
-                diagnostic_provider: Some(DiagnosticServerCapabilities::Options(
-                    DiagnosticOptions {
-                        identifier: Some("andy-cpp-diag-provider".to_string()),
-                        inter_file_dependencies: false,
-                        work_done_progress_options: WorkDoneProgressOptions {
-                            work_done_progress: None,
-                        },
-                        workspace_diagnostics: false,
-                    },
                 )),
                 completion_provider: Some(CompletionOptions {
                     resolve_provider: Some(false), // or true if you want to support `completionItem/resolve`

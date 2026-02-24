@@ -1,11 +1,7 @@
 
 import * as vscode from 'vscode';
 import { exec } from 'child_process';
-import * as path from 'path';
 import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind } from 'vscode-languageclient/node'
-
-// Adjust this to how your interpreter is invoked
-const interpreterPath = "ndc";
 
 let client: LanguageClient | undefined;
 
@@ -24,11 +20,31 @@ class Lazy<T> {
   }
 }
 
+function isNdcInstalled(ndcPath: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const cmd = process.platform === 'win32' ? `where "${ndcPath}"` : `which "${ndcPath}"`;
+    exec(cmd, (error) => resolve(!error));
+  });
+}
 
-export function activate(context: vscode.ExtensionContext) {
+export async function activate(context: vscode.ExtensionContext) {
+  const ndcPath = vscode.workspace.getConfiguration('andy-cpp').get<string>('ndcPath', 'ndc');
+
+  if (!await isNdcInstalled(ndcPath)) {
+    const action = 'How to install';
+    const choice = await vscode.window.showErrorMessage(
+      `Andy C++: \`${ndcPath}\` was not found. Install ndc with \`cargo install --git https://github.com/timfennis/andy-cpp\`, or set \`andy-cpp.ndcPath\` in your VSCode settings.`,
+      action
+    );
+    if (choice === action) {
+      vscode.env.openExternal(vscode.Uri.parse('https://github.com/timfennis/andy-cpp'));
+    }
+    return;
+  }
+
   const serverOptions: ServerOptions = {
-      run:   { command: 'ndc', args: ["lsp"], transport: TransportKind.stdio },
-      debug: { command: 'ndc', args: ["lsp"], transport: TransportKind.stdio }
+      run:   { command: ndcPath, args: ["lsp"], transport: TransportKind.stdio },
+      debug: { command: ndcPath, args: ["lsp"], transport: TransportKind.stdio }
   };
 
   const clientOptions: LanguageClientOptions = {
@@ -51,7 +67,7 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.debug.registerDebugAdapterDescriptorFactory('andy-cpp', {
       createDebugAdapterDescriptor(session: vscode.DebugSession, executable: vscode.DebugAdapterExecutable | undefined) {
         const file = session.configuration.program;
-        terminal.value.sendText(`ndc run "${file}"`);
+        terminal.value.sendText(`${ndcPath} run "${file}"`);
         terminal.value.show();
         return executable;
       }
@@ -68,7 +84,7 @@ export function activate(context: vscode.ExtensionContext) {
     const document = editor.document;
     const filePath = document.fileName;
 
-    terminal.value.sendText(`${interpreterPath} run ${filePath}`);
+    terminal.value.sendText(`${ndcPath} run ${filePath}`);
     terminal.value.show();
   }));
 }

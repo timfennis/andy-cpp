@@ -58,6 +58,16 @@
         "path": "./syntaxes/andy-cpp.tmLanguage.json"
       }
     ],
+    "configuration": {
+      "title": "Andy C++",
+      "properties": {
+        "andy-cpp.ndcPath": {
+          "type": "string",
+          "default": "ndc",
+          "description": "Path to the ndc binary. Useful when ndc is not on the PATH used by VSCode (e.g. when installed via cargo in a shell like fish)."
+        }
+      }
+    },
     "debuggers": [
       {
         "type": "andy-cpp",
