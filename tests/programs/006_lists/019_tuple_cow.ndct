@@ -1,9 +1,0 @@
---PROGRAM--
-// We had to sacrifice this feature to improve the typesystem
-// let x = (1,2);
-// let y = x;
-// x ++= (3,4);
-// print(x == (1,2,3,4) and y == (1,2))
-print(true);
---EXPECT--
-true

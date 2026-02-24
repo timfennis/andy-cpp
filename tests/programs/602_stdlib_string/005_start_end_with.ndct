@@ -1,8 +1,0 @@
---PROGRAM--
-assert("foobar".starts_with("foo"));
-assert(!"foobar".starts_with("baz"));
-assert("foobar".ends_with("bar"));
-assert(!"foobar".ends_with("baz"));
-print("ok");
---EXPECT--
-ok

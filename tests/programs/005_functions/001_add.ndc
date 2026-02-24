@@ -1,0 +1,4 @@
+fn add(a, b) {
+    a + b
+}
+assert_eq(add(110, -15), 95);

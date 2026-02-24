@@ -1,0 +1,6 @@
+let xs = [1,4,9,16,25];
+let _results = [];
+for x in xs {
+    _results.push(sqrt(x));
+}
+assert_eq(_results, [1.0, 2.0, 3.0, 4.0, 5.0]);

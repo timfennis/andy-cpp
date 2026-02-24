@@ -1,0 +1,15 @@
+assert_eq(6 > 5, true);
+assert_eq(5 >= 5, true);
+assert_eq(4 < 5, true);
+assert_eq(5 <= 5, true);
+
+assert_eq(6 < 5, false);
+assert_eq(6 <= 5, false);
+assert_eq(4 >= 5, false);
+assert_eq(4 > 5, false);
+
+assert_eq(5 == 5, true);
+assert_eq(4 == 5, false);
+
+assert_eq(4 != 4, false);
+assert_eq(4 != 5, true);

@@ -1,0 +1,28 @@
+let object = %{
+    "foo": "bar",
+    "int": 123,
+    "float": 123.123,
+    "rational": 10/3,
+    "object": %{
+        "test": [1,2,3]
+    },
+    "set": %{1,2,3},
+    "list": [1,2,3,4],
+    "tuple": (1,2,3),
+};
+
+let result = %{
+    "float": 123.123,
+    "foo": "bar",
+    "rational": 3.3333333333333335,
+    "int": 123,
+    "tuple": [1,2,3],
+    "object": %{
+        "test": [1,2,3]
+    },
+    "set": %{"1", "2", "3"}, // LMAO this is so lossy
+    "list": [1,2,3,4]
+};
+
+assert_eq(result, object.json_encode.json_decode);
+print("ok");

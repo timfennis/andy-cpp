@@ -1,5 +1,0 @@
---PROGRAM--
-if 1 == 1 { }
-[x for x in 0..10] // This comprehension is interpreted as indexing into the previous expression
---EXPECT-ERROR--
-Expected token ']' but got 'for' instead

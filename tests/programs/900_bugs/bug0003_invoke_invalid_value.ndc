@@ -1,0 +1,2 @@
+// expect-error: Unable to invoke Int as a function.
+5();

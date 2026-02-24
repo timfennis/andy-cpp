@@ -1,0 +1,14 @@
+fn mut_map(list, function) {
+  let index = 0;
+  while index < list.len {
+    // BUG#0001: this line used to fail because list had a mutable and immutable borrow at the same time
+    list[index] = function(list[index]);
+    index = index + 1;
+  }
+}
+
+let list = [1,2,3,4];
+fn add_one(n) { n + 1 };
+
+list.mut_map(add_one);
+assert_eq(list, [2,3,4,5]);

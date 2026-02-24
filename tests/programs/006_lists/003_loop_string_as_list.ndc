@@ -1,0 +1,6 @@
+let text = "hello";
+let _results = [];
+for char in text {
+    _results.push(char);
+}
+assert_eq(_results, ["h", "e", "l", "l", "o"]);

@@ -1,0 +1,2 @@
+let foo = { 8 } + { 3 + 1 };
+assert_eq(foo, 12);

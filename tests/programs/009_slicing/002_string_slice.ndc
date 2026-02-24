@@ -1,0 +1,16 @@
+let string = "The quick brown fox jumps over the lazy dog.";
+
+// Test exclusive ranges
+assert("The" == string[0..3]);
+
+// Test inclusive ranges
+assert("The" == string[0..=2]);
+
+// Test with negative ranges
+assert("The quick brown fox jumps over the lazy dog" == string[0..-1]);
+assert("The quick brown fox jumps over the lazy dog." == string[0..=-1]);
+
+// Test with unbound ranges
+assert("The quick brown fox jumps over the lazy dog." == string[0..]);
+
+print("ok");

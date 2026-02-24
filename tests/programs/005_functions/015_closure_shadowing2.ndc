@@ -1,0 +1,10 @@
+let a = "global";
+
+let _results = [];
+{
+    fn show_a() { _results.push(a); }
+    show_a();
+let     a = "block";
+    show_a();
+}
+assert_eq(_results, ["global", "global"]);

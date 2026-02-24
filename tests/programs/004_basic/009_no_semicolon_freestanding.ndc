@@ -1,0 +1,16 @@
+let text = "";
+{
+    {
+        {
+            {
+                text = text ++ "Hello";
+            }
+            text = text ++ ", ";
+        }
+        {
+            {}
+        }
+    }
+    text = text ++ "World";
+}
+assert_eq(text ++ "!", "Hello, World!");

@@ -1,0 +1,15 @@
+{
+    let mm1 = MinHeap();
+    let mm2 = MinHeap();
+
+    assert(mm1 == mm1);
+    assert(mm2 != mm1);
+}
+{
+    let mm1 = MaxHeap();
+    let mm2 = MaxHeap();
+
+    assert(mm1 == mm1);
+    assert(mm2 != mm1);
+}
+print("ok");

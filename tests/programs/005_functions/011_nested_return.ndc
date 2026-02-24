@@ -1,0 +1,9 @@
+fn foo(n) {
+    fn bar() {
+        return 6;
+    }
+let     x = bar();
+    return x + 1;
+    false
+}
+assert_eq(foo(10), 7);

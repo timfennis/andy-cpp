@@ -1,5 +1,0 @@
---PROGRAM--
-let my_list = [1,2,3];
-print(my_list);
---EXPECT--
-[1,2,3]

@@ -1,6 +1,0 @@
---PROGRAM--
-let list = [1,2,3];
-list[0] = 5;
-print(list[0]);
---EXPECT--
-5

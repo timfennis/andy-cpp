@@ -1,0 +1,3 @@
+let s = "Foobar is the Woobar";
+assert_eq(s.split(), ["Foobar","is","the","Woobar"]);
+assert_eq(s.split(" is the "), ["Foobar","Woobar"]);

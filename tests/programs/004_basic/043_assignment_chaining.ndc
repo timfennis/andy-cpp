@@ -1,0 +1,5 @@
+let y = 3;
+let x = y = 4;
+assert_eq(x, ());
+assert_eq(y, 4);
+print("ok");

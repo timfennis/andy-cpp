@@ -1,0 +1,2 @@
+// expect-error: 3..2 out of bounds
+[0,1,2,3,4,5,6,7][3..2]

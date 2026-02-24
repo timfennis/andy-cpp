@@ -1,4 +1,0 @@
---PROGRAM--
-print(1,2,3);
---EXPECT--
-1 2 3

@@ -1,0 +1,21 @@
+fn inc(a) {
+    a + 1
+}
+
+// This function should be shadowed by the one inside the scope
+fn inc(a, b) {
+    a + b + 3
+}
+
+let _results = [];
+{
+    fn inc(a, b) {
+        a + b
+    }
+
+    _results.push(inc(3)); // 4
+    _results.push(inc(3, 2)); // 5
+}
+
+_results.push(inc(3,3)); // 9
+assert_eq(_results, [4, 5, 9]);

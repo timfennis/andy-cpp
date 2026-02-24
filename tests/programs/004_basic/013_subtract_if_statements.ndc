@@ -1,0 +1,2 @@
+let foo = if true { 10 } else { 20 } - if false { 1 } else { 2 };
+assert_eq(foo, 8);

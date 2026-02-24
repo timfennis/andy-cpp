@@ -1,0 +1,3 @@
+let list = [1,2,3];
+list.push(4);
+assert_eq(list, [1,2,3,4]);

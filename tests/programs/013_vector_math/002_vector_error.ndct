@@ -1,4 +1,0 @@
---PROGRAM--
-(1,2) + (5,3,2)
---EXPECT-ERROR--
-no function called '+' found matches the arguments

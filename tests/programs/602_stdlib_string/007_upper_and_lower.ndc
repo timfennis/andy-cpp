@@ -1,0 +1,9 @@
+assert("FOOBAR".is_upper());
+assert(not "FOOBAR".is_lower());
+
+assert(not "foobar".is_upper());
+assert("foobar".is_lower());
+
+assert_eq("foobar".to_upper(), "FOOBAR");
+assert_eq("BARbaz".to_lower(), "barbaz");
+assert_eq("OK".to_lower(), "ok");

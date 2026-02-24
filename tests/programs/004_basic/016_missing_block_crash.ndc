@@ -1,0 +1,2 @@
+// expect-error: Unexpected end of input
+if if 5 > 3 { true } else { false }

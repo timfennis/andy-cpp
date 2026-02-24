@@ -1,0 +1,2 @@
+// expect-error: Invalid assignment target
+let [([1])] = 1;

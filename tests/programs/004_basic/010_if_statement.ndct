@@ -1,8 +1,0 @@
---PROGRAM--
-if true {
-    print("a");
-} else {
-    print("b");
-}
---EXPECT--
-a

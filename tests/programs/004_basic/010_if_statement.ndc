@@ -1,0 +1,5 @@
+if true {
+    assert_eq("a", "a");
+} else {
+    assert_eq("b", "a");
+}

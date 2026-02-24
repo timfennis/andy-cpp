@@ -1,0 +1,13 @@
+fn create(n) {
+  fn get_n() { n }
+  n = n + 1;
+  get_n
+}
+
+let x = create(5);
+let y = create(6);
+
+assert_eq(x(), 6);
+assert_eq(y(), 7);
+assert_eq(x(), 6);
+assert_eq(y(), 7);

@@ -1,0 +1,2 @@
+assert_eq(69 - 9, 60);
+assert_eq(69-9, 60);

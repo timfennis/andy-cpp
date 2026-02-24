@@ -1,5 +1,0 @@
---PROGRAM--
-x += 3;
-print(x);
---EXPECT-ERROR--
-Identifier x has not previously been declared

@@ -1,0 +1,11 @@
+let x = 10;
+
+if x > 100 {
+    assert_eq(false, true);
+} else if x > 10 {
+    assert_eq(false, true);
+} else if x == 10 {
+    assert_eq(true, true);
+} else {
+    assert_eq(false, true);
+}

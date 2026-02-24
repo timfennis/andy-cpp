@@ -1,4 +1,0 @@
---PROGRAM--
-{
---EXPECT-ERROR--
-expected '}'

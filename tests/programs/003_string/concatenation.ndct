@@ -1,4 +1,0 @@
---PROGRAM--
-print("Hello " ++ "World!");
---EXPECT--
-Hello World!

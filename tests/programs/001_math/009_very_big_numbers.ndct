@@ -1,6 +1,0 @@
---PROGRAM--
-print(9 / 3); // this can be calculated
-print(10 / 4); // this can be simplified
---EXPECT--
-3
-5/2

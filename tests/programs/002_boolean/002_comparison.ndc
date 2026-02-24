@@ -1,0 +1,7 @@
+assert_eq(true == false, false);
+assert_eq(true == true, true);
+assert_eq(false == true, false);
+assert_eq(false == false, true);
+
+assert_eq(false != false, false);
+assert_eq(true != true, false);

@@ -1,6 +1,0 @@
---PROGRAM--
-let x = { 5 };
-let y = { 8 * x };
-print(y * x);
---EXPECT--
-200

@@ -27,7 +27,7 @@ fn generate_tests(output: &mut impl Write, base: &Path, dir: &Path) {
         let path = entry.path();
         if path.is_dir() {
             generate_tests(output, base, &path);
-        } else if path.extension().map_or(false, |e| e == "ndct") {
+        } else if path.extension().map_or(false, |e| e == "ndc") {
             let relative = path.strip_prefix(base).unwrap();
             let stem = relative
                 .with_extension("")
@@ -40,7 +40,7 @@ fn generate_tests(output: &mut impl Write, base: &Path, dir: &Path) {
             writeln!(output, "fn {test_name}() {{").unwrap();
             writeln!(
                 output,
-                "    run_test(std::path::Path::new(env!(\"CARGO_MANIFEST_DIR\")).join(\"programs/{path_str}\")).expect(\"test failed\");",
+                "    run_ndc_test(std::path::Path::new(env!(\"CARGO_MANIFEST_DIR\")).join(\"programs/{path_str}\")).expect(\"test failed\");",
             )
             .unwrap();
             writeln!(output, "}}").unwrap();

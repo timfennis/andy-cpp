@@ -1,0 +1,10 @@
+fn inc(a) {
+    a + 1
+}
+
+fn inc(a, b) {
+    a + b
+}
+
+assert_eq(inc(3), 4); // 4
+assert_eq(inc(3, 2), 5); // 5

@@ -1,9 +1,0 @@
---PROGRAM--
-let i = 0;
-for c in "🧑‍🧑‍🧒‍🧒" {
-    i += 1;
-}
-assert(i == 7);
-print("ok");
---EXPECT--
-ok

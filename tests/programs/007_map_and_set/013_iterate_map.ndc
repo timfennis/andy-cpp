@@ -1,0 +1,17 @@
+let map = %{
+    1: 100,
+    2: 200,
+    3: 300,
+};
+
+let ksum = 0;
+let vsum = 0;
+for tuple in map {
+let     key = tuple[0];
+let     value = tuple[1];
+    ksum += key;
+    vsum += value;
+}
+assert(ksum == 6);
+assert(vsum == 600);
+print("ok");

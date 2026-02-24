@@ -1,6 +1,0 @@
---PROGRAM--
-print(69 - 9);
-print(69-9);
---EXPECT--
-60
-60

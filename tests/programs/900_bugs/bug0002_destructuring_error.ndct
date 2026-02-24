@@ -1,4 +1,0 @@
---PROGRAM--
-let [([1])] = 1;
---EXPECT-ERROR--
-Invalid assignment target

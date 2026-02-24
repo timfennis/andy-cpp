@@ -1,0 +1,6 @@
+assert_eq((1..10).product(), 362880);
+assert_eq(%{1,2,3}.product(), 6);
+assert_eq(%{1: "foo", 2: "bar", 3: "baz"}.product(), 6);
+assert_eq((1,2,3,4).product(), 24);
+assert_eq([1,2,3,4,5].product(), 120);
+print("ok");

@@ -1,0 +1,11 @@
+let n = 0;
+fn inc() {
+    n = n + 1;
+    n
+}
+
+inc();
+inc();
+let n = 10;
+inc();
+assert_eq(n, 10);

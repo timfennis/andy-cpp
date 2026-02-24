@@ -1,5 +1,0 @@
---PROGRAM--
-print("foo\nbar\\\"");
---EXPECT--
-foo
-bar\"

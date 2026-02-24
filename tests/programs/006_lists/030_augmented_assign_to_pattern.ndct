@@ -1,5 +1,0 @@
---PROGRAM--
-let x, y = 0, 0;
-x, y += 1; // ERROR
---EXPECT-ERROR--
-This lvalue is required to be a single identifier

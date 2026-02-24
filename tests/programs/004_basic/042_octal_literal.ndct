@@ -1,5 +1,0 @@
---PROGRAM--
-assert(0o7777 == 4095);
-print("ok");
---EXPECT--
-ok

@@ -1,5 +1,0 @@
---PROGRAM--
-let set = %{1,2,3};
-let val = set[4]; // not found
---EXPECT-ERROR--
-Key not found in map: 4

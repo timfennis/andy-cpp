@@ -1,0 +1,6 @@
+assert_eq((2+3j) + (4+5j), 6+8j);
+assert_eq((2+3j) - (4+5j), -2-2j);
+assert_eq((4+5j) - (2+3j), 2+2j);
+assert_eq((2+3j) * (4+5j), -7+22j);
+print((2+3j) ^ (4+5j));
+print((4+5j) ^ (2+3j));

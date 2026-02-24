@@ -1,4 +1,0 @@
---PROGRAM--
-print(!true);
---EXPECT--
-false

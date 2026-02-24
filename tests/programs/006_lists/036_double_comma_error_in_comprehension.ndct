@@ -1,4 +1,0 @@
---PROGRAM--
-[x for x in 0..10,,,,,,y in 0..10]
---EXPECT-ERROR--
-Unexpected token ','

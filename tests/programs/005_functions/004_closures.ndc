@@ -1,0 +1,22 @@
+let invoked = 0;
+
+fn counter() {
+let   n = 0;
+  fn add_one() {
+    n = n + 1;
+    invoked = invoked + 1;
+    n
+  }
+  add_one
+}
+
+let c1 = counter();
+let c2 = counter();
+
+assert_eq(c1(), 1);
+assert_eq(c2(), 1);
+assert_eq(c1(), 2);
+assert_eq(c2(), 2);
+assert_eq(c1(), 3);
+assert_eq(c2(), 3);
+assert_eq(invoked, 6);

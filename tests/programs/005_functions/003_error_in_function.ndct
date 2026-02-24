@@ -1,7 +1,0 @@
---PROGRAM--
-fn test() {
-    n + 3 // n does not exist
-}
-test();
---EXPECT-ERROR--
-Identifier n has not previously been declared

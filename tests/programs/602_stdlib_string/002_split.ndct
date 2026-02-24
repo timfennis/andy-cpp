@@ -1,7 +1,0 @@
---PROGRAM--
-let s = "Foobar is the Woobar";
-print(s.split());
-print(s.split(" is the "));
---EXPECT--
-["Foobar","is","the","Woobar"]
-["Foobar","Woobar"]

@@ -1,9 +1,0 @@
---PROGRAM--
-let n = 10;
-let v = 10;
-while { n = n - 1; n } > 0 {
-    v = v * n;
-}
-print(v);
---EXPECT--
-3628800

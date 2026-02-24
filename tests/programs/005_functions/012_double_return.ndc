@@ -1,0 +1,4 @@
+fn foo() {
+    return (return 5) + 1;
+}
+assert_eq(foo(), 5);

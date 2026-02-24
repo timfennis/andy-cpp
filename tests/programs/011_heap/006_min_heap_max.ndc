@@ -1,0 +1,7 @@
+// expect-error: not supported
+let heap = MaxHeap();
+heap.push(5);
+heap.push(4);
+heap.push(6);
+assert_eq(heap.min, 4);
+print("ok");

@@ -1,0 +1,2 @@
+// expect-error: unexpected break statement outside of loop
+break;

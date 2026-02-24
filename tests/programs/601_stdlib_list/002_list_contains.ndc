@@ -1,0 +1,2 @@
+let list = [1,2,3,4,5];
+assert_eq(list.contains(3), true);

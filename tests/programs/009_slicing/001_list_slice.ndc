@@ -1,0 +1,27 @@
+let list = [0,1,2,3,4,5,6,7,8,9];
+
+// Test exclusive ranges
+assert(list[0..3] == [0,1,2]);
+
+// Test inclusive ranges
+assert(list[0..=3] == [0,1,2,3]);
+
+// Test with negative ranges
+assert([0,1,2,3,4,5,6,7,8] == list[0..-1]);
+assert([0,1,2,3,4,5,6,7,8,9] == list[0..=-1]);
+
+// Test with unbound ranges
+assert([0,1,2,3,4,5,6,7,8,9] == list[0..]);
+
+// Test with ranges that exactly match
+assert([0,1,2,3,4,5,6,7,8,9] == list[0..10]);
+
+// Test with ranges that are massively out of bounds
+assert([0,1,2,3,4,5,6,7,8,9] == list[-100..100]);
+
+// For now unbound ranges without a start are not yet supported
+// assert([0,1,2,3,4,5,6,7,8,9] == list[(..=-1)]);
+// For now unbound ranges on both ends are not supported
+// assert([0,1,2,3,4,5,6,7,8,9] == list[..]);
+
+print("ok");

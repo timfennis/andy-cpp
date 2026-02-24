@@ -1,0 +1,9 @@
+let counter = 0;
+fn idx() {
+    counter += 1;
+    0
+}
+
+let unit_list = [0];
+unit_list[idx()] += 10;
+print("val:", unit_list[0],"invoked:", counter);

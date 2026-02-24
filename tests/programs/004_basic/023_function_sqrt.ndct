@@ -1,5 +1,0 @@
---PROGRAM--
-let s = sqrt(5.0);
-print(s);
---EXPECT--
-2.23606797749979

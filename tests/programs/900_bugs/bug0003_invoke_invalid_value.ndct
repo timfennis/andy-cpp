@@ -1,4 +1,0 @@
---PROGRAM--
-5();
---EXPECT-ERROR--
-Unable to invoke Int as a function.

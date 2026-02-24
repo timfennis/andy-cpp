@@ -1,0 +1,9 @@
+assert_eq(true and true, true); // true
+assert_eq(true and false, false); // false
+assert_eq(false and true, false); // false
+assert_eq(false and false, false); // false
+
+assert_eq(true or false, true); // true
+assert_eq(true or true, true); // true
+assert_eq(false or true, true); // true
+assert_eq(false or false, false); // false

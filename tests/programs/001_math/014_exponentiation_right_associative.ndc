@@ -1,0 +1,2 @@
+// Exponentiation is defined as being right associative
+assert_eq(2 ^ 3 ^ 4, 2417851639229258349412352);

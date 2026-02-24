@@ -1,0 +1,4 @@
+// expect-error: Expected token ';' but got 'let' instead
+let x = { 5 }
+let y = { 10 }
+print(x + y);

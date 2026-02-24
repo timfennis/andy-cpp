@@ -1,0 +1,6 @@
+let n = 10;
+let v = 10;
+while { n = n - 1; n } > 0 {
+    v = v * n;
+}
+assert_eq(v, 3628800);

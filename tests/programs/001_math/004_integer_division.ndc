@@ -1,0 +1,7 @@
+assert_eq(10 / 2, 5);
+assert_eq(10 \ 2, 5);
+assert_eq(10 / 3, 10 / 3);
+
+assert_eq((10 / 3).denominator, 3);
+assert_eq((10 / 3).numerator, 10);
+print("ok");

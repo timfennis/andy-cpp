@@ -1,6 +1,0 @@
---PROGRAM--
-fn f() { 2 }
-let l = [1,2,3];
-print(l[f() - 1]);
---EXPECT--
-2

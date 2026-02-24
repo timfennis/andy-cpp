@@ -1,0 +1,3 @@
+let _results = [];
+for x in (1..) { _results.push(x); if x == 3 { break } }
+assert_eq(_results, [1, 2, 3]);

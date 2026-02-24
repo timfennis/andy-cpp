@@ -1,0 +1,5 @@
+let x = {
+let     y = 3;
+let     z = 4;
+};
+assert_eq(x, ());

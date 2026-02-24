@@ -1,0 +1,5 @@
+let map_set = %{
+    "key": "value",
+    "just_key",
+};
+assert_eq(map_set.len() == 2, true);

@@ -1,0 +1,5 @@
+fn foo() { 5 }
+fn bar() { 6 }
+assert_eq(foo == bar, false);
+let baz = foo;
+assert_eq(foo == baz, true);

@@ -1,0 +1,9 @@
+if if {
+    let x = 5;
+    let y = 9;
+    y ^ x
+} > 12 ^ { let one = 1; one + one } { let ten = 10; ten } else { let minus_ten = -10; minus_ten } > 0 {
+    assert_eq(true, true);
+} else {
+    assert_eq(false, true);
+}

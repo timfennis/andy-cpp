@@ -1,6 +1,0 @@
---PROGRAM--
-let str = "foobak";
-str[-1] = "r";
-print(str);
---EXPECT--
-foobar

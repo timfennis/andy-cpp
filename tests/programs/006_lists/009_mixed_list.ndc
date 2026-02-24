@@ -1,0 +1,2 @@
+let list = ["foobar", 123];
+assert_eq(list, ["foobar", 123]);

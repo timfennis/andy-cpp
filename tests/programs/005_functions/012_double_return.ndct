@@ -1,7 +1,0 @@
---PROGRAM--
-fn foo() {
-    return (return 5) + 1;
-}
-print(foo());
---EXPECT--
-5

@@ -1,0 +1,17 @@
+
+fn is_even(num) {
+    if num == 0 {
+        return true;
+    }
+
+    if num == 1 {
+        return false;
+    }
+
+    return num % 2 == 0;
+}
+
+assert_eq(is_even(0), true);
+assert_eq(is_even(1), false);
+assert_eq(is_even(2), true);
+assert_eq(is_even(3), false);

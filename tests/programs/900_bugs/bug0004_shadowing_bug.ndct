@@ -1,9 +1,0 @@
---PROGRAM--
-fn foo(bar) {
-  let bar = bar + 1; // this used to produce an error in an older version
-}
-
-foo(5);
-print("ok");
---EXPECT--
-ok

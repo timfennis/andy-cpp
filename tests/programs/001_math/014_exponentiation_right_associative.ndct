@@ -1,5 +1,0 @@
---PROGRAM--
-// Exponentiation is defined as being right associative
-print(2 ^ 3 ^ 4);
---EXPECT--
-2417851639229258349412352

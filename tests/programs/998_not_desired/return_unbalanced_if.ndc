@@ -1,0 +1,10 @@
+// NOTE: this is definitely a weird one that should probably generate a type error in the future
+fn is_positive(n) {
+    return if n >= 0 {
+        true
+    };
+}
+
+assert_eq(is_positive(3), true);
+assert_eq(is_positive(0), true);
+assert_eq(is_positive(-5) == (), true);

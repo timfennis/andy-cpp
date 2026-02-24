@@ -1,0 +1,7 @@
+let x = 0;
+for i in 0..10 {
+    x += 1;
+}
+
+assert(x == 10);
+print("ok");

@@ -1,9 +1,0 @@
---PROGRAM--
-let tuple = (1,1+1,1+1+1);
-let sum = 0;
-for v in tuple {
-    sum = sum + v;
-}
-print(sum)
---EXPECT--
-6

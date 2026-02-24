@@ -1,0 +1,4 @@
+// expect-error: Cannot convert Int into i64
+// Not sure what to think of this one, but right now you cannot construct ranges with ints outside of the i64 range
+// it does make type analysis a tiny bit easier though
+(2^1024)..((2^1024)+1)

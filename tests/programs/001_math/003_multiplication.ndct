@@ -1,8 +1,0 @@
---PROGRAM--
-print(10 * -5);
-print(10 *- 5);
-print(10*-5);
---EXPECT--
--50
--50
--50

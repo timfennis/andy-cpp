@@ -1,6 +1,0 @@
---PROGRAM--
-for i in 1 {
-    print(i);
-}
---EXPECT-ERROR--
-Int is not iterable

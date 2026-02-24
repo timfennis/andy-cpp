@@ -1,4 +1,0 @@
---PROGRAM--
-[0,1,2,3,4,5,6,7][3..2]
---EXPECT-ERROR--
-3..2 out of bounds

@@ -1,4 +1,0 @@
---PROGRAM--
-print(9.0.sqrt());
---EXPECT--
-3.0

@@ -1,0 +1,2 @@
+// expect-error: unexpected continue statement outside of loop
+continue;

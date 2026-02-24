@@ -1,0 +1,2 @@
+// expect-error: Unexpected token 'if' expected either ']' or 'for'
+[1,2,3 if x > 5]

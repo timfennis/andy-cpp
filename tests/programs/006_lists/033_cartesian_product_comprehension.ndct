@@ -1,9 +1,0 @@
---PROGRAM--
-let out = [ x * y for x in 1..=10, y in 1..=10 ];
-assert(out.len() == 100);
-assert(out[0] == 1);
-assert(out[99] == 100);
-assert(out.sum() == 3025);
-print("ok");
---EXPECT--
-ok

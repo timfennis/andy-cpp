@@ -1,0 +1,15 @@
+assert_eq("1 2 3 4".words(), ["1","2","3","4"]);
+assert_eq("1\n2\n3\n4".lines(), ["1","2","3","4"]);
+assert_eq("1\n\n2\n\n3\n\n4".paragraphs(), ["1","2","3","4"]);
+
+let example_words = "this is a sentence with words";
+let example_lines = "these\nare\nmultiple\nlines";
+let example_paragraphs = "this\nis\none\nparagraph\n\nthis\nis\nanother";
+
+assert_eq(example_words.words().unwords(), example_words);
+assert_eq(example_lines.paragraphs().unparagraphs(), example_lines);
+assert_eq(example_paragraphs.lines().unlines(), example_paragraphs);
+
+assert_eq("the quick brown fox".words().join(", "), "the, quick, brown, fox");
+
+print("ok");

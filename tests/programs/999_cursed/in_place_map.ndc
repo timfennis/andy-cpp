@@ -1,0 +1,16 @@
+// This is a very strange implementation of a map function that changes the list in place
+fn mut_map(list, function) {
+let   len = list.len();
+
+let   index = 0;
+  while index < len {
+    list[index] = function(list[index]);
+    index += 1;
+  }
+}
+
+let list = [1,2,3,4];
+fn add_one(n) { n + 1 };
+
+list.mut_map(add_one);
+assert_eq(list, [2,3,4,5]);

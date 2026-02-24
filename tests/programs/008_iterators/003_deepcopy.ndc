@@ -1,0 +1,8 @@
+let i = 1..10;
+let j = deepcopy(i);
+for ii in i { }; // consumes the iterator
+let t = 0;
+for ii in i { t += 1 }; // NOOP
+for jj in j { t += 1 }; // should still count up
+assert_eq(t, 9);
+print("ok");

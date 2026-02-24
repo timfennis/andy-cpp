@@ -1,9 +1,0 @@
---PROGRAM--
-fn foo() { 5 }
-fn bar() { 6 }
-print(foo == bar);
-let baz = foo;
-print(foo == baz);
---EXPECT--
-false
-true

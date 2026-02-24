@@ -1,0 +1,7 @@
+let a = 3;
+let b = 3;
+if if a == b { a } else { b } == a {
+    assert_eq(true, true);
+} else {
+    assert_eq(false, true);
+}

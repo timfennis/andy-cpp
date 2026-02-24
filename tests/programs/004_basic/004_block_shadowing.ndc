@@ -1,0 +1,8 @@
+let foo = 3;
+let _results = [];
+{
+    let foo = 5;
+    _results.push(foo);
+}
+_results.push(foo);
+assert_eq(_results, [5, 3]);

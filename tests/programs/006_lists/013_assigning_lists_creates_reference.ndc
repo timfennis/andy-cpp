@@ -1,0 +1,4 @@
+let list = [1,2,3];
+let list2 = list;
+list2[0] = 999;
+print(list, list2);

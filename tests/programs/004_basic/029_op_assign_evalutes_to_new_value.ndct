@@ -1,7 +1,0 @@
---PROGRAM--
-// NOTE: this behavior was deleted when refactoring to operators as functions
-// let list = [1,2,3];
-// assert((list[1] += 10) == 12);
-print("ok");
---EXPECT--
-ok

@@ -1,0 +1,9 @@
+fn fac(n) {
+  if n == 0 {
+    1
+  } else {
+    n * fac(n - 1)
+  }
+}
+
+assert_eq(fac(10), 3628800);

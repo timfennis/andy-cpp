@@ -1,4 +1,0 @@
---PROGRAM--
-print(2 ^ 10);
---EXPECT--
-1024

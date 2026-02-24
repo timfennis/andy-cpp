@@ -1,4 +1,0 @@
---PROGRAM--
-[1,2,3 if x > 5]
---EXPECT-ERROR--
-Unexpected token 'if' expected either ']' or 'for'
