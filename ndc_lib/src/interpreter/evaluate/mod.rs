@@ -334,7 +334,7 @@ pub(crate) fn evaluate_expression(
                 evaluated_args.push(arg);
             }
 
-            let function_as_value = resolve_and_call(function, evaluated_args, environment, span)?;
+            resolve_and_call(function, evaluated_args, environment, span)?
         }
         Expression::FunctionDeclaration {
             parameters: arguments,
@@ -991,17 +991,16 @@ fn resolve_and_call(
     environment: &Rc<RefCell<Environment>>,
     span: Span,
 ) -> EvaluationResult {
-    ////////////////////////////
     let ExpressionLocation { expression, .. } = function_expression;
 
-    let function_as_value = if let Expression::Identifier { resolved, .. } = expression {
+    let function_as_value = if let Expression::Identifier { name, resolved, .. } = expression {
         let arg_types = args.iter().map(|arg| arg.static_type()).collect::<Vec<_>>();
 
         let opt = match resolved {
             Binding::None => None,
             Binding::Resolved(var) => Some(environment.borrow().get(*var)),
             Binding::Dynamic(dynamic_binding) => dynamic_binding
-                .iter() // TODO: should we consider the binding order?
+                .iter()
                 .find_map(|binding| {
                     let value = environment.borrow().get(*binding);
 
@@ -1009,7 +1008,6 @@ fn resolve_and_call(
                         panic!("dynamic binding resolved to non-function type at runtime");
                     };
 
-                    // Find the first function that matches
                     if fun.static_type().is_fn_and_matches(&arg_types) {
                         return Some(value);
                     }
@@ -1017,10 +1015,35 @@ fn resolve_and_call(
                     None
                 }),
         };
+
+        if opt.is_none() {
+            if let Binding::Dynamic(dynamic_binding) = resolved {
+                if let [left_type, right_type] = arg_types.as_slice() {
+                    if left_type.supports_vectorization_with(right_type) {
+                        let elem_types = vectorized_element_types(left_type, right_type);
+                        let inner_fn = dynamic_binding.iter().find_map(|binding| {
+                            let value = environment.borrow().get(*binding);
+                            let Value::Function(fun) = &value else {
+                                panic!("dynamic binding resolved to non-function type at runtime");
+                            };
+                            if fun.static_type().is_fn_and_matches(&elem_types) {
+                                Some(Rc::clone(&fun))
+                            } else {
+                                None
+                            }
+                        });
+                        if let Some(inner_fn) = inner_fn {
+                            return inner_fn.call_vectorized(&mut args, environment).add_span(span);
+                        }
+                    }
+                }
+            }
+        }
+
         opt.ok_or_else(|| {
             FunctionCarrier::EvaluationError(EvaluationError::new(
                 format!(
-                    "Failed to find a function that can handle the arguments ({}) at runtime",
+                    "no function called '{name}' found matches the arguments: ({})",
                     arg_types.iter().join(", ")
                 ),
                 function_expression.span,
@@ -1030,12 +1053,7 @@ fn resolve_and_call(
         evaluate_expression(function_expression, environment)?
     };
 
-    ////////////////////////////
-    ////////////////////////////
-    ////////////////////////////
-
     if let Value::Function(function) = function_as_value {
-        // Here we should be able to call without checking types
         function.call(&mut args, environment).add_span(span)
     } else {
         Err(FunctionCarrier::EvaluationError(EvaluationError::new(
@@ -1046,6 +1064,12 @@ fn resolve_and_call(
             span,
         )))
     }
+}
+
+fn vectorized_element_types(left: &StaticType, right: &StaticType) -> [StaticType; 2] {
+    let left_elem = left.sequence_element_type().unwrap_or_else(|| left.clone());
+    let right_elem = right.sequence_element_type().unwrap_or_else(|| right.clone());
+    [left_elem, right_elem]
 }
 
 fn resolve_dynamic_binding(

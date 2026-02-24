@@ -637,13 +637,38 @@ impl ScopeTree {
 
                 Some(Binding::Dynamic(loose_bindings))
             })
-            // If we can't find any function in scope that could match, we just default to an identifier.
-            // TODO: no this fucks everything
+            // If we can't find any function in scope that could match, fall back to all same-named
+            // bindings so runtime dynamic dispatch (including vectorization) can pick the right one.
             .or_else(|| {
-                self.get_binding_any(ident)
-                    .map(|resolved| Binding::Dynamic(vec![resolved]))
+                let all_bindings = self.get_all_bindings_by_name(ident);
+                if all_bindings.is_empty() {
+                    return None;
+                }
+                Some(Binding::Dynamic(all_bindings))
             })
             .unwrap_or(Binding::None)
+    }
+
+    fn get_all_bindings_by_name(&self, ident: &str) -> Vec<ResolvedVar> {
+        let mut results = Vec::new();
+        let mut depth = 0;
+        let mut scope_ptr = self.current_scope_idx;
+
+        loop {
+            let slots = self.scopes[scope_ptr].find_all_slots_by_name(ident);
+            results.extend(slots.into_iter().map(|slot| ResolvedVar::Captured { slot, depth }));
+
+            if let Some(parent_idx) = self.scopes[scope_ptr].parent_idx {
+                depth += 1;
+                scope_ptr = parent_idx;
+            } else {
+                let global_slots = self.global_scope.find_all_slots_by_name(ident);
+                results.extend(global_slots.into_iter().map(|slot| ResolvedVar::Global { slot }));
+                break;
+            }
+        }
+
+        results
     }
 
     fn resolve_function(&mut self, ident: &str, arg_types: &[StaticType]) -> Option<ResolvedVar> {
@@ -690,6 +715,16 @@ impl Scope {
         self.identifiers
             .iter()
             .rposition(|(ident, _)| ident == find_ident)
+    }
+
+    fn find_all_slots_by_name(&self, find_ident: &str) -> Vec<usize> {
+        self.identifiers
+            .iter()
+            .enumerate()
+            .filter_map(|(slot, (ident, _))| {
+                if ident == find_ident { Some(slot) } else { None }
+            })
+            .collect()
     }
 
     fn find_function_candidates(&self, find_ident: &str, find_types: &[StaticType]) -> Vec<usize> {

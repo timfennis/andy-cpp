@@ -122,49 +122,39 @@ impl Function {
         }
     }
 
-    fn call_vectorized(
+    pub fn call_vectorized(
         &self,
         args: &mut [Value],
         env: &Rc<RefCell<Environment>>,
     ) -> EvaluationResult {
         let [left, right] = args else {
-            // Vectorized application only works in cases where there are two tuple arguments
             panic!("incorrect argument count for vectorization should have been handled by caller");
         };
 
-        // TODO: let caller handle checks?
-        // if !left.supports_vectorization_with(right) {
-        //     return Err(FunctionCarrier::FunctionNotFound);
-        // }
-
-        let (left, right) = match (left, right) {
-            // Both are tuples
-            (Value::Sequence(Sequence::Tuple(left)), Value::Sequence(Sequence::Tuple(right))) => {
-                (left, right.as_slice())
+        let result = match (left, right) {
+            (Value::Sequence(Sequence::Tuple(left_rc)), Value::Sequence(Sequence::Tuple(right_rc))) => {
+                left_rc
+                    .iter()
+                    .zip(right_rc.iter())
+                    .map(|(l, r)| self.call(&mut [l.clone(), r.clone()], env))
+                    .collect::<Result<Vec<_>, _>>()?
             }
-            // Left is a number and right is a tuple
-            (left @ Value::Number(_), Value::Sequence(Sequence::Tuple(right))) => (
-                &mut Rc::new(vec![left.clone(); right.len()]),
-                right.as_slice(),
-            ),
-            // Left is a tuple and right is a number
-            (Value::Sequence(Sequence::Tuple(left)), right @ Value::Number(_)) => {
-                (left, std::slice::from_ref(right))
+            (left @ Value::Number(_), Value::Sequence(Sequence::Tuple(right_rc))) => {
+                right_rc
+                    .iter()
+                    .map(|r| self.call(&mut [left.clone(), r.clone()], env))
+                    .collect::<Result<Vec<_>, _>>()?
             }
-            _ => {
-                panic!("caller should handle all checks before vectorizing")
+            (Value::Sequence(Sequence::Tuple(left_rc)), right @ Value::Number(_)) => {
+                left_rc
+                    .iter()
+                    .map(|l| self.call(&mut [l.clone(), right.clone()], env))
+                    .collect::<Result<Vec<_>, _>>()?
             }
+            _ => panic!("caller should handle all checks before vectorizing"),
         };
 
-        let left_mut: &mut Vec<Value> = Rc::make_mut(left);
-
-        // Zip the mutable vector with the immutable right side and perform the operations on all elements
-        // TODO: maybe one day figure out how to get rid of all these clones
-        for (l, r) in left_mut.iter_mut().zip(right.iter().cycle()) {
-            *l = self.call(&mut [l.clone(), r.clone()], env)?;
-        }
-
-        Ok(Value::Sequence(Sequence::Tuple(left.clone())))
+        Ok(Value::Sequence(Sequence::Tuple(Rc::new(result))))
     }
 }
 

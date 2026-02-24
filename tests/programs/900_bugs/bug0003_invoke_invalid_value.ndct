@@ -1,4 +1,4 @@
 --PROGRAM--
 5();
 --EXPECT-ERROR--
-Failed to invoke expression as function
+Unable to invoke Int as a function.
