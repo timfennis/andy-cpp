@@ -6,4 +6,5 @@ fn idx() {
 
 let unit_list = [0];
 unit_list[idx()] += 10;
-print("val:", unit_list[0],"invoked:", counter);
+assert_eq(unit_list[0], 10);
+assert_eq(counter, 1);
