@@ -720,13 +720,11 @@ fn declare_or_assign_variable(
     Ok(Value::unit())
 }
 
-#[derive(thiserror::Error, miette::Diagnostic, Debug)]
+#[derive(thiserror::Error, Debug)]
 #[error("{text}")]
 pub struct EvaluationError {
     text: String,
-    #[label("related to this")]
     span: Span,
-    #[help]
     help_text: Option<String>,
 }
 
@@ -824,6 +822,14 @@ impl EvaluationError {
             span,
             help_text: None,
         }
+    }
+
+    pub fn span(&self) -> Span {
+        self.span
+    }
+
+    pub fn help_text(&self) -> Option<&str> {
+        self.help_text.as_deref()
     }
 }
 

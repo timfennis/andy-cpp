@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use std::process;
 use std::{fs, io::Write};
 
+mod diagnostic;
 mod repl;
 
 mod docs;
@@ -170,10 +171,7 @@ fn start_lsp() {
 }
 
 pub fn into_miette_result<T>(result: Result<T, InterpreterError>) -> miette::Result<T> {
-    match result {
-        Err(err) => Err(err)?,
-        Ok(val) => Ok(val),
-    }
+    result.map_err(|e| miette::Report::new(diagnostic::NdcReport::from(e)))
 }
 
 #[cfg(test)]

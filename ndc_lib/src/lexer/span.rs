@@ -38,8 +38,3 @@ impl Span {
     }
 }
 
-impl From<Span> for miette::SourceSpan {
-    fn from(val: Span) -> Self {
-        (val.offset, val.length).into()
-    }
-}

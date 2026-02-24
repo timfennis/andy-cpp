@@ -803,15 +803,18 @@ impl Scope {
         self.identifiers.len() - 1
     }
 }
-#[derive(thiserror::Error, miette::Diagnostic, Debug)]
+#[derive(thiserror::Error, Debug)]
 #[error("{text}")]
 pub struct AnalysisError {
     text: String,
-    #[label("related to this")]
     span: Span,
 }
 
-impl AnalysisError {}
+impl AnalysisError {
+    pub fn span(&self) -> Span {
+        self.span
+    }
+}
 
 impl AnalysisError {
     fn unable_to_index_into(typ: &StaticType, span: Span) -> Self {
