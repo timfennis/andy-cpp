@@ -5,7 +5,7 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
-tokio = { version = "1.48.0", features = ["full"] }
+tokio = { version = "1.49.0", features = ["full"] }
 ndc_lib.workspace = true
 tower-lsp.workspace = true
 

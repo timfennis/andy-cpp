@@ -1,6 +1,6 @@
 use anyhow::Context;
 use ndc_macros::export_module;
-use rand::Rng;
+use rand::RngExt;
 use rand::distr::Uniform;
 use rand::distr::uniform::SampleUniform;
 use rand::seq::SliceRandom;
