@@ -112,26 +112,29 @@ mod inner {
         }
     }
     pub fn max_by_key(seq: &mut Sequence, func: &Callable<'_>) -> EvaluationResult {
-        let mut best_value = None;
-        let mut best_key = None;
+        by_key(seq, func, Ordering::Greater)
+    }
 
-        for value in mut_seq_to_iterator(seq) {
-            if let Some(best_key_val) = &best_key {
-                let new_key = func.call(&mut [value.clone()])?;
-                if &new_key > best_key_val {
-                    best_key = Some(new_key);
-                    best_value = Some(value);
-                }
-            } else {
-                best_key = Some(func.call(&mut [value.clone()])?);
-                best_value = Some(value);
-            }
-        }
+    pub fn min_by_key(seq: &mut Sequence, func: &Callable<'_>) -> EvaluationResult {
+        by_key(seq, func, Ordering::Less)
+    }
 
-        match best_value {
-            None => Err(anyhow::anyhow!("empty input to max_by_key"))?,
-            Some(value) => Ok(value),
-        }
+    /// Returns the maximum element using a comparator function.
+    ///
+    /// The comparator function takes two elements and returns a number. A positive result means the
+    /// first argument is greater than the second, a negative result means the first argument is
+    /// less than the second, and zero means they are equal.
+    pub fn max_by(seq: &mut Sequence, comp: &Callable<'_>) -> EvaluationResult {
+        by_comp(seq, comp, Ordering::Greater)
+    }
+
+    /// Returns the minimum element using a comparator function.
+    ///
+    /// The comparator function takes two elements and returns a number. A positive result means the
+    /// first argument is greater than the second, a negative result means the first argument is
+    /// less than the second, and zero means they are equal.
+    pub fn min_by(seq: &mut Sequence, comp: &Callable<'_>) -> EvaluationResult {
+        by_comp(seq, comp, Ordering::Less)
     }
 
     /// Returns the lowest element in the sequence.
@@ -770,6 +773,52 @@ mod inner {
             }),
         ))))
     }
+}
+
+fn by_key(
+    seq: &mut Sequence,
+    func: &Callable<'_>,
+    better: Ordering,
+) -> EvaluationResult {
+    let mut best_value = None;
+    let mut best_key: Option<Value> = None;
+
+    for value in mut_seq_to_iterator(seq) {
+        let new_key = func.call(&mut [value.clone()])?;
+        let is_better = match &best_key {
+            None => true,
+            Some(current_best) => new_key.try_cmp(current_best)? == better,
+        };
+        if is_better {
+            best_key = Some(new_key);
+            best_value = Some(value);
+        }
+    }
+
+    best_value.ok_or_else(|| anyhow::anyhow!("sequence was empty").into())
+}
+
+fn by_comp(
+    seq: &mut Sequence,
+    comp: &Callable<'_>,
+    better: Ordering,
+) -> EvaluationResult {
+    let mut best: Option<Value> = None;
+
+    for value in mut_seq_to_iterator(seq) {
+        let is_better = match &best {
+            None => true,
+            Some(current) => {
+                let result = comp.call(&mut [value.clone(), current.clone()])?;
+                result.try_cmp(&Value::from(0))? == better
+            }
+        };
+        if is_better {
+            best = Some(value);
+        }
+    }
+
+    best.ok_or_else(|| anyhow::anyhow!("sequence was empty").into())
 }
 
 fn fold_iterator(
