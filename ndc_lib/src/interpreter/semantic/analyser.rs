@@ -107,7 +107,10 @@ impl Analyser {
                         parameters: Some(param_types.clone()),
                         return_type: Box::new(StaticType::Any),
                     };
-                    Some(self.scope_tree.create_local_binding(name.clone(), placeholder))
+                    Some(
+                        self.scope_tree
+                            .create_local_binding(name.clone(), placeholder),
+                    )
                 } else {
                     None
                 };
@@ -129,7 +132,8 @@ impl Analyser {
                 if let Some(slot) = pre_slot {
                     // TODO: is this correct, for now we just always create a new binding, we could
                     //       also produce an error if we are generating a conflicting binding
-                    self.scope_tree.update_binding_type(slot, function_type.clone());
+                    self.scope_tree
+                        .update_binding_type(slot, function_type.clone());
                     *resolved_name = Some(slot);
                 }
 

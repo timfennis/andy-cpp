@@ -32,13 +32,12 @@ impl Diagnostic for NdcReport {
     fn help<'a>(&'a self) -> Option<Box<dyn fmt::Display + 'a>> {
         self.help
             .as_ref()
-            .map(|h| Box::new(h) as Box<dyn fmt::Display>)
+            .map(|h| -> Box<dyn fmt::Display> { Box::new(h) })
     }
 
     fn labels(&self) -> Option<Box<dyn Iterator<Item = LabeledSpan> + '_>> {
-        self.span.map(|s| {
+        self.span.map(|s| -> Box<dyn Iterator<Item = LabeledSpan>> {
             Box::new(std::iter::once(LabeledSpan::at(s, self.label)))
-                as Box<dyn Iterator<Item = LabeledSpan>>
         })
     }
 }
@@ -46,25 +45,25 @@ impl Diagnostic for NdcReport {
 impl From<InterpreterError> for NdcReport {
     fn from(err: InterpreterError) -> Self {
         match err {
-            InterpreterError::Lexer { cause } => NdcReport {
+            InterpreterError::Lexer { cause } => Self {
                 message: cause.to_string(),
                 span: Some(span_to_source_span(cause.span())),
                 label: "here",
                 help: cause.help_text().map(str::to_owned),
             },
-            InterpreterError::Parser { cause } => NdcReport {
+            InterpreterError::Parser { cause } => Self {
                 message: cause.to_string(),
                 span: Some(span_to_source_span(cause.span())),
                 label: "here",
                 help: cause.help_text().map(str::to_owned),
             },
-            InterpreterError::Resolver { cause } => NdcReport {
+            InterpreterError::Resolver { cause } => Self {
                 message: cause.to_string(),
                 span: Some(span_to_source_span(cause.span())),
                 label: "related to this",
                 help: None,
             },
-            InterpreterError::Evaluation(cause) => NdcReport {
+            InterpreterError::Evaluation(cause) => Self {
                 message: cause.to_string(),
                 span: Some(span_to_source_span(cause.span())),
                 label: "related to this",

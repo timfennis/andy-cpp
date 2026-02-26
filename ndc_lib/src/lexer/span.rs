@@ -37,4 +37,3 @@ impl Span {
         self.offset + self.length
     }
 }
-

@@ -132,25 +132,22 @@ impl Function {
         };
 
         let result = match (left, right) {
-            (Value::Sequence(Sequence::Tuple(left_rc)), Value::Sequence(Sequence::Tuple(right_rc))) => {
-                left_rc
-                    .iter()
-                    .zip(right_rc.iter())
-                    .map(|(l, r)| self.call(&mut [l.clone(), r.clone()], env))
-                    .collect::<Result<Vec<_>, _>>()?
-            }
-            (left @ Value::Number(_), Value::Sequence(Sequence::Tuple(right_rc))) => {
-                right_rc
-                    .iter()
-                    .map(|r| self.call(&mut [left.clone(), r.clone()], env))
-                    .collect::<Result<Vec<_>, _>>()?
-            }
-            (Value::Sequence(Sequence::Tuple(left_rc)), right @ Value::Number(_)) => {
-                left_rc
-                    .iter()
-                    .map(|l| self.call(&mut [l.clone(), right.clone()], env))
-                    .collect::<Result<Vec<_>, _>>()?
-            }
+            (
+                Value::Sequence(Sequence::Tuple(left_rc)),
+                Value::Sequence(Sequence::Tuple(right_rc)),
+            ) => left_rc
+                .iter()
+                .zip(right_rc.iter())
+                .map(|(l, r)| self.call(&mut [l.clone(), r.clone()], env))
+                .collect::<Result<Vec<_>, _>>()?,
+            (left @ Value::Number(_), Value::Sequence(Sequence::Tuple(right_rc))) => right_rc
+                .iter()
+                .map(|r| self.call(&mut [left.clone(), r.clone()], env))
+                .collect::<Result<Vec<_>, _>>()?,
+            (Value::Sequence(Sequence::Tuple(left_rc)), right @ Value::Number(_)) => left_rc
+                .iter()
+                .map(|l| self.call(&mut [l.clone(), right.clone()], env))
+                .collect::<Result<Vec<_>, _>>()?,
             _ => panic!("caller should handle all checks before vectorizing"),
         };
 
