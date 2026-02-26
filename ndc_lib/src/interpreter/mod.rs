@@ -44,7 +44,7 @@ impl Interpreter {
         self.environment
     }
 
-    pub fn analyse_document(
+    pub fn analyse_str(
         &mut self,
         input: &str,
     ) -> Result<Vec<ExpressionLocation>, InterpreterError> {

@@ -81,7 +81,7 @@ impl Backend {
         // before the next await point.
         let hints = {
             let mut interpreter = Interpreter::new(Vec::new());
-            match interpreter.analyse_document(text) {
+            match interpreter.analyse_str(text) {
                 Ok(expressions) => {
                     let mut hints = Vec::new();
                     for expr in &expressions {
