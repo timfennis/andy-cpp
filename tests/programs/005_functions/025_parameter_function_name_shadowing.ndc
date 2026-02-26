@@ -1,0 +1,4 @@
+// Context: This code should be valid because the parameter name shadows the function name inside the scope.
+fn a(a) { a }
+
+assert_eq(a(3), 3);
