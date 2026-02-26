@@ -22,9 +22,6 @@ mod highlighter;
 #[command(version = "0.2.0")]
 #[command(about = "An interpreter for the Andy C++ language")]
 struct Cli {
-    #[arg(long)]
-    debug: bool,
-
     #[arg(short = 'C', long, default_value_t = 1)]
     context_lines: usize,
 
@@ -122,7 +119,7 @@ fn main() -> anyhow::Result<()> {
 
             let stdout = std::io::stdout();
             let mut interpreter = Interpreter::new(stdout);
-            match into_miette_result(interpreter.run_str(&string, cli.debug)) {
+            match into_miette_result(interpreter.run_str(&string)) {
                 // we can just ignore successful runs because we have print statements
                 Ok(_final_value) => {}
                 Err(report) => {
@@ -147,7 +144,7 @@ fn main() -> anyhow::Result<()> {
         }
         Action::Docs(query) => return docs(query.as_deref()),
         Action::StartRepl => {
-            repl::run(cli.debug)?;
+            repl::run()?;
         }
         Action::RunLsp => start_lsp(),
     }

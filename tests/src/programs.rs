@@ -24,7 +24,7 @@ fn run_ndc_test(path: PathBuf) -> Result<(), std::io::Error> {
     print!("Running {path:?}...");
 
     let mut interpreter = Interpreter::new(Vec::new());
-    let interpreter_result = interpreter.run_str(&contents, false);
+    let interpreter_result = interpreter.run_str(&contents);
 
     let program_had_error = interpreter_result.is_err();
     let actual_error = interpreter_result.unwrap_or_else(|err| format!("{err:?}"));

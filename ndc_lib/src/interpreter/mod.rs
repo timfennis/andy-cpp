@@ -24,7 +24,6 @@ pub struct Interpreter {
     analyser: Analyser,
 }
 
-#[allow(clippy::dbg_macro, clippy::print_stdout, clippy::print_stderr)]
 impl Interpreter {
     #[must_use]
     pub fn new<T>(dest: T) -> Self
@@ -49,10 +48,21 @@ impl Interpreter {
         &mut self,
         input: &str,
     ) -> Result<Vec<ExpressionLocation>, InterpreterError> {
-        let scanner = Lexer::new(input);
-        let tokens = scanner.collect::<Result<Vec<TokenLocation>, _>>()?;
-        let mut parser = crate::ast::Parser::from_tokens(tokens);
-        let mut expressions = parser.parse()?;
+        self.parse_and_analyse(input)
+    }
+
+    pub fn run_str(&mut self, input: &str) -> Result<String, InterpreterError> {
+        let expressions = self.parse_and_analyse(input)?;
+        let final_value = self.interpret(expressions.into_iter())?;
+        Ok(format!("{final_value}"))
+    }
+
+    fn parse_and_analyse(
+        &mut self,
+        input: &str,
+    ) -> Result<Vec<ExpressionLocation>, InterpreterError> {
+        let tokens = Lexer::new(input).collect::<Result<Vec<TokenLocation>, _>>()?;
+        let mut expressions = crate::ast::Parser::from_tokens(tokens).parse()?;
 
         let checkpoint = self.analyser.checkpoint();
         for e in &mut expressions {
@@ -63,43 +73,6 @@ impl Interpreter {
         }
 
         Ok(expressions)
-    }
-
-    pub fn run_str(&mut self, input: &str, debug: bool) -> Result<String, InterpreterError> {
-        let scanner = Lexer::new(input);
-        let tokens = scanner.collect::<Result<Vec<TokenLocation>, _>>()?;
-
-        if debug {
-            for token in &tokens {
-                eprintln!("{token:?}");
-            }
-        }
-
-        let mut parser = crate::ast::Parser::from_tokens(tokens);
-
-        let mut expressions = parser.parse()?;
-
-        if debug {
-            for s in &expressions {
-                println!("{s:#?}");
-            }
-        }
-
-        let checkpoint = self.analyser.checkpoint();
-        for e in &mut expressions {
-            if let Err(e) = self.analyser.analyse(e) {
-                self.analyser.restore(checkpoint);
-                return Err(e.into());
-            }
-        }
-
-        let final_value = self.interpret(expressions.into_iter())?;
-
-        if debug {
-            dbg!(&final_value, final_value.static_type());
-        }
-
-        Ok(format!("{final_value}"))
     }
 
     fn interpret(
