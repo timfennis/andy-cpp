@@ -65,8 +65,12 @@ impl Interpreter {
             }
         }
 
+        let checkpoint = self.analyser.checkpoint();
         for e in &mut expressions {
-            self.analyser.analyse(e)?;
+            if let Err(e) = self.analyser.analyse(e) {
+                self.analyser.restore(checkpoint);
+                return Err(e.into());
+            }
         }
 
         //dbg!(&expressions);
