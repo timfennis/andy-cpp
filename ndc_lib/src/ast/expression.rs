@@ -144,6 +144,8 @@ pub enum Lvalue {
     Identifier {
         identifier: String,
         resolved: Option<ResolvedVar>,
+        span: Span,
+        inferred_type: Option<StaticType>,
     },
     // Example: `foo()[1] = ...`
     Index {
@@ -151,7 +153,7 @@ pub enum Lvalue {
         index: Box<ExpressionLocation>,
     },
     // Example: `let a, b = ...`
-    Sequence(Vec<Lvalue>),
+    Sequence(Vec<Self>),
 }
 
 impl Eq for Expression {}
@@ -252,6 +254,8 @@ impl TryFrom<ExpressionLocation> for Lvalue {
             } => Ok(Self::Identifier {
                 identifier,
                 resolved: None,
+                span: value.span,
+                inferred_type: None,
             }),
             Expression::Index { value, index } => Ok(Self::Index { value, index }),
             Expression::List { values } | Expression::Tuple { values } => Ok(Self::Sequence(

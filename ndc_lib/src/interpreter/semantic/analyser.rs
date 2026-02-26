@@ -101,6 +101,7 @@ impl Analyser {
                 resolved_name,
                 parameters,
                 body,
+                return_type: return_type_slot,
                 ..
             } => {
                 // TODO: figuring out the type signature of function declarations is the rest of the owl
@@ -132,6 +133,7 @@ impl Analyser {
                 //       the body and then figuring out the LUB.
                 let return_type = self.analyse(body)?;
                 self.scope_tree.destroy_scope();
+                *return_type_slot = Some(return_type.clone());
 
                 let function_type = StaticType::Function {
                     parameters: Some(param_types.clone()),
@@ -403,6 +405,7 @@ impl Analyser {
             Lvalue::Identifier {
                 identifier,
                 resolved,
+                ..
             } => {
                 let Some(target) = self.scope_tree.get_binding_any(identifier) else {
                     return Err(AnalysisError::identifier_not_previously_declared(
@@ -433,6 +436,7 @@ impl Analyser {
             Lvalue::Identifier {
                 identifier,
                 resolved,
+                ..
             } => {
                 let Some(target) = self.scope_tree.get_binding_any(identifier) else {
                     return Err(AnalysisError::identifier_not_previously_declared(
@@ -508,11 +512,14 @@ impl Analyser {
             Lvalue::Identifier {
                 identifier,
                 resolved,
+                inferred_type,
+                ..
             } => {
                 *resolved = Some(
                     self.scope_tree
-                        .create_local_binding(identifier.clone(), typ),
+                        .create_local_binding(identifier.clone(), typ.clone()),
                 );
+                *inferred_type = Some(typ);
             }
             Lvalue::Index { index, value } => {
                 self.analyse(index)?;

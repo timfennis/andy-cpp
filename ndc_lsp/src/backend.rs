@@ -1,26 +1,31 @@
-use tower_lsp::lsp_types::{
-    DidChangeTextDocumentParams, DidOpenTextDocumentParams, InitializeParams, InitializeResult,
-    InitializedParams, MessageType, ServerCapabilities, TextDocumentSyncCapability,
-    TextDocumentSyncKind, Url,
-};
+use std::collections::HashMap;
 
+use ndc_lib::ast::{Expression, ExpressionLocation, ForBody, ForIteration, Lvalue};
 use ndc_lib::interpreter::Interpreter;
 use ndc_lib::lexer::{Lexer, Span, TokenLocation};
+use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::Result as JsonRPCResult;
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionOptions,
     CompletionParams, CompletionResponse, Diagnostic, DiagnosticSeverity, Documentation,
-    MarkupContent, MarkupKind, Position, Range, WorkDoneProgressOptions,
+    InitializeParams, InitializeResult, InitializedParams, InlayHint, InlayHintKind,
+    InlayHintLabel, InlayHintParams, MarkupContent, MarkupKind, MessageType, OneOf, Position,
+    Range, ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
+    WorkDoneProgressOptions,
 };
 use tower_lsp::{Client, LanguageServer};
 
 pub struct Backend {
     pub client: Client,
+    documents: Mutex<HashMap<Url, Vec<InlayHint>>>,
 }
 
 impl Backend {
     pub fn new(client: Client) -> Self {
-        Self { client }
+        Self {
+            client,
+            documents: Mutex::new(HashMap::new()),
+        }
     }
 
     async fn validate(&self, uri: &Url, text: &str) {
@@ -70,6 +75,25 @@ impl Backend {
         self.client
             .publish_diagnostics(uri.clone(), diagnostics, None)
             .await;
+
+        // Run full semantic analysis and collect inlay hints from the annotated AST.
+        // The interpreter uses Rc internally (non-Send), so it must be fully dropped
+        // before the next await point.
+        let hints = {
+            let mut interpreter = Interpreter::new(Vec::new());
+            match interpreter.analyse_document(text) {
+                Ok(expressions) => {
+                    let mut hints = Vec::new();
+                    for expr in &expressions {
+                        collect_hints(expr, text, &mut hints);
+                    }
+                    hints
+                }
+                Err(_) => Vec::new(),
+            }
+        };
+
+        self.documents.lock().await.insert(uri.clone(), hints);
     }
 }
 
@@ -82,18 +106,45 @@ impl LanguageServer for Backend {
                     TextDocumentSyncKind::FULL,
                 )),
                 completion_provider: Some(CompletionOptions {
-                    resolve_provider: Some(false), // or true if you want to support `completionItem/resolve`
-                    trigger_characters: Some(vec![".".to_string()]), // characters that trigger completion
+                    resolve_provider: Some(false),
+                    trigger_characters: Some(vec![".".to_string()]),
                     all_commit_characters: None,
                     work_done_progress_options: WorkDoneProgressOptions {
                         work_done_progress: None,
                     },
                     completion_item: None,
                 }),
+                inlay_hint_provider: Some(OneOf::Left(true)),
                 ..Default::default()
             },
             ..Default::default()
         })
+    }
+
+    async fn initialized(&self, _: InitializedParams) {
+        self.client
+            .log_message(MessageType::INFO, "server initialized")
+            .await;
+    }
+
+    async fn shutdown(&self) -> JsonRPCResult<()> {
+        Ok(())
+    }
+
+    async fn did_open(&self, params: tower_lsp::lsp_types::DidOpenTextDocumentParams) {
+        self.validate(&params.text_document.uri, &params.text_document.text)
+            .await;
+    }
+
+    async fn did_change(&self, params: tower_lsp::lsp_types::DidChangeTextDocumentParams) {
+        for change in params.content_changes {
+            self.validate(&params.text_document.uri, &change.text).await;
+        }
+    }
+
+    async fn inlay_hint(&self, params: InlayHintParams) -> JsonRPCResult<Option<Vec<InlayHint>>> {
+        let hints = self.documents.lock().await;
+        Ok(hints.get(&params.text_document.uri).cloned())
     }
 
     async fn completion(
@@ -105,7 +156,6 @@ impl LanguageServer for Backend {
         let functions = env.borrow().get_all_functions();
 
         let items = functions.iter().filter_map(|fun| {
-            // Ignore operators
             if !is_normal_ident(fun.name()) {
                 return None;
             }
@@ -141,32 +191,125 @@ impl LanguageServer for Backend {
         Ok(Some(CompletionResponse::Array(items.collect())))
     }
 
-    // Optional: resolve more details on selected item (THIS IS DISABLED FOR NOW??!)
     async fn completion_resolve(
         &self,
         item: CompletionItem,
     ) -> Result<CompletionItem, tower_lsp::jsonrpc::Error> {
-        Ok(item) // add documentation, detail, etc. if needed
+        Ok(item)
     }
+}
 
-    async fn initialized(&self, _: InitializedParams) {
-        self.client
-            .log_message(MessageType::INFO, "server initialized")
-            .await;
-    }
-    async fn shutdown(&self) -> JsonRPCResult<()> {
-        Ok(())
-    }
-
-    async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        self.validate(&params.text_document.uri, &params.text_document.text)
-            .await;
-    }
-
-    async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        for change in params.content_changes {
-            self.validate(&params.text_document.uri, &change.text).await;
+/// Recursively walk an analysed AST node and collect inlay hints from places where
+/// the analyser stored type information: `Lvalue::Identifier.inferred_type` (variable
+/// and for-loop declarations) and `FunctionDeclaration.return_type`.
+fn collect_hints(expr: &ExpressionLocation, text: &str, hints: &mut Vec<InlayHint>) {
+    match &expr.expression {
+        Expression::VariableDeclaration { l_value, value } => {
+            collect_hints_from_lvalue(l_value, text, hints);
+            collect_hints(value, text, hints);
         }
+        Expression::FunctionDeclaration {
+            return_type,
+            parameters,
+            body,
+            ..
+        } => {
+            if let Some(rt) = return_type {
+                hints.push(InlayHint {
+                    position: position_from_offset(text, parameters.span.end()),
+                    label: InlayHintLabel::String(format!(" -> {rt}")),
+                    kind: Some(InlayHintKind::TYPE),
+                    text_edits: None,
+                    tooltip: None,
+                    padding_left: None,
+                    padding_right: None,
+                    data: None,
+                });
+            }
+            collect_hints(body, text, hints);
+        }
+        Expression::Statement(inner) => collect_hints(inner, text, hints),
+        Expression::Grouping(inner) => collect_hints(inner, text, hints),
+        Expression::Block { statements } => {
+            for s in statements {
+                collect_hints(s, text, hints);
+            }
+        }
+        Expression::If {
+            condition,
+            on_true,
+            on_false,
+        } => {
+            collect_hints(condition, text, hints);
+            collect_hints(on_true, text, hints);
+            if let Some(f) = on_false {
+                collect_hints(f, text, hints);
+            }
+        }
+        Expression::While {
+            expression,
+            loop_body,
+        } => {
+            collect_hints(expression, text, hints);
+            collect_hints(loop_body, text, hints);
+        }
+        Expression::For { iterations, body } => {
+            for iteration in iterations {
+                match iteration {
+                    ForIteration::Iteration { l_value, sequence } => {
+                        collect_hints_from_lvalue(l_value, text, hints);
+                        collect_hints(sequence, text, hints);
+                    }
+                    ForIteration::Guard(expr) => collect_hints(expr, text, hints),
+                }
+            }
+            match body.as_ref() {
+                ForBody::Block(e) | ForBody::List(e) => collect_hints(e, text, hints),
+                ForBody::Map {
+                    key,
+                    value,
+                    default,
+                } => {
+                    collect_hints(key, text, hints);
+                    if let Some(v) = value {
+                        collect_hints(v, text, hints);
+                    }
+                    if let Some(d) = default {
+                        collect_hints(d, text, hints);
+                    }
+                }
+            }
+        }
+        Expression::Return { value } => collect_hints(value, text, hints),
+        // Literals, identifiers, ranges, calls etc. contain no declaration sites
+        _ => {}
+    }
+}
+
+fn collect_hints_from_lvalue(lvalue: &Lvalue, text: &str, hints: &mut Vec<InlayHint>) {
+    match lvalue {
+        Lvalue::Identifier {
+            inferred_type: Some(typ),
+            span,
+            ..
+        } => {
+            hints.push(InlayHint {
+                position: position_from_offset(text, span.end()),
+                label: InlayHintLabel::String(format!(": {typ}")),
+                kind: Some(InlayHintKind::TYPE),
+                text_edits: None,
+                tooltip: None,
+                padding_left: None,
+                padding_right: Some(true),
+                data: None,
+            });
+        }
+        Lvalue::Sequence(lvalues) => {
+            for lv in lvalues {
+                collect_hints_from_lvalue(lv, text, hints);
+            }
+        }
+        _ => {}
     }
 }
 

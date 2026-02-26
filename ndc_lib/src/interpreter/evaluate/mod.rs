@@ -87,6 +87,7 @@ pub(crate) fn evaluate_expression(
                 Lvalue::Identifier {
                     identifier,
                     resolved: resolved_l_value,
+                    ..
                 } => {
                     let resolved_l_value = resolved_l_value.expect("lvalue must be resolved");
                     let rhs = evaluate_expression(r_value, environment)?;
@@ -675,10 +676,7 @@ fn declare_or_assign_variable(
     span: Span,
 ) -> EvaluationResult {
     match l_value {
-        Lvalue::Identifier {
-            identifier: _,
-            resolved,
-        } => {
+        Lvalue::Identifier { resolved, .. } => {
             environment
                 .borrow_mut()
                 .set(resolved.expect("must be resolved"), value.clone());

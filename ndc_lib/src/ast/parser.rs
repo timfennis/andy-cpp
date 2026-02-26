@@ -659,6 +659,7 @@ impl Parser {
                     let Lvalue::Identifier {
                         identifier,
                         resolved: None,
+                        ..
                     } = identifier
                     else {
                         unreachable!("Guaranteed to match by previous call to require_identifier")

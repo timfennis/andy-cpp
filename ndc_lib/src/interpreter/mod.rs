@@ -45,6 +45,26 @@ impl Interpreter {
         self.environment
     }
 
+    pub fn analyse_document(
+        &mut self,
+        input: &str,
+    ) -> Result<Vec<ExpressionLocation>, InterpreterError> {
+        let scanner = Lexer::new(input);
+        let tokens = scanner.collect::<Result<Vec<TokenLocation>, _>>()?;
+        let mut parser = crate::ast::Parser::from_tokens(tokens);
+        let mut expressions = parser.parse()?;
+
+        let checkpoint = self.analyser.checkpoint();
+        for e in &mut expressions {
+            if let Err(e) = self.analyser.analyse(e) {
+                self.analyser.restore(checkpoint);
+                return Err(e.into());
+            }
+        }
+
+        Ok(expressions)
+    }
+
     pub fn run_str(&mut self, input: &str, debug: bool) -> Result<String, InterpreterError> {
         let scanner = Lexer::new(input);
         let tokens = scanner.collect::<Result<Vec<TokenLocation>, _>>()?;
@@ -72,9 +92,6 @@ impl Interpreter {
                 return Err(e.into());
             }
         }
-
-        //dbg!(&expressions);
-        //dbg!(&self.analyser);
 
         let final_value = self.interpret(expressions.into_iter())?;
 
