@@ -17,10 +17,7 @@ fn main() {
 }
 
 fn generate_tests(output: &mut impl Write, base: &Path, dir: &Path) {
-    let mut entries: Vec<_> = fs::read_dir(dir)
-        .unwrap()
-        .filter_map(|e| e.ok())
-        .collect();
+    let mut entries: Vec<_> = fs::read_dir(dir).unwrap().filter_map(|e| e.ok()).collect();
     entries.sort_by_key(|e| e.path());
 
     for entry in entries {

@@ -3,7 +3,6 @@ mod span;
 mod string;
 mod token;
 
-use miette::{Diagnostic, SourceSpan};
 use number::NumberLexer;
 use std::collections::VecDeque;
 use std::str::Chars;
@@ -238,18 +237,11 @@ impl SourceIterator<'_> {
     }
 }
 
-#[derive(Diagnostic, thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 #[error("{text}")]
-#[diagnostic()]
 pub struct Error {
     text: String,
-
     location: Span,
-
-    #[label("here")]
-    location_ss: SourceSpan,
-
-    #[help]
     help_text: Option<String>,
 }
 
@@ -259,7 +251,6 @@ impl Error {
         Self {
             text,
             location: source,
-            location_ss: source.into(),
             help_text: None,
         }
     }
@@ -269,7 +260,6 @@ impl Error {
         Self {
             text: "Unterminated string".to_string(),
             location: span,
-            location_ss: span.into(),
             help_text: None,
         }
     }
@@ -279,12 +269,19 @@ impl Error {
         Self {
             text,
             location: source,
-            location_ss: source.into(),
             help_text: Some(help_text),
         }
     }
 
     pub fn location(&self) -> Span {
         self.location
+    }
+
+    pub fn span(&self) -> Span {
+        self.location
+    }
+
+    pub fn help_text(&self) -> Option<&str> {
+        self.help_text.as_deref()
     }
 }

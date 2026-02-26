@@ -8,8 +8,6 @@ use crate::interpreter::function::FunctionCarrier;
 use crate::interpreter::semantic::analyser::{Analyser, ScopeTree};
 use crate::interpreter::value::Value;
 use crate::lexer::{Lexer, TokenLocation};
-use miette::Diagnostic;
-
 pub mod environment;
 pub mod evaluate;
 pub mod function;
@@ -121,27 +119,23 @@ impl Interpreter {
     }
 }
 
-#[derive(thiserror::Error, Diagnostic, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum InterpreterError {
     #[error("Error while lexing source")]
-    #[diagnostic(transparent)]
     Lexer {
         #[from]
         cause: crate::lexer::Error,
     },
     #[error("Error while parsing source")]
-    #[diagnostic(transparent)]
     Parser {
         #[from]
         cause: crate::ast::Error,
     },
     #[error("Error during static analysis")]
-    #[diagnostic(transparent)]
     Resolver {
         #[from]
         cause: semantic::analyser::AnalysisError,
     },
     #[error("Error while executing code")]
-    #[diagnostic(transparent)]
     Evaluation(#[from] EvaluationError),
 }

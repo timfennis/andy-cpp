@@ -720,13 +720,11 @@ fn declare_or_assign_variable(
     Ok(Value::unit())
 }
 
-#[derive(thiserror::Error, miette::Diagnostic, Debug)]
+#[derive(thiserror::Error, Debug)]
 #[error("{text}")]
 pub struct EvaluationError {
     text: String,
-    #[label("related to this")]
     span: Span,
-    #[help]
     help_text: Option<String>,
 }
 
@@ -824,6 +822,14 @@ impl EvaluationError {
             span,
             help_text: None,
         }
+    }
+
+    pub fn span(&self) -> Span {
+        self.span
+    }
+
+    pub fn help_text(&self) -> Option<&str> {
+        self.help_text.as_deref()
     }
 }
 
@@ -999,21 +1005,19 @@ fn resolve_and_call(
         let opt = match resolved {
             Binding::None => None,
             Binding::Resolved(var) => Some(environment.borrow().get(*var)),
-            Binding::Dynamic(dynamic_binding) => dynamic_binding
-                .iter()
-                .find_map(|binding| {
-                    let value = environment.borrow().get(*binding);
+            Binding::Dynamic(dynamic_binding) => dynamic_binding.iter().find_map(|binding| {
+                let value = environment.borrow().get(*binding);
 
-                    let Value::Function(fun) = &value else {
-                        panic!("dynamic binding resolved to non-function type at runtime");
-                    };
+                let Value::Function(fun) = &value else {
+                    panic!("dynamic binding resolved to non-function type at runtime");
+                };
 
-                    if fun.static_type().is_fn_and_matches(&arg_types) {
-                        return Some(value);
-                    }
+                if fun.static_type().is_fn_and_matches(&arg_types) {
+                    return Some(value);
+                }
 
-                    None
-                }),
+                None
+            }),
         };
 
         if opt.is_none() {
@@ -1033,7 +1037,9 @@ fn resolve_and_call(
                             }
                         });
                         if let Some(inner_fn) = inner_fn {
-                            return inner_fn.call_vectorized(&mut args, environment).add_span(span);
+                            return inner_fn
+                                .call_vectorized(&mut args, environment)
+                                .add_span(span);
                         }
                     }
                 }
@@ -1068,7 +1074,9 @@ fn resolve_and_call(
 
 fn vectorized_element_types(left: &StaticType, right: &StaticType) -> [StaticType; 2] {
     let left_elem = left.sequence_element_type().unwrap_or_else(|| left.clone());
-    let right_elem = right.sequence_element_type().unwrap_or_else(|| right.clone());
+    let right_elem = right
+        .sequence_element_type()
+        .unwrap_or_else(|| right.clone());
     [left_elem, right_elem]
 }
 

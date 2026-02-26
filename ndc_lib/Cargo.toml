@@ -11,7 +11,6 @@ derive_more.workspace = true
 derive_builder.workspace = true
 factorial.workspace = true
 itertools.workspace = true
-miette.workspace = true
 ndc_macros.workspace = true
 num.workspace = true
 once_cell.workspace = true

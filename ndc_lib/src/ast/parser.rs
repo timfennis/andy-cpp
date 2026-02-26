@@ -1,7 +1,5 @@
 use std::fmt::Write;
 
-use miette::Diagnostic;
-
 use crate::ast::Expression;
 use crate::ast::expression::{Binding, ExpressionLocation, ForBody, ForIteration, Lvalue};
 use crate::ast::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
@@ -1269,13 +1267,11 @@ impl Parser {
     }
 }
 
-#[derive(thiserror::Error, Diagnostic, Debug)]
+#[derive(thiserror::Error, Debug)]
 #[error("{text}")]
 pub struct Error {
     text: String,
-    #[help]
     help_text: Option<String>,
-    #[label("here")]
     span: Span,
 }
 
@@ -1309,6 +1305,14 @@ impl Error {
 
     pub fn location(&self) -> Span {
         self.span
+    }
+
+    pub fn span(&self) -> Span {
+        self.span
+    }
+
+    pub fn help_text(&self) -> Option<&str> {
+        self.help_text.as_deref()
     }
 }
 
