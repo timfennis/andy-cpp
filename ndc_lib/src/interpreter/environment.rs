@@ -16,7 +16,7 @@ pub struct RootEnvironment {
 
 pub struct Environment {
     root: Rc<RefCell<RootEnvironment>>,
-    parent: Option<Rc<RefCell<Environment>>>,
+    parent: Option<Rc<RefCell<Self>>>,
     values: Vec<Value>,
 }
 
