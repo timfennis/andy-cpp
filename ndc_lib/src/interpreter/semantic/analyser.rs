@@ -96,15 +96,16 @@ impl Analyser {
                 ..
             } => {
                 // TODO: figuring out the type signature of function declarations is the rest of the owl
-                let param_types: Vec<StaticType> =
-                    std::iter::repeat_n(StaticType::Any, extract_argument_arity(parameters))
-                        .collect();
 
                 // Pre-register the function before analysing its body so recursive calls can
                 // resolve the name. The return type is unknown at this point so we use Any.
                 let pre_slot = if let Some(name) = name {
+                    let param_types: Vec<StaticType> =
+                        std::iter::repeat_n(StaticType::Any, extract_argument_arity(parameters))
+                            .collect();
+
                     let placeholder = StaticType::Function {
-                        parameters: Some(param_types.clone()),
+                        parameters: Some(param_types),
                         return_type: Box::new(StaticType::Any),
                     };
                     Some(
@@ -116,7 +117,7 @@ impl Analyser {
                 };
 
                 self.scope_tree.new_scope();
-                self.resolve_parameters_declarative(parameters);
+                let param_types = self.resolve_parameters_declarative(parameters)?;
 
                 // TODO: instead of just hardcoding the return type of every function to StaticType::Any
                 //       we should somehow collect all the returns that were encountered while analysing
@@ -448,7 +449,13 @@ impl Analyser {
     }
 
     /// Resolve expressions as arguments to a function and return the function arity
-    fn resolve_parameters_declarative(&mut self, arguments: &mut ExpressionLocation) {
+    fn resolve_parameters_declarative(
+        &mut self,
+        arguments: &mut ExpressionLocation,
+    ) -> Result<Vec<StaticType>, AnalysisError> {
+        let mut types: Vec<StaticType> = Vec::new();
+        let mut names: Vec<&str> = Vec::new();
+
         let ExpressionLocation {
             expression: Expression::Tuple { values },
             ..
@@ -460,7 +467,7 @@ impl Analyser {
         for arg in values {
             let ExpressionLocation {
                 expression: Expression::Identifier { name, resolved },
-                ..
+                span,
             } = arg
             else {
                 panic!("expected tuple values to be ident");
@@ -468,11 +475,20 @@ impl Analyser {
 
             // TODO: big challenge how do we figure out the function parameter types?
             //       it seems like this is something we need an HM like system for!?
+            let resolved_type = StaticType::Any;
+            types.push(resolved_type.clone());
+            if names.contains(&name.as_str()) {
+                return Err(AnalysisError::parameter_redefined(name, *span));
+            }
+            names.push(name);
+
             *resolved = Binding::Resolved(
                 self.scope_tree
-                    .create_local_binding((*name).to_string(), StaticType::Any),
+                    .create_local_binding((*name).clone(), resolved_type),
             );
         }
+
+        Ok(types)
     }
     fn resolve_lvalue_declarative(
         &mut self,
@@ -818,9 +834,12 @@ impl AnalysisError {
     pub fn span(&self) -> Span {
         self.span
     }
-}
-
-impl AnalysisError {
+    fn parameter_redefined(param: &str, span: Span) -> Self {
+        Self {
+            text: format!("Illegal redefinition of parameter {param}"),
+            span,
+        }
+    }
     fn unable_to_index_into(typ: &StaticType, span: Span) -> Self {
         Self {
             text: format!("Unable to index into {typ}"),

@@ -777,11 +777,7 @@ mod inner {
     }
 }
 
-fn by_key(
-    seq: &mut Sequence,
-    func: &Callable<'_>,
-    better: Ordering,
-) -> EvaluationResult {
+fn by_key(seq: &mut Sequence, func: &Callable<'_>, better: Ordering) -> EvaluationResult {
     let mut best_value = None;
     let mut best_key: Option<Value> = None;
 
@@ -800,11 +796,7 @@ fn by_key(
     best_value.ok_or_else(|| anyhow::anyhow!("sequence was empty").into())
 }
 
-fn by_comp(
-    seq: &mut Sequence,
-    comp: &Callable<'_>,
-    better: Ordering,
-) -> EvaluationResult {
+fn by_comp(seq: &mut Sequence, comp: &Callable<'_>, better: Ordering) -> EvaluationResult {
     let mut best: Option<Value> = None;
 
     for value in mut_seq_to_iterator(seq) {
