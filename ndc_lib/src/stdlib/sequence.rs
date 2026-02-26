@@ -111,10 +111,12 @@ mod inner {
             Sequence::Deque(d) => d.try_borrow()?.iter().try_max(),
         }
     }
+    /// Returns the element for which the key function returns the highest value.
     pub fn max_by_key(seq: &mut Sequence, func: &Callable<'_>) -> EvaluationResult {
         by_key(seq, func, Ordering::Greater)
     }
 
+    /// Returns the element for which the key function returns the lowest value.
     pub fn min_by_key(seq: &mut Sequence, func: &Callable<'_>) -> EvaluationResult {
         by_key(seq, func, Ordering::Less)
     }
