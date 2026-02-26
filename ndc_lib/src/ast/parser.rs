@@ -656,12 +656,7 @@ impl Parser {
                     let identifier_span = l_value.span;
                     let first_argument_span = expr.span;
                     let identifier = Lvalue::try_from(l_value)?;
-                    let Lvalue::Identifier {
-                        identifier,
-                        resolved: None,
-                        ..
-                    } = identifier
-                    else {
+                    let Lvalue::Identifier { identifier, .. } = identifier else {
                         unreachable!("Guaranteed to match by previous call to require_identifier")
                     };
 
