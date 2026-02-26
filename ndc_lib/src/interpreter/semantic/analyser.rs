@@ -14,6 +14,14 @@ impl Analyser {
     pub fn from_scope_tree(scope_tree: ScopeTree) -> Self {
         Self { scope_tree }
     }
+
+    pub fn checkpoint(&self) -> ScopeTree {
+        self.scope_tree.clone()
+    }
+
+    pub fn restore(&mut self, checkpoint: ScopeTree) {
+        self.scope_tree = checkpoint;
+    }
 }
 
 impl Analyser {
@@ -559,7 +567,7 @@ fn extract_argument_arity(arguments: &ExpressionLocation) -> usize {
     values.len()
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ScopeTree {
     current_scope_idx: usize,
     global_scope: Scope,
@@ -749,7 +757,7 @@ impl ScopeTree {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Scope {
     parent_idx: Option<usize>,
     identifiers: Vec<(String, StaticType)>,
