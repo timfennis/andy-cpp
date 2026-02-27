@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["ndc_macros", "ndc_bin", "ndc_lib", "ndc_lsp", "ndc_lexer", "benches", "tests"]
+members = ["ndc_macros", "ndc_bin", "ndc_lib", "ndc_lsp", "ndc_lexer", "ndc_parser", "benches", "tests"]
 
 [workspace.package]
 edition = "2024"
@@ -19,6 +19,7 @@ factorial = "0.4.0"
 itertools = "0.14.0"
 ndc_lexer = { path = "ndc_lexer" }
 ndc_lib = { path = "ndc_lib" }
+ndc_parser = { path = "ndc_parser" }
 ndc_lsp = { path = "ndc_lsp" }
 ndc_macros = { path = "ndc_macros" }
 num = "0.4.3"

@@ -13,6 +13,7 @@ factorial.workspace = true
 itertools.workspace = true
 ndc_lexer.workspace = true
 ndc_macros.workspace = true
+ndc_parser.workspace = true
 num.workspace = true
 once_cell.workspace = true
 ordered-float.workspace = true

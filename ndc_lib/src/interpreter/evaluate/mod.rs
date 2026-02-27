@@ -346,7 +346,8 @@ pub(crate) fn evaluate_expression(
             ..
         } => {
             let mut user_function = FunctionBody::Closure {
-                parameter_names: arguments.try_into_parameters()?,
+                parameter_names: arguments.try_into_parameters()
+                    .map_err(|e| EvaluationError::syntax_error(e.to_string(), arguments.span))?,
                 body: *body.clone(),
                 return_type: return_type.clone().unwrap_or_else(StaticType::unit),
                 environment: environment.clone(),

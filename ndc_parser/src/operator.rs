@@ -1,4 +1,4 @@
-use crate::ast::Error as ParseError;
+use crate::parser::Error as ParseError;
 use ndc_lexer::{Token, TokenLocation};
 use std::fmt;
 use std::fmt::Formatter;

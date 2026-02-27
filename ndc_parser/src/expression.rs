@@ -1,7 +1,6 @@
-use crate::ast::operator::LogicalOperator;
-use crate::ast::parser::Error as ParseError;
-use crate::interpreter::evaluate::EvaluationError;
-use crate::interpreter::function::StaticType;
+use crate::operator::LogicalOperator;
+use crate::parser::Error as ParseError;
+use crate::static_type::StaticType;
 use ndc_lexer::Span;
 use num::BigInt;
 use num::complex::Complex64;
@@ -178,11 +177,11 @@ impl ExpressionLocation {
     }
 
     /// # Errors
-    /// If this expression cannot be converted into an identifier an `EvaluationError::InvalidExpression` will be returned
-    pub fn try_into_identifier(&self) -> Result<&str, EvaluationError> {
+    /// If this expression cannot be converted into an identifier a `ParseError` will be returned
+    pub fn try_into_identifier(&self) -> Result<&str, ParseError> {
         match &self.expression {
             Expression::Identifier { name, resolved: _ } => Ok(name),
-            _ => Err(EvaluationError::syntax_error(
+            _ => Err(ParseError::text(
                 "expected identifier".to_string(),
                 self.span,
             )),
@@ -190,16 +189,16 @@ impl ExpressionLocation {
     }
 
     /// # Errors
-    /// If this expression cannot be converted into a tuple (or possibly another type that can be a valid parameter list) an `EvaluationError::InvalidExpression` will be returned
-    pub fn try_into_parameters(&self) -> Result<Vec<String>, EvaluationError> {
+    /// If this expression cannot be converted into a tuple (or possibly another type that can be a valid parameter list) a `ParseError` will be returned
+    pub fn try_into_parameters(&self) -> Result<Vec<String>, ParseError> {
         match &self.expression {
             Expression::Tuple {
                 values: tuple_values,
             } => tuple_values
                 .iter()
                 .map(|it| it.try_into_identifier().map(ToString::to_string))
-                .collect::<Result<Vec<String>, EvaluationError>>(),
-            _ => Err(EvaluationError::syntax_error(
+                .collect::<Result<Vec<String>, ParseError>>(),
+            _ => Err(ParseError::text(
                 "expected a parameter list".to_string(),
                 self.span,
             )),

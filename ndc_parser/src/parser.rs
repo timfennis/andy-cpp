@@ -1,8 +1,8 @@
 use std::fmt::Write;
 
-use crate::ast::Expression;
-use crate::ast::expression::{Binding, ExpressionLocation, ForBody, ForIteration, Lvalue};
-use crate::ast::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
+use crate::expression::Expression;
+use crate::expression::{Binding, ExpressionLocation, ForBody, ForIteration, Lvalue};
+use crate::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
 use ndc_lexer::{Span, Token, TokenLocation};
 
 pub struct Parser {
