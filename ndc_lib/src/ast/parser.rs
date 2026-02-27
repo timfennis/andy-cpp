@@ -798,7 +798,7 @@ impl Parser {
                 self.for_comprehension(left_square_bracket_span, result, &Token::RightSquareBracket)
             }
             _ => {
-                let token = self.require_current_token().expect("must have token here");
+                let token = self.require_current_token()?;
                 Err(Error::with_help(
                     format!(
                         "Unexpected token '{}' expected either ']' or 'for'",
