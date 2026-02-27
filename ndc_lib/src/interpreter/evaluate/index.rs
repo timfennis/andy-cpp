@@ -9,7 +9,7 @@
 //! | Backward index | -10 | -9 | -8 | -7 | -6 | -5 | -4 | -3 | -2 | -1 |
 //! +----------------+-----+----+----+----+----+----+----+----+----+----+
 
-use super::{EvaluationError, IntoEvaluationResult, evaluate_expression};
+use super::{EvaluationError, EvaluationResult, IntoEvaluationResult, evaluate_expression};
 use crate::interpreter::environment::Environment;
 use crate::{
     ast::{Expression, ExpressionLocation},
@@ -174,6 +174,7 @@ pub fn get_at_index(
     lhs: &Value,
     index: EvaluatedIndex,
     span: Span,
+    environment: &Rc<RefCell<Environment>>,
 ) -> Result<Value, FunctionCarrier> {
     let Some(size) = lhs.sequence_length() else {
         return Err(EvaluationError::new(
@@ -210,9 +211,7 @@ pub fn get_at_index(
                     .collect::<String>(),
             }))
         }
-        Value::Sequence(Sequence::Map(map, _)) => {
-            let map = map.try_borrow().into_evaluation_result(span)?;
-
+        Value::Sequence(Sequence::Map(map, default)) => {
             let key = match index {
                 EvaluatedIndex::Index(idx) => idx,
                 EvaluatedIndex::Slice { .. } => {
@@ -224,16 +223,44 @@ pub fn get_at_index(
                 }
             };
 
-            Ok(map
-                .get(&key)
-                .ok_or_else(|| EvaluationError::key_not_found(&key, span))?
-                .clone())
+            let value = map.try_borrow().into_evaluation_result(span)?.get(&key).cloned();
+
+            if let Some(value) = value {
+                Ok(value)
+            } else if let Some(default) = default {
+                let default_value = produce_default_value(default, environment, span)?;
+                map.try_borrow_mut().into_evaluation_result(span)?.insert(key, default_value.clone());
+                Ok(default_value)
+            } else {
+                Err(EvaluationError::key_not_found(&key, span).into())
+            }
         }
         _ => Err(EvaluationError::syntax_error(
             format!("cannot insert into {} at index", lhs.static_type()),
             span,
         )
         .into()),
+    }
+}
+
+pub(super) fn produce_default_value(
+    default: &Value,
+    environment: &Rc<RefCell<Environment>>,
+    span: Span,
+) -> EvaluationResult {
+    match default {
+        Value::Function(function) => {
+            match function.call_checked(&mut [], environment) {
+                Err(FunctionCarrier::FunctionTypeMismatch) => {
+                    Err(FunctionCarrier::EvaluationError(EvaluationError::new(
+                        "default function is not callable without arguments".to_string(),
+                        span,
+                    )))
+                }
+                a => a,
+            }
+        }
+        value => Ok(value.clone()),
     }
 }
 pub fn set_at_index(

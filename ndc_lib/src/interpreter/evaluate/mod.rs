@@ -165,7 +165,7 @@ pub(crate) fn evaluate_expression(
                 } => {
                     let mut lhs_value = evaluate_expression(lhs_expression, environment)?;
                     let index = evaluate_as_index(index_expression, environment)?;
-                    let value_at_index = get_at_index(&lhs_value, index.clone(), span)?;
+                    let value_at_index = get_at_index(&lhs_value, index.clone(), span, environment)?;
 
                     let right_value = evaluate_expression(r_value, environment)?;
 
@@ -565,7 +565,7 @@ pub(crate) fn evaluate_expression(
                     return if let Some(value) = value {
                         Ok(value)
                     } else if let Some(default) = default {
-                        let default_value = produce_default_value(
+                        let default_value = index::produce_default_value(
                             &default,
                             environment,
                             // NOTE: this span points at the entire expression instead of the
@@ -647,27 +647,6 @@ pub(crate) fn evaluate_expression(
     Ok(literal)
 }
 
-fn produce_default_value(
-    default: &Value,
-    environment: &Rc<RefCell<Environment>>,
-    span: Span,
-) -> EvaluationResult {
-    match default {
-        Value::Function(function) => {
-            match function.call_checked(&mut [], environment) {
-                Err(FunctionCarrier::FunctionTypeMismatch) => {
-                    Err(FunctionCarrier::EvaluationError(EvaluationError::new(
-                        "default function is not callable without arguments".to_string(),
-                        span,
-                    )))
-                }
-                a => a,
-            }
-            // test
-        }
-        value => Ok(value.clone()),
-    }
-}
 
 fn declare_or_assign_variable(
     l_value: &Lvalue,
