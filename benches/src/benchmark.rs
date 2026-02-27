@@ -1,6 +1,6 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use ndc_lib::interpreter::{Interpreter, InterpreterError};
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use std::fs;
 use std::path::Path;
