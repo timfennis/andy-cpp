@@ -6,6 +6,7 @@ version.workspace = true
 
 [dependencies]
 tokio = { version = "1.49.0", features = ["full"] }
+ndc_lexer.workspace = true
 ndc_lib.workspace = true
 tower-lsp.workspace = true
 

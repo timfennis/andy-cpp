@@ -1,6 +1,6 @@
 use miette::{Diagnostic, LabeledSpan, SourceSpan};
 use ndc_lib::interpreter::InterpreterError;
-use ndc_lib::lexer::Span;
+use ndc_lexer::Span;
 use std::fmt;
 
 fn span_to_source_span(span: Span) -> SourceSpan {

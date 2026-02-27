@@ -14,8 +14,8 @@ use crate::interpreter::environment::Environment;
 use crate::{
     ast::{Expression, ExpressionLocation},
     interpreter::{function::FunctionCarrier, sequence::Sequence, value::Value},
-    lexer::Span,
 };
+use ndc_lexer::Span;
 use itertools::Itertools;
 use std::cell::RefCell;
 use std::cmp::min;

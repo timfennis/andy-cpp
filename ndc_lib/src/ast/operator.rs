@@ -1,5 +1,5 @@
 use crate::ast::Error as ParseError;
-use crate::lexer::{Token, TokenLocation};
+use ndc_lexer::{Token, TokenLocation};
 use std::fmt;
 use std::fmt::Formatter;
 

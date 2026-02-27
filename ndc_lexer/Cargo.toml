@@ -1,0 +1,9 @@
+[package]
+name = "ndc_lexer"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+num.workspace = true
+ryu.workspace = true
+thiserror.workspace = true

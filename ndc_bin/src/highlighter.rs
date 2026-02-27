@@ -3,7 +3,7 @@ use miette::{
     SpanContents,
     highlighters::{Highlighter, HighlighterState},
 };
-use ndc_lib::lexer::{Lexer, Token};
+use ndc_lexer::{Lexer, Token};
 use owo_colors::{Rgb, Style, Styled};
 
 #[derive(Default)]

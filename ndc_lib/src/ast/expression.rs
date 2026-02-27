@@ -2,7 +2,7 @@ use crate::ast::operator::LogicalOperator;
 use crate::ast::parser::Error as ParseError;
 use crate::interpreter::evaluate::EvaluationError;
 use crate::interpreter::function::StaticType;
-use crate::lexer::Span;
+use ndc_lexer::Span;
 use num::BigInt;
 use num::complex::Complex64;
 
