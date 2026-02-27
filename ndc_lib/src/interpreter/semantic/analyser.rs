@@ -22,9 +22,7 @@ impl Analyser {
     pub fn restore(&mut self, checkpoint: ScopeTree) {
         self.scope_tree = checkpoint;
     }
-}
 
-impl Analyser {
     pub fn analyse(
         &mut self,
         ExpressionLocation { expression, span }: &mut ExpressionLocation,
