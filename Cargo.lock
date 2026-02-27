@@ -1247,6 +1247,7 @@ dependencies = [
  "clap",
  "itertools 0.14.0",
  "miette",
+ "ndc_lexer",
  "ndc_lib",
  "ndc_lsp",
  "owo-colors",
@@ -1255,6 +1256,15 @@ dependencies = [
  "tap",
  "termimad",
  "tokio",
+]
+
+[[package]]
+name = "ndc_lexer"
+version = "0.2.1"
+dependencies = [
+ "num",
+ "ryu",
+ "thiserror",
 ]
 
 [[package]]
@@ -1268,6 +1278,7 @@ dependencies = [
  "factorial",
  "itertools 0.14.0",
  "md5",
+ "ndc_lexer",
  "ndc_macros",
  "num",
  "once_cell",
@@ -1286,6 +1297,7 @@ dependencies = [
 name = "ndc_lsp"
 version = "0.2.1"
 dependencies = [
+ "ndc_lexer",
  "ndc_lib",
  "tokio",
  "tower-lsp",

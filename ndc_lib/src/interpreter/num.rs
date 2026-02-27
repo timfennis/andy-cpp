@@ -8,7 +8,7 @@ use crate::ast::BinaryOperator;
 use crate::interpreter::evaluate::EvaluationError;
 use crate::interpreter::function::StaticType;
 use crate::interpreter::int::Int;
-use crate::lexer::Span;
+use ndc_lexer::Span;
 use num::bigint::TryFromBigIntError;
 use num::complex::{Complex64, ComplexFloat};
 use num::{BigInt, BigRational, Complex, FromPrimitive, Signed, ToPrimitive, Zero};

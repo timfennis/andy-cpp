@@ -7,7 +7,7 @@ use crate::interpreter::evaluate::{
 use crate::interpreter::num::{BinaryOperatorError, Number};
 use crate::interpreter::sequence::Sequence;
 use crate::interpreter::value::Value;
-use crate::lexer::Span;
+use ndc_lexer::Span;
 use derive_builder::Builder;
 use itertools::Itertools;
 use std::cell::{BorrowError, BorrowMutError, RefCell};

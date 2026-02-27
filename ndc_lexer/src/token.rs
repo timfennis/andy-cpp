@@ -331,7 +331,7 @@ impl From<String> for Token {
 
 #[cfg(test)]
 mod test {
-    use crate::lexer::Span;
+    use crate::Span;
 
     #[test]
     fn test_merge() {

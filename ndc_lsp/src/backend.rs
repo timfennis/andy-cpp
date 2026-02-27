@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use ndc_lib::ast::{Expression, ExpressionLocation, ForBody, ForIteration, Lvalue};
 use ndc_lib::interpreter::Interpreter;
-use ndc_lib::lexer::{Lexer, Span, TokenLocation};
+use ndc_lexer::{Lexer, Span, TokenLocation};
 use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::Result as JsonRPCResult;
 use tower_lsp::lsp_types::{
@@ -31,7 +31,7 @@ impl Backend {
     async fn validate(&self, uri: &Url, text: &str) {
         let scanner = Lexer::new(text);
         let tokens = scanner
-            .collect::<Result<Vec<TokenLocation>, ndc_lib::lexer::Error>>()
+            .collect::<Result<Vec<TokenLocation>, ndc_lexer::Error>>()
             .map_err(|err| {
                 let span: Span = err.location();
 

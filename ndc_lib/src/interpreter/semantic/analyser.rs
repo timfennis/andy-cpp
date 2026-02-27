@@ -2,7 +2,7 @@ use crate::ast::{
     Binding, Expression, ExpressionLocation, ForBody, ForIteration, Lvalue, ResolvedVar,
 };
 use crate::interpreter::function::StaticType;
-use crate::lexer::Span;
+use ndc_lexer::Span;
 use itertools::Itertools;
 use std::fmt::{Debug, Formatter};
 

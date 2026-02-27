@@ -9,7 +9,7 @@ use crate::interpreter::iterator::mut_value_to_iterator;
 use crate::interpreter::num::Number;
 use crate::interpreter::sequence::Sequence;
 use crate::interpreter::value::Value;
-use crate::lexer::Span;
+use ndc_lexer::Span;
 use index::{Offset, evaluate_as_index, get_at_index, set_at_index};
 use itertools::Itertools;
 use std::cell::RefCell;
