@@ -1,0 +1,7 @@
+let map = %{:0}; // map with default 0
+map["foo"] += 3;
+map[0] += 10;
+map[0] += 10;
+
+assert_eq(map["foo"], 3);
+assert_eq(map[0], 20);
