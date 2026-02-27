@@ -1,0 +1,2 @@
+// expect-error: failed to unpack value into pattern because the lengths do not match
+let a, b = "a\n\nb\n\nc".paragraphs
