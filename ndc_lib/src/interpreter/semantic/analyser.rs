@@ -101,6 +101,7 @@ impl Analyser {
                 resolved_name,
                 parameters,
                 body,
+                return_type: return_type_slot,
                 ..
             } => {
                 // TODO: figuring out the type signature of function declarations is the rest of the owl
@@ -127,15 +128,17 @@ impl Analyser {
                 self.scope_tree.new_scope();
                 let param_types = self.resolve_parameters_declarative(parameters)?;
 
-                // TODO: instead of just hardcoding the return type of every function to StaticType::Any
-                //       we should somehow collect all the returns that were encountered while analysing
-                //       the body and then figuring out the LUB.
                 let return_type = self.analyse(body)?;
                 self.scope_tree.destroy_scope();
+                *return_type_slot = Some(return_type);
 
                 let function_type = StaticType::Function {
                     parameters: Some(param_types.clone()),
-                    return_type: Box::new(return_type),
+                    return_type: Box::new(
+                        return_type_slot
+                            .clone()
+                            .expect("must have a value at this point"),
+                    ),
                 };
 
                 if let Some(slot) = pre_slot {
@@ -403,6 +406,7 @@ impl Analyser {
             Lvalue::Identifier {
                 identifier,
                 resolved,
+                ..
             } => {
                 let Some(target) = self.scope_tree.get_binding_any(identifier) else {
                     return Err(AnalysisError::identifier_not_previously_declared(
@@ -433,6 +437,7 @@ impl Analyser {
             Lvalue::Identifier {
                 identifier,
                 resolved,
+                ..
             } => {
                 let Some(target) = self.scope_tree.get_binding_any(identifier) else {
                     return Err(AnalysisError::identifier_not_previously_declared(
@@ -508,11 +513,14 @@ impl Analyser {
             Lvalue::Identifier {
                 identifier,
                 resolved,
+                inferred_type,
+                ..
             } => {
                 *resolved = Some(
                     self.scope_tree
-                        .create_local_binding(identifier.clone(), typ),
+                        .create_local_binding(identifier.clone(), typ.clone()),
                 );
+                *inferred_type = Some(typ);
             }
             Lvalue::Index { index, value } => {
                 self.analyse(index)?;

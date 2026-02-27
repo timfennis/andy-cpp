@@ -28,7 +28,7 @@ impl rustyline::highlight::Highlighter for RustlylineHelper {
     }
 }
 
-pub fn run(debug: bool) -> anyhow::Result<()> {
+pub fn run() -> anyhow::Result<()> {
     let h = RustlylineHelper {};
 
     let mut rl = Editor::new()?;
@@ -44,7 +44,7 @@ pub fn run(debug: bool) -> anyhow::Result<()> {
                 let _ = rl.add_history_entry(line.as_str());
 
                 // Run the line we just read through the interpreter
-                match into_miette_result(interpreter.run_str(line.as_str(), debug)) {
+                match into_miette_result(interpreter.run_str(line.as_str())) {
                     Ok(output) => {
                         if !output.is_empty() {
                             println!("{output}")

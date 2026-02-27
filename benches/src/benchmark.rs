@@ -9,7 +9,7 @@ use std::time::Duration;
 fn run_string(input: &str) -> Result<String, InterpreterError> {
     let buf: Vec<u8> = vec![];
     let mut interpreter = Interpreter::new(buf);
-    interpreter.run_str(std::hint::black_box(input), false)
+    interpreter.run_str(std::hint::black_box(input))
 }
 
 #[allow(unused)]
