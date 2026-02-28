@@ -33,7 +33,7 @@ impl Analyser {
             Expression::Int64Literal(_) | Expression::BigIntLiteral(_) => Ok(StaticType::Int),
             Expression::Float64Literal(_) => Ok(StaticType::Float),
             Expression::ComplexLiteral(_) => Ok(StaticType::Complex),
-            Expression::Continue | Expression::Break => Ok(StaticType::unit()), // TODO: change to never type?
+            Expression::Continue | Expression::Break => Ok(StaticType::unit()),
             Expression::Identifier {
                 name: ident,
                 resolved,
@@ -342,12 +342,12 @@ impl Analyser {
         let mut do_destroy = false;
         match iteration {
             ForIteration::Iteration { l_value, sequence } => {
-                self.analyse(sequence)?;
+                let sequence_type = self.analyse(sequence)?;
 
                 self.scope_tree.new_scope();
 
-                // TODO: when we give type parameters to all instances of sequence we can correctly infer StaticType::Any in this postition
-                self.resolve_lvalue_declarative(l_value, StaticType::Any, span)?;
+                // TODO: when we give type parameters to all instances of sequence we can correctly infer StaticType::Any in this position
+                self.resolve_lvalue_declarative(l_value, sequence_type.sequence_element_type().unwrap_or(StaticType::Any), span)?;
                 do_destroy = true; // TODO: why is this correct
             }
             ForIteration::Guard(expr) => {

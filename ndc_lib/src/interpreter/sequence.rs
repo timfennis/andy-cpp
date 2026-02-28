@@ -71,7 +71,7 @@ impl Sequence {
                         .unwrap_or(StaticType::Any),
                 ),
             },
-            // TODO: we can't infer the type of iterators at runtime, unless we implement peek (CNA WE?)
+            // TODO: we can't infer the type of iterators at runtime, unless we implement peek (CAN WE?)
             Self::Iterator(_) => StaticType::Iterator(Box::new(StaticType::Any)),
 
             Self::MaxHeap(heap) => StaticType::MaxHeap(Box::new(

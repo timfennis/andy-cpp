@@ -5,7 +5,6 @@ use quote::quote;
 
 #[derive(Debug, Clone)]
 pub struct Argument {
-    // TODO: remove these pub
     pub param_type: TokenStream,
     pub param_name: TokenStream,
     pub argument: TokenStream,
