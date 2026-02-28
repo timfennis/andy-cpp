@@ -1,7 +1,6 @@
-use crate::ast::operator::LogicalOperator;
-use crate::ast::parser::Error as ParseError;
-use crate::interpreter::evaluate::EvaluationError;
-use crate::interpreter::function::StaticType;
+use crate::operator::LogicalOperator;
+use crate::parser::Error as ParseError;
+use crate::static_type::StaticType;
 use ndc_lexer::Span;
 use num::BigInt;
 use num::complex::Complex64;
@@ -63,6 +62,7 @@ pub enum Expression {
     FunctionDeclaration {
         name: Option<String>,
         resolved_name: Option<ResolvedVar>,
+        // TODO: Instead of an ExpressionLocation with a Tuple the parser should just give us something we can actually work with
         parameters: Box<ExpressionLocation>,
         body: Box<ExpressionLocation>,
         return_type: Option<StaticType>,
@@ -177,32 +177,19 @@ impl ExpressionLocation {
         }
     }
 
-    /// # Errors
-    /// If this expression cannot be converted into an identifier an `EvaluationError::InvalidExpression` will be returned
-    pub fn try_into_identifier(&self) -> Result<&str, EvaluationError> {
+    pub fn as_identifier(&self) -> &str {
         match &self.expression {
-            Expression::Identifier { name, resolved: _ } => Ok(name),
-            _ => Err(EvaluationError::syntax_error(
-                "expected identifier".to_string(),
-                self.span,
-            )),
+            Expression::Identifier { name, resolved: _ } => name,
+            _ => panic!("the parser should have guaranteed us the right type of expression"),
         }
     }
 
-    /// # Errors
-    /// If this expression cannot be converted into a tuple (or possibly another type that can be a valid parameter list) an `EvaluationError::InvalidExpression` will be returned
-    pub fn try_into_parameters(&self) -> Result<Vec<String>, EvaluationError> {
+    pub fn as_parameters(&self) -> Vec<&str> {
         match &self.expression {
             Expression::Tuple {
                 values: tuple_values,
-            } => tuple_values
-                .iter()
-                .map(|it| it.try_into_identifier().map(ToString::to_string))
-                .collect::<Result<Vec<String>, EvaluationError>>(),
-            _ => Err(EvaluationError::syntax_error(
-                "expected a parameter list".to_string(),
-                self.span,
-            )),
+            } => tuple_values.iter().map(|it| it.as_identifier()).collect(),
+            _ => panic!("the parser should have guaranteed us the right type of expression"),
         }
     }
 

@@ -15,8 +15,8 @@ use crate::{
     ast::{Expression, ExpressionLocation},
     interpreter::{function::FunctionCarrier, sequence::Sequence, value::Value},
 };
-use ndc_lexer::Span;
 use itertools::Itertools;
+use ndc_lexer::Span;
 use std::cell::RefCell;
 use std::cmp::min;
 use std::ops::IndexMut;
@@ -223,13 +223,19 @@ pub fn get_at_index(
                 }
             };
 
-            let value = map.try_borrow().into_evaluation_result(span)?.get(&key).cloned();
+            let value = map
+                .try_borrow()
+                .into_evaluation_result(span)?
+                .get(&key)
+                .cloned();
 
             if let Some(value) = value {
                 Ok(value)
             } else if let Some(default) = default {
                 let default_value = produce_default_value(default, environment, span)?;
-                map.try_borrow_mut().into_evaluation_result(span)?.insert(key, default_value.clone());
+                map.try_borrow_mut()
+                    .into_evaluation_result(span)?
+                    .insert(key, default_value.clone());
                 Ok(default_value)
             } else {
                 Err(EvaluationError::key_not_found(&key, span).into())
@@ -249,17 +255,15 @@ pub(super) fn produce_default_value(
     span: Span,
 ) -> EvaluationResult {
     match default {
-        Value::Function(function) => {
-            match function.call_checked(&mut [], environment) {
-                Err(FunctionCarrier::FunctionTypeMismatch) => {
-                    Err(FunctionCarrier::EvaluationError(EvaluationError::new(
-                        "default function is not callable without arguments".to_string(),
-                        span,
-                    )))
-                }
-                a => a,
+        Value::Function(function) => match function.call_checked(&mut [], environment) {
+            Err(FunctionCarrier::FunctionTypeMismatch) => {
+                Err(FunctionCarrier::EvaluationError(EvaluationError::new(
+                    "default function is not callable without arguments".to_string(),
+                    span,
+                )))
             }
-        }
+            a => a,
+        },
         value => Ok(value.clone()),
     }
 }

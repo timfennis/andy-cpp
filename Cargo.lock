@@ -1280,6 +1280,7 @@ dependencies = [
  "md5",
  "ndc_lexer",
  "ndc_macros",
+ "ndc_parser",
  "num",
  "once_cell",
  "ordered-float",
@@ -1311,6 +1312,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "ndc_parser"
+version = "0.2.1"
+dependencies = [
+ "derive_more",
+ "itertools 0.14.0",
+ "ndc_lexer",
+ "num",
+ "thiserror",
 ]
 
 [[package]]

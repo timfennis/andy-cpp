@@ -1,0 +1,11 @@
+[package]
+name = "ndc_parser"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+ndc_lexer.workspace = true
+num.workspace = true
+derive_more = { workspace = true }
+thiserror.workspace = true
+itertools.workspace = true
