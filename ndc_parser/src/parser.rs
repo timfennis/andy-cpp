@@ -1,25 +1,30 @@
 use std::fmt::Write;
 
-use crate::expression::Expression;
-use crate::expression::{Binding, ExpressionLocation, ForBody, ForIteration, Lvalue};
+use crate::expression::{Binding, ExpressionLocation, ExpressionRef, ForBody, ForIteration, Lvalue};
+use crate::expression::{Expression, ExpressionPool};
 use crate::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
 use ndc_lexer::{Span, Token, TokenLocation};
 
 pub struct Parser {
     tokens: Vec<TokenLocation>,
     current: usize,
+    pool: ExpressionPool,
 }
 
 impl Parser {
     pub fn from_tokens(tokens: Vec<TokenLocation>) -> Self {
-        Self { tokens, current: 0 }
+        Self {
+            tokens,
+            current: 0,
+            pool: ExpressionPool::new(),
+        }
     }
 
     /// Parse a Vec of Tokens into a Vec of statements
     /// # Errors
     /// If the parsing fails which it could do for many different reasons it will return an [Error]. See the variants of
     /// this type for more information about the different kinds of errors.
-    pub fn parse(&mut self) -> Result<Vec<ExpressionLocation>, Error> {
+    pub fn parse(&mut self) -> Result<ExpressionPool, Error> {
         let is_valid_statement = |expr: &Expression| -> bool {
             matches!(
                 expr,
@@ -31,12 +36,12 @@ impl Parser {
                     | Expression::FunctionDeclaration { .. }
             )
         };
-        let mut expressions = Vec::new();
+
         while self.peek_current_token_location().is_some() {
             let expr_loc = self.expression_or_statement()?;
             let is_statement = is_valid_statement(&expr_loc.expression);
 
-            expressions.push(expr_loc);
+            self.pool.add(expr_loc);
 
             if !is_statement {
                 break;
@@ -51,7 +56,7 @@ impl Parser {
             ));
         }
 
-        Ok(expressions)
+        Ok(std::mem::replace(&mut self.pool, ExpressionPool::new()))
     }
 
     fn peek_current_token(&self) -> Option<&Token> {
@@ -150,11 +155,11 @@ impl Parser {
     /// it also works for expression like `x not == 5` which is a debatable feature.
     fn consume_binary_expression_left_associative(
         &mut self,
-        next: fn(&mut Self) -> Result<ExpressionLocation, Error>,
+        next: fn(&mut Self) -> Result<ExpressionRef, Error>,
         valid_tokens: &[Token],
         augment_not: bool,
-    ) -> Result<ExpressionLocation, Error> {
-        let mut left = next(self)?;
+    ) -> Result<ExpressionRef, Error> {
+        let mut left_id = next(self)?;
 
         let mut extended_valid_tokens = valid_tokens.to_vec();
         if augment_not {
@@ -188,79 +193,85 @@ impl Parser {
                         operator_token_loc.token
                     )
                 });
-            let right = next(self)?;
-            // IS this new span logic sound?
-            let new_span = left.span.merge(right.span);
+            let right_id = next(self)?;
+            
+            let new_span = self.pool.get(left_id).span.merge(self.pool.get(right_id).span);
 
             // Is this always the same
             debug_assert_eq!(operator.to_string(), operator_token_loc.token.to_string());
 
-            left = Expression::Call {
-                function: Box::new(
-                    Expression::Identifier {
-                        name: operator_token_loc.token.to_string(),
-                        resolved: Binding::None,
-                    }
-                    .to_location(operator_token_loc.span),
-                ),
-                arguments: vec![left, right],
+            let function_id = self.pool.add(
+                Expression::Identifier {
+                    name: operator_token_loc.token.to_string(),
+                    resolved: Binding::None,
+                }
+                .to_location(operator_token_loc.span),
+            );
+
+            left_id = self.pool.add(Expression::Call {
+                function: function_id,
+                arguments: vec![left_id, right_id],
             }
-            .to_location(new_span);
+            .to_location(new_span));
 
             if let Some(not_token) = invert {
-                left = Expression::Call {
-                    function: Box::new(
-                        Expression::Identifier {
-                            name: not_token.token.to_string(),
-                            resolved: Binding::None,
-                        }
-                        .to_location(not_token.span),
-                    ),
-                    arguments: vec![left],
+                let not_function_id = self.pool.add(
+                    Expression::Identifier {
+                        name: not_token.token.to_string(),
+                        resolved: Binding::None,
+                    }
+                    .to_location(not_token.span),
+                );
+
+                left_id = self.pool.add(Expression::Call {
+                    function: not_function_id,
+                    arguments: vec![left_id],
                 }
-                .to_location(new_span.merge(not_token.span));
+                .to_location(new_span.merge(not_token.span)));
             }
         }
-        Ok(left)
+        Ok(left_id)
     }
 
     fn consume_binary_expression_right_associative(
         &mut self,
-        next: fn(&mut Self) -> Result<ExpressionLocation, Error>,
-        current: fn(&mut Self) -> Result<ExpressionLocation, Error>,
+        next: fn(&mut Self) -> Result<ExpressionRef, Error>,
+        current: fn(&mut Self) -> Result<ExpressionRef, Error>,
         valid_tokens: &[Token],
-    ) -> Result<ExpressionLocation, Error> {
-        let left = next(self)?;
+    ) -> Result<ExpressionRef, Error> {
+        let left_id = next(self)?;
 
         if let Some(token_location) = self.consume_token_if(valid_tokens) {
             let operator_span = token_location.span;
             let operator = BinaryOperator::try_from(token_location)
                 .expect("COMPILER ERROR: consume_token_if must guarantee the correct token");
-            let right = current(self)?;
+            
+            let right_id = current(self)?;
+            let new_span = self.pool.get(left_id).span.merge(self.pool.get(right_id).span);
 
-            let new_span = left.span.merge(right.span);
-
-            return Ok(Expression::Call {
-                function: Box::new(
-                    Expression::Identifier {
-                        name: operator.to_string(),
-                        resolved: Binding::None,
-                    }
-                    .to_location(operator_span),
-                ),
-                arguments: vec![left, right],
+            
+            let ident_id = self.pool.add(Expression::Identifier {
+                name: operator.to_string(),
+                resolved: Binding::None,
             }
-            .to_location(new_span));
+                .to_location(operator_span));
+            
+            let out_id = self.pool.add(Expression::Call {
+                function: ident_id,
+                arguments: vec![left_id, right_id],
+            }
+                .to_location(new_span));
+            return Ok(out_id);
         }
 
-        Ok(left)
+        Ok(left_id)
     }
 
     fn consume_logical_expression_left_associative(
         &mut self,
-        next: fn(&mut Self) -> Result<ExpressionLocation, Error>,
+        next: fn(&mut Self) -> Result<ExpressionRef, Error>,
         valid_tokens: &[Token],
-    ) -> Result<ExpressionLocation, Error> {
+    ) -> Result<ExpressionRef, Error> {
         let mut left = next(self)?;
         while let Some(token_location) = self.consume_token_if(valid_tokens) {
             let operator: LogicalOperator = token_location
@@ -268,13 +279,13 @@ impl Parser {
                 .try_into()
                 .expect("consume_operator_if guaranteed us that this is an operator");
             let right = next(self)?;
-            let new_span = left.span.merge(right.span);
-            left = Expression::Logical {
-                left: Box::new(left),
+            let new_span = self.pool.get(left).span.merge(self.pool.get(right).span);
+            left = self.pool.add(Expression::Logical {
+                left,
                 operator,
-                right: Box::new(right),
+                right,
             }
-            .to_location(new_span);
+            .to_location(new_span));
         }
         Ok(left)
     }
@@ -324,7 +335,7 @@ impl Parser {
         let end = expression.span;
         let declaration = Expression::VariableDeclaration {
             l_value: lvalue,
-            value: Box::new(expression),
+            value: self.pool.add(expression),
         };
 
         if self.peek_current_token().is_some() {
@@ -367,7 +378,7 @@ impl Parser {
                 let assignment_expression = Expression::Assignment {
                     l_value: Lvalue::try_from(maybe_lvalue)
                         .expect("guaranteed to produce an lvalue"),
-                    r_value: Box::new(expression),
+                    r_value: self.pool.add(expression),
                 };
 
                 Ok(assignment_expression.to_location(start.merge(end)))
@@ -381,7 +392,7 @@ impl Parser {
                 let op_assign = Expression::OpAssignment {
                     l_value: Lvalue::try_from(maybe_lvalue)
                         .expect("guaranteed to produce an lvalue"),
-                    r_value: Box::new(expression),
+                    r_value: self.pool.add(expression),
                     operation: operation_identifier,
                     resolved_assign_operation: Binding::None,
                     resolved_operation: Binding::None,
@@ -395,10 +406,11 @@ impl Parser {
 
     fn tuple_expression(
         &mut self,
-        next: fn(&mut Self) -> Result<ExpressionLocation, Error>,
+        next: fn(&mut Self) -> Result<ExpressionRef, Error>,
         must_be_tuple: bool,
     ) -> Result<ExpressionLocation, Error> {
-        let mut expressions = vec![next(self)?];
+        let first_ref = next(self)?;
+        let mut refs = vec![first_ref];
         let mut must_be_tuple = must_be_tuple;
         while self.consume_token_if(&[Token::Comma]).is_some() {
             // Peek at right paren, if that matches we break
@@ -407,14 +419,13 @@ impl Parser {
                 must_be_tuple = true;
                 break;
             }
-            expressions.push(next(self)?);
+            refs.push(next(self)?);
         }
 
-        let new_span = expressions
-            .first()
-            .expect("first is guaranteed to have a result")
-            .span
-            .merge(expressions.last().unwrap().span);
+        let new_span = self.pool.get(refs[0]).span
+            .merge(self.pool.get(*refs.last().unwrap()).span);
+        let expressions: Vec<ExpressionLocation> =
+            refs.iter().map(|&r| self.pool.get(r).clone()).collect();
 
         let tuple_expression = ExpressionLocation {
             expression: Expression::Tuple {
@@ -433,7 +444,7 @@ impl Parser {
     /// Parses a delimited tuple (enclosed in parentheses) that can be empty
     fn delimited_tuple(
         &mut self,
-        next: fn(&mut Self) -> Result<ExpressionLocation, Error>,
+        next: fn(&mut Self) -> Result<ExpressionRef, Error>,
     ) -> Result<ExpressionLocation, Error> {
         let start = self.require_current_token_matches(&Token::LeftParentheses)?;
         if let Some(end) = self.consume_token_if(&[Token::RightParentheses]) {
@@ -451,14 +462,14 @@ impl Parser {
         }
     }
 
-    fn single_expression(&mut self) -> Result<ExpressionLocation, Error> {
+    fn single_expression(&mut self) -> Result<ExpressionRef, Error> {
         self.logic_or()
     }
 
-    fn logic_or(&mut self) -> Result<ExpressionLocation, Error> {
+    fn logic_or(&mut self) -> Result<ExpressionRef, Error> {
         self.consume_logical_expression_left_associative(Self::logic_and, &[Token::LogicOr])
     }
-    fn logic_and(&mut self) -> Result<ExpressionLocation, Error> {
+    fn logic_and(&mut self) -> Result<ExpressionRef, Error> {
         self.consume_logical_expression_left_associative(Self::logic_not, &[Token::LogicAnd])
     }
 
@@ -466,7 +477,7 @@ impl Parser {
     // ```ndc
     // x := not foo in bar
     // ```
-    fn logic_not(&mut self) -> Result<ExpressionLocation, Error> {
+    fn logic_not(&mut self) -> Result<ExpressionRef, Error> {
         if let Some(operator_token_loc) = self.consume_token_if(&[Token::LogicNot]) {
             let operator_span = operator_token_loc.span;
             let _: UnaryOperator = operator_token_loc
@@ -475,53 +486,59 @@ impl Parser {
                 .expect("consume_operator_if guaranteed us that this token can be UnaryOperator");
 
             let right = self.logic_not()?;
-            let span = right.span;
+            let span = self.pool.get(right).span;
 
-            Ok(Expression::Call {
-                function: Box::new(
-                    Expression::Identifier {
-                        name: operator_token_loc.token.to_string(),
-                        resolved: Binding::None,
-                    }
-                    .to_location(operator_span),
-                ),
-                arguments: vec![right],
-            }
-            .to_location(span))
+            let function_id = self.pool.add(
+                Expression::Identifier {
+                    name: operator_token_loc.token.to_string(),
+                    resolved: Binding::None,
+                }
+                .to_location(operator_span),
+            );
+
+            Ok(self.pool.add(
+                Expression::Call {
+                    function: function_id,
+                    arguments: vec![right],
+                }
+                .to_location(span),
+            ))
         } else {
             self.range()
         }
     }
 
-    fn range(&mut self) -> Result<ExpressionLocation, Error> {
+    fn range(&mut self) -> Result<ExpressionRef, Error> {
         let left = self.comparison()?;
         if let Some(token) = self.consume_token_if(&[Token::DotDot, Token::DotDotEquals]) {
+            let left_span = self.pool.get(left).span;
             let (span, right) = if self.peek_range_end() {
-                (left.span.merge(token.span), None)
+                (left_span.merge(token.span), None)
             } else {
                 let right = self.comparison()?;
-                (left.span.merge(right.span), Some(Box::new(right)))
+                let right_span = self.pool.get(right).span;
+                (left_span.merge(right_span), Some(right))
             };
 
             let expression = if token.token == Token::DotDot {
                 Expression::RangeExclusive {
-                    start: Some(Box::new(left)),
+                    start: Some(left),
                     end: right,
                 }
             } else {
                 Expression::RangeInclusive {
-                    start: Some(Box::new(left)),
+                    start: Some(left),
                     end: right,
                 }
             };
 
-            Ok(ExpressionLocation { expression, span })
+            Ok(self.pool.add(ExpressionLocation { expression, span }))
         } else {
             Ok(left)
         }
     }
 
-    fn comparison(&mut self) -> Result<ExpressionLocation, Error> {
+    fn comparison(&mut self) -> Result<ExpressionRef, Error> {
         self.consume_binary_expression_left_associative(
             Self::spaceship,
             &[
@@ -537,7 +554,7 @@ impl Parser {
         )
     }
 
-    fn spaceship(&mut self) -> Result<ExpressionLocation, Error> {
+    fn spaceship(&mut self) -> Result<ExpressionRef, Error> {
         self.consume_binary_expression_left_associative(
             Self::bit_shift,
             &[Token::Spaceship, Token::InverseSpaceship],
@@ -545,7 +562,7 @@ impl Parser {
         )
     }
 
-    fn bit_shift(&mut self) -> Result<ExpressionLocation, Error> {
+    fn bit_shift(&mut self) -> Result<ExpressionRef, Error> {
         self.consume_binary_expression_left_associative(
             Self::boolean_or,
             &[Token::LessLess, Token::GreaterGreater],
@@ -553,19 +570,19 @@ impl Parser {
         )
     }
 
-    fn boolean_or(&mut self) -> Result<ExpressionLocation, Error> {
+    fn boolean_or(&mut self) -> Result<ExpressionRef, Error> {
         self.consume_binary_expression_left_associative(Self::boolean_xor, &[Token::Pipe], false)
     }
 
-    fn boolean_xor(&mut self) -> Result<ExpressionLocation, Error> {
+    fn boolean_xor(&mut self) -> Result<ExpressionRef, Error> {
         self.consume_binary_expression_left_associative(Self::boolean_and, &[Token::Tilde], false)
     }
 
-    fn boolean_and(&mut self) -> Result<ExpressionLocation, Error> {
+    fn boolean_and(&mut self) -> Result<ExpressionRef, Error> {
         self.consume_binary_expression_left_associative(Self::term, &[Token::Ampersand], false)
     }
 
-    fn term(&mut self) -> Result<ExpressionLocation, Error> {
+    fn term(&mut self) -> Result<ExpressionRef, Error> {
         self.consume_binary_expression_left_associative(
             Self::factor,
             &[Token::Plus, Token::Minus, Token::PlusPlus, Token::Diamond],
@@ -573,7 +590,7 @@ impl Parser {
         )
     }
 
-    fn factor(&mut self) -> Result<ExpressionLocation, Error> {
+    fn factor(&mut self) -> Result<ExpressionRef, Error> {
         self.consume_binary_expression_left_associative(
             Self::exponent,
             &[
@@ -587,7 +604,7 @@ impl Parser {
         )
     }
 
-    fn exponent(&mut self) -> Result<ExpressionLocation, Error> {
+    fn exponent(&mut self) -> Result<ExpressionRef, Error> {
         self.consume_binary_expression_right_associative(
             Self::tight_unary,
             Self::exponent,
@@ -595,32 +612,36 @@ impl Parser {
         )
     }
 
-    fn tight_unary(&mut self) -> Result<ExpressionLocation, Error> {
+    fn tight_unary(&mut self) -> Result<ExpressionRef, Error> {
         if let Some(operator_token_loc) =
             self.consume_token_if(&[Token::Bang, Token::Minus, Token::Tilde])
         {
             let token_span = operator_token_loc.span;
 
             let right = self.tight_unary()?;
-            let span = right.span;
+            let right_span = self.pool.get(right).span;
 
-            Ok(Expression::Call {
-                function: Box::new(
-                    Expression::Identifier {
-                        name: operator_token_loc.token.to_string(),
-                        resolved: Binding::None,
-                    }
-                    .to_location(token_span),
-                ),
-                arguments: vec![right],
-            }
-            .to_location(span.merge(token_span)))
+            let function_id = self.pool.add(
+                Expression::Identifier {
+                    name: operator_token_loc.token.to_string(),
+                    resolved: Binding::None,
+                }
+                .to_location(token_span),
+            );
+
+            Ok(self.pool.add(
+                Expression::Call {
+                    function: function_id,
+                    arguments: vec![right],
+                }
+                .to_location(right_span.merge(token_span)),
+            ))
         } else {
             self.operand()
         }
     }
 
-    fn operand(&mut self) -> Result<ExpressionLocation, Error> {
+    fn operand(&mut self) -> Result<ExpressionRef, Error> {
         let mut expr = self.primary()?;
 
         // This loop handles the following cases:
@@ -639,29 +660,31 @@ impl Parser {
                     let Expression::Tuple { values: arguments } = arguments.expression else {
                         unreachable!("self.tuple() must always produce a tuple");
                     };
+                    let arguments: Vec<ExpressionRef> =
+                        arguments.into_iter().map(|a| self.pool.add(a)).collect();
 
-                    let span = expr.span;
+                    let span = self.pool.get(expr).span;
 
-                    expr = ExpressionLocation {
-                        expression: Expression::Call {
-                            function: Box::new(expr),
+                    expr = self.pool.add(
+                        Expression::Call {
+                            function: expr,
                             arguments,
-                        },
-                        span: span.merge(arguments_span),
-                    };
+                        }
+                        .to_location(span.merge(arguments_span)),
+                    );
                 }
                 Token::Dot => {
                     self.require_current_token_matches(&Token::Dot)?; // consume matched token
-                    let l_value = self.require_identifier()?;
-                    let identifier_span = l_value.span;
-                    let first_argument_span = expr.span;
-                    let identifier = Lvalue::try_from(l_value)?;
-                    let Lvalue::Identifier { identifier, .. } = identifier else {
-                        unreachable!("Guaranteed to match by previous call to require_identifier")
+                    let identifier_ref = self.require_identifier()?;
+                    let identifier_span = self.pool.get(identifier_ref).span;
+                    let first_argument_span = self.pool.get(expr).span;
+                    let identifier = match &self.pool.get(identifier_ref).expression {
+                        Expression::Identifier { name, .. } => name.clone(),
+                        _ => unreachable!("require_identifier guarantees an identifier"),
                     };
 
                     // () is now optional?
-                    let (mut arguments, tuple_span) =
+                    let (extra_arguments, tuple_span) =
                         if self.match_token(&[Token::LeftParentheses]).is_some() {
                             let tuple_expression = self.delimited_tuple(Self::single_expression)?;
 
@@ -676,23 +699,28 @@ impl Parser {
                             (Vec::new(), None)
                         };
 
-                    arguments.insert(0, expr);
+                    let mut arguments: Vec<ExpressionRef> = vec![expr];
+                    arguments.extend(extra_arguments.into_iter().map(|a| self.pool.add(a)));
 
-                    expr = ExpressionLocation {
-                        expression: Expression::Call {
-                            function: Box::new(
-                                Expression::Identifier {
-                                    name: identifier,
-                                    resolved: Binding::None,
-                                }
-                                .to_location(identifier_span),
-                            ),
+                    let function_id = self.pool.add(
+                        Expression::Identifier {
+                            name: identifier,
+                            resolved: Binding::None,
+                        }
+                        .to_location(identifier_span),
+                    );
+
+                    expr = self.pool.add(
+                        Expression::Call {
+                            function: function_id,
                             arguments,
-                        },
-                        span: tuple_span
-                            .unwrap_or(identifier_span)
-                            .merge(first_argument_span),
-                    }
+                        }
+                        .to_location(
+                            tuple_span
+                                .unwrap_or(identifier_span)
+                                .merge(first_argument_span),
+                        ),
+                    );
 
                     // for now, we require parentheses
                 }
@@ -724,15 +752,16 @@ impl Parser {
                     let end_token =
                         self.require_current_token_matches(&Token::RightSquareBracket)?;
 
-                    let span = expr.span.merge(end_token.span);
+                    let span = self.pool.get(expr).span.merge(end_token.span);
+                    let index_ref = self.pool.add(index_expression);
 
-                    expr = ExpressionLocation {
-                        expression: Expression::Index {
-                            value: Box::new(expr),
-                            index: Box::new(index_expression),
-                        },
-                        span,
-                    };
+                    expr = self.pool.add(
+                        Expression::Index {
+                            value: expr,
+                            index: index_ref,
+                        }
+                        .to_location(span),
+                    );
                 }
                 _ => unreachable!("guaranteed to match"),
             }
@@ -794,7 +823,7 @@ impl Parser {
             }
             // WOAH, this is not a list, it's a list comprehension
             Some(Token::For) => {
-                let result = ForBody::List(expr.simplify());
+                let result = ForBody::List(self.pool.add(expr.simplify()));
                 self.for_comprehension(left_square_bracket_span, result, &Token::RightSquareBracket)
             }
             _ => {
@@ -876,22 +905,26 @@ impl Parser {
     }
 
     #[allow(clippy::too_many_lines)] // WERE BUILDING A PROGRAMMING LANGUAGE CLIPPY WHAT DO YOU WANT?
-    fn primary(&mut self) -> Result<ExpressionLocation, Error> {
+    fn primary(&mut self) -> Result<ExpressionRef, Error> {
         // matches if expression like `if a < b { } else { }`
         if self.consume_token_if(&[Token::If]).is_some() {
-            return self.if_expression();
+            let loc = self.if_expression()?;
+            return Ok(self.pool.add(loc));
         }
         // matches while loops like `while foo < bar { }`
         else if self.consume_token_if(&[Token::While]).is_some() {
-            return self.while_expression();
+            let loc = self.while_expression()?;
+            return Ok(self.pool.add(loc));
         }
         // matches for loops like `for x in xs { }`
         else if self.match_token(&[Token::For]).is_some() {
-            return self.for_expression();
+            let loc = self.for_expression()?;
+            return Ok(self.pool.add(loc));
         }
         // matches function declarations like `fn function_name(arg1, arg2) { }`
         else if self.match_token(&[Token::Fn, Token::Pure]).is_some() {
-            return self.function_declaration();
+            let loc = self.function_declaration()?;
+            return Ok(self.pool.add(loc));
         }
         // matches `return;` and `return (expression);`
         else if let Some(return_token_location) = self.consume_token_if(&[Token::Return]) {
@@ -902,45 +935,46 @@ impl Parser {
             };
 
             let span = expr_loc.span;
+            let value = self.pool.add(expr_loc);
 
-            let return_expression = Expression::Return {
-                value: Box::new(expr_loc),
-            }
-            .to_location(return_token_location.span.merge(span));
+            let return_expression = Expression::Return { value }
+                .to_location(return_token_location.span.merge(span));
 
-            return Ok(return_expression);
+            return Ok(self.pool.add(return_expression));
         } else if let Some(token_location) = self.consume_token_if(&[Token::Break]) {
-            let expression = Expression::Break;
-            return Ok(expression.to_location(token_location.span));
+            return Ok(self.pool.add(Expression::Break.to_location(token_location.span)));
         } else if let Some(token_location) = self.consume_token_if(&[Token::Continue]) {
-            let expression = Expression::Continue;
-            return Ok(expression.to_location(token_location.span));
+            return Ok(self.pool.add(Expression::Continue.to_location(token_location.span)));
         }
         // matches curly bracketed block expression `{ }`
         else if self.match_token(&[Token::LeftCurlyBracket]).is_some() {
-            return self.block();
+            let loc = self.block()?;
+            return Ok(self.pool.add(loc));
         }
         // matches map expression %{1,2,3}
         else if self.match_token(&[Token::MapOpen]).is_some() {
-            return self.map_expression();
+            let loc = self.map_expression()?;
+            return Ok(self.pool.add(loc));
         }
         // matches list and list comprehensions
         else if self.match_token(&[Token::LeftSquareBracket]).is_some() {
-            return self.list();
+            let loc = self.list()?;
+            return Ok(self.pool.add(loc));
         }
         // matches either a grouped expression `(1+1)` or a tuple `(1,1)`
         else if let Some(start_parentheses) = self.consume_token_if(&[Token::LeftParentheses]) {
             // If an opening parentheses is immediately followed by a closing parentheses we're dealing with a Unit expression
             if let Some(end_parentheses) = self.consume_token_if(&[Token::RightParentheses]) {
-                return Ok(Expression::Tuple { values: vec![] }
-                    .to_location(start_parentheses.span.merge(end_parentheses.span)));
+                let loc = Expression::Tuple { values: vec![] }
+                    .to_location(start_parentheses.span.merge(end_parentheses.span));
+                return Ok(self.pool.add(loc));
             }
 
             let grouped = self.expression()?;
 
             self.require_current_token_matches(&Token::RightParentheses)?;
 
-            return Ok(grouped);
+            return Ok(self.pool.add(grouped));
         }
 
         let token_location = self.require_current_token()?;
@@ -970,7 +1004,7 @@ impl Parser {
             }
         };
 
-        Ok(expression.to_location(token_location.span))
+        Ok(self.pool.add(expression.to_location(token_location.span)))
     }
 
     /// Parses if expression without the `if` token
@@ -986,38 +1020,39 @@ impl Parser {
     /// ```
     fn if_expression(&mut self) -> Result<ExpressionLocation, Error> {
         let expression = self.expression()?;
-        let on_true = self.block()?;
+        let span = expression.span;
+        let condition = self.pool.add(expression);
+        let on_true_loc = self.block()?;
+        let on_true = self.pool.add(on_true_loc);
 
         let on_false = if self.consume_token_if(&[Token::Else]).is_some() {
             if self.consume_token_if(&[Token::If]).is_some() {
-                let expression = self.if_expression()?;
-                Some(Box::new(expression))
+                let loc = self.if_expression()?;
+                Some(self.pool.add(loc))
             } else {
-                Some(Box::new(self.block()?))
+                let loc = self.block()?;
+                Some(self.pool.add(loc))
             }
         } else {
             None
         };
 
-        let span = expression.span;
         Ok(Expression::If {
-            condition: Box::new(expression),
-            on_true: Box::new(on_true),
+            condition,
+            on_true,
             on_false,
         }
         .to_location(span))
     }
 
     fn while_expression(&mut self) -> Result<ExpressionLocation, Error> {
-        let expression = self.expression()?;
-        let loop_body = self.block()?;
+        let expression_loc = self.expression()?;
+        let span = expression_loc.span;
+        let expression = self.pool.add(expression_loc);
+        let block = self.block()?;
+        let loop_body = self.pool.add(block);
 
-        let span = expression.span;
-        Ok(Expression::While {
-            expression: Box::new(expression),
-            loop_body: Box::new(loop_body),
-        }
-        .to_location(span))
+        Ok(Expression::While { expression, loop_body }.to_location(span))
     }
 
     fn for_expression(&mut self) -> Result<ExpressionLocation, Error> {
@@ -1042,29 +1077,27 @@ impl Parser {
 
         let body = self.block()?;
         let body_span = body.span;
+        let body_ref = self.pool.add(body);
 
         Ok(Expression::For {
             iterations,
-            body: Box::new(ForBody::Block(body)),
+            body: Box::new(ForBody::Block(body_ref)),
         }
         .to_location(for_token_span.merge(body_span)))
     }
 
-    fn require_identifier(&mut self) -> Result<ExpressionLocation, Error> {
-        let identifier_expression = self.primary()?;
+    fn require_identifier(&mut self) -> Result<ExpressionRef, Error> {
+        let identifier_ref = self.primary()?;
 
         if matches!(
-            identifier_expression,
-            ExpressionLocation {
-                expression: Expression::Identifier { .. },
-                ..
-            }
+            self.pool.get(identifier_ref).expression,
+            Expression::Identifier { .. }
         ) {
-            Ok(identifier_expression)
+            Ok(identifier_ref)
         } else {
             Err(Error::text(
                 "expected an identifier".to_string(),
-                identifier_expression.span,
+                self.pool.get(identifier_ref).span,
             ))
         }
     }
@@ -1104,14 +1137,11 @@ impl Parser {
         let identifier = match self.peek_current_token() {
             Some(Token::LeftParentheses) => None,
             Some(Token::Identifier(_)) => {
-                let Ok(ExpressionLocation {
-                    expression: Expression::Identifier { name, .. },
-                    ..
-                }) = self.require_identifier()
-                else {
-                    unreachable!("guaranteed to to produce identifier")
+                let identifier_ref = self.require_identifier()?;
+                let name = match &self.pool.get(identifier_ref).expression {
+                    Expression::Identifier { name, .. } => name.clone(),
+                    _ => unreachable!("require_identifier guarantees an identifier"),
                 };
-
                 Some(name)
             } // MUST BE IDENT
             Some(_) | None => {
@@ -1129,12 +1159,15 @@ impl Parser {
 
         // Next we either expect a body block `{ ... }` or a fat arrow followed by a single expression `=> ...`
 
-        let body = match self.peek_current_token() {
+        let body: ExpressionRef = match self.peek_current_token() {
             Some(Token::FatArrow) => {
                 self.advance();
                 self.single_expression()?
             }
-            Some(Token::LeftCurlyBracket) => self.block()?,
+            Some(Token::LeftCurlyBracket) => {
+                let block = self.block()?;
+                self.pool.add(block)
+            }
             Some(token) => {
                 return Err(Error::with_help(
                     format!("unexpected token: {token}"),
@@ -1145,12 +1178,13 @@ impl Parser {
             None => return Err(Error::end_of_input(argument_list.span)),
         };
 
-        let span = fn_token.span.merge(body.span);
+        let span = fn_token.span.merge(self.pool.get(body).span);
+        let parameters = self.pool.add(argument_list);
         Ok(ExpressionLocation {
             expression: Expression::FunctionDeclaration {
                 name: identifier,
-                parameters: Box::new(argument_list),
-                body: Box::new(body),
+                parameters,
+                body,
                 return_type: None, // At some point in the future we could use type declarations here to insert the type (return type inference is cringe anyway)
                 pure: is_pure,
                 resolved_name: None,
@@ -1196,19 +1230,19 @@ impl Parser {
         let map_open_span = self.require_token(&[Token::MapOpen])?;
 
         // Optional default value
-        let default = if self.consume_token_if(&[Token::Colon]).is_some() {
+        let default: Option<ExpressionRef> = if self.consume_token_if(&[Token::Colon]).is_some() {
             let default = self.single_expression()?;
             // If the list ends without any values we just do nothing and let the loop below handle the rest
             if self.match_token(&[Token::RightCurlyBracket]).is_none() {
                 // If there isn't a '}' to close the map there must be a comma otherwise we error out
                 self.require_current_token_matches(&Token::Comma)?;
             }
-            Some(Box::new(default))
+            Some(default)
         } else {
             None
         };
 
-        let mut values = Vec::new();
+        let mut values: Vec<(ExpressionLocation, Option<ExpressionLocation>)> = Vec::new();
 
         let map_close_span = loop {
             // End parsing if we see a RightCurlyBracket, this one only happens if the expression is
@@ -1217,10 +1251,12 @@ impl Parser {
                 break token_location.span;
             }
 
-            let key = self.single_expression()?;
+            let key_ref = self.single_expression()?;
+            let key = self.pool.get(key_ref).clone();
 
             if self.consume_token_if(&[Token::Colon]).is_some() {
-                let value = self.single_expression()?;
+                let value_ref = self.single_expression()?;
+                let value = self.pool.get(value_ref).clone();
                 values.push((key, Some(value)));
             } else {
                 values.push((key, None));
@@ -1234,12 +1270,14 @@ impl Parser {
                 let (key_expr, value_expr) = values
                     .pop()
                     .expect("guaranteed by previous call to values.len()");
+                let key = self.pool.add(key_expr);
+                let value = value_expr.map(|v| self.pool.add(v));
                 return self.for_comprehension(
                     map_open_span,
                     ForBody::Map {
-                        key: key_expr,
-                        value: value_expr,
-                        default,
+                        key,
+                        value,
+                        default: default.map(Box::new),
                     },
                     &Token::RightCurlyBracket,
                 );

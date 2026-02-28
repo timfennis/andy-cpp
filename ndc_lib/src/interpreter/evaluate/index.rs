@@ -9,14 +9,12 @@
 //! | Backward index | -10 | -9 | -8 | -7 | -6 | -5 | -4 | -3 | -2 | -1 |
 //! +----------------+-----+----+----+----+----+----+----+----+----+----+
 
-use ndc_parser::{Expression, ExpressionLocation};
 use super::{EvaluationError, EvaluationResult, IntoEvaluationResult, evaluate_expression};
 use crate::interpreter::environment::Environment;
-use crate::{
-    interpreter::{function::FunctionCarrier, sequence::Sequence, value::Value},
-};
+use crate::interpreter::{function::FunctionCarrier, sequence::Sequence, value::Value};
 use itertools::Itertools;
 use ndc_lexer::Span;
+use ndc_parser::{Expression, ExpressionLocation};
 use std::cell::RefCell;
 use std::cmp::min;
 use std::ops::IndexMut;
@@ -300,7 +298,11 @@ pub fn set_at_index(
                 Offset::Range(from_usize, to_usize) => {
                     let tail = list.drain(from_usize..).collect::<Vec<_>>();
 
-                    list.extend(rhs.try_into_vec().expect("this must succeed, but not sure why").into_iter());
+                    list.extend(
+                        rhs.try_into_vec()
+                            .expect("this must succeed, but not sure why")
+                            .into_iter(),
+                    );
 
                     list.extend_from_slice(&tail[(to_usize - from_usize)..]);
                 }

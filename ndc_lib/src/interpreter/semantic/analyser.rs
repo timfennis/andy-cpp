@@ -1,9 +1,9 @@
-use ndc_parser::{
-    Binding, Expression, ExpressionLocation, ForBody, ForIteration, Lvalue, ResolvedVar,
-};
 use crate::interpreter::function::StaticType;
 use itertools::Itertools;
 use ndc_lexer::Span;
+use ndc_parser::{
+    Binding, Expression, ExpressionLocation, ForBody, ForIteration, Lvalue, ResolvedVar,
+};
 use std::fmt::{Debug, Formatter};
 
 pub struct Analyser {
@@ -347,7 +347,13 @@ impl Analyser {
                 self.scope_tree.new_scope();
 
                 // TODO: when we give type parameters to all instances of sequence we can correctly infer StaticType::Any in this position
-                self.resolve_lvalue_declarative(l_value, sequence_type.sequence_element_type().unwrap_or(StaticType::Any), span)?;
+                self.resolve_lvalue_declarative(
+                    l_value,
+                    sequence_type
+                        .sequence_element_type()
+                        .unwrap_or(StaticType::Any),
+                    span,
+                )?;
                 do_destroy = true; // TODO: why is this correct
             }
             ForIteration::Guard(expr) => {
