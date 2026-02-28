@@ -27,11 +27,9 @@ pub fn export_module(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut registrations = Vec::new();
     let mut uses = Vec::new();
 
-    // TODO: if we find something that we don't wish to edit we can just copy it over instead of throwing an erreor
-    // TODO: if we find a non-public function we could just copy it over as well?
     for item in items {
         match item {
-            Item::Fn(f) => {
+            Item::Fn(f) if matches!(f.vis, syn::Visibility::Public(_)) => {
                 for fun in wrap_function(&f) {
                     declarations.push(fun.function_declaration);
                     registrations.push(fun.function_registration);
@@ -40,7 +38,7 @@ pub fn export_module(_attr: TokenStream, item: TokenStream) -> TokenStream {
             Item::Use(u) => {
                 uses.push(u);
             }
-            _ => panic!("not sure how to deal with this thing"),
+            item => declarations.push(quote! { #item }),
         }
     }
 
