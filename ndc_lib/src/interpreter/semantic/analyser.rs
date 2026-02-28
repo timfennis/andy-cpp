@@ -1,4 +1,4 @@
-use crate::ast::{
+use ndc_parser::{
     Binding, Expression, ExpressionLocation, ForBody, ForIteration, Lvalue, ResolvedVar,
 };
 use crate::interpreter::function::StaticType;

@@ -1300,6 +1300,7 @@ version = "0.2.1"
 dependencies = [
  "ndc_lexer",
  "ndc_lib",
+ "ndc_parser",
  "tokio",
  "tower-lsp",
 ]

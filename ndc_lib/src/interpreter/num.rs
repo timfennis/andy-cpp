@@ -4,7 +4,7 @@ use std::hash::{Hash, Hasher};
 use std::num::TryFromIntError;
 use std::ops::{Add, Div, Mul, Neg, Not, Rem, Sub};
 
-use crate::ast::BinaryOperator;
+use ndc_parser::BinaryOperator;
 use crate::interpreter::evaluate::EvaluationError;
 use crate::interpreter::function::StaticType;
 use crate::interpreter::int::Int;

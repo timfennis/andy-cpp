@@ -1,4 +1,4 @@
-use crate::ast::{
+use ndc_parser::{
     Binding, Expression, ExpressionLocation, ForBody, ForIteration, LogicalOperator, Lvalue,
 };
 use crate::hash_map::HashMap;

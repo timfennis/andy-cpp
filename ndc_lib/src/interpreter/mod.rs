@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::ast::ExpressionLocation;
+use ndc_parser::ExpressionLocation;
 use crate::interpreter::environment::{Environment, InterpreterOutput};
 use crate::interpreter::evaluate::{EvaluationError, evaluate_expression};
 use crate::interpreter::function::FunctionCarrier;
@@ -62,7 +62,7 @@ impl Interpreter {
         input: &str,
     ) -> Result<Vec<ExpressionLocation>, InterpreterError> {
         let tokens = Lexer::new(input).collect::<Result<Vec<TokenLocation>, _>>()?;
-        let mut expressions = crate::ast::Parser::from_tokens(tokens).parse()?;
+        let mut expressions = ndc_parser::Parser::from_tokens(tokens).parse()?;
 
         let checkpoint = self.analyser.checkpoint();
         for e in &mut expressions {
@@ -123,7 +123,7 @@ pub enum InterpreterError {
     #[error("Error while parsing source")]
     Parser {
         #[from]
-        cause: crate::ast::Error,
+        cause: ndc_parser::Error,
     },
     #[error("Error during static analysis")]
     Resolver {

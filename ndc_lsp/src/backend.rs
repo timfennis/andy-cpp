@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use ndc_lexer::{Lexer, Span, TokenLocation};
-use ndc_lib::ast::{Expression, ExpressionLocation, ForBody, ForIteration, Lvalue};
+use ndc_parser::{Expression, ExpressionLocation, ForBody, ForIteration, Lvalue};
 use ndc_lib::interpreter::Interpreter;
 use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::Result as JsonRPCResult;
@@ -51,7 +51,7 @@ impl Backend {
         let mut diagnostics = vec![];
         match tokens {
             Ok(tokens) => {
-                let mut parser = ndc_lib::ast::Parser::from_tokens(tokens);
+                let mut parser = ndc_parser::Parser::from_tokens(tokens);
 
                 let parse_result = parser.parse().map_err(|err| Diagnostic {
                     range: span_into_range(text, err.location()),

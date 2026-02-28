@@ -1,4 +1,4 @@
-use crate::ast::{ExpressionLocation, ResolvedVar};
+use ndc_parser::{ExpressionLocation, ResolvedVar};
 use crate::hash_map::{DefaultHasher, HashMap};
 use crate::interpreter::environment::Environment;
 use crate::interpreter::evaluate::{

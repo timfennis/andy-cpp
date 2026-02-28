@@ -77,53 +77,6 @@ impl Value {
         }
     }
 
-    // The alternate solution in this SO thread has a nice way to iterate over the contents of a
-    // RefCell but the iterator would not be compatible with non refcell items
-    // https://stackoverflow.com/questions/33541492/returning-iterator-of-a-vec-in-a-refcell
-    //
-    // Note: this method is called `try_into_iter` but it doesn't always create an iterator over
-    //       the original value. In most cases you get an iterator over a copy of the data.
-    #[must_use]
-    #[deprecated = "use try_into_vec"]
-    pub fn try_into_iter(self) -> Option<impl Iterator<Item = Self>> {
-        match self {
-            Self::Sequence(Sequence::List(list)) => match Rc::try_unwrap(list) {
-                // This short circuit is almost certainly wrong because take will panic if list is borrowed
-                Ok(list) => Some(list.into_inner().into_iter()),
-                Err(list) => Some(Vec::clone(&*list.borrow()).into_iter()),
-            },
-            Self::Sequence(Sequence::Tuple(list)) => match Rc::try_unwrap(list) {
-                Ok(list) => Some(list.into_iter()),
-                Err(list) => Some(Vec::clone(&list).into_iter()),
-            },
-            Self::Sequence(Sequence::Map(map, _)) => {
-                let x = map.borrow().keys().cloned().collect_vec().into_iter();
-                Some(x)
-            }
-            Self::Sequence(Sequence::String(string)) => match Rc::try_unwrap(string) {
-                // This implementation is peak retard, we don't want collect_vec here
-                // ^-- WTF: is this comment, we collect_vec here anyways?
-                Ok(string) => Some(
-                    string
-                        .into_inner()
-                        .chars()
-                        .map(Self::from)
-                        .collect_vec()
-                        .into_iter(),
-                ),
-                Err(string) => Some(
-                    string
-                        .borrow()
-                        .chars()
-                        .map(Self::from)
-                        .collect_vec()
-                        .into_iter(),
-                ),
-            },
-            _ => None,
-        }
-    }
-
     pub fn try_into_vec(self) -> Option<Vec<Self>> {
         match self {
             Self::Sequence(Sequence::List(list)) => match Rc::try_unwrap(list) {
