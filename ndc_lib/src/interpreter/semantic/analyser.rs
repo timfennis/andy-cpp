@@ -2,8 +2,8 @@ use crate::ast::{
     Binding, Expression, ExpressionLocation, ForBody, ForIteration, Lvalue, ResolvedVar,
 };
 use crate::interpreter::function::StaticType;
-use ndc_lexer::Span;
 use itertools::Itertools;
+use ndc_lexer::Span;
 use std::fmt::{Debug, Formatter};
 
 pub struct Analyser {

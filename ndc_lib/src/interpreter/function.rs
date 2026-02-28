@@ -1,5 +1,4 @@
 use crate::ast::{ExpressionLocation, ResolvedVar};
-pub use ndc_parser::{Parameter, StaticType, TypeSignature};
 use crate::hash_map::{DefaultHasher, HashMap};
 use crate::interpreter::environment::Environment;
 use crate::interpreter::evaluate::{
@@ -8,8 +7,9 @@ use crate::interpreter::evaluate::{
 use crate::interpreter::num::{BinaryOperatorError, Number};
 use crate::interpreter::sequence::Sequence;
 use crate::interpreter::value::Value;
-use ndc_lexer::Span;
 use derive_builder::Builder;
+use ndc_lexer::Span;
+pub use ndc_parser::{Parameter, StaticType, TypeSignature};
 use std::cell::{BorrowError, BorrowMutError, RefCell};
 use std::fmt;
 use std::hash::{Hash, Hasher};

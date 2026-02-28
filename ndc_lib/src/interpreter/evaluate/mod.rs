@@ -9,9 +9,9 @@ use crate::interpreter::iterator::mut_value_to_iterator;
 use crate::interpreter::num::Number;
 use crate::interpreter::sequence::Sequence;
 use crate::interpreter::value::Value;
-use ndc_lexer::Span;
 use index::{Offset, evaluate_as_index, get_at_index, set_at_index};
 use itertools::Itertools;
+use ndc_lexer::Span;
 use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
@@ -165,7 +165,8 @@ pub(crate) fn evaluate_expression(
                 } => {
                     let mut lhs_value = evaluate_expression(lhs_expression, environment)?;
                     let index = evaluate_as_index(index_expression, environment)?;
-                    let value_at_index = get_at_index(&lhs_value, index.clone(), span, environment)?;
+                    let value_at_index =
+                        get_at_index(&lhs_value, index.clone(), span, environment)?;
 
                     let right_value = evaluate_expression(r_value, environment)?;
 
@@ -346,7 +347,11 @@ pub(crate) fn evaluate_expression(
             ..
         } => {
             let mut user_function = FunctionBody::Closure {
-                parameter_names: parameters.as_parameters().into_iter().map(|x| x.to_string()).collect(),
+                parameter_names: parameters
+                    .as_parameters()
+                    .into_iter()
+                    .map(|x| x.to_string())
+                    .collect(),
                 body: *body.clone(),
                 return_type: return_type.clone().unwrap_or_else(StaticType::unit),
                 environment: environment.clone(),
@@ -646,7 +651,6 @@ pub(crate) fn evaluate_expression(
 
     Ok(literal)
 }
-
 
 fn declare_or_assign_variable(
     l_value: &Lvalue,
