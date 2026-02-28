@@ -1,5 +1,10 @@
 # Change Log
 
+## [v0.3.0] (2026-02-28)
+
+- Added configurable `andy-cpp.ndcPath` setting for specifying the path to the `ndc` binary (useful when `ndc` is not on the PATH used by VSCode, e.g. when installed via cargo in a fish shell)
+- Shows a friendly error message with install instructions when the `ndc` binary cannot be found
+
 ## [v0.2.0] (2025-12-01)
 
 Basic language server support. Runs the interpreter using `ndc lsp` for some basic autocomplete.
