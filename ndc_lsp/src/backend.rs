@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use ndc_lexer::{Lexer, Span, TokenLocation};
-use ndc_parser::{Expression, ExpressionLocation, ForBody, ForIteration, Lvalue};
 use ndc_lib::interpreter::Interpreter;
+use ndc_parser::{Expression, ExpressionLocation, ForBody, ForIteration, Lvalue};
 use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::Result as JsonRPCResult;
 use tower_lsp::lsp_types::{

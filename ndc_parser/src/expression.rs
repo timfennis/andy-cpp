@@ -4,6 +4,12 @@ use crate::static_type::StaticType;
 use ndc_lexer::Span;
 use num::BigInt;
 use num::complex::Complex64;
+use std::fmt::Debug;
+
+
+trait IsExpression: Debug + Clone + PartialEq + Eq {
+    fn expression(&self) -> &Expression<Self>;
+}
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Binding {
@@ -19,13 +25,15 @@ pub enum ResolvedVar {
 }
 
 #[derive(Eq, PartialEq, Clone)]
-pub struct ExpressionLocation {
-    pub expression: Expression,
+pub struct ExpressionLocation<E: IsExpression>
+{
+    pub expression: Expression<E>,
     pub span: Span,
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum Expression {
+pub enum Expression<E: IsExpression>
+{
     // Literals
     BoolLiteral(bool),
     StringLiteral(String),
@@ -37,24 +45,24 @@ pub enum Expression {
         name: String,
         resolved: Binding,
     },
-    Statement(Box<ExpressionLocation>),
+    Statement(E),
     Logical {
-        left: Box<ExpressionLocation>,
+        left: E,
         operator: LogicalOperator,
-        right: Box<ExpressionLocation>,
+        right: E,
     },
-    Grouping(Box<ExpressionLocation>),
+    Grouping(E),
     VariableDeclaration {
-        l_value: Lvalue,
-        value: Box<ExpressionLocation>,
+        l_value: Lvalue<E>,
+        value: E,
     },
     Assignment {
-        l_value: Lvalue,
-        r_value: Box<ExpressionLocation>,
+        l_value: Lvalue<E>,
+        r_value: E,
     },
     OpAssignment {
-        l_value: Lvalue,
-        r_value: Box<ExpressionLocation>,
+        l_value: Lvalue<E>,
+        r_value: E,
         operation: String,
         resolved_assign_operation: Binding,
         resolved_operation: Binding,
@@ -62,84 +70,86 @@ pub enum Expression {
     FunctionDeclaration {
         name: Option<String>,
         resolved_name: Option<ResolvedVar>,
-        // TODO: Instead of an ExpressionLocation with a Tuple the parser should just give us something we can actually work with
-        parameters: Box<ExpressionLocation>,
-        body: Box<ExpressionLocation>,
+        // TODO: Instead of an IsExpression with a Tuple the parser should just give us something we can actually work with
+        parameters: E,
+        body: E,
         return_type: Option<StaticType>,
         pure: bool,
     },
     Block {
-        statements: Vec<ExpressionLocation>,
+        statements: Vec<E>,
     },
     If {
-        condition: Box<ExpressionLocation>,
-        on_true: Box<ExpressionLocation>,
-        on_false: Option<Box<ExpressionLocation>>,
+        condition: E,
+        on_true: E,
+        on_false: Option<E>,
     },
     While {
-        expression: Box<ExpressionLocation>,
-        loop_body: Box<ExpressionLocation>,
+        expression: E,
+        loop_body: E,
     },
     For {
-        iterations: Vec<ForIteration>,
-        body: Box<ForBody>,
+        iterations: Vec<ForIteration<E>>,
+        body: Box<ForBody<E>>,
     },
     Call {
         /// The function to call, could be an identifier, or any expression that produces a function as its value
-        function: Box<ExpressionLocation>,
-        arguments: Vec<ExpressionLocation>,
+        function: E,
+        arguments: Vec<E>,
     },
     Index {
-        value: Box<ExpressionLocation>,
-        index: Box<ExpressionLocation>,
+        value: E,
+        index: E,
     },
     Tuple {
-        values: Vec<ExpressionLocation>,
+        values: Vec<E>,
     },
     List {
-        values: Vec<ExpressionLocation>,
+        values: Vec<E>,
     },
     Map {
-        values: Vec<(ExpressionLocation, Option<ExpressionLocation>)>,
-        default: Option<Box<ExpressionLocation>>,
+        values: Vec<(E, Option<E>)>,
+        default: Option<E>,
     },
     Return {
-        value: Box<ExpressionLocation>,
+        value: E,
     },
     Break,
     Continue,
     RangeInclusive {
-        start: Option<Box<ExpressionLocation>>,
-        end: Option<Box<ExpressionLocation>>,
+        start: Option<E>,
+        end: Option<E>,
     },
     RangeExclusive {
-        start: Option<Box<ExpressionLocation>>,
-        end: Option<Box<ExpressionLocation>>,
+        start: Option<E>,
+        end: Option<E>,
     },
 }
 
+impl<E: IsExpression> Eq for Expression<E> {}
+
 #[derive(Debug, Eq, PartialEq, Clone)]
-pub enum ForIteration {
+pub enum ForIteration<E> where E: Clone + Debug {
     Iteration {
-        l_value: Lvalue,
-        sequence: ExpressionLocation,
+        l_value: Lvalue<E>,
+        sequence: E,
     },
-    Guard(ExpressionLocation),
+    Guard(E),
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
-pub enum ForBody {
-    Block(ExpressionLocation),
-    List(ExpressionLocation),
+pub enum ForBody<E> where E: Clone + Debug {
+    Block(E),
+    List(E),
     Map {
-        key: ExpressionLocation,
-        value: Option<ExpressionLocation>,
-        default: Option<Box<ExpressionLocation>>,
+        key: E,
+        value: Option<E>,
+        default: Option<E>,
     },
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
-pub enum Lvalue {
+pub enum Lvalue<E> where E: Clone + Debug {
     // Example: `let foo = ...`
     Identifier {
         identifier: String,
@@ -149,18 +159,16 @@ pub enum Lvalue {
     },
     // Example: `foo()[1] = ...`
     Index {
-        value: Box<ExpressionLocation>,
-        index: Box<ExpressionLocation>,
+        value: E,
+        index: E,
     },
     // Example: `let a, b = ...`
     Sequence(Vec<Self>),
 }
 
-impl Eq for Expression {}
-
-impl Expression {
+impl<E: IsExpression> Expression<E> {
     #[must_use]
-    pub fn to_location(self, span: Span) -> ExpressionLocation {
+    pub fn to_location(self, span: Span) -> ExpressionLocation<E> {
         ExpressionLocation {
             expression: self,
             span,
@@ -168,27 +176,16 @@ impl Expression {
     }
 }
 
-impl ExpressionLocation {
-    #[must_use]
-    pub fn to_statement(self) -> Self {
-        Self {
-            span: self.span,
-            expression: Expression::Statement(Box::new(self)),
-        }
+impl<E: IsExpression> IsExpression for Box<ExpressionLocation<E>> {
+    fn expression(&self) -> &Expression<Self> {
+        &self.expression
     }
+}
 
+impl<E: IsExpression> ExpressionLocation<E> {
     pub fn as_identifier(&self) -> &str {
         match &self.expression {
             Expression::Identifier { name, resolved: _ } => name,
-            _ => panic!("the parser should have guaranteed us the right type of expression"),
-        }
-    }
-
-    pub fn as_parameters(&self) -> Vec<&str> {
-        match &self.expression {
-            Expression::Tuple {
-                values: tuple_values,
-            } => tuple_values.iter().map(|it| it.as_identifier()).collect(),
             _ => panic!("the parser should have guaranteed us the right type of expression"),
         }
     }
@@ -208,25 +205,33 @@ impl ExpressionLocation {
     }
 }
 
-impl Lvalue {
+// Methods that require E = Box<ExpressionLocation<...>> because they wrap or recurse into children
+impl<E: IsExpression> ExpressionLocation<Box<ExpressionLocation<E>>> {
+    #[must_use]
+    pub fn to_statement(self) -> Self {
+        Self {
+            span: self.span,
+            expression: Expression::Statement(Box::new(self)),
+        }
+    }
+
+    pub fn as_parameters(&self) -> Vec<&str> {
+        match &self.expression {
+            Expression::Tuple { values: tuple_values } => {
+                tuple_values.iter().map(|it| it.as_identifier()).collect()
+            }
+            _ => panic!("the parser should have guaranteed us the right type of expression"),
+        }
+    }
+}
+
+impl<E: IsExpression> Lvalue<E> {
     #[must_use]
     pub fn expression_type_name(&self) -> &str {
         match self {
             Self::Identifier { .. } => "variable",
             Self::Index { .. } => "index expression",
             Self::Sequence(_) => "destructure pattern", // ??
-        }
-    }
-
-    #[must_use]
-    pub fn can_build_from_expression(expression: &Expression) -> bool {
-        match expression {
-            Expression::Identifier { .. } | Expression::Index { .. } => true,
-            Expression::List { values } | Expression::Tuple { values } => values
-                .iter()
-                .all(|el| Self::can_build_from_expression(&el.expression)),
-            Expression::Grouping(inner) => Self::can_build_from_expression(&inner.expression),
-            _ => false,
         }
     }
 
@@ -240,27 +245,52 @@ impl Lvalue {
     }
 }
 
-impl TryFrom<ExpressionLocation> for Lvalue {
+impl<E: IsExpression> Lvalue<E> {
+    #[must_use]
+    pub fn can_build_from_expression(expression: &Expression<E>) -> bool {
+        match expression {
+            Expression::Identifier { .. } | Expression::Index { .. } => true,
+            Expression::List { values } | Expression::Tuple { values } => values
+                .iter()
+                .all(|el| Self::can_build_from_expression(el.expression())),
+            Expression::Grouping(inner) => Self::can_build_from_expression(inner.expression()),
+            _ => false,
+        }
+    }
+}
+
+impl<E: IsExpression> TryFrom<Box<ExpressionLocation<E>>> for Lvalue<Box<ExpressionLocation<E>>> {
     type Error = ParseError;
 
-    fn try_from(value: ExpressionLocation) -> Result<Self, Self::Error> {
+    fn try_from(value: Box<ExpressionLocation<E>>) -> Result<Self, Self::Error> {
+        Self::try_from(*value)
+    }
+}
+
+impl<E: IsExpression> TryFrom<ExpressionLocation<E>> for Lvalue<E>
+where
+    Lvalue<E>: TryFrom<E, Error = ParseError>,
+{
+    type Error = ParseError;
+
+    fn try_from(value: ExpressionLocation<E>) -> Result<Self, Self::Error> {
         match value.expression {
             Expression::Identifier { name, .. } => Ok(Self::new_identifier(name, value.span)),
             Expression::Index { value, index } => Ok(Self::Index { value, index }),
             Expression::List { values } | Expression::Tuple { values } => Ok(Self::Sequence(
                 values
                     .into_iter()
-                    .map(Self::try_from)
+                    .map(Lvalue::try_from)
                     .collect::<Result<Vec<Self>, Self::Error>>()?,
             )),
-            Expression::Grouping(value) => Ok(Self::Sequence(vec![Self::try_from(*value)?])),
+            Expression::Grouping(value) => Lvalue::try_from(value).map(|lv| Self::Sequence(vec![lv])),
             _expr => Err(ParseError::text("invalid l-value".to_string(), value.span)),
         }
     }
 }
 
 #[allow(clippy::missing_fields_in_debug, clippy::too_many_lines)]
-impl std::fmt::Debug for ExpressionLocation {
+impl<E: IsExpression> Debug for ExpressionLocation<E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // write!(f, "{{{:?} at {:?}}}", self.expression, self.span)
         match &self.expression {

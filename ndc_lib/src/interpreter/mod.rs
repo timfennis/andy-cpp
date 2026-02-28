@@ -1,13 +1,13 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use ndc_parser::ExpressionLocation;
 use crate::interpreter::environment::{Environment, InterpreterOutput};
 use crate::interpreter::evaluate::{EvaluationError, evaluate_expression};
 use crate::interpreter::function::FunctionCarrier;
 use crate::interpreter::semantic::analyser::{Analyser, ScopeTree};
 use crate::interpreter::value::Value;
 use ndc_lexer::{Lexer, TokenLocation};
+use ndc_parser::ExpressionLocation;
 pub mod environment;
 pub mod evaluate;
 pub mod function;
