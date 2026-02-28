@@ -338,7 +338,7 @@ pub(crate) fn evaluate_expression(
             resolve_and_call(function, evaluated_args, environment, span)?
         }
         Expression::FunctionDeclaration {
-            parameters: arguments,
+            parameters,
             body,
             resolved_name,
             return_type,
@@ -346,8 +346,7 @@ pub(crate) fn evaluate_expression(
             ..
         } => {
             let mut user_function = FunctionBody::Closure {
-                parameter_names: arguments.try_into_parameters()
-                    .map_err(|e| EvaluationError::syntax_error(e.to_string(), arguments.span))?,
+                parameter_names: parameters.as_parameters().into_iter().map(|x| x.to_string()).collect(),
                 body: *body.clone(),
                 return_type: return_type.clone().unwrap_or_else(StaticType::unit),
                 environment: environment.clone(),

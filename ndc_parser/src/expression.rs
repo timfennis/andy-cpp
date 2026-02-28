@@ -62,6 +62,7 @@ pub enum Expression {
     FunctionDeclaration {
         name: Option<String>,
         resolved_name: Option<ResolvedVar>,
+        // TODO: Instead of an ExpressionLocation with a Tuple the parser should just give us something we can actually work with
         parameters: Box<ExpressionLocation>,
         body: Box<ExpressionLocation>,
         return_type: Option<StaticType>,
@@ -176,32 +177,22 @@ impl ExpressionLocation {
         }
     }
 
-    /// # Errors
-    /// If this expression cannot be converted into an identifier a `ParseError` will be returned
-    pub fn try_into_identifier(&self) -> Result<&str, ParseError> {
+    pub fn as_identifier(&self) -> &str {
         match &self.expression {
-            Expression::Identifier { name, resolved: _ } => Ok(name),
-            _ => Err(ParseError::text(
-                "expected identifier".to_string(),
-                self.span,
-            )),
+            Expression::Identifier { name, resolved: _ } => name,
+            _ => panic!("the parser should have guaranteed us the right type of expression"),
         }
     }
 
-    /// # Errors
-    /// If this expression cannot be converted into a tuple (or possibly another type that can be a valid parameter list) a `ParseError` will be returned
-    pub fn try_into_parameters(&self) -> Result<Vec<String>, ParseError> {
+    pub fn as_parameters(&self) -> Vec<&str> {
         match &self.expression {
             Expression::Tuple {
                 values: tuple_values,
             } => tuple_values
                 .iter()
-                .map(|it| it.try_into_identifier().map(ToString::to_string))
-                .collect::<Result<Vec<String>, ParseError>>(),
-            _ => Err(ParseError::text(
-                "expected a parameter list".to_string(),
-                self.span,
-            )),
+                .map(|it| it.as_identifier())
+                .collect(),
+            _ => panic!("the parser should have guaranteed us the right type of expression"),
         }
     }
 
