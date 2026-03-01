@@ -58,19 +58,17 @@ impl Interpreter {
 
     fn parse_and_analyse(&mut self, input: &str) -> Result<ExpressionPool, InterpreterError> {
         let tokens = Lexer::new(input).collect::<Result<Vec<TokenLocation>, _>>()?;
-        let expressions = ndc_parser::Parser::from_tokens(tokens).parse()?;
+        let mut expressions = ndc_parser::Parser::from_tokens(tokens).parse()?;
 
         let checkpoint = self.analyser.checkpoint();
 
-        dbg!(&expressions);
-
-        // TODO: add back the analyser
-        // for e in &mut expressions {
-        //     if let Err(e) = self.analyser.analyse(e) {
-        //         self.analyser.restore(checkpoint);
-        //         return Err(e.into());
-        //     }
-        // }
+        let root_refs = expressions.root_expressions().copied().collect::<Vec<_>>();
+        for expr_ref in root_refs {
+            if let Err(e) = self.analyser.analyse(expr_ref, &mut expressions) {
+                self.analyser.restore(checkpoint);
+                return Err(e.into());
+            }
+        }
 
         Ok(expressions)
     }
