@@ -1,4 +1,4 @@
-// expect-error: Identifier x has not previously been declared
+// expect-error: Identifier 'x' not previously declared
 {
     let x = 5;
 }

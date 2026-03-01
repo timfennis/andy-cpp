@@ -1,4 +1,4 @@
-// expect-error: Identifier n has not previously been declared
+// expect-error: Identifier 'n' not previously declared
 fn test() {
     n + 3 // n does not exist
 }

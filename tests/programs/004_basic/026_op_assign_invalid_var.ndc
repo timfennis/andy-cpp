@@ -1,3 +1,3 @@
-// expect-error: Identifier x has not previously been declared
+// expect-error: Identifier 'x' not previously declared
 x += 3;
 print(x);

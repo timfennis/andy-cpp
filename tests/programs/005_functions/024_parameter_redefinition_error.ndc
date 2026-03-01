@@ -1,4 +1,4 @@
-// expect-error: Illegal redefinition of parameter a
+// expect-error: Parameter 'a' is defined more than once
 fn foo(a, a, a, a) {
     print(a)
 }

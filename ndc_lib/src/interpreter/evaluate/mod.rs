@@ -1,6 +1,3 @@
-use ndc_parser::{
-    Binding, Expression, ExpressionLocation, ForBody, ForIteration, LogicalOperator, Lvalue,
-};
 use crate::hash_map::HashMap;
 use crate::interpreter::environment::Environment;
 use crate::interpreter::function::{Function, FunctionBody, FunctionCarrier, StaticType};
@@ -12,19 +9,44 @@ use crate::interpreter::value::Value;
 use index::{Offset, evaluate_as_index, get_at_index, set_at_index};
 use itertools::Itertools;
 use ndc_lexer::Span;
+use ndc_parser::{
+    Binding, Expression, ExpressionLocation, ExpressionPool, ExpressionRef, ForBody, ForIteration,
+    LogicalOperator, Lvalue,
+};
 use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
 
 pub type EvaluationResult = Result<Value, FunctionCarrier>;
 
+mod flat;
 mod index;
+
+#[derive(Clone)]
+pub(crate) struct PoolWalker {
+    pub(crate) cur: ExpressionRef,
+    pub(crate) pool: Rc<ExpressionPool>,
+}
+
+impl PoolWalker {
+    pub(crate) fn current(&self) -> &ExpressionLocation {
+        self.pool.get(self.cur)
+    }
+
+    pub(crate) fn resolve(&self, r: ExpressionRef) -> PoolWalker {
+        PoolWalker {
+            cur: r,
+            pool: Rc::clone(&self.pool),
+        }
+    }
+}
 
 #[allow(clippy::too_many_lines)]
 pub(crate) fn evaluate_expression(
-    expression_location: &ExpressionLocation,
+    pool_walker: PoolWalker,
     environment: &Rc<RefCell<Environment>>,
 ) -> EvaluationResult {
+    let expression_location: &ExpressionLocation = pool_walker.current();
     let span = expression_location.span;
     let literal: Value = match &expression_location.expression {
         Expression::BoolLiteral(b) => Value::Bool(*b),
@@ -33,7 +55,7 @@ pub(crate) fn evaluate_expression(
         Expression::BigIntLiteral(n) => Value::Number(Number::Int(Int::BigInt(n.clone()))),
         Expression::Float64Literal(n) => Value::Number(Number::Float(*n)),
         Expression::ComplexLiteral(n) => Value::Number(Number::Complex(*n)),
-        Expression::Grouping(expr) => evaluate_expression(expr, environment)?,
+        Expression::Grouping(expr) => evaluate_expression(pool_walker.resolve(*expr), environment)?,
         Expression::Identifier { name, resolved } => {
             if name == "None" {
                 return Ok(Value::none());
@@ -46,8 +68,8 @@ pub(crate) fn evaluate_expression(
             }
         }
         Expression::VariableDeclaration { l_value, value } => {
-            let value = evaluate_expression(value, environment)?;
-            declare_or_assign_variable(l_value, value, environment, span)?;
+            let value = evaluate_expression(pool_walker.resolve(*value), environment)?;
+            declare_or_assign_variable(l_value, value, environment, span, &pool_walker)?;
             Value::unit()
         }
         Expression::Assignment {
@@ -55,21 +77,22 @@ pub(crate) fn evaluate_expression(
             r_value: value,
         } => match l_value {
             l_value @ (Lvalue::Identifier { .. } | Lvalue::Sequence(_)) => {
-                let value = evaluate_expression(value, environment)?;
-                declare_or_assign_variable(l_value, value, environment, span)?
+                let value = evaluate_expression(pool_walker.resolve(*value), environment)?;
+                declare_or_assign_variable(l_value, value, environment, span, &pool_walker)?
             }
             Lvalue::Index {
                 value: lhs_expression,
                 index: index_expression,
             } => {
-                let mut lhs = evaluate_expression(lhs_expression, environment)?;
+                let mut lhs =
+                    evaluate_expression(pool_walker.resolve(*lhs_expression), environment)?;
 
                 // the computation of this value may need the list that we assign to,
                 // therefore the value needs to be computed before we mutably borrow the list
                 // see: `bug0001_in_place_map.ndct`
-                let rhs = evaluate_expression(value, environment)?;
+                let rhs = evaluate_expression(pool_walker.resolve(*value), environment)?;
 
-                let index = evaluate_as_index(index_expression, environment)?;
+                let index = evaluate_as_index(pool_walker.resolve(*index_expression), environment)?;
 
                 set_at_index(&mut lhs, rhs, index, span)?;
 
@@ -90,7 +113,7 @@ pub(crate) fn evaluate_expression(
                     ..
                 } => {
                     let resolved_l_value = resolved_l_value.expect("lvalue must be resolved");
-                    let rhs = evaluate_expression(r_value, environment)?;
+                    let rhs = evaluate_expression(pool_walker.resolve(*r_value), environment)?;
 
                     // TODO: this statement does damage which isn't reverted when for instance we can't find the function
                     let Some(lhs) = environment.borrow_mut().take(resolved_l_value) else {
@@ -120,7 +143,6 @@ pub(crate) fn evaluate_expression(
                                 "the resolver pass should have guaranteed that the operation points to a function"
                             );
                         };
-                        // (&func, &mut arguments, environment, span)
                         let result = match func.call_checked(&mut arguments, environment) {
                             Err(FunctionCarrier::FunctionTypeMismatch)
                                 if operations_to_try.peek().is_none() =>
@@ -163,12 +185,15 @@ pub(crate) fn evaluate_expression(
                     value: lhs_expression,
                     index: index_expression,
                 } => {
-                    let mut lhs_value = evaluate_expression(lhs_expression, environment)?;
-                    let index = evaluate_as_index(index_expression, environment)?;
+                    let mut lhs_value =
+                        evaluate_expression(pool_walker.resolve(*lhs_expression), environment)?;
+                    let index =
+                        evaluate_as_index(pool_walker.resolve(*index_expression), environment)?;
                     let value_at_index =
                         get_at_index(&lhs_value, index.clone(), span, environment)?;
 
-                    let right_value = evaluate_expression(r_value, environment)?;
+                    let right_value =
+                        evaluate_expression(pool_walker.resolve(*r_value), environment)?;
 
                     let types = [value_at_index.static_type(), right_value.static_type()];
                     let mut operations_to_try = [
@@ -241,7 +266,7 @@ pub(crate) fn evaluate_expression(
 
             let mut value = Value::unit();
             for stm in statements {
-                value = evaluate_expression(stm, &local_scope)?;
+                value = evaluate_expression(pool_walker.resolve(*stm), &local_scope)?;
             }
 
             drop(local_scope);
@@ -252,11 +277,15 @@ pub(crate) fn evaluate_expression(
             on_true,
             on_false,
         } => {
-            let result = evaluate_expression(condition, environment)?;
+            let result = evaluate_expression(pool_walker.resolve(*condition), environment)?;
 
             match (result, on_false) {
-                (Value::Bool(true), _) => evaluate_expression(on_true, environment)?,
-                (Value::Bool(false), Some(block)) => evaluate_expression(block, environment)?,
+                (Value::Bool(true), _) => {
+                    evaluate_expression(pool_walker.resolve(*on_true), environment)?
+                }
+                (Value::Bool(false), Some(block)) => {
+                    evaluate_expression(pool_walker.resolve(*block), environment)?
+                }
                 (Value::Bool(false), None) => Value::unit(),
                 (value, _) => {
                     return Err(EvaluationError::new(
@@ -272,7 +301,7 @@ pub(crate) fn evaluate_expression(
             }
         }
         Expression::Statement(expression) => {
-            evaluate_expression(expression, environment)?;
+            evaluate_expression(pool_walker.resolve(*expression), environment)?;
             Value::unit()
         }
         Expression::Logical {
@@ -280,11 +309,11 @@ pub(crate) fn evaluate_expression(
             left,
             right,
         } => {
-            let left = evaluate_expression(left, environment)?;
+            let left = evaluate_expression(pool_walker.resolve(*left), environment)?;
             match (operator, left) {
                 (LogicalOperator::And, Value::Bool(true))
                 | (LogicalOperator::Or, Value::Bool(false)) => {
-                    evaluate_expression(right, environment)?
+                    evaluate_expression(pool_walker.resolve(*right), environment)?
                 }
                 (LogicalOperator::And, Value::Bool(false)) => Value::Bool(false),
                 (LogicalOperator::Or, Value::Bool(true)) => Value::Bool(true),
@@ -305,9 +334,9 @@ pub(crate) fn evaluate_expression(
             loop_body,
         } => {
             loop {
-                let lit = evaluate_expression(expression, environment)?;
+                let lit = evaluate_expression(pool_walker.resolve(*expression), environment)?;
                 if lit == Value::Bool(true) {
-                    let result = evaluate_expression(loop_body, environment);
+                    let result = evaluate_expression(pool_walker.resolve(*loop_body), environment);
                     match result {
                         Err(FunctionCarrier::Break(value)) => return Ok(value),
                         Err(FunctionCarrier::Continue) | Ok(_) => {}
@@ -332,11 +361,16 @@ pub(crate) fn evaluate_expression(
             let mut evaluated_args = Vec::new();
 
             for argument in arguments {
-                let arg = evaluate_expression(argument, environment)?;
+                let arg = evaluate_expression(pool_walker.resolve(*argument), environment)?;
                 evaluated_args.push(arg);
             }
 
-            resolve_and_call(function, evaluated_args, environment, span)?
+            resolve_and_call(
+                &pool_walker.resolve(*function),
+                evaluated_args,
+                environment,
+                span,
+            )?
         }
         Expression::FunctionDeclaration {
             parameters,
@@ -346,13 +380,27 @@ pub(crate) fn evaluate_expression(
             pure,
             ..
         } => {
+            let params_walker = pool_walker.resolve(*parameters);
+            let params_loc = params_walker.current();
+            let parameter_names: Vec<String> =
+                if let Expression::Tuple { values } = &params_loc.expression {
+                    values
+                        .iter()
+                        .map(|param_ref| {
+                            pool_walker
+                                .resolve(*param_ref)
+                                .current()
+                                .as_identifier()
+                                .to_string()
+                        })
+                        .collect()
+                } else {
+                    panic!("function parameters must be a tuple expression")
+                };
+
             let mut user_function = FunctionBody::Closure {
-                parameter_names: parameters
-                    .as_parameters()
-                    .into_iter()
-                    .map(|x| x.to_string())
-                    .collect(),
-                body: *body.clone(),
+                parameter_names,
+                body: pool_walker.resolve(*body),
                 return_type: return_type.clone().unwrap_or_else(StaticType::unit),
                 environment: environment.clone(),
             };
@@ -380,7 +428,10 @@ pub(crate) fn evaluate_expression(
         Expression::Tuple { values } => {
             let mut out_values = Vec::with_capacity(values.len());
             for value in values {
-                out_values.push(evaluate_expression(value, environment)?);
+                out_values.push(evaluate_expression(
+                    pool_walker.resolve(*value),
+                    environment,
+                )?);
             }
 
             Value::Sequence(Sequence::Tuple(Rc::new(out_values)))
@@ -388,7 +439,7 @@ pub(crate) fn evaluate_expression(
         Expression::List { values } => {
             let mut values_out = Vec::with_capacity(values.len());
             for expression in values {
-                let v = evaluate_expression(expression, environment)?;
+                let v = evaluate_expression(pool_walker.resolve(*expression), environment)?;
                 values_out.push(v);
             }
             Value::Sequence(Sequence::List(Rc::new(RefCell::new(values_out))))
@@ -396,9 +447,9 @@ pub(crate) fn evaluate_expression(
         Expression::Map { values, default } => {
             let mut hashmap = HashMap::with_capacity(values.len());
             for (key, value) in values {
-                let key = evaluate_expression(key, environment)?;
+                let key = evaluate_expression(pool_walker.resolve(*key), environment)?;
                 let value = if let Some(value) = value {
-                    evaluate_expression(value, environment)?
+                    evaluate_expression(pool_walker.resolve(*value), environment)?
                 } else {
                     Value::unit()
                 };
@@ -407,7 +458,10 @@ pub(crate) fn evaluate_expression(
             }
 
             let default = if let Some(default) = default {
-                Some(Box::new(evaluate_expression(default, environment)?))
+                Some(Box::new(evaluate_expression(
+                    pool_walker.resolve(*default),
+                    environment,
+                )?))
             } else {
                 None
             };
@@ -416,8 +470,14 @@ pub(crate) fn evaluate_expression(
         }
         Expression::For { iterations, body } => {
             let mut out_values = Vec::new();
-            let result =
-                execute_for_iterations(iterations, body, &mut out_values, environment, span);
+            let result = execute_for_iterations(
+                iterations,
+                body,
+                &mut out_values,
+                &pool_walker,
+                environment,
+                span,
+            );
 
             match result {
                 Err(FunctionCarrier::Break(break_value)) => return Ok(break_value),
@@ -443,14 +503,17 @@ pub(crate) fn evaluate_expression(
                     )),
                     default
                         .as_ref()
-                        .map(|default| evaluate_expression(default, environment).map(Box::new))
+                        .map(|default| {
+                            evaluate_expression(pool_walker.resolve(**default), environment)
+                                .map(Box::new)
+                        })
                         .transpose()?,
                 )),
             }
         }
         Expression::Return { value } => {
             return Err(FunctionCarrier::Return(evaluate_expression(
-                value,
+                pool_walker.resolve(*value),
                 environment,
             )?));
         }
@@ -460,14 +523,16 @@ pub(crate) fn evaluate_expression(
             value: lhs_expr,
             index: index_expr,
         } => {
-            let lhs_value = evaluate_expression(lhs_expr, environment)?;
+            let lhs_span = pool_walker.resolve(*lhs_expr).current().span;
+            let index_span = pool_walker.resolve(*index_expr).current().span;
+            let lhs_value = evaluate_expression(pool_walker.resolve(*lhs_expr), environment)?;
 
             match lhs_value {
                 Value::Sequence(Sequence::String(string)) => {
                     let string = string.borrow();
 
-                    let index = evaluate_as_index(index_expr, environment)?
-                        .try_into_offset(string.chars().count(), index_expr.span)?;
+                    let index = evaluate_as_index(pool_walker.resolve(*index_expr), environment)?
+                        .try_into_offset(string.chars().count(), index_span)?;
 
                     let (start, end) = index.into_tuple();
                     let new = string
@@ -481,15 +546,15 @@ pub(crate) fn evaluate_expression(
                 Value::Sequence(Sequence::List(list)) => {
                     let list_length = list.borrow().len();
 
-                    let index = evaluate_as_index(index_expr, environment)?
-                        .try_into_offset(list_length, index_expr.span)?;
+                    let index = evaluate_as_index(pool_walker.resolve(*index_expr), environment)?
+                        .try_into_offset(list_length, index_span)?;
 
                     match index {
                         Offset::Element(usize_index) => {
                             let list = list.borrow();
                             let Some(value) = list.get(usize_index) else {
                                 return Err(
-                                    EvaluationError::out_of_bounds(index, index_expr.span).into()
+                                    EvaluationError::out_of_bounds(index, index_span).into()
                                 );
                             };
                             value.clone()
@@ -498,7 +563,7 @@ pub(crate) fn evaluate_expression(
                             let list = list.borrow();
                             let Some(values) = list.get(from_usize..to_usize) else {
                                 return Err(
-                                    EvaluationError::out_of_bounds(index, index_expr.span).into()
+                                    EvaluationError::out_of_bounds(index, index_span).into()
                                 );
                             };
 
@@ -507,14 +572,14 @@ pub(crate) fn evaluate_expression(
                     }
                 }
                 Value::Sequence(Sequence::Tuple(tuple)) => {
-                    let index = evaluate_as_index(index_expr, environment)?
-                        .try_into_offset(tuple.len(), index_expr.span)?;
+                    let index = evaluate_as_index(pool_walker.resolve(*index_expr), environment)?
+                        .try_into_offset(tuple.len(), index_span)?;
 
                     match index {
                         Offset::Element(index_usize) => {
                             let Some(value) = tuple.get(index_usize) else {
                                 return Err(
-                                    EvaluationError::out_of_bounds(index, index_expr.span).into()
+                                    EvaluationError::out_of_bounds(index, index_span).into()
                                 );
                             };
 
@@ -524,7 +589,7 @@ pub(crate) fn evaluate_expression(
                         Offset::Range(from_usize, to_usize) => {
                             let Some(values) = tuple.get(from_usize..to_usize) else {
                                 return Err(
-                                    EvaluationError::out_of_bounds(index, index_expr.span).into()
+                                    EvaluationError::out_of_bounds(index, index_span).into()
                                 );
                             };
 
@@ -535,15 +600,15 @@ pub(crate) fn evaluate_expression(
                 Value::Sequence(Sequence::Deque(deque)) => {
                     let list_length = deque.borrow().len();
 
-                    let index = evaluate_as_index(index_expr, environment)?
-                        .try_into_offset(list_length, index_expr.span)?;
+                    let index = evaluate_as_index(pool_walker.resolve(*index_expr), environment)?
+                        .try_into_offset(list_length, index_span)?;
 
                     match index {
                         Offset::Element(usize_index) => {
                             let list = deque.borrow();
                             let Some(value) = list.get(usize_index) else {
                                 return Err(
-                                    EvaluationError::out_of_bounds(index, index_expr.span).into()
+                                    EvaluationError::out_of_bounds(index, index_span).into()
                                 );
                             };
                             value.clone()
@@ -562,7 +627,7 @@ pub(crate) fn evaluate_expression(
                     }
                 }
                 Value::Sequence(Sequence::Map(dict, default)) => {
-                    let key = evaluate_expression(index_expr, environment)?;
+                    let key = evaluate_expression(pool_walker.resolve(*index_expr), environment)?;
                     // let dict = dict.borrow();
 
                     let value = { dict.borrow().get(&key).cloned() };
@@ -576,7 +641,7 @@ pub(crate) fn evaluate_expression(
                             // NOTE: this span points at the entire expression instead of the
                             // function that cannot be executed because we don't have that span here
                             // maybe we can check the function signature earlier when we do have the span
-                            lhs_expr.span.merge(index_expr.span),
+                            lhs_span.merge(index_span),
                         )?;
 
                         // TODO: This borrow_mut can fail, handle it better!!
@@ -585,13 +650,13 @@ pub(crate) fn evaluate_expression(
 
                         Ok(default_value)
                     } else {
-                        Err(EvaluationError::key_not_found(&key, index_expr.span).into())
+                        Err(EvaluationError::key_not_found(&key, index_span).into())
                     };
                 }
                 value => {
                     return Err(EvaluationError::new(
                         format!("cannot index into {}", value.static_type()),
-                        lhs_expr.span,
+                        lhs_span,
                     )
                     .into());
                 }
@@ -602,7 +667,7 @@ pub(crate) fn evaluate_expression(
             end: range_end,
         } => {
             let range_start = if let Some(range_start) = range_start {
-                evaluate_expression(range_start, environment)?
+                evaluate_expression(pool_walker.resolve(*range_start), environment)?
             } else {
                 return Err(EvaluationError::new(
                     "ranges without a lower bound cannot be evaluated into a value".to_string(),
@@ -614,7 +679,7 @@ pub(crate) fn evaluate_expression(
             let range_start = i64::try_from(range_start).into_evaluation_result(span)?;
 
             if let Some(range_end) = range_end {
-                let range_end = evaluate_expression(range_end, environment)?;
+                let range_end = evaluate_expression(pool_walker.resolve(*range_end), environment)?;
                 let range_end = i64::try_from(range_end).into_evaluation_result(span)?;
 
                 Value::from(range_start..=range_end)
@@ -627,7 +692,7 @@ pub(crate) fn evaluate_expression(
             end: range_end,
         } => {
             let range_start = if let Some(range_start) = range_start {
-                evaluate_expression(range_start, environment)?
+                evaluate_expression(pool_walker.resolve(*range_start), environment)?
             } else {
                 return Err(EvaluationError::new(
                     "ranges without a lower bound cannot be evaluated into a value".to_string(),
@@ -639,7 +704,7 @@ pub(crate) fn evaluate_expression(
             let range_start = i64::try_from(range_start).into_evaluation_result(span)?;
 
             if let Some(range_end) = range_end {
-                let range_end = evaluate_expression(range_end, environment)?;
+                let range_end = evaluate_expression(pool_walker.resolve(*range_end), environment)?;
                 let range_end = i64::try_from(range_end).into_evaluation_result(span)?;
 
                 Value::from(range_start..range_end)
@@ -657,6 +722,7 @@ fn declare_or_assign_variable(
     value: Value,
     environment: &Rc<RefCell<Environment>>,
     span: Span,
+    walker: &PoolWalker,
 ) -> EvaluationResult {
     match l_value {
         Lvalue::Identifier { resolved, .. } => {
@@ -683,16 +749,16 @@ fn declare_or_assign_variable(
             let mut iter = l_values.iter().zip(r_values);
 
             for (l_value, value) in iter.by_ref() {
-                declare_or_assign_variable(l_value, value, environment, span)?;
+                declare_or_assign_variable(l_value, value, environment, span, walker)?;
             }
         }
         Lvalue::Index {
             value: lhs_expr,
             index,
         } => {
-            let mut lhs = evaluate_expression(lhs_expr, environment)?;
+            let mut lhs = evaluate_expression(walker.resolve(*lhs_expr), environment)?;
 
-            let index = evaluate_as_index(index, environment)?;
+            let index = evaluate_as_index(walker.resolve(*index), environment)?;
 
             set_at_index(&mut lhs, value, index, span)?;
         }
@@ -858,23 +924,24 @@ where
 
 fn execute_for_body(
     body: &ForBody,
+    pool_walker: &PoolWalker,
     environment: &Rc<RefCell<Environment>>,
     result: &mut Vec<Value>,
 ) -> EvaluationResult {
     match body {
         ForBody::Block(expr) => {
-            evaluate_expression(expr, environment)?;
+            evaluate_expression(pool_walker.resolve(*expr), environment)?;
         }
         ForBody::List(expr) => {
-            let value = evaluate_expression(expr, environment)?;
+            let value = evaluate_expression(pool_walker.resolve(*expr), environment)?;
             result.push(value);
         }
         ForBody::Map { key, value, .. } => {
             result.push(Value::tuple(vec![
-                evaluate_expression(key, environment)?,
+                evaluate_expression(pool_walker.resolve(*key), environment)?,
                 value
                     .as_ref()
-                    .map(|value| evaluate_expression(value, environment))
+                    .map(|v| evaluate_expression(pool_walker.resolve(*v), environment))
                     .transpose()?
                     .unwrap_or(Value::unit()),
             ]));
@@ -891,6 +958,7 @@ fn execute_for_iterations(
     iterations: &[ForIteration],
     body: &ForBody,
     out_values: &mut Vec<Value>,
+    pool_walker: &PoolWalker,
     environment: &Rc<RefCell<Environment>>,
     span: Span,
 ) -> Result<Value, FunctionCarrier> {
@@ -900,7 +968,7 @@ fn execute_for_iterations(
 
     match cur {
         ForIteration::Iteration { l_value, sequence } => {
-            let mut sequence = evaluate_expression(sequence, environment)?;
+            let mut sequence = evaluate_expression(pool_walker.resolve(*sequence), environment)?;
             let iter = mut_value_to_iterator(&mut sequence).into_evaluation_result(span)?;
 
             for r_value in iter {
@@ -912,75 +980,58 @@ fn execute_for_iterations(
                 // With the current implementation with a new scope declared for every iteration this produces 10 functions
                 // each with their own scope and their own version of `i`, this might potentially be a bit slower though
                 let scope = Rc::new(RefCell::new(Environment::new_scope(environment)));
-                declare_or_assign_variable(l_value, r_value, &scope, span)?;
+                declare_or_assign_variable(l_value, r_value, &scope, span, pool_walker)?;
 
                 if tail.is_empty() {
-                    match execute_for_body(body, &scope, out_values) {
+                    match execute_for_body(body, pool_walker, &scope, out_values) {
                         Err(FunctionCarrier::Continue) => {}
                         Err(error) => return Err(error),
                         Ok(_value) => {}
                     }
                 } else {
-                    execute_for_iterations(tail, body, out_values, &scope, span)?;
+                    execute_for_iterations(tail, body, out_values, pool_walker, &scope, span)?;
                 }
             }
         }
-        ForIteration::Guard(guard) => match evaluate_expression(guard, environment)? {
-            Value::Bool(true) if tail.is_empty() => {
-                execute_for_body(body, environment, out_values)?;
+        ForIteration::Guard(guard) => {
+            match evaluate_expression(pool_walker.resolve(*guard), environment)? {
+                Value::Bool(true) if tail.is_empty() => {
+                    execute_for_body(body, pool_walker, environment, out_values)?;
+                }
+                Value::Bool(true) => {
+                    execute_for_iterations(tail, body, out_values, pool_walker, environment, span)?;
+                }
+                Value::Bool(false) => {}
+                value => {
+                    return Err(EvaluationError::type_error(
+                        format!(
+                            "mismatched types: expected {}, found {}",
+                            StaticType::Bool,
+                            value.static_type(),
+                        ),
+                        span,
+                    )
+                    .into());
+                }
             }
-            Value::Bool(true) => {
-                execute_for_iterations(tail, body, out_values, environment, span)?;
-            }
-            Value::Bool(false) => {}
-            value => {
-                return Err(EvaluationError::type_error(
-                    format!(
-                        "mismatched types: expected {}, found {}",
-                        StaticType::Bool,
-                        value.static_type(),
-                    ),
-                    span,
-                )
-                .into());
-            }
-        },
+        }
     }
 
     Ok(Value::unit())
 }
 
-// fn evaluate_as_function(
-//     function_expression: &ExpressionLocation,
-//     arg_types: &[StaticType],
-//     environment: &Rc<RefCell<Environment>>,
-// ) -> EvaluationResult {
-//     let ExpressionLocation { expression, .. } = function_expression;
-//
-//     if let Expression::Identifier { resolved, .. } = expression {
-//         resolve_dynamic_binding(resolved, arg_types, environment).ok_or_else(|| {
-//             FunctionCarrier::EvaluationError(EvaluationError::new(
-//                 format!(
-//                     "Failed to find a function that can handle the arguments ({}) at runtime",
-//                     arg_types.iter().join(", ")
-//                 ),
-//                 function_expression.span,
-//             ))
-//         })
-//     } else {
-//         evaluate_expression(function_expression, environment)
-//     }
-// }
-
 fn resolve_and_call(
-    function_expression: &ExpressionLocation,
+    function_expression: &PoolWalker,
     mut args: Vec<Value>,
     environment: &Rc<RefCell<Environment>>,
     span: Span,
 ) -> EvaluationResult {
-    let ExpressionLocation { expression, .. } = function_expression;
+    let fn_loc = function_expression.current();
+    let fn_span = fn_loc.span;
 
-    let function_as_value = if let Expression::Identifier { name, resolved, .. } = expression {
+    let function_as_value = if let Expression::Identifier { name, resolved, .. } =
+        &fn_loc.expression
+    {
         let arg_types = args.iter().map(|arg| arg.static_type()).collect::<Vec<_>>();
 
         let opt = match resolved {
@@ -1030,14 +1081,14 @@ fn resolve_and_call(
         opt.ok_or_else(|| {
             FunctionCarrier::EvaluationError(EvaluationError::new(
                 format!(
-                    "no function called '{name}' found matches the arguments: ({})",
+                    "no function called '{name}' found that matches the arguments: ({})",
                     arg_types.iter().join(", ")
                 ),
-                function_expression.span,
+                fn_span,
             ))
         })?
     } else {
-        evaluate_expression(function_expression, environment)?
+        evaluate_expression(function_expression.clone(), environment)?
     };
 
     if let Value::Function(function) = function_as_value {

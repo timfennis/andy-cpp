@@ -1,3 +1,3 @@
-// expect-error: This lvalue is required to be a single identifier
+// expect-error: Left-hand side of augmented assignment must be a single identifier or index expression
 let x, y = 0, 0;
 x, y += 1; // ERROR

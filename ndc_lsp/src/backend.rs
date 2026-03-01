@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use ndc_lexer::{Lexer, Span, TokenLocation};
-use ndc_parser::{Expression, ExpressionLocation, ForBody, ForIteration, Lvalue};
 use ndc_lib::interpreter::Interpreter;
+use ndc_parser::{Expression, ExpressionLocation, ExpressionPool, ForIteration, Lvalue};
 use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::Result as JsonRPCResult;
 use tower_lsp::lsp_types::{
@@ -84,8 +84,8 @@ impl Backend {
             match interpreter.analyse_str(text) {
                 Ok(expressions) => {
                     let mut hints = Vec::new();
-                    for expr in &expressions {
-                        collect_hints(expr, text, &mut hints);
+                    for expr in expressions.iter() {
+                        collect_hints(expr, &expressions, text, &mut hints);
                     }
                     hints
                 }
@@ -199,24 +199,24 @@ impl LanguageServer for Backend {
     }
 }
 
-/// Recursively walk an analysed AST node and collect inlay hints from places where
-/// the analyser stored type information: `Lvalue::Identifier.inferred_type` (variable
-/// and for-loop declarations) and `FunctionDeclaration.return_type`.
-fn collect_hints(expr: &ExpressionLocation, text: &str, hints: &mut Vec<InlayHint>) {
+/// Collect inlay hints from a single AST node. Sub-expressions are visited by the caller
+/// iterating over all entries in the pool, so this function does not recurse into
+/// pool-stored children. It only recurses into embedded `Lvalue` values, which are not
+/// stored as separate pool entries.
+fn collect_hints(expr: &ExpressionLocation, pool: &ExpressionPool, text: &str, hints: &mut Vec<InlayHint>) {
     match &expr.expression {
-        Expression::VariableDeclaration { l_value, value } => {
+        Expression::VariableDeclaration { l_value, .. } => {
             collect_hints_from_lvalue(l_value, text, hints);
-            collect_hints(value, text, hints);
         }
         Expression::FunctionDeclaration {
             return_type,
             parameters,
-            body,
             ..
         } => {
             if let Some(rt) = return_type {
+                let params_span = pool.get(*parameters).span;
                 hints.push(InlayHint {
-                    position: position_from_offset(text, parameters.span.end()),
+                    position: position_from_offset(text, params_span.end()),
                     label: InlayHintLabel::String(format!(" -> {rt}")),
                     kind: Some(InlayHintKind::TYPE),
                     text_edits: None,
@@ -226,62 +226,14 @@ fn collect_hints(expr: &ExpressionLocation, text: &str, hints: &mut Vec<InlayHin
                     data: None,
                 });
             }
-            collect_hints(body, text, hints);
         }
-        Expression::Statement(inner) => collect_hints(inner, text, hints),
-        Expression::Grouping(inner) => collect_hints(inner, text, hints),
-        Expression::Block { statements } => {
-            for s in statements {
-                collect_hints(s, text, hints);
-            }
-        }
-        Expression::If {
-            condition,
-            on_true,
-            on_false,
-        } => {
-            collect_hints(condition, text, hints);
-            collect_hints(on_true, text, hints);
-            if let Some(f) = on_false {
-                collect_hints(f, text, hints);
-            }
-        }
-        Expression::While {
-            expression,
-            loop_body,
-        } => {
-            collect_hints(expression, text, hints);
-            collect_hints(loop_body, text, hints);
-        }
-        Expression::For { iterations, body } => {
+        Expression::For { iterations, .. } => {
             for iteration in iterations {
-                match iteration {
-                    ForIteration::Iteration { l_value, sequence } => {
-                        collect_hints_from_lvalue(l_value, text, hints);
-                        collect_hints(sequence, text, hints);
-                    }
-                    ForIteration::Guard(expr) => collect_hints(expr, text, hints),
-                }
-            }
-            match body.as_ref() {
-                ForBody::Block(e) | ForBody::List(e) => collect_hints(e, text, hints),
-                ForBody::Map {
-                    key,
-                    value,
-                    default,
-                } => {
-                    collect_hints(key, text, hints);
-                    if let Some(v) = value {
-                        collect_hints(v, text, hints);
-                    }
-                    if let Some(d) = default {
-                        collect_hints(d, text, hints);
-                    }
+                if let ForIteration::Iteration { l_value, .. } = iteration {
+                    collect_hints_from_lvalue(l_value, text, hints);
                 }
             }
         }
-        Expression::Return { value } => collect_hints(value, text, hints),
-        // Literals, identifiers, ranges, calls etc. contain no declaration sites
         _ => {}
     }
 }
