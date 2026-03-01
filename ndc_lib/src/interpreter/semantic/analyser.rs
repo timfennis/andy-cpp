@@ -404,7 +404,7 @@ impl Analyser {
 
     fn resolve_for_iterations(
         &mut self,
-        iterations: &mut Vec<ForIteration>,
+        iterations: &mut [ForIteration],
         body: &mut Box<ForBody>,
         span: Span,
         pool: &mut ExpressionPool,
@@ -438,7 +438,7 @@ impl Analyser {
 
         let out_type = if !tail.is_empty() {
             self.resolve_for_iterations(
-                &mut tail.to_vec(),
+                tail,
                 body,
                 span,
                 pool,
