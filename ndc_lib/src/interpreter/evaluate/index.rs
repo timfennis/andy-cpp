@@ -9,12 +9,12 @@
 //! | Backward index | -10 | -9 | -8 | -7 | -6 | -5 | -4 | -3 | -2 | -1 |
 //! +----------------+-----+----+----+----+----+----+----+----+----+----+
 
-use super::{EvaluationError, EvaluationResult, IntoEvaluationResult, evaluate_expression};
+use super::{EvaluationError, EvaluationResult, IntoEvaluationResult, PoolWalker, evaluate_expression};
 use crate::interpreter::environment::Environment;
 use crate::interpreter::{function::FunctionCarrier, sequence::Sequence, value::Value};
 use itertools::Itertools;
 use ndc_lexer::Span;
-use ndc_parser::{Expression, ExpressionLocation};
+use ndc_parser::Expression;
 use std::cell::RefCell;
 use std::cmp::min;
 use std::ops::IndexMut;
@@ -61,20 +61,23 @@ impl EvaluatedIndex {
 }
 
 pub(crate) fn evaluate_as_index(
-    expression_location: &ExpressionLocation,
+    walker: PoolWalker,
     environment: &Rc<RefCell<Environment>>,
 ) -> Result<EvaluatedIndex, FunctionCarrier> {
-    let (range_start, range_end, inclusive) = match expression_location.expression {
+    let expression_location = walker.current();
+    let span = expression_location.span;
+
+    let (range_start, range_end, inclusive) = match &expression_location.expression {
         Expression::RangeExclusive {
-            start: ref range_start,
-            end: ref range_end,
+            start: range_start,
+            end: range_end,
         } => (range_start, range_end, false),
         Expression::RangeInclusive {
-            start: ref range_start,
-            end: ref range_end,
+            start: range_start,
+            end: range_end,
         } => (range_start, range_end, true),
         _ => {
-            let result = evaluate_expression(expression_location, environment)?;
+            let result = evaluate_expression(walker, environment)?;
             return Ok(EvaluatedIndex::Index(result));
         }
     };
@@ -82,19 +85,19 @@ pub(crate) fn evaluate_as_index(
     if inclusive && range_end.is_none() {
         return Err(EvaluationError::new(
             "inclusive ranges must have an end".to_string(),
-            expression_location.span,
+            span,
         )
         .into());
     }
 
     let start = if let Some(range_start) = range_start {
-        Some(evaluate_expression(range_start, environment)?)
+        Some(evaluate_expression(walker.resolve(*range_start), environment)?)
     } else {
         None
     };
 
     let end = if let Some(range_end) = range_end {
-        Some(evaluate_expression(range_end, environment)?)
+        Some(evaluate_expression(walker.resolve(*range_end), environment)?)
     } else {
         None
     };

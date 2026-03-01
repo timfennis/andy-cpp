@@ -27,6 +27,12 @@ pub struct ExpressionLocation {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExpressionRef(u32);
 
+impl ExpressionRef {
+    pub fn as_usize(self) -> usize {
+        self.0 as usize
+    }
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub enum Expression {
     // Literals
@@ -72,7 +78,7 @@ pub enum Expression {
         pure: bool,
     },
     Block {
-        statements: Vec<ExpressionLocation>,
+        statements: Vec<ExpressionRef>,
     },
     If {
         condition: ExpressionRef,
@@ -97,13 +103,13 @@ pub enum Expression {
         index: ExpressionRef,
     },
     Tuple {
-        values: Vec<ExpressionLocation>,
+        values: Vec<ExpressionRef>,
     },
     List {
-        values: Vec<ExpressionLocation>,
+        values: Vec<ExpressionRef>,
     },
     Map {
-        values: Vec<(ExpressionLocation, Option<ExpressionLocation>)>,
+        values: Vec<(ExpressionRef, Option<ExpressionRef>)>,
         default: Option<ExpressionRef>,
     },
     Return {
@@ -171,15 +177,36 @@ impl Expression {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Default)]
 pub struct ExpressionPool {
     region: Vec<ExpressionLocation>,
+    root_refs: Vec<ExpressionRef>,
+}
+
+impl ExpressionPool {}
+
+impl IntoIterator for ExpressionPool {
+    type Item = ExpressionLocation;
+    type IntoIter = std::vec::IntoIter<ExpressionLocation>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.region.into_iter()
+    }
 }
 
 impl ExpressionPool {
-    pub fn new() -> Self {
-        Self { region: Vec::new() }
+    pub fn len(&self) -> usize {
+        self.region.len()
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.region.is_empty()
+    }
+
+    pub fn add_root_ref(&mut self, root_ref: ExpressionRef) {
+        self.root_refs.push(root_ref)
+    }
+
     pub fn get(&self, er: ExpressionRef) -> &ExpressionLocation {
         &self.region[er.0 as usize]
     }
@@ -189,8 +216,38 @@ impl ExpressionPool {
         ExpressionRef((self.region.len() - 1) as u32)
     }
 
+    pub fn set_span(&mut self, er: ExpressionRef, span: Span) {
+        self.region[er.0 as usize].span = span;
+    }
+
+    pub fn get_mut(&mut self, er: ExpressionRef) -> &mut ExpressionLocation {
+        &mut self.region[er.0 as usize]
+    }
+
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &ExpressionLocation> {
+        self.region.iter()
+    }
+
+    pub fn root_expressions(&self) -> impl DoubleEndedIterator<Item = &ExpressionRef> {
+        self.root_refs.iter()
+    }
     pub fn merged_span(&self, left_id: ExpressionRef, right_id: ExpressionRef) -> Span {
-        self.region[left_id.0 as usize].span.merge(self.region[right_id.0 as usize].span)
+        self.region[left_id.0 as usize]
+            .span
+            .merge(self.region[right_id.0 as usize].span)
+    }
+
+    pub fn simplify(&mut self, target: ExpressionRef) {
+        // NOTE: for now we put a copy of the expression in the target slot but in the future we might want to move it
+        match self.get(target) {
+            ExpressionLocation {
+                expression: Expression::Tuple { values },
+                ..
+            } if values.len() == 1 => {
+                self.region[target.0 as usize] = self.region[values[0].0 as usize].clone()
+            }
+            _ => {}
+        }
     }
 }
 
@@ -199,29 +256,6 @@ impl ExpressionLocation {
         match &self.expression {
             Expression::Identifier { name, resolved: _ } => name,
             _ => panic!("the parser should have guaranteed us the right type of expression"),
-        }
-    }
-
-    pub fn as_parameters(&self) -> Vec<&str> {
-        match &self.expression {
-            Expression::Tuple {
-                values: tuple_values,
-            } => tuple_values.iter().map(|it| it.as_identifier()).collect(),
-            _ => panic!("the parser should have guaranteed us the right type of expression"),
-        }
-    }
-
-    /// If this `ExpressionLocation` is a tuple expression with length one, it returns the
-    /// `ExpressionLocation` inside the tuple.
-    #[must_use]
-    pub fn simplify(self) -> Self {
-        match self {
-            Self {
-                expression: Expression::Tuple { mut values },
-                ..
-            // } if values.len() == 1 => values.remove(0).simplify(),
-            } if values.len() == 1 => values.remove(0),
-            tuple @ Self { .. } => tuple,
         }
     }
 }
@@ -242,7 +276,7 @@ impl Lvalue {
             Expression::Identifier { .. } | Expression::Index { .. } => true,
             Expression::List { values } | Expression::Tuple { values } => values
                 .iter()
-                .all(|el| Self::can_build_from_expression(&el.expression, pool)),
+                .all(|el| Self::can_build_from_expression(&pool.get(*el).expression, pool)),
             Expression::Grouping(inner) => {
                 Self::can_build_from_expression(&pool.get(*inner).expression, pool)
             }
@@ -260,20 +294,26 @@ impl Lvalue {
     }
 }
 
-impl TryFrom<ExpressionLocation> for Lvalue {
-    type Error = ParseError;
-
-    fn try_from(value: ExpressionLocation) -> Result<Self, Self::Error> {
+impl Lvalue {
+    pub fn from_expression_location(
+        value: ExpressionLocation,
+        pool: &ExpressionPool,
+    ) -> Result<Self, ParseError> {
         match value.expression {
             Expression::Identifier { name, .. } => Ok(Self::new_identifier(name, value.span)),
             Expression::Index { value, index } => Ok(Self::Index { value, index }),
             Expression::List { values } | Expression::Tuple { values } => Ok(Self::Sequence(
                 values
                     .into_iter()
-                    .map(Self::try_from)
-                    .collect::<Result<Vec<Self>, Self::Error>>()?,
+                    .map(|er| Self::from_expression_location(pool.get(er).clone(), pool))
+                    .collect::<Result<Vec<Self>, ParseError>>()?,
             )),
-            Expression::Grouping(value) => Ok(Self::Sequence(vec![Self::try_from(*value)?])),
+            Expression::Grouping(inner) => {
+                Ok(Self::Sequence(vec![Self::from_expression_location(
+                    pool.get(inner).clone(),
+                    pool,
+                )?]))
+            }
             _expr => Err(ParseError::text("invalid l-value".to_string(), value.span)),
         }
     }

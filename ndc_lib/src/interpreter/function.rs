@@ -1,14 +1,14 @@
 use crate::hash_map::{DefaultHasher, HashMap};
 use crate::interpreter::environment::Environment;
 use crate::interpreter::evaluate::{
-    ErrorConverter, EvaluationError, EvaluationResult, evaluate_expression,
+    ErrorConverter, EvaluationError, EvaluationResult, PoolWalker, evaluate_expression,
 };
 use crate::interpreter::num::{BinaryOperatorError, Number};
 use crate::interpreter::sequence::Sequence;
 use crate::interpreter::value::Value;
 use derive_builder::Builder;
 use ndc_lexer::Span;
-use ndc_parser::{ExpressionLocation, ResolvedVar};
+use ndc_parser::ResolvedVar;
 pub use ndc_parser::{Parameter, StaticType, TypeSignature};
 use std::cell::{BorrowError, BorrowMutError, RefCell};
 use std::fmt;
@@ -156,10 +156,11 @@ impl Function {
 }
 
 #[derive(Clone)]
+#[allow(private_interfaces)]
 pub enum FunctionBody {
     Closure {
         parameter_names: Vec<String>,
-        body: ExpressionLocation,
+        body: PoolWalker,
         return_type: StaticType,
         environment: Rc<RefCell<Environment>>,
     },
@@ -259,7 +260,7 @@ impl FunctionBody {
                 }
 
                 let local_scope = Rc::new(RefCell::new(local_scope));
-                match evaluate_expression(body, &local_scope) {
+                match evaluate_expression(body.clone(), &local_scope) {
                     Err(FunctionCarrier::Return(v)) => Ok(v),
                     r => r,
                 }

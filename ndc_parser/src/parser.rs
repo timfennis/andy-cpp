@@ -1,6 +1,8 @@
 use std::fmt::Write;
 
-use crate::expression::{Binding, ExpressionLocation, ExpressionRef, ForBody, ForIteration, Lvalue};
+use crate::expression::{
+    Binding, ExpressionLocation, ExpressionRef, ForBody, ForIteration, Lvalue,
+};
 use crate::expression::{Expression, ExpressionPool};
 use crate::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
 use ndc_lexer::{Span, Token, TokenLocation};
@@ -16,7 +18,7 @@ impl Parser {
         Self {
             tokens,
             current: 0,
-            pool: ExpressionPool::new(),
+            pool: ExpressionPool::default(),
         }
     }
 
@@ -38,10 +40,10 @@ impl Parser {
         };
 
         while self.peek_current_token_location().is_some() {
-            let expr_loc = self.expression_or_statement()?;
-            let is_statement = is_valid_statement(&expr_loc.expression);
+            let expr_ref = self.expression_or_statement()?;
+            let is_statement = is_valid_statement(&self.pool.get(expr_ref).expression);
 
-            self.pool.add(expr_loc);
+            self.pool.add_root_ref(expr_ref);
 
             if !is_statement {
                 break;
@@ -56,7 +58,7 @@ impl Parser {
             ));
         }
 
-        Ok(std::mem::replace(&mut self.pool, ExpressionPool::new()))
+        Ok(std::mem::replace(&mut self.pool, ExpressionPool::default()))
     }
 
     fn peek_current_token(&self) -> Option<&Token> {
@@ -194,8 +196,12 @@ impl Parser {
                     )
                 });
             let right_id = next(self)?;
-            
-            let new_span = self.pool.get(left_id).span.merge(self.pool.get(right_id).span);
+
+            let new_span = self
+                .pool
+                .get(left_id)
+                .span
+                .merge(self.pool.get(right_id).span);
 
             // Is this always the same
             debug_assert_eq!(operator.to_string(), operator_token_loc.token.to_string());
@@ -208,11 +214,13 @@ impl Parser {
                 .to_location(operator_token_loc.span),
             );
 
-            left_id = self.pool.add(Expression::Call {
-                function: function_id,
-                arguments: vec![left_id, right_id],
-            }
-            .to_location(new_span));
+            left_id = self.pool.add(
+                Expression::Call {
+                    function: function_id,
+                    arguments: vec![left_id, right_id],
+                }
+                .to_location(new_span),
+            );
 
             if let Some(not_token) = invert {
                 let not_function_id = self.pool.add(
@@ -223,11 +231,13 @@ impl Parser {
                     .to_location(not_token.span),
                 );
 
-                left_id = self.pool.add(Expression::Call {
-                    function: not_function_id,
-                    arguments: vec![left_id],
-                }
-                .to_location(new_span.merge(not_token.span)));
+                left_id = self.pool.add(
+                    Expression::Call {
+                        function: not_function_id,
+                        arguments: vec![left_id],
+                    }
+                    .to_location(new_span.merge(not_token.span)),
+                );
             }
         }
         Ok(left_id)
@@ -245,22 +255,29 @@ impl Parser {
             let operator_span = token_location.span;
             let operator = BinaryOperator::try_from(token_location)
                 .expect("COMPILER ERROR: consume_token_if must guarantee the correct token");
-            
-            let right_id = current(self)?;
-            let new_span = self.pool.get(left_id).span.merge(self.pool.get(right_id).span);
 
-            
-            let ident_id = self.pool.add(Expression::Identifier {
-                name: operator.to_string(),
-                resolved: Binding::None,
-            }
-                .to_location(operator_span));
-            
-            let out_id = self.pool.add(Expression::Call {
-                function: ident_id,
-                arguments: vec![left_id, right_id],
-            }
-                .to_location(new_span));
+            let right_id = current(self)?;
+            let new_span = self
+                .pool
+                .get(left_id)
+                .span
+                .merge(self.pool.get(right_id).span);
+
+            let ident_id = self.pool.add(
+                Expression::Identifier {
+                    name: operator.to_string(),
+                    resolved: Binding::None,
+                }
+                .to_location(operator_span),
+            );
+
+            let out_id = self.pool.add(
+                Expression::Call {
+                    function: ident_id,
+                    arguments: vec![left_id, right_id],
+                }
+                .to_location(new_span),
+            );
             return Ok(out_id);
         }
 
@@ -280,12 +297,14 @@ impl Parser {
                 .expect("consume_operator_if guaranteed us that this is an operator");
             let right = next(self)?;
             let new_span = self.pool.get(left).span.merge(self.pool.get(right).span);
-            left = self.pool.add(Expression::Logical {
-                left,
-                operator,
-                right,
-            }
-            .to_location(new_span));
+            left = self.pool.add(
+                Expression::Logical {
+                    left,
+                    operator,
+                    right,
+                }
+                .to_location(new_span),
+            );
         }
         Ok(left)
     }
@@ -298,8 +317,8 @@ impl Parser {
 
     // ---------------------------------------- Recursive Descent Parser ----------------------------------------
 
-    fn expression_or_statement(&mut self) -> Result<ExpressionLocation, Error> {
-        let mut expression = if self.match_token(&[Token::Let]).is_some() {
+    fn expression_or_statement(&mut self) -> Result<ExpressionRef, Error> {
+        let expression = if self.match_token(&[Token::Let]).is_some() {
             self.let_statement()?
         } else {
             self.expression()?
@@ -307,21 +326,25 @@ impl Parser {
 
         if self.match_token(&[Token::Semicolon]).is_some() {
             self.advance();
-            expression = expression.to_statement();
+            let span = self.pool.get(expression).span;
+            return Ok(self
+                .pool
+                .add(Expression::Statement(expression).to_location(span)));
         }
 
         Ok(expression)
     }
 
-    fn let_statement(&mut self) -> Result<ExpressionLocation, Error> {
+    fn let_statement(&mut self) -> Result<ExpressionRef, Error> {
         let let_token = self
             .require_current_token_matches(&Token::Let)
             .expect("guaranteed to match by caller");
 
-        let maybe_lvalue = self.tuple_expression(Self::single_expression, false)?;
-        let lvalue_span = maybe_lvalue.span;
+        let maybe_lvalue_ref = self.tuple_expression(Self::single_expression, false)?;
+        let lvalue_span = self.pool.get(maybe_lvalue_ref).span;
+        let maybe_lvalue = self.pool.get(maybe_lvalue_ref).clone();
 
-        let Ok(lvalue) = Lvalue::try_from(maybe_lvalue) else {
+        let Ok(lvalue) = Lvalue::from_expression_location(maybe_lvalue, &self.pool) else {
             return Err(Error::with_help(
                 "Invalid assignment target".to_string(),
                 lvalue_span,
@@ -331,38 +354,42 @@ impl Parser {
 
         self.require_current_token_matches(&Token::EqualsSign)?;
 
-        let expression = self.variable_assignment()?;
-        let end = expression.span;
+        let value = self.variable_assignment()?;
+        let end = self.pool.get(value).span;
         let declaration = Expression::VariableDeclaration {
             l_value: lvalue,
-            value: self.pool.add(expression),
+            value,
         };
 
         if self.peek_current_token().is_some() {
             self.require_current_token_matches(&Token::Semicolon)?;
         }
 
-        Ok(declaration
-            .to_location(let_token.span.merge(end))
-            .to_statement())
+        let decl_ref = self
+            .pool
+            .add(declaration.to_location(let_token.span.merge(end)));
+        let span = self.pool.get(decl_ref).span;
+        Ok(self
+            .pool
+            .add(Expression::Statement(decl_ref).to_location(span)))
     }
 
-    fn expression(&mut self) -> Result<ExpressionLocation, Error> {
+    fn expression(&mut self) -> Result<ExpressionRef, Error> {
         self.variable_assignment()
     }
 
-    fn variable_assignment(&mut self) -> Result<ExpressionLocation, Error> {
+    fn variable_assignment(&mut self) -> Result<ExpressionRef, Error> {
         let maybe_lvalue = self.tuple_expression(Self::single_expression, false)?;
-        let start = maybe_lvalue.span;
+        let start = self.pool.get(maybe_lvalue).span;
 
-        if !Lvalue::can_build_from_expression(&maybe_lvalue.expression) {
+        if !Lvalue::can_build_from_expression(&self.pool.get(maybe_lvalue).expression, &self.pool) {
             // In this case we got some kind of expression that we can't assign to. We can just return the expression as is.
             // But to improve error handling and stuff it would be nice if we could check if the next token matches one
             // of the assignment operator and throw an appropriate error.
             return match self.peek_current_token() {
                 Some(Token::EqualsSign) => Err(Error::with_help(
                     "Invalid assignment target".to_string(),
-                    maybe_lvalue.span,
+                    start,
                     "Assignment target is not a valid lvalue. Only a few expressions can be assigned a value. Check that the left-hand side of the assignment is a valid target.".to_string(),
                 )),
                 _ => Ok(maybe_lvalue),
@@ -373,32 +400,36 @@ impl Parser {
             // NOTE: the parser supports every LValue but some might cause an error when declaring vars
             Some(Token::EqualsSign) => {
                 self.advance();
-                let expression = self.tuple_expression(Self::single_expression, false)?;
-                let end = expression.span;
-                let assignment_expression = Expression::Assignment {
-                    l_value: Lvalue::try_from(maybe_lvalue)
-                        .expect("guaranteed to produce an lvalue"),
-                    r_value: self.pool.add(expression),
-                };
-
-                Ok(assignment_expression.to_location(start.merge(end)))
+                let r_value = self.tuple_expression(Self::single_expression, false)?;
+                let end = self.pool.get(r_value).span;
+                let l_value = Lvalue::from_expression_location(
+                    self.pool.get(maybe_lvalue).clone(),
+                    &self.pool,
+                )
+                .expect("guaranteed to produce an lvalue");
+                let assignment_expression = Expression::Assignment { l_value, r_value };
+                Ok(self
+                    .pool
+                    .add(assignment_expression.to_location(start.merge(end))))
             }
             Some(Token::OpAssign(inner)) => {
                 let operation_identifier = inner.token.to_string();
-
                 self.advance();
-                let expression = self.tuple_expression(Self::single_expression, false)?;
-                let end = expression.span;
+                let r_value = self.tuple_expression(Self::single_expression, false)?;
+                let end = self.pool.get(r_value).span;
+                let l_value = Lvalue::from_expression_location(
+                    self.pool.get(maybe_lvalue).clone(),
+                    &self.pool,
+                )
+                .expect("guaranteed to produce an lvalue");
                 let op_assign = Expression::OpAssignment {
-                    l_value: Lvalue::try_from(maybe_lvalue)
-                        .expect("guaranteed to produce an lvalue"),
-                    r_value: self.pool.add(expression),
+                    l_value,
+                    r_value,
                     operation: operation_identifier,
                     resolved_assign_operation: Binding::None,
                     resolved_operation: Binding::None,
                 };
-
-                Ok(op_assign.to_location(start.merge(end)))
+                Ok(self.pool.add(op_assign.to_location(start.merge(end))))
             }
             _ => Ok(maybe_lvalue),
         }
@@ -408,7 +439,7 @@ impl Parser {
         &mut self,
         next: fn(&mut Self) -> Result<ExpressionRef, Error>,
         must_be_tuple: bool,
-    ) -> Result<ExpressionLocation, Error> {
+    ) -> Result<ExpressionRef, Error> {
         let first_ref = next(self)?;
         let mut refs = vec![first_ref];
         let mut must_be_tuple = must_be_tuple;
@@ -422,43 +453,44 @@ impl Parser {
             refs.push(next(self)?);
         }
 
-        let new_span = self.pool.get(refs[0]).span
+        let new_span = self
+            .pool
+            .get(refs[0])
+            .span
             .merge(self.pool.get(*refs.last().unwrap()).span);
-        let expressions: Vec<ExpressionLocation> =
-            refs.iter().map(|&r| self.pool.get(r).clone()).collect();
 
-        let tuple_expression = ExpressionLocation {
-            expression: Expression::Tuple {
-                values: expressions,
-            },
-            span: new_span,
-        };
+        let tuple_ref = self
+            .pool
+            .add(Expression::Tuple { values: refs }.to_location(new_span));
 
-        if must_be_tuple {
-            Ok(tuple_expression)
-        } else {
-            Ok(tuple_expression.simplify())
+        if !must_be_tuple {
+            self.pool.simplify(tuple_ref);
         }
+
+        Ok(tuple_ref)
     }
 
     /// Parses a delimited tuple (enclosed in parentheses) that can be empty
     fn delimited_tuple(
         &mut self,
         next: fn(&mut Self) -> Result<ExpressionRef, Error>,
-    ) -> Result<ExpressionLocation, Error> {
+    ) -> Result<ExpressionRef, Error> {
         let start = self.require_current_token_matches(&Token::LeftParentheses)?;
         if let Some(end) = self.consume_token_if(&[Token::RightParentheses]) {
-            Ok(Expression::Tuple { values: vec![] }.to_location(start.span.merge(end.span)))
+            Ok(self
+                .pool
+                .add(Expression::Tuple { values: vec![] }.to_location(start.span.merge(end.span))))
         } else {
-            let mut tuple_expression = self.tuple_expression(next, true)?;
+            let tuple_ref = self.tuple_expression(next, true)?;
             let right_paren_span = self
                 .require_current_token_matches(&Token::RightParentheses)?
                 .span;
 
-            // Include the right paretheses in the span
-            tuple_expression.span = tuple_expression.span.merge(right_paren_span);
+            // Include the right parentheses in the span
+            let extended_span = self.pool.get(tuple_ref).span.merge(right_paren_span);
+            self.pool.set_span(tuple_ref, extended_span);
 
-            Ok(tuple_expression)
+            Ok(tuple_ref)
         }
     }
 
@@ -655,13 +687,12 @@ impl Parser {
             match current.token {
                 // handles: foo()
                 Token::LeftParentheses => {
-                    let arguments = self.delimited_tuple(Self::single_expression)?;
-                    let arguments_span = arguments.span;
-                    let Expression::Tuple { values: arguments } = arguments.expression else {
-                        unreachable!("self.tuple() must always produce a tuple");
+                    let arguments_ref = self.delimited_tuple(Self::single_expression)?;
+                    let arguments_span = self.pool.get(arguments_ref).span;
+                    let arguments = match &self.pool.get(arguments_ref).expression {
+                        Expression::Tuple { values } => values.clone(),
+                        _ => unreachable!("self.delimited_tuple() must always produce a tuple"),
                     };
-                    let arguments: Vec<ExpressionRef> =
-                        arguments.into_iter().map(|a| self.pool.add(a)).collect();
 
                     let span = self.pool.get(expr).span;
 
@@ -684,23 +715,23 @@ impl Parser {
                     };
 
                     // () is now optional?
-                    let (extra_arguments, tuple_span) =
-                        if self.match_token(&[Token::LeftParentheses]).is_some() {
-                            let tuple_expression = self.delimited_tuple(Self::single_expression)?;
-
-                            if let Expression::Tuple { values: arguments } =
-                                tuple_expression.expression
-                            {
-                                (arguments, Some(tuple_expression.span))
-                            } else {
-                                unreachable!("self.tuple() must always produce a tuple");
-                            }
-                        } else {
-                            (Vec::new(), None)
+                    let (extra_arguments, tuple_span) = if self
+                        .match_token(&[Token::LeftParentheses])
+                        .is_some()
+                    {
+                        let tuple_ref = self.delimited_tuple(Self::single_expression)?;
+                        let tuple_span = self.pool.get(tuple_ref).span;
+                        let values = match &self.pool.get(tuple_ref).expression {
+                            Expression::Tuple { values } => values.clone(),
+                            _ => unreachable!("self.delimited_tuple() must always produce a tuple"),
                         };
+                        (values, Some(tuple_span))
+                    } else {
+                        (Vec::new(), None)
+                    };
 
                     let mut arguments: Vec<ExpressionRef> = vec![expr];
-                    arguments.extend(extra_arguments.into_iter().map(|a| self.pool.add(a)));
+                    arguments.extend(extra_arguments);
 
                     let function_id = self.pool.add(
                         Expression::Identifier {
@@ -753,12 +784,11 @@ impl Parser {
                         self.require_current_token_matches(&Token::RightSquareBracket)?;
 
                     let span = self.pool.get(expr).span.merge(end_token.span);
-                    let index_ref = self.pool.add(index_expression);
 
                     expr = self.pool.add(
                         Expression::Index {
                             value: expr,
-                            index: index_ref,
+                            index: index_expression,
                         }
                         .to_location(span),
                     );
@@ -784,15 +814,17 @@ impl Parser {
     /// ```ndc
     /// [x + y for x in 0..10, y in 0..10, if x != y]
     /// ```
-    fn list(&mut self) -> Result<ExpressionLocation, Error> {
+    fn list(&mut self) -> Result<ExpressionRef, Error> {
         // Lists must begin with a `[` and the caller should have checked for this
         let left_square_bracket_span = self
             .require_current_token_matches(&Token::LeftSquareBracket)?
             .span;
 
         if let Some(bracket) = self.consume_token_if(&[Token::RightSquareBracket]) {
-            return Ok(Expression::List { values: vec![] }
-                .to_location(left_square_bracket_span.merge(bracket.span)));
+            return Ok(self.pool.add(
+                Expression::List { values: vec![] }
+                    .to_location(left_square_bracket_span.merge(bracket.span)),
+            ));
         }
 
         // If this isn't an empty list we parse a tuple expression (without delimiters) consisting of
@@ -811,19 +843,20 @@ impl Parser {
 
                 self.advance();
 
-                let Expression::Tuple { values } = expr.expression else {
-                    unreachable!("tuple_expression must guarantee us a tuple");
+                let values = match &self.pool.get(expr).expression {
+                    Expression::Tuple { values } => values.clone(),
+                    _ => unreachable!("tuple_expression must guarantee us a tuple"),
                 };
 
-                // Next we can maybe turn this into a list expression
-                //let last_value_span = values.last().map_or(left_square_bracket_span, |e| e.span);
-
-                Ok(Expression::List { values }
-                    .to_location(left_square_bracket_span.merge(right_square_bracket_span)))
+                Ok(self.pool.add(
+                    Expression::List { values }
+                        .to_location(left_square_bracket_span.merge(right_square_bracket_span)),
+                ))
             }
             // WOAH, this is not a list, it's a list comprehension
             Some(Token::For) => {
-                let result = ForBody::List(self.pool.add(expr.simplify()));
+                self.pool.simplify(expr);
+                let result = ForBody::List(expr);
                 self.for_comprehension(left_square_bracket_span, result, &Token::RightSquareBracket)
             }
             _ => {
@@ -845,7 +878,7 @@ impl Parser {
         span: Span,
         result: ForBody,
         end_token: &Token,
-    ) -> Result<ExpressionLocation, Error> {
+    ) -> Result<ExpressionRef, Error> {
         self.require_current_token_matches(&Token::For)
             .expect("guaranteed to match");
         let mut iterations = Vec::new();
@@ -874,11 +907,13 @@ impl Parser {
 
         let end = self.require_current_token_matches(end_token)?;
 
-        Ok(Expression::For {
-            body: Box::new(result),
-            iterations,
-        }
-        .to_location(span.merge(end.span)))
+        Ok(self.pool.add(
+            Expression::For {
+                body: Box::new(result),
+                iterations,
+            }
+            .to_location(span.merge(end.span)),
+        ))
     }
 
     fn if_guard(&mut self) -> Result<ForIteration, Error> {
@@ -892,7 +927,9 @@ impl Parser {
     /// x in xs
     /// ```
     fn for_iteration(&mut self) -> Result<ForIteration, Error> {
-        let l_value = Lvalue::try_from(self.tuple_expression(Self::primary, false)?)?;
+        let lvalue_ref = self.tuple_expression(Self::primary, false)?;
+        let lvalue_loc = self.pool.get(lvalue_ref).clone();
+        let l_value = Lvalue::from_expression_location(lvalue_loc, &self.pool)?;
 
         self.require_current_token_matches(&Token::In)?;
 
@@ -908,73 +945,70 @@ impl Parser {
     fn primary(&mut self) -> Result<ExpressionRef, Error> {
         // matches if expression like `if a < b { } else { }`
         if self.consume_token_if(&[Token::If]).is_some() {
-            let loc = self.if_expression()?;
-            return Ok(self.pool.add(loc));
+            return self.if_expression();
         }
         // matches while loops like `while foo < bar { }`
         else if self.consume_token_if(&[Token::While]).is_some() {
-            let loc = self.while_expression()?;
-            return Ok(self.pool.add(loc));
+            return self.while_expression();
         }
         // matches for loops like `for x in xs { }`
         else if self.match_token(&[Token::For]).is_some() {
-            let loc = self.for_expression()?;
-            return Ok(self.pool.add(loc));
+            return self.for_expression();
         }
         // matches function declarations like `fn function_name(arg1, arg2) { }`
         else if self.match_token(&[Token::Fn, Token::Pure]).is_some() {
-            let loc = self.function_declaration()?;
-            return Ok(self.pool.add(loc));
+            return self.function_declaration();
         }
         // matches `return;` and `return (expression);`
         else if let Some(return_token_location) = self.consume_token_if(&[Token::Return]) {
-            let expr_loc = if self.match_token(&[Token::Semicolon]).is_some() {
-                Expression::Tuple { values: vec![] }.to_location(return_token_location.span)
+            let value = if self.match_token(&[Token::Semicolon]).is_some() {
+                self.pool.add(
+                    Expression::Tuple { values: vec![] }.to_location(return_token_location.span),
+                )
             } else {
                 self.expression()?
             };
 
-            let span = expr_loc.span;
-            let value = self.pool.add(expr_loc);
-
-            let return_expression = Expression::Return { value }
-                .to_location(return_token_location.span.merge(span));
-
-            return Ok(self.pool.add(return_expression));
+            let span = self.pool.get(value).span;
+            return Ok(self.pool.add(
+                Expression::Return { value }.to_location(return_token_location.span.merge(span)),
+            ));
         } else if let Some(token_location) = self.consume_token_if(&[Token::Break]) {
-            return Ok(self.pool.add(Expression::Break.to_location(token_location.span)));
+            return Ok(self
+                .pool
+                .add(Expression::Break.to_location(token_location.span)));
         } else if let Some(token_location) = self.consume_token_if(&[Token::Continue]) {
-            return Ok(self.pool.add(Expression::Continue.to_location(token_location.span)));
+            return Ok(self
+                .pool
+                .add(Expression::Continue.to_location(token_location.span)));
         }
         // matches curly bracketed block expression `{ }`
         else if self.match_token(&[Token::LeftCurlyBracket]).is_some() {
-            let loc = self.block()?;
-            return Ok(self.pool.add(loc));
+            return self.block();
         }
         // matches map expression %{1,2,3}
         else if self.match_token(&[Token::MapOpen]).is_some() {
-            let loc = self.map_expression()?;
-            return Ok(self.pool.add(loc));
+            return self.map_expression();
         }
         // matches list and list comprehensions
         else if self.match_token(&[Token::LeftSquareBracket]).is_some() {
-            let loc = self.list()?;
-            return Ok(self.pool.add(loc));
+            return self.list();
         }
         // matches either a grouped expression `(1+1)` or a tuple `(1,1)`
         else if let Some(start_parentheses) = self.consume_token_if(&[Token::LeftParentheses]) {
             // If an opening parentheses is immediately followed by a closing parentheses we're dealing with a Unit expression
             if let Some(end_parentheses) = self.consume_token_if(&[Token::RightParentheses]) {
-                let loc = Expression::Tuple { values: vec![] }
-                    .to_location(start_parentheses.span.merge(end_parentheses.span));
-                return Ok(self.pool.add(loc));
+                return Ok(self.pool.add(
+                    Expression::Tuple { values: vec![] }
+                        .to_location(start_parentheses.span.merge(end_parentheses.span)),
+                ));
             }
 
             let grouped = self.expression()?;
 
             self.require_current_token_matches(&Token::RightParentheses)?;
 
-            return Ok(self.pool.add(grouped));
+            return Ok(grouped);
         }
 
         let token_location = self.require_current_token()?;
@@ -1018,44 +1052,46 @@ impl Parser {
     ///
     /// }
     /// ```
-    fn if_expression(&mut self) -> Result<ExpressionLocation, Error> {
-        let expression = self.expression()?;
-        let span = expression.span;
-        let condition = self.pool.add(expression);
-        let on_true_loc = self.block()?;
-        let on_true = self.pool.add(on_true_loc);
+    fn if_expression(&mut self) -> Result<ExpressionRef, Error> {
+        let condition = self.expression()?;
+        let span = self.pool.get(condition).span;
+        let on_true = self.block()?;
 
         let on_false = if self.consume_token_if(&[Token::Else]).is_some() {
             if self.consume_token_if(&[Token::If]).is_some() {
-                let loc = self.if_expression()?;
-                Some(self.pool.add(loc))
+                Some(self.if_expression()?)
             } else {
-                let loc = self.block()?;
-                Some(self.pool.add(loc))
+                Some(self.block()?)
             }
         } else {
             None
         };
 
-        Ok(Expression::If {
-            condition,
-            on_true,
-            on_false,
-        }
-        .to_location(span))
+        Ok(self.pool.add(
+            Expression::If {
+                condition,
+                on_true,
+                on_false,
+            }
+            .to_location(span),
+        ))
     }
 
-    fn while_expression(&mut self) -> Result<ExpressionLocation, Error> {
-        let expression_loc = self.expression()?;
-        let span = expression_loc.span;
-        let expression = self.pool.add(expression_loc);
-        let block = self.block()?;
-        let loop_body = self.pool.add(block);
+    fn while_expression(&mut self) -> Result<ExpressionRef, Error> {
+        let expression = self.expression()?;
+        let span = self.pool.get(expression).span;
+        let loop_body = self.block()?;
 
-        Ok(Expression::While { expression, loop_body }.to_location(span))
+        Ok(self.pool.add(
+            Expression::While {
+                expression,
+                loop_body,
+            }
+            .to_location(span),
+        ))
     }
 
-    fn for_expression(&mut self) -> Result<ExpressionLocation, Error> {
+    fn for_expression(&mut self) -> Result<ExpressionRef, Error> {
         let for_token_span = self
             .require_current_token_matches(&Token::For)
             .expect("required to be the correct token")
@@ -1076,14 +1112,15 @@ impl Parser {
         }
 
         let body = self.block()?;
-        let body_span = body.span;
-        let body_ref = self.pool.add(body);
+        let body_span = self.pool.get(body).span;
 
-        Ok(Expression::For {
-            iterations,
-            body: Box::new(ForBody::Block(body_ref)),
-        }
-        .to_location(for_token_span.merge(body_span)))
+        Ok(self.pool.add(
+            Expression::For {
+                iterations,
+                body: Box::new(ForBody::Block(body)),
+            }
+            .to_location(for_token_span.merge(body_span)),
+        ))
     }
 
     fn require_identifier(&mut self) -> Result<ExpressionRef, Error> {
@@ -1102,7 +1139,7 @@ impl Parser {
         }
     }
 
-    fn function_declaration(&mut self) -> Result<ExpressionLocation, Error> {
+    fn function_declaration(&mut self) -> Result<ExpressionRef, Error> {
         let mut modifiers = Vec::new();
 
         while let Some(token) = self.consume_token_if(&[Token::Fn, Token::Pure]) {
@@ -1164,10 +1201,7 @@ impl Parser {
                 self.advance();
                 self.single_expression()?
             }
-            Some(Token::LeftCurlyBracket) => {
-                let block = self.block()?;
-                self.pool.add(block)
-            }
+            Some(Token::LeftCurlyBracket) => self.block()?,
             Some(token) => {
                 return Err(Error::with_help(
                     format!("unexpected token: {token}"),
@@ -1175,22 +1209,21 @@ impl Parser {
                     "Expected that the argument list is followed by either a body `{}` or a fat arrow `=>`".to_string(),
                 ))
             }
-            None => return Err(Error::end_of_input(argument_list.span)),
+            None => return Err(Error::end_of_input(self.pool.get(argument_list).span)),
         };
 
         let span = fn_token.span.merge(self.pool.get(body).span);
-        let parameters = self.pool.add(argument_list);
-        Ok(ExpressionLocation {
+        Ok(self.pool.add(ExpressionLocation {
             expression: Expression::FunctionDeclaration {
                 name: identifier,
-                parameters,
+                parameters: argument_list,
                 body,
                 return_type: None, // At some point in the future we could use type declarations here to insert the type (return type inference is cringe anyway)
                 pure: is_pure,
                 resolved_name: None,
             },
             span,
-        })
+        }))
     }
 
     /// Parses a block expression including the block delimiters `{` and `}`
@@ -1202,7 +1235,7 @@ impl Parser {
     ///     x
     /// }
     /// ```
-    fn block(&mut self) -> Result<ExpressionLocation, Error> {
+    fn block(&mut self) -> Result<ExpressionRef, Error> {
         let left_curly_span = self.require_token(&[Token::LeftCurlyBracket])?;
 
         let mut statements = Vec::new();
@@ -1222,10 +1255,12 @@ impl Parser {
             }
         };
 
-        Ok(Expression::Block { statements }.to_location(left_curly_span.merge(loop_span)))
+        Ok(self
+            .pool
+            .add(Expression::Block { statements }.to_location(left_curly_span.merge(loop_span))))
     }
 
-    fn map_expression(&mut self) -> Result<ExpressionLocation, Error> {
+    fn map_expression(&mut self) -> Result<ExpressionRef, Error> {
         // This should have been checked before this method is called;
         let map_open_span = self.require_token(&[Token::MapOpen])?;
 
@@ -1242,7 +1277,7 @@ impl Parser {
             None
         };
 
-        let mut values: Vec<(ExpressionLocation, Option<ExpressionLocation>)> = Vec::new();
+        let mut values: Vec<(ExpressionRef, Option<ExpressionRef>)> = Vec::new();
 
         let map_close_span = loop {
             // End parsing if we see a RightCurlyBracket, this one only happens if the expression is
@@ -1251,12 +1286,10 @@ impl Parser {
                 break token_location.span;
             }
 
-            let key_ref = self.single_expression()?;
-            let key = self.pool.get(key_ref).clone();
+            let key = self.single_expression()?;
 
             if self.consume_token_if(&[Token::Colon]).is_some() {
-                let value_ref = self.single_expression()?;
-                let value = self.pool.get(value_ref).clone();
+                let value = self.single_expression()?;
                 values.push((key, Some(value)));
             } else {
                 values.push((key, None));
@@ -1267,11 +1300,9 @@ impl Parser {
             }
 
             if values.len() == 1 && self.match_token(&[Token::For]).is_some() {
-                let (key_expr, value_expr) = values
+                let (key, value) = values
                     .pop()
                     .expect("guaranteed by previous call to values.len()");
-                let key = self.pool.add(key_expr);
-                let value = value_expr.map(|v| self.pool.add(v));
                 return self.for_comprehension(
                     map_open_span,
                     ForBody::Map {
@@ -1285,7 +1316,9 @@ impl Parser {
 
             self.require_current_token_matches(&Token::Comma)?;
         };
-        Ok(Expression::Map { values, default }.to_location(map_open_span.merge(map_close_span)))
+        Ok(self.pool.add(
+            Expression::Map { values, default }.to_location(map_open_span.merge(map_close_span)),
+        ))
     }
     fn peek_range_end(&self) -> bool {
         matches!(
