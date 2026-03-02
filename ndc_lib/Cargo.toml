@@ -5,7 +5,7 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
-ahash = { workspace = true, optional = true }
+ahash.workspace = true
 anyhow.workspace = true
 derive_more.workspace = true
 derive_builder.workspace = true
@@ -18,6 +18,3 @@ ryu.workspace = true
 self_cell.workspace = true
 thiserror.workspace = true
 
-[features]
-default = ["ahash"]
-ahash = ["dep:ahash"]

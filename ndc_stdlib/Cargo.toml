@@ -21,6 +21,5 @@ md5 = { version = "0.8.0", optional = true }
 sha1 = { version = "0.10.6", optional = true }
 
 [features]
-default = ["ahash", "crypto"]
-ahash = ["ndc_lib/ahash"]
+default = ["crypto"]
 crypto = ["dep:md5", "dep:sha1"]
