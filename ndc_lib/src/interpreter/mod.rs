@@ -42,6 +42,12 @@ impl Interpreter {
         }
     }
 
+    pub fn configure<F: FnOnce(&mut Environment)>(&mut self, f: F) {
+        f(&mut self.environment.borrow_mut());
+        let global_identifiers = self.environment.borrow().get_global_identifiers();
+        self.analyser = Analyser::from_scope_tree(ScopeTree::from_global_scope(global_identifiers));
+    }
+
     #[must_use]
     pub fn environment(self) -> Rc<RefCell<Environment>> {
         self.environment

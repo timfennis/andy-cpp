@@ -1292,6 +1292,7 @@ name = "ndc_lsp"
 version = "0.2.1"
 dependencies = [
  "ndc_lexer",
+ "ndc_lib",
  "ndc_parser",
  "ndc_stdlib",
  "tokio",
@@ -2062,6 +2063,7 @@ dependencies = [
 name = "tests"
 version = "0.2.1"
 dependencies = [
+ "ndc_lib",
  "ndc_stdlib",
  "owo-colors",
 ]
