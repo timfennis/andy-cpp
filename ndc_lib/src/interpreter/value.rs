@@ -93,7 +93,7 @@ impl Value {
             }
             Self::Sequence(Sequence::String(string)) => match Rc::try_unwrap(string) {
                 // This implementation is peak retard, we don't want collect_vec here
-                // ^-- WTF: is this comment, we collect_vec here anyways?
+                // ^-- WTF: is this comment, we collect_vec here anyway?
                 Ok(string) => Some(string.into_inner().chars().map(Self::from).collect_vec()),
                 Err(string) => Some(string.borrow().chars().map(Self::from).collect_vec()),
             },

@@ -14,7 +14,9 @@ fn string_match(needle: &str, haystack: &str) -> bool {
 }
 
 pub fn docs(query: Option<&str>) -> anyhow::Result<()> {
-    let interpreter = Interpreter::new(Vec::new()).with_stdlib(); // Discard the output
+    let interpreter = Interpreter::new(Vec::new()) // Discard the output
+        .with_stdlib();
+
     let functions = interpreter.environment().borrow().get_all_functions();
 
     let matched_functions = functions
