@@ -11,7 +11,7 @@ use ndc_lexer::{Lexer, TokenLocation};
 pub mod environment;
 pub mod evaluate;
 pub mod function;
-pub(crate) mod heap;
+pub mod heap;
 pub mod int;
 pub mod iterator;
 pub mod num;
@@ -30,10 +30,12 @@ impl Interpreter {
     where
         T: InterpreterOutput + 'static,
     {
-        let mut environment = Environment::new(Box::new(dest));
-        crate::stdlib::register(&mut environment);
-        let global_identifiers = environment.get_global_identifiers();
+        Self::from_env(Environment::new(Box::new(dest)))
+    }
 
+    #[must_use]
+    pub fn from_env(environment: Environment) -> Self {
+        let global_identifiers = environment.get_global_identifiers();
         Self {
             environment: Rc::new(RefCell::new(environment)),
             analyser: Analyser::from_scope_tree(ScopeTree::from_global_scope(global_identifiers)),

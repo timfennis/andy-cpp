@@ -1,0 +1,26 @@
+[package]
+name = "ndc_stdlib"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+factorial.workspace = true
+itertools.workspace = true
+ndc_lib = { workspace = true }
+ndc_macros.workspace = true
+num.workspace = true
+once_cell.workspace = true
+rand.workspace = true
+regex.workspace = true
+serde_json = { workspace = true }
+tap.workspace = true
+
+# Crypto
+md5 = { version = "0.8.0", optional = true }
+sha1 = { version = "0.10.6", optional = true }
+
+[features]
+default = ["ahash", "crypto"]
+ahash = ["ndc_lib/ahash"]
+crypto = ["dep:md5", "dep:sha1"]

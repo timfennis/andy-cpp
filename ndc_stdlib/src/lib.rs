@@ -1,4 +1,5 @@
-use crate::interpreter::environment::Environment;
+use ndc_lib::interpreter::environment::{Environment, InterpreterOutput};
+use ndc_lib::interpreter::Interpreter;
 
 pub mod aoc;
 pub mod cmp;
@@ -38,4 +39,10 @@ pub fn register(env: &mut Environment) {
     serde::register(env);
     string::register(env);
     value::register(env);
+}
+
+pub fn new_interpreter<T: InterpreterOutput + 'static>(dest: T) -> Interpreter {
+    let mut environment = Environment::new(Box::new(dest));
+    register(&mut environment);
+    Interpreter::from_env(environment)
 }

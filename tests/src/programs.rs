@@ -1,4 +1,4 @@
-use ndc_lib::interpreter::Interpreter;
+use ndc_stdlib::new_interpreter;
 use owo_colors::OwoColorize;
 use std::fs;
 use std::path::PathBuf;
@@ -23,7 +23,7 @@ fn run_ndc_test(path: PathBuf) -> Result<(), std::io::Error> {
 
     print!("Running {path:?}...");
 
-    let mut interpreter = Interpreter::new(Vec::new());
+    let mut interpreter = new_interpreter(Vec::new());
     let interpreter_result = interpreter.run_str(&contents);
 
     let program_had_error = interpreter_result.is_err();

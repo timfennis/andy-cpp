@@ -1,8 +1,8 @@
 #[ndc_macros::export_module]
 mod inner {
-    use crate::interpreter::iterator::mut_seq_to_iterator;
-    use crate::interpreter::sequence::{ListRepr, Sequence};
-    use crate::interpreter::value::Value;
+    use ndc_lib::interpreter::iterator::mut_seq_to_iterator;
+    use ndc_lib::interpreter::sequence::{ListRepr, Sequence};
+    use ndc_lib::interpreter::value::Value;
     use itertools::Itertools;
     use std::rc::Rc;
 

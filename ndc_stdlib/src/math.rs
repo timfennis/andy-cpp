@@ -1,7 +1,7 @@
-use crate::interpreter::environment::Environment;
-use crate::interpreter::num::{BinaryOperatorError, Number};
-use crate::interpreter::sequence::Sequence;
-use crate::interpreter::value::Value;
+use ndc_lib::interpreter::environment::Environment;
+use ndc_lib::interpreter::num::{BinaryOperatorError, Number};
+use ndc_lib::interpreter::sequence::Sequence;
+use ndc_lib::interpreter::value::Value;
 use factorial::Factorial;
 use ndc_macros::export_module;
 use num::ToPrimitive;
@@ -52,8 +52,8 @@ mod inner {
     use std::ops::Sub;
 
     use super::FallibleSum;
-    use crate::interpreter::int::Int;
-    use crate::interpreter::num::Number;
+    use ndc_lib::interpreter::int::Int;
+    use ndc_lib::interpreter::num::Number;
     use anyhow::Context;
     use num::{BigInt, BigRational, BigUint, Integer, complex::Complex64};
 
@@ -209,11 +209,11 @@ mod inner {
 
 pub mod f64 {
     use super::{Environment, Number, ToPrimitive, f64};
-    use crate::interpreter::function::{
+    use ndc_lib::interpreter::function::{
         FunctionBody, FunctionBuilder, FunctionCarrier, Parameter, StaticType, TypeSignature,
     };
-    use crate::interpreter::num::BinaryOperatorError;
-    use crate::interpreter::value::Value;
+    use ndc_lib::interpreter::num::BinaryOperatorError;
+    use ndc_lib::interpreter::value::Value;
     use std::cmp::Ordering;
     use std::ops::Not;
 
@@ -475,7 +475,7 @@ pub mod f64 {
             ($method:ident,$docs:literal) => {
                 let function = FunctionBuilder::default()
                     .body(
-                        $crate::interpreter::function::FunctionBody::NumericUnaryOp {
+                        ndc_lib::interpreter::function::FunctionBody::NumericUnaryOp {
                             body: |num: Number| match num {
                                 Number::Int(i) => Number::Float(f64::from(i).$method()),
                                 Number::Float(f) => Number::Float(f.$method()),

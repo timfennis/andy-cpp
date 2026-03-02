@@ -1,7 +1,7 @@
 #![allow(clippy::print_stdout, clippy::print_stderr)]
 use itertools::Itertools;
 use miette::highlighters::HighlighterState;
-use ndc_lib::interpreter::Interpreter;
+use ndc_stdlib::new_interpreter;
 use rustyline::Helper;
 use rustyline::config::Configurer;
 use rustyline::error::ReadlineError;
@@ -36,7 +36,7 @@ pub fn run() -> anyhow::Result<()> {
     rl.set_helper(Some(h));
 
     let stdout = std::io::stdout();
-    let mut interpreter = Interpreter::new(stdout);
+    let mut interpreter = new_interpreter(stdout);
     loop {
         match rl.readline("λ ") {
             Ok(line) => {

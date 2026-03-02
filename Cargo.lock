@@ -168,6 +168,7 @@ version = "0.0.0"
 dependencies = [
  "criterion",
  "ndc_lib",
+ "ndc_stdlib",
  "rand",
  "rand_chacha",
 ]
@@ -1250,6 +1251,7 @@ dependencies = [
  "ndc_lexer",
  "ndc_lib",
  "ndc_lsp",
+ "ndc_stdlib",
  "owo-colors",
  "rustyline",
  "strsim",
@@ -1275,22 +1277,13 @@ dependencies = [
  "anyhow",
  "derive_builder",
  "derive_more",
- "factorial",
  "itertools 0.14.0",
- "md5",
  "ndc_lexer",
- "ndc_macros",
  "ndc_parser",
  "num",
- "once_cell",
  "ordered-float",
- "rand",
- "regex",
  "ryu",
  "self_cell",
- "serde_json",
- "sha1",
- "tap",
  "thiserror",
 ]
 
@@ -1299,8 +1292,8 @@ name = "ndc_lsp"
 version = "0.2.1"
 dependencies = [
  "ndc_lexer",
- "ndc_lib",
  "ndc_parser",
+ "ndc_stdlib",
  "tokio",
  "tower-lsp",
 ]
@@ -1324,6 +1317,25 @@ dependencies = [
  "ndc_lexer",
  "num",
  "thiserror",
+]
+
+[[package]]
+name = "ndc_stdlib"
+version = "0.2.1"
+dependencies = [
+ "anyhow",
+ "factorial",
+ "itertools 0.14.0",
+ "md5",
+ "ndc_lib",
+ "ndc_macros",
+ "num",
+ "once_cell",
+ "rand",
+ "regex",
+ "serde_json",
+ "sha1",
+ "tap",
 ]
 
 [[package]]
@@ -2050,7 +2062,7 @@ dependencies = [
 name = "tests"
 version = "0.2.1"
 dependencies = [
- "ndc_lib",
+ "ndc_stdlib",
  "owo-colors",
 ]
 

@@ -3,10 +3,10 @@ use std::fmt::Write;
 
 #[export_module]
 mod inner {
-    use crate::interpreter::function::Callable;
-    use crate::interpreter::heap::{MaxHeap, MinHeap};
-    use crate::interpreter::sequence::Sequence;
-    use crate::interpreter::value::Value;
+    use ndc_lib::interpreter::function::Callable;
+    use ndc_lib::interpreter::heap::{MaxHeap, MinHeap};
+    use ndc_lib::interpreter::sequence::Sequence;
+    use ndc_lib::interpreter::value::Value;
     use std::cell::RefCell;
     use std::rc::Rc;
 

@@ -29,18 +29,18 @@ pub enum Value {
 }
 
 impl Value {
-    pub(crate) fn function(function: Function) -> Self {
+    pub fn function(function: Function) -> Self {
         Self::Function(Rc::new(function))
     }
-    pub(crate) fn string<S: Into<String>>(string: S) -> Self {
+    pub fn string<S: Into<String>>(string: S) -> Self {
         Self::Sequence(Sequence::String(Rc::new(RefCell::new(string.into()))))
     }
 
-    pub(crate) fn list<V: Into<Vec<Self>>>(data: V) -> Self {
+    pub fn list<V: Into<Vec<Self>>>(data: V) -> Self {
         Self::Sequence(Sequence::List(Rc::new(RefCell::new(data.into()))))
     }
 
-    pub(crate) fn collect_list<I, V>(i: I) -> Self
+    pub fn collect_list<I, V>(i: I) -> Self
     where
         I: Iterator<Item = V>,
         V: Into<Self>,
@@ -48,23 +48,23 @@ impl Value {
         Self::list(i.map(Into::into).collect::<Vec<Self>>())
     }
 
-    pub(crate) fn tuple<V: Into<Vec<Self>>>(data: V) -> Self {
+    pub fn tuple<V: Into<Vec<Self>>>(data: V) -> Self {
         Self::Sequence(Sequence::Tuple(Rc::new(data.into())))
     }
 
-    pub(crate) fn unit() -> Self {
+    pub fn unit() -> Self {
         Self::Sequence(Sequence::Tuple(Rc::new(vec![])))
     }
 
-    pub(crate) fn none() -> Self {
+    pub fn none() -> Self {
         Self::Option(None)
     }
 
-    pub(crate) fn some(value: Self) -> Self {
+    pub fn some(value: Self) -> Self {
         Self::Option(Some(Box::new(value)))
     }
 
-    pub(crate) fn number<T: Into<Number>>(source: T) -> Self {
+    pub fn number<T: Into<Number>>(source: T) -> Self {
         Self::Number(source.into())
     }
 
