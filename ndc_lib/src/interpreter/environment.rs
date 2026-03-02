@@ -50,21 +50,17 @@ impl Environment {
     }
 
     #[must_use]
-    pub fn new_with_stdlib(writer: Box<dyn InterpreterOutput>) -> Self {
+    pub fn new(writer: Box<dyn InterpreterOutput>) -> Self {
         let root = RootEnvironment {
             output: writer,
             global_functions: Default::default(),
         };
 
-        let mut env = Self {
+        Self {
             root: Rc::new(RefCell::new(root)),
             parent: None,
             values: Default::default(),
-        };
-
-        crate::stdlib::register(&mut env);
-
-        env
+        }
     }
 
     pub fn get_global_identifiers(&self) -> Vec<(String, StaticType)> {
@@ -181,7 +177,7 @@ impl Environment {
 
 impl Default for Environment {
     fn default() -> Self {
-        Self::new_with_stdlib(Box::new(stdout()))
+        Self::new(Box::new(stdout()))
     }
 }
 

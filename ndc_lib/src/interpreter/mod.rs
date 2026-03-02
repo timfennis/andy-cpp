@@ -30,7 +30,8 @@ impl Interpreter {
     where
         T: InterpreterOutput + 'static,
     {
-        let environment = Environment::new_with_stdlib(Box::new(dest));
+        let mut environment = Environment::new(Box::new(dest));
+        crate::stdlib::register(&mut environment);
         let global_identifiers = environment.get_global_identifiers();
 
         Self {
