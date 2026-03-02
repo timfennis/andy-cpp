@@ -10,10 +10,10 @@ use num::BigInt;
 
 use crate::compare::FallibleOrd;
 use crate::hash_map::DefaultHasher;
-use crate::interpreter::function::{Function, StaticType};
-use crate::interpreter::int::Int;
-use crate::interpreter::num::{Number, NumberToFloatError, NumberToUsizeError};
-use crate::interpreter::sequence::Sequence;
+use crate::function::{Function, StaticType};
+use crate::int::Int;
+use crate::num::{Number, NumberToFloatError, NumberToUsizeError};
+use crate::sequence::Sequence;
 
 use super::iterator::{ValueIterator, ValueRange, ValueRangeFrom, ValueRangeInclusive};
 

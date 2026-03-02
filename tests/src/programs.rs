@@ -1,4 +1,4 @@
-use ndc_lib::interpreter::Interpreter;
+use ndc_interpreter::Interpreter;
 use ndc_stdlib::WithStdlib;
 use owo_colors::OwoColorize;
 use std::fs;

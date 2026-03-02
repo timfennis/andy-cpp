@@ -10,8 +10,8 @@
 //! +----------------+-----+----+----+----+----+----+----+----+----+----+
 
 use super::{EvaluationError, EvaluationResult, IntoEvaluationResult, evaluate_expression};
-use crate::interpreter::environment::Environment;
-use crate::interpreter::{function::FunctionCarrier, sequence::Sequence, value::Value};
+use crate::environment::Environment;
+use crate::{function::FunctionCarrier, sequence::Sequence, value::Value};
 use itertools::Itertools;
 use ndc_lexer::Span;
 use ndc_parser::{Expression, ExpressionLocation};

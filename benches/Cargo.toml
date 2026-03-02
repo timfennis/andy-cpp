@@ -4,7 +4,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-ndc_lib.workspace = true
+ndc_interpreter.workspace = true
 ndc_stdlib.workspace = true
 rand.workspace = true
 criterion.workspace = true

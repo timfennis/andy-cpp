@@ -1,4 +1,4 @@
-use crate::interpreter::function::StaticType;
+use crate::function::StaticType;
 use itertools::Itertools;
 use ndc_lexer::Span;
 use ndc_parser::{

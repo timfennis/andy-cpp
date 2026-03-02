@@ -1,13 +1,5 @@
-use std::cell::RefCell;
-use std::rc::Rc;
-
-use crate::interpreter::environment::{Environment, InterpreterOutput};
-use crate::interpreter::evaluate::{EvaluationError, evaluate_expression};
-use crate::interpreter::function::FunctionCarrier;
-use crate::interpreter::semantic::analyser::{Analyser, ScopeTree};
-use crate::interpreter::value::Value;
-use ndc_lexer::{Lexer, TokenLocation};
-use ndc_parser::ExpressionLocation;
+pub mod compare;
+pub mod hash_map;
 pub mod environment;
 pub mod evaluate;
 pub mod function;
@@ -18,6 +10,17 @@ pub mod num;
 pub mod semantic;
 pub mod sequence;
 pub mod value;
+
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use crate::environment::{Environment, InterpreterOutput};
+use crate::evaluate::{EvaluationError, evaluate_expression};
+use crate::function::FunctionCarrier;
+use crate::semantic::analyser::{Analyser, ScopeTree};
+use crate::value::Value;
+use ndc_lexer::{Lexer, TokenLocation};
+use ndc_parser::ExpressionLocation;
 
 pub struct Interpreter {
     environment: Rc<RefCell<Environment>>,

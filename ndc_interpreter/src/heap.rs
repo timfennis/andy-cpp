@@ -1,4 +1,4 @@
-use crate::interpreter::value::Value;
+use crate::value::Value;
 use derive_more::{Deref, DerefMut};
 use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;

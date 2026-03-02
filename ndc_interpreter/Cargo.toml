@@ -1,6 +1,6 @@
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [package]
-name = "ndc_lib"
+name = "ndc_interpreter"
 edition.workspace = true
 version.workspace = true
 

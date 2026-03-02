@@ -1,7 +1,7 @@
 #![allow(clippy::print_stdout, clippy::print_stderr)]
 use itertools::Itertools;
 use miette::highlighters::HighlighterState;
-use ndc_lib::interpreter::Interpreter;
+use ndc_interpreter::Interpreter;
 use ndc_stdlib::WithStdlib;
 use rustyline::Helper;
 use rustyline::config::Configurer;

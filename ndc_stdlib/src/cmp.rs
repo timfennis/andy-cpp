@@ -2,8 +2,8 @@
 mod inner {
     use anyhow::anyhow;
 
-    use ndc_lib::compare::FallibleOrd;
-    use ndc_lib::interpreter::value::Value;
+    use ndc_interpreter::compare::FallibleOrd;
+    use ndc_interpreter::value::Value;
     use std::cmp::Ordering;
 
     /// Produces an error if the argument is not true.

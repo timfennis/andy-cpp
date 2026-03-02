@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use ndc_lexer::{Lexer, Span, TokenLocation};
-use ndc_lib::interpreter::Interpreter;
+use ndc_interpreter::Interpreter;
 use ndc_parser::{Expression, ExpressionLocation, ForBody, ForIteration, Lvalue};
 use ndc_stdlib::WithStdlib;
 use tokio::sync::Mutex;

@@ -1,8 +1,8 @@
 use ndc_macros::export_module;
 
-use ndc_lib::interpreter::iterator::mut_seq_to_iterator;
-use ndc_lib::interpreter::sequence::{Sequence, StringRepr};
-use ndc_lib::interpreter::value::Value;
+use ndc_interpreter::iterator::mut_seq_to_iterator;
+use ndc_interpreter::sequence::{Sequence, StringRepr};
+use ndc_interpreter::value::Value;
 use std::rc::Rc;
 
 use anyhow::{Context, anyhow};

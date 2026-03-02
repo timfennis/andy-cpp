@@ -1,11 +1,11 @@
 use crate::hash_map::{DefaultHasher, HashMap};
-use crate::interpreter::environment::Environment;
-use crate::interpreter::evaluate::{
+use crate::environment::Environment;
+use crate::evaluate::{
     ErrorConverter, EvaluationError, EvaluationResult, evaluate_expression,
 };
-use crate::interpreter::num::{BinaryOperatorError, Number};
-use crate::interpreter::sequence::Sequence;
-use crate::interpreter::value::Value;
+use crate::num::{BinaryOperatorError, Number};
+use crate::sequence::Sequence;
+use crate::value::Value;
 use derive_builder::Builder;
 use ndc_lexer::Span;
 use ndc_parser::{ExpressionLocation, ResolvedVar};
