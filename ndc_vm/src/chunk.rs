@@ -1,17 +1,29 @@
+use ndc_interpreter::value::Value;
+use ndc_lexer::Span;
+
 /// A single bytecode instruction.
 #[derive(Debug, Clone, PartialEq)]
 pub enum OpCode {
+    Constant(usize),
     Return,
 }
 
 /// A chunk of bytecode along with the constants it references.
 #[derive(Debug, Default)]
 pub struct Chunk {
+    pub constants: Vec<Value>,
     pub code: Vec<OpCode>,
+    pub spans: Vec<Span>,
 }
 
 impl Chunk {
-    pub fn write(&mut self, op: OpCode) {
+    pub fn add_constant(&mut self, value: Value) -> usize {
+        self.constants.push(value);
+        self.constants.len() - 1
+    }
+
+    pub fn write(&mut self, op: OpCode, span: Span) {
         self.code.push(op);
+        (self.spans).push(span);
     }
 }
