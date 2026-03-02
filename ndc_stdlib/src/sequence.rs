@@ -6,7 +6,7 @@ use ndc_interpreter::iterator::{MutableValueIntoIterator, mut_seq_to_iterator};
 use ndc_interpreter::sequence::Sequence;
 use ndc_interpreter::{
     compare::FallibleOrd,
-    interpreter::{evaluate::EvaluationResult, function::Callable, value::Value},
+    {evaluate::EvaluationResult, function::Callable, value::Value},
 };
 use ndc_macros::export_module;
 use std::cmp::Ordering;
