@@ -5,3 +5,6 @@ version.workspace = true
 
 [dependencies]
 thiserror.workspace = true
+ndc_interpreter.workspace = true
+# ndc_parser.workspace = true
+ndc_lexer.workspace = true
