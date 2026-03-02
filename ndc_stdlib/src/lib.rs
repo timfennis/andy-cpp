@@ -9,15 +9,18 @@ pub mod hash_map;
 pub mod heap;
 pub mod list;
 pub mod math;
-pub mod rand;
-pub mod regex;
 pub mod sequence;
-pub mod serde;
 pub mod string;
 pub mod value;
 
 #[cfg(feature = "crypto")]
 pub mod crypto;
+#[cfg(feature = "rand")]
+pub mod rand;
+#[cfg(feature = "regex")]
+pub mod regex;
+#[cfg(feature = "serde")]
+pub mod serde;
 
 pub fn register(env: &mut Environment) {
     aoc::register(env);
@@ -32,10 +35,13 @@ pub fn register(env: &mut Environment) {
     list::register(env);
     math::f64::register(env);
     math::register(env);
+    #[cfg(feature = "rand")]
     rand::register(env);
+    #[cfg(feature = "regex")]
     regex::register(env);
     sequence::extra::register(env);
     sequence::register(env);
+    #[cfg(feature = "serde")]
     serde::register(env);
     string::register(env);
     value::register(env);
