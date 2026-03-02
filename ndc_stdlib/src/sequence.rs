@@ -1,13 +1,13 @@
 #![allow(clippy::ptr_arg)]
 
+use anyhow::anyhow;
+use itertools::Itertools;
 use ndc_lib::interpreter::iterator::{MutableValueIntoIterator, mut_seq_to_iterator};
 use ndc_lib::interpreter::sequence::Sequence;
 use ndc_lib::{
     compare::FallibleOrd,
     interpreter::{evaluate::EvaluationResult, function::Callable, value::Value},
 };
-use anyhow::anyhow;
-use itertools::Itertools;
 use ndc_macros::export_module;
 use std::cmp::Ordering;
 use std::rc::Rc;

@@ -2,10 +2,10 @@ use ndc_macros::export_module;
 use std::rc::Rc;
 use std::{cell::RefCell, str::FromStr};
 
+use anyhow::Context;
 use ndc_lib::hash_map::HashMap;
 use ndc_lib::interpreter::sequence::Sequence;
 use ndc_lib::interpreter::value::Value;
-use anyhow::Context;
 use num::BigInt;
 use num::ToPrimitive;
 use serde_json::{Map, Number, Value as JsonValue, json};
@@ -25,9 +25,7 @@ fn value_to_json(value: Value) -> Result<JsonValue, anyhow::Error> {
             },
             ndc_lib::interpreter::num::Number::Float(f) => Ok(json!(f)),
             ndc_lib::interpreter::num::Number::Rational(ratio) => Ok(json!(ratio.to_f64())),
-            ndc_lib::interpreter::num::Number::Complex(complex) => {
-                Ok(json!(format!("{complex}")))
-            }
+            ndc_lib::interpreter::num::Number::Complex(complex) => Ok(json!(format!("{complex}"))),
         },
         Value::Bool(b) => Ok(json!(b)),
         Value::Sequence(s) => match s {

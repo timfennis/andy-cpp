@@ -433,9 +433,15 @@ fn into_param_type(ty: &syn::Type) -> TokenStream {
         syn::Type::Reference(syn::TypeReference { elem, .. }) => into_param_type(elem),
         syn::Type::Path(syn::TypePath { path, .. }) => match path {
             _ if path.is_ident("i64") => quote! { ndc_lib::interpreter::function::StaticType::Int },
-            _ if path.is_ident("usize") => quote! { ndc_lib::interpreter::function::StaticType::Int },
-            _ if path.is_ident("f64") => quote! { ndc_lib::interpreter::function::StaticType::Float },
-            _ if path.is_ident("bool") => quote! { ndc_lib::interpreter::function::StaticType::Bool },
+            _ if path.is_ident("usize") => {
+                quote! { ndc_lib::interpreter::function::StaticType::Int }
+            }
+            _ if path.is_ident("f64") => {
+                quote! { ndc_lib::interpreter::function::StaticType::Float }
+            }
+            _ if path.is_ident("bool") => {
+                quote! { ndc_lib::interpreter::function::StaticType::Bool }
+            }
             _ if path.is_ident("Value") => {
                 quote! { ndc_lib::interpreter::function::StaticType::Any }
             }

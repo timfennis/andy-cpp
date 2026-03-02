@@ -1,8 +1,8 @@
+use factorial::Factorial;
 use ndc_lib::interpreter::environment::Environment;
 use ndc_lib::interpreter::num::{BinaryOperatorError, Number};
 use ndc_lib::interpreter::sequence::Sequence;
 use ndc_lib::interpreter::value::Value;
-use factorial::Factorial;
 use ndc_macros::export_module;
 use num::ToPrimitive;
 use std::ops::{Add, Mul};
@@ -52,9 +52,9 @@ mod inner {
     use std::ops::Sub;
 
     use super::FallibleSum;
+    use anyhow::Context;
     use ndc_lib::interpreter::int::Int;
     use ndc_lib::interpreter::num::Number;
-    use anyhow::Context;
     use num::{BigInt, BigRational, BigUint, Integer, complex::Complex64};
 
     /// Returns the sign of a number.

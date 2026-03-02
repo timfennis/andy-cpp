@@ -1,6 +1,3 @@
-use ndc_parser::{
-    Binding, Expression, ExpressionLocation, ForBody, ForIteration, LogicalOperator, Lvalue,
-};
 use crate::hash_map::HashMap;
 use crate::interpreter::environment::Environment;
 use crate::interpreter::function::{Function, FunctionBody, FunctionCarrier, StaticType};
@@ -12,6 +9,9 @@ use crate::interpreter::value::Value;
 use index::{Offset, evaluate_as_index, get_at_index, set_at_index};
 use itertools::Itertools;
 use ndc_lexer::Span;
+use ndc_parser::{
+    Binding, Expression, ExpressionLocation, ForBody, ForIteration, LogicalOperator, Lvalue,
+};
 use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;

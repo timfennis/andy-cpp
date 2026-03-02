@@ -1,7 +1,7 @@
 use crate::interpreter::function::{Function, StaticType};
 
-use ndc_parser::ResolvedVar;
 use crate::interpreter::value::Value;
+use ndc_parser::ResolvedVar;
 use std::cell::RefCell;
 use std::fmt;
 use std::fmt::Formatter;

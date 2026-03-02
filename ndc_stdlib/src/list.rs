@@ -1,9 +1,9 @@
 #[ndc_macros::export_module]
 mod inner {
+    use itertools::Itertools;
     use ndc_lib::interpreter::iterator::mut_seq_to_iterator;
     use ndc_lib::interpreter::sequence::{ListRepr, Sequence};
     use ndc_lib::interpreter::value::Value;
-    use itertools::Itertools;
     use std::rc::Rc;
 
     use anyhow::anyhow;
