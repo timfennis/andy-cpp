@@ -2,8 +2,8 @@
 
 use anyhow::anyhow;
 use itertools::Itertools;
-use ndc_interpreter::interpreter::iterator::{MutableValueIntoIterator, mut_seq_to_iterator};
-use ndc_interpreter::interpreter::sequence::Sequence;
+use ndc_interpreter::iterator::{MutableValueIntoIterator, mut_seq_to_iterator};
+use ndc_interpreter::sequence::Sequence;
 use ndc_interpreter::{
     compare::FallibleOrd,
     interpreter::{evaluate::EvaluationResult, function::Callable, value::Value},
@@ -79,8 +79,8 @@ fn try_sort_by<E>(
 
 #[export_module]
 mod inner {
-    use ndc_interpreter::interpreter::iterator::{Repeat, ValueIterator};
-    use ndc_interpreter::interpreter::{function::FunctionCarrier, iterator::mut_value_to_iterator};
+    use ndc_interpreter::iterator::{Repeat, ValueIterator};
+    use ndc_interpreter::{function::FunctionCarrier, iterator::mut_value_to_iterator};
     use std::cell::RefCell;
 
     #[function(name = "in")]
@@ -832,8 +832,8 @@ pub mod extra {
     use anyhow::anyhow;
     use itertools::izip;
 
-    use ndc_interpreter::interpreter::function::{FunctionBuilder, StaticType};
-    use ndc_interpreter::interpreter::{
+    use ndc_interpreter::function::{FunctionBuilder, StaticType};
+    use ndc_interpreter::{
         environment::Environment, function::FunctionBody, iterator::mut_value_to_iterator,
         value::Value,
     };
@@ -844,7 +844,7 @@ pub mod extra {
                     .name("zip".to_string())
                     .documentation("Combines multiple sequences (or iterables) into a single sequence of tuples, where the ith tuple contains the ith element from each input sequence.\n\nIf the input sequences are of different lengths, the resulting sequence is truncated to the length of the shortest input.".to_string())
                     .body(FunctionBody::generic(
-                        ndc_interpreter::interpreter::function::TypeSignature::Variadic,
+                        ndc_interpreter::function::TypeSignature::Variadic,
                         StaticType::List(Box::new(StaticType::Tuple(vec![StaticType::Any, StaticType::Any]))),
                         |args, _env| match args {
                             [_] => {

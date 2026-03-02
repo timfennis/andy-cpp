@@ -2,9 +2,9 @@ use ndc_macros::export_module;
 
 #[export_module]
 mod inner {
-    use ndc_interpreter::interpreter::heap::{MaxHeap, MinHeap};
-    use ndc_interpreter::interpreter::sequence::Sequence;
-    use ndc_interpreter::interpreter::value::Value;
+    use ndc_interpreter::heap::{MaxHeap, MinHeap};
+    use ndc_interpreter::sequence::Sequence;
+    use ndc_interpreter::value::Value;
     use std::cell::RefCell;
     use std::rc::Rc;
 

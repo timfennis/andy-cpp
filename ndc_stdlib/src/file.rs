@@ -1,8 +1,8 @@
-use ndc_interpreter::interpreter::environment::Environment;
-use ndc_interpreter::interpreter::function::{
+use ndc_interpreter::environment::Environment;
+use ndc_interpreter::function::{
     FunctionBody, FunctionBuilder, FunctionCarrier, StaticType, TypeSignature,
 };
-use ndc_interpreter::interpreter::value::Value;
+use ndc_interpreter::value::Value;
 use ndc_macros::export_module;
 use std::fs::read_to_string;
 

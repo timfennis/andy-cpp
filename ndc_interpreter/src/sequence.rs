@@ -1,8 +1,8 @@
 use crate::hash_map::HashMap;
-use crate::interpreter::function::StaticType;
-use crate::interpreter::heap::{MaxHeap, MinHeap};
-use crate::interpreter::iterator::ValueIterator;
-use crate::interpreter::value::Value;
+use crate::function::StaticType;
+use crate::heap::{MaxHeap, MinHeap};
+use crate::iterator::ValueIterator;
+use crate::value::Value;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::VecDeque;

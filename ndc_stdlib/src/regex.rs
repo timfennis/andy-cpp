@@ -1,4 +1,4 @@
-use ndc_interpreter::interpreter::value::Value;
+use ndc_interpreter::value::Value;
 use once_cell::sync::Lazy;
 use regex::Regex;
 

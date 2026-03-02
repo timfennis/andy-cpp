@@ -5,7 +5,7 @@ use anyhow::{Context, anyhow};
 use clap::{Parser, Subcommand};
 use highlighter::{AndycppHighlighter, AndycppHighlighterState};
 use miette::{NamedSource, highlighters::HighlighterState};
-use ndc_interpreter::interpreter::{Interpreter, InterpreterError};
+use ndc_interpreter::{Interpreter, InterpreterError};
 use ndc_stdlib::WithStdlib;
 use std::path::PathBuf;
 use std::process;

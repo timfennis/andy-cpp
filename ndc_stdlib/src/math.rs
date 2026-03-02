@@ -1,8 +1,8 @@
 use factorial::Factorial;
-use ndc_interpreter::interpreter::environment::Environment;
-use ndc_interpreter::interpreter::num::{BinaryOperatorError, Number};
-use ndc_interpreter::interpreter::sequence::Sequence;
-use ndc_interpreter::interpreter::value::Value;
+use ndc_interpreter::environment::Environment;
+use ndc_interpreter::num::{BinaryOperatorError, Number};
+use ndc_interpreter::sequence::Sequence;
+use ndc_interpreter::value::Value;
 use ndc_macros::export_module;
 use num::ToPrimitive;
 use std::ops::{Add, Mul};
@@ -53,8 +53,8 @@ mod inner {
 
     use super::FallibleSum;
     use anyhow::Context;
-    use ndc_interpreter::interpreter::int::Int;
-    use ndc_interpreter::interpreter::num::Number;
+    use ndc_interpreter::int::Int;
+    use ndc_interpreter::num::Number;
     use num::{BigInt, BigRational, BigUint, Integer, complex::Complex64};
 
     /// Returns the sign of a number.
@@ -209,11 +209,11 @@ mod inner {
 
 pub mod f64 {
     use super::{Environment, Number, ToPrimitive, f64};
-    use ndc_interpreter::interpreter::function::{
+    use ndc_interpreter::function::{
         FunctionBody, FunctionBuilder, FunctionCarrier, Parameter, StaticType, TypeSignature,
     };
-    use ndc_interpreter::interpreter::num::BinaryOperatorError;
-    use ndc_interpreter::interpreter::value::Value;
+    use ndc_interpreter::num::BinaryOperatorError;
+    use ndc_interpreter::value::Value;
     use std::cmp::Ordering;
     use std::ops::Not;
 
@@ -475,7 +475,7 @@ pub mod f64 {
             ($method:ident,$docs:literal) => {
                 let function = FunctionBuilder::default()
                     .body(
-                        ndc_interpreter::interpreter::function::FunctionBody::NumericUnaryOp {
+                        ndc_interpreter::function::FunctionBody::NumericUnaryOp {
                             body: |num: Number| match num {
                                 Number::Int(i) => Number::Float(f64::from(i).$method()),
                                 Number::Float(f) => Number::Float(f.$method()),

@@ -20,10 +20,10 @@ pub fn random_n<N: SampleUniform + std::fmt::Display + Copy>(
 #[export_module]
 mod inner {
     use itertools::Itertools;
-    use ndc_interpreter::interpreter::iterator::mut_seq_to_iterator;
-    use ndc_interpreter::interpreter::num::Number;
-    use ndc_interpreter::interpreter::sequence::Sequence;
-    use ndc_interpreter::interpreter::value::Value;
+    use ndc_interpreter::iterator::mut_seq_to_iterator;
+    use ndc_interpreter::num::Number;
+    use ndc_interpreter::sequence::Sequence;
+    use ndc_interpreter::value::Value;
 
     /// Randomly shuffles the elements of the list in place.
     pub fn shuffle(list: &mut [Value]) {

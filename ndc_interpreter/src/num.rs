@@ -4,9 +4,9 @@ use std::hash::{Hash, Hasher};
 use std::num::TryFromIntError;
 use std::ops::{Add, Div, Mul, Neg, Not, Rem, Sub};
 
-use crate::interpreter::evaluate::EvaluationError;
-use crate::interpreter::function::StaticType;
-use crate::interpreter::int::Int;
+use crate::evaluate::EvaluationError;
+use crate::function::StaticType;
+use crate::int::Int;
 use ndc_lexer::Span;
 use ndc_parser::BinaryOperator;
 use num::bigint::TryFromBigIntError;

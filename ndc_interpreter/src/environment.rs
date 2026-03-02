@@ -1,6 +1,6 @@
-use crate::interpreter::function::{Function, StaticType};
+use crate::function::{Function, StaticType};
 
-use crate::interpreter::value::Value;
+use crate::value::Value;
 use ndc_parser::ResolvedVar;
 use std::cell::RefCell;
 use std::fmt;

@@ -1,11 +1,11 @@
 use crate::hash_map::HashMap;
-use crate::interpreter::environment::Environment;
-use crate::interpreter::function::{Function, FunctionBody, FunctionCarrier, StaticType};
-use crate::interpreter::int::Int;
-use crate::interpreter::iterator::mut_value_to_iterator;
-use crate::interpreter::num::Number;
-use crate::interpreter::sequence::Sequence;
-use crate::interpreter::value::Value;
+use crate::environment::Environment;
+use crate::function::{Function, FunctionBody, FunctionCarrier, StaticType};
+use crate::int::Int;
+use crate::iterator::mut_value_to_iterator;
+use crate::num::Number;
+use crate::sequence::Sequence;
+use crate::value::Value;
 use index::{Offset, evaluate_as_index, get_at_index, set_at_index};
 use itertools::Itertools;
 use ndc_lexer::Span;

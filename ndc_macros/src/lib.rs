@@ -43,7 +43,7 @@ pub fn export_module(_attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 
     let register_function = quote! {
-        pub fn register(env: &mut ndc_interpreter::interpreter::environment::Environment) {
+        pub fn register(env: &mut ndc_interpreter::environment::Environment) {
             #(#registrations)*
         }
     };
