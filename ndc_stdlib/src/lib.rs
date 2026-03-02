@@ -1,5 +1,5 @@
-use ndc_lib::interpreter::Interpreter;
-use ndc_lib::interpreter::environment::Environment;
+use ndc_interpreter::interpreter::Interpreter;
+use ndc_interpreter::interpreter::environment::Environment;
 
 pub mod aoc;
 pub mod cmp;

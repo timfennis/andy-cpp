@@ -167,7 +167,7 @@ name = "benches"
 version = "0.0.0"
 dependencies = [
  "criterion",
- "ndc_lib",
+ "ndc_interpreter",
  "ndc_stdlib",
  "rand",
  "rand_chacha",
@@ -1248,8 +1248,8 @@ dependencies = [
  "clap",
  "itertools 0.14.0",
  "miette",
+ "ndc_interpreter",
  "ndc_lexer",
- "ndc_lib",
  "ndc_lsp",
  "ndc_stdlib",
  "owo-colors",
@@ -1261,16 +1261,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "ndc_lexer"
-version = "0.2.1"
-dependencies = [
- "num",
- "ryu",
- "thiserror",
-]
-
-[[package]]
-name = "ndc_lib"
+name = "ndc_interpreter"
 version = "0.2.1"
 dependencies = [
  "ahash",
@@ -1288,11 +1279,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ndc_lexer"
+version = "0.2.1"
+dependencies = [
+ "num",
+ "ryu",
+ "thiserror",
+]
+
+[[package]]
 name = "ndc_lsp"
 version = "0.2.1"
 dependencies = [
+ "ndc_interpreter",
  "ndc_lexer",
- "ndc_lib",
  "ndc_parser",
  "ndc_stdlib",
  "tokio",
@@ -1328,7 +1328,7 @@ dependencies = [
  "factorial",
  "itertools 0.14.0",
  "md5",
- "ndc_lib",
+ "ndc_interpreter",
  "ndc_macros",
  "num",
  "once_cell",
@@ -2063,7 +2063,7 @@ dependencies = [
 name = "tests"
 version = "0.2.1"
 dependencies = [
- "ndc_lib",
+ "ndc_interpreter",
  "ndc_stdlib",
  "owo-colors",
 ]

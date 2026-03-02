@@ -3,9 +3,9 @@ use std::rc::Rc;
 use std::{cell::RefCell, str::FromStr};
 
 use anyhow::Context;
-use ndc_lib::hash_map::HashMap;
-use ndc_lib::interpreter::sequence::Sequence;
-use ndc_lib::interpreter::value::Value;
+use ndc_interpreter::hash_map::HashMap;
+use ndc_interpreter::interpreter::sequence::Sequence;
+use ndc_interpreter::interpreter::value::Value;
 use num::BigInt;
 use num::ToPrimitive;
 use serde_json::{Map, Number, Value as JsonValue, json};
@@ -15,17 +15,17 @@ fn value_to_json(value: Value) -> Result<JsonValue, anyhow::Error> {
         Value::Option(Some(value)) => value_to_json(*value),
         Value::Option(None) => Ok(JsonValue::Null),
         Value::Number(number) => match number {
-            ndc_lib::interpreter::num::Number::Int(int) => match int {
-                ndc_lib::interpreter::int::Int::Int64(i) => Ok(json!(i)),
-                ndc_lib::interpreter::int::Int::BigInt(big_int) => {
+            ndc_interpreter::interpreter::num::Number::Int(int) => match int {
+                ndc_interpreter::interpreter::int::Int::Int64(i) => Ok(json!(i)),
+                ndc_interpreter::interpreter::int::Int::BigInt(big_int) => {
                     Number::from_str(&big_int.to_string())
                         .map(JsonValue::Number)
                         .context("Cannot convert bigint to string")
                 }
             },
-            ndc_lib::interpreter::num::Number::Float(f) => Ok(json!(f)),
-            ndc_lib::interpreter::num::Number::Rational(ratio) => Ok(json!(ratio.to_f64())),
-            ndc_lib::interpreter::num::Number::Complex(complex) => Ok(json!(format!("{complex}"))),
+            ndc_interpreter::interpreter::num::Number::Float(f) => Ok(json!(f)),
+            ndc_interpreter::interpreter::num::Number::Rational(ratio) => Ok(json!(ratio.to_f64())),
+            ndc_interpreter::interpreter::num::Number::Complex(complex) => Ok(json!(format!("{complex}"))),
         },
         Value::Bool(b) => Ok(json!(b)),
         Value::Sequence(s) => match s {
@@ -116,7 +116,7 @@ fn json_to_value(value: JsonValue) -> Result<Value, anyhow::Error> {
 
 #[export_module]
 mod inner {
-    use ndc_lib::interpreter::value::Value;
+    use ndc_interpreter::interpreter::value::Value;
 
     /// Converts a JSON string to a value
     pub fn json_decode(input: &str) -> anyhow::Result<Value> {

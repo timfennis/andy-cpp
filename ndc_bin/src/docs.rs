@@ -1,5 +1,5 @@
-use ndc_lib::interpreter::Interpreter;
-use ndc_lib::interpreter::function::{Parameter, TypeSignature};
+use ndc_interpreter::interpreter::Interpreter;
+use ndc_interpreter::interpreter::function::{Parameter, TypeSignature};
 use ndc_stdlib::WithStdlib;
 use std::cmp::Ordering;
 use std::fmt::Write;

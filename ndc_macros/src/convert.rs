@@ -28,7 +28,7 @@ impl TypeConverter for MutRefString {
     }
 
     fn static_type(&self) -> TokenStream {
-        quote! { ndc_lib::interpreter::function::StaticType::String }
+        quote! { ndc_interpreter::interpreter::function::StaticType::String }
     }
 
     fn convert(
@@ -42,7 +42,7 @@ impl TypeConverter for MutRefString {
             param_name: quote! { #original_name },
             argument: quote! { #argument_var_name },
             initialize_code: quote! {
-                let ndc_lib::interpreter::value::Value::Sequence(ndc_lib::interpreter::sequence::Sequence::String(#temp_var)) = #argument_var_name else {
+                let ndc_interpreter::interpreter::value::Value::Sequence(ndc_interpreter::interpreter::sequence::Sequence::String(#temp_var)) = #argument_var_name else {
                     panic!("Value #position needed to be a Sequence::String but wasn't");
                 };
                 let #argument_var_name = &mut *#temp_var.try_borrow_mut()?;
@@ -73,7 +73,7 @@ impl TypeConverter for InternalMap {
             param_name: quote! { #original_name },
             argument: quote! { #argument_var_name },
             initialize_code: quote! {
-                let ndc_lib::interpreter::value::Value::Sequence(ndc_lib::interpreter::sequence::Sequence::Map(#temp_var, _)) = #argument_var_name else {
+                let ndc_interpreter::interpreter::value::Value::Sequence(ndc_interpreter::interpreter::sequence::Sequence::Map(#temp_var, _)) = #argument_var_name else {
                     panic!("Value #position needed to be Sequence::Map but wasn't");
                 };
 
@@ -89,7 +89,7 @@ impl TypeConverter for InternalString {
     }
 
     fn static_type(&self) -> TokenStream {
-        quote! { ndc_lib::interpreter::function::StaticType::String }
+        quote! { ndc_interpreter::interpreter::function::StaticType::String }
     }
 
     fn convert(
@@ -103,7 +103,7 @@ impl TypeConverter for InternalString {
             param_name: quote! { #original_name },
             argument: quote! { #argument_var_name },
             initialize_code: quote! {
-                let ndc_lib::interpreter::value::Value::Sequence(ndc_lib::interpreter::sequence::Sequence::String(#temp_var)) = #argument_var_name else {
+                let ndc_interpreter::interpreter::value::Value::Sequence(ndc_interpreter::interpreter::sequence::Sequence::String(#temp_var)) = #argument_var_name else {
                     panic!("Value #position needed to be Sequence::List but wasn't");
                 };
 
@@ -122,8 +122,8 @@ impl TypeConverter for InternalList {
     fn static_type(&self) -> TokenStream {
         // TODO: just hardcoding Any here is lazy
         quote! {
-            ndc_lib::interpreter::function::StaticType::List(Box::new(
-                ndc_lib::interpreter::function::StaticType::Any
+            ndc_interpreter::interpreter::function::StaticType::List(Box::new(
+                ndc_interpreter::interpreter::function::StaticType::Any
             ))
         }
     }
@@ -139,7 +139,7 @@ impl TypeConverter for InternalList {
             param_name: quote! { #original_name },
             argument: quote! { #argument_var_name },
             initialize_code: quote! {
-                let ndc_lib::interpreter::value::Value::Sequence(ndc_lib::interpreter::sequence::Sequence::List(#temp_var)) = #argument_var_name else {
+                let ndc_interpreter::interpreter::value::Value::Sequence(ndc_interpreter::interpreter::sequence::Sequence::List(#temp_var)) = #argument_var_name else {
                     panic!("Value #position needed to be Sequence::List but wasn't");
                 };
 
@@ -164,11 +164,11 @@ impl TypeConverter for InternalList {
 //         argument_var_name: syn::Ident,
 //     ) -> Vec<Argument> {
 //         vec![Argument {
-//             param_type: quote! { ndc_lib::interpreter::function::StaticType::Tuple },
+//             param_type: quote! { ndc_interpreter::interpreter::function::StaticType::Tuple },
 //             param_name: quote! { #original_name },
 //             argument: quote! { #argument_var_name },
 //             initialize_code: quote! {
-//                 let ndc_lib::interpreter::value::Value::Sequence(ndc_lib::interpreter::sequence::Sequence::Tuple(#temp_var)) = #argument_var_name else {
+//                 let ndc_interpreter::interpreter::value::Value::Sequence(ndc_interpreter::interpreter::sequence::Sequence::Tuple(#temp_var)) = #argument_var_name else {
 //                     panic!("Value #position needed to be Sequence::Tuple but wasn't");
 //                 };
 //

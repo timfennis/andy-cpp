@@ -2,8 +2,8 @@ use ndc_macros::export_module;
 
 #[export_module]
 mod inner {
-    use ndc_lib::interpreter::sequence::Sequence;
-    use ndc_lib::interpreter::value::Value;
+    use ndc_interpreter::interpreter::sequence::Sequence;
+    use ndc_interpreter::interpreter::value::Value;
     use std::cell::RefCell;
     use std::collections::VecDeque;
     use std::rc::Rc;

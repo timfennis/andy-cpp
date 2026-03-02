@@ -7,7 +7,7 @@ version.workspace = true
 anyhow.workspace = true
 factorial.workspace = true
 itertools.workspace = true
-ndc_lib = { workspace = true }
+ndc_interpreter = { workspace = true }
 ndc_macros.workspace = true
 num.workspace = true
 once_cell.workspace = true

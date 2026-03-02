@@ -1,8 +1,8 @@
-use ndc_lib::hash_map;
-use ndc_lib::hash_map::HashMap;
-use ndc_lib::hash_map::HashMapExt;
-use ndc_lib::interpreter::sequence::{DefaultMap, MapRepr, Sequence};
-use ndc_lib::interpreter::value::Value;
+use ndc_interpreter::hash_map;
+use ndc_interpreter::hash_map::HashMap;
+use ndc_interpreter::hash_map::HashMapExt;
+use ndc_interpreter::interpreter::sequence::{DefaultMap, MapRepr, Sequence};
+use ndc_interpreter::interpreter::value::Value;
 use std::cell::RefCell;
 use std::rc::Rc;
 
