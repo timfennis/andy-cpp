@@ -1,8 +1,8 @@
-use crate::interpreter::environment::Environment;
-use crate::interpreter::function::{
+use ndc_lib::interpreter::environment::Environment;
+use ndc_lib::interpreter::function::{
     FunctionBody, FunctionBuilder, FunctionCarrier, StaticType, TypeSignature,
 };
-use crate::interpreter::value::Value;
+use ndc_lib::interpreter::value::Value;
 use ndc_macros::export_module;
 use std::fs::read_to_string;
 

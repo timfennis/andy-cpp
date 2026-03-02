@@ -1,17 +1,17 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use ndc_parser::ExpressionLocation;
 use crate::interpreter::environment::{Environment, InterpreterOutput};
 use crate::interpreter::evaluate::{EvaluationError, evaluate_expression};
 use crate::interpreter::function::FunctionCarrier;
 use crate::interpreter::semantic::analyser::{Analyser, ScopeTree};
 use crate::interpreter::value::Value;
 use ndc_lexer::{Lexer, TokenLocation};
+use ndc_parser::ExpressionLocation;
 pub mod environment;
 pub mod evaluate;
 pub mod function;
-pub(crate) mod heap;
+pub mod heap;
 pub mod int;
 pub mod iterator;
 pub mod num;
@@ -30,13 +30,22 @@ impl Interpreter {
     where
         T: InterpreterOutput + 'static,
     {
-        let environment = Environment::new_with_stdlib(Box::new(dest));
-        let global_identifiers = environment.get_global_identifiers();
+        Self::from_env(Environment::new(Box::new(dest)))
+    }
 
+    #[must_use]
+    pub fn from_env(environment: Environment) -> Self {
+        let global_identifiers = environment.get_global_identifiers();
         Self {
             environment: Rc::new(RefCell::new(environment)),
             analyser: Analyser::from_scope_tree(ScopeTree::from_global_scope(global_identifiers)),
         }
+    }
+
+    pub fn configure<F: FnOnce(&mut Environment)>(&mut self, f: F) {
+        f(&mut self.environment.borrow_mut());
+        let global_identifiers = self.environment.borrow().get_global_identifiers();
+        self.analyser = Analyser::from_scope_tree(ScopeTree::from_global_scope(global_identifiers));
     }
 
     #[must_use]

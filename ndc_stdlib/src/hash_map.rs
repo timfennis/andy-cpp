@@ -1,8 +1,8 @@
-use crate::hash_map;
-use crate::hash_map::HashMap;
-use crate::hash_map::HashMapExt;
-use crate::interpreter::sequence::{DefaultMap, MapRepr, Sequence};
-use crate::interpreter::value::Value;
+use ndc_lib::hash_map;
+use ndc_lib::hash_map::HashMap;
+use ndc_lib::hash_map::HashMapExt;
+use ndc_lib::interpreter::sequence::{DefaultMap, MapRepr, Sequence};
+use ndc_lib::interpreter::value::Value;
 use std::cell::RefCell;
 use std::rc::Rc;
 

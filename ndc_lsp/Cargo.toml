@@ -8,5 +8,6 @@ version.workspace = true
 tokio = { version = "1.49.0", features = ["full"] }
 ndc_lexer.workspace = true
 ndc_lib.workspace = true
+ndc_stdlib.workspace = true
 tower-lsp.workspace = true
 ndc_parser.workspace = true

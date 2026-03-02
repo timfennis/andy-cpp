@@ -122,7 +122,7 @@ fn map_return_type(output: &syn::ReturnType) -> TokenStream {
     match output {
         syn::ReturnType::Default => {
             // in case return type is not specified (for closures rust defaults to type inference which doesn't help us here)
-            quote! { crate::interpreter::function::StaticType::Tuple(vec![]) }
+            quote! { ndc_lib::interpreter::function::StaticType::Tuple(vec![]) }
         }
         syn::ReturnType::Type(_, ty) => map_type(ty),
     }
@@ -135,13 +135,13 @@ fn map_type(ty: &syn::Type) -> TokenStream {
         syn::Type::Tuple(t) => {
             let inner = t.elems.iter().map(map_type);
             quote::quote! {
-                crate::interpreter::function::StaticType::Tuple(vec![
+                ndc_lib::interpreter::function::StaticType::Tuple(vec![
                     #(#inner),*
                 ])
             }
         }
         syn::Type::Infer(_) => {
-            quote::quote! { crate::interpreter::function::StaticType::Any }
+            quote::quote! { ndc_lib::interpreter::function::StaticType::Any }
         }
         _ => {
             panic!("unmapped type: {ty:?}");
@@ -155,29 +155,29 @@ fn map_type_path(p: &syn::TypePath) -> TokenStream {
 
     match segment.ident.to_string().as_str() {
         "i32" | "i64" | "isize" | "u32" | "u64" | "usize" | "BigInt" => {
-            quote::quote! { crate::interpreter::function::StaticType::Int }
+            quote::quote! { ndc_lib::interpreter::function::StaticType::Int }
         }
         "f32" | "f64" => {
-            quote::quote! { crate::interpreter::function::StaticType::Float }
+            quote::quote! { ndc_lib::interpreter::function::StaticType::Float }
         }
         "bool" => {
-            quote::quote! { crate::interpreter::function::StaticType::Bool }
+            quote::quote! { ndc_lib::interpreter::function::StaticType::Bool }
         }
         "String" | "str" => {
-            quote::quote! { crate::interpreter::function::StaticType::String }
+            quote::quote! { ndc_lib::interpreter::function::StaticType::String }
         }
         "Vec" | "List" => match &segment.arguments {
             syn::PathArguments::AngleBracketed(args) => {
                 let inner = args.args.first().expect("Vec<> requires inner type");
                 if let syn::GenericArgument::Type(inner_ty) = inner {
                     let mapped = map_type(inner_ty);
-                    quote::quote! { crate::interpreter::function::StaticType::List(Box::new(#mapped)) }
+                    quote::quote! { ndc_lib::interpreter::function::StaticType::List(Box::new(#mapped)) }
                 } else {
                     panic!("Vec inner not a type");
                 }
             }
             _ => {
-                quote::quote! { crate::interpreter::function::StaticType::List(Box::new(crate::interpreter::function::StaticType::Any)) }
+                quote::quote! { ndc_lib::interpreter::function::StaticType::List(Box::new(ndc_lib::interpreter::function::StaticType::Any)) }
             }
         },
         "VecDeque" | "Deque" => match &segment.arguments {
@@ -185,14 +185,14 @@ fn map_type_path(p: &syn::TypePath) -> TokenStream {
                 let inner = args.args.first().expect("VecDeque<> requires inner type");
                 if let syn::GenericArgument::Type(inner_ty) = inner {
                     let mapped = map_type(inner_ty);
-                    quote::quote! { crate::interpreter::function::StaticType::Deque(Box::new(#mapped)) }
+                    quote::quote! { ndc_lib::interpreter::function::StaticType::Deque(Box::new(#mapped)) }
                 } else {
                     panic!("VecDeque inner not a type");
                 }
             }
             _ => quote::quote! {
-                crate::interpreter::function::StaticType::Deque(Box::new(
-                    crate::interpreter::function::StaticType::Any
+                ndc_lib::interpreter::function::StaticType::Deque(Box::new(
+                    ndc_lib::interpreter::function::StaticType::Any
                 ))
             },
         },
@@ -215,7 +215,7 @@ fn map_type_path(p: &syn::TypePath) -> TokenStream {
                 };
                 let key_mapped = map_type(key_ty);
                 let val_mapped = map_type(val_ty);
-                quote::quote! { crate::interpreter::function::StaticType::Map { key: Box::new(#key_mapped), value: Box::new(#val_mapped) } }
+                quote::quote! { ndc_lib::interpreter::function::StaticType::Map { key: Box::new(#key_mapped), value: Box::new(#val_mapped) } }
             }
             _ => temp_create_map_any(),
         },
@@ -224,14 +224,14 @@ fn map_type_path(p: &syn::TypePath) -> TokenStream {
                 let inner = args.args.first().expect("MinHeap requires inner");
                 if let syn::GenericArgument::Type(inner_ty) = inner {
                     let mapped = map_type(inner_ty);
-                    quote::quote! { crate::interpreter::function::StaticType::MinHeap(Box::new(#mapped)) }
+                    quote::quote! { ndc_lib::interpreter::function::StaticType::MinHeap(Box::new(#mapped)) }
                 } else {
                     panic!("MinHeap inner invalid");
                 }
             }
             _ => quote::quote! {
-                crate::interpreter::function::StaticType::MinHeap(Box::new(
-                    crate::interpreter::function::StaticType::Any
+                ndc_lib::interpreter::function::StaticType::MinHeap(Box::new(
+                    ndc_lib::interpreter::function::StaticType::Any
                 ))
             },
         },
@@ -240,7 +240,7 @@ fn map_type_path(p: &syn::TypePath) -> TokenStream {
                 let inner = args.args.first().expect("MaxHeap requires inner");
                 if let syn::GenericArgument::Type(inner_ty) = inner {
                     let mapped = map_type(inner_ty);
-                    quote::quote! { crate::interpreter::function::StaticType::MaxHeap(Box::new(#mapped)) }
+                    quote::quote! { ndc_lib::interpreter::function::StaticType::MaxHeap(Box::new(#mapped)) }
                 } else {
                     panic!("MaxHeap inner invalid");
                 }
@@ -252,13 +252,13 @@ fn map_type_path(p: &syn::TypePath) -> TokenStream {
                 let inner = args.args.first().expect("Iterator requires inner");
                 if let syn::GenericArgument::Type(inner_ty) = inner {
                     let mapped = map_type(inner_ty);
-                    quote::quote! { crate::interpreter::function::StaticType::Iterator(Box::new(#mapped)) }
+                    quote::quote! { ndc_lib::interpreter::function::StaticType::Iterator(Box::new(#mapped)) }
                 } else {
                     panic!("Iterator inner invalid");
                 }
             }
             _ => {
-                quote::quote! { crate::interpreter::function::StaticType::Iterator(Box::new(crate::interpreter::function::StaticType::Any)) }
+                quote::quote! { ndc_lib::interpreter::function::StaticType::Iterator(Box::new(ndc_lib::interpreter::function::StaticType::Any)) }
             }
         },
         "Option" => match &segment.arguments {
@@ -266,7 +266,7 @@ fn map_type_path(p: &syn::TypePath) -> TokenStream {
                 let inner = args.args.first().expect("Option requires inner type");
                 if let syn::GenericArgument::Type(inner_ty) = inner {
                     let mapped = map_type(inner_ty);
-                    quote::quote! { crate::interpreter::function::StaticType::Option(Box::new(#mapped)) }
+                    quote::quote! { ndc_lib::interpreter::function::StaticType::Option(Box::new(#mapped)) }
                 } else {
                     panic!("Option inner invalid");
                 }
@@ -283,9 +283,9 @@ fn map_type_path(p: &syn::TypePath) -> TokenStream {
             }
             _ => panic!("Result without angle bracketed args"),
         },
-        "Number" => quote::quote! { crate::interpreter::function::StaticType::Number },
+        "Number" => quote::quote! { ndc_lib::interpreter::function::StaticType::Number },
         "Value" | "EvaluationResult" => {
-            quote::quote! { crate::interpreter::function::StaticType::Any }
+            quote::quote! { ndc_lib::interpreter::function::StaticType::Any }
         }
         unmatched => panic!("Cannot map type string '{unmatched}' to StaticType"),
     }
@@ -334,7 +334,7 @@ fn wrap_single(
 
     let return_expr = match function.sig.output {
         syn::ReturnType::Default => quote! {
-            return Ok(crate::interpreter::value::Value::unit());
+            return Ok(ndc_lib::interpreter::value::Value::unit());
         },
         syn::ReturnType::Type(_, typ) => match &*typ {
             // If the function returns a result we unpack it using the question mark operator
@@ -342,11 +342,11 @@ fn wrap_single(
                 return result;
             },
             ty @ syn::Type::Path(_) if path_ends_with(ty, "Result") => quote! {
-                let value = result.map_err(|err| crate::interpreter::function::FunctionCarrier::IntoEvaluationError(Box::new(err)))?;
-                return Ok(crate::interpreter::value::Value::from(value));
+                let value = result.map_err(|err| ndc_lib::interpreter::function::FunctionCarrier::IntoEvaluationError(Box::new(err)))?;
+                return Ok(ndc_lib::interpreter::value::Value::from(value));
             },
             _ => quote! {
-                let result = crate::interpreter::value::Value::from(result);
+                let result = ndc_lib::interpreter::value::Value::from(result);
                 return Ok(result);
             },
         },
@@ -364,9 +364,9 @@ fn wrap_single(
     // }
     let function_declaration = quote! {
         pub fn #identifier (
-            values: &mut [crate::interpreter::value::Value],
-            environment: &std::rc::Rc<std::cell::RefCell<crate::interpreter::environment::Environment>>
-        ) -> crate::interpreter::evaluate::EvaluationResult {
+            values: &mut [ndc_lib::interpreter::value::Value],
+            environment: &std::rc::Rc<std::cell::RefCell<ndc_lib::interpreter::environment::Environment>>
+        ) -> ndc_lib::interpreter::evaluate::EvaluationResult {
             // Define the inner function that has the rust type signature
             #[inline]
             #inner
@@ -384,11 +384,11 @@ fn wrap_single(
     };
 
     let function_registration = quote! {
-        let func = crate::interpreter::function::FunctionBuilder::default()
-            .body(crate::interpreter::function::FunctionBody::GenericFunction {
+        let func = ndc_lib::interpreter::function::FunctionBuilder::default()
+            .body(ndc_lib::interpreter::function::FunctionBody::GenericFunction {
                 function: #identifier,
-                type_signature: crate::interpreter::function::TypeSignature::Exact(vec![
-                    #( crate::interpreter::function::Parameter::new(#param_names, #param_types,) ),*
+                type_signature: ndc_lib::interpreter::function::TypeSignature::Exact(vec![
+                    #( ndc_lib::interpreter::function::Parameter::new(#param_names, #param_types,) ),*
                 ]),
                 return_type: #return_type,
             })
@@ -409,10 +409,10 @@ fn wrap_single(
 fn into_param_type(ty: &syn::Type) -> TokenStream {
     match ty {
         ty if path_ends_with(ty, "Vec") => {
-            quote! { crate::interpreter::function::StaticType::List(Box::new(crate::interpreter::function::StaticType::Any)) }
+            quote! { ndc_lib::interpreter::function::StaticType::List(Box::new(ndc_lib::interpreter::function::StaticType::Any)) }
         }
         ty if path_ends_with(ty, "VecDeque") => {
-            quote! { crate::interpreter::function::StaticType::Deque(Box::new(crate::interpreter::function::StaticType::Any)) }
+            quote! { ndc_lib::interpreter::function::StaticType::Deque(Box::new(ndc_lib::interpreter::function::StaticType::Any)) }
         }
         ty if path_ends_with(ty, "DefaultMap")
             || path_ends_with(ty, "DefaultMapMut")
@@ -421,42 +421,48 @@ fn into_param_type(ty: &syn::Type) -> TokenStream {
             temp_create_map_any()
         }
         ty if path_ends_with(ty, "MinHeap") => {
-            quote! { crate::interpreter::function::StaticType::MinHeap(Box::new(crate::interpreter::function::StaticType::Any)) }
+            quote! { ndc_lib::interpreter::function::StaticType::MinHeap(Box::new(ndc_lib::interpreter::function::StaticType::Any)) }
         }
         ty if path_ends_with(ty, "MaxHeap") => {
-            quote! { crate::interpreter::function::StaticType::MaxHeap(Box::new(crate::interpreter::function::StaticType::Any)) }
+            quote! { ndc_lib::interpreter::function::StaticType::MaxHeap(Box::new(ndc_lib::interpreter::function::StaticType::Any)) }
         }
         ty if path_ends_with(ty, "ListRepr") => {
-            quote! { crate::interpreter::function::StaticType::List(Box::new(crate::interpreter::function::StaticType::Any)) }
+            quote! { ndc_lib::interpreter::function::StaticType::List(Box::new(ndc_lib::interpreter::function::StaticType::Any)) }
         }
         ty if path_ends_with(ty, "MapRepr") => temp_create_map_any(),
         syn::Type::Reference(syn::TypeReference { elem, .. }) => into_param_type(elem),
         syn::Type::Path(syn::TypePath { path, .. }) => match path {
-            _ if path.is_ident("i64") => quote! { crate::interpreter::function::StaticType::Int },
-            _ if path.is_ident("usize") => quote! { crate::interpreter::function::StaticType::Int },
-            _ if path.is_ident("f64") => quote! { crate::interpreter::function::StaticType::Float },
-            _ if path.is_ident("bool") => quote! { crate::interpreter::function::StaticType::Bool },
+            _ if path.is_ident("i64") => quote! { ndc_lib::interpreter::function::StaticType::Int },
+            _ if path.is_ident("usize") => {
+                quote! { ndc_lib::interpreter::function::StaticType::Int }
+            }
+            _ if path.is_ident("f64") => {
+                quote! { ndc_lib::interpreter::function::StaticType::Float }
+            }
+            _ if path.is_ident("bool") => {
+                quote! { ndc_lib::interpreter::function::StaticType::Bool }
+            }
             _ if path.is_ident("Value") => {
-                quote! { crate::interpreter::function::StaticType::Any }
+                quote! { ndc_lib::interpreter::function::StaticType::Any }
             }
             _ if path.is_ident("Number") => {
-                quote! { crate::interpreter::function::StaticType::Number }
+                quote! { ndc_lib::interpreter::function::StaticType::Number }
             }
             _ if path.is_ident("Sequence") => {
-                quote! { crate::interpreter::function::StaticType::Sequence(Box::new(crate::interpreter::function::StaticType::Any)) }
+                quote! { ndc_lib::interpreter::function::StaticType::Sequence(Box::new(ndc_lib::interpreter::function::StaticType::Any)) }
             }
             _ if path.is_ident("Callable") => {
                 quote! {
-                    crate::interpreter::function::StaticType::Function {
+                    ndc_lib::interpreter::function::StaticType::Function {
                         parameters: None,
-                        return_type: Box::new(crate::interpreter::function::StaticType::Any)
+                        return_type: Box::new(ndc_lib::interpreter::function::StaticType::Any)
                     }
                 }
             }
             _ => panic!("Don't know how to convert Path into StaticType\n\n{path:?}"),
         },
         syn::Type::ImplTrait(_) => {
-            quote! { crate::interpreter::function::StaticType::Iterator(Box::new(crate::interpreter::function::StaticType::Any)) }
+            quote! { ndc_lib::interpreter::function::StaticType::Iterator(Box::new(ndc_lib::interpreter::function::StaticType::Any)) }
         }
         x => panic!("Don't know how to convert {x:?} into StaticType"),
     }
@@ -488,15 +494,15 @@ fn create_temp_variable(
             return vec![Argument {
                 param_type: quote! {
                     // TODO: how are we going to figure out the exact type of function here
-                    crate::interpreter::function::StaticType::Function {
+                    ndc_lib::interpreter::function::StaticType::Function {
                         parameters: None,
-                        return_type: Box::new(crate::interpreter::function::StaticType::Any)
+                        return_type: Box::new(ndc_lib::interpreter::function::StaticType::Any)
                     }
                 },
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Function(#temp_var) = #argument_var_name else {
+                    let ndc_lib::interpreter::value::Value::Function(#temp_var) = #argument_var_name else {
                         panic!("Value #position needed to be a Sequence::Map but wasn't");
                     };
                     let #argument_var_name = &Callable {
@@ -515,7 +521,7 @@ fn create_temp_variable(
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::Map(#rc_temp_var, _default)) = #argument_var_name else {
+                    let ndc_lib::interpreter::value::Value::Sequence(ndc_lib::interpreter::sequence::Sequence::Map(#rc_temp_var, _default)) = #argument_var_name else {
                         panic!("Value #position needed to be a Sequence::Map but wasn't");
                     };
                     let #argument_var_name = &*#rc_temp_var.borrow();
@@ -531,7 +537,7 @@ fn create_temp_variable(
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::Map(#rc_temp_var, _default)) = #argument_var_name else {
+                    let ndc_lib::interpreter::value::Value::Sequence(ndc_lib::interpreter::sequence::Sequence::Map(#rc_temp_var, _default)) = #argument_var_name else {
                         panic!("Value #position needed to be a Sequence::Map but wasn't");
                     };
                     let #argument_var_name = &mut *#rc_temp_var.try_borrow_mut()?;
@@ -547,7 +553,7 @@ fn create_temp_variable(
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::Map(#rc_temp_var, default)) = #argument_var_name else {
+                    let ndc_lib::interpreter::value::Value::Sequence(ndc_lib::interpreter::sequence::Sequence::Map(#rc_temp_var, default)) = #argument_var_name else {
                         panic!("Value #position needed to be a Sequence::Map but wasn't");
                     };
                     let #argument_var_name = (&*#rc_temp_var.borrow(), default.to_owned());
@@ -563,7 +569,7 @@ fn create_temp_variable(
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::Map(#rc_temp_var, default)) = #argument_var_name else {
+                    let ndc_lib::interpreter::value::Value::Sequence(ndc_lib::interpreter::sequence::Sequence::Map(#rc_temp_var, default)) = #argument_var_name else {
                         panic!("Value #position needed to be a Sequence::Map but wasn't");
                     };
                     let #argument_var_name = (&mut *#rc_temp_var.try_borrow_mut()?, default.to_owned());
@@ -576,11 +582,11 @@ fn create_temp_variable(
             let rc_temp_var =
                 syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
             return vec![Argument {
-                param_type: quote! { crate::interpreter::function::StaticType::List(Box::new(crate::interpreter::function::StaticType::Any)) },
+                param_type: quote! { ndc_lib::interpreter::function::StaticType::List(Box::new(ndc_lib::interpreter::function::StaticType::Any)) },
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::List(#rc_temp_var)) = #argument_var_name else {
+                    let ndc_lib::interpreter::value::Value::Sequence(ndc_lib::interpreter::sequence::Sequence::List(#rc_temp_var)) = #argument_var_name else {
                         panic!("Value #position needed to be a Sequence::List but wasn't");
                     };
                     let #argument_var_name = &mut *#rc_temp_var.try_borrow_mut()?;
@@ -596,7 +602,7 @@ fn create_temp_variable(
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::Deque(#rc_temp_var)) = #argument_var_name else {
+                    let ndc_lib::interpreter::value::Value::Sequence(ndc_lib::interpreter::sequence::Sequence::Deque(#rc_temp_var)) = #argument_var_name else {
                         panic!("Value #position needed to be a Sequence::List but wasn't");
                     };
                     let #argument_var_name = &mut *#rc_temp_var.try_borrow_mut()?;
@@ -612,7 +618,7 @@ fn create_temp_variable(
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::Deque(#rc_temp_var)) = #argument_var_name else {
+                    let ndc_lib::interpreter::value::Value::Sequence(ndc_lib::interpreter::sequence::Sequence::Deque(#rc_temp_var)) = #argument_var_name else {
                         panic!("Value #position needed to be a Sequence::List but wasn't");
                     };
                     let #argument_var_name = &*#rc_temp_var.try_borrow()?;
@@ -628,7 +634,7 @@ fn create_temp_variable(
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::MaxHeap(#rc_temp_var)) = #argument_var_name else {
+                    let ndc_lib::interpreter::value::Value::Sequence(ndc_lib::interpreter::sequence::Sequence::MaxHeap(#rc_temp_var)) = #argument_var_name else {
                         panic!("Value #position needed to be a Sequence::MaxHeap but wasn't");
                     };
                     let #argument_var_name = &mut *#rc_temp_var.try_borrow_mut()?;
@@ -644,7 +650,7 @@ fn create_temp_variable(
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::MaxHeap(#rc_temp_var)) = #argument_var_name else {
+                    let ndc_lib::interpreter::value::Value::Sequence(ndc_lib::interpreter::sequence::Sequence::MaxHeap(#rc_temp_var)) = #argument_var_name else {
                         panic!("Value #position needed to be a Sequence::MaxHeap but wasn't");
                     };
                     let #argument_var_name = &*#rc_temp_var.try_borrow()?;
@@ -660,7 +666,7 @@ fn create_temp_variable(
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::MinHeap(#rc_temp_var)) = #argument_var_name else {
+                    let ndc_lib::interpreter::value::Value::Sequence(ndc_lib::interpreter::sequence::Sequence::MinHeap(#rc_temp_var)) = #argument_var_name else {
                         panic!("Value #position needed to be a Sequence::MinHeap but wasn't");
                     };
                     let #argument_var_name = &mut *#rc_temp_var.try_borrow_mut()?;
@@ -676,7 +682,7 @@ fn create_temp_variable(
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::MinHeap(#rc_temp_var)) = #argument_var_name else {
+                    let ndc_lib::interpreter::value::Value::Sequence(ndc_lib::interpreter::sequence::Sequence::MinHeap(#rc_temp_var)) = #argument_var_name else {
                         panic!("Value #position needed to be a Sequence::MinHeap but wasn't");
                     };
                     let #argument_var_name = &*#rc_temp_var.try_borrow()?;
@@ -688,11 +694,11 @@ fn create_temp_variable(
             let rc_temp_var =
                 syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
             return vec![Argument {
-                param_type: quote! { crate::interpreter::function::StaticType::String },
+                param_type: quote! { ndc_lib::interpreter::function::StaticType::String },
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::String(#rc_temp_var)) = #argument_var_name else {
+                    let ndc_lib::interpreter::value::Value::Sequence(ndc_lib::interpreter::sequence::Sequence::String(#rc_temp_var)) = #argument_var_name else {
                         panic!("Value #position needed to be a Sequence::String but wasn't");
                     };
                     let #rc_temp_var = #rc_temp_var.borrow();
@@ -704,19 +710,19 @@ fn create_temp_variable(
         else if is_ref_of_bigint(ty) {
             let big_int = syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
             return vec![Argument {
-                param_type: quote! { crate::interpreter::function::StaticType::Int },
+                param_type: quote! { ndc_lib::interpreter::function::StaticType::Int },
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
-                    let #big_int = if let crate::interpreter::value::Value::Number(crate::interpreter::num::Number::Int(crate::interpreter::int::Int::Int64(smol))) = #argument_var_name {
+                    let #big_int = if let ndc_lib::interpreter::value::Value::Number(ndc_lib::interpreter::num::Number::Int(ndc_lib::interpreter::int::Int::Int64(smol))) = #argument_var_name {
                         Some(num::BigInt::from(*smol))
                     } else {
                         None
                     };
 
                     let #argument_var_name = match #argument_var_name {
-                        crate::interpreter::value::Value::Number(crate::interpreter::num::Number::Int(crate::interpreter::int::Int::BigInt(big))) => big,
-                        crate::interpreter::value::Value::Number(crate::interpreter::num::Number::Int(crate::interpreter::int::Int::Int64(smoll))) => #big_int.as_ref().unwrap(),
+                        ndc_lib::interpreter::value::Value::Number(ndc_lib::interpreter::num::Number::Int(ndc_lib::interpreter::int::Int::BigInt(big))) => big,
+                        ndc_lib::interpreter::value::Value::Number(ndc_lib::interpreter::num::Number::Int(ndc_lib::interpreter::int::Int::Int64(smoll))) => #big_int.as_ref().unwrap(),
                         _ => panic!("Value #position need to be an Int but wasn't"),
                     }
                 },
@@ -725,7 +731,7 @@ fn create_temp_variable(
         // If we need an owned Value
         else if path_ends_with(ty, "Value") && !is_ref(ty) {
             return vec![Argument {
-                param_type: quote! { crate::interpreter::function::StaticType::Any },
+                param_type: quote! { ndc_lib::interpreter::function::StaticType::Any },
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
@@ -738,11 +744,11 @@ fn create_temp_variable(
             let rc_temp_var =
                 syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
             return vec![Argument {
-                param_type: quote! { crate::interpreter::function::StaticType::List(Box::new(crate::interpreter::function::StaticType::Any)) },
+                param_type: quote! { ndc_lib::interpreter::function::StaticType::List(Box::new(ndc_lib::interpreter::function::StaticType::Any)) },
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::List(#rc_temp_var)) = #argument_var_name else {
+                    let ndc_lib::interpreter::value::Value::Sequence(ndc_lib::interpreter::sequence::Sequence::List(#rc_temp_var)) = #argument_var_name else {
                         panic!("Value #position needed to be a Sequence::List but wasn't");
                     };
                     let #argument_var_name = &mut *#rc_temp_var.borrow_mut();
@@ -755,22 +761,22 @@ fn create_temp_variable(
                 syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
             return vec![
                 Argument {
-                    param_type: quote! { crate::interpreter::function::StaticType::List(Box::new(crate::interpreter::function::StaticType::Any)) },
+                    param_type: quote! { ndc_lib::interpreter::function::StaticType::List(Box::new(ndc_lib::interpreter::function::StaticType::Any)) },
                     param_name: quote! { #original_name },
                     argument: quote! { #argument_var_name },
                     initialize_code: quote! {
-                        let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::List(#rc_temp_var)) = #argument_var_name else {
+                        let ndc_lib::interpreter::value::Value::Sequence(ndc_lib::interpreter::sequence::Sequence::List(#rc_temp_var)) = #argument_var_name else {
                             panic!("Value #position needed to be a Sequence::List but wasn't");
                         };
                         let #argument_var_name = &*#rc_temp_var.borrow();
                     },
                 },
                 // Argument {
-                //     param_type: quote! { crate::interpreter::function::StaticType::Tuple },
+                //     param_type: quote! { ndc_lib::interpreter::function::StaticType::Tuple },
                 //     param_name: quote! { #original_name },
                 //     argument: quote! { #argument_var_name },
                 //     initialize_code: quote! {
-                //         let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::Tuple(#rc_temp_var)) = #argument_var_name else {
+                //         let ndc_lib::interpreter::value::Value::Sequence(ndc_lib::interpreter::sequence::Sequence::Tuple(#rc_temp_var)) = #argument_var_name else {
                 //             panic!("Value #position needed to be a Sequence::List but wasn't");
                 //         };
                 //         let #argument_var_name = &#rc_temp_var;
@@ -781,11 +787,11 @@ fn create_temp_variable(
         // The pattern is &BigRational
         else if path_ends_with(ty, "BigRational") && is_ref(ty) {
             return vec![Argument {
-                param_type: quote! { crate::interpreter::function::StaticType::Rational },
+                param_type: quote! { ndc_lib::interpreter::function::StaticType::Rational },
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Number(crate::interpreter::num::Number::Rational(#argument_var_name)) = #argument_var_name else {
+                    let ndc_lib::interpreter::value::Value::Number(ndc_lib::interpreter::num::Number::Rational(#argument_var_name)) = #argument_var_name else {
                         panic!("Value #position needs to be Rational but wasn't");
                     };
 
@@ -796,11 +802,11 @@ fn create_temp_variable(
         // The pattern is BigRational
         else if path_ends_with(ty, "BigRational") && !is_ref(ty) {
             return vec![Argument {
-                param_type: quote! { crate::interpreter::function::StaticType::Rational },
+                param_type: quote! { ndc_lib::interpreter::function::StaticType::Rational },
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Number(crate::interpreter::num::Number::Rational(#argument_var_name)) = #argument_var_name else {
+                    let ndc_lib::interpreter::value::Value::Number(ndc_lib::interpreter::num::Number::Rational(#argument_var_name)) = #argument_var_name else {
                         panic!("VValue #position needs to be Rational but wasn't");
                     };
 
@@ -811,11 +817,11 @@ fn create_temp_variable(
         // The pattern is Complex64
         else if path_ends_with(ty, "Complex64") && !is_ref(ty) {
             return vec![Argument {
-                param_type: quote! { crate::interpreter::function::StaticType::Complex },
+                param_type: quote! { ndc_lib::interpreter::function::StaticType::Complex },
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Number(crate::interpreter::num::Number::Complex(#argument_var_name)) = #argument_var_name else {
+                    let ndc_lib::interpreter::value::Value::Number(ndc_lib::interpreter::num::Number::Complex(#argument_var_name)) = #argument_var_name else {
                         panic!("Value #position needs to be Complex64 but wasn't");
                     };
 
@@ -830,7 +836,7 @@ fn create_temp_variable(
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
-                    let #argument_var_name = #path :: try_from(#argument_var_name).map_err(|err| crate::interpreter::function::FunctionCallError::ConvertToNativeTypeError(format!("{err}")))?
+                    let #argument_var_name = #path :: try_from(#argument_var_name).map_err(|err| ndc_lib::interpreter::function::FunctionCallError::ConvertToNativeTypeError(format!("{err}")))?
                 },
             }];
         }
@@ -841,7 +847,7 @@ fn create_temp_variable(
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
-                    let #argument_var_name = <#type_ref as TryFrom<&mut crate::interpreter::value::Value>> :: try_from(#argument_var_name).map_err(|err| crate::interpreter::function::FunctionCallError::ConvertToNativeTypeError(format!("{err}")))?
+                    let #argument_var_name = <#type_ref as TryFrom<&mut ndc_lib::interpreter::value::Value>> :: try_from(#argument_var_name).map_err(|err| ndc_lib::interpreter::function::FunctionCallError::ConvertToNativeTypeError(format!("{err}")))?
                 },
             }];
         }
@@ -856,11 +862,11 @@ fn create_temp_variable(
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
-                    let crate::interpreter::value::Value::Sequence(crate::interpreter::sequence::Sequence::Iterator(#rc_temp_var)) = #argument_var_name else {
+                    let ndc_lib::interpreter::value::Value::Sequence(ndc_lib::interpreter::sequence::Sequence::Iterator(#rc_temp_var)) = #argument_var_name else {
                         panic!("Value #position needed to be a Sequence::Iterator but wasn't");
                     };
 
-                    let #argument_var_name = crate::interpreter::iterator::RcIter::new(Rc::clone(#rc_temp_var));
+                    let #argument_var_name = ndc_lib::interpreter::iterator::RcIter::new(Rc::clone(#rc_temp_var));
                 },
             }];
         } else {
@@ -874,9 +880,9 @@ fn create_temp_variable(
 // TODO: just adding Any as type here is lazy AF but CBA fixing generics
 pub fn temp_create_map_any() -> TokenStream {
     quote! {
-       crate::interpreter::function::StaticType::Map {
-           key: Box::new(crate::interpreter::function::StaticType::Any),
-           value: Box::new(crate::interpreter::function::StaticType::Any)
+       ndc_lib::interpreter::function::StaticType::Map {
+           key: Box::new(ndc_lib::interpreter::function::StaticType::Any),
+           value: Box::new(ndc_lib::interpreter::function::StaticType::Any)
        }
     }
 }

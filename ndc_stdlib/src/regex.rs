@@ -1,4 +1,4 @@
-use crate::interpreter::value::Value;
+use ndc_lib::interpreter::value::Value;
 use once_cell::sync::Lazy;
 use regex::Regex;
 

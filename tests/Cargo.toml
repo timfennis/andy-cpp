@@ -5,6 +5,7 @@ version.workspace = true
 
 [dev-dependencies]
 ndc_lib.workspace = true
+ndc_stdlib.workspace = true
 owo-colors.workspace = true
 
 [[test]]

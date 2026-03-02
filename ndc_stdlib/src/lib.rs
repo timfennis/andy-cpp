@@ -1,4 +1,5 @@
-use crate::interpreter::environment::Environment;
+use ndc_lib::interpreter::Interpreter;
+use ndc_lib::interpreter::environment::Environment;
 
 pub mod aoc;
 pub mod cmp;
@@ -38,4 +39,15 @@ pub fn register(env: &mut Environment) {
     serde::register(env);
     string::register(env);
     value::register(env);
+}
+
+pub trait WithStdlib: Sized {
+    fn with_stdlib(self) -> Self;
+}
+
+impl WithStdlib for Interpreter {
+    fn with_stdlib(mut self) -> Self {
+        self.configure(register);
+        self
+    }
 }

@@ -1,4 +1,3 @@
-mod compare;
-mod hash_map;
+pub mod compare;
+pub mod hash_map;
 pub mod interpreter;
-pub mod stdlib;

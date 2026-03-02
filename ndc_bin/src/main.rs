@@ -6,6 +6,7 @@ use clap::{Parser, Subcommand};
 use highlighter::{AndycppHighlighter, AndycppHighlighterState};
 use miette::{NamedSource, highlighters::HighlighterState};
 use ndc_lib::interpreter::{Interpreter, InterpreterError};
+use ndc_stdlib::WithStdlib;
 use std::path::PathBuf;
 use std::process;
 use std::{fs, io::Write};
@@ -118,7 +119,7 @@ fn main() -> anyhow::Result<()> {
             let string = fs::read_to_string(path)?;
 
             let stdout = std::io::stdout();
-            let mut interpreter = Interpreter::new(stdout);
+            let mut interpreter = Interpreter::new(stdout).with_stdlib();
             match into_miette_result(interpreter.run_str(&string)) {
                 // we can just ignore successful runs because we have print statements
                 Ok(_final_value) => {}

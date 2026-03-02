@@ -16,6 +16,7 @@ strsim.workspace = true
 miette = { version = "7.6.0", features = ["fancy"] }
 ndc_lexer.workspace = true
 ndc_lib.workspace = true
+ndc_stdlib.workspace = true
 ndc_lsp.workspace = true
 owo-colors.workspace = true
 rustyline.workspace = true

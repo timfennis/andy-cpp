@@ -4,10 +4,10 @@ mod inner {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use crate::hash_map::HashMap;
-    use crate::interpreter::iterator::mut_seq_to_iterator;
-    use crate::interpreter::sequence::Sequence;
-    use crate::interpreter::value::Value;
+    use ndc_lib::hash_map::HashMap;
+    use ndc_lib::interpreter::iterator::mut_seq_to_iterator;
+    use ndc_lib::interpreter::sequence::Sequence;
+    use ndc_lib::interpreter::value::Value;
 
     /// Counts the occurrences of each item in a sequence and returns a map with the frequencies.
     #[function(return_type = HashMap<_, _>)]

@@ -4,11 +4,11 @@ use std::hash::{Hash, Hasher};
 use std::num::TryFromIntError;
 use std::ops::{Add, Div, Mul, Neg, Not, Rem, Sub};
 
-use ndc_parser::BinaryOperator;
 use crate::interpreter::evaluate::EvaluationError;
 use crate::interpreter::function::StaticType;
 use crate::interpreter::int::Int;
 use ndc_lexer::Span;
+use ndc_parser::BinaryOperator;
 use num::bigint::TryFromBigIntError;
 use num::complex::{Complex64, ComplexFloat};
 use num::{BigInt, BigRational, Complex, FromPrimitive, Signed, ToPrimitive, Zero};
