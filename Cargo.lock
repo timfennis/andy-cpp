@@ -1350,6 +1350,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ndc_vm"
+version = "0.2.1"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
 name = "nibble_vec"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
