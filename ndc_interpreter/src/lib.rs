@@ -1,12 +1,10 @@
-pub mod compare;
-pub mod hash_map;
+pub use ndc_core::{compare, hash_map, int, num};
+
 pub mod environment;
 pub mod evaluate;
 pub mod function;
 pub mod heap;
-pub mod int;
 pub mod iterator;
-pub mod num;
 pub mod semantic;
 pub mod sequence;
 pub mod value;

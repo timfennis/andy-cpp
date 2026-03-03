@@ -4,11 +4,8 @@ use std::hash::{Hash, Hasher};
 use std::num::TryFromIntError;
 use std::ops::{Add, Div, Mul, Neg, Not, Rem, Sub};
 
-use crate::evaluate::EvaluationError;
-use crate::function::StaticType;
 use crate::int::Int;
-use ndc_lexer::Span;
-use ndc_parser::BinaryOperator;
+use ndc_parser::{BinaryOperator, StaticType};
 use num::bigint::TryFromBigIntError;
 use num::complex::{Complex64, ComplexFloat};
 use num::{BigInt, BigRational, Complex, FromPrimitive, Signed, ToPrimitive, Zero};
@@ -474,26 +471,24 @@ impl Number {
     }
 
     /// # Errors
-    /// Returns an `EvaluationError` (for now) if you try to convert Inf or NaN to an int
-    pub fn to_int_lossy(&self) -> Result<Self, EvaluationError> {
+    /// Returns a `NumberConversionError` if you try to convert Inf, NaN, or Complex to an int
+    pub fn to_int_lossy(&self) -> Result<Self, NumberConversionError> {
         let n = match self {
             Self::Int(i) => Self::Int(i.clone()),
             Self::Float(f) => {
                 if let Some(bi) = BigInt::from_f64(*f) {
                     Self::Int(Int::BigInt(bi).simplified())
                 } else {
-                    return Err(EvaluationError::type_error(
-                        format!("cannot convert {f} to int"),
-                        Span::new(0, 0), // TODO: fix span creation (move out of this impl)
-                    ));
+                    return Err(NumberConversionError(format!(
+                        "cannot convert {f} to int"
+                    )));
                 }
             }
             Self::Rational(r) => Self::Int(Int::BigInt(r.to_integer()).simplified()),
             Self::Complex(c) => {
-                return Err(EvaluationError::type_error(
-                    format!("cannot convert complex number {c} to int"),
-                    Span::new(0, 0), // TODO: fix span creation (move out of this impl)
-                ));
+                return Err(NumberConversionError(format!(
+                    "cannot convert complex number {c} to int"
+                )));
             }
         };
         Ok(n)
@@ -693,6 +688,10 @@ fn rational_to_float(r: &BigRational) -> f64 {
 fn rational_to_complex(r: &BigRational) -> Complex<f64> {
     Complex::from(r.to_f64().unwrap_or(f64::NAN))
 }
+
+#[derive(thiserror::Error, Debug)]
+#[error("{0}")]
+pub struct NumberConversionError(String);
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 #[deprecated = "use static type instead?"]

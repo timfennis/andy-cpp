@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["ndc_macros", "ndc_bin", "ndc_interpreter", "ndc_lsp", "ndc_lexer", "ndc_parser", "ndc_stdlib", "benches", "tests"]
+members = ["ndc_macros", "ndc_bin", "ndc_core", "ndc_interpreter", "ndc_lsp", "ndc_lexer", "ndc_parser", "ndc_stdlib", "benches", "tests"]
 
 [workspace.package]
 edition = "2024"
@@ -17,6 +17,7 @@ derive_builder = { version = "0.20.2" }
 derive_more = { version = "2.1.1", features = ["deref", "deref_mut", "from", "display", "constructor"] }
 factorial = "0.4.0"
 itertools = "0.14.0"
+ndc_core = { path = "ndc_core" }
 ndc_lexer = { path = "ndc_lexer" }
 ndc_interpreter = { path = "ndc_interpreter" }
 ndc_parser = { path = "ndc_parser" }

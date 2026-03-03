@@ -1,0 +1,12 @@
+[package]
+name = "ndc_core"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+ahash.workspace = true
+ndc_parser.workspace = true
+num.workspace = true
+ordered-float.workspace = true
+ryu.workspace = true
+thiserror.workspace = true
