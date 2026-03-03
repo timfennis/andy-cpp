@@ -18,6 +18,7 @@ ndc_lexer.workspace = true
 ndc_interpreter.workspace = true
 ndc_stdlib.workspace = true
 ndc_lsp.workspace = true
+ndc_vm.workspace = true
 owo-colors.workspace = true
 rustyline.workspace = true
 tap.workspace = true

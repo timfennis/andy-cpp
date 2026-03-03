@@ -11,9 +11,9 @@ pub enum OpCode {
 /// A chunk of bytecode along with the constants it references.
 #[derive(Debug, Default)]
 pub struct Chunk {
-    pub constants: Vec<Value>,
-    pub code: Vec<OpCode>,
-    pub spans: Vec<Span>,
+    constants: Vec<Value>,
+    code: Vec<OpCode>,
+    spans: Vec<Span>,
 }
 
 impl Chunk {
