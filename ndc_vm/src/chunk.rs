@@ -1,4 +1,4 @@
-use ndc_interpreter::value::Value;
+use crate::Value;
 use ndc_lexer::Span;
 
 /// A single bytecode instruction.
@@ -25,5 +25,17 @@ impl Chunk {
     pub fn write(&mut self, op: OpCode, span: Span) {
         self.code.push(op);
         (self.spans).push(span);
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.code.is_empty()
+    }
+    #[inline(always)]
+    pub fn opcode(&self, idx: usize) -> &OpCode {
+        &self.code[idx]
+    }
+
+    pub fn constant(&self, idx: usize) -> &Value {
+        &self.constants[idx]
     }
 }

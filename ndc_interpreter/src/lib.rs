@@ -9,16 +9,18 @@ pub mod semantic;
 pub mod sequence;
 pub mod value;
 
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use crate::environment::{Environment, InterpreterOutput};
 use crate::evaluate::{EvaluationError, evaluate_expression};
 use crate::function::FunctionCarrier;
 use crate::semantic::analyser::{Analyser, ScopeTree};
 use crate::value::Value;
+use ndc_core::int::Int;
 use ndc_lexer::{Lexer, TokenLocation};
 use ndc_parser::ExpressionLocation;
+use ndc_vm::compiler::Compiler;
+use ndc_vm::vm::Vm;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 pub struct Interpreter {
     environment: Rc<RefCell<Environment>>,
@@ -63,7 +65,7 @@ impl Interpreter {
 
     pub fn run_str(&mut self, input: &str) -> Result<String, InterpreterError> {
         let expressions = self.parse_and_analyse(input)?;
-        let final_value = self.interpret(expressions.into_iter())?;
+        let final_value = self.interpret_vm(expressions.into_iter())?;
         Ok(format!("{final_value}"))
     }
 
@@ -83,6 +85,17 @@ impl Interpreter {
         }
 
         Ok(expressions)
+    }
+    fn interpret_vm(
+        &mut self,
+        expressions: impl Iterator<Item = ExpressionLocation>,
+    ) -> Result<Value, InterpreterError> {
+        let code = Compiler::compile(expressions);
+        dbg!(&code);
+        let mut vm = Vm::new(code);
+        vm.run().expect("VM failed");
+
+        Ok(Value::unit())
     }
 
     fn interpret(

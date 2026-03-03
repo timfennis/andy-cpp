@@ -10,6 +10,7 @@ derive_more.workspace = true
 derive_builder.workspace = true
 itertools.workspace = true
 ndc_core.workspace = true
+ndc_vm.workspace = true
 ndc_lexer.workspace = true
 ndc_parser.workspace = true
 num.workspace = true
