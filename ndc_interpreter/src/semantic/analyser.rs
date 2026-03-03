@@ -2,10 +2,8 @@ use crate::function::StaticType;
 use crate::semantic::ScopeTree;
 use itertools::Itertools;
 use ndc_lexer::Span;
-use ndc_parser::{
-    Binding, Expression, ExpressionLocation, ForBody, ForIteration, Lvalue, ResolvedVar,
-};
-use std::fmt::{Debug, Formatter};
+use ndc_parser::{Binding, Expression, ExpressionLocation, ForBody, ForIteration, Lvalue};
+use std::fmt::Debug;
 
 #[derive(Debug)]
 pub struct Analyser {

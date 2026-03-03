@@ -55,7 +55,6 @@ fn compile_expr(ExpressionLocation { expression, span }: ExpressionLocation, chu
             compile_expr(*stm, chunk);
         }
         Expression::Logical { .. } => {}
-        Expression::Grouping(_) => {}
         // TODO: is this supposed to be different in the VM?
         Expression::Assignment {
             l_value,
