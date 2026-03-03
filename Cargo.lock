@@ -1261,19 +1261,29 @@ dependencies = [
 ]
 
 [[package]]
-name = "ndc_interpreter"
+name = "ndc_core"
 version = "0.2.1"
 dependencies = [
  "ahash",
- "anyhow",
- "derive_builder",
- "derive_more",
- "itertools 0.14.0",
- "ndc_lexer",
  "ndc_parser",
  "num",
  "ordered-float",
  "ryu",
+ "thiserror",
+]
+
+[[package]]
+name = "ndc_interpreter"
+version = "0.2.1"
+dependencies = [
+ "anyhow",
+ "derive_builder",
+ "derive_more",
+ "itertools 0.14.0",
+ "ndc_core",
+ "ndc_lexer",
+ "ndc_parser",
+ "num",
  "self_cell",
  "thiserror",
 ]
