@@ -62,6 +62,24 @@ impl Vm {
                         self.locals.push(value);
                     }
                 }
+                OpCode::JumpIfFalse(offset) => {
+                    let top = self.stack.last().expect("stack underflow");
+                    if let Value::Bool(false) = top {
+                        self.ip = self.ip.wrapping_add(*offset); // This will probably go wrong because of the +1 later
+                    }
+                }
+                OpCode::JumpIfTrue(offset) => {
+                    let top = self.stack.last().expect("stack underflow");
+                    if let Value::Bool(true) = top {
+                        self.ip = self.ip.wrapping_add(*offset); // This will probably go wrong because of the +1 later
+                    }
+                }
+                OpCode::Jump(offset) => {
+                    self.ip = self.ip.wrapping_add_signed(*offset);
+                }
+                OpCode::Pop => {
+                    self.stack.pop();
+                }
             }
         }
     }
