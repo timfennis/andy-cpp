@@ -18,6 +18,7 @@ pub struct Environment {
     root: Rc<RefCell<RootEnvironment>>,
     parent: Option<Rc<RefCell<Self>>>,
     values: Vec<Value>,
+    base_offset: usize,
 }
 
 impl fmt::Debug for Environment {
@@ -60,6 +61,7 @@ impl Environment {
             root: Rc::new(RefCell::new(root)),
             parent: None,
             values: Default::default(),
+            base_offset: 0,
         }
     }
 
@@ -79,23 +81,36 @@ impl Environment {
 
     pub fn set(&mut self, var: ResolvedVar, value: Value) {
         match var {
-            ResolvedVar::Captured { depth: 0, slot } => {
-                if self.values.len() > slot {
-                    self.values[slot] = value
+            ResolvedVar::Local { slot } if slot >= self.base_offset => {
+                let local_idx = slot - self.base_offset;
+                if local_idx < self.values.len() {
+                    self.values[local_idx] = value;
                 } else {
-                    debug_assert!(slot == self.values.len());
+                    debug_assert!(local_idx == self.values.len());
                     self.values.push(value);
                 }
             }
-
-            // Recursively insert
-            ResolvedVar::Captured { depth, slot } => {
+            ResolvedVar::Local { .. } => {
                 self.parent
                     .clone()
-                    .expect("tried to get parent but failed")
+                    .expect("Local slot below base_offset but no parent")
+                    .borrow_mut()
+                    .set(var, value);
+            }
+            ResolvedVar::Upvalue { depth: 1, slot } => {
+                self.parent
+                    .clone()
+                    .expect("Upvalue but no parent environment")
+                    .borrow_mut()
+                    .set(ResolvedVar::Local { slot }, value);
+            }
+            ResolvedVar::Upvalue { depth, slot } => {
+                self.parent
+                    .clone()
+                    .expect("Upvalue but no parent environment")
                     .borrow_mut()
                     .set(
-                        ResolvedVar::Captured {
+                        ResolvedVar::Upvalue {
                             depth: depth - 1,
                             slot,
                         },
@@ -118,26 +133,33 @@ impl Environment {
         root.global_functions.push(new_function.clone());
     }
 
-    fn get_copy_from_slot(&self, depth: usize, slot: usize) -> Value {
-        if depth == 0 {
-            assert!(
-                self.values.len() > slot,
-                "failed to take item out of slot {slot} because it was empty"
-            );
-            self.values[slot].clone()
-        } else {
-            self.parent
-                .clone()
-                .expect("expected parent env did not exist")
-                .borrow()
-                .get_copy_from_slot(depth - 1, slot)
-        }
-    }
-
     #[must_use]
     pub fn get(&self, var: ResolvedVar) -> Value {
         match var {
-            ResolvedVar::Captured { depth, slot } => self.get_copy_from_slot(depth, slot),
+            ResolvedVar::Local { slot } if slot >= self.base_offset => {
+                self.values[slot - self.base_offset].clone()
+            }
+            ResolvedVar::Local { .. } => self
+                .parent
+                .as_ref()
+                .expect("Local slot below base_offset but no parent")
+                .borrow()
+                .get(var),
+            ResolvedVar::Upvalue { depth: 1, slot } => self
+                .parent
+                .as_ref()
+                .expect("Upvalue but no parent environment")
+                .borrow()
+                .get(ResolvedVar::Local { slot }),
+            ResolvedVar::Upvalue { depth, slot } => self
+                .parent
+                .as_ref()
+                .expect("Upvalue but no parent environment")
+                .borrow()
+                .get(ResolvedVar::Upvalue {
+                    depth: depth - 1,
+                    slot,
+                }),
             ResolvedVar::Global { slot } => {
                 Value::function(self.root.borrow().global_functions[slot].clone())
             }
@@ -148,16 +170,31 @@ impl Environment {
     #[must_use]
     pub fn take(&mut self, var: ResolvedVar) -> Option<Value> {
         match var {
-            ResolvedVar::Captured { depth: 0, slot } => Some(std::mem::replace(
-                self.values.get_mut(slot).expect("slot can't be empty"),
-                Value::unit(),
-            )),
-            ResolvedVar::Captured { depth, slot } => self
+            ResolvedVar::Local { slot } if slot >= self.base_offset => {
+                let local_idx = slot - self.base_offset;
+                Some(std::mem::replace(
+                    self.values.get_mut(local_idx).expect("slot can't be empty"),
+                    Value::unit(),
+                ))
+            }
+            ResolvedVar::Local { .. } => self
                 .parent
                 .clone()
-                .expect("expected parent env did not exist")
+                .expect("Local slot below base_offset but no parent")
                 .borrow_mut()
-                .take(ResolvedVar::Captured {
+                .take(var),
+            ResolvedVar::Upvalue { depth: 1, slot } => self
+                .parent
+                .clone()
+                .expect("Upvalue but no parent environment")
+                .borrow_mut()
+                .take(ResolvedVar::Local { slot }),
+            ResolvedVar::Upvalue { depth, slot } => self
+                .parent
+                .clone()
+                .expect("Upvalue but no parent environment")
+                .borrow_mut()
+                .take(ResolvedVar::Upvalue {
                     depth: depth - 1,
                     slot,
                 }),
@@ -165,12 +202,23 @@ impl Environment {
         }
     }
 
-    pub fn new_scope(parent: &Rc<RefCell<Self>>) -> Self {
+    pub fn new_function_scope(parent: &Rc<RefCell<Self>>) -> Self {
         let root_ref = Rc::clone(&parent.borrow().root);
         Self {
             parent: Some(parent.clone()),
             root: root_ref,
             values: Default::default(),
+            base_offset: 0,
+        }
+    }
+
+    pub fn new_iteration_scope(parent: &Rc<RefCell<Self>>, base_offset: usize) -> Self {
+        let root_ref = Rc::clone(&parent.borrow().root);
+        Self {
+            parent: Some(parent.clone()),
+            root: root_ref,
+            values: Default::default(),
+            base_offset,
         }
     }
 }
