@@ -1,6 +1,5 @@
 use crate::Value;
 use crate::chunk::{Chunk, OpCode};
-use ndc_core::num::Number;
 
 pub struct Vm {
     chunk: Chunk,

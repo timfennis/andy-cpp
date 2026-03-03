@@ -1,4 +1,3 @@
-use crate::semantic::analyser::Analyser;
 use ndc_parser::{Binding, ResolvedVar, StaticType};
 use std::fmt::{Debug, Formatter};
 
