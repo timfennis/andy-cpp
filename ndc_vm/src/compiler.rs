@@ -1,7 +1,7 @@
 use crate::chunk::{Chunk, OpCode};
 use crate::{Object, Value};
 use ndc_lexer::Span;
-use ndc_parser::{Expression, ExpressionLocation, Lvalue, ResolvedVar};
+use ndc_parser::{Binding, Expression, ExpressionLocation, LogicalOperator, Lvalue, ResolvedVar};
 
 pub struct Compiler;
 
@@ -18,8 +18,12 @@ impl Compiler {
         chunk
     }
 }
-fn compile_expr(ExpressionLocation { expression, span }: ExpressionLocation, chunk: &mut Chunk) {
+fn compile_expr(
+    ExpressionLocation { expression, span }: ExpressionLocation,
+    chunk: &mut Chunk,
+) -> usize {
     eprintln!("[COMPILING]: {expression:?}");
+    let start_len = chunk.len();
     match expression {
         Expression::BoolLiteral(b) => {
             let idx = chunk.add_constant(Value::Bool(b));
@@ -46,15 +50,43 @@ fn compile_expr(ExpressionLocation { expression, span }: ExpressionLocation, chu
             chunk.write(OpCode::Constant(idx), span);
         }
         Expression::Identifier { resolved, .. } => match resolved {
-            ndc_parser::Binding::Resolved(ResolvedVar::Local { slot }) => {
+            Binding::None => todo!("return a nice error"),
+            Binding::Resolved(ResolvedVar::Local { slot }) => {
                 chunk.write(OpCode::GetLocal(slot), span);
             }
-            _ => {}
+            Binding::Resolved(ResolvedVar::Upvalue { slot, depth }) => {
+                todo!("?")
+            }
+            Binding::Resolved(ResolvedVar::Global { slot }) => {
+                todo!("?")
+            }
+            Binding::Dynamic(_) => {}
         },
         Expression::Statement(stm) => {
             compile_expr(*stm, chunk);
         }
-        Expression::Logical { .. } => {}
+        Expression::Logical {
+            left,
+            right,
+            operator,
+        } => {
+            let left_span = left.span;
+            compile_expr(*left, chunk);
+            match operator {
+                LogicalOperator::And => {
+                    let end_jump = chunk.write(OpCode::JumpIfFalse(0), left_span);
+                    chunk.write(OpCode::Pop, span);
+                    compile_expr(*right, chunk);
+                    chunk.patch_jump(end_jump);
+                }
+                LogicalOperator::Or => {
+                    let end_jump = chunk.write(OpCode::JumpIfTrue(0), left_span);
+                    chunk.write(OpCode::Pop, span);
+                    compile_expr(*right, chunk);
+                    chunk.patch_jump(end_jump);
+                }
+            }
+        }
         // TODO: is this supposed to be different in the VM?
         Expression::Assignment {
             l_value,
@@ -71,11 +103,11 @@ fn compile_expr(ExpressionLocation { expression, span }: ExpressionLocation, chu
                     ResolvedVar::Local { slot } => {
                         chunk.write(OpCode::SetLocal(slot), lv_span);
                     }
-                    ResolvedVar::Upvalue { .. } => {}
-                    ResolvedVar::Global { .. } => {}
+                    ResolvedVar::Upvalue { .. } => todo!("?"),
+                    ResolvedVar::Global { .. } => todo!("?"),
                 },
-                Lvalue::Index { .. } => {}
-                Lvalue::Sequence(_) => {}
+                Lvalue::Index { .. } => todo!("?"),
+                Lvalue::Sequence(_) => todo!("?"),
             }
         }
         Expression::OpAssignment { .. } => {}
@@ -88,10 +120,58 @@ fn compile_expr(ExpressionLocation { expression, span }: ExpressionLocation, chu
                 compile_expr(statement, chunk);
             }
         }
-        Expression::If { .. } => {}
-        Expression::While { .. } => {}
+        Expression::If {
+            condition,
+            on_true,
+            on_false,
+        } => {
+            let condition_span = condition.span;
+            compile_expr(*condition, chunk);
+            let conditional_jump_idx = chunk.write(OpCode::JumpIfFalse(0), condition_span);
+            chunk.write(OpCode::Pop, span);
+            compile_expr(*on_true, chunk);
+            // If there is an else branch we need to compile it and backpatch the jump instruction to find it
+            if let Some(on_false) = on_false {
+                // In the true branch still we add a jump instruction at the end
+                let jump_to_end_op = chunk.write(OpCode::Jump(0), span);
+                // Change the earlier jump to jump over the jump (YO DAWG)
+                chunk.patch_jump(conditional_jump_idx);
+                chunk.write(OpCode::Pop, span);
+                compile_expr(*on_false, chunk);
+                chunk.patch_jump(jump_to_end_op);
+            } else {
+                chunk.patch_jump(conditional_jump_idx);
+                // If we're jumping over true we still need to pop the condition from the stack
+                chunk.write(OpCode::Pop, span);
+            }
+        }
+        Expression::While {
+            expression: condition,
+            loop_body,
+        } => {
+            let condition_span = condition.span;
+            compile_expr(*condition, chunk);
+            let conditional_jump_idx = chunk.write(OpCode::JumpIfFalse(0), condition_span);
+            chunk.write(OpCode::Pop, span);
+            let body_size = compile_expr(*loop_body, chunk);
+            chunk.write(OpCode::Jump(-((body_size + 1) as isize)), span);
+            chunk.patch_jump(conditional_jump_idx);
+            chunk.write(OpCode::Pop, span);
+        }
         Expression::For { .. } => {}
-        Expression::Call { .. } => {}
+        Expression::Call {
+            arguments,
+            function,
+        } => {
+            for argument in arguments {
+                compile_expr(argument, chunk);
+            }
+
+            // compile_expr(*function, chunk);
+
+            // chunk.write(OpCode::Call, span);
+            // chunk.write(OpCode::Return);
+        }
         Expression::Index { .. } => {}
         Expression::Tuple { .. } => {}
         Expression::List { .. } => {}
@@ -102,4 +182,6 @@ fn compile_expr(ExpressionLocation { expression, span }: ExpressionLocation, chu
         Expression::RangeInclusive { .. } => {}
         Expression::RangeExclusive { .. } => {}
     }
+
+    chunk.len() - start_len
 }
