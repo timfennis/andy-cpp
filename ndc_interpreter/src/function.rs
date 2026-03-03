@@ -1,8 +1,6 @@
-use crate::hash_map::{DefaultHasher, HashMap};
 use crate::environment::Environment;
-use crate::evaluate::{
-    ErrorConverter, EvaluationError, EvaluationResult, evaluate_expression,
-};
+use crate::evaluate::{ErrorConverter, EvaluationError, EvaluationResult, evaluate_expression};
+use crate::hash_map::{DefaultHasher, HashMap};
 use crate::num::{BinaryOperatorError, Number};
 use crate::sequence::Sequence;
 use crate::value::Value;
@@ -241,21 +239,10 @@ impl FunctionBody {
             Self::Closure {
                 body, environment, ..
             } => {
-                let mut local_scope = Environment::new_scope(environment);
+                let mut local_scope = Environment::new_function_scope(environment);
 
-                {
-                    for (position, value) in args.iter().enumerate() {
-                        // NOTE: stores a copy of the value in the environment (which is fine?)
-                        // NOTE: we just assume here that the arguments are slotted in order starting at 0
-                        // because why not? Is this a call convention?
-                        local_scope.set(
-                            ResolvedVar::Captured {
-                                depth: 0,
-                                slot: position,
-                            },
-                            value.clone(),
-                        )
-                    }
+                for (position, value) in args.iter().enumerate() {
+                    local_scope.set(ResolvedVar::Local { slot: position }, value.clone())
                 }
 
                 let local_scope = Rc::new(RefCell::new(local_scope));

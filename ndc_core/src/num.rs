@@ -479,9 +479,7 @@ impl Number {
                 if let Some(bi) = BigInt::from_f64(*f) {
                     Self::Int(Int::BigInt(bi).simplified())
                 } else {
-                    return Err(NumberConversionError(format!(
-                        "cannot convert {f} to int"
-                    )));
+                    return Err(NumberConversionError(format!("cannot convert {f} to int")));
                 }
             }
             Self::Rational(r) => Self::Int(Int::BigInt(r.to_integer()).simplified()),

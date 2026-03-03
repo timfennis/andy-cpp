@@ -12,9 +12,8 @@ pub mod value;
 use crate::environment::{Environment, InterpreterOutput};
 use crate::evaluate::{EvaluationError, evaluate_expression};
 use crate::function::FunctionCarrier;
-use crate::semantic::analyser::{Analyser, ScopeTree};
+use crate::semantic::{Analyser, ScopeTree};
 use crate::value::Value;
-use ndc_core::int::Int;
 use ndc_lexer::{Lexer, TokenLocation};
 use ndc_parser::ExpressionLocation;
 use ndc_vm::compiler::Compiler;
@@ -64,8 +63,20 @@ impl Interpreter {
     }
 
     pub fn run_str(&mut self, input: &str) -> Result<String, InterpreterError> {
+        self.run_str_with_options(input, false)
+    }
+
+    pub fn run_str_with_options(
+        &mut self,
+        input: &str,
+        use_vm: bool,
+    ) -> Result<String, InterpreterError> {
         let expressions = self.parse_and_analyse(input)?;
-        let final_value = self.interpret_vm(expressions.into_iter())?;
+        let final_value = if use_vm {
+            self.interpret_vm(expressions.into_iter())?
+        } else {
+            self.interpret(expressions.into_iter())?
+        };
         Ok(format!("{final_value}"))
     }
 
@@ -91,7 +102,6 @@ impl Interpreter {
         expressions: impl Iterator<Item = ExpressionLocation>,
     ) -> Result<Value, InterpreterError> {
         let code = Compiler::compile(expressions);
-        dbg!(&code);
         let mut vm = Vm::new(code);
         vm.run().expect("VM failed");
 
@@ -151,7 +161,7 @@ pub enum InterpreterError {
     #[error("Error during static analysis")]
     Resolver {
         #[from]
-        cause: semantic::analyser::AnalysisError,
+        cause: semantic::AnalysisError,
     },
     #[error("Error while executing code")]
     Evaluation(#[from] EvaluationError),

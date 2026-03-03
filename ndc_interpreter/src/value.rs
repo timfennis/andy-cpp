@@ -9,8 +9,8 @@ use itertools::Itertools;
 use num::BigInt;
 
 use crate::compare::FallibleOrd;
-use crate::hash_map::DefaultHasher;
 use crate::function::{Function, StaticType};
+use crate::hash_map::DefaultHasher;
 use crate::int::Int;
 use crate::num::{Number, NumberToFloatError, NumberToUsizeError};
 use crate::sequence::Sequence;

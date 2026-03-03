@@ -1,6 +1,6 @@
-use crate::hash_map::HashMap;
 use crate::environment::Environment;
 use crate::function::{Function, FunctionBody, FunctionCarrier, StaticType};
+use crate::hash_map::HashMap;
 use crate::int::Int;
 use crate::iterator::mut_value_to_iterator;
 use crate::num::Number;
@@ -11,6 +11,7 @@ use itertools::Itertools;
 use ndc_lexer::Span;
 use ndc_parser::{
     Binding, Expression, ExpressionLocation, ForBody, ForIteration, LogicalOperator, Lvalue,
+    ResolvedVar,
 };
 use std::cell::RefCell;
 use std::fmt;
@@ -237,14 +238,10 @@ pub(crate) fn evaluate_expression(
             }
         }
         Expression::Block { statements } => {
-            let local_scope = Rc::new(RefCell::new(Environment::new_scope(environment)));
-
             let mut value = Value::unit();
             for stm in statements {
-                value = evaluate_expression(stm, &local_scope)?;
+                value = evaluate_expression(stm, environment)?;
             }
-
-            drop(local_scope);
             value
         }
         Expression::If {
@@ -903,15 +900,13 @@ fn execute_for_iterations(
             let mut sequence = evaluate_expression(sequence, environment)?;
             let iter = mut_value_to_iterator(&mut sequence).into_evaluation_result(span)?;
 
+            let base_offset = lvalue_base_offset(l_value);
+
             for r_value in iter {
-                // In a previous version this scope was lifted outside the loop and reset for every iteration inside the loop
-                // in the following code sample this matters (a lot):
-                // ```ndc
-                // [fn(x) { x + i } for i in 0...10]
-                // ```
-                // With the current implementation with a new scope declared for every iteration this produces 10 functions
-                // each with their own scope and their own version of `i`, this might potentially be a bit slower though
-                let scope = Rc::new(RefCell::new(Environment::new_scope(environment)));
+                let scope = Rc::new(RefCell::new(Environment::new_iteration_scope(
+                    environment,
+                    base_offset,
+                )));
                 declare_or_assign_variable(l_value, r_value, &scope, span)?;
 
                 if tail.is_empty() {
@@ -1059,6 +1054,17 @@ fn vectorized_element_types(left: &StaticType, right: &StaticType) -> [StaticTyp
         .sequence_element_type()
         .unwrap_or_else(|| right.clone());
     [left_elem, right_elem]
+}
+
+fn lvalue_base_offset(lvalue: &Lvalue) -> usize {
+    match lvalue {
+        Lvalue::Identifier {
+            resolved: Some(ResolvedVar::Local { slot }),
+            ..
+        } => *slot,
+        Lvalue::Sequence(seq) => seq.iter().map(lvalue_base_offset).min().unwrap_or(0),
+        _ => 0,
+    }
 }
 
 fn resolve_dynamic_binding(

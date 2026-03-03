@@ -1,4 +1,5 @@
 use crate::function::StaticType;
+use crate::semantic::ScopeTree;
 use itertools::Itertools;
 use ndc_lexer::Span;
 use ndc_parser::{
@@ -6,6 +7,7 @@ use ndc_parser::{
 };
 use std::fmt::{Debug, Formatter};
 
+#[derive(Debug)]
 pub struct Analyser {
     scope_tree: ScopeTree,
 }
@@ -83,8 +85,10 @@ impl Analyser {
 
                 *resolved_assign_operation = self
                     .scope_tree
-                    .resolve_function2(&format!("{operation}="), &arg_types);
-                *resolved_operation = self.scope_tree.resolve_function2(operation, &arg_types);
+                    .resolve_function_binding(&format!("{operation}="), &arg_types);
+                *resolved_operation = self
+                    .scope_tree
+                    .resolve_function_binding(operation, &arg_types);
 
                 if let Binding::None = resolved_operation {
                     return Err(AnalysisError::function_not_found(
@@ -123,7 +127,7 @@ impl Analyser {
                     None
                 };
 
-                self.scope_tree.new_scope();
+                self.scope_tree.new_function_scope();
                 let param_types = self.resolve_parameters_declarative(parameters)?;
 
                 let return_type = self.analyse(body)?;
@@ -150,7 +154,7 @@ impl Analyser {
                 Ok(function_type)
             }
             Expression::Block { statements } => {
-                self.scope_tree.new_scope();
+                self.scope_tree.new_block_scope();
                 let mut last = None;
                 for s in statements {
                     last = Some(self.analyse(s)?);
@@ -306,7 +310,9 @@ impl Analyser {
 
         // println!("resolve fn {name} {}", argument_types.iter().join(", "));
 
-        let binding = self.scope_tree.resolve_function2(name, argument_types);
+        let binding = self
+            .scope_tree
+            .resolve_function_binding(name, argument_types);
 
         let out_type = match &binding {
             Binding::None => {
@@ -344,7 +350,7 @@ impl Analyser {
             ForIteration::Iteration { l_value, sequence } => {
                 let sequence_type = self.analyse(sequence)?;
 
-                self.scope_tree.new_scope();
+                self.scope_tree.new_iteration_scope();
 
                 // TODO: when we give type parameters to all instances of sequence we can correctly infer StaticType::Any in this position
                 self.resolve_lvalue_declarative(
@@ -354,7 +360,7 @@ impl Analyser {
                         .unwrap_or(StaticType::Any),
                     span,
                 )?;
-                do_destroy = true; // TODO: why is this correct
+                do_destroy = true;
             }
             ForIteration::Guard(expr) => {
                 self.analyse(expr)?;
@@ -579,270 +585,6 @@ fn extract_argument_arity(arguments: &ExpressionLocation) -> usize {
     values.len()
 }
 
-#[derive(Debug, Clone)]
-pub struct ScopeTree {
-    current_scope_idx: usize,
-    global_scope: Scope,
-    scopes: Vec<Scope>,
-}
-
-impl ScopeTree {
-    pub fn from_global_scope(global_scope_map: Vec<(String, StaticType)>) -> Self {
-        Self {
-            current_scope_idx: 0,
-            global_scope: Scope {
-                parent_idx: None,
-                identifiers: global_scope_map,
-            },
-            scopes: vec![Scope::new(None)],
-        }
-    }
-
-    fn get_type(&self, res: ResolvedVar) -> &StaticType {
-        match res {
-            ResolvedVar::Captured { slot, depth } => {
-                let mut scope_idx = self.current_scope_idx;
-                let mut depth = depth;
-                while depth > 0 {
-                    depth -= 1;
-                    scope_idx = self.scopes[scope_idx]
-                        .parent_idx
-                        .expect("parent_idx was None while traversing the scope tree");
-                }
-                &self.scopes[scope_idx].identifiers[slot].1
-            }
-            // for now all globals are functions
-            ResolvedVar::Global { slot } => &self.global_scope.identifiers[slot].1,
-        }
-    }
-
-    fn new_scope(&mut self) -> &Scope {
-        let old_scope_idx = self.current_scope_idx;
-        self.current_scope_idx = self.scopes.len();
-        let new_scope = Scope::new(Some(old_scope_idx));
-        self.scopes.push(new_scope);
-        &self.scopes[self.current_scope_idx]
-    }
-
-    fn destroy_scope(&mut self) {
-        let next = self.scopes[self.current_scope_idx]
-            .parent_idx
-            .expect("tried to destroy scope while there were none");
-        self.current_scope_idx = next;
-    }
-
-    fn get_binding_any(&mut self, ident: &str) -> Option<ResolvedVar> {
-        let mut depth = 0;
-        let mut scope_ptr = self.current_scope_idx;
-
-        loop {
-            if let Some(slot) = self.scopes[scope_ptr].find_slot_by_name(ident) {
-                return Some(ResolvedVar::Captured { slot, depth });
-            } else if let Some(parent_idx) = self.scopes[scope_ptr].parent_idx {
-                depth += 1;
-                scope_ptr = parent_idx;
-            } else {
-                return Some(ResolvedVar::Global {
-                    slot: self.global_scope.find_slot_by_name(ident)?,
-                });
-            }
-        }
-    }
-
-    fn resolve_function_dynamic(&mut self, ident: &str, sig: &[StaticType]) -> Vec<ResolvedVar> {
-        let mut depth = 0;
-        let mut scope_ptr = self.current_scope_idx;
-
-        loop {
-            let candidates = self.scopes[scope_ptr].find_function_candidates(ident, sig);
-            if !candidates.is_empty() {
-                return candidates
-                    .into_iter()
-                    .map(|slot| ResolvedVar::Captured { slot, depth })
-                    .collect();
-            } else if let Some(parent_idx) = self.scopes[scope_ptr].parent_idx {
-                depth += 1;
-                scope_ptr = parent_idx;
-            } else {
-                return self
-                    .global_scope
-                    .find_function_candidates(ident, sig)
-                    .into_iter()
-                    .map(|slot| ResolvedVar::Global { slot })
-                    .collect();
-            }
-        }
-    }
-
-    fn resolve_function2(&mut self, ident: &str, sig: &[StaticType]) -> Binding {
-        self.resolve_function(ident, sig)
-            .map(Binding::Resolved)
-            .or_else(|| {
-                let loose_bindings = self.resolve_function_dynamic(ident, sig);
-
-                if loose_bindings.is_empty() {
-                    return None;
-                }
-
-                Some(Binding::Dynamic(loose_bindings))
-            })
-            // If we can't find any function in scope that could match, fall back to all same-named
-            // bindings so runtime dynamic dispatch (including vectorization) can pick the right one.
-            .or_else(|| {
-                let all_bindings = self.get_all_bindings_by_name(ident);
-                if all_bindings.is_empty() {
-                    return None;
-                }
-                Some(Binding::Dynamic(all_bindings))
-            })
-            .unwrap_or(Binding::None)
-    }
-
-    fn get_all_bindings_by_name(&self, ident: &str) -> Vec<ResolvedVar> {
-        let mut results = Vec::new();
-        let mut depth = 0;
-        let mut scope_ptr = self.current_scope_idx;
-
-        loop {
-            let slots = self.scopes[scope_ptr].find_all_slots_by_name(ident);
-            results.extend(
-                slots
-                    .into_iter()
-                    .map(|slot| ResolvedVar::Captured { slot, depth }),
-            );
-
-            if let Some(parent_idx) = self.scopes[scope_ptr].parent_idx {
-                depth += 1;
-                scope_ptr = parent_idx;
-            } else {
-                let global_slots = self.global_scope.find_all_slots_by_name(ident);
-                results.extend(
-                    global_slots
-                        .into_iter()
-                        .map(|slot| ResolvedVar::Global { slot }),
-                );
-                break;
-            }
-        }
-
-        results
-    }
-
-    fn resolve_function(&mut self, ident: &str, arg_types: &[StaticType]) -> Option<ResolvedVar> {
-        let mut depth = 0;
-        let mut scope_ptr = self.current_scope_idx;
-
-        loop {
-            if let Some(slot) = self.scopes[scope_ptr].find_function(ident, arg_types) {
-                return Some(ResolvedVar::Captured { slot, depth });
-            } else if let Some(parent_idx) = self.scopes[scope_ptr].parent_idx {
-                depth += 1;
-                scope_ptr = parent_idx;
-            } else {
-                return Some(ResolvedVar::Global {
-                    slot: self.global_scope.find_function(ident, arg_types)?,
-                });
-            }
-        }
-    }
-
-    fn create_local_binding(&mut self, ident: String, typ: StaticType) -> ResolvedVar {
-        ResolvedVar::Captured {
-            slot: self.scopes[self.current_scope_idx].allocate(ident, typ),
-            depth: 0,
-        }
-    }
-
-    fn update_binding_type(&mut self, var: ResolvedVar, new_type: StaticType) {
-        let ResolvedVar::Captured { slot, depth } = var else {
-            panic!("update_binding_type called with a global binding");
-        };
-        let mut scope_idx = self.current_scope_idx;
-        let mut remaining = depth;
-        while remaining > 0 {
-            remaining -= 1;
-            scope_idx = self.scopes[scope_idx]
-                .parent_idx
-                .expect("parent_idx was None while traversing the scope tree");
-        }
-        self.scopes[scope_idx].identifiers[slot].1 = new_type;
-    }
-}
-
-#[derive(Debug, Clone)]
-struct Scope {
-    parent_idx: Option<usize>,
-    identifiers: Vec<(String, StaticType)>,
-}
-
-impl Scope {
-    fn new(parent_idx: Option<usize>) -> Self {
-        Self {
-            parent_idx,
-            identifiers: Default::default(),
-        }
-    }
-
-    pub fn find_slot_by_name(&self, find_ident: &str) -> Option<usize> {
-        self.identifiers
-            .iter()
-            .rposition(|(ident, _)| ident == find_ident)
-    }
-
-    fn find_all_slots_by_name(&self, find_ident: &str) -> Vec<usize> {
-        self.identifiers
-            .iter()
-            .enumerate()
-            .filter_map(|(slot, (ident, _))| {
-                if ident == find_ident {
-                    Some(slot)
-                } else {
-                    None
-                }
-            })
-            .collect()
-    }
-
-    fn find_function_candidates(&self, find_ident: &str, find_types: &[StaticType]) -> Vec<usize> {
-        self.identifiers.iter()
-            .enumerate()
-            .rev()
-            .filter_map(|(slot, (ident, typ))| {
-                if ident != find_ident {
-                    return None;
-                }
-
-                // If the thing is not a function we're not interested
-                let StaticType::Function { parameters, .. } = typ else {
-                    return None;
-                };
-
-                let Some(param_types) = parameters else {
-                    // If this branch happens then the function we're matching against is variadic meaning it's always a match
-                    debug_assert!(false, "we should never be calling find_function_candidates if there were variadic matches");
-                    // TODO: Change to unreachable?
-                    return Some(slot);
-                };
-
-                let is_good = param_types.len() == find_types.len()
-                    && param_types.iter().zip(find_types.iter()).all(|(typ_1, typ_2)| !typ_1.is_incompatible_with(typ_2));
-
-                is_good.then_some(slot)
-            })
-            .collect()
-    }
-    fn find_function(&self, find_ident: &str, find_types: &[StaticType]) -> Option<usize> {
-        self.identifiers
-            .iter()
-            .rposition(|(ident, typ)| ident == find_ident && typ.is_fn_and_matches(find_types))
-    }
-
-    fn allocate(&mut self, name: String, typ: StaticType) -> usize {
-        self.identifiers.push((name, typ));
-        // Slot is just the length of the list minus one
-        self.identifiers.len() - 1
-    }
-}
 #[derive(thiserror::Error, Debug)]
 #[error("{text}")]
 pub struct AnalysisError {
@@ -894,16 +636,5 @@ impl AnalysisError {
             text: format!("Identifier {ident} has not previously been declared"),
             span,
         }
-    }
-}
-
-impl Debug for Analyser {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        writeln!(f)?;
-        for (id, scope) in self.scope_tree.scopes.iter().enumerate() {
-            writeln!(f, "{id}: {scope:?}")?;
-        }
-
-        Ok(())
     }
 }

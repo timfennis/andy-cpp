@@ -1,8 +1,7 @@
 use crate::chunk::{Chunk, OpCode};
 use crate::{Object, Value};
-use ndc_core::int::Int;
-use ndc_core::num::Number;
-use ndc_parser::{Expression, ExpressionLocation};
+use ndc_lexer::Span;
+use ndc_parser::{Expression, ExpressionLocation, Lvalue, ResolvedVar};
 
 pub struct Compiler;
 
@@ -14,11 +13,13 @@ impl Compiler {
             compile_expr(expr_loc, &mut chunk);
         }
 
+        // TODO: 0,0 span is kinda strange
+        chunk.write(OpCode::Halt, Span::new(0, 0));
         chunk
     }
 }
 fn compile_expr(ExpressionLocation { expression, span }: ExpressionLocation, chunk: &mut Chunk) {
-    println!("COMPILING: {expression:?}");
+    eprintln!("[COMPILING]: {expression:?}");
     match expression {
         Expression::BoolLiteral(b) => {
             let idx = chunk.add_constant(Value::Bool(b));
@@ -44,17 +45,50 @@ fn compile_expr(ExpressionLocation { expression, span }: ExpressionLocation, chu
             let idx = chunk.add_constant(Object::Complex(c).into());
             chunk.write(OpCode::Constant(idx), span);
         }
-        Expression::Identifier { .. } => {}
+        Expression::Identifier { resolved, .. } => match resolved {
+            ndc_parser::Binding::Resolved(ResolvedVar::Local { slot }) => {
+                chunk.write(OpCode::GetLocal(slot), span);
+            }
+            _ => {}
+        },
         Expression::Statement(stm) => {
             compile_expr(*stm, chunk);
         }
         Expression::Logical { .. } => {}
         Expression::Grouping(_) => {}
-        Expression::VariableDeclaration { .. } => {}
-        Expression::Assignment { .. } => {}
+        // TODO: is this supposed to be different in the VM?
+        Expression::Assignment {
+            l_value,
+            r_value: value,
+        }
+        | Expression::VariableDeclaration { l_value, value } => {
+            compile_expr(*value, chunk);
+            match l_value {
+                Lvalue::Identifier {
+                    resolved,
+                    span: lv_span,
+                    ..
+                } => match resolved.expect("identifiers must be resolved") {
+                    ResolvedVar::Local { slot } => {
+                        chunk.write(OpCode::SetLocal(slot), lv_span);
+                    }
+                    ResolvedVar::Upvalue { .. } => {}
+                    ResolvedVar::Global { .. } => {}
+                },
+                Lvalue::Index { .. } => {}
+                Lvalue::Sequence(_) => {}
+            }
+        }
         Expression::OpAssignment { .. } => {}
         Expression::FunctionDeclaration { .. } => {}
-        Expression::Block { .. } => {}
+        Expression::Grouping(statements) => {
+            compile_expr(*statements, chunk);
+        }
+        Expression::Block { statements } => {
+            for statement in statements {
+                compile_expr(statement, chunk);
+            }
+        }
         Expression::If { .. } => {}
         Expression::While { .. } => {}
         Expression::For { .. } => {}

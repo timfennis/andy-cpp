@@ -33,7 +33,12 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Execute an .ndc file or start the repl (this default action may be omitted)
-    Run { file: Option<PathBuf> },
+    Run {
+        file: Option<PathBuf>,
+        /// Run using the bytecode VM instead of the tree-walk interpreter
+        #[arg(long)]
+        vm: bool,
+    },
     /// Output an .ndc file using the built-in syntax highlighting engine
     Highlight { file: PathBuf },
 
@@ -53,13 +58,16 @@ enum Command {
 
 impl Default for Command {
     fn default() -> Self {
-        Self::Run { file: None }
+        Self::Run {
+            file: None,
+            vm: false,
+        }
     }
 }
 
 enum Action {
     RunLsp,
-    RunFile(PathBuf),
+    RunFile { path: PathBuf, vm: bool },
     HighlightFile(PathBuf),
     StartRepl,
     Docs(Option<String>),
@@ -70,8 +78,11 @@ impl TryFrom<Command> for Action {
 
     fn try_from(value: Command) -> Result<Self, Self::Error> {
         let action = match value {
-            Command::Run { file: Some(file) } => Self::RunFile(file),
-            Command::Run { file: None } => Self::StartRepl,
+            Command::Run {
+                file: Some(file),
+                vm,
+            } => Self::RunFile { path: file, vm },
+            Command::Run { file: None, .. } => Self::StartRepl,
             Command::Lsp { stdio: _ } => Self::RunLsp,
             Command::Highlight { file } => Self::HighlightFile(file),
             Command::Docs { query } => Self::Docs(query),
@@ -81,7 +92,10 @@ impl TryFrom<Command> for Action {
                         // This case should have defaulted to `Command::Run { file: None }`
                         unreachable!("fallback case reached with 0 arguments (should never happen)")
                     }
-                    1 => Self::RunFile(args[0].parse::<PathBuf>().context("invalid path")?),
+                    1 => Self::RunFile {
+                        path: args[0].parse::<PathBuf>().context("invalid path")?,
+                        vm: false,
+                    },
                     n => return Err(anyhow!("invalid number of arguments: {n}")),
                 }
             }
@@ -110,7 +124,7 @@ fn main() -> anyhow::Result<()> {
     let action: Action = cli.command.unwrap_or_default().try_into()?;
 
     match action {
-        Action::RunFile(path) => {
+        Action::RunFile { path, vm } => {
             let filename = path
                 .file_name()
                 .and_then(|name| name.to_str())
@@ -120,7 +134,7 @@ fn main() -> anyhow::Result<()> {
 
             let stdout = std::io::stdout();
             let mut interpreter = Interpreter::new(stdout).with_stdlib();
-            match into_miette_result(interpreter.run_str(&string)) {
+            match into_miette_result(interpreter.run_str_with_options(&string, vm)) {
                 // we can just ignore successful runs because we have print statements
                 Ok(_final_value) => {}
                 Err(report) => {

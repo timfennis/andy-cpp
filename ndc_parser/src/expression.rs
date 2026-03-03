@@ -14,8 +14,17 @@ pub enum Binding {
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub enum ResolvedVar {
-    Captured { depth: usize, slot: usize },
+    Local { slot: usize },
+    Upvalue { depth: usize, slot: usize },
     Global { slot: usize },
+}
+
+impl ResolvedVar {
+    pub fn slot(self) -> usize {
+        match self {
+            Self::Local { slot } | Self::Upvalue { slot, .. } | Self::Global { slot } => slot,
+        }
+    }
 }
 
 #[derive(Eq, PartialEq, Clone)]
