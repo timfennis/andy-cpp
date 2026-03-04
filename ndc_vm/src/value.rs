@@ -1,7 +1,5 @@
-use crate::chunk::Chunk;
-use ndc_core::hash_map::HashMap;
+use crate::chunk::{Chunk, OpCode};
 use ndc_parser::{StaticType, TypeSignature};
-use std::cell::RefCell;
 use std::fmt::Formatter;
 use std::rc::Rc;
 
@@ -25,59 +23,27 @@ pub enum Object {
     String(String),
     List(Vec<Value>),
     Tuple(Vec<Value>),
-    Function(Rc<Function>),
+    Function(Function),
     // tec....
 }
 
-pub struct Function {
-    name: Option<String>,
-    documentation: Option<String>,
-    body: FunctionBody,
+#[derive(Clone)]
+pub enum Function {
+    Compiled(Rc<CompiledFunction>),
+    Native(Rc<dyn Fn(&[Value]) -> Value>),
 }
 
-impl Function {
-    pub(crate) fn new_compiled(
-        name: Option<String>,
-        documentation: Option<String>,
-        type_signature: TypeSignature,
-        body: Chunk,
-        return_type: StaticType,
-    ) -> Self {
-        Self {
-            name,
-            documentation,
-            body: FunctionBody::Compiled {
-                type_signature,
-                body,
-                return_type,
-            },
-        }
-    }
-
-    pub fn into_chunk(self) -> Chunk {
-        match self.body {
-            FunctionBody::Compiled { body, .. } => body,
-            FunctionBody::Memoized { .. } => panic!("cannot get chunk from memoized function"),
-        }
-    }
+pub struct CompiledFunction {
+    pub name: Option<String>,
+    pub(crate) type_signature: TypeSignature,
+    pub(crate) body: Chunk,
+    pub(crate) return_type: StaticType,
 }
 
-pub enum FunctionBody {
-    Compiled {
-        type_signature: TypeSignature,
-        body: Chunk,
-        return_type: StaticType,
-        // environment: Rc<RefCell<Environment>>,
-    },
-    // NativeFunction {
-    //     type_signature: TypeSignature,
-    //     return_type: StaticType,
-    //     function: fn(&mut [Value], &Rc<RefCell<Environment>>) -> EvaluationResult,
-    // },
-    Memoized {
-        cache: RefCell<HashMap<u64, Value>>,
-        function: Box<Self>,
-    },
+impl CompiledFunction {
+    pub fn opcodes(&self) -> &[OpCode] {
+        self.body.opcodes()
+    }
 }
 
 impl From<Object> for Value {
@@ -88,7 +54,9 @@ impl From<Object> for Value {
 
 impl std::fmt::Debug for Function {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        // Whatever
-        write!(f, "function {:?}", self.name)
+        match self {
+            Self::Compiled(func) => write!(f, "function {:?}", func.name),
+            Self::Native(_) => write!(f, "<native function>"),
+        }
     }
 }

@@ -1165,14 +1165,6 @@ impl Parser {
     }
 
     /// Parses a block expression including the block delimiters `{` and `}`
-    /// example:
-    /// ```ndc
-    /// {
-    ///     func();
-    ///     x := 1 + 1;
-    ///     x
-    /// }
-    /// ```
     fn block(&mut self) -> Result<ExpressionLocation, Error> {
         let left_curly_span = self.require_token(&[Token::LeftCurlyBracket])?;
 
