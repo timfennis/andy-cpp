@@ -1,5 +1,6 @@
 use crate::chunk::{Chunk, OpCode};
 use ndc_parser::{StaticType, TypeSignature};
+use std::fmt;
 use std::fmt::Formatter;
 use std::rc::Rc;
 
@@ -58,5 +59,92 @@ impl std::fmt::Debug for Function {
             Self::Compiled(func) => write!(f, "function {:?}", func.name),
             Self::Native(_) => write!(f, "<native function>"),
         }
+    }
+}
+
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Value::Int(n) => write!(f, "{n}"),
+            Value::Float(n) => write!(f, "{n}"),
+            Value::Bool(b) => write!(f, "{b}"),
+            Value::None => write!(f, "None"),
+            Value::Object(obj) => write!(f, "{obj}"),
+        }
+    }
+}
+
+impl fmt::Display for Object {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Object::Some(v) => write!(f, "Some({v})"),
+            Object::BigInt(n) => write!(f, "{n}"),
+            Object::Complex(c) => write!(f, "{c}"),
+            Object::Rational(r) => write!(f, "{r}"),
+            Object::String(s) => write!(f, "\"{s}\""),
+            Object::List(vs) => {
+                write!(f, "[")?;
+                for (i, v) in vs.iter().enumerate() {
+                    if i > 0 { write!(f, ", ")?; }
+                    write!(f, "{v}")?;
+                }
+                write!(f, "]")
+            }
+            Object::Tuple(vs) => {
+                write!(f, "(")?;
+                for (i, v) in vs.iter().enumerate() {
+                    if i > 0 { write!(f, ", ")?; }
+                    write!(f, "{v}")?;
+                }
+                write!(f, ")")
+            }
+            Object::Function(func) => write!(f, "{func}"),
+        }
+    }
+}
+
+impl fmt::Display for Function {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Function::Compiled(func) => {
+                let name = func.name.as_deref().unwrap_or("?");
+                write!(f, "<fn {name}>")
+            }
+            Function::Native(_) => write!(f, "<native fn>"),
+        }
+    }
+}
+
+impl fmt::Display for CompiledFunction {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let name = self.name.as_deref().unwrap_or("<script>");
+        writeln!(f, "== {name} ==")?;
+
+        let mut nested: Vec<Rc<CompiledFunction>> = Vec::new();
+
+        for (i, op, constant) in self.body.iter() {
+            match (op, constant) {
+                (OpCode::Constant(idx), Some(val)) => {
+                    write!(f, "{i:04}  {:<20}", format!("Constant({idx})"))?;
+                    if let Value::Object(obj) = val {
+                        if let Object::Function(Function::Compiled(func)) = obj.as_ref() {
+                            let name = func.name.as_deref().unwrap_or("?");
+                            writeln!(f, " ; <fn {name}>")?;
+                            nested.push(Rc::clone(func));
+                            continue;
+                        }
+                    }
+                    writeln!(f, " ; {val}")?;
+                }
+                (op, _) => writeln!(f, "{i:04}  {op:?}")?,
+            }
+        }
+
+        for func in nested {
+            writeln!(f)?;
+            write!(f, "{func}")?;
+        }
+
+        Ok(())
     }
 }

@@ -48,6 +48,9 @@ enum Command {
         stdio: bool,
     },
 
+    /// Print the disassembled bytecode for an .ndc file
+    Disassemble { file: PathBuf },
+
     /// Output the documentation optionally searched using a query string
     Docs { query: Option<String> },
 
@@ -68,6 +71,7 @@ impl Default for Command {
 enum Action {
     RunLsp,
     RunFile { path: PathBuf, vm: bool },
+    DisassembleFile(PathBuf),
     HighlightFile(PathBuf),
     StartRepl,
     Docs(Option<String>),
@@ -84,6 +88,7 @@ impl TryFrom<Command> for Action {
             } => Self::RunFile { path: file, vm },
             Command::Run { file: None, .. } => Self::StartRepl,
             Command::Lsp { stdio: _ } => Self::RunLsp,
+            Command::Disassemble { file } => Self::DisassembleFile(file),
             Command::Highlight { file } => Self::HighlightFile(file),
             Command::Docs { query } => Self::Docs(query),
             Command::Unknown(args) => {
@@ -143,6 +148,18 @@ fn main() -> anyhow::Result<()> {
                     let report = report.with_source_code(source);
                     eprintln!("{:?}", report);
 
+                    process::exit(1);
+                }
+            }
+        }
+        Action::DisassembleFile(path) => {
+            let string = fs::read_to_string(path)?;
+            let stdout = std::io::stdout();
+            let mut interpreter = Interpreter::new(stdout).with_stdlib();
+            match interpreter.compile_str(&string) {
+                Ok(compiled) => print!("{compiled}"),
+                Err(e) => {
+                    eprintln!("{:?}", miette::Report::new(diagnostic::NdcReport::from(e)));
                     process::exit(1);
                 }
             }
