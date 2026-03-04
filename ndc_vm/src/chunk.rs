@@ -78,4 +78,17 @@ impl Chunk {
     pub fn constant(&self, idx: usize) -> &Value {
         &self.constants[idx]
     }
+
+    /// Iterates opcodes as `(index, opcode, constant_value)` where `constant_value`
+    /// is `Some` only for `Constant(idx)` opcodes.
+    pub fn iter(&self) -> impl Iterator<Item = (usize, OpCode, Option<&Value>)> {
+        self.code.iter().copied().enumerate().map(|(i, op)| {
+            let val = if let OpCode::Constant(idx) = op {
+                Some(&self.constants[idx])
+            } else {
+                None
+            };
+            (i, op, val)
+        })
+    }
 }

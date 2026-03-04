@@ -34,7 +34,6 @@ fn compile_expr(
     ExpressionLocation { expression, span }: ExpressionLocation,
     chunk: &mut Chunk,
 ) -> usize {
-    eprintln!("[COMPILING]: {expression:?}");
     let start_len = chunk.len();
     match expression {
         Expression::BoolLiteral(b) => {

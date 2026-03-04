@@ -1252,6 +1252,7 @@ dependencies = [
  "ndc_lexer",
  "ndc_lsp",
  "ndc_stdlib",
+ "ndc_vm",
  "owo-colors",
  "rustyline",
  "strsim",

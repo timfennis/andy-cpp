@@ -17,6 +17,7 @@ use crate::value::Value;
 use ndc_lexer::{Lexer, TokenLocation};
 use ndc_parser::ExpressionLocation;
 use ndc_vm::compiler::Compiler;
+use ndc_vm::value::CompiledFunction;
 use ndc_vm::vm::Vm;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -60,6 +61,11 @@ impl Interpreter {
         input: &str,
     ) -> Result<Vec<ExpressionLocation>, InterpreterError> {
         self.parse_and_analyse(input)
+    }
+
+    pub fn compile_str(&mut self, input: &str) -> Result<CompiledFunction, InterpreterError> {
+        let expressions = self.parse_and_analyse(input)?;
+        Ok(Compiler::compile(expressions.into_iter())?)
     }
 
     pub fn run_str(&mut self, input: &str) -> Result<String, InterpreterError> {

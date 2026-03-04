@@ -141,14 +141,14 @@ impl ScopeTree {
             ResolvedVar::Local { slot } => self.find_type_by_slot(self.current_scope_idx, slot),
             ResolvedVar::Upvalue { slot, depth } => {
                 let mut scope_idx = self.current_scope_idx;
-                let mut depth = depth;
-                while depth > 0 {
+                let mut env_count = 0;
+                while env_count < depth {
+                    if self.scopes[scope_idx].creates_environment {
+                        env_count += 1;
+                    }
                     scope_idx = self.scopes[scope_idx]
                         .parent_idx
                         .expect("parent_idx was None while traversing the scope tree");
-                    if self.scopes[scope_idx].creates_environment {
-                        depth -= 1;
-                    }
                 }
                 self.find_type_by_slot(scope_idx, slot)
             }
@@ -369,14 +369,14 @@ impl ScopeTree {
             }
             ResolvedVar::Upvalue { depth, .. } => {
                 let mut scope_idx = self.current_scope_idx;
-                let mut depth = depth;
-                while depth > 0 {
+                let mut env_count = 0;
+                while env_count < depth {
+                    if self.scopes[scope_idx].creates_environment {
+                        env_count += 1;
+                    }
                     scope_idx = self.scopes[scope_idx]
                         .parent_idx
                         .expect("parent_idx was None while traversing the scope tree");
-                    if self.scopes[scope_idx].creates_environment {
-                        depth -= 1;
-                    }
                 }
                 self.find_scope_owning_slot(scope_idx, var.slot())
             }
