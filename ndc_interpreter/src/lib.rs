@@ -8,6 +8,7 @@ pub mod iterator;
 pub mod semantic;
 pub mod sequence;
 pub mod value;
+mod vm_bridge;
 
 use crate::environment::{Environment, InterpreterOutput};
 use crate::evaluate::{EvaluationError, evaluate_expression};
@@ -68,6 +69,18 @@ impl Interpreter {
         Ok(Compiler::compile(expressions.into_iter())?)
     }
 
+    pub fn disassemble_str(&mut self, input: &str) -> Result<String, InterpreterError> {
+        let compiled = self.compile_str(input)?;
+        let globals = self.environment.borrow().get_global_identifiers();
+        let mut out = String::from("== globals ==\n");
+        for (slot, (name, _)) in globals.iter().enumerate() {
+            out.push_str(&format!("  {slot:4}  {name}\n"));
+        }
+        out.push('\n');
+        out.push_str(&compiled.to_string());
+        Ok(out)
+    }
+
     pub fn run_str(&mut self, input: &str) -> Result<String, InterpreterError> {
         self.run_str_with_options(input, false)
     }
@@ -109,7 +122,8 @@ impl Interpreter {
     ) -> Result<Value, InterpreterError> {
         let code = Compiler::compile(expressions)?;
 
-        let mut vm = Vm::new(code, Vec::new());
+        let globals = vm_bridge::make_vm_globals(&self.environment.borrow());
+        let mut vm = Vm::new(code, globals);
 
         vm.run().expect("VM failed");
 

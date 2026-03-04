@@ -156,8 +156,8 @@ fn main() -> anyhow::Result<()> {
             let string = fs::read_to_string(path)?;
             let stdout = std::io::stdout();
             let mut interpreter = Interpreter::new(stdout).with_stdlib();
-            match interpreter.compile_str(&string) {
-                Ok(compiled) => print!("{compiled}"),
+            match interpreter.disassemble_str(&string) {
+                Ok(output) => print!("{output}"),
                 Err(e) => {
                     eprintln!("{:?}", miette::Report::new(diagnostic::NdcReport::from(e)));
                     process::exit(1);

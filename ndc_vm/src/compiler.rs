@@ -115,7 +115,9 @@ fn compile_expr(
                         chunk.write(OpCode::SetLocal(slot), lv_span);
                     }
                     ResolvedVar::Upvalue { .. } => todo!("?"),
-                    ResolvedVar::Global { .. } => unreachable!("globals are native, never assigned"),
+                    ResolvedVar::Global { .. } => {
+                        unreachable!("globals are native, never assigned")
+                    }
                 },
                 Lvalue::Index { .. } => todo!("?"),
                 Lvalue::Sequence(_) => todo!("?"),
@@ -143,14 +145,18 @@ fn compile_expr(
                 Object::Function(Function::Compiled(std::rc::Rc::new(compiled))).into(),
             );
 
+            // Put the compiled function inside the chunk's constant storage
             chunk.write(OpCode::Constant(idx), span);
 
+            // !??!!?
             match resolved_name {
                 Some(ResolvedVar::Local { slot }) => {
                     chunk.write(OpCode::SetLocal(slot), span);
                 }
                 Some(ResolvedVar::Upvalue { .. }) => todo!("?"),
-                Some(ResolvedVar::Global { .. }) => unreachable!("globals are native, never compiled"),
+                Some(ResolvedVar::Global { .. }) => {
+                    unreachable!("globals are native, never compiled")
+                }
                 None => {}
             }
         }
