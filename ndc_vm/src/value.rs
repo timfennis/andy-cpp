@@ -1,5 +1,5 @@
 use crate::chunk::{Chunk, OpCode};
-use ndc_parser::{StaticType, TypeSignature};
+use ndc_parser::{ResolvedVar, StaticType, TypeSignature};
 use std::fmt;
 use std::fmt::Formatter;
 use std::rc::Rc;
@@ -25,13 +25,18 @@ pub enum Object {
     List(Vec<Value>),
     Tuple(Vec<Value>),
     Function(Function),
-    // tec....
+    OverloadSet(Vec<ResolvedVar>),
 }
 
 #[derive(Clone)]
 pub enum Function {
     Compiled(Rc<CompiledFunction>),
-    Native(Rc<dyn Fn(&[Value]) -> Value>),
+    Native(Rc<NativeFunction>),
+}
+
+pub struct NativeFunction {
+    pub func: Box<dyn Fn(&[Value]) -> Value>,
+    pub static_type: StaticType,
 }
 
 pub struct CompiledFunction {
@@ -47,6 +52,51 @@ impl CompiledFunction {
     }
 }
 
+impl Value {
+    pub fn static_type(&self) -> StaticType {
+        match self {
+            Self::Int(_) => StaticType::Int,
+            Self::Float(_) => StaticType::Float,
+            Self::Bool(_) => StaticType::Bool,
+            Self::None => StaticType::Option(Box::new(StaticType::Any)),
+            Self::Object(obj) => obj.static_type(),
+        }
+    }
+}
+
+impl Object {
+    pub fn static_type(&self) -> StaticType {
+        match self {
+            Self::Some(inner) => StaticType::Option(Box::new(inner.static_type())),
+            Self::BigInt(_) => StaticType::Int,
+            Self::Complex(_) => StaticType::Complex,
+            Self::Rational(_) => StaticType::Rational,
+            Self::String(_) => StaticType::String,
+            Self::List(_) => StaticType::List(Box::new(StaticType::Any)),
+            Self::Tuple(_) => StaticType::Tuple(Vec::new()),
+            Self::Function(f) => f.static_type(),
+            Self::OverloadSet(_) => StaticType::Any,
+        }
+    }
+}
+
+impl Function {
+    pub fn static_type(&self) -> StaticType {
+        match self {
+            Self::Compiled(f) => StaticType::Function {
+                parameters: match &f.type_signature {
+                    TypeSignature::Variadic => None,
+                    TypeSignature::Exact(types) => {
+                        Some(types.iter().map(|x| x.type_name.clone()).collect())
+                    }
+                },
+                return_type: Box::new(f.return_type.clone()),
+            },
+            Self::Native(f) => f.static_type.clone(),
+        }
+    }
+}
+
 impl From<Object> for Value {
     fn from(value: Object) -> Self {
         Self::Object(Box::new(value))
@@ -57,8 +107,14 @@ impl fmt::Debug for Function {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::Compiled(func) => write!(f, "function {:?}", func.name),
-            Self::Native(_) => write!(f, "<native function>"),
+            Self::Native(native) => write!(f, "<native function {:?}>", native.static_type),
         }
+    }
+}
+
+impl fmt::Debug for NativeFunction {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "<native fn {:?}>", self.static_type)
     }
 }
 
@@ -103,6 +159,7 @@ impl fmt::Display for Object {
                 write!(f, ")")
             }
             Self::Function(func) => write!(f, "{func}"),
+            Self::OverloadSet(slots) => write!(f, "<overload set ({} candidates)>", slots.len()),
         }
     }
 }
@@ -114,7 +171,7 @@ impl fmt::Display for Function {
                 let name = func.name.as_deref().unwrap_or("?");
                 write!(f, "<fn {name}>")
             }
-            Self::Native(_) => write!(f, "<native fn>"),
+            Self::Native(native) => write!(f, "<native fn {:?}>", native.static_type),
         }
     }
 }

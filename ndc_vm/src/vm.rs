@@ -1,6 +1,7 @@
 use crate::chunk::OpCode;
 use crate::value::{CompiledFunction, Function};
 use crate::{Object, Value};
+use ndc_parser::ResolvedVar;
 use std::rc::Rc;
 
 pub struct Vm {
@@ -56,8 +57,10 @@ impl Vm {
 
             match op {
                 OpCode::Halt => {
-                    eprintln!("[VM] stack-dump\n{:?}", self.stack);
-                    return Ok(());
+                    let ret = self.stack.pop().expect("stack underflow");
+                    self.stack.truncate(frame.frame_pointer - 1);
+                    self.frames.pop().expect("no frame to pop");
+                    self.stack.push(ret)
                 }
                 OpCode::Return => {
                     println!("{:?}", self.stack.pop().expect("stack underflow"));
@@ -109,12 +112,61 @@ impl Vm {
                                     frame_pointer: self.stack.len() - args,
                                 });
                             }
-                            Object::Function(Function::Native(f)) => {
-                                let f = Rc::clone(f);
+                            Object::Function(Function::Native(native)) => {
+                                let native = Rc::clone(native);
                                 let args_slice = self.stack[self.stack.len() - args..].to_vec();
-                                let result = f(&args_slice);
+                                let result = (native.func)(&args_slice);
                                 self.stack.truncate(self.stack.len() - args - 1);
                                 self.stack.push(result);
+                            }
+                            Object::OverloadSet(candidates) => {
+                                let candidates = candidates.clone();
+                                let fp = frame.frame_pointer;
+                                let arg_types: Vec<_> = self.stack[self.stack.len() - args..]
+                                    .iter()
+                                    .map(Value::static_type)
+                                    .collect();
+
+                                let resolved = candidates.iter().find_map(|var| {
+                                    let value = self.resolve_var(var, fp);
+                                    let Value::Object(obj) = &value else {
+                                        return None;
+                                    };
+                                    let Object::Function(func) = obj.as_ref() else {
+                                        return None;
+                                    };
+                                    if func.static_type().is_fn_and_matches(&arg_types) {
+                                        Some(value.clone())
+                                    } else {
+                                        None
+                                    }
+                                });
+
+                                match resolved {
+                                    Some(Value::Object(obj)) => match obj.as_ref() {
+                                        Object::Function(Function::Compiled(f)) => {
+                                            let f = Rc::clone(f);
+                                            self.frames.push(CallFrame {
+                                                function: f,
+                                                ip: 0,
+                                                frame_pointer: self.stack.len() - args,
+                                            });
+                                        }
+                                        Object::Function(Function::Native(native)) => {
+                                            let native = Rc::clone(native);
+                                            let args_slice =
+                                                self.stack[self.stack.len() - args..].to_vec();
+                                            let result = (native.func)(&args_slice);
+                                            self.stack.truncate(self.stack.len() - args - 1);
+                                            self.stack.push(result);
+                                        }
+                                        _ => unreachable!(),
+                                    },
+                                    _ => panic!(
+                                        "no matching overload found for argument types {:?}",
+                                        arg_types
+                                    ),
+                                }
                             }
                             _ => panic!("callee is unexpected object type"),
                         },
@@ -122,6 +174,14 @@ impl Vm {
                     }
                 }
             }
+        }
+    }
+
+    fn resolve_var(&self, var: &ResolvedVar, frame_pointer: usize) -> &Value {
+        match var {
+            ResolvedVar::Global { slot } => &self.globals[*slot],
+            ResolvedVar::Local { slot } => &self.stack[frame_pointer + slot],
+            ResolvedVar::Upvalue { .. } => todo!("upvalue resolution in overload sets"),
         }
     }
 }

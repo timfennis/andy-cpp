@@ -71,7 +71,10 @@ fn compile_expr(
             Binding::Resolved(ResolvedVar::Global { slot }) => {
                 chunk.write(OpCode::GetGlobal(slot), span);
             }
-            Binding::Dynamic(_) => {}
+            Binding::Dynamic(candidates) => {
+                let idx = chunk.add_constant(Object::OverloadSet(candidates).into());
+                chunk.write(OpCode::Constant(idx), span);
+            }
         },
         Expression::Statement(stm) => {
             compile_expr(*stm, chunk);
@@ -231,7 +234,10 @@ fn compile_expr(
         Expression::Tuple { .. } => {}
         Expression::List { .. } => {}
         Expression::Map { .. } => {}
-        Expression::Return { .. } => {}
+        Expression::Return { value } => {
+            compile_expr(*value, chunk);
+            chunk.write(OpCode::Return, span);
+        }
         Expression::Break => {}
         Expression::Continue => {}
         Expression::RangeInclusive { .. } => {}
