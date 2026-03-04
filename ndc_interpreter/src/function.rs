@@ -156,7 +156,7 @@ impl Function {
 #[derive(Clone)]
 pub enum FunctionBody {
     Closure {
-        parameter_names: Vec<String>,
+        type_signature: TypeSignature,
         body: ExpressionLocation,
         return_type: StaticType,
         environment: Rc<RefCell<Environment>>,
@@ -181,9 +181,7 @@ pub enum FunctionBody {
 impl FunctionBody {
     pub fn arity(&self) -> Option<usize> {
         match self {
-            Self::Closure {
-                parameter_names, ..
-            } => Some(parameter_names.len()),
+            Self::Closure { type_signature, .. } => type_signature.arity(),
             Self::NumericUnaryOp { .. } => Some(1),
             Self::NumericBinaryOp { .. } => Some(2),
             Self::GenericFunction { type_signature, .. } => type_signature.arity(),
@@ -205,14 +203,7 @@ impl FunctionBody {
 
     fn type_signature(&self) -> TypeSignature {
         match self {
-            Self::Closure {
-                parameter_names, ..
-            } => TypeSignature::Exact(
-                parameter_names
-                    .iter()
-                    .map(|name| Parameter::new(name, StaticType::Any))
-                    .collect(),
-            ),
+            Self::Closure { type_signature, .. } => type_signature.clone(),
             Self::Memoized { cache: _, function } => function.type_signature(),
             Self::NumericUnaryOp { .. } => {
                 TypeSignature::Exact(vec![Parameter::new("num", StaticType::Number)])

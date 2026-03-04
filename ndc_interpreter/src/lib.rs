@@ -101,8 +101,10 @@ impl Interpreter {
         &mut self,
         expressions: impl Iterator<Item = ExpressionLocation>,
     ) -> Result<Value, InterpreterError> {
-        let code = Compiler::compile(expressions);
+        let code = Compiler::compile(expressions)?.into_chunk();
+
         let mut vm = Vm::new(code);
+
         vm.run().expect("VM failed");
 
         Ok(Value::unit())
@@ -162,6 +164,11 @@ pub enum InterpreterError {
     Resolver {
         #[from]
         cause: semantic::AnalysisError,
+    },
+    #[error("Compilation error")]
+    Compiler {
+        #[from]
+        cause: ndc_vm::CompileError,
     },
     #[error("Error while executing code")]
     Evaluation(#[from] EvaluationError),
