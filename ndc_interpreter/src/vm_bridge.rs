@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use ndc_core::int::Int;
 use ndc_core::num::Number;
-use ndc_vm::value::{Function as VmFunction, Object as VmObject, Value as VmValue};
+use ndc_vm::value::{Function as VmFunction, NativeFunction, Object as VmObject, Value as VmValue};
 
 use crate::environment::Environment;
 use crate::function::Function as InterpFunction;
@@ -19,6 +19,7 @@ pub fn make_vm_globals(env: &Environment) -> Vec<VmValue> {
 }
 
 fn wrap_function(func: InterpFunction, dummy_env: Rc<RefCell<Environment>>) -> VmValue {
+    let static_type = func.static_type();
     let native = move |args: &[VmValue]| -> VmValue {
         let mut interp_args: Vec<InterpValue> = args.iter().map(vm_to_interp).collect();
         match func.call(&mut interp_args, &dummy_env) {
@@ -27,7 +28,10 @@ fn wrap_function(func: InterpFunction, dummy_env: Rc<RefCell<Environment>>) -> V
         }
     };
     VmValue::Object(Box::new(VmObject::Function(VmFunction::Native(Rc::new(
-        native,
+        NativeFunction {
+            func: Box::new(native),
+            static_type,
+        },
     )))))
 }
 
@@ -54,6 +58,7 @@ pub fn vm_to_interp(value: &VmValue) -> InterpValue {
                 vs.iter().map(vm_to_interp).collect(),
             ))),
             VmObject::Function(_) => panic!("cannot convert vm function to interpreter value"),
+            VmObject::OverloadSet(_) => panic!("cannot convert overload set to interpreter value"),
         },
     }
 }
