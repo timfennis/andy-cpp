@@ -1,5 +1,7 @@
 use crate::chunk::{Chunk, OpCode};
-use crate::{Function, Object, Value};
+use crate::value::{CompiledFunction, Function};
+use crate::{Object, Value};
+use ndc_lexer::Span;
 use ndc_parser::{
     Binding, Expression, ExpressionLocation, LogicalOperator, Lvalue, ResolvedVar, StaticType,
     TypeSignature,
@@ -10,20 +12,21 @@ pub struct Compiler;
 impl Compiler {
     pub fn compile(
         expressions: impl Iterator<Item = ExpressionLocation>,
-    ) -> Result<Function, CompileError> {
+    ) -> Result<CompiledFunction, CompileError> {
         let mut chunk = Chunk::default();
 
         for expr_loc in expressions {
             compile_expr(expr_loc, &mut chunk);
         }
 
-        Ok(Function::new_compiled(
-            None,
-            None,
-            TypeSignature::default(),
-            chunk,
-            StaticType::Any,
-        ))
+        chunk.write(OpCode::Halt, Span::new(0, 0));
+
+        Ok(CompiledFunction {
+            name: None,
+            type_signature: TypeSignature::default(),
+            body: chunk,
+            return_type: StaticType::Any,
+        })
     }
 }
 
@@ -130,14 +133,16 @@ fn compile_expr(
             let mut fn_chunk = Chunk::default();
             compile_expr(*body, &mut fn_chunk);
 
-            // TODO: what do we do with the compiled function
-            Function::new_compiled(
+            let compiled = CompiledFunction {
                 name,
-                None,
                 type_signature,
-                fn_chunk,
-                return_type.unwrap_or_default(),
+                body: fn_chunk,
+                return_type: return_type.unwrap_or_default(),
+            };
+            let idx = chunk.add_constant(
+                Object::Function(Function::Compiled(std::rc::Rc::new(compiled))).into(),
             );
+            chunk.write(OpCode::Constant(idx), span);
         }
         Expression::Grouping(statements) => {
             compile_expr(*statements, chunk);
@@ -177,13 +182,15 @@ fn compile_expr(
             loop_body,
         } => {
             let condition_span = condition.span;
+            let loop_start = chunk.len();
             compile_expr(*condition, chunk);
             let conditional_jump_idx = chunk.write(OpCode::JumpIfFalse(0), condition_span);
             chunk.write(OpCode::Pop, span);
-            let body_size = compile_expr(*loop_body, chunk);
+            compile_expr(*loop_body, chunk);
             chunk.write(
                 OpCode::Jump(
-                    -isize::try_from(body_size + 1).expect("unable to convert usize to isize"),
+                    -isize::try_from(chunk.len() - loop_start + 1)
+                        .expect("loop too large to jump back"),
                 ),
                 span,
             );
@@ -191,10 +198,7 @@ fn compile_expr(
             chunk.write(OpCode::Pop, span);
         }
         Expression::For { .. } => {}
-        Expression::Call {
-            arguments,
-            function,
-        } => {
+        Expression::Call { arguments, .. } => {
             for argument in arguments {
                 compile_expr(argument, chunk);
             }

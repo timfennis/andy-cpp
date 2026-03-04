@@ -2,7 +2,8 @@ use crate::Value;
 use ndc_lexer::Span;
 
 /// A single bytecode instruction.
-#[derive(Debug, Clone, PartialEq)]
+// NOTE: For now we just derive Copy for OpCode since it makes our live easier and it probably won't cost THAT much performance. In the future we might want to do some proper byte packing and dive into unsafe land to optimize further.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum OpCode {
     /// Removes the top of the stack
     Pop,
@@ -66,8 +67,12 @@ impl Chunk {
         self.code.is_empty()
     }
     #[inline(always)]
-    pub fn opcode(&self, idx: usize) -> &OpCode {
-        &self.code[idx]
+    pub fn opcode(&self, idx: usize) -> OpCode {
+        self.code[idx]
+    }
+
+    pub fn opcodes(&self) -> &[OpCode] {
+        &self.code
     }
 
     pub fn constant(&self, idx: usize) -> &Value {

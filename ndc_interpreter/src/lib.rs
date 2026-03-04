@@ -101,7 +101,7 @@ impl Interpreter {
         &mut self,
         expressions: impl Iterator<Item = ExpressionLocation>,
     ) -> Result<Value, InterpreterError> {
-        let code = Compiler::compile(expressions)?.into_chunk();
+        let code = Compiler::compile(expressions)?;
 
         let mut vm = Vm::new(code);
 

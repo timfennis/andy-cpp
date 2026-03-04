@@ -2086,7 +2086,10 @@ name = "tests"
 version = "0.2.1"
 dependencies = [
  "ndc_interpreter",
+ "ndc_lexer",
+ "ndc_parser",
  "ndc_stdlib",
+ "ndc_vm",
  "owo-colors",
 ]
 
