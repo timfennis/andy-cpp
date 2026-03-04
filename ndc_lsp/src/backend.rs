@@ -211,13 +211,13 @@ fn collect_hints(expr: &ExpressionLocation, text: &str, hints: &mut Vec<InlayHin
         }
         Expression::FunctionDeclaration {
             return_type,
-            parameters,
+            parameters_span,
             body,
             ..
         } => {
             if let Some(rt) = return_type {
                 hints.push(InlayHint {
-                    position: position_from_offset(text, parameters.span.end()),
+                    position: position_from_offset(text, parameters_span.end()),
                     label: InlayHintLabel::String(format!(" -> {rt}")),
                     kind: Some(InlayHintKind::TYPE),
                     text_edits: None,

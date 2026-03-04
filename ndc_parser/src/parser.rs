@@ -3,6 +3,7 @@ use std::fmt::Write;
 use crate::expression::Expression;
 use crate::expression::{Binding, ExpressionLocation, ForBody, ForIteration, Lvalue};
 use crate::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
+use crate::{Parameter, StaticType, TypeSignature};
 use ndc_lexer::{Span, Token, TokenLocation};
 
 pub struct Parser {
@@ -1145,11 +1146,15 @@ impl Parser {
             None => return Err(Error::end_of_input(argument_list.span)),
         };
 
+        let parameters_span = argument_list.span;
         let span = fn_token.span.merge(body.span);
         Ok(ExpressionLocation {
             expression: Expression::FunctionDeclaration {
                 name: identifier,
-                parameters: Box::new(argument_list),
+                type_signature: argument_list
+                    .try_into()
+                    .expect("INTERNAL ERROR: type of argument list is incorrect"),
+                parameters_span,
                 body: Box::new(body),
                 return_type: None, // At some point in the future we could use type declarations here to insert the type (return type inference is cringe anyway)
                 pure: is_pure,
@@ -1323,4 +1328,31 @@ fn tokens_to_string(tokens: &[Token]) -> String {
         }
     }
     buf
+}
+
+impl TryFrom<ExpressionLocation> for TypeSignature {
+    type Error = ();
+
+    fn try_from(
+        ExpressionLocation { expression, .. }: ExpressionLocation,
+    ) -> Result<Self, Self::Error> {
+        let Expression::Tuple { values } = expression else {
+            return Err(());
+        };
+
+        values
+            .into_iter()
+            .map(|expression_location| {
+                let ExpressionLocation { expression, .. } = expression_location;
+
+                match expression {
+                    Expression::Identifier { name, .. } => {
+                        Ok(Parameter::new(name, StaticType::Any))
+                    }
+                    _ => Err(()),
+                }
+            })
+            .collect::<Result<Vec<_>, ()>>()
+            .map(TypeSignature::Exact)
+    }
 }

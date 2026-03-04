@@ -2,7 +2,9 @@ use crate::function::StaticType;
 use crate::semantic::ScopeTree;
 use itertools::Itertools;
 use ndc_lexer::Span;
-use ndc_parser::{Binding, Expression, ExpressionLocation, ForBody, ForIteration, Lvalue};
+use ndc_parser::{
+    Binding, Expression, ExpressionLocation, ForBody, ForIteration, Lvalue, TypeSignature,
+};
 use std::fmt::Debug;
 
 #[derive(Debug)]
@@ -99,7 +101,7 @@ impl Analyser {
             Expression::FunctionDeclaration {
                 name,
                 resolved_name,
-                parameters,
+                type_signature,
                 body,
                 return_type: return_type_slot,
                 ..
@@ -109,12 +111,8 @@ impl Analyser {
                 // Pre-register the function before analysing its body so recursive calls can
                 // resolve the name. The return type is unknown at this point so we use Any.
                 let pre_slot = if let Some(name) = name {
-                    let param_types: Vec<StaticType> =
-                        std::iter::repeat_n(StaticType::Any, extract_argument_arity(parameters))
-                            .collect();
-
                     let placeholder = StaticType::Function {
-                        parameters: Some(param_types),
+                        parameters: type_signature.types(),
                         return_type: Box::new(StaticType::Any),
                     };
                     Some(
@@ -126,7 +124,7 @@ impl Analyser {
                 };
 
                 self.scope_tree.new_function_scope();
-                let param_types = self.resolve_parameters_declarative(parameters)?;
+                let param_types = self.resolve_parameters_declarative(type_signature, *span)?;
 
                 let return_type = self.analyse(body)?;
                 self.scope_tree.destroy_scope();
@@ -472,41 +470,28 @@ impl Analyser {
     /// Resolve expressions as arguments to a function and return the function arity
     fn resolve_parameters_declarative(
         &mut self,
-        arguments: &mut ExpressionLocation,
+        type_signature: &TypeSignature,
+        span: Span,
     ) -> Result<Vec<StaticType>, AnalysisError> {
-        let mut types: Vec<StaticType> = Vec::new();
-        let mut names: Vec<&str> = Vec::new();
-
-        let ExpressionLocation {
-            expression: Expression::Tuple { values },
-            ..
-        } = arguments
-        else {
-            panic!("expected arguments to be tuple");
+        let TypeSignature::Exact(parameters) = type_signature else {
+            return Ok(vec![]);
         };
 
-        for arg in values {
-            let ExpressionLocation {
-                expression: Expression::Identifier { name, resolved },
-                span,
-            } = arg
-            else {
-                panic!("expected tuple values to be ident");
-            };
+        let mut types: Vec<StaticType> = Vec::new();
+        let mut seen_names: Vec<&str> = Vec::new();
 
+        for param in parameters {
             // TODO: big challenge how do we figure out the function parameter types?
             //       it seems like this is something we need an HM like system for!?
             let resolved_type = StaticType::Any;
             types.push(resolved_type.clone());
-            if names.contains(&name.as_str()) {
-                return Err(AnalysisError::parameter_redefined(name, *span));
+            if seen_names.contains(&param.name.as_str()) {
+                return Err(AnalysisError::parameter_redefined(&param.name, span));
             }
-            names.push(name);
+            seen_names.push(&param.name);
 
-            *resolved = Binding::Resolved(
-                self.scope_tree
-                    .create_local_binding((*name).clone(), resolved_type),
-            );
+            self.scope_tree
+                .create_local_binding(param.name.clone(), resolved_type);
         }
 
         Ok(types)
@@ -569,18 +554,6 @@ impl Analyser {
 
         Ok(element_type)
     }
-}
-
-fn extract_argument_arity(arguments: &ExpressionLocation) -> usize {
-    let ExpressionLocation {
-        expression: Expression::Tuple { values },
-        ..
-    } = arguments
-    else {
-        panic!("expected arguments to be tuple");
-    };
-
-    values.len()
 }
 
 #[derive(thiserror::Error, Debug)]

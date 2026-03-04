@@ -1,23 +1,32 @@
 use crate::chunk::{Chunk, OpCode};
-use crate::{Object, Value};
-use ndc_lexer::Span;
-use ndc_parser::{Binding, Expression, ExpressionLocation, LogicalOperator, Lvalue, ResolvedVar};
+use crate::{Function, Object, Value};
+use ndc_parser::{
+    Binding, Expression, ExpressionLocation, LogicalOperator, Lvalue, ResolvedVar, StaticType,
+    TypeSignature,
+};
 
 pub struct Compiler;
 
 impl Compiler {
-    pub fn compile(expressions: impl Iterator<Item = ExpressionLocation>) -> Chunk {
+    pub fn compile(
+        expressions: impl Iterator<Item = ExpressionLocation>,
+    ) -> Result<Function, CompileError> {
         let mut chunk = Chunk::default();
 
         for expr_loc in expressions {
             compile_expr(expr_loc, &mut chunk);
         }
 
-        // TODO: 0,0 span is kinda strange
-        chunk.write(OpCode::Halt, Span::new(0, 0));
-        chunk
+        Ok(Function::new_compiled(
+            None,
+            None,
+            TypeSignature::default(),
+            chunk,
+            StaticType::Any,
+        ))
     }
 }
+
 fn compile_expr(
     ExpressionLocation { expression, span }: ExpressionLocation,
     chunk: &mut Chunk,
@@ -54,10 +63,10 @@ fn compile_expr(
             Binding::Resolved(ResolvedVar::Local { slot }) => {
                 chunk.write(OpCode::GetLocal(slot), span);
             }
-            Binding::Resolved(ResolvedVar::Upvalue { slot, depth }) => {
+            Binding::Resolved(ResolvedVar::Upvalue { .. }) => {
                 todo!("?")
             }
-            Binding::Resolved(ResolvedVar::Global { slot }) => {
+            Binding::Resolved(ResolvedVar::Global { .. }) => {
                 todo!("?")
             }
             Binding::Dynamic(_) => {}
@@ -111,7 +120,25 @@ fn compile_expr(
             }
         }
         Expression::OpAssignment { .. } => {}
-        Expression::FunctionDeclaration { .. } => {}
+        Expression::FunctionDeclaration {
+            name,
+            body,
+            type_signature,
+            return_type,
+            ..
+        } => {
+            let mut fn_chunk = Chunk::default();
+            compile_expr(*body, &mut fn_chunk);
+
+            // TODO: what do we do with the compiled function
+            Function::new_compiled(
+                name,
+                None,
+                type_signature,
+                fn_chunk,
+                return_type.unwrap_or_default(),
+            );
+        }
         Expression::Grouping(statements) => {
             compile_expr(*statements, chunk);
         }
@@ -154,7 +181,12 @@ fn compile_expr(
             let conditional_jump_idx = chunk.write(OpCode::JumpIfFalse(0), condition_span);
             chunk.write(OpCode::Pop, span);
             let body_size = compile_expr(*loop_body, chunk);
-            chunk.write(OpCode::Jump(-((body_size + 1) as isize)), span);
+            chunk.write(
+                OpCode::Jump(
+                    -isize::try_from(body_size + 1).expect("unable to convert usize to isize"),
+                ),
+                span,
+            );
             chunk.patch_jump(conditional_jump_idx);
             chunk.write(OpCode::Pop, span);
         }
@@ -185,3 +217,6 @@ fn compile_expr(
 
     chunk.len() - start_len
 }
+
+#[derive(thiserror::Error, Debug)]
+pub enum CompileError {}
