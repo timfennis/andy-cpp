@@ -5,6 +5,8 @@ use ndc_lexer::Span;
 // NOTE: For now we just derive Copy for OpCode since it makes our live easier and it probably won't cost THAT much performance. In the future we might want to do some proper byte packing and dive into unsafe land to optimize further.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum OpCode {
+    /// Call the function with `usize` arguments
+    Call(usize),
     /// Removes the top of the stack
     Pop,
     /// Always jumps
@@ -19,6 +21,8 @@ pub enum OpCode {
     GetLocal(usize),
     /// Pops the top of the stack and stores it in the given local slot
     SetLocal(usize),
+    /// Reads global variable at the given slot and pushes it on the stack
+    GetGlobal(usize),
     /// Stop execution
     Halt,
     Return,

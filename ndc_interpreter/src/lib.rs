@@ -109,7 +109,7 @@ impl Interpreter {
     ) -> Result<Value, InterpreterError> {
         let code = Compiler::compile(expressions)?;
 
-        let mut vm = Vm::new(code);
+        let mut vm = Vm::new(code, Vec::new());
 
         vm.run().expect("VM failed");
 

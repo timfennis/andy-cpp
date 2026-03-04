@@ -6,6 +6,7 @@ use std::rc::Rc;
 pub struct Vm {
     stack: Vec<Value>,
     locals: Vec<Value>,
+    globals: Vec<Value>,
     frames: Vec<CallFrame>,
 }
 
@@ -23,13 +24,14 @@ pub struct CallFrame {
 }
 
 impl Vm {
-    pub fn new(function: CompiledFunction) -> Self {
+    pub fn new(function: CompiledFunction, globals: Vec<Value>) -> Self {
         let function = Rc::new(function);
         Self {
-            stack: vec![Value::Object(Box::new(Object::Function(Function::Compiled(
-                Rc::clone(&function),
-            ))))],
+            stack: vec![Value::Object(Box::new(Object::Function(
+                Function::Compiled(Rc::clone(&function)),
+            )))],
             locals: Vec::default(),
+            globals,
             frames: vec![CallFrame {
                 function,
                 ip: 0,
@@ -69,6 +71,9 @@ impl Vm {
                 OpCode::GetLocal(slot) => {
                     self.stack.push(self.locals[frame.slot(slot)].clone());
                 }
+                OpCode::GetGlobal(slot) => {
+                    self.stack.push(self.globals[slot].clone());
+                }
                 OpCode::SetLocal(slot) => {
                     let value = self.stack.pop().expect("stack underflow");
                     if slot < self.locals.len() {
@@ -96,6 +101,21 @@ impl Vm {
                 }
                 OpCode::Pop => {
                     self.stack.pop();
+                }
+                OpCode::Call(args) => {
+                    let callee = &self.stack[self.stack.len() - args - 1];
+                    let function = match callee {
+                        Value::Object(obj) => match obj.as_ref() {
+                            Object::Function(Function::Compiled(f)) => Rc::clone(f),
+                            _ => return Err(VmError::RuntimeError),
+                        },
+                        _ => return Err(VmError::RuntimeError),
+                    };
+                    self.frames.push(CallFrame {
+                        function,
+                        ip: 0,
+                        frame_pointer: self.stack.len() - args,
+                    });
                 }
             }
         }

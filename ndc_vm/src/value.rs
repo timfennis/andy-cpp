@@ -53,8 +53,8 @@ impl From<Object> for Value {
     }
 }
 
-impl std::fmt::Debug for Function {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for Function {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::Compiled(func) => write!(f, "function {:?}", func.name),
             Self::Native(_) => write!(f, "<native function>"),
@@ -65,11 +65,11 @@ impl std::fmt::Debug for Function {
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            Value::Int(n) => write!(f, "{n}"),
-            Value::Float(n) => write!(f, "{n}"),
-            Value::Bool(b) => write!(f, "{b}"),
-            Value::None => write!(f, "None"),
-            Value::Object(obj) => write!(f, "{obj}"),
+            Self::Int(n) => write!(f, "{n}"),
+            Self::Float(n) => write!(f, "{n}"),
+            Self::Bool(b) => write!(f, "{b}"),
+            Self::None => write!(f, "None"),
+            Self::Object(obj) => write!(f, "{obj}"),
         }
     }
 }
@@ -77,28 +77,32 @@ impl fmt::Display for Value {
 impl fmt::Display for Object {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            Object::Some(v) => write!(f, "Some({v})"),
-            Object::BigInt(n) => write!(f, "{n}"),
-            Object::Complex(c) => write!(f, "{c}"),
-            Object::Rational(r) => write!(f, "{r}"),
-            Object::String(s) => write!(f, "\"{s}\""),
-            Object::List(vs) => {
+            Self::Some(v) => write!(f, "Some({v})"),
+            Self::BigInt(n) => write!(f, "{n}"),
+            Self::Complex(c) => write!(f, "{c}"),
+            Self::Rational(r) => write!(f, "{r}"),
+            Self::String(s) => write!(f, "\"{s}\""),
+            Self::List(vs) => {
                 write!(f, "[")?;
                 for (i, v) in vs.iter().enumerate() {
-                    if i > 0 { write!(f, ", ")?; }
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
                     write!(f, "{v}")?;
                 }
                 write!(f, "]")
             }
-            Object::Tuple(vs) => {
+            Self::Tuple(vs) => {
                 write!(f, "(")?;
                 for (i, v) in vs.iter().enumerate() {
-                    if i > 0 { write!(f, ", ")?; }
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
                     write!(f, "{v}")?;
                 }
                 write!(f, ")")
             }
-            Object::Function(func) => write!(f, "{func}"),
+            Self::Function(func) => write!(f, "{func}"),
         }
     }
 }
@@ -106,11 +110,11 @@ impl fmt::Display for Object {
 impl fmt::Display for Function {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            Function::Compiled(func) => {
+            Self::Compiled(func) => {
                 let name = func.name.as_deref().unwrap_or("?");
                 write!(f, "<fn {name}>")
             }
-            Function::Native(_) => write!(f, "<native fn>"),
+            Self::Native(_) => write!(f, "<native fn>"),
         }
     }
 }
@@ -120,7 +124,7 @@ impl fmt::Display for CompiledFunction {
         let name = self.name.as_deref().unwrap_or("<script>");
         writeln!(f, "== {name} ==")?;
 
-        let mut nested: Vec<Rc<CompiledFunction>> = Vec::new();
+        let mut nested: Vec<Rc<Self>> = Vec::new();
 
         for (i, op, constant) in self.body.iter() {
             match (op, constant) {
