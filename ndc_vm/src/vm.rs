@@ -5,7 +5,6 @@ use std::rc::Rc;
 
 pub struct Vm {
     stack: Vec<Value>,
-    locals: Vec<Value>,
     globals: Vec<Value>,
     frames: Vec<CallFrame>,
 }
@@ -30,7 +29,6 @@ impl Vm {
             stack: vec![Value::Object(Box::new(Object::Function(
                 Function::Compiled(Rc::clone(&function)),
             )))],
-            locals: Vec::default(),
             globals,
             frames: vec![CallFrame {
                 function,
@@ -59,7 +57,6 @@ impl Vm {
             match op {
                 OpCode::Halt => {
                     eprintln!("[VM] stack-dump\n{:?}", self.stack);
-                    eprintln!("[VM] locals-dump\n{:?}", self.locals);
                     return Ok(());
                 }
                 OpCode::Return => {
@@ -69,19 +66,17 @@ impl Vm {
                     self.stack.push(frame.function.body.constant(idx).clone());
                 }
                 OpCode::GetLocal(slot) => {
-                    self.stack.push(self.locals[frame.slot(slot)].clone());
+                    self.stack.push(self.stack[frame.slot(slot)].clone());
                 }
                 OpCode::GetGlobal(slot) => {
                     self.stack.push(self.globals[slot].clone());
                 }
                 OpCode::SetLocal(slot) => {
                     let value = self.stack.pop().expect("stack underflow");
-                    if slot < self.locals.len() {
-                        self.locals[frame.slot(slot)] = value;
+                    if frame.slot(slot) < self.stack.len() {
+                        self.stack[frame.slot(slot)] = value;
                     } else {
-                        // TODO: should we really silently allow this? If the given slot mismatches the size of our local variable storage didn't the compiler mess up?
-                        self.locals.resize(frame.slot(slot), Value::None);
-                        self.locals.push(value);
+                        self.stack.push(value);
                     }
                 }
                 OpCode::JumpIfFalse(offset) => {
@@ -104,18 +99,27 @@ impl Vm {
                 }
                 OpCode::Call(args) => {
                     let callee = &self.stack[self.stack.len() - args - 1];
-                    let function = match callee {
+                    match callee {
                         Value::Object(obj) => match obj.as_ref() {
-                            Object::Function(Function::Compiled(f)) => Rc::clone(f),
-                            _ => return Err(VmError::RuntimeError),
+                            Object::Function(Function::Compiled(f)) => {
+                                let f = Rc::clone(f);
+                                self.frames.push(CallFrame {
+                                    function: f,
+                                    ip: 0,
+                                    frame_pointer: self.stack.len() - args,
+                                });
+                            }
+                            Object::Function(Function::Native(f)) => {
+                                let f = Rc::clone(f);
+                                let args_slice = self.stack[self.stack.len() - args..].to_vec();
+                                let result = f(&args_slice);
+                                self.stack.truncate(self.stack.len() - args - 1);
+                                self.stack.push(result);
+                            }
+                            _ => panic!("callee is unexpected object type"),
                         },
-                        _ => return Err(VmError::RuntimeError),
-                    };
-                    self.frames.push(CallFrame {
-                        function,
-                        ip: 0,
-                        frame_pointer: self.stack.len() - args,
-                    });
+                        _ => panic!("callee is unexpected value type"),
+                    }
                 }
             }
         }
