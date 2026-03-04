@@ -68,8 +68,8 @@ fn compile_expr(
             Binding::Resolved(ResolvedVar::Upvalue { .. }) => {
                 todo!("?")
             }
-            Binding::Resolved(ResolvedVar::Global { .. }) => {
-                todo!("?")
+            Binding::Resolved(ResolvedVar::Global { slot }) => {
+                chunk.write(OpCode::GetGlobal(slot), span);
             }
             Binding::Dynamic(_) => {}
         },
@@ -115,7 +115,7 @@ fn compile_expr(
                         chunk.write(OpCode::SetLocal(slot), lv_span);
                     }
                     ResolvedVar::Upvalue { .. } => todo!("?"),
-                    ResolvedVar::Global { .. } => todo!("?"),
+                    ResolvedVar::Global { .. } => unreachable!("globals are native, never assigned"),
                 },
                 Lvalue::Index { .. } => todo!("?"),
                 Lvalue::Sequence(_) => todo!("?"),
@@ -124,6 +124,7 @@ fn compile_expr(
         Expression::OpAssignment { .. } => {}
         Expression::FunctionDeclaration {
             name,
+            resolved_name,
             body,
             type_signature,
             return_type,
@@ -141,7 +142,17 @@ fn compile_expr(
             let idx = chunk.add_constant(
                 Object::Function(Function::Compiled(std::rc::Rc::new(compiled))).into(),
             );
+
             chunk.write(OpCode::Constant(idx), span);
+
+            match resolved_name {
+                Some(ResolvedVar::Local { slot }) => {
+                    chunk.write(OpCode::SetLocal(slot), span);
+                }
+                Some(ResolvedVar::Upvalue { .. }) => todo!("?"),
+                Some(ResolvedVar::Global { .. }) => unreachable!("globals are native, never compiled"),
+                None => {}
+            }
         }
         Expression::Grouping(statements) => {
             compile_expr(*statements, chunk);
@@ -197,15 +208,18 @@ fn compile_expr(
             chunk.write(OpCode::Pop, span);
         }
         Expression::For { .. } => {}
-        Expression::Call { arguments, .. } => {
+        Expression::Call {
+            function,
+            arguments,
+        } => {
+            compile_expr(*function, chunk);
+
+            let argument_count = arguments.len();
             for argument in arguments {
                 compile_expr(argument, chunk);
             }
 
-            // compile_expr(*function, chunk);
-
-            // chunk.write(OpCode::Call, span);
-            // chunk.write(OpCode::Return);
+            chunk.write(OpCode::Call(argument_count), span);
         }
         Expression::Index { .. } => {}
         Expression::Tuple { .. } => {}
