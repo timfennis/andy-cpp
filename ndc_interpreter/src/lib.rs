@@ -92,7 +92,7 @@ impl Interpreter {
     ) -> Result<String, InterpreterError> {
         let expressions = self.parse_and_analyse(input)?;
         let final_value = if use_vm {
-            self.interpret_vm(expressions.into_iter())?
+            self.interpret_vm(input, expressions.into_iter())?
         } else {
             self.interpret(expressions.into_iter())?
         };
@@ -118,12 +118,18 @@ impl Interpreter {
     }
     fn interpret_vm(
         &mut self,
+        input: &str,
         expressions: impl Iterator<Item = ExpressionLocation>,
     ) -> Result<Value, InterpreterError> {
         let code = Compiler::compile(expressions)?;
 
         let globals = vm_bridge::make_vm_globals(&self.environment);
         let mut vm = Vm::new(code, globals);
+
+        #[cfg(feature = "vm-trace")]
+        {
+            vm = vm.with_source(input);
+        }
 
         vm.run().expect("VM failed");
 

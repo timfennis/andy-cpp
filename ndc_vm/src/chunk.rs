@@ -83,6 +83,10 @@ impl Chunk {
         &self.constants[idx]
     }
 
+    pub fn span(&self, ip: usize) -> Span {
+        self.spans[ip]
+    }
+
     /// Iterates opcodes as `(index, opcode, constant_value)` where `constant_value`
     /// is `Some` only for `Constant(idx)` opcodes.
     pub fn iter(&self) -> impl Iterator<Item = (usize, OpCode, Option<&Value>)> {

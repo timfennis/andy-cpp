@@ -3,6 +3,9 @@ name = "ndc_vm"
 edition.workspace = true
 version.workspace = true
 
+[features]
+vm-trace = []
+
 [dependencies]
 thiserror.workspace = true
 ndc_parser.workspace = true
