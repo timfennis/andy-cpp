@@ -27,9 +27,7 @@ impl Vm {
     pub fn new(function: CompiledFunction, globals: Vec<Value>) -> Self {
         let function = Rc::new(function);
         Self {
-            stack: vec![Value::Object(Box::new(Object::Function(
-                Function::Compiled(Rc::clone(&function)),
-            )))],
+            stack: vec![],
             globals,
             frames: vec![CallFrame {
                 function,

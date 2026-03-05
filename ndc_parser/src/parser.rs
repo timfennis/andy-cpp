@@ -30,6 +30,7 @@ impl Parser {
                     | Expression::While { .. }
                     | Expression::For { .. }
                     | Expression::FunctionDeclaration { .. }
+                    | Expression::VariableDeclaration { .. }
             )
         };
         let mut expressions = Vec::new();
@@ -332,9 +333,7 @@ impl Parser {
             self.require_current_token_matches(&Token::Semicolon)?;
         }
 
-        Ok(declaration
-            .to_location(let_token.span.merge(end))
-            .to_statement())
+        Ok(declaration.to_location(let_token.span.merge(end)))
     }
 
     fn expression(&mut self) -> Result<ExpressionLocation, Error> {
