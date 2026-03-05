@@ -250,8 +250,20 @@ fn compile_expr(
             chunk.write(OpCode::Call(argument_count), span);
         }
         Expression::Index { .. } => todo!("index expression"),
-        Expression::Tuple { .. } => todo!("tuple literal"),
-        Expression::List { .. } => todo!("list literal"),
+        Expression::Tuple { values } => {
+            let size = values.len();
+            for expression in values {
+                compile_expr(expression, chunk);
+            }
+            chunk.write(OpCode::MakeTuple(size), span);
+        }
+        Expression::List { values } => {
+            let size = values.len();
+            for expression in values {
+                compile_expr(expression, chunk);
+            }
+            chunk.write(OpCode::MakeList(size), span);
+        }
         Expression::Map { .. } => todo!("map literal"),
         Expression::Return { value } => {
             compile_expr(*value, chunk);
@@ -260,7 +272,7 @@ fn compile_expr(
         Expression::Break => todo!("break"),
         Expression::Continue => todo!("continue"),
         Expression::RangeInclusive { .. } => todo!("inclusive range"),
-        Expression::RangeExclusive { .. } => todo!("exclusive range")
+        Expression::RangeExclusive { .. } => todo!("exclusive range"),
     }
 
     chunk.len() - start_len

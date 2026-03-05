@@ -23,8 +23,13 @@ pub enum OpCode {
     SetLocal(usize),
     /// Reads global variable at the given slot and pushes it on the stack
     GetGlobal(usize),
+    /// Create a list using n arguments on the stack
+    MakeList(usize),
+    /// Create a tuple using n arguments on the stack
+    MakeTuple(usize),
     /// Stop execution
     Halt,
+    /// Return from function call
     Return,
 }
 
