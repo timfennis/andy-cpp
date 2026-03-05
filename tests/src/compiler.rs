@@ -17,6 +17,15 @@ fn compile(input: &str) -> Vec<OpCode> {
         .to_vec()
 }
 
+fn compile_with_analysis(input: &str) -> Vec<OpCode> {
+    let mut interp = ndc_interpreter::Interpreter::new(Vec::new());
+    interp
+        .compile_str(input)
+        .expect("compile failed")
+        .opcodes()
+        .to_vec()
+}
+
 // if true { 1 }
 //
 // 0: Constant(0)      push `true`
@@ -230,5 +239,41 @@ fn test_while() {
             Pop,
             Halt
         ]
+    );
+}
+
+// let a = 1;
+//
+// Declaration is a pure statement: the value is pushed onto the stack as local
+// slot 0. No SetLocal and no Pop — the local lives on the stack permanently.
+//
+// 0: Constant(0)   push `1` (becomes local slot 0)
+// 1: Halt
+#[test]
+fn test_declaration() {
+    assert_eq!(
+        compile_with_analysis("let a = 1;"),
+        [Constant(0), Halt]
+    );
+}
+
+// let a = 1;
+// a = 5;
+//
+// Declaration pushes 1 as local slot 0.
+// Assignment compiles to: push new value, SetLocal to overwrite the slot,
+// push unit as the expression result, Pop discards it (statement context).
+//
+// 0: Constant(0)   push `1` (local slot 0 = a)
+// 1: Constant(1)   push `5`
+// 2: SetLocal(0)   overwrite a's slot
+// 3: Constant(2)   push `()` (assignment expression result)
+// 4: Pop           discard (statement)
+// 5: Halt
+#[test]
+fn test_assignment() {
+    assert_eq!(
+        compile_with_analysis("let a = 1;\na = 5;"),
+        [Constant(0), Constant(1), SetLocal(0), Constant(2), Pop, Halt]
     );
 }

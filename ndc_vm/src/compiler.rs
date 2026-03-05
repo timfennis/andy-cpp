@@ -102,12 +102,13 @@ fn compile_expr(
                 }
             }
         }
-        // TODO: is this supposed to be different in the VM?
+        Expression::VariableDeclaration { value, .. } => {
+            compile_expr(*value, chunk);
+        }
         Expression::Assignment {
             l_value,
             r_value: value,
-        }
-        | Expression::VariableDeclaration { l_value, value } => {
+        } => {
             compile_expr(*value, chunk);
             match l_value {
                 Lvalue::Identifier {
@@ -126,6 +127,8 @@ fn compile_expr(
                 Lvalue::Index { .. } => todo!("?"),
                 Lvalue::Sequence(_) => todo!("?"),
             }
+            let idx = chunk.add_constant(Value::unit());
+            chunk.write(OpCode::Constant(idx), span);
         }
         Expression::OpAssignment { .. } => {}
         Expression::FunctionDeclaration {

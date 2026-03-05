@@ -7,5 +7,4 @@ version.workspace = true
 thiserror.workspace = true
 ndc_parser.workspace = true
 ndc_lexer.workspace = true
-ndc_core.workspace = true
 num.workspace = true
