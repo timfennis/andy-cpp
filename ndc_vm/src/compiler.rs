@@ -171,7 +171,7 @@ fn compile_expr(
         }
         Expression::Block { statements } => {
             if statements.is_empty() {
-                let idx = chunk.add_constant(Object::Tuple(vec![]).into());
+                let idx = chunk.add_constant(Value::unit());
                 chunk.write(OpCode::Constant(idx), span);
             } else {
                 let last = statements.len() - 1;
@@ -180,7 +180,7 @@ fn compile_expr(
                         compile_expr(stmt, chunk);
                     } else if i == last {
                         compile_expr(stmt, chunk); // emits inner + Pop
-                        let idx = chunk.add_constant(Object::Tuple(vec![]).into());
+                        let idx = chunk.add_constant(Value::unit());
                         chunk.write(OpCode::Constant(idx), span);
                     } else {
                         compile_expr(stmt, chunk); // non-last, always a Statement → inner + Pop
