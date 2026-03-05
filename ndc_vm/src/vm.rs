@@ -29,7 +29,7 @@ impl Vm {
     pub fn new(function: CompiledFunction, globals: Vec<Value>) -> Self {
         let function = Rc::new(function);
         Self {
-            stack: vec![],
+            stack: Vec::with_capacity(256),
             globals,
             frames: vec![CallFrame {
                 function,
@@ -180,9 +180,9 @@ impl Vm {
                 });
             }
             Function::Native(native) => {
-                let args_slice = self.stack[self.stack.len() - args..].to_vec();
-                let result = (native.func)(&args_slice);
-                self.stack.truncate(self.stack.len() - args - 1);
+                let start = self.stack.len() - args;
+                let result = (native.func)(&self.stack[start..]);
+                self.stack.truncate(start - 1);
                 self.stack.push(result);
             }
         }
