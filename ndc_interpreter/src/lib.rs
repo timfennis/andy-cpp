@@ -122,7 +122,7 @@ impl Interpreter {
     ) -> Result<Value, InterpreterError> {
         let code = Compiler::compile(expressions)?;
 
-        let globals = vm_bridge::make_vm_globals(&self.environment.borrow());
+        let globals = vm_bridge::make_vm_globals(&self.environment);
         let mut vm = Vm::new(code, globals);
 
         vm.run().expect("VM failed");

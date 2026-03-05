@@ -10,11 +10,11 @@ use crate::function::Function as InterpFunction;
 use crate::sequence::Sequence;
 use crate::value::Value as InterpValue;
 
-pub fn make_vm_globals(env: &Environment) -> Vec<VmValue> {
-    let dummy_env = Rc::new(RefCell::new(Environment::default()));
-    env.get_all_functions()
+pub fn make_vm_globals(env: &Rc<RefCell<Environment>>) -> Vec<VmValue> {
+    env.borrow()
+        .get_all_functions()
         .into_iter()
-        .map(|func| wrap_function(func, Rc::clone(&dummy_env)))
+        .map(|func| wrap_function(func, Rc::clone(env)))
         .collect()
 }
 

@@ -15,6 +15,13 @@ fn run_ndc_test_vm(path: PathBuf) -> Result<(), std::io::Error> {
         .map(|s| s.trim().to_string())
         .unwrap_or_default();
 
+    let expect_output = contents
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("// expect-output:"))
+        .map(|s| s.trim())
+        .collect::<Vec<_>>()
+        .join("\n");
+
     print!("Running {path:?} (vm)...");
 
     let mut interpreter = Interpreter::new(Vec::new()).with_stdlib();
@@ -37,7 +44,23 @@ fn run_ndc_test_vm(path: PathBuf) -> Result<(), std::io::Error> {
         );
     }
 
-    // TODO: output checking requires wiring the VM's print output into the captured buffer
+    if !expect_output.is_empty() {
+        let environment = interpreter.environment();
+        let environment = environment.borrow();
+        let output = environment
+            .get_output()
+            .expect("interpreter must have output in test context");
+        let output = String::from_utf8(output).expect("test output must be valid UTF-8");
+
+        if output.trim_end() != expect_output.trim_end() {
+            println!(" {}", "ERR".red().bold());
+            panic!(
+                "\n\tThere was a problem running {path:?}\n\tActual output: {}\n\tdid not match\n\tExpected output: {}\n",
+                output.trim_end(),
+                expect_output.trim_end()
+            );
+        }
+    }
 
     println!(" {}", "OK".green().bold());
 
