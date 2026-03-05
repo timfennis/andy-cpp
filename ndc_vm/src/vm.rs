@@ -8,6 +8,8 @@ pub struct Vm {
     stack: Vec<Value>,
     globals: Vec<Value>,
     frames: Vec<CallFrame>,
+    #[cfg(feature = "vm-trace")]
+    source: Option<String>,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -34,7 +36,15 @@ impl Vm {
                 ip: 0,
                 frame_pointer: 0,
             }],
+            #[cfg(feature = "vm-trace")]
+            source: None,
         }
+    }
+
+    #[cfg(feature = "vm-trace")]
+    pub fn with_source(mut self, source: impl Into<String>) -> Self {
+        self.source = Some(source.into());
+        self
     }
 
     pub fn run(&mut self) -> Result<(), VmError> {
@@ -45,14 +55,25 @@ impl Vm {
         loop {
             let frame = self.frames.last_mut().expect("must not be empty");
 
+            let ip = frame.ip;
             let op = frame.opcode();
             frame.ip += 1;
 
-            // eprintln!("[VM] Running: {:?}", op);
+            #[cfg(feature = "vm-trace")]
+            {
+                let span = frame.function.body.span(ip);
+                let excerpt = self.source.as_deref().and_then(|src| {
+                    src.get(span.range()).map(|s| s.trim().replace('\n', "↵"))
+                });
+                let op_str = format!("{op:?}");
+                match excerpt {
+                    Some(s) => eprintln!("[VM] {ip:04} {op_str:<30}  {s}"),
+                    None => eprintln!("[VM] {ip:04} {op_str}"),
+                }
+            }
 
             match op {
                 OpCode::Halt => {
-                    // eprintln!("halting");
                     return Ok(());
                 }
                 OpCode::Return => {
