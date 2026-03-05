@@ -137,6 +137,8 @@ fn compile_expr(
         } => {
             let mut fn_chunk = Chunk::default();
             compile_expr(*body, &mut fn_chunk);
+            // Ensure there is a return, this could become dead code if there is one already.
+            fn_chunk.write(OpCode::Return, span);
 
             let compiled = CompiledFunction {
                 name,

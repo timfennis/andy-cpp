@@ -40,8 +40,8 @@ impl Vm {
     }
 
     pub fn run(&mut self) -> Result<(), VmError> {
-        eprintln!("[VM] Value bytes: {}", size_of::<Value>());
-        eprintln!("[VM] OpCode bytes: {}", size_of::<OpCode>());
+        // eprintln!("[VM] Value bytes: {}", size_of::<Value>());
+        // eprintln!("[VM] OpCode bytes: {}", size_of::<OpCode>());
 
         if self.frames.is_empty() {
             panic!("no call frames")
@@ -53,17 +53,18 @@ impl Vm {
             let op = frame.opcode();
             frame.ip += 1;
 
-            eprintln!("[VM] Running: {:?}", op);
+            // eprintln!("[VM] Running: {:?}", op);
 
             match op {
                 OpCode::Halt => {
+                    // eprintln!("halting");
+                    return Ok(());
+                }
+                OpCode::Return => {
                     let ret = self.stack.pop().expect("stack underflow");
                     self.stack.truncate(frame.frame_pointer - 1);
                     self.frames.pop().expect("no frame to pop");
                     self.stack.push(ret)
-                }
-                OpCode::Return => {
-                    println!("{:?}", self.stack.pop().expect("stack underflow"));
                 }
                 OpCode::Constant(idx) => {
                     self.stack.push(frame.function.body.constant(idx).clone());
