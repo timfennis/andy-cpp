@@ -53,6 +53,10 @@ impl CompiledFunction {
 }
 
 impl Value {
+    pub fn unit() -> Self {
+        Self::Object(Box::new(Object::Tuple(vec![])))
+    }
+
     pub fn static_type(&self) -> StaticType {
         match self {
             Self::Int(_) => StaticType::Int,
