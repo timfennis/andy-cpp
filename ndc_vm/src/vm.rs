@@ -40,9 +40,6 @@ impl Vm {
     }
 
     pub fn run(&mut self) -> Result<(), VmError> {
-        // eprintln!("[VM] Value bytes: {}", size_of::<Value>());
-        // eprintln!("[VM] OpCode bytes: {}", size_of::<OpCode>());
-
         if self.frames.is_empty() {
             panic!("no call frames")
         }
@@ -103,23 +100,9 @@ impl Vm {
                 }
                 OpCode::Call(args) => {
                     let callee = &self.stack[self.stack.len() - args - 1];
-                    match callee {
+                    let func = match callee {
                         Value::Object(obj) => match obj.as_ref() {
-                            Object::Function(Function::Compiled(f)) => {
-                                let f = Rc::clone(f);
-                                self.frames.push(CallFrame {
-                                    function: f,
-                                    ip: 0,
-                                    frame_pointer: self.stack.len() - args,
-                                });
-                            }
-                            Object::Function(Function::Native(native)) => {
-                                let native = Rc::clone(native);
-                                let args_slice = self.stack[self.stack.len() - args..].to_vec();
-                                let result = (native.func)(&args_slice);
-                                self.stack.truncate(self.stack.len() - args - 1);
-                                self.stack.push(result);
-                            }
+                            Object::Function(f) => f.clone(),
                             Object::OverloadSet(candidates) => {
                                 let candidates = candidates.clone();
                                 let fp = frame.frame_pointer;
@@ -127,53 +110,49 @@ impl Vm {
                                     .iter()
                                     .map(Value::static_type)
                                     .collect();
-
-                                let resolved = candidates.iter().find_map(|var| {
-                                    let value = self.resolve_var(var, fp);
-                                    let Value::Object(obj) = &value else {
-                                        return None;
-                                    };
-                                    let Object::Function(func) = obj.as_ref() else {
-                                        return None;
-                                    };
-                                    if func.static_type().is_fn_and_matches(&arg_types) {
-                                        Some(value.clone())
-                                    } else {
-                                        None
-                                    }
-                                });
-
-                                match resolved {
-                                    Some(Value::Object(obj)) => match obj.as_ref() {
-                                        Object::Function(Function::Compiled(f)) => {
-                                            let f = Rc::clone(f);
-                                            self.frames.push(CallFrame {
-                                                function: f,
-                                                ip: 0,
-                                                frame_pointer: self.stack.len() - args,
-                                            });
-                                        }
-                                        Object::Function(Function::Native(native)) => {
-                                            let native = Rc::clone(native);
-                                            let args_slice =
-                                                self.stack[self.stack.len() - args..].to_vec();
-                                            let result = (native.func)(&args_slice);
-                                            self.stack.truncate(self.stack.len() - args - 1);
-                                            self.stack.push(result);
-                                        }
-                                        _ => unreachable!(),
-                                    },
-                                    _ => panic!(
-                                        "no matching overload found for argument types {:?}",
-                                        arg_types
-                                    ),
-                                }
+                                candidates
+                                    .iter()
+                                    .find_map(|var| {
+                                        let value = self.resolve_var(var, fp);
+                                        let Value::Object(obj) = value else { return None };
+                                        let Object::Function(f) = obj.as_ref() else {
+                                            return None;
+                                        };
+                                        f.static_type()
+                                            .is_fn_and_matches(&arg_types)
+                                            .then(|| f.clone())
+                                    })
+                                    .unwrap_or_else(|| {
+                                        panic!(
+                                            "no matching overload found for argument types {:?}",
+                                            arg_types
+                                        )
+                                    })
                             }
                             _ => panic!("callee is unexpected object type"),
                         },
                         _ => panic!("callee is unexpected value type"),
-                    }
+                    };
+                    self.dispatch_call(func, args);
                 }
+            }
+        }
+    }
+
+    fn dispatch_call(&mut self, func: Function, args: usize) {
+        match func {
+            Function::Compiled(f) => {
+                self.frames.push(CallFrame {
+                    function: f,
+                    ip: 0,
+                    frame_pointer: self.stack.len() - args,
+                });
+            }
+            Function::Native(native) => {
+                let args_slice = self.stack[self.stack.len() - args..].to_vec();
+                let result = (native.func)(&args_slice);
+                self.stack.truncate(self.stack.len() - args - 1);
+                self.stack.push(result);
             }
         }
     }
