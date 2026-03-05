@@ -118,7 +118,8 @@ impl Interpreter {
     }
     fn interpret_vm(
         &mut self,
-        input: &str,
+        #[cfg(feature = "vm-trace")] input: &str,
+        #[cfg(not(feature = "vm-trace"))] _input: &str,
         expressions: impl Iterator<Item = ExpressionLocation>,
     ) -> Result<Value, InterpreterError> {
         let code = Compiler::compile(expressions)?;

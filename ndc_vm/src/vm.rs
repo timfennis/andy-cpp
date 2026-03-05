@@ -55,22 +55,24 @@ impl Vm {
         loop {
             let frame = self.frames.last_mut().expect("must not be empty");
 
-            let ip = frame.ip;
             let op = frame.opcode();
-            frame.ip += 1;
 
             #[cfg(feature = "vm-trace")]
             {
+                let ip = frame.ip;
                 let span = frame.function.body.span(ip);
-                let excerpt = self.source.as_deref().and_then(|src| {
-                    src.get(span.range()).map(|s| s.trim().replace('\n', "↵"))
-                });
+                let excerpt = self
+                    .source
+                    .as_deref()
+                    .and_then(|src| src.get(span.range()).map(|s| s.trim().replace('\n', "↵")));
                 let op_str = format!("{op:?}");
                 match excerpt {
                     Some(s) => eprintln!("[VM] {ip:04} {op_str:<30}  {s}"),
                     None => eprintln!("[VM] {ip:04} {op_str}"),
                 }
             }
+
+            frame.ip += 1;
 
             match op {
                 OpCode::Halt => {
@@ -119,17 +121,18 @@ impl Vm {
                 }
                 OpCode::Call(args) => {
                     let callee = &self.stack[self.stack.len() - args - 1];
-                    let func = match callee {
-                        Value::Object(obj) => match obj.as_ref() {
-                            Object::Function(f) => f.clone(),
-                            Object::OverloadSet(candidates) => {
-                                let candidates = candidates.clone();
-                                let fp = frame.frame_pointer;
-                                let arg_types: Vec<_> = self.stack[self.stack.len() - args..]
-                                    .iter()
-                                    .map(Value::static_type)
-                                    .collect();
-                                candidates
+                    let func =
+                        match callee {
+                            Value::Object(obj) => match obj.as_ref() {
+                                Object::Function(f) => f.clone(),
+                                Object::OverloadSet(candidates) => {
+                                    let candidates = candidates.clone();
+                                    let fp = frame.frame_pointer;
+                                    let arg_types: Vec<_> = self.stack[self.stack.len() - args..]
+                                        .iter()
+                                        .map(Value::static_type)
+                                        .collect();
+                                    candidates
                                     .iter()
                                     .find_map(|var| {
                                         let value = self.resolve_var(var, fp);
@@ -147,12 +150,21 @@ impl Vm {
                                             arg_types
                                         )
                                     })
-                            }
-                            _ => panic!("callee is unexpected object type"),
-                        },
-                        _ => panic!("callee is unexpected value type"),
-                    };
+                                }
+                                _ => panic!("callee is unexpected object type"),
+                            },
+                            _ => panic!("callee is unexpected value type"),
+                        };
                     self.dispatch_call(func, args);
+                }
+                OpCode::MakeList(size) => {
+                    let data = self.stack.split_off(self.stack.len() - size);
+                    self.stack.push(Value::Object(Box::new(Object::List(data))));
+                }
+                OpCode::MakeTuple(size) => {
+                    let data = self.stack.split_off(self.stack.len() - size);
+                    self.stack
+                        .push(Value::Object(Box::new(Object::Tuple(data))));
                 }
             }
         }
