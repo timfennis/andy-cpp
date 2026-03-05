@@ -94,6 +94,120 @@ fn test_or() {
     );
 }
 
+// 5;
+//
+// 0: Constant(0)      push `5`
+// 1: Pop              discard value (it's a statement)
+// 2: Halt
+#[test]
+fn test_statement() {
+    assert_eq!(compile("5;"), [Constant(0), Pop, Halt]);
+}
+
+// { 5 }
+//
+// 0: Constant(0)      push `5` (block result)
+// 1: Halt
+#[test]
+fn test_block_with_expression() {
+    assert_eq!(compile("{ 5 }"), [Constant(0), Halt]);
+}
+
+// { 5; }
+//
+// 0: Constant(0)      push `5`
+// 1: Pop              discard (trailing semicolon)
+// 2: Constant(1)      push `()` (block result is unit)
+// 3: Halt
+#[test]
+fn test_block_with_trailing_statement() {
+    assert_eq!(compile("{ 5; }"), [Constant(0), Pop, Constant(1), Halt]);
+}
+
+// { 5; 6 }
+//
+// 0: Constant(0)      push `5`
+// 1: Pop              discard intermediate statement
+// 2: Constant(1)      push `6` (block result)
+// 3: Halt
+#[test]
+fn test_block_multiple_statements() {
+    assert_eq!(
+        compile("{ 5; 6 }"),
+        [Constant(0), Pop, Constant(1), Halt]
+    );
+}
+
+// if true { 3 } else { 3; }
+//
+// true branch returns 3, false branch returns ()
+//
+// 0: Constant(0)      push `true`
+// 1: JumpIfFalse(3)   jump to false branch (index 5)
+// 2: Pop              pop condition (true path)
+// 3: Constant(1)      push `3`
+// 4: Jump(4)          jump to Halt (index 9)
+// 5: Pop              pop condition (false path)
+// 6: Constant(2)      push `3` (inner of `3;`)
+// 7: Pop              discard (trailing semicolon)
+// 8: Constant(3)      push `()` (block result)
+// 9: Halt
+#[test]
+fn test_if_with_statement_else() {
+    assert_eq!(
+        compile("if true { 3 } else { 3; }"),
+        [
+            Constant(0),
+            JumpIfFalse(3),
+            Pop,
+            Constant(1),
+            Jump(4),
+            Pop,
+            Constant(2),
+            Pop,
+            Constant(3),
+            Halt
+        ]
+    );
+}
+
+// if true { 3; } else { 3; }
+//
+// Both branches return () — result is unit regardless of condition
+//
+// 0: Constant(0)      push `true`
+// 1: JumpIfFalse(5)   jump to false branch (index 7)
+// 2: Pop              pop condition (true path)
+// 3: Constant(1)      push `3`
+// 4: Pop              discard
+// 5: Constant(2)      push `()`
+// 6: Jump(4)          jump to Halt (index 11)
+// 7: Pop              pop condition (false path)
+// 8: Constant(3)      push `3`
+// 9: Pop              discard
+// 10: Constant(4)     push `()`
+// 11: Halt
+#[test]
+fn test_if_with_statement_branches() {
+    assert_eq!(
+        compile("if true { 3; } else { 3; }"),
+        [
+            Constant(0),
+            JumpIfFalse(5),
+            Pop,
+            Constant(1),
+            Pop,
+            Constant(2),
+            Jump(4),
+            Pop,
+            Constant(3),
+            Pop,
+            Constant(4),
+            Halt
+        ]
+    );
+}
+
 // while true { 1 }
 //
 // 0: Constant(0)      push `true`  ← loop_start

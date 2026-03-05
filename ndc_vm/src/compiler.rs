@@ -78,6 +78,7 @@ fn compile_expr(
         },
         Expression::Statement(stm) => {
             compile_expr(*stm, chunk);
+            chunk.write(OpCode::Pop, span);
         }
         Expression::Logical {
             left,
@@ -169,8 +170,22 @@ fn compile_expr(
             compile_expr(*statements, chunk);
         }
         Expression::Block { statements } => {
-            for statement in statements {
-                compile_expr(statement, chunk);
+            if statements.is_empty() {
+                let idx = chunk.add_constant(Object::Tuple(vec![]).into());
+                chunk.write(OpCode::Constant(idx), span);
+            } else {
+                let last = statements.len() - 1;
+                for (i, stmt) in statements.into_iter().enumerate() {
+                    if i == last && !matches!(stmt.expression, Expression::Statement(_)) {
+                        compile_expr(stmt, chunk);
+                    } else if i == last {
+                        compile_expr(stmt, chunk); // emits inner + Pop
+                        let idx = chunk.add_constant(Object::Tuple(vec![]).into());
+                        chunk.write(OpCode::Constant(idx), span);
+                    } else {
+                        compile_expr(stmt, chunk); // non-last, always a Statement → inner + Pop
+                    }
+                }
             }
         }
         Expression::If {
