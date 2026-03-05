@@ -130,7 +130,7 @@ fn compile_expr(
             let idx = chunk.add_constant(Value::unit());
             chunk.write(OpCode::Constant(idx), span);
         }
-        Expression::OpAssignment { .. } => {}
+        Expression::OpAssignment { .. } => todo!("op-assignment"),
         Expression::FunctionDeclaration {
             name,
             resolved_name,
@@ -157,7 +157,6 @@ fn compile_expr(
             // Put the compiled function inside the chunk's constant storage
             chunk.write(OpCode::Constant(idx), span);
 
-            // !??!!?
             match resolved_name {
                 Some(ResolvedVar::Local { slot }) => {
                     chunk.write(OpCode::SetLocal(slot), span);
@@ -236,7 +235,7 @@ fn compile_expr(
             chunk.patch_jump(conditional_jump_idx);
             chunk.write(OpCode::Pop, span);
         }
-        Expression::For { .. } => {}
+        Expression::For { .. } => todo!("for loop"),
         Expression::Call {
             function,
             arguments,
@@ -250,18 +249,18 @@ fn compile_expr(
 
             chunk.write(OpCode::Call(argument_count), span);
         }
-        Expression::Index { .. } => {}
-        Expression::Tuple { .. } => {}
-        Expression::List { .. } => {}
-        Expression::Map { .. } => {}
+        Expression::Index { .. } => todo!("index expression"),
+        Expression::Tuple { .. } => todo!("tuple literal"),
+        Expression::List { .. } => todo!("list literal"),
+        Expression::Map { .. } => todo!("map literal"),
         Expression::Return { value } => {
             compile_expr(*value, chunk);
             chunk.write(OpCode::Return, span);
         }
-        Expression::Break => {}
-        Expression::Continue => {}
-        Expression::RangeInclusive { .. } => {}
-        Expression::RangeExclusive { .. } => {}
+        Expression::Break => todo!("break"),
+        Expression::Continue => todo!("continue"),
+        Expression::RangeInclusive { .. } => todo!("inclusive range"),
+        Expression::RangeExclusive { .. } => todo!("exclusive range")
     }
 
     chunk.len() - start_len
