@@ -72,11 +72,7 @@ impl Interpreter {
     pub fn disassemble_str(&mut self, input: &str) -> Result<String, InterpreterError> {
         let compiled = self.compile_str(input)?;
         let globals = self.environment.borrow().get_global_identifiers();
-        let mut out = String::from("== globals ==\n");
-        for (slot, (name, _)) in globals.iter().enumerate() {
-            out.push_str(&format!("  {slot:4}  {name}\n"));
-        }
-        out.push('\n');
+        let mut out = String::new();
         out.push_str(&ndc_vm::disassemble::disassemble(&compiled, Some(input)));
         Ok(out)
     }

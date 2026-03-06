@@ -46,6 +46,7 @@ pub struct CompiledFunction {
     pub(crate) type_signature: TypeSignature,
     pub(crate) body: Chunk,
     pub(crate) return_type: StaticType,
+    pub(crate) num_locals: usize,
 }
 
 #[derive(Clone)]
