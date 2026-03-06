@@ -239,40 +239,82 @@ fn test_while() {
 
 // let a = 1;
 //
-// Declaration is a pure statement: the value is pushed onto the stack as local
-// slot 0. No SetLocal and no Pop — the local lives on the stack permanently.
+// Value is compiled, then SetLocal stores it in pre-allocated slot 0.
 //
-// 0: Constant(0)   push `1` (becomes local slot 0)
-// 1: Halt
+// 0: Constant(0)   push `1`
+// 1: SetLocal(0)   store in slot 0
+// 2: Halt
 #[test]
 fn test_declaration() {
-    assert_eq!(compile_with_analysis("let a = 1;"), [Constant(0), Halt]);
+    assert_eq!(
+        compile_with_analysis("let a = 1;"),
+        [Constant(0), SetLocal(0), Halt]
+    );
 }
 
 // let a = 1;
 // a = 5;
 //
-// Declaration pushes 1 as local slot 0.
-// Assignment compiles to: push new value, SetLocal to overwrite the slot,
-// push unit as the expression result, Pop discards it (statement context).
+// Declaration stores 1 into pre-allocated slot 0.
+// Assignment pushes new value, SetLocal overwrites,
+// push unit as the expression result, Pop discards it.
 //
-// 0: Constant(0)   push `1` (local slot 0 = a)
-// 1: Constant(1)   push `5`
-// 2: SetLocal(0)   overwrite a's slot
-// 3: Constant(2)   push `()` (assignment expression result)
-// 4: Pop           discard (statement)
-// 5: Halt
+// 0: Constant(0)   push `1`
+// 1: SetLocal(0)   store in slot 0 (declaration)
+// 2: Constant(1)   push `5`
+// 3: SetLocal(0)   overwrite slot 0 (assignment)
+// 4: Constant(2)   push `()` (assignment result)
+// 5: Pop           discard (statement)
+// 6: Halt
 #[test]
 fn test_assignment() {
     assert_eq!(
         compile_with_analysis("let a = 1;\na = 5;"),
         [
             Constant(0),
+            SetLocal(0),
             Constant(1),
             SetLocal(0),
             Constant(2),
             Pop,
             Halt
         ]
+    );
+}
+
+// { let a = 3; a }
+//
+// Declaration stores 3 into pre-allocated slot 0.
+// Block result is `a`, read via GetLocal.
+// No cleanup needed — locals are pre-allocated.
+//
+// 0: Constant(0)   push `3`
+// 1: SetLocal(0)   store in slot 0 (declaration)
+// 2: GetLocal(0)   push `a` (block result)
+// 3: Halt
+#[test]
+fn test_block_scope_cleanup() {
+    assert_eq!(
+        compile_with_analysis("{ let a = 3; a }"),
+        [Constant(0), SetLocal(0), GetLocal(0), Halt]
+    );
+}
+
+// { let a = 1; let b = 2; a }
+//
+// Both locals stored via SetLocal into pre-allocated slots.
+// Block result is `a`, read via GetLocal. No cleanup needed.
+//
+// 0: Constant(0)   push `1`
+// 1: SetLocal(0)   store in slot 0
+// 2: Constant(1)   push `2`
+// 3: SetLocal(1)   store in slot 1
+// 4: GetLocal(0)   push `a` (block result)
+// 5: Halt
+#[test]
+fn test_block_scope_cleanup_multiple_locals() {
+    assert_eq!(
+        compile_with_analysis("{ let a = 1; let b = 2; a }"),
+        [Constant(0), SetLocal(0), Constant(1), SetLocal(1), GetLocal(0), Halt]
     );
 }

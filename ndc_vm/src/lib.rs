@@ -18,6 +18,6 @@ mod test {
     #[test]
     fn test_that_opcode_size_does_not_change() {
         // NOTE: this is allowed to change, but we'd like to know about it.
-        assert_eq!(size_of::<crate::chunk::OpCode>(), 24)
+        assert_eq!(size_of::<crate::chunk::OpCode>(), 32)
     }
 }

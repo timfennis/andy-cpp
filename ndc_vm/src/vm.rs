@@ -29,7 +29,8 @@ pub struct CallFrame {
 
 impl Vm {
     pub fn new(function: CompiledFunction, globals: Vec<Value>) -> Self {
-        Self {
+        let num_locals = function.num_locals;
+        let mut vm = Self {
             stack: Vec::with_capacity(256),
             globals,
             frames: vec![CallFrame {
@@ -42,7 +43,11 @@ impl Vm {
             }],
             #[cfg(feature = "vm-trace")]
             source: None,
+        };
+        for _ in 0..num_locals {
+            vm.stack.push(Value::unit());
         }
+        vm
     }
 
     #[cfg(feature = "vm-trace")]
@@ -209,19 +214,30 @@ impl Vm {
                     self.stack.push(closure);
                 }
             }
+
+            #[cfg(feature = "vm-trace")]
+            {
+                dbg!(&self.stack);
+                // eprintln!("[VM] stack: {:?}", self.stack);
+            }
         }
     }
 
     fn dispatch_call(&mut self, func: Function, args: usize) {
         match func {
             Function::Closure(c) => {
+                let num_locals = c.prototype.num_locals;
                 self.frames.push(CallFrame {
                     closure: c,
                     ip: 0,
                     frame_pointer: self.stack.len() - args,
                 });
+                for _ in args..num_locals {
+                    self.stack.push(Value::unit());
+                }
             }
             Function::Compiled(f) => {
+                let num_locals = f.num_locals;
                 self.frames.push(CallFrame {
                     closure: ClosureFunction {
                         prototype: f,
@@ -230,6 +246,9 @@ impl Vm {
                     ip: 0,
                     frame_pointer: self.stack.len() - args,
                 });
+                for _ in args..num_locals {
+                    self.stack.push(Value::unit());
+                }
             }
             Function::Native(native) => {
                 let start = self.stack.len() - args;
