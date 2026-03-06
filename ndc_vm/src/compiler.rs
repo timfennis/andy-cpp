@@ -6,6 +6,7 @@ use ndc_parser::{
     Binding, Expression, ExpressionLocation, LogicalOperator, Lvalue, ResolvedVar, StaticType,
     TypeSignature,
 };
+use std::rc::Rc;
 
 pub struct Compiler;
 
@@ -146,6 +147,7 @@ fn compile_expr(
                 .any(|(_, op, _)| matches!(op, OpCode::GetUpvalue { .. }));
             // Ensure there is a return, this could become dead code if there is one already.
             fn_chunk.write(OpCode::Return, span);
+            let captures = fn_chunk.capture_upvalues();
 
             let compiled = CompiledFunction {
                 name,
@@ -153,13 +155,18 @@ fn compile_expr(
                 body: fn_chunk,
                 return_type: return_type.unwrap_or_default(),
             };
-            let idx = chunk.add_constant(
-                Object::Function(Function::Compiled(std::rc::Rc::new(compiled))).into(),
-            );
+            let idx =
+                chunk.add_constant(Object::Function(Function::Compiled(Rc::new(compiled))).into());
 
             // Put the compiled function inside the chunk's constant storage
             if is_closure {
-                chunk.write(OpCode::Closure(idx), span);
+                chunk.write(
+                    OpCode::Closure {
+                        constant_idx: idx,
+                        values: captures.into(),
+                    },
+                    span,
+                );
             } else {
                 chunk.write(OpCode::Constant(idx), span);
             }

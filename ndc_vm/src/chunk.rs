@@ -1,9 +1,10 @@
 use crate::Value;
 use ndc_lexer::Span;
+use std::rc::Rc;
 
 /// A single bytecode instruction.
 // NOTE: For now we just derive Copy for OpCode since it makes our live easier and it probably won't cost THAT much performance. In the future we might want to do some proper byte packing and dive into unsafe land to optimize further.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum OpCode {
     /// Call the function with `usize` arguments
     Call(usize),
@@ -29,16 +30,59 @@ pub enum OpCode {
     MakeList(usize),
     /// Create a tuple using n arguments on the stack
     MakeTuple(usize),
-    ///
-    Closure(usize),
+    /// Create a closure by capturing some values
+    Closure {
+        constant_idx: usize,
+        values: Rc<[CaptureFrom]>,
+    },
     /// Stop execution
     Halt,
     /// Return from function call
     Return,
 }
 
+impl std::fmt::Debug for OpCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Call(n) => write!(f, "Call({n})"),
+            Self::Pop => write!(f, "Pop"),
+            Self::Jump(n) => write!(f, "Jump({n})"),
+            Self::JumpIfTrue(n) => write!(f, "JumpIfTrue({n})"),
+            Self::JumpIfFalse(n) => write!(f, "JumpIfFalse({n})"),
+            Self::Constant(n) => write!(f, "Constant({n})"),
+            Self::GetLocal(n) => write!(f, "GetLocal({n})"),
+            Self::SetLocal(n) => write!(f, "SetLocal({n})"),
+            Self::GetGlobal(n) => write!(f, "GetGlobal({n})"),
+            Self::GetUpvalue { slot, depth } => write!(f, "GetUpvalue({slot}, {depth})"),
+            Self::MakeList(n) => write!(f, "MakeList({n})"),
+            Self::MakeTuple(n) => write!(f, "MakeTuple({n})"),
+            Self::Closure {
+                constant_idx,
+                values,
+            } => {
+                write!(f, "Closure({constant_idx}")?;
+                for cap in values.iter() {
+                    match cap {
+                        CaptureFrom::Local(n) => write!(f, ", local({n})")?,
+                        CaptureFrom::Upvalue(n) => write!(f, ", upvalue({n})")?,
+                    }
+                }
+                write!(f, ")")
+            }
+            Self::Halt => write!(f, "Halt"),
+            Self::Return => write!(f, "Return"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CaptureFrom {
+    Local(usize),
+    Upvalue(usize),
+}
+
 /// A chunk of bytecode along with the constants it references.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct Chunk {
     constants: Vec<Value>,
     code: Vec<OpCode>,
@@ -76,12 +120,41 @@ impl Chunk {
         }
     }
 
+    pub fn capture_upvalues(&mut self) -> Vec<CaptureFrom> {
+        let mut upvalues = vec![];
+        for op in &mut self.code {
+            let OpCode::GetUpvalue { slot, depth } = op else {
+                continue;
+            };
+
+            // Create a capture
+            let capture = if *depth == 1 {
+                CaptureFrom::Local(*slot)
+            } else {
+                CaptureFrom::Upvalue(*slot)
+            };
+
+            // If an equal capture already exists we just use that index instead, otherwise we add it to the capture list
+            let idx = upvalues
+                .iter()
+                .position(|c| c == &capture)
+                .unwrap_or_else(|| {
+                    upvalues.push(capture);
+                    upvalues.len() - 1
+                });
+
+            *depth = 0;
+            *slot = idx;
+        }
+        upvalues
+    }
+
     pub fn is_empty(&self) -> bool {
         self.code.is_empty()
     }
     #[inline(always)]
     pub fn opcode(&self, idx: usize) -> OpCode {
-        self.code[idx]
+        self.code[idx].clone()
     }
 
     pub fn opcodes(&self) -> &[OpCode] {
@@ -99,9 +172,12 @@ impl Chunk {
     /// Iterates opcodes as `(index, opcode, constant_value)` where `constant_value`
     /// is `Some` for `Constant(idx)` and `Closure(idx)` opcodes.
     pub fn iter(&self) -> impl Iterator<Item = (usize, OpCode, Option<&Value>)> {
-        self.code.iter().copied().enumerate().map(|(i, op)| {
+        self.code.iter().cloned().enumerate().map(|(i, op)| {
             let val = match op {
-                OpCode::Constant(idx) | OpCode::Closure(idx) => Some(&self.constants[idx]),
+                OpCode::Constant(idx)
+                | OpCode::Closure {
+                    constant_idx: idx, ..
+                } => Some(&self.constants[idx]),
                 _ => None,
             };
             (i, op, val)

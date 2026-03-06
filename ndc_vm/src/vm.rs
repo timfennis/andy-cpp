@@ -1,7 +1,9 @@
-use crate::chunk::OpCode;
+use crate::chunk::{CaptureFrom, OpCode};
 use crate::value::{CompiledFunction, Function};
-use crate::{ClosureFunction, Object, Value};
+use crate::{ClosureFunction, Object, UpvalueCell, Value};
 use ndc_parser::ResolvedVar;
+use std::cell::RefCell;
+use std::ops::Deref;
 use std::rc::Rc;
 
 pub struct Vm {
@@ -19,7 +21,7 @@ pub enum VmError {
 }
 
 pub struct CallFrame {
-    function: Rc<CompiledFunction>,
+    closure: ClosureFunction,
     ip: usize,
     // offset into the locals array for this call frame
     frame_pointer: usize,
@@ -27,12 +29,14 @@ pub struct CallFrame {
 
 impl Vm {
     pub fn new(function: CompiledFunction, globals: Vec<Value>) -> Self {
-        let function = Rc::new(function);
         Self {
             stack: Vec::with_capacity(256),
             globals,
             frames: vec![CallFrame {
-                function,
+                closure: ClosureFunction {
+                    prototype: Rc::new(function),
+                    upvalues: vec![],
+                },
                 ip: 0,
                 frame_pointer: 0,
             }],
@@ -60,7 +64,7 @@ impl Vm {
             #[cfg(feature = "vm-trace")]
             {
                 let ip = frame.ip;
-                let span = frame.function.body.span(ip);
+                let span = frame.closure.prototype.body.span(ip);
                 let excerpt = self
                     .source
                     .as_deref()
@@ -85,7 +89,8 @@ impl Vm {
                     self.stack.push(ret)
                 }
                 OpCode::Constant(idx) => {
-                    self.stack.push(frame.function.body.constant(idx).clone());
+                    self.stack
+                        .push(frame.closure.prototype.body.constant(idx).clone());
                 }
                 OpCode::GetLocal(slot) => {
                     self.stack.push(self.stack[frame.slot(slot)].clone());
@@ -167,12 +172,20 @@ impl Vm {
                         .push(Value::Object(Box::new(Object::Tuple(data))));
                 }
                 OpCode::GetUpvalue { depth, slot } => {
-                    let target_frame_idx = self.frames.len() - depth - 1;
-                    let fp = self.frames[target_frame_idx].frame_pointer;
-                    self.stack.push(self.stack[fp + slot].clone())
+                    debug_assert_eq!(
+                        depth, 0,
+                        "compiler must have captured the closed over variables"
+                    );
+                    match frame.closure.upvalues[slot].borrow().deref() {
+                        UpvalueCell::Open(slot) => self.stack.push(self.stack[*slot].clone()),
+                        UpvalueCell::Closed(value) => self.stack.push(value.clone()),
+                    }
                 }
-                OpCode::Closure(idx) => {
-                    let Value::Object(obj) = frame.function.body.constant(idx) else {
+                OpCode::Closure {
+                    constant_idx: idx,
+                    values,
+                } => {
+                    let Value::Object(obj) = frame.closure.prototype.body.constant(idx) else {
                         panic!("invalid type");
                     };
                     let Object::Function(Function::Compiled(compiled)) = &**obj else {
@@ -180,7 +193,17 @@ impl Vm {
                     };
                     let closure = Value::function(Function::Closure(ClosureFunction {
                         prototype: Rc::clone(compiled),
-                        upvalues: Vec::default(),
+                        upvalues: values
+                            .iter()
+                            .map(|c| match c {
+                                CaptureFrom::Local(slot) => Rc::new(RefCell::new(
+                                    UpvalueCell::Open(frame.frame_pointer + slot),
+                                )),
+                                CaptureFrom::Upvalue(slot) => {
+                                    Rc::clone(&frame.closure.upvalues[*slot])
+                                }
+                            })
+                            .collect(),
                     }));
 
                     self.stack.push(closure);
@@ -191,9 +214,19 @@ impl Vm {
 
     fn dispatch_call(&mut self, func: Function, args: usize) {
         match func {
-            Function::Closure(ClosureFunction { prototype: f, .. }) | Function::Compiled(f) => {
+            Function::Closure(c) => {
                 self.frames.push(CallFrame {
-                    function: f,
+                    closure: c,
+                    ip: 0,
+                    frame_pointer: self.stack.len() - args,
+                });
+            }
+            Function::Compiled(f) => {
+                self.frames.push(CallFrame {
+                    closure: ClosureFunction {
+                        prototype: f,
+                        upvalues: vec![],
+                    },
                     ip: 0,
                     frame_pointer: self.stack.len() - args,
                 });
@@ -219,7 +252,7 @@ impl Vm {
 impl CallFrame {
     #[inline(always)]
     fn opcode(&mut self) -> OpCode {
-        self.function.body.opcode(self.ip)
+        self.closure.prototype.body.opcode(self.ip)
     }
 
     #[inline(always)]
