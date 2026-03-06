@@ -23,7 +23,7 @@ pub enum Object {
     Complex(num::Complex<f64>),
     Rational(num::BigRational),
     String(String),
-    List(Vec<Value>),
+    List(Rc<RefCell<Vec<Value>>>),
     Tuple(Vec<Value>),
     Function(Function),
     OverloadSet(Vec<ResolvedVar>),
@@ -86,6 +86,10 @@ impl Value {
 }
 
 impl Object {
+    pub fn list(values: Vec<Value>) -> Self {
+        Self::List(Rc::new(RefCell::new(values)))
+    }
+
     pub fn static_type(&self) -> StaticType {
         match self {
             Self::Some(inner) => StaticType::Option(Box::new(inner.static_type())),
@@ -184,6 +188,7 @@ impl fmt::Display for Object {
             Self::Rational(r) => write!(f, "{r}"),
             Self::String(s) => write!(f, "\"{s}\""),
             Self::List(vs) => {
+                let vs = vs.borrow();
                 write!(f, "[")?;
                 for (i, v) in vs.iter().enumerate() {
                     if i > 0 {

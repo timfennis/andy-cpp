@@ -164,7 +164,7 @@ impl Vm {
                 }
                 OpCode::MakeList(size) => {
                     let data = self.stack.split_off(self.stack.len() - size);
-                    self.stack.push(Value::Object(Box::new(Object::List(data))));
+                    self.stack.push(Value::Object(Box::new(Object::list(data))));
                 }
                 OpCode::MakeTuple(size) => {
                     let data = self.stack.split_off(self.stack.len() - size);
