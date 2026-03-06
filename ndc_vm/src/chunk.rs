@@ -19,6 +19,8 @@ pub enum OpCode {
     Constant(usize),
     /// Reads local variable at the given slot and pushes it on the stack
     GetLocal(usize),
+    /// Read a value from a parent scope
+    GetUpvalue { slot: usize, depth: usize },
     /// Pops the top of the stack and stores it in the given local slot
     SetLocal(usize),
     /// Reads global variable at the given slot and pushes it on the stack
@@ -27,6 +29,8 @@ pub enum OpCode {
     MakeList(usize),
     /// Create a tuple using n arguments on the stack
     MakeTuple(usize),
+    ///
+    Closure(usize),
     /// Stop execution
     Halt,
     /// Return from function call
@@ -93,13 +97,12 @@ impl Chunk {
     }
 
     /// Iterates opcodes as `(index, opcode, constant_value)` where `constant_value`
-    /// is `Some` only for `Constant(idx)` opcodes.
+    /// is `Some` for `Constant(idx)` and `Closure(idx)` opcodes.
     pub fn iter(&self) -> impl Iterator<Item = (usize, OpCode, Option<&Value>)> {
         self.code.iter().copied().enumerate().map(|(i, op)| {
-            let val = if let OpCode::Constant(idx) = op {
-                Some(&self.constants[idx])
-            } else {
-                None
+            let val = match op {
+                OpCode::Constant(idx) | OpCode::Closure(idx) => Some(&self.constants[idx]),
+                _ => None,
             };
             (i, op, val)
         })

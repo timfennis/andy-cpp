@@ -1,5 +1,6 @@
 use crate::chunk::{Chunk, OpCode};
 use ndc_parser::{ResolvedVar, StaticType, TypeSignature};
+use std::cell::RefCell;
 use std::fmt;
 use std::fmt::Formatter;
 use std::rc::Rc;
@@ -30,6 +31,7 @@ pub enum Object {
 
 #[derive(Clone)]
 pub enum Function {
+    Closure(ClosureFunction),
     Compiled(Rc<CompiledFunction>),
     Native(Rc<NativeFunction>),
 }
@@ -46,6 +48,12 @@ pub struct CompiledFunction {
     pub(crate) return_type: StaticType,
 }
 
+#[derive(Clone)]
+pub struct ClosureFunction {
+    pub(crate) prototype: Rc<CompiledFunction>,
+    pub(crate) upvalues: Vec<Rc<RefCell<Value>>>,
+}
+
 impl CompiledFunction {
     pub fn opcodes(&self) -> &[OpCode] {
         self.body.opcodes()
@@ -55,6 +63,10 @@ impl CompiledFunction {
 impl Value {
     pub fn unit() -> Self {
         Self::Object(Box::new(Object::Tuple(vec![])))
+    }
+
+    pub fn function(function: Function) -> Self {
+        Self::Object(Box::new(Object::Function(function)))
     }
 
     pub fn static_type(&self) -> StaticType {
@@ -84,7 +96,29 @@ impl Object {
     }
 }
 
+impl Value {
+    pub fn function_prototype(&self) -> Option<&Rc<CompiledFunction>> {
+        let Self::Object(obj) = self else { return None };
+        obj.function_prototype()
+    }
+}
+
+impl Object {
+    pub fn function_prototype(&self) -> Option<&Rc<CompiledFunction>> {
+        let Self::Function(f) = self else { return None };
+        f.prototype()
+    }
+}
+
 impl Function {
+    pub fn prototype(&self) -> Option<&Rc<CompiledFunction>> {
+        match self {
+            Self::Compiled(f) => Some(f),
+            Self::Closure(c) => Some(&c.prototype),
+            Self::Native(_) => None,
+        }
+    }
+
     pub fn static_type(&self) -> StaticType {
         match self {
             Self::Compiled(f) => StaticType::Function {
@@ -97,6 +131,7 @@ impl Function {
                 return_type: Box::new(f.return_type.clone()),
             },
             Self::Native(f) => f.static_type.clone(),
+            Self::Closure(c) => Function::Compiled(c.prototype.clone()).static_type(),
         }
     }
 }
@@ -112,6 +147,7 @@ impl fmt::Debug for Function {
         match self {
             Self::Compiled(func) => write!(f, "function {:?}", func.name),
             Self::Native(native) => write!(f, "<native function {:?}>", native.static_type),
+            Self::Closure(closure) => write!(f, "<closure over {:?}>", closure.prototype.name),
         }
     }
 }
@@ -176,40 +212,7 @@ impl fmt::Display for Function {
                 write!(f, "<fn {name}>")
             }
             Self::Native(native) => write!(f, "<native fn {:?}>", native.static_type),
+            Self::Closure(closure) => write!(f, "<closure over {:?}>", closure.prototype.name),
         }
-    }
-}
-
-impl fmt::Display for CompiledFunction {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let name = self.name.as_deref().unwrap_or("<script>");
-        writeln!(f, "== {name} ==")?;
-
-        let mut nested: Vec<Rc<Self>> = Vec::new();
-
-        for (i, op, constant) in self.body.iter() {
-            match (op, constant) {
-                (OpCode::Constant(idx), Some(val)) => {
-                    write!(f, "{i:04}  {:<20}", format!("Constant({idx})"))?;
-                    if let Value::Object(obj) = val {
-                        if let Object::Function(Function::Compiled(func)) = obj.as_ref() {
-                            let name = func.name.as_deref().unwrap_or("?");
-                            writeln!(f, " ; <fn {name}>")?;
-                            nested.push(Rc::clone(func));
-                            continue;
-                        }
-                    }
-                    writeln!(f, " ; {val}")?;
-                }
-                (op, _) => writeln!(f, "{i:04}  {op:?}")?,
-            }
-        }
-
-        for func in nested {
-            writeln!(f)?;
-            write!(f, "{func}")?;
-        }
-
-        Ok(())
     }
 }

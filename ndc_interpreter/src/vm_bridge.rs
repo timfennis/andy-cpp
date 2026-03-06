@@ -42,15 +42,13 @@ pub fn vm_to_interp(value: &VmValue) -> InterpValue {
         VmValue::Bool(b) => InterpValue::Bool(*b),
         VmValue::None => InterpValue::Option(None),
         VmValue::Object(obj) => match obj.as_ref() {
-            VmObject::Some(inner) => {
-                InterpValue::Option(Some(Box::new(vm_to_interp(inner))))
-            }
+            VmObject::Some(inner) => InterpValue::Option(Some(Box::new(vm_to_interp(inner)))),
             VmObject::BigInt(b) => InterpValue::Number(Number::Int(Int::BigInt(b.clone()))),
             VmObject::Complex(c) => InterpValue::Number(Number::Complex(*c)),
             VmObject::Rational(r) => InterpValue::Number(Number::Rational(Box::new(r.clone()))),
-            VmObject::String(s) => InterpValue::Sequence(Sequence::String(Rc::new(
-                RefCell::new(s.clone()),
-            ))),
+            VmObject::String(s) => {
+                InterpValue::Sequence(Sequence::String(Rc::new(RefCell::new(s.clone()))))
+            }
             VmObject::List(vs) => InterpValue::Sequence(Sequence::List(Rc::new(RefCell::new(
                 vs.iter().map(vm_to_interp).collect(),
             )))),
@@ -83,13 +81,14 @@ pub fn interp_to_vm(value: InterpValue) -> VmValue {
             VmValue::Object(Box::new(VmObject::String(s.borrow().clone())))
         }
         InterpValue::Sequence(Sequence::List(list)) => VmValue::Object(Box::new(VmObject::List(
-            list.borrow().iter().map(|v| interp_to_vm(v.clone())).collect(),
+            list.borrow()
+                .iter()
+                .map(|v| interp_to_vm(v.clone()))
+                .collect(),
         ))),
-        InterpValue::Sequence(Sequence::Tuple(tuple)) => {
-            VmValue::Object(Box::new(VmObject::Tuple(
-                tuple.iter().map(|v| interp_to_vm(v.clone())).collect(),
-            )))
-        }
+        InterpValue::Sequence(Sequence::Tuple(tuple)) => VmValue::Object(Box::new(
+            VmObject::Tuple(tuple.iter().map(|v| interp_to_vm(v.clone())).collect()),
+        )),
         InterpValue::Sequence(seq) => {
             panic!("cannot convert {} to vm value", seq.static_type())
         }

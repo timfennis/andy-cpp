@@ -1,6 +1,6 @@
 use crate::chunk::OpCode;
 use crate::value::{CompiledFunction, Function};
-use crate::{Object, Value};
+use crate::{ClosureFunction, Object, Value};
 use ndc_parser::ResolvedVar;
 use std::rc::Rc;
 
@@ -166,13 +166,32 @@ impl Vm {
                     self.stack
                         .push(Value::Object(Box::new(Object::Tuple(data))));
                 }
+                OpCode::GetUpvalue { depth, slot } => {
+                    let target_frame_idx = self.frames.len() - depth - 1;
+                    let fp = self.frames[target_frame_idx].frame_pointer;
+                    self.stack.push(self.stack[fp + slot].clone())
+                }
+                OpCode::Closure(idx) => {
+                    let Value::Object(obj) = frame.function.body.constant(idx) else {
+                        panic!("invalid type");
+                    };
+                    let Object::Function(Function::Compiled(compiled)) = &**obj else {
+                        panic!("invalid type 2");
+                    };
+                    let closure = Value::function(Function::Closure(ClosureFunction {
+                        prototype: Rc::clone(compiled),
+                        upvalues: Vec::default(),
+                    }));
+
+                    self.stack.push(closure);
+                }
             }
         }
     }
 
     fn dispatch_call(&mut self, func: Function, args: usize) {
         match func {
-            Function::Compiled(f) => {
+            Function::Closure(ClosureFunction { prototype: f, .. }) | Function::Compiled(f) => {
                 self.frames.push(CallFrame {
                     function: f,
                     ip: 0,
