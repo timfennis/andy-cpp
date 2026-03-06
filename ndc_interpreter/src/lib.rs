@@ -77,7 +77,7 @@ impl Interpreter {
             out.push_str(&format!("  {slot:4}  {name}\n"));
         }
         out.push('\n');
-        out.push_str(&compiled.to_string());
+        out.push_str(&ndc_vm::disassemble::disassemble(&compiled, Some(input)));
         Ok(out)
     }
 

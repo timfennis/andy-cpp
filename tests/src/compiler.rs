@@ -8,9 +8,7 @@ fn compile(input: &str) -> Vec<OpCode> {
     let tokens = Lexer::new(input)
         .collect::<Result<Vec<_>, _>>()
         .expect("lex failed");
-    let expressions = Parser::from_tokens(tokens)
-        .parse()
-        .expect("parse failed");
+    let expressions = Parser::from_tokens(tokens).parse().expect("parse failed");
     Compiler::compile(expressions.into_iter())
         .expect("compile failed")
         .opcodes()
@@ -141,10 +139,7 @@ fn test_block_with_trailing_statement() {
 // 3: Halt
 #[test]
 fn test_block_multiple_statements() {
-    assert_eq!(
-        compile("{ 5; 6 }"),
-        [Constant(0), Pop, Constant(1), Halt]
-    );
+    assert_eq!(compile("{ 5; 6 }"), [Constant(0), Pop, Constant(1), Halt]);
 }
 
 // if true { 3 } else { 3; }
@@ -251,10 +246,7 @@ fn test_while() {
 // 1: Halt
 #[test]
 fn test_declaration() {
-    assert_eq!(
-        compile_with_analysis("let a = 1;"),
-        [Constant(0), Halt]
-    );
+    assert_eq!(compile_with_analysis("let a = 1;"), [Constant(0), Halt]);
 }
 
 // let a = 1;
@@ -274,6 +266,13 @@ fn test_declaration() {
 fn test_assignment() {
     assert_eq!(
         compile_with_analysis("let a = 1;\na = 5;"),
-        [Constant(0), Constant(1), SetLocal(0), Constant(2), Pop, Halt]
+        [
+            Constant(0),
+            Constant(1),
+            SetLocal(0),
+            Constant(2),
+            Pop,
+            Halt
+        ]
     );
 }

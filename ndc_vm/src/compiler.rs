@@ -65,8 +65,8 @@ fn compile_expr(
             Binding::Resolved(ResolvedVar::Local { slot }) => {
                 chunk.write(OpCode::GetLocal(slot), span);
             }
-            Binding::Resolved(ResolvedVar::Upvalue { .. }) => {
-                todo!("?")
+            Binding::Resolved(ResolvedVar::Upvalue { slot, depth }) => {
+                chunk.write(OpCode::GetUpvalue { slot, depth }, span);
             }
             Binding::Resolved(ResolvedVar::Global { slot }) => {
                 chunk.write(OpCode::GetGlobal(slot), span);
@@ -141,6 +141,9 @@ fn compile_expr(
         } => {
             let mut fn_chunk = Chunk::default();
             compile_expr(*body, &mut fn_chunk);
+            let is_closure = fn_chunk
+                .iter()
+                .any(|(_, op, _)| matches!(op, OpCode::GetUpvalue { .. }));
             // Ensure there is a return, this could become dead code if there is one already.
             fn_chunk.write(OpCode::Return, span);
 
@@ -155,11 +158,15 @@ fn compile_expr(
             );
 
             // Put the compiled function inside the chunk's constant storage
-            chunk.write(OpCode::Constant(idx), span);
+            if is_closure {
+                chunk.write(OpCode::Closure(idx), span);
+            } else {
+                chunk.write(OpCode::Constant(idx), span);
+            }
 
             match resolved_name {
-                Some(ResolvedVar::Local { slot }) => {
-                    chunk.write(OpCode::SetLocal(slot), span);
+                Some(ResolvedVar::Local { .. }) => {
+                    // value already on the stack at the right slot — no SetLocal needed
                 }
                 Some(ResolvedVar::Upvalue { .. }) => todo!("?"),
                 Some(ResolvedVar::Global { .. }) => {
@@ -240,6 +247,7 @@ fn compile_expr(
             function,
             arguments,
         } => {
+            let function_span = function.span;
             compile_expr(*function, chunk);
 
             let argument_count = arguments.len();
@@ -247,7 +255,7 @@ fn compile_expr(
                 compile_expr(argument, chunk);
             }
 
-            chunk.write(OpCode::Call(argument_count), span);
+            chunk.write(OpCode::Call(argument_count), function_span);
         }
         Expression::Index { .. } => todo!("index expression"),
         Expression::Tuple { values } => {
