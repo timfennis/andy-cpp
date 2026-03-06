@@ -23,7 +23,12 @@ fn wrap_function(func: InterpFunction, dummy_env: Rc<RefCell<Environment>>) -> V
     let native = move |args: &[VmValue]| -> VmValue {
         let mut interp_args: Vec<InterpValue> = args.iter().map(vm_to_interp).collect();
         match func.call(&mut interp_args, &dummy_env) {
-            Ok(result) => interp_to_vm(result),
+            Ok(result) => {
+                for (vm_arg, interp_arg) in args.iter().zip(interp_args.iter()) {
+                    sync_list_mutations(vm_arg, interp_arg);
+                }
+                interp_to_vm(result)
+            }
             Err(e) => panic!("stdlib function failed: {:?}", e),
         }
     };
@@ -50,7 +55,7 @@ pub fn vm_to_interp(value: &VmValue) -> InterpValue {
                 InterpValue::Sequence(Sequence::String(Rc::new(RefCell::new(s.clone()))))
             }
             VmObject::List(vs) => InterpValue::Sequence(Sequence::List(Rc::new(RefCell::new(
-                vs.iter().map(vm_to_interp).collect(),
+                vs.borrow().iter().map(vm_to_interp).collect(),
             )))),
             VmObject::Tuple(vs) => InterpValue::Sequence(Sequence::Tuple(Rc::new(
                 vs.iter().map(vm_to_interp).collect(),
@@ -80,7 +85,7 @@ pub fn interp_to_vm(value: InterpValue) -> VmValue {
         InterpValue::Sequence(Sequence::String(s)) => {
             VmValue::Object(Box::new(VmObject::String(s.borrow().clone())))
         }
-        InterpValue::Sequence(Sequence::List(list)) => VmValue::Object(Box::new(VmObject::List(
+        InterpValue::Sequence(Sequence::List(list)) => VmValue::Object(Box::new(VmObject::list(
             list.borrow()
                 .iter()
                 .map(|v| interp_to_vm(v.clone()))
@@ -94,4 +99,16 @@ pub fn interp_to_vm(value: InterpValue) -> VmValue {
         }
         InterpValue::Function(_) => panic!("cannot convert interpreter function to vm value"),
     }
+}
+
+fn sync_list_mutations(vm_arg: &VmValue, interp_arg: &InterpValue) {
+    let VmValue::Object(vm_obj) = vm_arg else { return };
+    let VmObject::List(vm_list) = vm_obj.as_ref() else { return };
+    let InterpValue::Sequence(Sequence::List(interp_list)) = interp_arg else { return };
+
+    *vm_list.borrow_mut() = interp_list
+        .borrow()
+        .iter()
+        .map(|v| interp_to_vm(v.clone()))
+        .collect();
 }
