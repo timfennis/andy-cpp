@@ -43,9 +43,7 @@ pub enum EvaluatedIndex {
 impl EvaluatedIndex {
     pub fn try_into_offset(self, size: usize) -> Result<Offset, IndexError> {
         Ok(match self {
-            Self::Index(idx) => {
-                Offset::Element(value_to_bounded_forward_index(idx, size, false)?)
-            }
+            Self::Index(idx) => Offset::Element(value_to_bounded_forward_index(idx, size, false)?),
             Self::Slice {
                 from,
                 to,
@@ -120,7 +118,11 @@ fn value_to_bounded_forward_index(
     size: usize,
     for_slice: bool,
 ) -> Result<usize, IndexError> {
-    let index = i64::try_from(value).map_err(|_| IndexError::new("Invalid list index. List indices must be convertible to a signed 64-bit integer."))?;
+    let index = i64::try_from(value).map_err(|_| {
+        IndexError::new(
+            "Invalid list index. List indices must be convertible to a signed 64-bit integer.",
+        )
+    })?;
 
     if index.is_negative() {
         let index = usize::try_from(index.abs())
@@ -133,8 +135,11 @@ fn value_to_bounded_forward_index(
                 .ok_or_else(|| IndexError::new("index out of bounds"))
         }
     } else {
-        let index = usize::try_from(index)
-            .map_err(|_| IndexError::new("Invalid list index. List indices must be convertible to a signed 64-bit integer."))?;
+        let index = usize::try_from(index).map_err(|_| {
+            IndexError::new(
+                "Invalid list index. List indices must be convertible to a signed 64-bit integer.",
+            )
+        })?;
         if for_slice {
             return Ok(min(index, size));
         }
@@ -167,10 +172,7 @@ pub fn get_at_index(
     environment: &Rc<RefCell<Environment>>,
 ) -> Result<Value, FunctionCarrier> {
     let Some(size) = lhs.sequence_length() else {
-        return Err(IndexError::new(
-            "cannot index into this type because it doesn't have a length",
-        )
-        .into());
+        return Err(IndexError::new(format!("cannot index into {}", lhs.static_type())).into());
     };
 
     match lhs {
@@ -213,7 +215,7 @@ pub fn get_at_index(
                 EvaluatedIndex::Index(idx) => idx,
                 EvaluatedIndex::Slice { .. } => {
                     return Err(
-                        IndexError::new("cannot use range expression as index in map").into()
+                        IndexError::new("cannot use range expression as index in map").into(),
                     );
                 }
             };
@@ -285,10 +287,9 @@ pub fn produce_default_value(
 ) -> EvaluationResult {
     match default {
         Value::Function(function) => match function.call_checked(&mut [], environment) {
-            Err(FunctionCarrier::FunctionTypeMismatch) => Err(IndexError::new(
-                "default function is not callable without arguments",
-            )
-            .into()),
+            Err(FunctionCarrier::FunctionTypeMismatch) => {
+                Err(IndexError::new("default function is not callable without arguments").into())
+            }
             a => a,
         },
         value => Ok(value.clone()),
@@ -301,10 +302,7 @@ pub fn set_at_index(
     index: EvaluatedIndex,
 ) -> Result<(), FunctionCarrier> {
     let Some(size) = lhs.sequence_length() else {
-        return Err(IndexError::new(
-            "cannot index into this type because it doesn't have a length",
-        )
-        .into());
+        return Err(IndexError::new(format!("cannot index into {}", lhs.static_type())).into());
     };
 
     match lhs {
@@ -325,8 +323,7 @@ pub fn set_at_index(
 
                     list.extend(
                         rhs.try_into_vec()
-                            .expect("this must succeed, but not sure why")
-                            .into_iter(),
+                            .expect("this must succeed, but not sure why"),
                     );
 
                     list.extend_from_slice(&tail[(to_usize - from_usize)..]);
@@ -365,9 +362,7 @@ pub fn set_at_index(
             let key = match index {
                 EvaluatedIndex::Index(idx) => idx,
                 EvaluatedIndex::Slice { .. } => {
-                    return Err(
-                        IndexError::new("cannot use range expression as index").into()
-                    );
+                    return Err(IndexError::new("cannot use range expression as index").into());
                 }
             };
             map.insert(key, rhs);
