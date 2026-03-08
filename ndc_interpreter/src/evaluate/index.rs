@@ -118,7 +118,7 @@ fn value_to_bounded_forward_index(
     size: usize,
     for_slice: bool,
 ) -> Result<usize, IndexError> {
-    let index = i64::try_from(value).map_err(|_| {
+    let index = i64::try_from(value).map_err(|_e| {
         IndexError::new(
             "Invalid list index. List indices must be convertible to a signed 64-bit integer.",
         )
@@ -126,7 +126,7 @@ fn value_to_bounded_forward_index(
 
     if index.is_negative() {
         let index = usize::try_from(index.abs())
-            .map_err(|_| IndexError::new("invalid index: too large"))?;
+            .map_err(|_e| IndexError::new("invalid index: too large"))?;
 
         if for_slice {
             Ok(size.saturating_sub(index))
@@ -135,7 +135,7 @@ fn value_to_bounded_forward_index(
                 .ok_or_else(|| IndexError::new("index out of bounds"))
         }
     } else {
-        let index = usize::try_from(index).map_err(|_| {
+        let index = usize::try_from(index).map_err(|_e| {
             IndexError::new(
                 "Invalid list index. List indices must be convertible to a signed 64-bit integer.",
             )
@@ -307,7 +307,7 @@ pub fn set_at_index(
 
     match lhs {
         Value::Sequence(Sequence::List(list)) => {
-            let mut list = list.try_borrow_mut().map_err(|_| -> FunctionCarrier {
+            let mut list = list.try_borrow_mut().map_err(|_e| -> FunctionCarrier {
                 IndexError::new("Mutation error: you cannot mutate a value in a list while you're iterating over this list").into()
             })?;
 
@@ -403,7 +403,7 @@ pub fn value_to_evaluated_index(value: Value) -> EvaluatedIndex {
                     inclusive: false,
                 };
             }
-            _ => {}
+            ValueIterator::Repeat(_) => {}
         }
     }
     EvaluatedIndex::Index(value)
