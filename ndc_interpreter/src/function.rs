@@ -176,6 +176,12 @@ pub enum FunctionBody {
         cache: RefCell<HashMap<u64, Value>>,
         function: Box<FunctionBody>,
     },
+    /// Opaque foreign function that cannot be called by the interpreter.
+    /// Used to round-trip VM functions through interpreter values.
+    Opaque {
+        data: Rc<dyn std::any::Any>,
+        static_type: StaticType,
+    },
 }
 
 impl FunctionBody {
@@ -186,6 +192,7 @@ impl FunctionBody {
             Self::NumericBinaryOp { .. } => Some(2),
             Self::GenericFunction { type_signature, .. } => type_signature.arity(),
             Self::Memoized { function, .. } => function.arity(),
+            Self::Opaque { .. } => None,
         }
     }
 
@@ -213,6 +220,7 @@ impl FunctionBody {
                 Parameter::new("right", StaticType::Number),
             ]),
             Self::GenericFunction { type_signature, .. } => type_signature.clone(),
+            Self::Opaque { .. } => TypeSignature::Variadic,
         }
     }
 
@@ -223,6 +231,7 @@ impl FunctionBody {
             }
             Self::NumericUnaryOp { .. } | Self::NumericBinaryOp { .. } => &StaticType::Number,
             Self::Memoized { function, .. } => function.return_type(),
+            Self::Opaque { static_type, .. } => static_type,
         }
     }
     pub fn call(&self, args: &mut [Value], env: &Rc<RefCell<Environment>>) -> EvaluationResult {
@@ -277,6 +286,13 @@ impl FunctionBody {
                 .into()),
             },
             Self::GenericFunction { function, .. } => function(args, env),
+            Self::Opaque { .. } => {
+                Err(FunctionCallError::ArgumentCountError {
+                    expected: 0,
+                    actual: args.len(),
+                }
+                .into())
+            }
             Self::Memoized { cache, function } => {
                 let mut hasher = DefaultHasher::default();
                 for arg in &*args {

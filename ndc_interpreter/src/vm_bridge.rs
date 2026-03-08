@@ -6,7 +6,7 @@ use ndc_core::num::Number;
 use ndc_vm::value::{Function as VmFunction, NativeFunction, Object as VmObject, Value as VmValue};
 
 use crate::environment::Environment;
-use crate::function::Function as InterpFunction;
+use crate::function::{Function as InterpFunction, FunctionBody, FunctionBuilder};
 use crate::sequence::Sequence;
 use crate::value::Value as InterpValue;
 
@@ -60,8 +60,31 @@ pub fn vm_to_interp(value: &VmValue) -> InterpValue {
             VmObject::Tuple(vs) => InterpValue::Sequence(Sequence::Tuple(Rc::new(
                 vs.iter().map(vm_to_interp).collect(),
             ))),
-            VmObject::Function(_) => panic!("cannot convert vm function to interpreter value"),
-            VmObject::OverloadSet(_) => panic!("cannot convert overload set to interpreter value"),
+            VmObject::Function(f) => {
+                let static_type = f.static_type();
+                InterpValue::function(
+                    FunctionBuilder::default()
+                        .body(FunctionBody::Opaque {
+                            data: Rc::new(VmValue::Object(Box::new(VmObject::Function(f.clone())))),
+                            static_type,
+                        })
+                        .build()
+                        .expect("must succeed"),
+                )
+            }
+            VmObject::OverloadSet(slots) => {
+                InterpValue::function(
+                    FunctionBuilder::default()
+                        .body(FunctionBody::Opaque {
+                            data: Rc::new(VmValue::Object(Box::new(VmObject::OverloadSet(
+                                slots.clone(),
+                            )))),
+                            static_type: ndc_parser::StaticType::Any,
+                        })
+                        .build()
+                        .expect("must succeed"),
+                )
+            }
         },
     }
 }
@@ -97,7 +120,14 @@ pub fn interp_to_vm(value: InterpValue) -> VmValue {
         InterpValue::Sequence(seq) => {
             panic!("cannot convert {} to vm value", seq.static_type())
         }
-        InterpValue::Function(_) => panic!("cannot convert interpreter function to vm value"),
+        InterpValue::Function(f) => {
+            if let FunctionBody::Opaque { data, .. } = f.body() {
+                if let Some(vm_val) = data.downcast_ref::<VmValue>() {
+                    return vm_val.clone();
+                }
+            }
+            panic!("cannot convert interpreter function to vm value")
+        }
     }
 }
 
