@@ -167,8 +167,7 @@ pub(crate) fn evaluate_expression(
                     let mut lhs_value = evaluate_expression(lhs_expression, environment)?;
                     let index = evaluate_as_index(index_expression, environment)?;
                     let value_at_index =
-                        get_at_index(&lhs_value, index.clone(), environment)
-                            .add_span(span)?;
+                        get_at_index(&lhs_value, index.clone(), environment).add_span(span)?;
 
                     let right_value = evaluate_expression(r_value, environment)?;
 
@@ -220,8 +219,7 @@ pub(crate) fn evaluate_expression(
                         };
 
                         if !modified_in_place {
-                            set_at_index(&mut lhs_value, result, index.clone())
-                                .add_span(span)?;
+                            set_at_index(&mut lhs_value, result, index.clone()).add_span(span)?;
                         }
 
                         break;

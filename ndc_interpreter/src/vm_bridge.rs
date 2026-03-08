@@ -102,9 +102,15 @@ pub fn interp_to_vm(value: InterpValue) -> VmValue {
 }
 
 fn sync_list_mutations(vm_arg: &VmValue, interp_arg: &InterpValue) {
-    let VmValue::Object(vm_obj) = vm_arg else { return };
-    let VmObject::List(vm_list) = vm_obj.as_ref() else { return };
-    let InterpValue::Sequence(Sequence::List(interp_list)) = interp_arg else { return };
+    let VmValue::Object(vm_obj) = vm_arg else {
+        return;
+    };
+    let VmObject::List(vm_list) = vm_obj.as_ref() else {
+        return;
+    };
+    let InterpValue::Sequence(Sequence::List(interp_list)) = interp_arg else {
+        return;
+    };
 
     *vm_list.borrow_mut() = interp_list
         .borrow()

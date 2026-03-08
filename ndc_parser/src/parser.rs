@@ -729,8 +729,7 @@ impl Parser {
                             ..
                         } => {
                             *start = Some(Box::new(
-                                Expression::Int64Literal(0)
-                                    .to_location(index_expression.span),
+                                Expression::Int64Literal(0).to_location(index_expression.span),
                             ));
                         }
                         _ => {}

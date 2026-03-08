@@ -212,8 +212,7 @@ impl Compiler {
                 } else {
                     let last = statements.len() - 1;
                     for (i, stmt) in statements.into_iter().enumerate() {
-                        let is_block_result =
-                            i == last && produces_value(&stmt.expression);
+                        let is_block_result = i == last && produces_value(&stmt.expression);
                         self.compile_expr(stmt);
                         if i == last && !is_block_result {
                             let idx = self.chunk.add_constant(Value::unit());
