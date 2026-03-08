@@ -99,10 +99,6 @@ pub enum Expression {
         function: Box<ExpressionLocation>,
         arguments: Vec<ExpressionLocation>,
     },
-    Index {
-        value: Box<ExpressionLocation>,
-        index: Box<ExpressionLocation>,
-    },
     Tuple {
         values: Vec<ExpressionLocation>,
     },
@@ -231,7 +227,11 @@ impl Lvalue {
     #[must_use]
     pub fn can_build_from_expression(expression: &Expression) -> bool {
         match expression {
-            Expression::Identifier { .. } | Expression::Index { .. } => true,
+            Expression::Identifier { .. } => true,
+            Expression::Call {
+                function,
+                arguments,
+            } if is_index_call(function, arguments) => true,
             Expression::List { values } | Expression::Tuple { values } => values
                 .iter()
                 .all(|el| Self::can_build_from_expression(&el.expression)),
@@ -256,7 +256,17 @@ impl TryFrom<ExpressionLocation> for Lvalue {
     fn try_from(value: ExpressionLocation) -> Result<Self, Self::Error> {
         match value.expression {
             Expression::Identifier { name, .. } => Ok(Self::new_identifier(name, value.span)),
-            Expression::Index { value, index } => Ok(Self::Index { value, index }),
+            Expression::Call {
+                function,
+                mut arguments,
+            } if is_index_call(&function, &arguments) => {
+                let index = arguments.remove(1);
+                let container = arguments.remove(0);
+                Ok(Self::Index {
+                    value: Box::new(container),
+                    index: Box::new(index),
+                })
+            }
             Expression::List { values } | Expression::Tuple { values } => Ok(Self::Sequence(
                 values
                     .into_iter()
@@ -267,4 +277,11 @@ impl TryFrom<ExpressionLocation> for Lvalue {
             _expr => Err(ParseError::text("invalid l-value".to_string(), value.span)),
         }
     }
+}
+
+fn is_index_call(function: &ExpressionLocation, arguments: &[ExpressionLocation]) -> bool {
+    matches!(
+        &function.expression,
+        Expression::Identifier { name, .. } if name == "[]"
+    ) && arguments.len() == 2
 }
