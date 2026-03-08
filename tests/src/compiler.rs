@@ -315,6 +315,13 @@ fn test_block_scope_cleanup() {
 fn test_block_scope_cleanup_multiple_locals() {
     assert_eq!(
         compile_with_analysis("{ let a = 1; let b = 2; a }"),
-        [Constant(0), SetLocal(0), Constant(1), SetLocal(1), GetLocal(0), Halt]
+        [
+            Constant(0),
+            SetLocal(0),
+            Constant(1),
+            SetLocal(1),
+            GetLocal(0),
+            Halt
+        ]
     );
 }
