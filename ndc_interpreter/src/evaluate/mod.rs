@@ -19,7 +19,7 @@ use std::rc::Rc;
 
 pub type EvaluationResult = Result<Value, FunctionCarrier>;
 
-mod index;
+pub mod index;
 
 #[allow(clippy::too_many_lines)]
 pub(crate) fn evaluate_expression(
@@ -72,7 +72,7 @@ pub(crate) fn evaluate_expression(
 
                 let index = evaluate_as_index(index_expression, environment)?;
 
-                set_at_index(&mut lhs, rhs, index, span)?;
+                set_at_index(&mut lhs, rhs, index).add_span(span)?;
 
                 Value::unit()
             }
@@ -167,7 +167,8 @@ pub(crate) fn evaluate_expression(
                     let mut lhs_value = evaluate_expression(lhs_expression, environment)?;
                     let index = evaluate_as_index(index_expression, environment)?;
                     let value_at_index =
-                        get_at_index(&lhs_value, index.clone(), span, environment)?;
+                        get_at_index(&lhs_value, index.clone(), environment)
+                            .add_span(span)?;
 
                     let right_value = evaluate_expression(r_value, environment)?;
 
@@ -219,7 +220,8 @@ pub(crate) fn evaluate_expression(
                         };
 
                         if !modified_in_place {
-                            set_at_index(&mut lhs_value, result, index.clone(), span)?;
+                            set_at_index(&mut lhs_value, result, index.clone())
+                                .add_span(span)?;
                         }
 
                         break;
@@ -449,147 +451,6 @@ pub(crate) fn evaluate_expression(
         }
         Expression::Break => return Err(FunctionCarrier::Break(Value::unit())),
         Expression::Continue => return Err(FunctionCarrier::Continue),
-        Expression::Index {
-            value: lhs_expr,
-            index: index_expr,
-        } => {
-            let lhs_value = evaluate_expression(lhs_expr, environment)?;
-
-            match lhs_value {
-                Value::Sequence(Sequence::String(string)) => {
-                    let string = string.borrow();
-
-                    let index = evaluate_as_index(index_expr, environment)?
-                        .try_into_offset(string.chars().count(), index_expr.span)?;
-
-                    let (start, end) = index.into_tuple();
-                    let new = string
-                        .chars()
-                        .dropping(start)
-                        .take(end - start)
-                        .collect::<String>();
-
-                    new.into()
-                }
-                Value::Sequence(Sequence::List(list)) => {
-                    let list_length = list.borrow().len();
-
-                    let index = evaluate_as_index(index_expr, environment)?
-                        .try_into_offset(list_length, index_expr.span)?;
-
-                    match index {
-                        Offset::Element(usize_index) => {
-                            let list = list.borrow();
-                            let Some(value) = list.get(usize_index) else {
-                                return Err(
-                                    EvaluationError::out_of_bounds(index, index_expr.span).into()
-                                );
-                            };
-                            value.clone()
-                        }
-                        Offset::Range(from_usize, to_usize) => {
-                            let list = list.borrow();
-                            let Some(values) = list.get(from_usize..to_usize) else {
-                                return Err(
-                                    EvaluationError::out_of_bounds(index, index_expr.span).into()
-                                );
-                            };
-
-                            Value::list(values)
-                        }
-                    }
-                }
-                Value::Sequence(Sequence::Tuple(tuple)) => {
-                    let index = evaluate_as_index(index_expr, environment)?
-                        .try_into_offset(tuple.len(), index_expr.span)?;
-
-                    match index {
-                        Offset::Element(index_usize) => {
-                            let Some(value) = tuple.get(index_usize) else {
-                                return Err(
-                                    EvaluationError::out_of_bounds(index, index_expr.span).into()
-                                );
-                            };
-
-                            value.clone()
-                        }
-
-                        Offset::Range(from_usize, to_usize) => {
-                            let Some(values) = tuple.get(from_usize..to_usize) else {
-                                return Err(
-                                    EvaluationError::out_of_bounds(index, index_expr.span).into()
-                                );
-                            };
-
-                            Value::Sequence(Sequence::Tuple(Rc::new(values.to_vec())))
-                        }
-                    }
-                }
-                Value::Sequence(Sequence::Deque(deque)) => {
-                    let list_length = deque.borrow().len();
-
-                    let index = evaluate_as_index(index_expr, environment)?
-                        .try_into_offset(list_length, index_expr.span)?;
-
-                    match index {
-                        Offset::Element(usize_index) => {
-                            let list = deque.borrow();
-                            let Some(value) = list.get(usize_index) else {
-                                return Err(
-                                    EvaluationError::out_of_bounds(index, index_expr.span).into()
-                                );
-                            };
-                            value.clone()
-                        }
-                        Offset::Range(from_usize, to_usize) => {
-                            let list = deque.borrow();
-                            let out = list
-                                .iter()
-                                .dropping(from_usize)
-                                .take(to_usize - from_usize)
-                                .cloned()
-                                .collect::<Vec<_>>();
-
-                            Value::list(out)
-                        }
-                    }
-                }
-                Value::Sequence(Sequence::Map(dict, default)) => {
-                    let key = evaluate_expression(index_expr, environment)?;
-                    // let dict = dict.borrow();
-
-                    let value = { dict.borrow().get(&key).cloned() };
-
-                    return if let Some(value) = value {
-                        Ok(value)
-                    } else if let Some(default) = default {
-                        let default_value = index::produce_default_value(
-                            &default,
-                            environment,
-                            // NOTE: this span points at the entire expression instead of the
-                            // function that cannot be executed because we don't have that span here
-                            // maybe we can check the function signature earlier when we do have the span
-                            lhs_expr.span.merge(index_expr.span),
-                        )?;
-
-                        // TODO: This borrow_mut can fail, handle it better!!
-                        // NOTE: WHEN DOES IT FAIL!?
-                        dict.borrow_mut().insert(key, default_value.clone());
-
-                        Ok(default_value)
-                    } else {
-                        Err(EvaluationError::key_not_found(&key, index_expr.span).into())
-                    };
-                }
-                value => {
-                    return Err(EvaluationError::new(
-                        format!("cannot index into {}", value.static_type()),
-                        lhs_expr.span,
-                    )
-                    .into());
-                }
-            }
-        }
         Expression::RangeInclusive {
             start: range_start,
             end: range_end,
@@ -687,7 +548,7 @@ fn declare_or_assign_variable(
 
             let index = evaluate_as_index(index, environment)?;
 
-            set_at_index(&mut lhs, value, index, span)?;
+            set_at_index(&mut lhs, value, index).add_span(span)?;
         }
     };
 

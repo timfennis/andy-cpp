@@ -697,12 +697,44 @@ impl Parser {
                     // for now, we require parentheses
                 }
                 Token::LeftSquareBracket => {
+                    let bracket_span = current.span;
                     self.require_current_token_matches(&Token::LeftSquareBracket)?;
                     // self.expression here allows for this syntax which is maybe a good idea
                     // `foo[1, 2] == foo[(1, 2)]`
                     // and
                     // `foo[x := 3]`
-                    let index_expression = self.expression()?;
+                    let mut index_expression = self.expression()?;
+
+                    // Reject `a[x..=]` — inclusive ranges must have an end.
+                    if matches!(
+                        &index_expression.expression,
+                        Expression::RangeInclusive { end: None, .. }
+                    ) {
+                        return Err(Error::text(
+                            "inclusive ranges must have an end".to_string(),
+                            index_expression.span,
+                        ));
+                    }
+
+                    // Normalize open-ended ranges: `a[..3]` → `a[0..3]` so the range
+                    // can be evaluated as a standalone value (ranges without a lower
+                    // bound cannot be evaluated otherwise).
+                    match &mut index_expression.expression {
+                        Expression::RangeExclusive {
+                            start: start @ None,
+                            ..
+                        }
+                        | Expression::RangeInclusive {
+                            start: start @ None,
+                            ..
+                        } => {
+                            *start = Some(Box::new(
+                                Expression::Int64Literal(0)
+                                    .to_location(index_expression.span),
+                            ));
+                        }
+                        _ => {}
+                    }
 
                     // TODO: this error may be triggered in a scenario described below, and it would
                     //       probably be nice if we could have a special message in a later version
@@ -727,9 +759,15 @@ impl Parser {
                     let span = expr.span.merge(end_token.span);
 
                     expr = ExpressionLocation {
-                        expression: Expression::Index {
-                            value: Box::new(expr),
-                            index: Box::new(index_expression),
+                        expression: Expression::Call {
+                            function: Box::new(
+                                Expression::Identifier {
+                                    name: "[]".to_string(),
+                                    resolved: Binding::None,
+                                }
+                                .to_location(bracket_span),
+                            ),
+                            arguments: vec![expr, index_expression],
                         },
                         span,
                     };

@@ -283,7 +283,6 @@ impl Compiler {
                 self.chunk
                     .write(OpCode::Call(argument_count), function_span);
             }
-            Expression::Index { .. } => todo!("index expression"),
             Expression::Tuple { values } => {
                 let size = values.len();
                 for expression in values {

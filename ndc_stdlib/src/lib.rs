@@ -7,6 +7,7 @@ pub mod deque;
 pub mod file;
 pub mod hash_map;
 pub mod heap;
+pub mod index;
 pub mod list;
 pub mod math;
 pub mod sequence;
@@ -32,6 +33,7 @@ pub fn register(env: &mut Environment) {
     file::register_variadic(env);
     hash_map::register(env);
     heap::register(env);
+    index::register(env);
     list::register(env);
     math::f64::register(env);
     math::register(env);

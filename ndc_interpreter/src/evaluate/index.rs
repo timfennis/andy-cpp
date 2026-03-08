@@ -9,16 +9,26 @@
 //! | Backward index | -10 | -9 | -8 | -7 | -6 | -5 | -4 | -3 | -2 | -1 |
 //! +----------------+-----+----+----+----+----+----+----+----+----+----+
 
-use super::{EvaluationError, EvaluationResult, IntoEvaluationResult, evaluate_expression};
+use super::{EvaluationError, EvaluationResult, evaluate_expression};
 use crate::environment::Environment;
+use crate::iterator::ValueIterator;
 use crate::{function::FunctionCarrier, sequence::Sequence, value::Value};
 use itertools::Itertools;
-use ndc_lexer::Span;
 use ndc_parser::{Expression, ExpressionLocation};
 use std::cell::RefCell;
 use std::cmp::min;
 use std::ops::IndexMut;
 use std::rc::Rc;
+
+#[derive(thiserror::Error, Debug)]
+#[error("{0}")]
+pub struct IndexError(String);
+
+impl IndexError {
+    pub fn new(msg: impl Into<String>) -> Self {
+        Self(msg.into())
+    }
+}
 
 #[derive(Clone)]
 pub enum EvaluatedIndex {
@@ -31,25 +41,22 @@ pub enum EvaluatedIndex {
 }
 
 impl EvaluatedIndex {
-    // TODO: improve error contract so we don't need EvaluationError (maybe??)
-    pub fn try_into_offset(self, size: usize, span: Span) -> Result<Offset, EvaluationError> {
+    pub fn try_into_offset(self, size: usize) -> Result<Offset, IndexError> {
         Ok(match self {
-            Self::Index(idx) => {
-                Offset::Element(value_to_bounded_forward_index(idx, size, false, span)?)
-            }
+            Self::Index(idx) => Offset::Element(value_to_bounded_forward_index(idx, size, false)?),
             Self::Slice {
                 from,
                 to,
                 inclusive,
             } => {
                 let from_idx = if let Some(from) = from {
-                    value_to_bounded_forward_index(from, size, true, span)?
+                    value_to_bounded_forward_index(from, size, true)?
                 } else {
                     0
                 };
 
                 let to_idx = if let Some(to) = to {
-                    value_to_bounded_forward_index(to, size, true, span)?
+                    value_to_bounded_forward_index(to, size, true)?
                 } else {
                     size
                 };
@@ -106,48 +113,39 @@ pub(crate) fn evaluate_as_index(
     })
 }
 
-fn invalid_index_err<T>(span: Span) -> impl Fn(T) -> EvaluationError {
-    move |_: T| {
-        EvaluationError::with_help(
-            "Invalid list index".to_string(),
-            span,
-            "The value used as a list index is not valid. List indices must be convertible to a signed 64-bit integer. Ensure the index is a valid integer within the range of -2^63 to 2^63-1".to_string(),
-        )
-    }
-}
-
-/// This function converts a native Andy C++ `Value` (hopefully a number) into a valid usize index
-/// into a vector of size `size`. The `allow_oob` argument allows the argument to be out of bounds
-/// which is needed when evaluating range expressions.
 fn value_to_bounded_forward_index(
     value: Value,
     size: usize,
     for_slice: bool,
-    span: Span,
-) -> Result<usize, EvaluationError> {
-    let index = i64::try_from(value).map_err(invalid_index_err(span))?;
+) -> Result<usize, IndexError> {
+    let index = i64::try_from(value).map_err(|_e| {
+        IndexError::new(
+            "Invalid list index. List indices must be convertible to a signed 64-bit integer.",
+        )
+    })?;
 
     if index.is_negative() {
         let index = usize::try_from(index.abs())
-            .map_err(|_err| EvaluationError::new("invalid index: too large".to_string(), span))?;
+            .map_err(|_e| IndexError::new("invalid index: too large"))?;
 
         if for_slice {
             Ok(size.saturating_sub(index))
         } else {
             size.checked_sub(index)
-                .ok_or_else(|| EvaluationError::new("index out of bounds".to_string(), span))
+                .ok_or_else(|| IndexError::new("index out of bounds"))
         }
     } else {
-        let index = usize::try_from(index).map_err(invalid_index_err(span))?;
+        let index = usize::try_from(index).map_err(|_e| {
+            IndexError::new(
+                "Invalid list index. List indices must be convertible to a signed 64-bit integer.",
+            )
+        })?;
         if for_slice {
             return Ok(min(index, size));
         }
 
         if index >= size {
-            return Err(EvaluationError::new(
-                "index out of bounds".to_string(),
-                span,
-            ));
+            return Err(IndexError::new("index out of bounds"));
         }
         Ok(index)
     }
@@ -171,29 +169,32 @@ impl Offset {
 pub fn get_at_index(
     lhs: &Value,
     index: EvaluatedIndex,
-    span: Span,
     environment: &Rc<RefCell<Environment>>,
 ) -> Result<Value, FunctionCarrier> {
     let Some(size) = lhs.sequence_length() else {
-        return Err(EvaluationError::new(
-            "cannot index into this type because it doesn't have a length".to_string(),
-            span,
-        )
-        .into());
+        return Err(IndexError::new(format!("cannot index into {}", lhs.static_type())).into());
     };
 
     match lhs {
         Value::Sequence(Sequence::List(list)) => {
             let list = list.borrow();
-            let index = index.try_into_offset(size, span)?;
+            let index = index.try_into_offset(size)?;
 
             match index {
                 Offset::Element(index_usize) => Ok(list[index_usize].clone()),
-                Offset::Range(from_usize, to_usize) => Ok(Value::list(&list[from_usize..to_usize])),
+                Offset::Range(from_usize, to_usize) => {
+                    let Some(values) = list.get(from_usize..to_usize) else {
+                        return Err(IndexError::new(format!(
+                            "{from_usize}..{to_usize} out of bounds"
+                        ))
+                        .into());
+                    };
+                    Ok(Value::list(values))
+                }
             }
         }
         Value::Sequence(Sequence::String(insertion_target)) => {
-            let index = index.try_into_offset(size, span)?;
+            let index = index.try_into_offset(size)?;
             Ok(Value::string(match index {
                 Offset::Element(e) => insertion_target
                     .borrow()
@@ -213,82 +214,104 @@ pub fn get_at_index(
             let key = match index {
                 EvaluatedIndex::Index(idx) => idx,
                 EvaluatedIndex::Slice { .. } => {
-                    return Err(EvaluationError::syntax_error(
-                        "cannot use range expression as index in map".to_string(),
-                        span,
-                    )
-                    .into());
+                    return Err(
+                        IndexError::new("cannot use range expression as index in map").into(),
+                    );
                 }
             };
 
             let value = map
                 .try_borrow()
-                .into_evaluation_result(span)?
+                .map_err(|e| -> FunctionCarrier { IndexError::new(e.to_string()).into() })?
                 .get(&key)
                 .cloned();
 
             if let Some(value) = value {
                 Ok(value)
             } else if let Some(default) = default {
-                let default_value = produce_default_value(default, environment, span)?;
+                let default_value = produce_default_value(default, environment)?;
                 map.try_borrow_mut()
-                    .into_evaluation_result(span)?
+                    .map_err(|e| -> FunctionCarrier { IndexError::new(e.to_string()).into() })?
                     .insert(key, default_value.clone());
                 Ok(default_value)
             } else {
-                Err(EvaluationError::key_not_found(&key, span).into())
+                Err(IndexError::new(format!("Key not found in map: {key}")).into())
             }
         }
-        _ => Err(EvaluationError::syntax_error(
-            format!("cannot insert into {} at index", lhs.static_type()),
-            span,
-        )
-        .into()),
+        Value::Sequence(Sequence::Tuple(tuple)) => {
+            let index = index.try_into_offset(size)?;
+            match index {
+                Offset::Element(index_usize) => {
+                    let Some(value) = tuple.get(index_usize) else {
+                        return Err(IndexError::new("index out of bounds").into());
+                    };
+                    Ok(value.clone())
+                }
+                Offset::Range(from_usize, to_usize) => {
+                    let Some(values) = tuple.get(from_usize..to_usize) else {
+                        return Err(IndexError::new("index out of bounds").into());
+                    };
+                    Ok(Value::Sequence(Sequence::Tuple(Rc::new(values.to_vec()))))
+                }
+            }
+        }
+        Value::Sequence(Sequence::Deque(deque)) => {
+            let index = index.try_into_offset(size)?;
+            match index {
+                Offset::Element(usize_index) => {
+                    let list = deque.borrow();
+                    let Some(value) = list.get(usize_index) else {
+                        return Err(IndexError::new("index out of bounds").into());
+                    };
+                    Ok(value.clone())
+                }
+                Offset::Range(from_usize, to_usize) => {
+                    let list = deque.borrow();
+                    let out = list
+                        .iter()
+                        .dropping(from_usize)
+                        .take(to_usize - from_usize)
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    Ok(Value::list(out))
+                }
+            }
+        }
+        _ => Err(IndexError::new(format!("cannot index into {}", lhs.static_type())).into()),
     }
 }
 
-pub(super) fn produce_default_value(
+pub fn produce_default_value(
     default: &Value,
     environment: &Rc<RefCell<Environment>>,
-    span: Span,
 ) -> EvaluationResult {
     match default {
         Value::Function(function) => match function.call_checked(&mut [], environment) {
             Err(FunctionCarrier::FunctionTypeMismatch) => {
-                Err(FunctionCarrier::EvaluationError(EvaluationError::new(
-                    "default function is not callable without arguments".to_string(),
-                    span,
-                )))
+                Err(IndexError::new("default function is not callable without arguments").into())
             }
             a => a,
         },
         value => Ok(value.clone()),
     }
 }
+
 pub fn set_at_index(
     lhs: &mut Value,
     rhs: Value,
     index: EvaluatedIndex,
-    span: Span,
 ) -> Result<(), FunctionCarrier> {
     let Some(size) = lhs.sequence_length() else {
-        return Err(EvaluationError::new(
-            "cannot index into this type because it doesn't have a length".to_string(),
-            span,
-        )
-        .into());
+        return Err(IndexError::new(format!("cannot index into {}", lhs.static_type())).into());
     };
 
     match lhs {
         Value::Sequence(Sequence::List(list)) => {
-            let mut list = list.try_borrow_mut().map_err(|_err| {
-                EvaluationError::mutation_error(
-                    "you cannot mutate a value in a list while you're iterating over this list",
-                    span,
-                )
+            let mut list = list.try_borrow_mut().map_err(|_e| -> FunctionCarrier {
+                IndexError::new("Mutation error: you cannot mutate a value in a list while you're iterating over this list").into()
             })?;
 
-            let index = index.try_into_offset(size, span)?;
+            let index = index.try_into_offset(size)?;
 
             match index {
                 Offset::Element(index_usize) => {
@@ -300,8 +323,7 @@ pub fn set_at_index(
 
                     list.extend(
                         rhs.try_into_vec()
-                            .expect("this must succeed, but not sure why")
-                            .into_iter(),
+                            .expect("this must succeed, but not sure why"),
                     );
 
                     list.extend_from_slice(&tail[(to_usize - from_usize)..]);
@@ -314,7 +336,7 @@ pub fn set_at_index(
 
                 let mut insertion_target = insertion_target.borrow_mut();
 
-                let index = index.try_into_offset(size, span)?;
+                let index = index.try_into_offset(size)?;
 
                 match index {
                     Offset::Element(index) => {
@@ -325,35 +347,64 @@ pub fn set_at_index(
                     }
                 }
             } else {
-                return Err(EvaluationError::syntax_error(
-                    format!("cannot insert {} into a string", rhs.static_type()),
-                    span,
-                )
+                return Err(IndexError::new(format!(
+                    "cannot insert {} into a string",
+                    rhs.static_type()
+                ))
                 .into());
             }
         }
         Value::Sequence(Sequence::Map(map, _)) => {
-            let mut map = map.try_borrow_mut().into_evaluation_result(span)?;
+            let mut map = map
+                .try_borrow_mut()
+                .map_err(|e| -> FunctionCarrier { IndexError::new(e.to_string()).into() })?;
 
             let key = match index {
                 EvaluatedIndex::Index(idx) => idx,
                 EvaluatedIndex::Slice { .. } => {
-                    return Err(EvaluationError::syntax_error(
-                        "cannot use range expression as index".to_string(),
-                        span,
-                    )
-                    .into());
+                    return Err(IndexError::new("cannot use range expression as index").into());
                 }
             };
             map.insert(key, rhs);
         }
         _ => {
-            return Err(EvaluationError::syntax_error(
-                format!("cannot insert into {} at index", lhs.static_type()),
-                span,
-            )
+            return Err(IndexError::new(format!(
+                "cannot insert into {} at index",
+                lhs.static_type()
+            ))
             .into());
         }
     };
     Ok(())
+}
+
+pub fn value_to_evaluated_index(value: Value) -> EvaluatedIndex {
+    if let Value::Sequence(Sequence::Iterator(ref rc)) = value {
+        let iter = rc.borrow();
+        match &*iter {
+            ValueIterator::ValueRange(r) => {
+                return EvaluatedIndex::Slice {
+                    from: Some(Value::from(r.0.start)),
+                    to: Some(Value::from(r.0.end)),
+                    inclusive: false,
+                };
+            }
+            ValueIterator::ValueRangeInclusive(r) => {
+                return EvaluatedIndex::Slice {
+                    from: Some(Value::from(*r.0.start())),
+                    to: Some(Value::from(*r.0.end())),
+                    inclusive: true,
+                };
+            }
+            ValueIterator::ValueRangeFrom(r) => {
+                return EvaluatedIndex::Slice {
+                    from: Some(Value::from(r.0.start)),
+                    to: None,
+                    inclusive: false,
+                };
+            }
+            ValueIterator::Repeat(_) => {}
+        }
+    }
+    EvaluatedIndex::Index(value)
 }

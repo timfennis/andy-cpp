@@ -212,14 +212,6 @@ impl Analyser {
 
                 Ok(*return_type)
             }
-            Expression::Index { index, value } => {
-                self.analyse(index)?;
-                let container_type = self.analyse(value)?;
-
-                container_type
-                    .index_element_type()
-                    .ok_or_else(|| AnalysisError::unable_to_index_into(&container_type, *span))
-            }
             Expression::Tuple { values } => {
                 let mut types = Vec::with_capacity(values.len());
                 for v in values {
