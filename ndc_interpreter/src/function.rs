@@ -369,3 +369,9 @@ impl From<BorrowError> for FunctionCarrier {
         Self::IntoEvaluationError(Box::new(value))
     }
 }
+
+impl From<crate::evaluate::index::IndexError> for FunctionCarrier {
+    fn from(value: crate::evaluate::index::IndexError) -> Self {
+        Self::IntoEvaluationError(Box::new(value))
+    }
+}
