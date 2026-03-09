@@ -72,19 +72,17 @@ pub fn vm_to_interp(value: &VmValue) -> InterpValue {
                         .expect("must succeed"),
                 )
             }
-            VmObject::OverloadSet(slots) => {
-                InterpValue::function(
-                    FunctionBuilder::default()
-                        .body(FunctionBody::Opaque {
-                            data: Rc::new(VmValue::Object(Box::new(VmObject::OverloadSet(
-                                slots.clone(),
-                            )))),
-                            static_type: ndc_parser::StaticType::Any,
-                        })
-                        .build()
-                        .expect("must succeed"),
-                )
-            }
+            VmObject::OverloadSet(slots) => InterpValue::function(
+                FunctionBuilder::default()
+                    .body(FunctionBody::Opaque {
+                        data: Rc::new(VmValue::Object(Box::new(VmObject::OverloadSet(
+                            slots.clone(),
+                        )))),
+                        static_type: ndc_parser::StaticType::Any,
+                    })
+                    .build()
+                    .expect("must succeed"),
+            ),
         },
     }
 }
