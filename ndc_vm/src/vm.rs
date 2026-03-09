@@ -186,6 +186,18 @@ impl Vm {
                         UpvalueCell::Closed(value) => self.stack.push(value.clone()),
                     }
                 }
+                OpCode::SetUpvalue { depth, slot } => {
+                    debug_assert_eq!(
+                        depth, 0,
+                        "compiler must have captured the closed over variables"
+                    );
+                    let value = self.stack.last().expect("stack underflow").clone();
+                    let mut cell = frame.closure.upvalues[slot].borrow_mut();
+                    match &mut *cell {
+                        UpvalueCell::Open(stack_slot) => self.stack[*stack_slot] = value,
+                        UpvalueCell::Closed(stored) => *stored = value,
+                    }
+                }
                 OpCode::Closure {
                     constant_idx: idx,
                     values,

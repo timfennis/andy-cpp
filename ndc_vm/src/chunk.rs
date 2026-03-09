@@ -24,6 +24,8 @@ pub enum OpCode {
     GetUpvalue { slot: usize, depth: usize },
     /// Pops the top of the stack and stores it in the given local slot
     SetLocal(usize),
+    /// Pops the top of the stack and stores it in the given upvalue slot
+    SetUpvalue { slot: usize, depth: usize },
     /// Reads global variable at the given slot and pushes it on the stack
     GetGlobal(usize),
     /// Create a list using n arguments on the stack
@@ -54,6 +56,7 @@ impl std::fmt::Debug for OpCode {
             Self::SetLocal(n) => write!(f, "SetLocal({n})"),
             Self::GetGlobal(n) => write!(f, "GetGlobal({n})"),
             Self::GetUpvalue { slot, depth } => write!(f, "GetUpvalue({slot}, {depth})"),
+            Self::SetUpvalue { slot, depth } => write!(f, "SetUpvalue({slot}, {depth})"),
             Self::MakeList(n) => write!(f, "MakeList({n})"),
             Self::MakeTuple(n) => write!(f, "MakeTuple({n})"),
             Self::Closure {
@@ -123,8 +126,11 @@ impl Chunk {
     pub fn capture_upvalues(&mut self) -> Vec<CaptureFrom> {
         let mut upvalues = vec![];
         for op in &mut self.code {
-            let OpCode::GetUpvalue { slot, depth } = op else {
-                continue;
+            let (slot, depth) = match op {
+                OpCode::GetUpvalue { slot, depth } | OpCode::SetUpvalue { slot, depth } => {
+                    (slot, depth)
+                }
+                _ => continue,
             };
 
             // Create a capture

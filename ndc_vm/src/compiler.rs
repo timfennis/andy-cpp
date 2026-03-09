@@ -67,7 +67,8 @@ impl Compiler {
                 Binding::Resolved(ResolvedVar::Local { slot }) => {
                     self.chunk.write(OpCode::GetLocal(slot), span);
                 }
-                Binding::Resolved(ResolvedVar::Upvalue { slot, depth }) => {
+                Binding::Resolved(ResolvedVar::Upvalue { slot }) => {
+                    let depth = todo!("implement this part later");
                     self.chunk.write(OpCode::GetUpvalue { slot, depth }, span);
                 }
                 Binding::Resolved(ResolvedVar::Global { slot }) => {
@@ -129,7 +130,11 @@ impl Compiler {
                         ResolvedVar::Local { slot } => {
                             self.chunk.write(OpCode::SetLocal(slot), lv_span);
                         }
-                        ResolvedVar::Upvalue { .. } => todo!("?"),
+                        ResolvedVar::Upvalue { slot } => {
+                            let depth = todo!("implement this part later");
+                            self.chunk
+                                .write(OpCode::SetUpvalue { slot, depth }, lv_span);
+                        }
                         ResolvedVar::Global { .. } => {
                             unreachable!("globals are native, never assigned")
                         }

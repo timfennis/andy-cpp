@@ -1193,8 +1193,9 @@ impl Parser {
                 parameters_span,
                 body: Box::new(body),
                 return_type: None, // At some point in the future we could use type declarations here to insert the type (return type inference is cringe anyway)
-                pure: is_pure,
                 resolved_name: None,
+                captures: vec![],
+                pure: is_pure,
             },
             span,
         })
