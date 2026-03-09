@@ -106,8 +106,6 @@ impl Analyser {
                 return_type: return_type_slot,
                 ..
             } => {
-                // TODO: figuring out the type signature of function declarations is the rest of the owl
-
                 // Pre-register the function before analysing its body so recursive calls can
                 // resolve the name. The return type is unknown at this point so we use Any.
                 let pre_slot = if let Some(name) = name {

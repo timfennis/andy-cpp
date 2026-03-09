@@ -1,4 +1,4 @@
-use ndc_parser::{Binding, ResolvedVar, StaticType};
+use ndc_parser::{Binding, CaptureSource, ResolvedVar, StaticType};
 use std::fmt::{Debug, Formatter};
 
 #[derive(Debug, Clone)]
@@ -8,6 +8,7 @@ pub(crate) struct Scope {
     base_offset: usize,
     function_scope_idx: usize,
     identifiers: Vec<(String, StaticType)>,
+    upvalues: Vec<(String, CaptureSource)>,
 }
 
 impl Scope {
@@ -22,6 +23,7 @@ impl Scope {
             base_offset: 0,
             function_scope_idx,
             identifiers: Vec::default(),
+            upvalues: Vec::default(),
         }
     }
 
@@ -36,6 +38,7 @@ impl Scope {
             base_offset,
             function_scope_idx,
             identifiers: Vec::default(),
+            upvalues: Vec::default(),
         }
     }
 
@@ -50,6 +53,7 @@ impl Scope {
             base_offset,
             function_scope_idx,
             identifiers: Vec::default(),
+            upvalues: Vec::default(),
         }
     }
 
@@ -115,6 +119,19 @@ impl Scope {
         // Slot is just the length of the list minus one
         self.base_offset + self.identifiers.len() - 1
     }
+
+    fn add_upvalue(&mut self, name: &str, source: CaptureSource) -> usize {
+        if let Some(idx) = self.upvalues.iter().position(|(n, _)| n == name) {
+            return idx;
+        }
+
+        self.upvalues.push((name.to_string(), source));
+        self.upvalues.len() - 1
+    }
+
+    fn find_upvalue(&self, name: &str) -> Option<usize> {
+        self.upvalues.iter().position(|(n, _)| n == name)
+    }
 }
 
 #[derive(Clone)]
@@ -139,21 +156,36 @@ impl ScopeTree {
     pub(crate) fn get_type(&self, res: ResolvedVar) -> &StaticType {
         match res {
             ResolvedVar::Local { slot } => self.find_type_by_slot(self.current_scope_idx, slot),
-            ResolvedVar::Upvalue { slot, depth } => {
-                let mut scope_idx = self.current_scope_idx;
-                let mut env_count = 0;
-                while env_count < depth {
-                    if self.scopes[scope_idx].creates_environment {
-                        env_count += 1;
+            ResolvedVar::Upvalue { slot } => {
+                let mut scope_idx = self.scopes[self.current_scope_idx].function_scope_idx;
+                let mut check_slot = slot;
+
+                loop {
+                    let (_, source) = &self.scopes[scope_idx].upvalues[check_slot];
+
+                    match source {
+                        CaptureSource::Local(slot) => {
+                            return self.find_type_by_slot(
+                                self.get_parent_function_scope_idx(scope_idx),
+                                *slot,
+                            );
+                        }
+                        CaptureSource::Upvalue(slot) => {
+                            scope_idx = self.get_parent_function_scope_idx(scope_idx);
+                            check_slot = *slot;
+                        }
                     }
-                    scope_idx = self.scopes[scope_idx]
-                        .parent_idx
-                        .expect("parent_idx was None while traversing the scope tree");
                 }
-                self.find_type_by_slot(scope_idx, slot)
             }
             ResolvedVar::Global { slot } => &self.global_scope.identifiers[slot].1,
         }
+    }
+
+    fn get_parent_function_scope_idx(&self, scope_idx: usize) -> usize {
+        self.scopes[self.scopes[scope_idx]
+            .parent_idx
+            .expect("expected parent scope to exist")]
+        .function_scope_idx
     }
 
     pub(crate) fn find_type_by_slot(&self, start_scope: usize, slot: usize) -> &StaticType {
@@ -208,20 +240,36 @@ impl ScopeTree {
         self.current_scope_idx = next;
     }
 
+    // When the Analyser encounters an identifier as the rhs of an expression during resolution it
+    // will use this method to lookup if that identifier has already been seen.
     pub(crate) fn get_binding_any(&mut self, ident: &str) -> Option<ResolvedVar> {
-        let mut depth = 0;
         let mut scope_ptr = self.current_scope_idx;
+        let mut env_scopes: Vec<usize> = Vec::default();
 
         loop {
             if let Some(slot) = self.scopes[scope_ptr].find_slot_by_name(ident) {
-                return Some(if depth == 0 {
-                    ResolvedVar::Local { slot }
-                } else {
-                    ResolvedVar::Upvalue { slot, depth }
-                });
-            } else if let Some(parent_idx) = self.scopes[scope_ptr].parent_idx {
+                if env_scopes.is_empty() {
+                    return Some(ResolvedVar::Local { slot });
+                }
+
+                let slot = self.hoist_upvalue(ident, slot, &env_scopes);
+                return Some(ResolvedVar::Upvalue { slot });
+            }
+
+            if let Some(slot) = self.scopes[scope_ptr].find_upvalue(ident) {
+                if env_scopes.is_empty() {
+                    return Some(ResolvedVar::Upvalue { slot });
+                }
+
+                let slot = self.hoist_from_upvalue(ident, slot, &env_scopes);
+                return Some(ResolvedVar::Upvalue { slot });
+            }
+
+            // We couldn't find this ident in the local scope, or as an upvalue in the current scope
+            // in this case we just recurse.
+            if let Some(parent_idx) = self.scopes[scope_ptr].parent_idx {
                 if self.scopes[scope_ptr].creates_environment {
-                    depth += 1;
+                    env_scopes.push(parent_idx);
                 }
                 scope_ptr = parent_idx;
             } else {
@@ -237,8 +285,8 @@ impl ScopeTree {
         ident: &str,
         sig: &[StaticType],
     ) -> Vec<ResolvedVar> {
-        let mut depth = 0;
         let mut scope_ptr = self.current_scope_idx;
+        let mut env_scopes: Vec<usize> = Vec::default();
 
         loop {
             let candidates = self.scopes[scope_ptr].find_function_candidates(ident, sig);
@@ -246,16 +294,25 @@ impl ScopeTree {
                 return candidates
                     .into_iter()
                     .map(|slot| {
-                        if depth == 0 {
-                            ResolvedVar::Local { slot }
-                        } else {
-                            ResolvedVar::Upvalue { slot, depth }
+                        if env_scopes.is_empty() {
+                            return ResolvedVar::Local { slot };
                         }
+
+                        let slot = self.hoist_upvalue(ident, slot, &env_scopes);
+                        ResolvedVar::Upvalue { slot }
                     })
                     .collect();
+            } else if let Some(slot) = self.scopes[scope_ptr].find_upvalue(ident) {
+                if env_scopes.is_empty() {
+                    return vec![ResolvedVar::Upvalue { slot }];
+                }
+
+                let slot = self.hoist_from_upvalue(ident, slot, &env_scopes);
+
+                return vec![ResolvedVar::Upvalue { slot }];
             } else if let Some(parent_idx) = self.scopes[scope_ptr].parent_idx {
                 if self.scopes[scope_ptr].creates_environment {
-                    depth += 1;
+                    env_scopes.push(scope_ptr);
                 }
 
                 scope_ptr = parent_idx;
@@ -294,25 +351,37 @@ impl ScopeTree {
             .unwrap_or(Binding::None)
     }
 
-    pub(crate) fn get_all_bindings_by_name(&self, ident: &str) -> Vec<ResolvedVar> {
+    pub(crate) fn get_all_bindings_by_name(&mut self, ident: &str) -> Vec<ResolvedVar> {
         let mut results = Vec::new();
-        let mut depth = 0;
         let mut scope_ptr = self.current_scope_idx;
+        let mut env_scopes: Vec<usize> = Vec::default();
 
         loop {
             let slots = self.scopes[scope_ptr].find_all_slots_by_name(ident);
+
             results.extend(slots.into_iter().map(|slot| {
-                if depth == 0 {
+                if env_scopes.is_empty() {
                     ResolvedVar::Local { slot }
                 } else {
-                    ResolvedVar::Upvalue { slot, depth }
+                    let slot = self.hoist_upvalue(ident, slot, &env_scopes);
+                    ResolvedVar::Upvalue { slot }
                 }
             }));
 
+            if let Some(slot) = self.scopes[scope_ptr].find_upvalue(ident) {
+                if env_scopes.is_empty() {
+                    results.push(ResolvedVar::Upvalue { slot });
+                } else {
+                    let slot = self.hoist_from_upvalue(ident, slot, &env_scopes);
+                    results.push(ResolvedVar::Upvalue { slot });
+                }
+            }
+
             if let Some(parent_idx) = self.scopes[scope_ptr].parent_idx {
                 if self.scopes[scope_ptr].creates_environment {
-                    depth += 1;
+                    env_scopes.push(scope_ptr);
                 }
+
                 scope_ptr = parent_idx;
             } else {
                 let global_slots = self.global_scope.find_all_slots_by_name(ident);
@@ -333,19 +402,28 @@ impl ScopeTree {
         ident: &str,
         arg_types: &[StaticType],
     ) -> Option<ResolvedVar> {
-        let mut depth = 0;
         let mut scope_ptr = self.current_scope_idx;
+        let mut env_scopes: Vec<usize> = Vec::default();
 
         loop {
             if let Some(slot) = self.scopes[scope_ptr].find_function(ident, arg_types) {
-                return Some(if depth == 0 {
-                    ResolvedVar::Local { slot }
-                } else {
-                    ResolvedVar::Upvalue { slot, depth }
-                });
+                if env_scopes.is_empty() {
+                    return Some(ResolvedVar::Local { slot });
+                }
+
+                let slot = self.hoist_upvalue(ident, slot, &env_scopes);
+
+                return Some(ResolvedVar::Upvalue { slot });
+            } else if let Some(slot) = self.scopes[scope_ptr].find_upvalue(ident) {
+                if env_scopes.is_empty() {
+                    return Some(ResolvedVar::Upvalue { slot });
+                }
+
+                let slot = self.hoist_from_upvalue(ident, slot, &env_scopes);
+                return Some(ResolvedVar::Upvalue { slot });
             } else if let Some(parent_idx) = self.scopes[scope_ptr].parent_idx {
                 if self.scopes[scope_ptr].creates_environment {
-                    depth += 1;
+                    env_scopes.push(scope_ptr);
                 }
                 scope_ptr = parent_idx;
             } else {
@@ -363,30 +441,38 @@ impl ScopeTree {
     }
 
     pub(crate) fn update_binding_type(&mut self, var: ResolvedVar, new_type: StaticType) {
-        let scope_idx = match var {
+        match var {
             ResolvedVar::Local { slot } => {
-                self.find_scope_owning_slot(self.current_scope_idx, slot)
+                let scope_idx = self.find_scope_owning_slot(self.current_scope_idx, slot);
+                let base = self.scopes[scope_idx].base_offset;
+                self.scopes[scope_idx].identifiers[slot - base].1 = new_type;
             }
-            ResolvedVar::Upvalue { depth, .. } => {
-                let mut scope_idx = self.current_scope_idx;
-                let mut env_count = 0;
-                while env_count < depth {
-                    if self.scopes[scope_idx].creates_environment {
-                        env_count += 1;
+            ResolvedVar::Upvalue { slot } => {
+                let mut scope_idx = self.scopes[self.current_scope_idx].function_scope_idx;
+                let mut check_slot = slot;
+
+                loop {
+                    let (_, source) = self.scopes[scope_idx].upvalues[check_slot].clone();
+                    let parent_fn = self.get_parent_function_scope_idx(scope_idx);
+
+                    match source {
+                        CaptureSource::Local(local_slot) => {
+                            let owning = self.find_scope_owning_slot(parent_fn, local_slot);
+                            let base = self.scopes[owning].base_offset;
+                            self.scopes[owning].identifiers[local_slot - base].1 = new_type;
+                            return;
+                        }
+                        CaptureSource::Upvalue(uv_slot) => {
+                            scope_idx = parent_fn;
+                            check_slot = uv_slot;
+                        }
                     }
-                    scope_idx = self.scopes[scope_idx]
-                        .parent_idx
-                        .expect("parent_idx was None while traversing the scope tree");
                 }
-                self.find_scope_owning_slot(scope_idx, var.slot())
             }
             ResolvedVar::Global { .. } => {
                 panic!("update_binding_type called with a global binding")
             }
-        };
-        let slot = var.slot();
-        let base = self.scopes[scope_idx].base_offset;
-        self.scopes[scope_idx].identifiers[slot - base].1 = new_type;
+        }
     }
 
     pub(crate) fn find_scope_owning_slot(&self, start_scope: usize, slot: usize) -> usize {
@@ -400,6 +486,51 @@ impl ScopeTree {
                 .parent_idx
                 .expect("slot not found in any scope within function");
         }
+    }
+
+    // In a situation where the analyser is recursing through the scope tree and finds an identifier
+    // in the current local scope, if we were searching from a nested scope we now have to 'hoist'
+    // this local value as an upvalue in all the nested scopes. This function is responsible for adding
+    // this value as an upvalue to all the nested scopes.
+    //
+    // `env_scopes`: is a list of scopes that the analyser has already searched that will need to get this upvalue.
+    pub(crate) fn hoist_upvalue(
+        &mut self,
+        name: &str,
+        local_slot: usize,
+        env_scopes: &[usize],
+    ) -> usize {
+        let mut capture_idx = local_slot;
+        let mut is_local = true;
+
+        for &scope_idx in env_scopes.iter().rev() {
+            // The very first scope we encounter when we iterate this list in reverse is the scope directly inside
+            // the scope that captures the identifier as a local scope. In this case we want to capture the variable on the stack instead.
+            let source = if is_local {
+                CaptureSource::Local(capture_idx)
+            } else {
+                CaptureSource::Upvalue(capture_idx)
+            };
+            capture_idx = self.scopes[scope_idx].add_upvalue(name, source);
+            is_local = false; // only the first iteration is local
+        }
+
+        capture_idx
+    }
+
+    pub(crate) fn hoist_from_upvalue(
+        &mut self,
+        name: &str,
+        upvalue_slot: usize,
+        env_scopes: &[usize],
+    ) -> usize {
+        let mut capture_idx = upvalue_slot;
+        for &scope_idx in env_scopes.iter().rev() {
+            capture_idx =
+                self.scopes[scope_idx].add_upvalue(name, CaptureSource::Upvalue(capture_idx));
+        }
+
+        capture_idx
     }
 }
 
@@ -476,7 +607,7 @@ mod tests {
     }
 
     #[test]
-    fn block_scope_does_not_increment_depth() {
+    fn block_scope_does_not_create_upvalue() {
         let mut tree = empty_scope_tree();
         tree.create_local_binding("x".into(), StaticType::Int);
 
@@ -488,7 +619,7 @@ mod tests {
     }
 
     #[test]
-    fn function_scope_resets_slots_and_increments_depth() {
+    fn function_scope_resets_slots_and_captures_as_upvalue() {
         let mut tree = empty_scope_tree();
         tree.create_local_binding("x".into(), StaticType::Int);
 
@@ -498,12 +629,12 @@ mod tests {
 
         assert_eq!(
             tree.get_binding_any("x"),
-            Some(ResolvedVar::Upvalue { depth: 1, slot: 0 })
+            Some(ResolvedVar::Upvalue { slot: 0 })
         );
     }
 
     #[test]
-    fn iteration_scope_continues_numbering_but_increments_depth() {
+    fn iteration_scope_continues_numbering_and_captures_as_upvalue() {
         let mut tree = empty_scope_tree();
         tree.create_local_binding("x".into(), StaticType::Int);
 
@@ -513,7 +644,7 @@ mod tests {
 
         assert_eq!(
             tree.get_binding_any("x"),
-            Some(ResolvedVar::Upvalue { depth: 1, slot: 0 })
+            Some(ResolvedVar::Upvalue { slot: 0 })
         );
     }
 
@@ -526,7 +657,6 @@ mod tests {
                 return_type: Box::new(StaticType::Any),
             },
         )]);
-        // get_binding_any requires &mut self
         let mut tree = tree;
         assert_eq!(
             tree.get_binding_any("print"),
@@ -561,5 +691,112 @@ mod tests {
             tree.get_type(ResolvedVar::Local { slot: 1 }),
             &StaticType::String
         );
+    }
+
+    // Simulates: let x = 1; fn outer() { fn inner() { x } }
+    // inner needs x, which is 2 function scopes away. hoist_upvalue should
+    // create a capture chain: outer captures x as Local(0) from the top-level,
+    // then inner captures it as Upvalue(0) from outer.
+    #[test]
+    fn upvalue_hoisting_across_two_function_scopes() {
+        let mut tree = empty_scope_tree();
+        tree.create_local_binding("x".into(), StaticType::Int);
+
+        tree.new_function_scope(); // outer
+        tree.new_function_scope(); // inner
+
+        let resolved = tree.get_binding_any("x");
+        assert_eq!(resolved, Some(ResolvedVar::Upvalue { slot: 0 }));
+
+        // Verify the capture chain was built correctly.
+        // inner's upvalue 0 should point to outer's upvalue via Upvalue(0).
+        // outer's upvalue 0 should capture the top-level local via Local(0).
+        let inner_scope_idx = tree.current_scope_idx;
+        let inner_capture = &tree.scopes[inner_scope_idx].upvalues[0];
+        assert_eq!(inner_capture.1, CaptureSource::Upvalue(0));
+
+        let outer_scope_idx = tree.scopes[inner_scope_idx]
+            .parent_idx
+            .expect("inner must have parent");
+        let outer_capture = &tree.scopes[outer_scope_idx].upvalues[0];
+        assert_eq!(outer_capture.1, CaptureSource::Local(0));
+    }
+
+    // Simulates: let a = 1; let b = 2; fn f() { a; b }
+    // Both a and b are captured. They should get distinct upvalue indices.
+    #[test]
+    fn multiple_upvalues_get_distinct_indices() {
+        let mut tree = empty_scope_tree();
+        tree.create_local_binding("a".into(), StaticType::Int);
+        tree.create_local_binding("b".into(), StaticType::String);
+
+        tree.new_function_scope();
+
+        let a = tree.get_binding_any("a");
+        let b = tree.get_binding_any("b");
+        assert_eq!(a, Some(ResolvedVar::Upvalue { slot: 0 }));
+        assert_eq!(b, Some(ResolvedVar::Upvalue { slot: 1 }));
+    }
+
+    // Resolving the same upvalue twice should return the same index,
+    // not create a duplicate entry.
+    #[test]
+    fn duplicate_upvalue_resolution_reuses_index() {
+        let mut tree = empty_scope_tree();
+        tree.create_local_binding("x".into(), StaticType::Int);
+
+        tree.new_function_scope();
+
+        let first = tree.get_binding_any("x");
+        let second = tree.get_binding_any("x");
+        assert_eq!(first, second);
+        assert_eq!(first, Some(ResolvedVar::Upvalue { slot: 0 }));
+
+        let fn_scope = &tree.scopes[tree.current_scope_idx];
+        assert_eq!(fn_scope.upvalues.len(), 1);
+    }
+
+    // Simulates: let x = 1; fn outer() { fn inner() { x } }
+    // After resolving x in inner (which hoists through outer), we should
+    // be able to look up x's type via get_type on the upvalue.
+    #[test]
+    fn get_type_follows_upvalue_chain() {
+        let mut tree = empty_scope_tree();
+        tree.create_local_binding("x".into(), StaticType::Int);
+
+        tree.new_function_scope(); // outer
+        tree.new_function_scope(); // inner
+
+        let resolved = tree.get_binding_any("x").unwrap();
+        assert_eq!(tree.get_type(resolved), &StaticType::Int);
+    }
+
+    // Simulates: fn outer() { let x = 1; fn middle() { fn inner() { x } } }
+    // When inner's upvalue for x is resolved, a sibling function of inner
+    // should be able to find x already registered as an upvalue on middle
+    // (via find_upvalue), rather than re-walking all the way to outer.
+    #[test]
+    fn sibling_closure_finds_existing_upvalue() {
+        let mut tree = empty_scope_tree();
+        tree.create_local_binding("x".into(), StaticType::Int);
+
+        tree.new_function_scope(); // middle
+
+        // First closure resolves x, which registers it on middle's upvalue list
+        tree.new_function_scope(); // inner1
+        let r1 = tree.get_binding_any("x");
+        assert_eq!(r1, Some(ResolvedVar::Upvalue { slot: 0 }));
+        tree.destroy_scope(); // back to middle
+
+        // Second closure resolves x — middle already has it as an upvalue,
+        // so it should be found via find_upvalue without re-hoisting
+        tree.new_function_scope(); // inner2
+        let r2 = tree.get_binding_any("x");
+        assert_eq!(r2, Some(ResolvedVar::Upvalue { slot: 0 }));
+        tree.destroy_scope(); // back to middle
+
+        // middle should still have exactly one upvalue entry
+        let middle_idx = tree.current_scope_idx;
+        assert_eq!(tree.scopes[middle_idx].upvalues.len(), 1);
     }
 }

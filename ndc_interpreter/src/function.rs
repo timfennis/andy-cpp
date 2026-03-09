@@ -286,13 +286,11 @@ impl FunctionBody {
                 .into()),
             },
             Self::GenericFunction { function, .. } => function(args, env),
-            Self::Opaque { .. } => {
-                Err(FunctionCallError::ArgumentCountError {
-                    expected: 0,
-                    actual: args.len(),
-                }
-                .into())
+            Self::Opaque { .. } => Err(FunctionCallError::ArgumentCountError {
+                expected: 0,
+                actual: args.len(),
             }
+            .into()),
             Self::Memoized { cache, function } => {
                 let mut hasher = DefaultHasher::default();
                 for arg in &*args {
