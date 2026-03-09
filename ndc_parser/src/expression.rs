@@ -16,7 +16,7 @@ pub enum Binding {
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub enum ResolvedVar {
     Local { slot: usize },
-    Upvalue { depth: usize, slot: usize },
+    Upvalue { slot: usize },
     Global { slot: usize },
 }
 
@@ -26,6 +26,12 @@ impl ResolvedVar {
             Self::Local { slot } | Self::Upvalue { slot, .. } | Self::Global { slot } => slot,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CaptureSource {
+    Local(usize),
+    Upvalue(usize),
 }
 
 #[derive(Eq, PartialEq, Clone, Debug)]
@@ -76,6 +82,7 @@ pub enum Expression {
         parameters_span: Span,
         body: Box<ExpressionLocation>,
         return_type: Option<StaticType>,
+        captures: Vec<CaptureSource>,
         pure: bool,
     },
     Block {
