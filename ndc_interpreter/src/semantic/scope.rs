@@ -240,6 +240,14 @@ impl ScopeTree {
         self.current_scope_idx = next;
     }
 
+    pub(crate) fn current_scope_captures(&self) -> Vec<CaptureSource> {
+        self.scopes[self.current_scope_idx]
+            .upvalues
+            .iter()
+            .map(|(_, source)| source.clone())
+            .collect()
+    }
+
     // When the Analyser encounters an identifier as the rhs of an expression during resolution it
     // will use this method to lookup if that identifier has already been seen.
     pub(crate) fn get_binding_any(&mut self, ident: &str) -> Option<ResolvedVar> {
@@ -269,7 +277,7 @@ impl ScopeTree {
             // in this case we just recurse.
             if let Some(parent_idx) = self.scopes[scope_ptr].parent_idx {
                 if self.scopes[scope_ptr].creates_environment {
-                    env_scopes.push(parent_idx);
+                    env_scopes.push(scope_ptr);
                 }
                 scope_ptr = parent_idx;
             } else {

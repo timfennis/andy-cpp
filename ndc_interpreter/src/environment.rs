@@ -1,7 +1,7 @@
 use crate::function::{Function, StaticType};
 
 use crate::value::Value;
-use ndc_parser::ResolvedVar;
+use ndc_parser::{CaptureSource, ResolvedVar};
 use std::cell::RefCell;
 use std::fmt;
 use std::fmt::Formatter;
@@ -18,6 +18,7 @@ pub struct Environment {
     root: Rc<RefCell<RootEnvironment>>,
     parent: Option<Rc<RefCell<Self>>>,
     values: Vec<Value>,
+    upvalues: Vec<Rc<RefCell<Value>>>,
     base_offset: usize,
 }
 
@@ -61,6 +62,7 @@ impl Environment {
             root: Rc::new(RefCell::new(root)),
             parent: None,
             values: Default::default(),
+            upvalues: Default::default(),
             base_offset: 0,
         }
     }
@@ -97,25 +99,8 @@ impl Environment {
                     .borrow_mut()
                     .set(var, value);
             }
-            ResolvedVar::Upvalue { depth: 1, slot } => {
-                self.parent
-                    .clone()
-                    .expect("Upvalue but no parent environment")
-                    .borrow_mut()
-                    .set(ResolvedVar::Local { slot }, value);
-            }
-            ResolvedVar::Upvalue { depth, slot } => {
-                self.parent
-                    .clone()
-                    .expect("Upvalue but no parent environment")
-                    .borrow_mut()
-                    .set(
-                        ResolvedVar::Upvalue {
-                            depth: depth - 1,
-                            slot,
-                        },
-                        value,
-                    );
+            ResolvedVar::Upvalue { slot } => {
+                *self.upvalues[slot].borrow_mut() = value;
             }
             ResolvedVar::Global { .. } => {
                 unreachable!("cannot assign value to global")
@@ -145,21 +130,7 @@ impl Environment {
                 .expect("Local slot below base_offset but no parent")
                 .borrow()
                 .get(var),
-            ResolvedVar::Upvalue { depth: 1, slot } => self
-                .parent
-                .as_ref()
-                .expect("Upvalue but no parent environment")
-                .borrow()
-                .get(ResolvedVar::Local { slot }),
-            ResolvedVar::Upvalue { depth, slot } => self
-                .parent
-                .as_ref()
-                .expect("Upvalue but no parent environment")
-                .borrow()
-                .get(ResolvedVar::Upvalue {
-                    depth: depth - 1,
-                    slot,
-                }),
+            ResolvedVar::Upvalue { slot } => self.upvalues[slot].borrow().clone(),
             ResolvedVar::Global { slot } => {
                 Value::function(self.root.borrow().global_functions[slot].clone())
             }
@@ -183,31 +154,34 @@ impl Environment {
                 .expect("Local slot below base_offset but no parent")
                 .borrow_mut()
                 .take(var),
-            ResolvedVar::Upvalue { depth: 1, slot } => self
-                .parent
-                .clone()
-                .expect("Upvalue but no parent environment")
-                .borrow_mut()
-                .take(ResolvedVar::Local { slot }),
-            ResolvedVar::Upvalue { depth, slot } => self
-                .parent
-                .clone()
-                .expect("Upvalue but no parent environment")
-                .borrow_mut()
-                .take(ResolvedVar::Upvalue {
-                    depth: depth - 1,
-                    slot,
-                }),
+            ResolvedVar::Upvalue { slot } => {
+                let cell = &self.upvalues[slot];
+                Some(std::mem::replace(&mut *cell.borrow_mut(), Value::unit()))
+            }
             ResolvedVar::Global { .. } => panic!("cannot take global variable from environment"),
         }
     }
 
-    pub fn new_function_scope(parent: &Rc<RefCell<Self>>) -> Self {
-        let root_ref = Rc::clone(&parent.borrow().root);
+    pub fn new_function_scope(parent: &Rc<RefCell<Self>>, captures: &[CaptureSource]) -> Self {
+        let parent_env = parent.borrow();
+        let root_ref = Rc::clone(&parent_env.root);
+        let upvalues = captures
+            .iter()
+            .map(|cap| match cap {
+                CaptureSource::Local(slot) => {
+                    parent_env.get_local_cell(*slot)
+                }
+                CaptureSource::Upvalue(idx) => {
+                    Rc::clone(&parent_env.upvalues[*idx])
+                }
+            })
+            .collect();
+        drop(parent_env);
         Self {
             parent: Some(parent.clone()),
             root: root_ref,
             values: Default::default(),
+            upvalues,
             base_offset: 0,
         }
     }
@@ -218,8 +192,14 @@ impl Environment {
             parent: Some(parent.clone()),
             root: root_ref,
             values: Default::default(),
+            upvalues: Default::default(),
             base_offset,
         }
+    }
+
+    fn get_local_cell(&self, slot: usize) -> Rc<RefCell<Value>> {
+        let local_idx = slot - self.base_offset;
+        Rc::new(RefCell::new(self.values[local_idx].clone()))
     }
 }
 

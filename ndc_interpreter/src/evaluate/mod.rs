@@ -340,6 +340,7 @@ pub(crate) fn evaluate_expression(
             body,
             resolved_name,
             return_type,
+            captures,
             pure,
             ..
         } => {
@@ -347,6 +348,7 @@ pub(crate) fn evaluate_expression(
                 type_signature: type_signature.clone(),
                 body: *body.clone(),
                 return_type: return_type.clone().unwrap_or_else(StaticType::unit),
+                captures: captures.clone(),
                 environment: environment.clone(),
             };
 

@@ -6,7 +6,7 @@ use crate::sequence::Sequence;
 use crate::value::Value;
 use derive_builder::Builder;
 use ndc_lexer::Span;
-use ndc_parser::{ExpressionLocation, ResolvedVar};
+use ndc_parser::{CaptureSource, ExpressionLocation, ResolvedVar};
 pub use ndc_parser::{Parameter, StaticType, TypeSignature};
 use std::cell::{BorrowError, BorrowMutError, RefCell};
 use std::fmt;
@@ -159,6 +159,7 @@ pub enum FunctionBody {
         type_signature: TypeSignature,
         body: ExpressionLocation,
         return_type: StaticType,
+        captures: Vec<CaptureSource>,
         environment: Rc<RefCell<Environment>>,
     },
     NumericUnaryOp {
@@ -237,9 +238,12 @@ impl FunctionBody {
     pub fn call(&self, args: &mut [Value], env: &Rc<RefCell<Environment>>) -> EvaluationResult {
         match self {
             Self::Closure {
-                body, environment, ..
+                body,
+                captures,
+                environment,
+                ..
             } => {
-                let mut local_scope = Environment::new_function_scope(environment);
+                let mut local_scope = Environment::new_function_scope(environment, captures);
 
                 for (position, value) in args.iter().enumerate() {
                     local_scope.set(ResolvedVar::Local { slot: position }, value.clone())

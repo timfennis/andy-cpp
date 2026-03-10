@@ -104,6 +104,7 @@ impl Analyser {
                 type_signature,
                 body,
                 return_type: return_type_slot,
+                captures,
                 ..
             } => {
                 // Pre-register the function before analysing its body so recursive calls can
@@ -125,6 +126,7 @@ impl Analyser {
                 let param_types = self.resolve_parameters_declarative(type_signature, *span)?;
 
                 let return_type = self.analyse(body)?;
+                *captures = self.scope_tree.current_scope_captures();
                 self.scope_tree.destroy_scope();
                 *return_type_slot = Some(return_type);
 
