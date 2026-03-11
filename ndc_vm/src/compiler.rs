@@ -68,8 +68,7 @@ impl Compiler {
                     self.chunk.write(OpCode::GetLocal(slot), span);
                 }
                 Binding::Resolved(ResolvedVar::Upvalue { slot }) => {
-                    let depth = todo!("implement this part later");
-                    self.chunk.write(OpCode::GetUpvalue { slot, depth }, span);
+                    self.chunk.write(OpCode::GetUpvalue(slot), span);
                 }
                 Binding::Resolved(ResolvedVar::Global { slot }) => {
                     self.chunk.write(OpCode::GetGlobal(slot), span);
@@ -131,9 +130,7 @@ impl Compiler {
                             self.chunk.write(OpCode::SetLocal(slot), lv_span);
                         }
                         ResolvedVar::Upvalue { slot } => {
-                            let depth = todo!("implement this part later");
-                            self.chunk
-                                .write(OpCode::SetUpvalue { slot, depth }, lv_span);
+                            self.chunk.write(OpCode::SetUpvalue(slot), lv_span);
                         }
                         ResolvedVar::Global { .. } => {
                             unreachable!("globals are native, never assigned")
@@ -152,6 +149,7 @@ impl Compiler {
                 body,
                 type_signature,
                 return_type,
+                captures,
                 ..
             } => {
                 let num_params = match &type_signature {
@@ -163,12 +161,7 @@ impl Compiler {
                     ..Default::default()
                 };
                 fn_compiler.compile_expr(*body);
-                let is_closure = fn_compiler
-                    .chunk
-                    .iter()
-                    .any(|(_, op, _)| matches!(op, OpCode::GetUpvalue { .. }));
                 fn_compiler.chunk.write(OpCode::Return, span);
-                let captures = fn_compiler.chunk.capture_upvalues();
 
                 let compiled = CompiledFunction {
                     name,
@@ -181,7 +174,7 @@ impl Compiler {
                     .chunk
                     .add_constant(Value::function(Function::Compiled(Rc::new(compiled))));
 
-                if is_closure {
+                if !captures.is_empty() {
                     self.chunk.write(
                         OpCode::Closure {
                             constant_idx: idx,
