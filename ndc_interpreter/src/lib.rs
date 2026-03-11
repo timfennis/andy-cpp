@@ -71,7 +71,6 @@ impl Interpreter {
 
     pub fn disassemble_str(&mut self, input: &str) -> Result<String, InterpreterError> {
         let compiled = self.compile_str(input)?;
-        let globals = self.environment.borrow().get_global_identifiers();
         let mut out = String::new();
         out.push_str(&ndc_vm::disassemble::disassemble(&compiled, Some(input)));
         Ok(out)

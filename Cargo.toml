@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["ndc_macros", "ndc_bin", "ndc_core", "ndc_interpreter", "ndc_vm", "ndc_lsp", "ndc_lexer", "ndc_parser", "ndc_stdlib", "benches", "tests"]
+members = ["ndc_macros", "ndc_bin", "ndc_core", "ndc_interpreter", "ndc_vm", "ndc_lsp", "ndc_lexer", "ndc_parser", "ndc_stdlib", "benches", "tests", "compiler_tests"]
 
 [workspace.package]
 edition = "2024"
