@@ -49,7 +49,7 @@ impl Scope {
     ) -> Self {
         Self {
             parent_idx,
-            creates_environment: true,
+            creates_environment: false,
             base_offset,
             function_scope_idx,
             identifiers: Vec::default(),
@@ -165,10 +165,10 @@ impl ScopeTree {
 
                     match source {
                         CaptureSource::Local(slot) => {
-                            return self.find_type_by_slot(
-                                self.get_parent_function_scope_idx(scope_idx),
-                                *slot,
-                            );
+                            let parent = self.scopes[scope_idx]
+                                .parent_idx
+                                .expect("expected parent scope");
+                            return self.find_type_by_slot(parent, *slot);
                         }
                         CaptureSource::Upvalue(slot) => {
                             scope_idx = self.get_parent_function_scope_idx(scope_idx);
@@ -226,8 +226,8 @@ impl ScopeTree {
         self.current_scope_idx = self.scopes.len();
         let new_scope = Scope::new_iteration_scope(
             Some(old_scope_idx),
-            self.scopes[old_scope_idx].offset(), // todo: @claude is this correct
-            self.scopes.len(),
+            self.scopes[old_scope_idx].offset(),
+            self.scopes[old_scope_idx].function_scope_idx,
         );
         self.scopes.push(new_scope);
         &self.scopes[self.current_scope_idx]
@@ -461,17 +461,19 @@ impl ScopeTree {
 
                 loop {
                     let (_, source) = self.scopes[scope_idx].upvalues[check_slot].clone();
-                    let parent_fn = self.get_parent_function_scope_idx(scope_idx);
 
                     match source {
                         CaptureSource::Local(local_slot) => {
-                            let owning = self.find_scope_owning_slot(parent_fn, local_slot);
+                            let parent = self.scopes[scope_idx]
+                                .parent_idx
+                                .expect("expected parent scope");
+                            let owning = self.find_scope_owning_slot(parent, local_slot);
                             let base = self.scopes[owning].base_offset;
                             self.scopes[owning].identifiers[local_slot - base].1 = new_type;
                             return;
                         }
                         CaptureSource::Upvalue(uv_slot) => {
-                            scope_idx = parent_fn;
+                            scope_idx = self.get_parent_function_scope_idx(scope_idx);
                             check_slot = uv_slot;
                         }
                     }
@@ -642,7 +644,7 @@ mod tests {
     }
 
     #[test]
-    fn iteration_scope_continues_numbering_and_captures_as_upvalue() {
+    fn iteration_scope_continues_numbering_and_is_transparent() {
         let mut tree = empty_scope_tree();
         tree.create_local_binding("x".into(), StaticType::Int);
 
@@ -652,7 +654,7 @@ mod tests {
 
         assert_eq!(
             tree.get_binding_any("x"),
-            Some(ResolvedVar::Upvalue { slot: 0 })
+            Some(ResolvedVar::Local { slot: 0 })
         );
     }
 

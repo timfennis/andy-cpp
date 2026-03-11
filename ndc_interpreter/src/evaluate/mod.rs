@@ -344,11 +344,12 @@ pub(crate) fn evaluate_expression(
             pure,
             ..
         } => {
+            let upvalue_cells = Environment::resolve_captures(environment, captures);
             let mut user_function = FunctionBody::Closure {
                 type_signature: type_signature.clone(),
                 body: *body.clone(),
                 return_type: return_type.clone().unwrap_or_else(StaticType::unit),
-                captures: captures.clone(),
+                upvalue_cells,
                 environment: environment.clone(),
             };
 
