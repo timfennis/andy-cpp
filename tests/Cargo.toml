@@ -5,16 +5,9 @@ version.workspace = true
 
 [dev-dependencies]
 ndc_interpreter.workspace = true
-ndc_lexer.workspace = true
-ndc_parser.workspace = true
-ndc_vm.workspace = true
 ndc_stdlib.workspace = true
 owo-colors.workspace = true
 
 [[test]]
 name = "ndc_tests"
 path = "src/programs.rs"
-
-[[test]]
-name = "compiler"
-path = "src/compiler.rs"
