@@ -1,7 +1,7 @@
-use crate::chunk::{CaptureFrom, OpCode};
+use crate::chunk::OpCode;
 use crate::value::{CompiledFunction, Function};
 use crate::{ClosureFunction, Object, UpvalueCell, Value};
-use ndc_parser::ResolvedVar;
+use ndc_parser::{CaptureSource, ResolvedVar};
 use std::cell::RefCell;
 use std::ops::Deref;
 use std::rc::Rc;
@@ -10,6 +10,12 @@ pub struct Vm {
     stack: Vec<Value>,
     globals: Vec<Value>,
     frames: Vec<CallFrame>,
+    /// All currently-open upvalue cells, keyed by absolute stack slot.
+    /// When a frame exits, cells pointing into that frame's stack region are
+    /// "closed" — the live value is copied out of the stack into the cell so
+    /// the closure can still read/write it after the frame is gone.
+    /// Two closures capturing the same local share one cell via this list.
+    open_upvalues: Vec<Rc<RefCell<UpvalueCell>>>,
     #[cfg(feature = "vm-trace")]
     source: Option<String>,
 }
@@ -41,6 +47,7 @@ impl Vm {
                 ip: 0,
                 frame_pointer: 0,
             }],
+            open_upvalues: Vec::new(),
             #[cfg(feature = "vm-trace")]
             source: None,
         };
@@ -89,7 +96,9 @@ impl Vm {
                 }
                 OpCode::Return => {
                     let ret = self.stack.pop().expect("stack underflow");
-                    self.stack.truncate(frame.frame_pointer - 1);
+                    let frame_pointer = self.frames.last().expect("no frame").frame_pointer;
+                    self.close_upvalues(frame_pointer);
+                    self.stack.truncate(frame_pointer - 1);
                     self.frames.pop().expect("no frame to pop");
                     self.stack.push(ret)
                 }
@@ -176,21 +185,11 @@ impl Vm {
                     self.stack
                         .push(Value::Object(Box::new(Object::Tuple(data))));
                 }
-                OpCode::GetUpvalue { depth, slot } => {
-                    debug_assert_eq!(
-                        depth, 0,
-                        "compiler must have captured the closed over variables"
-                    );
-                    match frame.closure.upvalues[slot].borrow().deref() {
-                        UpvalueCell::Open(slot) => self.stack.push(self.stack[*slot].clone()),
-                        UpvalueCell::Closed(value) => self.stack.push(value.clone()),
-                    }
-                }
-                OpCode::SetUpvalue { depth, slot } => {
-                    debug_assert_eq!(
-                        depth, 0,
-                        "compiler must have captured the closed over variables"
-                    );
+                OpCode::GetUpvalue(slot) => match frame.closure.upvalues[slot].borrow().deref() {
+                    UpvalueCell::Open(slot) => self.stack.push(self.stack[*slot].clone()),
+                    UpvalueCell::Closed(value) => self.stack.push(value.clone()),
+                },
+                OpCode::SetUpvalue(slot) => {
                     let value = self.stack.last().expect("stack underflow").clone();
                     let mut cell = frame.closure.upvalues[slot].borrow_mut();
                     match &mut *cell {
@@ -202,25 +201,30 @@ impl Vm {
                     constant_idx: idx,
                     values,
                 } => {
+                    let frame = self.frames.last().expect("no frame");
                     let Value::Object(obj) = frame.closure.prototype.body.constant(idx) else {
                         panic!("invalid type");
                     };
                     let Object::Function(Function::Compiled(compiled)) = &**obj else {
                         panic!("invalid type 2");
                     };
+                    let compiled = Rc::clone(compiled);
+                    let frame_pointer = frame.frame_pointer;
+                    // Pre-clone parent upvalue Rcs so we can drop the frame borrow
+                    // before calling capture_upvalue (which needs &mut self).
+                    let parent_upvalues: Vec<_> = frame.closure.upvalues.iter().map(Rc::clone).collect();
+                    let upvalues = values
+                        .iter()
+                        .map(|c| match c {
+                            CaptureSource::Local(slot) => {
+                                self.capture_upvalue(frame_pointer + slot)
+                            }
+                            CaptureSource::Upvalue(slot) => Rc::clone(&parent_upvalues[*slot]),
+                        })
+                        .collect();
                     let closure = Value::function(Function::Closure(ClosureFunction {
-                        prototype: Rc::clone(compiled),
-                        upvalues: values
-                            .iter()
-                            .map(|c| match c {
-                                CaptureFrom::Local(slot) => Rc::new(RefCell::new(
-                                    UpvalueCell::Open(frame.frame_pointer + slot),
-                                )),
-                                CaptureFrom::Upvalue(slot) => {
-                                    Rc::clone(&frame.closure.upvalues[*slot])
-                                }
-                            })
-                            .collect(),
+                        prototype: compiled,
+                        upvalues,
                     }));
 
                     self.stack.push(closure);
@@ -233,6 +237,38 @@ impl Vm {
                 // eprintln!("[VM] stack: {:?}", self.stack);
             }
         }
+    }
+
+    /// Returns a shared upvalue cell for the given absolute stack slot, creating
+    /// one if it doesn't exist yet. Two closures capturing the same local get the
+    /// same `Rc` so mutations from either side are immediately visible to both.
+    fn capture_upvalue(&mut self, stack_slot: usize) -> Rc<RefCell<UpvalueCell>> {
+        if let Some(cell) = self
+            .open_upvalues
+            .iter()
+            .find(|c| matches!(*c.borrow(), UpvalueCell::Open(s) if s == stack_slot))
+        {
+            return Rc::clone(cell);
+        }
+        let cell = Rc::new(RefCell::new(UpvalueCell::Open(stack_slot)));
+        self.open_upvalues.push(Rc::clone(&cell));
+        cell
+    }
+
+    /// Closes every open upvalue whose stack slot falls within the region
+    /// starting at `frame_pointer`. Called just before a frame's stack window
+    /// is reclaimed so that closures retaining those cells keep live copies.
+    fn close_upvalues(&mut self, frame_pointer: usize) {
+        for cell in &self.open_upvalues {
+            let mut borrow = cell.borrow_mut();
+            if let UpvalueCell::Open(slot) = *borrow {
+                if slot >= frame_pointer {
+                    *borrow = UpvalueCell::Closed(self.stack[slot].clone());
+                }
+            }
+        }
+        self.open_upvalues
+            .retain(|c| matches!(*c.borrow(), UpvalueCell::Open(_)));
     }
 
     fn dispatch_call(&mut self, func: Function, args: usize) {

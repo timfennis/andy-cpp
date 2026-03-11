@@ -1,5 +1,6 @@
 use crate::Value;
 use ndc_lexer::Span;
+use ndc_parser::CaptureSource;
 use std::rc::Rc;
 
 /// A single bytecode instruction.
@@ -21,11 +22,11 @@ pub enum OpCode {
     /// Reads local variable at the given slot and pushes it on the stack
     GetLocal(usize),
     /// Read a value from a parent scope
-    GetUpvalue { slot: usize, depth: usize },
+    GetUpvalue(usize),
     /// Pops the top of the stack and stores it in the given local slot
     SetLocal(usize),
     /// Pops the top of the stack and stores it in the given upvalue slot
-    SetUpvalue { slot: usize, depth: usize },
+    SetUpvalue(usize),
     /// Reads global variable at the given slot and pushes it on the stack
     GetGlobal(usize),
     /// Create a list using n arguments on the stack
@@ -35,7 +36,7 @@ pub enum OpCode {
     /// Create a closure by capturing some values
     Closure {
         constant_idx: usize,
-        values: Rc<[CaptureFrom]>,
+        values: Rc<[CaptureSource]>,
     },
     /// Stop execution
     Halt,
@@ -55,8 +56,8 @@ impl std::fmt::Debug for OpCode {
             Self::GetLocal(n) => write!(f, "GetLocal({n})"),
             Self::SetLocal(n) => write!(f, "SetLocal({n})"),
             Self::GetGlobal(n) => write!(f, "GetGlobal({n})"),
-            Self::GetUpvalue { slot, depth } => write!(f, "GetUpvalue({slot}, {depth})"),
-            Self::SetUpvalue { slot, depth } => write!(f, "SetUpvalue({slot}, {depth})"),
+            Self::GetUpvalue(n) => write!(f, "GetUpvalue({n})"),
+            Self::SetUpvalue(n) => write!(f, "SetUpvalue({n})"),
             Self::MakeList(n) => write!(f, "MakeList({n})"),
             Self::MakeTuple(n) => write!(f, "MakeTuple({n})"),
             Self::Closure {
@@ -66,8 +67,8 @@ impl std::fmt::Debug for OpCode {
                 write!(f, "Closure({constant_idx}")?;
                 for cap in values.iter() {
                     match cap {
-                        CaptureFrom::Local(n) => write!(f, ", local({n})")?,
-                        CaptureFrom::Upvalue(n) => write!(f, ", upvalue({n})")?,
+                        CaptureSource::Local(n) => write!(f, ", local({n})")?,
+                        CaptureSource::Upvalue(n) => write!(f, ", upvalue({n})")?,
                     }
                 }
                 write!(f, ")")
@@ -76,12 +77,6 @@ impl std::fmt::Debug for OpCode {
             Self::Return => write!(f, "Return"),
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CaptureFrom {
-    Local(usize),
-    Upvalue(usize),
 }
 
 /// A chunk of bytecode along with the constants it references.
@@ -121,38 +116,6 @@ impl Chunk {
                 panic!("expected to backpatch JumpIfFalse")
             }
         }
-    }
-
-    pub fn capture_upvalues(&mut self) -> Vec<CaptureFrom> {
-        let mut upvalues = vec![];
-        for op in &mut self.code {
-            let (slot, depth) = match op {
-                OpCode::GetUpvalue { slot, depth } | OpCode::SetUpvalue { slot, depth } => {
-                    (slot, depth)
-                }
-                _ => continue,
-            };
-
-            // Create a capture
-            let capture = if *depth == 1 {
-                CaptureFrom::Local(*slot)
-            } else {
-                CaptureFrom::Upvalue(*slot)
-            };
-
-            // If an equal capture already exists we just use that index instead, otherwise we add it to the capture list
-            let idx = upvalues
-                .iter()
-                .position(|c| c == &capture)
-                .unwrap_or_else(|| {
-                    upvalues.push(capture);
-                    upvalues.len() - 1
-                });
-
-            *depth = 0;
-            *slot = idx;
-        }
-        upvalues
     }
 
     pub fn is_empty(&self) -> bool {
