@@ -191,11 +191,10 @@ impl Compiler {
                         self.chunk.write(OpCode::SetLocal(slot), span);
                         self.max_local = self.max_local.max(slot + 1);
                     }
-                    Some(ResolvedVar::Upvalue { .. }) => {
-                        todo!("?")
-                    }
-                    Some(ResolvedVar::Global { .. }) => {
-                        unreachable!("globals are native, never compiled")
+                    Some(ResolvedVar::Upvalue { .. } | ResolvedVar::Global { .. }) => {
+                        unreachable!(
+                            "the analyser never assigns a declaration to a non-local binding"
+                        )
                     }
                     None => {}
                 }
