@@ -159,7 +159,7 @@ pub enum FunctionBody {
         type_signature: TypeSignature,
         body: ExpressionLocation,
         return_type: StaticType,
-        captures: Vec<CaptureSource>,
+        upvalue_cells: Vec<Rc<RefCell<Value>>>,
         environment: Rc<RefCell<Environment>>,
     },
     NumericUnaryOp {
@@ -239,11 +239,12 @@ impl FunctionBody {
         match self {
             Self::Closure {
                 body,
-                captures,
+                upvalue_cells,
                 environment,
                 ..
             } => {
-                let mut local_scope = Environment::new_function_scope(environment, captures);
+                let mut local_scope =
+                    Environment::new_function_scope_with_cells(environment, upvalue_cells);
 
                 for (position, value) in args.iter().enumerate() {
                     local_scope.set(ResolvedVar::Local { slot: position }, value.clone())

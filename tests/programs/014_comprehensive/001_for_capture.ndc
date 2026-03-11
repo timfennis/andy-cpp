@@ -1,0 +1,28 @@
+// Normal for loop
+{
+    let fns = [];
+    for ii in 0..10 {
+        fns.push(fn() => ii);
+    }
+
+    let out = [];
+    for f in fns {
+        out.push(f());
+    }
+
+    assert_eq(out, list(0..10));
+}
+
+// Comprehension
+{
+    let fns = [fn() => i for i in 0..10];
+    let out = [f() for f in fns];
+    assert_eq(out, list(0..10));
+}
+
+// Double loop
+{
+    let fns = [fn() => i + j for i in 0..10, j in 0..10];
+    let out = [f() for f in fns];
+    assert_eq(out, [i + j for i in 0..10, j in 0..10]);
+}
