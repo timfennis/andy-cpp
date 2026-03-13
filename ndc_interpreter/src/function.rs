@@ -13,6 +13,14 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
+/// Wraps a VM function value for round-tripping through interpreter values.
+/// `identity` is the raw pointer of the `Rc<CompiledFunction>` prototype,
+/// used to implement stable equality for VM-compiled functions.
+pub(crate) struct VmFunctionWrapper {
+    pub(crate) vm_value: ndc_vm::Value,
+    pub(crate) identity: Option<usize>,
+}
+
 /// Callable is a wrapper around a `OverloadedFunction` pointer and the environment to make it
 /// easy to have an executable function as a method signature in the standard library
 pub struct Callable<'a> {

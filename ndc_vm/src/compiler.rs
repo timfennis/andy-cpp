@@ -13,6 +13,7 @@ pub struct Compiler {
     chunk: Chunk,
     max_local: usize,
     loop_stack: Vec<LoopContext>,
+    allow_return: bool,
 }
 
 impl Compiler {
@@ -207,6 +208,9 @@ impl Compiler {
             }
             Expression::Map { .. } => todo!("map literal"),
             Expression::Return { value } => {
+                if !self.allow_return {
+                    return Err(CompileError::return_outside_function(span));
+                }
                 self.compile_expr(*value)?;
                 self.chunk.write(OpCode::Return, span);
             }
@@ -370,6 +374,7 @@ impl Compiler {
         };
         let mut fn_compiler = Self {
             max_local: num_params,
+            allow_return: true,
             ..Default::default()
         };
         fn_compiler.compile_expr(body)?;
@@ -487,6 +492,13 @@ impl CompileError {
     fn unexpected_continue(span: Span) -> Self {
         Self {
             text: "unexpected continue statement outside of loop".to_string(),
+            span,
+        }
+    }
+
+    fn return_outside_function(span: Span) -> Self {
+        Self {
+            text: "unexpected return statement outside of function body".to_string(),
             span,
         }
     }

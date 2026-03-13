@@ -9,7 +9,7 @@ use itertools::Itertools;
 use num::BigInt;
 
 use crate::compare::FallibleOrd;
-use crate::function::{Function, StaticType};
+use crate::function::{Function, FunctionBody, StaticType, VmFunctionWrapper};
 use crate::hash_map::DefaultHasher;
 use crate::int::Int;
 use crate::num::{Number, NumberToFloatError, NumberToUsizeError};
@@ -258,7 +258,26 @@ impl PartialEq for Value {
             (Self::Number(n1), Self::Number(n2)) => n1.eq(n2),
             (Self::Bool(b1), Self::Bool(b2)) => b1.eq(b2),
             (Self::Sequence(s1), Self::Sequence(s2)) => s1.eq(s2),
-            (Self::Function(f1), Self::Function(f2)) => Rc::as_ptr(f1) == Rc::as_ptr(f2),
+            (Self::Function(f1), Self::Function(f2)) => {
+                // For VM-bridged (Opaque) functions, compare by prototype identity.
+                if let (
+                    FunctionBody::Opaque { data: d1, .. },
+                    FunctionBody::Opaque { data: d2, .. },
+                ) = (f1.body(), f2.body())
+                {
+                    if let (Some(w1), Some(w2)) = (
+                        d1.downcast_ref::<VmFunctionWrapper>(),
+                        d2.downcast_ref::<VmFunctionWrapper>(),
+                    ) {
+                        return match (w1.identity, w2.identity) {
+                            (Some(id1), Some(id2)) => id1 == id2,
+                            _ => false,
+                        };
+                    }
+                }
+                // Interpreter-native functions: use Rc pointer identity.
+                Rc::as_ptr(f1) == Rc::as_ptr(f2)
+            }
             _ => false,
         }
     }

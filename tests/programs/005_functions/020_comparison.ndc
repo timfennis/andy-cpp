@@ -1,3 +1,4 @@
+// vm-ready
 fn foo() { 5 }
 fn bar() { 6 }
 assert_eq(foo == bar, false);
