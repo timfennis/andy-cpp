@@ -3,8 +3,8 @@ use crate::value::{CompiledFunction, Function};
 use crate::{Object, Value};
 use ndc_lexer::Span;
 use ndc_parser::{
-    Binding, Expression, ExpressionLocation, LogicalOperator, Lvalue, ResolvedVar, StaticType,
-    TypeSignature,
+    Binding, CaptureSource, Expression, ExpressionLocation, LogicalOperator, Lvalue, ResolvedVar,
+    StaticType, TypeSignature,
 };
 use std::rc::Rc;
 
@@ -152,116 +152,34 @@ impl Compiler {
                 captures,
                 ..
             } => {
-                let num_params = match &type_signature {
-                    TypeSignature::Exact(params) => params.len(),
-                    TypeSignature::Variadic => 0,
-                };
-                let mut fn_compiler = Compiler {
-                    max_local: num_params,
-                    ..Default::default()
-                };
-                fn_compiler.compile_expr(*body);
-                fn_compiler.chunk.write(OpCode::Return, span);
-
-                let compiled = CompiledFunction {
+                self.compile_function_decl(
                     name,
+                    resolved_name,
+                    *body,
                     type_signature,
-                    body: fn_compiler.chunk,
-                    return_type: return_type.unwrap_or_default(),
-                    num_locals: fn_compiler.max_local,
-                };
-                let idx = self
-                    .chunk
-                    .add_constant(Value::function(Function::Compiled(Rc::new(compiled))));
-
-                if !captures.is_empty() {
-                    self.chunk.write(
-                        OpCode::Closure {
-                            constant_idx: idx,
-                            values: captures.into(),
-                        },
-                        span,
-                    );
-                } else {
-                    self.chunk.write(OpCode::Constant(idx), span);
-                }
-
-                match resolved_name {
-                    Some(ResolvedVar::Local { slot }) => {
-                        self.chunk.write(OpCode::SetLocal(slot), span);
-                        self.max_local = self.max_local.max(slot + 1);
-                    }
-                    Some(ResolvedVar::Upvalue { .. } | ResolvedVar::Global { .. }) => {
-                        unreachable!(
-                            "the analyser never assigns a declaration to a non-local binding"
-                        )
-                    }
-                    None => {}
-                }
+                    return_type,
+                    captures,
+                    span,
+                );
             }
             Expression::Grouping(statements) => {
                 self.compile_expr(*statements);
             }
             Expression::Block { statements } => {
-                if statements.is_empty() {
-                    let idx = self.chunk.add_constant(Value::unit());
-                    self.chunk.write(OpCode::Constant(idx), span);
-                } else {
-                    let last = statements.len() - 1;
-                    for (i, stmt) in statements.into_iter().enumerate() {
-                        let is_block_result = i == last && produces_value(&stmt.expression);
-                        self.compile_expr(stmt);
-                        if i == last && !is_block_result {
-                            let idx = self.chunk.add_constant(Value::unit());
-                            self.chunk.write(OpCode::Constant(idx), span);
-                        }
-                    }
-                }
+                self.compile_block(statements, span);
             }
             Expression::If {
                 condition,
                 on_true,
                 on_false,
             } => {
-                let condition_span = condition.span;
-                self.compile_expr(*condition);
-                let conditional_jump_idx = self.chunk.write(OpCode::JumpIfFalse(0), condition_span);
-                self.chunk.write(OpCode::Pop, span);
-                self.compile_expr(*on_true);
-                // If there is an else branch we need to compile it and backpatch the jump instruction to find it
-                if let Some(on_false) = on_false {
-                    // In the true branch still we add a jump instruction at the end
-                    let jump_to_end_op = self.chunk.write(OpCode::Jump(0), span);
-                    // Change the earlier jump to jump over the jump (YO DAWG)
-                    self.chunk.patch_jump(conditional_jump_idx);
-                    self.chunk.write(OpCode::Pop, span);
-                    self.compile_expr(*on_false);
-                    self.chunk.patch_jump(jump_to_end_op);
-                } else {
-                    self.chunk.patch_jump(conditional_jump_idx);
-                    // If we're jumping over true we still need to pop the condition from the stack
-                    self.chunk.write(OpCode::Pop, span);
-                }
+                self.compile_if(*condition, *on_true, on_false.map(|e| *e), span);
             }
             Expression::While {
                 expression: condition,
                 loop_body,
             } => {
-                let condition_span = condition.span;
-                let loop_start = self.chunk.len();
-                self.compile_expr(*condition);
-                let conditional_jump_idx = self.chunk.write(OpCode::JumpIfFalse(0), condition_span);
-                self.chunk.write(OpCode::Pop, span);
-                self.compile_expr(*loop_body);
-                self.chunk.write(
-                    OpCode::Jump(
-                        -isize::try_from(self.chunk.len() - loop_start + 1)
-                            .expect("loop too large to jump back"),
-                    ),
-                    span,
-                );
-                self.chunk.patch_jump(conditional_jump_idx);
-                self.chunk.write(OpCode::Pop, span);
+                self.compile_while(*condition, *loop_body, span);
             }
             Expression::For { .. } => todo!("for loop"),
             Expression::Call {
@@ -302,6 +220,121 @@ impl Compiler {
             Expression::Continue => todo!("continue"),
             Expression::RangeInclusive { .. } => todo!("inclusive range"),
             Expression::RangeExclusive { .. } => todo!("exclusive range"),
+        }
+    }
+    fn compile_block(&mut self, statements: Vec<ExpressionLocation>, span: Span) {
+        if statements.is_empty() {
+            let idx = self.chunk.add_constant(Value::unit());
+            self.chunk.write(OpCode::Constant(idx), span);
+        } else {
+            let last = statements.len() - 1;
+            for (i, stmt) in statements.into_iter().enumerate() {
+                let is_last_expr = i == last && produces_value(&stmt.expression);
+                self.compile_expr(stmt);
+                if i == last && !is_last_expr {
+                    let idx = self.chunk.add_constant(Value::unit());
+                    self.chunk.write(OpCode::Constant(idx), span);
+                }
+            }
+        }
+    }
+
+    fn compile_if(
+        &mut self,
+        condition: ExpressionLocation,
+        on_true: ExpressionLocation,
+        on_false: Option<ExpressionLocation>,
+        span: Span,
+    ) {
+        let condition_span = condition.span;
+        self.compile_expr(condition);
+        let conditional_jump_idx = self.chunk.write(OpCode::JumpIfFalse(0), condition_span);
+        self.chunk.write(OpCode::Pop, span);
+        self.compile_expr(on_true);
+        if let Some(on_false) = on_false {
+            // In the true branch, jump over the false branch
+            let jump_to_end = self.chunk.write(OpCode::Jump(0), span);
+            // The earlier JumpIfFalse lands here (start of false branch)
+            self.chunk.patch_jump(conditional_jump_idx);
+            self.chunk.write(OpCode::Pop, span);
+            self.compile_expr(on_false);
+            self.chunk.patch_jump(jump_to_end);
+        } else {
+            self.chunk.patch_jump(conditional_jump_idx);
+            self.chunk.write(OpCode::Pop, span);
+        }
+    }
+
+    fn compile_while(
+        &mut self,
+        condition: ExpressionLocation,
+        loop_body: ExpressionLocation,
+        span: Span,
+    ) {
+        let condition_span = condition.span;
+        let loop_start = self.chunk.len();
+        self.compile_expr(condition);
+        let conditional_jump_idx = self.chunk.write(OpCode::JumpIfFalse(0), condition_span);
+        self.chunk.write(OpCode::Pop, span);
+        self.compile_expr(loop_body);
+        self.chunk.write_jump_back(loop_start, span);
+        self.chunk.patch_jump(conditional_jump_idx);
+        self.chunk.write(OpCode::Pop, span);
+    }
+
+    fn compile_function_decl(
+        &mut self,
+        name: Option<String>,
+        resolved_name: Option<ResolvedVar>,
+        body: ExpressionLocation,
+        type_signature: TypeSignature,
+        return_type: Option<StaticType>,
+        captures: Vec<CaptureSource>,
+        span: Span,
+    ) {
+        let num_params = match &type_signature {
+            TypeSignature::Exact(params) => params.len(),
+            TypeSignature::Variadic => 0,
+        };
+        let mut fn_compiler = Compiler {
+            max_local: num_params,
+            ..Default::default()
+        };
+        fn_compiler.compile_expr(body);
+        fn_compiler.chunk.write(OpCode::Return, span);
+
+        let compiled = CompiledFunction {
+            name,
+            type_signature,
+            body: fn_compiler.chunk,
+            return_type: return_type.unwrap_or_default(),
+            num_locals: fn_compiler.max_local,
+        };
+        let idx = self
+            .chunk
+            .add_constant(Value::function(Function::Compiled(Rc::new(compiled))));
+
+        if !captures.is_empty() {
+            self.chunk.write(
+                OpCode::Closure {
+                    constant_idx: idx,
+                    values: captures.into(),
+                },
+                span,
+            );
+        } else {
+            self.chunk.write(OpCode::Constant(idx), span);
+        }
+
+        match resolved_name {
+            Some(ResolvedVar::Local { slot }) => {
+                self.chunk.write(OpCode::SetLocal(slot), span);
+                self.max_local = self.max_local.max(slot + 1);
+            }
+            Some(ResolvedVar::Upvalue { .. } | ResolvedVar::Global { .. }) => {
+                unreachable!("the analyser never assigns a declaration to a non-local binding")
+            }
+            None => {}
         }
     }
 }

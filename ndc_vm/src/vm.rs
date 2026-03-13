@@ -123,13 +123,13 @@ impl Vm {
                 OpCode::JumpIfFalse(offset) => {
                     let top = self.stack.last().expect("stack underflow");
                     if let Value::Bool(false) = top {
-                        frame.ip = frame.ip.wrapping_add(offset);
+                        frame.ip = frame.ip.wrapping_add_signed(offset);
                     }
                 }
                 OpCode::JumpIfTrue(offset) => {
                     let top = self.stack.last().expect("stack underflow");
                     if let Value::Bool(true) = top {
-                        frame.ip = frame.ip.wrapping_add(offset);
+                        frame.ip = frame.ip.wrapping_add_signed(offset);
                     }
                 }
                 OpCode::Jump(offset) => {

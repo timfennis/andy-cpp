@@ -14,9 +14,9 @@ pub enum OpCode {
     /// Always jumps
     Jump(isize),
     /// Conditionally jumps if the top of the stack is true
-    JumpIfTrue(usize),
+    JumpIfTrue(isize),
     /// Conditionally jumps if the top of the stack is false
-    JumpIfFalse(usize),
+    JumpIfFalse(isize),
     /// Pushes a constant value on the stack
     Constant(usize),
     /// Reads local variable at the given slot and pushes it on the stack
@@ -104,18 +104,17 @@ impl Chunk {
     }
 
     pub fn patch_jump(&mut self, op_idx: usize) {
-        let len = self.code.len();
+        let offset = isize::try_from(self.code.len() - op_idx - 1).expect("jump too large to patch");
         match self.code.get_mut(op_idx) {
-            Some(OpCode::JumpIfFalse(offset) | OpCode::JumpIfTrue(offset)) => {
-                *offset = len - op_idx - 1
-            }
-            Some(OpCode::Jump(offset)) => {
-                *offset = isize::try_from(len - op_idx - 1).expect("usize underflow")
-            }
-            _ => {
-                panic!("expected to backpatch JumpIfFalse")
-            }
+            Some(OpCode::JumpIfFalse(n) | OpCode::JumpIfTrue(n) | OpCode::Jump(n)) => *n = offset,
+            _ => panic!("expected a patchable jump instruction at index {op_idx}"),
         }
+    }
+
+    /// Emits a `Jump` that goes back to `target` (a previously recorded chunk offset).
+    pub fn write_jump_back(&mut self, target: usize, span: Span) -> usize {
+        let offset = -isize::try_from(self.len() - target + 1).expect("loop too large to jump back");
+        self.write(OpCode::Jump(offset), span)
     }
 
     pub fn is_empty(&self) -> bool {
