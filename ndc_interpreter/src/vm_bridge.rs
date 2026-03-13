@@ -6,7 +6,7 @@ use ndc_core::num::Number;
 use ndc_vm::value::{Function as VmFunction, NativeFunction, Object as VmObject, Value as VmValue};
 
 use crate::environment::Environment;
-use crate::function::{Function as InterpFunction, FunctionBody, FunctionBuilder};
+use crate::function::{Function as InterpFunction, FunctionBody, FunctionBuilder, VmFunctionWrapper};
 use crate::sequence::Sequence;
 use crate::value::Value as InterpValue;
 
@@ -62,12 +62,12 @@ pub fn vm_to_interp(value: &VmValue) -> InterpValue {
             ))),
             VmObject::Function(f) => {
                 let static_type = f.static_type();
+                let identity = f.prototype().map(|p| Rc::as_ptr(p) as usize);
+                let vm_value = VmValue::Object(Box::new(VmObject::Function(f.clone())));
+                let data: Rc<dyn std::any::Any> = Rc::new(VmFunctionWrapper { vm_value, identity });
                 InterpValue::function(
                     FunctionBuilder::default()
-                        .body(FunctionBody::Opaque {
-                            data: Rc::new(VmValue::Object(Box::new(VmObject::Function(f.clone())))),
-                            static_type,
-                        })
+                        .body(FunctionBody::Opaque { data, static_type })
                         .build()
                         .expect("must succeed"),
                 )
@@ -120,8 +120,8 @@ pub fn interp_to_vm(value: InterpValue) -> VmValue {
         }
         InterpValue::Function(f) => {
             if let FunctionBody::Opaque { data, .. } = f.body() {
-                if let Some(vm_val) = data.downcast_ref::<VmValue>() {
-                    return vm_val.clone();
+                if let Some(wrapper) = data.downcast_ref::<VmFunctionWrapper>() {
+                    return wrapper.vm_value.clone();
                 }
             }
             panic!("cannot convert interpreter function to vm value")
