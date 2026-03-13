@@ -1,2 +1,3 @@
+// vm-ready
 let l = [1,2,3];
 assert_eq(l[-1], 3);

@@ -1,2 +1,3 @@
+// vm-ready
 // expect-error: Unexpected token ','
 [x for x in 0..10,,,,,,y in 0..10]

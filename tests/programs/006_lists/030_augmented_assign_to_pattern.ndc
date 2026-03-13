@@ -1,3 +1,4 @@
+// vm-ready
 // expect-error: This lvalue is required to be a single identifier
 let x, y = 0, 0;
 x, y += 1; // ERROR

@@ -12,16 +12,17 @@ use std::rc::Rc;
 pub struct Compiler {
     chunk: Chunk,
     max_local: usize,
+    loop_stack: Vec<LoopContext>,
 }
 
 impl Compiler {
     pub fn compile(
         expressions: impl Iterator<Item = ExpressionLocation>,
     ) -> Result<CompiledFunction, CompileError> {
-        let mut compiler = Compiler::default();
+        let mut compiler = Self::default();
 
         for expr_loc in expressions {
-            compiler.compile_expr(expr_loc);
+            compiler.compile_expr(expr_loc)?;
         }
 
         compiler.chunk.write(OpCode::Halt, Span::new(0, 0));
@@ -35,7 +36,10 @@ impl Compiler {
         })
     }
 
-    fn compile_expr(&mut self, expression_location: ExpressionLocation) {
+    fn compile_expr(
+        &mut self,
+        expression_location: ExpressionLocation,
+    ) -> Result<(), CompileError> {
         let ExpressionLocation { expression, span } = expression_location;
         match expression {
             Expression::BoolLiteral(b) => {
@@ -82,7 +86,7 @@ impl Compiler {
             },
             Expression::Statement(stm) => {
                 let needs_pop = produces_value(&stm.expression);
-                self.compile_expr(*stm);
+                self.compile_expr(*stm)?;
                 if needs_pop {
                     self.chunk.write(OpCode::Pop, span);
                 }
@@ -93,24 +97,24 @@ impl Compiler {
                 operator,
             } => {
                 let left_span = left.span;
-                self.compile_expr(*left);
+                self.compile_expr(*left)?;
                 match operator {
                     LogicalOperator::And => {
                         let end_jump = self.chunk.write(OpCode::JumpIfFalse(0), left_span);
                         self.chunk.write(OpCode::Pop, span);
-                        self.compile_expr(*right);
+                        self.compile_expr(*right)?;
                         self.chunk.patch_jump(end_jump);
                     }
                     LogicalOperator::Or => {
                         let end_jump = self.chunk.write(OpCode::JumpIfTrue(0), left_span);
                         self.chunk.write(OpCode::Pop, span);
-                        self.compile_expr(*right);
+                        self.compile_expr(*right)?;
                         self.chunk.patch_jump(end_jump);
                     }
                 }
             }
             Expression::VariableDeclaration { value, l_value } => {
-                self.compile_expr(*value);
+                self.compile_expr(*value)?;
                 let slot = extract_lvalue_slot(&l_value);
                 self.chunk.write(OpCode::SetLocal(slot), span);
                 self.max_local = self.max_local.max(slot + 1);
@@ -119,7 +123,7 @@ impl Compiler {
                 l_value,
                 r_value: value,
             } => {
-                self.compile_expr(*value);
+                self.compile_expr(*value)?;
                 match l_value {
                     Lvalue::Identifier {
                         resolved,
@@ -160,26 +164,26 @@ impl Compiler {
                     return_type,
                     captures,
                     span,
-                );
+                )?;
             }
             Expression::Grouping(statements) => {
-                self.compile_expr(*statements);
+                self.compile_expr(*statements)?;
             }
             Expression::Block { statements } => {
-                self.compile_block(statements, span);
+                self.compile_block(statements, span)?;
             }
             Expression::If {
                 condition,
                 on_true,
                 on_false,
             } => {
-                self.compile_if(*condition, *on_true, on_false.map(|e| *e), span);
+                self.compile_if(*condition, *on_true, on_false.map(|e| *e), span)?;
             }
             Expression::While {
                 expression: condition,
                 loop_body,
             } => {
-                self.compile_while(*condition, *loop_body, span);
+                self.compile_while(*condition, *loop_body, span)?;
             }
             Expression::For { .. } => todo!("for loop"),
             Expression::Call {
@@ -187,11 +191,11 @@ impl Compiler {
                 arguments,
             } => {
                 let function_span = function.span;
-                self.compile_expr(*function);
+                self.compile_expr(*function)?;
 
                 let argument_count = arguments.len();
                 for argument in arguments {
-                    self.compile_expr(argument);
+                    self.compile_expr(argument)?;
                 }
 
                 self.chunk
@@ -200,29 +204,48 @@ impl Compiler {
             Expression::Tuple { values } => {
                 let size = values.len();
                 for expression in values {
-                    self.compile_expr(expression);
+                    self.compile_expr(expression)?;
                 }
                 self.chunk.write(OpCode::MakeTuple(size), span);
             }
             Expression::List { values } => {
                 let size = values.len();
                 for expression in values {
-                    self.compile_expr(expression);
+                    self.compile_expr(expression)?;
                 }
                 self.chunk.write(OpCode::MakeList(size), span);
             }
             Expression::Map { .. } => todo!("map literal"),
             Expression::Return { value } => {
-                self.compile_expr(*value);
+                self.compile_expr(*value)?;
                 self.chunk.write(OpCode::Return, span);
             }
-            Expression::Break => todo!("break"),
-            Expression::Continue => todo!("continue"),
+            Expression::Break => {
+                let idx = self.chunk.write(OpCode::Jump(0), span); // will be backpatched
+                self.current_loop_context_mut()
+                    .ok_or(CompileError::unexpected_break(span))?
+                    .break_instructions
+                    .push(idx);
+            }
+            Expression::Continue => {
+                self.chunk.write_jump_back(
+                    self.current_loop_context()
+                        .ok_or(CompileError::unexpected_continue(span))?
+                        .start,
+                    span,
+                );
+            }
             Expression::RangeInclusive { .. } => todo!("inclusive range"),
             Expression::RangeExclusive { .. } => todo!("exclusive range"),
         }
+
+        Ok(())
     }
-    fn compile_block(&mut self, statements: Vec<ExpressionLocation>, span: Span) {
+    fn compile_block(
+        &mut self,
+        statements: Vec<ExpressionLocation>,
+        span: Span,
+    ) -> Result<(), CompileError> {
         if statements.is_empty() {
             let idx = self.chunk.add_constant(Value::unit());
             self.chunk.write(OpCode::Constant(idx), span);
@@ -230,13 +253,15 @@ impl Compiler {
             let last = statements.len() - 1;
             for (i, stmt) in statements.into_iter().enumerate() {
                 let is_last_expr = i == last && produces_value(&stmt.expression);
-                self.compile_expr(stmt);
+                self.compile_expr(stmt)?;
                 if i == last && !is_last_expr {
                     let idx = self.chunk.add_constant(Value::unit());
                     self.chunk.write(OpCode::Constant(idx), span);
                 }
             }
         }
+
+        Ok(())
     }
 
     fn compile_if(
@@ -245,24 +270,26 @@ impl Compiler {
         on_true: ExpressionLocation,
         on_false: Option<ExpressionLocation>,
         span: Span,
-    ) {
+    ) -> Result<(), CompileError> {
         let condition_span = condition.span;
-        self.compile_expr(condition);
+        self.compile_expr(condition)?;
         let conditional_jump_idx = self.chunk.write(OpCode::JumpIfFalse(0), condition_span);
         self.chunk.write(OpCode::Pop, span);
-        self.compile_expr(on_true);
+        self.compile_expr(on_true)?;
         if let Some(on_false) = on_false {
             // In the true branch, jump over the false branch
             let jump_to_end = self.chunk.write(OpCode::Jump(0), span);
             // The earlier JumpIfFalse lands here (start of false branch)
             self.chunk.patch_jump(conditional_jump_idx);
             self.chunk.write(OpCode::Pop, span);
-            self.compile_expr(on_false);
+            self.compile_expr(on_false)?;
             self.chunk.patch_jump(jump_to_end);
         } else {
             self.chunk.patch_jump(conditional_jump_idx);
             self.chunk.write(OpCode::Pop, span);
         }
+
+        Ok(())
     }
 
     fn compile_while(
@@ -270,18 +297,35 @@ impl Compiler {
         condition: ExpressionLocation,
         loop_body: ExpressionLocation,
         span: Span,
-    ) {
+    ) -> Result<(), CompileError> {
         let condition_span = condition.span;
-        let loop_start = self.chunk.len();
-        self.compile_expr(condition);
+        self.new_loop_context();
+        self.compile_expr(condition)?;
         let conditional_jump_idx = self.chunk.write(OpCode::JumpIfFalse(0), condition_span);
         self.chunk.write(OpCode::Pop, span);
-        self.compile_expr(loop_body);
-        self.chunk.write_jump_back(loop_start, span);
+        self.compile_expr(loop_body)?;
+        self.chunk.write_jump_back(
+            self.current_loop_context()
+                .expect("guaranteed to be in loop")
+                .start,
+            span,
+        );
         self.chunk.patch_jump(conditional_jump_idx);
         self.chunk.write(OpCode::Pop, span);
+        let break_instructions = std::mem::take(
+            &mut self
+                .current_loop_context_mut()
+                .expect("guaranteed to be in loop")
+                .break_instructions,
+        );
+        for instruction in break_instructions {
+            self.chunk.patch_jump(instruction)
+        }
+        self.end_loop_context();
+        Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn compile_function_decl(
         &mut self,
         name: Option<String>,
@@ -291,16 +335,16 @@ impl Compiler {
         return_type: Option<StaticType>,
         captures: Vec<CaptureSource>,
         span: Span,
-    ) {
+    ) -> Result<(), CompileError> {
         let num_params = match &type_signature {
             TypeSignature::Exact(params) => params.len(),
             TypeSignature::Variadic => 0,
         };
-        let mut fn_compiler = Compiler {
+        let mut fn_compiler = Self {
             max_local: num_params,
             ..Default::default()
         };
-        fn_compiler.compile_expr(body);
+        fn_compiler.compile_expr(body)?;
         fn_compiler.chunk.write(OpCode::Return, span);
 
         let compiled = CompiledFunction {
@@ -336,7 +380,35 @@ impl Compiler {
             }
             None => {}
         }
+
+        Ok(())
     }
+
+    fn new_loop_context(&mut self) {
+        self.loop_stack.push(LoopContext {
+            start: self.chunk.len(),
+            break_instructions: Vec::default(),
+        });
+    }
+
+    fn current_loop_context(&self) -> Option<&LoopContext> {
+        self.loop_stack.last()
+    }
+
+    fn current_loop_context_mut(&mut self) -> Option<&mut LoopContext> {
+        self.loop_stack.last_mut()
+    }
+
+    fn end_loop_context(&mut self) {
+        self.loop_stack
+            .pop()
+            .expect("expected there to be a loop context to pop");
+    }
+}
+
+struct LoopContext {
+    start: usize,
+    break_instructions: Vec<usize>,
 }
 
 fn produces_value(expr: &Expression) -> bool {
@@ -362,4 +434,27 @@ fn extract_lvalue_slot(lvalue: &Lvalue) -> usize {
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum CompileError {}
+#[error("{text}")]
+pub struct CompileError {
+    text: String,
+    span: Span,
+}
+
+impl CompileError {
+    pub fn unexpected_break(span: Span) -> Self {
+        Self {
+            text: "unexpected break statement outside of loop".to_string(),
+            span,
+        }
+    }
+    pub fn unexpected_continue(span: Span) -> Self {
+        Self {
+            text: "unexpected continue statement outside of loop".to_string(),
+            span,
+        }
+    }
+
+    pub fn span(&self) -> Span {
+        self.span
+    }
+}

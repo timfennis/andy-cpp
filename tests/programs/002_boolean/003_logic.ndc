@@ -1,3 +1,4 @@
+// vm-ready
 assert_eq(true and true, true); // true
 assert_eq(true and false, false); // false
 assert_eq(false and true, false); // false

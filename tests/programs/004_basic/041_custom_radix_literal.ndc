@@ -1,3 +1,4 @@
+// vm-ready
 assert(32rmmmm == 744150);
 assert(36r10 == 36);
 assert(36rZ == 35);

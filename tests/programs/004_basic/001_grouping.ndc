@@ -1,3 +1,4 @@
+// vm-ready
 assert_eq((5 + 3) * 10, 80);
 assert_eq(5 + 3 * 10, 35);
 assert_eq(3 * 10 + 5, 35);

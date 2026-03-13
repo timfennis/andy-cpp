@@ -1,3 +1,4 @@
+// vm-ready
 // Tuple concat is no longer a feature
 // let tup = (1,2,3);
 // let out = tup ++ (4,5);

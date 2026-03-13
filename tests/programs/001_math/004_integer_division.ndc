@@ -1,3 +1,4 @@
+// vm-ready
 assert_eq(10 / 2, 5);
 assert_eq(10 \ 2, 5);
 assert_eq(10 / 3, 10 / 3);

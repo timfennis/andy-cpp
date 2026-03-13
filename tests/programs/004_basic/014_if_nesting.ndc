@@ -1,3 +1,4 @@
+// vm-ready
 let a = 3;
 let b = 3;
 if if a == b { a } else { b } == a {

@@ -1,2 +1,3 @@
+// vm-ready
 assert_eq(-9, -9);
 assert_eq(-(3 * 3), -9);
