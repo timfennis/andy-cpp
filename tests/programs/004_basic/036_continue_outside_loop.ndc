@@ -1,2 +1,3 @@
+// vm-ready
 // expect-error: unexpected continue statement outside of loop
 continue;

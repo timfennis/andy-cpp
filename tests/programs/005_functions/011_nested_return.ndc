@@ -1,3 +1,4 @@
+// vm-ready
 fn foo(n) {
     fn bar() {
         return 6;

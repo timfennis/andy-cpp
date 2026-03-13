@@ -1,3 +1,4 @@
+// vm-ready
 let x = { 5 };
 let y = { 8 * x };
 assert_eq(y * x, 200);

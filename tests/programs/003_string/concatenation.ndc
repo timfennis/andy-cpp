@@ -1,1 +1,2 @@
+// vm-ready
 assert_eq("Hello " ++ "World!", "Hello World!");

@@ -1,2 +1,3 @@
+// vm-ready
 let my_list = [1,2,3];
 assert_eq(my_list, [1,2,3]);

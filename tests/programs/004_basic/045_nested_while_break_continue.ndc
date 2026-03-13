@@ -1,15 +1,16 @@
+// vm-ready
 // continue in inner loop must not affect outer loop
 let outer_count = 0;
 let inner_count = 0;
 let i = 0;
 while i < 5 {
-    i += 1;
-    outer_count += 1;
+    i = i+ 1;
+    outer_count = outer_count + 1;
     let j = 0;
     while j < 5 {
-        j += 1;
+        j = j + 1;
         if j == 3 { continue; }
-        inner_count += 1;
+        inner_count = inner_count + 1;
     }
 }
 // If continue leaked to outer, outer_count would be < 5
@@ -22,13 +23,13 @@ let outer_count = 0;
 let inner_count = 0;
 let i = 0;
 while i < 5 {
-    i += 1;
-    outer_count += 1;
+    i = i + 1;
+    outer_count = outer_count + 1;
     let j = 0;
     while j < 5 {
-        j += 1;
+        j = j + 1;
         if j == 3 { break; }
-        inner_count += 1;
+        inner_count = inner_count + 1;
     }
 }
 // If break leaked to outer, outer_count would be < 5

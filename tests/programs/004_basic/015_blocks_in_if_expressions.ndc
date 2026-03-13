@@ -1,3 +1,4 @@
+// vm-ready
 if { let a = 3; a * a } == 9 {
     assert_eq(true, true);
 }

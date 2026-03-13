@@ -1,3 +1,4 @@
+// vm-ready
 assert_eq("1 2 3 4".words(), ["1","2","3","4"]);
 assert_eq("1\n2\n3\n4".lines(), ["1","2","3","4"]);
 assert_eq("1\n\n2\n\n3\n\n4".paragraphs(), ["1","2","3","4"]);

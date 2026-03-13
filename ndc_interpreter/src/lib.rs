@@ -193,5 +193,8 @@ pub enum InterpreterError {
         cause: ndc_vm::CompileError,
     },
     #[error("Error while executing code")]
-    Evaluation(#[from] EvaluationError),
+    Evaluation {
+        #[from]
+        cause: EvaluationError,
+    },
 }

@@ -1,3 +1,4 @@
+// vm-ready
 assert(0xffff == 65535);
 // Big numbers
 assert(0xDEADDEADDEADDEADDEAD == 1051572691647698727460525);

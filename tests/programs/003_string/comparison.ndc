@@ -1,3 +1,4 @@
+// vm-ready
 assert_eq("Tim" > "Robert", true);
 assert_eq("Tim" >= "Tim", true);
 assert_eq("Tim" <= "Lindsey", false);

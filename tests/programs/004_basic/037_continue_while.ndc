@@ -1,9 +1,10 @@
+// vm-ready
 let i = 0;
 let sum = 0;
 while i < 100 {
-    i += 1;
+    i = i + 1;
     if i == 30 { continue; }
-    sum += i;
+    sum = sum + i;
 }
 
 assert_eq(sum, 5020);

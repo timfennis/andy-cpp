@@ -1,3 +1,4 @@
+// vm-ready
 assert_eq(1.0 < 10 / 5, true);
 assert_eq(5j < 1, true);
 assert_eq(1.0 < 2, true);
