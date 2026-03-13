@@ -67,7 +67,7 @@ pub(crate) fn evaluate_expression(
 
                 // the computation of this value may need the list that we assign to,
                 // therefore the value needs to be computed before we mutably borrow the list
-                // see: `bug0001_in_place_map.ndct`
+                // see: `bug0001_in_place_map.ndc`
                 let rhs = evaluate_expression(value, environment)?;
 
                 let index = evaluate_as_index(index_expression, environment)?;
