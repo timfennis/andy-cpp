@@ -299,24 +299,16 @@ impl Compiler {
         span: Span,
     ) -> Result<(), CompileError> {
         let condition_span = condition.span;
-        self.new_loop_context();
+        let loop_start = self.new_loop_context();
         self.compile_expr(condition)?;
         let conditional_jump_idx = self.chunk.write(OpCode::JumpIfFalse(0), condition_span);
         self.chunk.write(OpCode::Pop, span);
         self.compile_expr(loop_body)?;
-        self.chunk.write_jump_back(
-            self.current_loop_context()
-                .expect("guaranteed to be in loop")
-                .start,
-            span,
-        );
+        self.chunk.write_jump_back(loop_start, span);
         self.chunk.patch_jump(conditional_jump_idx);
         self.chunk.write(OpCode::Pop, span);
         let break_instructions = std::mem::take(
-            &mut self
-                .current_loop_context_mut()
-                .expect("guaranteed to be in loop")
-                .break_instructions,
+            &mut self.current_loop_context_mut().unwrap().break_instructions,
         );
         for instruction in break_instructions {
             self.chunk.patch_jump(instruction)
@@ -384,11 +376,13 @@ impl Compiler {
         Ok(())
     }
 
-    fn new_loop_context(&mut self) {
+    fn new_loop_context(&mut self) -> usize {
+        let start = self.chunk.len();
         self.loop_stack.push(LoopContext {
-            start: self.chunk.len(),
-            break_instructions: Vec::default(),
+            start,
+            break_instructions: Vec::new(),
         });
+        start
     }
 
     fn current_loop_context(&self) -> Option<&LoopContext> {
