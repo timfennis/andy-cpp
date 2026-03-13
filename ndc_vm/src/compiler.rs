@@ -66,24 +66,7 @@ impl Compiler {
                 let idx = self.chunk.add_constant(Object::Complex(c).into());
                 self.chunk.write(OpCode::Constant(idx), span);
             }
-            Expression::Identifier { resolved, .. } => match resolved {
-                Binding::None => todo!("return a nice error"),
-                Binding::Resolved(ResolvedVar::Local { slot }) => {
-                    self.chunk.write(OpCode::GetLocal(slot), span);
-                }
-                Binding::Resolved(ResolvedVar::Upvalue { slot }) => {
-                    self.chunk.write(OpCode::GetUpvalue(slot), span);
-                }
-                Binding::Resolved(ResolvedVar::Global { slot }) => {
-                    self.chunk.write(OpCode::GetGlobal(slot), span);
-                }
-                Binding::Dynamic(candidates) => {
-                    let idx = self
-                        .chunk
-                        .add_constant(Object::OverloadSet(candidates).into());
-                    self.chunk.write(OpCode::Constant(idx), span);
-                }
-            },
+            Expression::Identifier { resolved, .. } => self.compile_binding(resolved, span)?,
             Expression::Statement(stm) => {
                 let needs_pop = produces_value(&stm.expression);
                 self.compile_expr(*stm)?;
@@ -124,29 +107,36 @@ impl Compiler {
                 r_value: value,
             } => {
                 self.compile_expr(*value)?;
+                self.compile_lvalue(l_value)?;
+                let idx = self.chunk.add_constant(Value::unit());
+                self.chunk.write(OpCode::Constant(idx), span);
+            }
+            Expression::OpAssignment {
+                l_value,
+                r_value,
+                resolved_assign_operation: _todo_in_place,
+                resolved_operation,
+                ..
+            } => {
                 match l_value {
                     Lvalue::Identifier {
                         resolved,
                         span: lv_span,
                         ..
-                    } => match resolved.expect("identifiers must be resolved") {
-                        ResolvedVar::Local { slot } => {
-                            self.chunk.write(OpCode::SetLocal(slot), lv_span);
-                        }
-                        ResolvedVar::Upvalue { slot } => {
-                            self.chunk.write(OpCode::SetUpvalue(slot), lv_span);
-                        }
-                        ResolvedVar::Global { .. } => {
-                            unreachable!("globals are native, never assigned")
-                        }
-                    },
-                    Lvalue::Index { .. } => todo!("?"),
-                    Lvalue::Sequence(_) => todo!("?"),
+                    } => {
+                        let var = resolved.expect("lvalue must be resolved");
+                        self.compile_binding(resolved_operation, span)?;
+                        self.emit_get_var(var, lv_span);
+                        self.compile_expr(*r_value)?;
+                        self.chunk.write(OpCode::Call(2), span);
+                        self.emit_set_var(var, lv_span);
+                    }
+                    Lvalue::Index { .. } => todo!("index op-assignment"),
+                    Lvalue::Sequence(_) => todo!("sequence op-assignment"),
                 }
                 let idx = self.chunk.add_constant(Value::unit());
                 self.chunk.write(OpCode::Constant(idx), span);
             }
-            Expression::OpAssignment { .. } => todo!("op-assignment"),
             Expression::FunctionDeclaration {
                 name,
                 resolved_name,
@@ -241,6 +231,53 @@ impl Compiler {
 
         Ok(())
     }
+
+    fn compile_lvalue(&mut self, l_value: Lvalue) -> Result<(), CompileError> {
+        match l_value {
+            Lvalue::Identifier {
+                resolved,
+                span: lv_span,
+                ..
+            } => {
+                self.emit_set_var(resolved.expect("identifiers must be resolved"), lv_span);
+            }
+            Lvalue::Index { .. } => todo!("?"),
+            Lvalue::Sequence(_) => todo!("?"),
+        }
+
+        Ok(())
+    }
+
+    fn compile_binding(&mut self, resolved: Binding, span: Span) -> Result<(), CompileError> {
+        match resolved {
+            Binding::None => return Err(CompileError::unresolved_binding(span)),
+            Binding::Resolved(var) => self.emit_get_var(var, span),
+            Binding::Dynamic(candidates) => {
+                let idx = self
+                    .chunk
+                    .add_constant(Object::OverloadSet(candidates).into());
+                self.chunk.write(OpCode::Constant(idx), span);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn emit_get_var(&mut self, var: ResolvedVar, span: Span) {
+        match var {
+            ResolvedVar::Local { slot } => self.chunk.write(OpCode::GetLocal(slot), span),
+            ResolvedVar::Upvalue { slot } => self.chunk.write(OpCode::GetUpvalue(slot), span),
+            ResolvedVar::Global { slot } => self.chunk.write(OpCode::GetGlobal(slot), span),
+        };
+    }
+
+    fn emit_set_var(&mut self, var: ResolvedVar, span: Span) {
+        match var {
+            ResolvedVar::Local { slot } => self.chunk.write(OpCode::SetLocal(slot), span),
+            ResolvedVar::Upvalue { slot } => self.chunk.write(OpCode::SetUpvalue(slot), span),
+            ResolvedVar::Global { .. } => unreachable!("globals are native, never assigned"),
+        };
+    }
     fn compile_block(
         &mut self,
         statements: Vec<ExpressionLocation>,
@@ -307,9 +344,8 @@ impl Compiler {
         self.chunk.write_jump_back(loop_start, span);
         self.chunk.patch_jump(conditional_jump_idx);
         self.chunk.write(OpCode::Pop, span);
-        let break_instructions = std::mem::take(
-            &mut self.current_loop_context_mut().unwrap().break_instructions,
-        );
+        let break_instructions =
+            std::mem::take(&mut self.current_loop_context_mut().unwrap().break_instructions);
         for instruction in break_instructions {
             self.chunk.patch_jump(instruction)
         }
@@ -435,13 +471,20 @@ pub struct CompileError {
 }
 
 impl CompileError {
-    pub fn unexpected_break(span: Span) -> Self {
+    fn unresolved_binding(span: Span) -> Self {
+        Self {
+            text: "encountered unresolved binding during compilation, this is probably an internal error".to_string(),
+            span,
+        }
+    }
+
+    fn unexpected_break(span: Span) -> Self {
         Self {
             text: "unexpected break statement outside of loop".to_string(),
             span,
         }
     }
-    pub fn unexpected_continue(span: Span) -> Self {
+    fn unexpected_continue(span: Span) -> Self {
         Self {
             text: "unexpected continue statement outside of loop".to_string(),
             span,
