@@ -200,10 +200,7 @@ impl Analyser {
                     accumulator_slot, ..
                 } = body.as_mut()
                 {
-                    let max_loop_slot = iterations
-                        .iter()
-                        .filter_map(iteration_local_slot)
-                        .max();
+                    let max_loop_slot = iterations.iter().filter_map(iteration_local_slot).max();
                     *accumulator_slot = Some(max_loop_slot.map_or(0, |s| s + 1));
                 }
                 Ok(return_type)
@@ -431,9 +428,17 @@ impl Analyser {
 
                 Ok(self.scope_tree.get_type(target).clone())
             }
-            Lvalue::Index { index, value, .. } => {
+            Lvalue::Index {
+                index,
+                value,
+                resolved_set,
+                resolved_get,
+            } => {
                 self.analyse(index)?;
                 let type_of_index_target = self.analyse(value)?;
+
+                *resolved_set = Some(self.scope_tree.resolve_function_binding("[]=", &[]));
+                *resolved_get = Some(self.scope_tree.resolve_function_binding("[]", &[]));
 
                 type_of_index_target
                     .index_element_type()
@@ -464,10 +469,12 @@ impl Analyser {
                 index,
                 value,
                 resolved_set,
+                resolved_get,
             } => {
                 self.analyse(index)?;
                 self.analyse(value)?;
                 *resolved_set = Some(self.scope_tree.resolve_function_binding("[]=", &[]));
+                *resolved_get = Some(self.scope_tree.resolve_function_binding("[]", &[]));
             }
             Lvalue::Sequence(seq) => {
                 for sub_lvalue in seq {
@@ -573,7 +580,11 @@ impl Analyser {
 /// accumulator slot.
 fn iteration_local_slot(it: &ForIteration) -> Option<usize> {
     let ForIteration::Iteration {
-        l_value: Lvalue::Identifier { resolved: Some(ResolvedVar::Local { slot }), .. },
+        l_value:
+            Lvalue::Identifier {
+                resolved: Some(ResolvedVar::Local { slot }),
+                ..
+            },
         ..
     } = it
     else {

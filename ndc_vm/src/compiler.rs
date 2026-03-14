@@ -111,6 +111,7 @@ impl Compiler {
                     value: container,
                     index,
                     resolved_set,
+                    ..
                 } => {
                     let set_fn = resolved_set.expect("[]= must be resolved");
                     self.compile_binding(set_fn, span)?;
@@ -146,7 +147,46 @@ impl Compiler {
                         self.chunk.write(OpCode::Call(2), span);
                         self.emit_set_var(var, lv_span);
                     }
-                    Lvalue::Index { .. } => todo!("index op-assignment"),
+                    Lvalue::Index {
+                        value,
+                        index,
+                        resolved_get,
+                        resolved_set,
+                    } => {
+                        // let getter = ;
+                        let container_span = value.span;
+                        let index_span = index.span;
+
+                        let tmp_container = self.max_local;
+                        let tmp_index = self.max_local + 1;
+                        self.max_local += 2;
+
+                        self.compile_expr(*value)?;
+                        self.chunk.write(OpCode::SetLocal(tmp_container), container_span);
+                        self.compile_expr(*index)?;
+                        self.chunk.write(OpCode::SetLocal(tmp_index), index_span);
+
+                        self.compile_binding(
+                            resolved_set.expect("[]= must be resolved"),
+                            container_span.merge(index_span),
+                        )?;
+                        self.chunk
+                            .write(OpCode::GetLocal(tmp_container), container_span);
+                        self.chunk.write(OpCode::GetLocal(tmp_index), index_span);
+
+                        self.compile_binding(resolved_operation, span)?;
+                        self.compile_binding(
+                            resolved_get.expect("[] must be resolved"),
+                            index_span,
+                        )?;
+                        self.chunk
+                            .write(OpCode::GetLocal(tmp_container), container_span);
+                        self.chunk.write(OpCode::GetLocal(tmp_index), index_span);
+                        self.chunk.write(OpCode::Call(2), span); // [](container, index) → current_value
+                        self.compile_expr(*r_value)?;
+                        self.chunk.write(OpCode::Call(2), span); // op(current_value, r_value) → new_value
+                        self.chunk.write(OpCode::Call(3), span); // []=(container, index, new_value)
+                    }
                     Lvalue::Sequence(_) => todo!("sequence op-assignment"),
                 }
                 let idx = self.chunk.add_constant(Value::unit());
