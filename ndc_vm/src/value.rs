@@ -1,4 +1,5 @@
 use crate::chunk::{Chunk, OpCode};
+use crate::iterator::SharedIterator;
 use ndc_parser::{ResolvedVar, StaticType, TypeSignature};
 use std::cell::RefCell;
 use std::fmt;
@@ -16,17 +17,18 @@ pub enum Value {
     Object(Box<Object>),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub enum Object {
     Some(Value),
     BigInt(num::BigInt),
     Complex(num::Complex<f64>),
     Rational(num::BigRational),
-    String(String),
+    String(Rc<RefCell<String>>),
     List(Rc<RefCell<Vec<Value>>>),
     Tuple(Vec<Value>),
     Function(Function),
     OverloadSet(Vec<ResolvedVar>),
+    Iterator(SharedIterator),
 }
 
 #[derive(Clone)]
@@ -75,6 +77,16 @@ impl Value {
         Self::Object(Box::new(Object::Function(function)))
     }
 
+    pub fn string<S: Into<String>>(string: S) -> Self {
+        Self::Object(Box::new(Object::String(Rc::new(RefCell::new(
+            string.into(),
+        )))))
+    }
+
+    pub fn iterator(iter: SharedIterator) -> Self {
+        Self::Object(Box::new(Object::Iterator(iter)))
+    }
+
     pub fn static_type(&self) -> StaticType {
         match self {
             Self::Int(_) => StaticType::Int,
@@ -102,6 +114,7 @@ impl Object {
             Self::Tuple(_) => StaticType::Tuple(Vec::new()),
             Self::Function(f) => f.static_type(),
             Self::OverloadSet(_) => StaticType::Any,
+            Self::Iterator(_) => StaticType::Iterator(Box::new(StaticType::Any)),
         }
     }
 }
@@ -187,7 +200,7 @@ impl fmt::Display for Object {
             Self::BigInt(n) => write!(f, "{n}"),
             Self::Complex(c) => write!(f, "{c}"),
             Self::Rational(r) => write!(f, "{r}"),
-            Self::String(s) => write!(f, "\"{s}\""),
+            Self::String(s) => write!(f, "\"{}\"", s.borrow()),
             Self::List(vs) => {
                 let vs = vs.borrow();
                 write!(f, "[")?;
@@ -211,6 +224,30 @@ impl fmt::Display for Object {
             }
             Self::Function(func) => write!(f, "{func}"),
             Self::OverloadSet(slots) => write!(f, "<overload set ({} candidates)>", slots.len()),
+            Self::Iterator(iter) => match iter.borrow().len() {
+                Some(n) => write!(f, "<iterator (len={n})>"),
+                None => write!(f, "<iterator>"),
+            },
+        }
+    }
+}
+
+impl fmt::Debug for Object {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Some(v) => f.debug_tuple("Some").field(v).finish(),
+            Self::BigInt(n) => f.debug_tuple("BigInt").field(n).finish(),
+            Self::Complex(c) => f.debug_tuple("Complex").field(c).finish(),
+            Self::Rational(r) => f.debug_tuple("Rational").field(r).finish(),
+            Self::String(s) => f.debug_tuple("String").field(&s.borrow()).finish(),
+            Self::List(vs) => f.debug_tuple("List").field(&vs.borrow()).finish(),
+            Self::Tuple(vs) => f.debug_tuple("Tuple").field(vs).finish(),
+            Self::Function(func) => write!(f, "{func:?}"),
+            Self::OverloadSet(slots) => f.debug_tuple("OverloadSet").field(slots).finish(),
+            Self::Iterator(iter) => match iter.borrow().len() {
+                Some(n) => write!(f, "<iterator (len={n})>"),
+                None => write!(f, "<iterator>"),
+            },
         }
     }
 }

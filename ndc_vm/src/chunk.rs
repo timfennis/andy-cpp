@@ -38,6 +38,16 @@ pub enum OpCode {
         constant_idx: usize,
         values: Rc<[CaptureSource]>,
     },
+    /// Convert top-of-stack to an iterator. No-op if already an iterator.
+    GetIterator,
+    /// Peek at iterator on stack (don't pop). If value: push it. If done: jump by offset.
+    IterNext(isize),
+    /// Pop top-of-stack, append to list at local slot.
+    ListPush(usize),
+    /// Pop end, pop start (both i64), push exclusive range iterator.
+    MakeRange,
+    /// Pop end, pop start (both i64), push inclusive range iterator.
+    MakeRangeInclusive,
     /// Stop execution
     Halt,
     /// Return from function call
@@ -73,6 +83,11 @@ impl std::fmt::Debug for OpCode {
                 }
                 write!(f, ")")
             }
+            Self::GetIterator => write!(f, "GetIterator"),
+            Self::IterNext(n) => write!(f, "IterNext({n})"),
+            Self::ListPush(n) => write!(f, "ListPush({n})"),
+            Self::MakeRange => write!(f, "MakeRange"),
+            Self::MakeRangeInclusive => write!(f, "MakeRangeInclusive"),
             Self::Halt => write!(f, "Halt"),
             Self::Return => write!(f, "Return"),
         }
@@ -106,7 +121,7 @@ impl Chunk {
     pub fn patch_jump(&mut self, op_idx: usize) {
         let offset = isize::try_from(self.code.len() - op_idx - 1).expect("jump too large to patch");
         match self.code.get_mut(op_idx) {
-            Some(OpCode::JumpIfFalse(n) | OpCode::JumpIfTrue(n) | OpCode::Jump(n)) => *n = offset,
+            Some(OpCode::JumpIfFalse(n) | OpCode::JumpIfTrue(n) | OpCode::Jump(n) | OpCode::IterNext(n)) => *n = offset,
             _ => panic!("expected a patchable jump instruction at index {op_idx}"),
         }
     }

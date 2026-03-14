@@ -1,4 +1,5 @@
 use crate::chunk::OpCode;
+use crate::iterator::{ListIter, RangeIter, RangeInclusiveIter, StringIter, TupleIter};
 use crate::value::{CompiledFunction, Function};
 use crate::{ClosureFunction, Object, UpvalueCell, Value};
 use ndc_parser::{CaptureSource, ResolvedVar};
@@ -196,6 +197,76 @@ impl Vm {
                         UpvalueCell::Open(stack_slot) => self.stack[*stack_slot] = value,
                         UpvalueCell::Closed(stored) => *stored = value,
                     }
+                }
+                OpCode::GetIterator => {
+                    let val = self.stack.pop().expect("stack underflow");
+                    let iter_val = match val {
+                        Value::Object(ref obj) if matches!(**obj, Object::Iterator(_)) => val,
+                        Value::Object(obj) => match *obj {
+                            Object::List(rc) => {
+                                Value::iterator(Rc::new(RefCell::new(ListIter::new(rc))))
+                            }
+                            Object::Tuple(vec) => {
+                                Value::iterator(Rc::new(RefCell::new(TupleIter::new(vec))))
+                            }
+                            Object::String(rc) => {
+                                Value::iterator(Rc::new(RefCell::new(StringIter::new(rc))))
+                            }
+                            other => panic!("value is not iterable: {other}"),
+                        },
+                        other => panic!("value is not iterable: {:?}", other),
+                    };
+                    self.stack.push(iter_val);
+                }
+                OpCode::IterNext(offset) => {
+                    let top = self.stack.last().expect("stack underflow");
+                    let Value::Object(obj) = top else {
+                        panic!("IterNext expects an iterator on the stack")
+                    };
+                    let Object::Iterator(iter_rc) = &**obj else {
+                        panic!("IterNext expects an iterator on the stack")
+                    };
+                    let next = iter_rc.borrow_mut().next();
+                    match next {
+                        Some(value) => {
+                            self.stack.push(value);
+                        }
+                        None => {
+                            frame.ip = frame.ip.wrapping_add_signed(offset);
+                        }
+                    }
+                }
+                OpCode::ListPush(slot) => {
+                    let value = self.stack.pop().expect("stack underflow");
+                    let frame = self.frames.last().expect("no frame");
+                    let list_val = &self.stack[frame.slot(slot)];
+                    let Value::Object(obj) = list_val else {
+                        panic!("ListPush expects a list")
+                    };
+                    let Object::List(rc) = &**obj else {
+                        panic!("ListPush expects a list")
+                    };
+                    rc.borrow_mut().push(value);
+                }
+                OpCode::MakeRange => {
+                    let end = self.stack.pop().expect("stack underflow");
+                    let start = self.stack.pop().expect("stack underflow");
+                    let (Value::Int(start), Value::Int(end)) = (start, end) else {
+                        panic!("range bounds must be integers")
+                    };
+                    self.stack.push(Value::iterator(Rc::new(RefCell::new(
+                        RangeIter::new(start, end),
+                    ))));
+                }
+                OpCode::MakeRangeInclusive => {
+                    let end = self.stack.pop().expect("stack underflow");
+                    let start = self.stack.pop().expect("stack underflow");
+                    let (Value::Int(start), Value::Int(end)) = (start, end) else {
+                        panic!("range bounds must be integers")
+                    };
+                    self.stack.push(Value::iterator(Rc::new(RefCell::new(
+                        RangeInclusiveIter::new(start, end),
+                    ))));
                 }
                 OpCode::Closure {
                     constant_idx: idx,
