@@ -1,2 +1,3 @@
+// vm-ready
 let l = [ x * x for x in 1..100 ];
 assert(l[7] == 64);

@@ -831,7 +831,7 @@ impl Parser {
             }
             // WOAH, this is not a list, it's a list comprehension
             Some(Token::For) => {
-                let result = ForBody::List(expr.simplify());
+                let result = ForBody::List { expr: expr.simplify(), accumulator_slot: None };
                 self.for_comprehension(left_square_bracket_span, result, &Token::RightSquareBracket)
             }
             _ => {

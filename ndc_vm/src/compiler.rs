@@ -446,12 +446,6 @@ impl Compiler {
         Ok(())
     }
 
-    fn alloc_temp(&mut self) -> usize {
-        let slot = self.max_local;
-        self.max_local += 1;
-        slot
-    }
-
     fn compile_for(
         &mut self,
         iterations: Vec<ForIteration>,
@@ -463,8 +457,10 @@ impl Compiler {
                 self.compile_for_block(&iterations, block, span)?;
                 Ok(())
             }
-            ForBody::List(expr) => {
-                let tmp_list = self.alloc_temp();
+            ForBody::List { expr, accumulator_slot } => {
+                let tmp_list = accumulator_slot
+                    .expect("list accumulator slot must be assigned by the analyser");
+                self.max_local = self.max_local.max(tmp_list + 1);
                 self.chunk.write(OpCode::MakeList(0), span);
                 self.chunk.write(OpCode::SetLocal(tmp_list), span);
                 self.compile_for_list(&iterations, expr, tmp_list, span)?;
@@ -633,7 +629,7 @@ fn produces_value(expr: &Expression) -> bool {
         | Expression::Continue
         | Expression::Return { .. } => false,
         Expression::For { body, .. } => {
-            matches!(**body, ForBody::List(_) | ForBody::Map { .. })
+            matches!(**body, ForBody::List { .. } | ForBody::Map { .. })
         }
         _ => true,
     }

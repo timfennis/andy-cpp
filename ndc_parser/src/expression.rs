@@ -143,7 +143,10 @@ pub enum ForIteration {
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum ForBody {
     Block(ExpressionLocation),
-    List(ExpressionLocation),
+    List {
+        expr: ExpressionLocation,
+        accumulator_slot: Option<usize>,
+    },
     Map {
         key: ExpressionLocation,
         value: Option<ExpressionLocation>,
