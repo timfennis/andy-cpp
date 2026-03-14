@@ -1,3 +1,4 @@
+// vm-ready
 fn mut_map(list, function) {
   let index = 0;
   while index < list.len {
