@@ -416,7 +416,7 @@ impl Analyser {
 
                 Ok(self.scope_tree.get_type(target).clone())
             }
-            Lvalue::Index { index, value } => {
+            Lvalue::Index { index, value, .. } => {
                 self.analyse(index)?;
                 let type_of_index_target = self.analyse(value)?;
 
@@ -445,9 +445,14 @@ impl Analyser {
 
                 *resolved = Some(target);
             }
-            Lvalue::Index { index, value } => {
+            Lvalue::Index {
+                index,
+                value,
+                resolved_set,
+            } => {
                 self.analyse(index)?;
                 self.analyse(value)?;
+                *resolved_set = Some(self.scope_tree.resolve_function_binding("[]=", &[]));
             }
             Lvalue::Sequence(seq) => {
                 for sub_lvalue in seq {
@@ -507,7 +512,7 @@ impl Analyser {
                 );
                 *inferred_type = Some(typ);
             }
-            Lvalue::Index { index, value } => {
+            Lvalue::Index { index, value, .. } => {
                 self.analyse(index)?;
                 self.analyse(value)?;
             }

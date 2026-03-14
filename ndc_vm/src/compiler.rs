@@ -107,10 +107,26 @@ impl Compiler {
                 l_value,
                 r_value: value,
             } => {
-                self.compile_expr(*value)?;
-                self.compile_lvalue(l_value)?;
-                let idx = self.chunk.add_constant(Value::unit());
-                self.chunk.write(OpCode::Constant(idx), span);
+                match l_value {
+                    Lvalue::Index {
+                        value: container,
+                        index,
+                        resolved_set,
+                    } => {
+                        let set_fn = resolved_set.expect("[]= must be resolved");
+                        self.compile_binding(set_fn, span)?;
+                        self.compile_expr(*container)?;
+                        self.compile_expr(*index)?;
+                        self.compile_expr(*value)?;
+                        self.chunk.write(OpCode::Call(3), span);
+                    }
+                    _ => {
+                        self.compile_expr(*value)?;
+                        self.compile_lvalue(l_value)?;
+                        let idx = self.chunk.add_constant(Value::unit());
+                        self.chunk.write(OpCode::Constant(idx), span);
+                    }
+                }
             }
             Expression::OpAssignment {
                 l_value,

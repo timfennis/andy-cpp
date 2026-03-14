@@ -62,6 +62,7 @@ pub(crate) fn evaluate_expression(
             Lvalue::Index {
                 value: lhs_expression,
                 index: index_expression,
+                ..
             } => {
                 let mut lhs = evaluate_expression(lhs_expression, environment)?;
 
@@ -163,6 +164,7 @@ pub(crate) fn evaluate_expression(
                 Lvalue::Index {
                     value: lhs_expression,
                     index: index_expression,
+                    ..
                 } => {
                     let mut lhs_value = evaluate_expression(lhs_expression, environment)?;
                     let index = evaluate_as_index(index_expression, environment)?;
@@ -544,6 +546,7 @@ fn declare_or_assign_variable(
         Lvalue::Index {
             value: lhs_expr,
             index,
+            ..
         } => {
             let mut lhs = evaluate_expression(lhs_expr, environment)?;
 
