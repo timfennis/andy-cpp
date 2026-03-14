@@ -3,8 +3,8 @@ use crate::value::{CompiledFunction, Function};
 use crate::{Object, Value};
 use ndc_lexer::Span;
 use ndc_parser::{
-    Binding, CaptureSource, Expression, ExpressionLocation, ForBody, ForIteration,
-    LogicalOperator, Lvalue, ResolvedVar, StaticType, TypeSignature,
+    Binding, CaptureSource, Expression, ExpressionLocation, ForBody, ForIteration, LogicalOperator,
+    Lvalue, ResolvedVar, StaticType, TypeSignature,
 };
 use std::rc::Rc;
 
@@ -457,7 +457,10 @@ impl Compiler {
                 self.compile_for_block(&iterations, block, span)?;
                 Ok(())
             }
-            ForBody::List { expr, accumulator_slot } => {
+            ForBody::List {
+                expr,
+                accumulator_slot,
+            } => {
                 let tmp_list = accumulator_slot
                     .expect("list accumulator slot must be assigned by the analyser");
                 self.max_local = self.max_local.max(tmp_list + 1);

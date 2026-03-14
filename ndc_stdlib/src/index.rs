@@ -1,5 +1,7 @@
 use ndc_interpreter::environment::Environment;
-use ndc_interpreter::evaluate::index::{IndexError, get_at_index, set_at_index, value_to_evaluated_index};
+use ndc_interpreter::evaluate::index::{
+    IndexError, get_at_index, set_at_index, value_to_evaluated_index,
+};
 use ndc_interpreter::function::{
     FunctionBody, FunctionBuilder, FunctionCarrier, StaticType, TypeSignature,
 };

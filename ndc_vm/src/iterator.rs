@@ -27,7 +27,10 @@ pub struct RangeIter {
 
 impl RangeIter {
     pub fn new(start: i64, end: i64) -> Self {
-        Self { current: start, end }
+        Self {
+            current: start,
+            end,
+        }
     }
 }
 
