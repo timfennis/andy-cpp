@@ -1,3 +1,4 @@
+// vm-ready
 // expect-error: Identifier x has not previously been declared
 x += 3;
 print(x);

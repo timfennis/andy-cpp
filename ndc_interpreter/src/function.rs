@@ -1,8 +1,6 @@
-use crate::hash_map::{DefaultHasher, HashMap};
 use crate::environment::Environment;
-use crate::evaluate::{
-    ErrorConverter, EvaluationError, EvaluationResult, evaluate_expression,
-};
+use crate::evaluate::{ErrorConverter, EvaluationError, EvaluationResult, evaluate_expression};
+use crate::hash_map::{DefaultHasher, HashMap};
 use crate::num::{BinaryOperatorError, Number};
 use crate::sequence::Sequence;
 use crate::value::Value;
@@ -14,6 +12,14 @@ use std::cell::{BorrowError, BorrowMutError, RefCell};
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
+
+/// Wraps a VM function value for round-tripping through interpreter values.
+/// `identity` is the raw pointer of the `Rc<CompiledFunction>` prototype,
+/// used to implement stable equality for VM-compiled functions.
+pub(crate) struct VmFunctionWrapper {
+    pub(crate) vm_value: ndc_vm::Value,
+    pub(crate) identity: Option<usize>,
+}
 
 /// Callable is a wrapper around a `OverloadedFunction` pointer and the environment to make it
 /// easy to have an executable function as a method signature in the standard library
@@ -158,9 +164,10 @@ impl Function {
 #[derive(Clone)]
 pub enum FunctionBody {
     Closure {
-        parameter_names: Vec<String>,
+        type_signature: TypeSignature,
         body: ExpressionLocation,
         return_type: StaticType,
+        upvalue_cells: Vec<Rc<RefCell<Value>>>,
         environment: Rc<RefCell<Environment>>,
     },
     NumericUnaryOp {
@@ -178,18 +185,23 @@ pub enum FunctionBody {
         cache: RefCell<HashMap<u64, Value>>,
         function: Box<FunctionBody>,
     },
+    /// Opaque foreign function that cannot be called by the interpreter.
+    /// Used to round-trip VM functions through interpreter values.
+    Opaque {
+        data: Rc<dyn std::any::Any>,
+        static_type: StaticType,
+    },
 }
 
 impl FunctionBody {
     pub fn arity(&self) -> Option<usize> {
         match self {
-            Self::Closure {
-                parameter_names, ..
-            } => Some(parameter_names.len()),
+            Self::Closure { type_signature, .. } => type_signature.arity(),
             Self::NumericUnaryOp { .. } => Some(1),
             Self::NumericBinaryOp { .. } => Some(2),
             Self::GenericFunction { type_signature, .. } => type_signature.arity(),
             Self::Memoized { function, .. } => function.arity(),
+            Self::Opaque { .. } => None,
         }
     }
 
@@ -207,14 +219,7 @@ impl FunctionBody {
 
     fn type_signature(&self) -> TypeSignature {
         match self {
-            Self::Closure {
-                parameter_names, ..
-            } => TypeSignature::Exact(
-                parameter_names
-                    .iter()
-                    .map(|name| Parameter::new(name, StaticType::Any))
-                    .collect(),
-            ),
+            Self::Closure { type_signature, .. } => type_signature.clone(),
             Self::Memoized { cache: _, function } => function.type_signature(),
             Self::NumericUnaryOp { .. } => {
                 TypeSignature::Exact(vec![Parameter::new("num", StaticType::Number)])
@@ -224,6 +229,7 @@ impl FunctionBody {
                 Parameter::new("right", StaticType::Number),
             ]),
             Self::GenericFunction { type_signature, .. } => type_signature.clone(),
+            Self::Opaque { .. } => TypeSignature::Variadic,
         }
     }
 
@@ -234,28 +240,22 @@ impl FunctionBody {
             }
             Self::NumericUnaryOp { .. } | Self::NumericBinaryOp { .. } => &StaticType::Number,
             Self::Memoized { function, .. } => function.return_type(),
+            Self::Opaque { static_type, .. } => static_type,
         }
     }
     pub fn call(&self, args: &mut [Value], env: &Rc<RefCell<Environment>>) -> EvaluationResult {
         match self {
             Self::Closure {
-                body, environment, ..
+                body,
+                upvalue_cells,
+                environment,
+                ..
             } => {
-                let mut local_scope = Environment::new_scope(environment);
+                let mut local_scope =
+                    Environment::new_function_scope_with_cells(environment, upvalue_cells);
 
-                {
-                    for (position, value) in args.iter().enumerate() {
-                        // NOTE: stores a copy of the value in the environment (which is fine?)
-                        // NOTE: we just assume here that the arguments are slotted in order starting at 0
-                        // because why not? Is this a call convention?
-                        local_scope.set(
-                            ResolvedVar::Captured {
-                                depth: 0,
-                                slot: position,
-                            },
-                            value.clone(),
-                        )
-                    }
+                for (position, value) in args.iter().enumerate() {
+                    local_scope.set(ResolvedVar::Local { slot: position }, value.clone())
                 }
 
                 let local_scope = Rc::new(RefCell::new(local_scope));
@@ -299,6 +299,11 @@ impl FunctionBody {
                 .into()),
             },
             Self::GenericFunction { function, .. } => function(args, env),
+            Self::Opaque { .. } => Err(FunctionCallError::ArgumentCountError {
+                expected: 0,
+                actual: args.len(),
+            }
+            .into()),
             Self::Memoized { cache, function } => {
                 let mut hasher = DefaultHasher::default();
                 for arg in &*args {
@@ -388,6 +393,12 @@ impl From<BorrowMutError> for FunctionCarrier {
 impl From<BorrowError> for FunctionCarrier {
     fn from(value: BorrowError) -> Self {
         // TODO: maybe this needs a better message
+        Self::IntoEvaluationError(Box::new(value))
+    }
+}
+
+impl From<crate::evaluate::index::IndexError> for FunctionCarrier {
+    fn from(value: crate::evaluate::index::IndexError) -> Self {
         Self::IntoEvaluationError(Box::new(value))
     }
 }

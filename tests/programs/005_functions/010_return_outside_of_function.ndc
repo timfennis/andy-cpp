@@ -1,2 +1,3 @@
+// vm-ready
 // expect-error: unexpected return statement outside of function body
 return 5;

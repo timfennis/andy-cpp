@@ -1,3 +1,4 @@
+// vm-ready
 fn multiply(a, b) { a * b };
 let x = 5;
 x multiply= 10;

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use ndc_lexer::{Lexer, Span, TokenLocation};
 use ndc_interpreter::Interpreter;
+use ndc_lexer::{Lexer, Span, TokenLocation};
 use ndc_parser::{Expression, ExpressionLocation, ForBody, ForIteration, Lvalue};
 use ndc_stdlib::WithStdlib;
 use tokio::sync::Mutex;
@@ -211,13 +211,13 @@ fn collect_hints(expr: &ExpressionLocation, text: &str, hints: &mut Vec<InlayHin
         }
         Expression::FunctionDeclaration {
             return_type,
-            parameters,
+            parameters_span,
             body,
             ..
         } => {
             if let Some(rt) = return_type {
                 hints.push(InlayHint {
-                    position: position_from_offset(text, parameters.span.end()),
+                    position: position_from_offset(text, parameters_span.end()),
                     label: InlayHintLabel::String(format!(" -> {rt}")),
                     kind: Some(InlayHintKind::TYPE),
                     text_edits: None,
@@ -265,7 +265,8 @@ fn collect_hints(expr: &ExpressionLocation, text: &str, hints: &mut Vec<InlayHin
                 }
             }
             match body.as_ref() {
-                ForBody::Block(e) | ForBody::List(e) => collect_hints(e, text, hints),
+                ForBody::Block(e) => collect_hints(e, text, hints),
+                ForBody::List { expr: e, .. } => collect_hints(e, text, hints),
                 ForBody::Map {
                     key,
                     value,

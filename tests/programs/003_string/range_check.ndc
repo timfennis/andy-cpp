@@ -1,3 +1,4 @@
+// vm-ready
 assert("foo" in "foobar");
 assert("foobar" in "foobar");
 let a = "test";

@@ -1,0 +1,19 @@
+// vm-ready
+// Regression test: accessing a variable from an outer block scope inside a list comprehension
+// guard used to panic with "slot not found in any scope within function".
+//
+// The bug was in get_type's upvalue navigation: iteration scopes have creates_environment=true
+// (needed so closures capture the right iteration variable), but don't reset slot numbering like
+// function scopes do. This caused get_type to overshoot by one environment boundary when the
+// current scope was the iteration scope itself, landing at the function scope instead of the
+// outer block scope that owns the variable.
+//
+// The while loop is load-bearing: it introduces a block scope between the function scope and the
+// iteration scope, which is what triggers the off-by-one in scope traversal.
+let i = 0;
+while i < 1 {
+    let target = 5;
+    let result = [x for x in 0..10, if x == target];
+    assert_eq(result, [5]);
+    i += 1;
+}

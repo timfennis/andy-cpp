@@ -1,6 +1,6 @@
-use crate::hash_map::HashMap;
 use crate::environment::Environment;
 use crate::function::{Function, FunctionBody, FunctionCarrier, StaticType};
+use crate::hash_map::HashMap;
 use crate::int::Int;
 use crate::iterator::mut_value_to_iterator;
 use crate::num::Number;
@@ -11,6 +11,7 @@ use itertools::Itertools;
 use ndc_lexer::Span;
 use ndc_parser::{
     Binding, Expression, ExpressionLocation, ForBody, ForIteration, LogicalOperator, Lvalue,
+    ResolvedVar,
 };
 use std::cell::RefCell;
 use std::fmt;
@@ -18,7 +19,7 @@ use std::rc::Rc;
 
 pub type EvaluationResult = Result<Value, FunctionCarrier>;
 
-mod index;
+pub mod index;
 
 #[allow(clippy::too_many_lines)]
 pub(crate) fn evaluate_expression(
@@ -61,17 +62,18 @@ pub(crate) fn evaluate_expression(
             Lvalue::Index {
                 value: lhs_expression,
                 index: index_expression,
+                ..
             } => {
                 let mut lhs = evaluate_expression(lhs_expression, environment)?;
 
                 // the computation of this value may need the list that we assign to,
                 // therefore the value needs to be computed before we mutably borrow the list
-                // see: `bug0001_in_place_map.ndct`
+                // see: `bug0001_in_place_map.ndc`
                 let rhs = evaluate_expression(value, environment)?;
 
                 let index = evaluate_as_index(index_expression, environment)?;
 
-                set_at_index(&mut lhs, rhs, index, span)?;
+                set_at_index(&mut lhs, rhs, index).add_span(span)?;
 
                 Value::unit()
             }
@@ -162,11 +164,12 @@ pub(crate) fn evaluate_expression(
                 Lvalue::Index {
                     value: lhs_expression,
                     index: index_expression,
+                    ..
                 } => {
                     let mut lhs_value = evaluate_expression(lhs_expression, environment)?;
                     let index = evaluate_as_index(index_expression, environment)?;
                     let value_at_index =
-                        get_at_index(&lhs_value, index.clone(), span, environment)?;
+                        get_at_index(&lhs_value, index.clone(), environment).add_span(span)?;
 
                     let right_value = evaluate_expression(r_value, environment)?;
 
@@ -218,7 +221,7 @@ pub(crate) fn evaluate_expression(
                         };
 
                         if !modified_in_place {
-                            set_at_index(&mut lhs_value, result, index.clone(), span)?;
+                            set_at_index(&mut lhs_value, result, index.clone()).add_span(span)?;
                         }
 
                         break;
@@ -237,14 +240,10 @@ pub(crate) fn evaluate_expression(
             }
         }
         Expression::Block { statements } => {
-            let local_scope = Rc::new(RefCell::new(Environment::new_scope(environment)));
-
             let mut value = Value::unit();
             for stm in statements {
-                value = evaluate_expression(stm, &local_scope)?;
+                value = evaluate_expression(stm, environment)?;
             }
-
-            drop(local_scope);
             value
         }
         Expression::If {
@@ -339,21 +338,20 @@ pub(crate) fn evaluate_expression(
             resolve_and_call(function, evaluated_args, environment, span)?
         }
         Expression::FunctionDeclaration {
-            parameters,
+            type_signature,
             body,
             resolved_name,
             return_type,
+            captures,
             pure,
             ..
         } => {
+            let upvalue_cells = Environment::resolve_captures(environment, captures);
             let mut user_function = FunctionBody::Closure {
-                parameter_names: parameters
-                    .as_parameters()
-                    .into_iter()
-                    .map(|x| x.to_string())
-                    .collect(),
+                type_signature: type_signature.clone(),
                 body: *body.clone(),
                 return_type: return_type.clone().unwrap_or_else(StaticType::unit),
+                upvalue_cells,
                 environment: environment.clone(),
             };
 
@@ -428,7 +426,7 @@ pub(crate) fn evaluate_expression(
 
             match &**body {
                 ForBody::Block(_) => Value::unit(),
-                ForBody::List(_) => Value::list(out_values),
+                ForBody::List { .. } => Value::list(out_values),
                 ForBody::Map {
                     key: _,
                     value: _,
@@ -456,147 +454,6 @@ pub(crate) fn evaluate_expression(
         }
         Expression::Break => return Err(FunctionCarrier::Break(Value::unit())),
         Expression::Continue => return Err(FunctionCarrier::Continue),
-        Expression::Index {
-            value: lhs_expr,
-            index: index_expr,
-        } => {
-            let lhs_value = evaluate_expression(lhs_expr, environment)?;
-
-            match lhs_value {
-                Value::Sequence(Sequence::String(string)) => {
-                    let string = string.borrow();
-
-                    let index = evaluate_as_index(index_expr, environment)?
-                        .try_into_offset(string.chars().count(), index_expr.span)?;
-
-                    let (start, end) = index.into_tuple();
-                    let new = string
-                        .chars()
-                        .dropping(start)
-                        .take(end - start)
-                        .collect::<String>();
-
-                    new.into()
-                }
-                Value::Sequence(Sequence::List(list)) => {
-                    let list_length = list.borrow().len();
-
-                    let index = evaluate_as_index(index_expr, environment)?
-                        .try_into_offset(list_length, index_expr.span)?;
-
-                    match index {
-                        Offset::Element(usize_index) => {
-                            let list = list.borrow();
-                            let Some(value) = list.get(usize_index) else {
-                                return Err(
-                                    EvaluationError::out_of_bounds(index, index_expr.span).into()
-                                );
-                            };
-                            value.clone()
-                        }
-                        Offset::Range(from_usize, to_usize) => {
-                            let list = list.borrow();
-                            let Some(values) = list.get(from_usize..to_usize) else {
-                                return Err(
-                                    EvaluationError::out_of_bounds(index, index_expr.span).into()
-                                );
-                            };
-
-                            Value::list(values)
-                        }
-                    }
-                }
-                Value::Sequence(Sequence::Tuple(tuple)) => {
-                    let index = evaluate_as_index(index_expr, environment)?
-                        .try_into_offset(tuple.len(), index_expr.span)?;
-
-                    match index {
-                        Offset::Element(index_usize) => {
-                            let Some(value) = tuple.get(index_usize) else {
-                                return Err(
-                                    EvaluationError::out_of_bounds(index, index_expr.span).into()
-                                );
-                            };
-
-                            value.clone()
-                        }
-
-                        Offset::Range(from_usize, to_usize) => {
-                            let Some(values) = tuple.get(from_usize..to_usize) else {
-                                return Err(
-                                    EvaluationError::out_of_bounds(index, index_expr.span).into()
-                                );
-                            };
-
-                            Value::Sequence(Sequence::Tuple(Rc::new(values.to_vec())))
-                        }
-                    }
-                }
-                Value::Sequence(Sequence::Deque(deque)) => {
-                    let list_length = deque.borrow().len();
-
-                    let index = evaluate_as_index(index_expr, environment)?
-                        .try_into_offset(list_length, index_expr.span)?;
-
-                    match index {
-                        Offset::Element(usize_index) => {
-                            let list = deque.borrow();
-                            let Some(value) = list.get(usize_index) else {
-                                return Err(
-                                    EvaluationError::out_of_bounds(index, index_expr.span).into()
-                                );
-                            };
-                            value.clone()
-                        }
-                        Offset::Range(from_usize, to_usize) => {
-                            let list = deque.borrow();
-                            let out = list
-                                .iter()
-                                .dropping(from_usize)
-                                .take(to_usize - from_usize)
-                                .cloned()
-                                .collect::<Vec<_>>();
-
-                            Value::list(out)
-                        }
-                    }
-                }
-                Value::Sequence(Sequence::Map(dict, default)) => {
-                    let key = evaluate_expression(index_expr, environment)?;
-                    // let dict = dict.borrow();
-
-                    let value = { dict.borrow().get(&key).cloned() };
-
-                    return if let Some(value) = value {
-                        Ok(value)
-                    } else if let Some(default) = default {
-                        let default_value = index::produce_default_value(
-                            &default,
-                            environment,
-                            // NOTE: this span points at the entire expression instead of the
-                            // function that cannot be executed because we don't have that span here
-                            // maybe we can check the function signature earlier when we do have the span
-                            lhs_expr.span.merge(index_expr.span),
-                        )?;
-
-                        // TODO: This borrow_mut can fail, handle it better!!
-                        // NOTE: WHEN DOES IT FAIL!?
-                        dict.borrow_mut().insert(key, default_value.clone());
-
-                        Ok(default_value)
-                    } else {
-                        Err(EvaluationError::key_not_found(&key, index_expr.span).into())
-                    };
-                }
-                value => {
-                    return Err(EvaluationError::new(
-                        format!("cannot index into {}", value.static_type()),
-                        lhs_expr.span,
-                    )
-                    .into());
-                }
-            }
-        }
         Expression::RangeInclusive {
             start: range_start,
             end: range_end,
@@ -689,12 +546,13 @@ fn declare_or_assign_variable(
         Lvalue::Index {
             value: lhs_expr,
             index,
+            ..
         } => {
             let mut lhs = evaluate_expression(lhs_expr, environment)?;
 
             let index = evaluate_as_index(index, environment)?;
 
-            set_at_index(&mut lhs, value, index, span)?;
+            set_at_index(&mut lhs, value, index).add_span(span)?;
         }
     };
 
@@ -865,7 +723,7 @@ fn execute_for_body(
         ForBody::Block(expr) => {
             evaluate_expression(expr, environment)?;
         }
-        ForBody::List(expr) => {
+        ForBody::List { expr, .. } => {
             let value = evaluate_expression(expr, environment)?;
             result.push(value);
         }
@@ -903,15 +761,13 @@ fn execute_for_iterations(
             let mut sequence = evaluate_expression(sequence, environment)?;
             let iter = mut_value_to_iterator(&mut sequence).into_evaluation_result(span)?;
 
+            let base_offset = lvalue_base_offset(l_value);
+
             for r_value in iter {
-                // In a previous version this scope was lifted outside the loop and reset for every iteration inside the loop
-                // in the following code sample this matters (a lot):
-                // ```ndc
-                // [fn(x) { x + i } for i in 0...10]
-                // ```
-                // With the current implementation with a new scope declared for every iteration this produces 10 functions
-                // each with their own scope and their own version of `i`, this might potentially be a bit slower though
-                let scope = Rc::new(RefCell::new(Environment::new_scope(environment)));
+                let scope = Rc::new(RefCell::new(Environment::new_iteration_scope(
+                    environment,
+                    base_offset,
+                )));
                 declare_or_assign_variable(l_value, r_value, &scope, span)?;
 
                 if tail.is_empty() {
@@ -1059,6 +915,17 @@ fn vectorized_element_types(left: &StaticType, right: &StaticType) -> [StaticTyp
         .sequence_element_type()
         .unwrap_or_else(|| right.clone());
     [left_elem, right_elem]
+}
+
+fn lvalue_base_offset(lvalue: &Lvalue) -> usize {
+    match lvalue {
+        Lvalue::Identifier {
+            resolved: Some(ResolvedVar::Local { slot }),
+            ..
+        } => *slot,
+        Lvalue::Sequence(seq) => seq.iter().map(lvalue_base_offset).min().unwrap_or(0),
+        _ => 0,
+    }
 }
 
 fn resolve_dynamic_binding(

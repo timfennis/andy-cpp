@@ -8,17 +8,20 @@ pub mod iterator;
 pub mod semantic;
 pub mod sequence;
 pub mod value;
-
-use std::cell::RefCell;
-use std::rc::Rc;
+mod vm_bridge;
 
 use crate::environment::{Environment, InterpreterOutput};
 use crate::evaluate::{EvaluationError, evaluate_expression};
 use crate::function::FunctionCarrier;
-use crate::semantic::analyser::{Analyser, ScopeTree};
+use crate::semantic::{Analyser, ScopeTree};
 use crate::value::Value;
 use ndc_lexer::{Lexer, TokenLocation};
 use ndc_parser::ExpressionLocation;
+use ndc_vm::compiler::Compiler;
+use ndc_vm::value::CompiledFunction;
+use ndc_vm::vm::Vm;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 pub struct Interpreter {
     environment: Rc<RefCell<Environment>>,
@@ -61,9 +64,33 @@ impl Interpreter {
         self.parse_and_analyse(input)
     }
 
-    pub fn run_str(&mut self, input: &str) -> Result<String, InterpreterError> {
+    pub fn compile_str(&mut self, input: &str) -> Result<CompiledFunction, InterpreterError> {
         let expressions = self.parse_and_analyse(input)?;
-        let final_value = self.interpret(expressions.into_iter())?;
+        Ok(Compiler::compile(expressions.into_iter())?)
+    }
+
+    pub fn disassemble_str(&mut self, input: &str) -> Result<String, InterpreterError> {
+        let compiled = self.compile_str(input)?;
+        let mut out = String::new();
+        out.push_str(&ndc_vm::disassemble::disassemble(&compiled, Some(input)));
+        Ok(out)
+    }
+
+    pub fn run_str(&mut self, input: &str) -> Result<String, InterpreterError> {
+        self.run_str_with_options(input, false)
+    }
+
+    pub fn run_str_with_options(
+        &mut self,
+        input: &str,
+        use_vm: bool,
+    ) -> Result<String, InterpreterError> {
+        let expressions = self.parse_and_analyse(input)?;
+        let final_value = if use_vm {
+            self.interpret_vm(input, expressions.into_iter())?
+        } else {
+            self.interpret(expressions.into_iter())?
+        };
         Ok(format!("{final_value}"))
     }
 
@@ -83,6 +110,26 @@ impl Interpreter {
         }
 
         Ok(expressions)
+    }
+    fn interpret_vm(
+        &mut self,
+        #[cfg(feature = "vm-trace")] input: &str,
+        #[cfg(not(feature = "vm-trace"))] _input: &str,
+        expressions: impl Iterator<Item = ExpressionLocation>,
+    ) -> Result<Value, InterpreterError> {
+        let code = Compiler::compile(expressions)?;
+
+        let globals = vm_bridge::make_vm_globals(&self.environment);
+        let mut vm = Vm::new(code, globals);
+
+        #[cfg(feature = "vm-trace")]
+        {
+            vm = vm.with_source(input);
+        }
+
+        vm.run().expect("VM failed");
+
+        Ok(Value::unit())
     }
 
     fn interpret(
@@ -138,8 +185,16 @@ pub enum InterpreterError {
     #[error("Error during static analysis")]
     Resolver {
         #[from]
-        cause: semantic::analyser::AnalysisError,
+        cause: semantic::AnalysisError,
+    },
+    #[error("Compilation error")]
+    Compiler {
+        #[from]
+        cause: ndc_vm::CompileError,
     },
     #[error("Error while executing code")]
-    Evaluation(#[from] EvaluationError),
+    Evaluation {
+        #[from]
+        cause: EvaluationError,
+    },
 }

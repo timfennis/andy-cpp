@@ -1,6 +1,7 @@
+// vm-ready
 let i = 0;
 while true {
-    i += 1;
+    i = i + 1;
     if i == 30 { break; }
 }
 

@@ -1,6 +1,6 @@
 use miette::{Diagnostic, LabeledSpan, SourceSpan};
-use ndc_lexer::Span;
 use ndc_interpreter::InterpreterError;
+use ndc_lexer::Span;
 use std::fmt;
 
 fn span_to_source_span(span: Span) -> SourceSpan {
@@ -63,11 +63,17 @@ impl From<InterpreterError> for NdcReport {
                 label: "related to this",
                 help: None,
             },
-            InterpreterError::Evaluation(cause) => Self {
+            InterpreterError::Evaluation { cause } => Self {
                 message: cause.to_string(),
                 span: Some(span_to_source_span(cause.span())),
                 label: "related to this",
                 help: cause.help_text().map(str::to_owned),
+            },
+            InterpreterError::Compiler { cause } => Self {
+                message: cause.to_string(),
+                span: Some(span_to_source_span(cause.span())),
+                label: "related to this",
+                help: None,
             },
         }
     }

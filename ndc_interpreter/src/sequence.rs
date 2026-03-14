@@ -1,5 +1,5 @@
-use crate::hash_map::HashMap;
 use crate::function::StaticType;
+use crate::hash_map::HashMap;
 use crate::heap::{MaxHeap, MinHeap};
 use crate::iterator::ValueIterator;
 use crate::value::Value;

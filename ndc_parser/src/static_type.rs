@@ -7,6 +7,12 @@ pub enum TypeSignature {
     Exact(Vec<Parameter>),
 }
 
+impl Default for TypeSignature {
+    fn default() -> Self {
+        Self::Exact(vec![])
+    }
+}
+
 impl TypeSignature {
     /// Matches a list of `ValueTypes` to a type signature. It can return `None` if there is no match or
     /// `Some(num)` where num is the sum of the distances of the types. The type `Int`, is distance 1
@@ -42,6 +48,13 @@ impl TypeSignature {
             Self::Exact(args) => Some(args.len()),
         }
     }
+
+    pub fn types(&self) -> Option<Vec<StaticType>> {
+        match self {
+            Self::Variadic => None,
+            Self::Exact(v) => Some(v.iter().map(|p| p.type_name.clone()).collect()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -59,15 +72,16 @@ impl Parameter {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Default)]
 pub enum StaticType {
+    #[default]
     Any,
     Bool,
     Function {
-        parameters: Option<Vec<StaticType>>,
-        return_type: Box<StaticType>,
+        parameters: Option<Vec<Self>>,
+        return_type: Box<Self>,
     },
-    Option(Box<StaticType>),
+    Option(Box<Self>),
 
     // Numbers
     Number,
@@ -77,18 +91,18 @@ pub enum StaticType {
     Complex,
 
     // Sequences List<Int> -> List<Number>
-    Sequence(Box<StaticType>),
-    List(Box<StaticType>),
+    Sequence(Box<Self>),
+    List(Box<Self>),
     String,
-    Tuple(Vec<StaticType>),
+    Tuple(Vec<Self>),
     Map {
-        key: Box<StaticType>,
-        value: Box<StaticType>,
+        key: Box<Self>,
+        value: Box<Self>,
     },
-    Iterator(Box<StaticType>),
-    MinHeap(Box<StaticType>),
-    MaxHeap(Box<StaticType>),
-    Deque(Box<StaticType>),
+    Iterator(Box<Self>),
+    MinHeap(Box<Self>),
+    MaxHeap(Box<Self>),
+    Deque(Box<Self>),
 }
 
 impl StaticType {

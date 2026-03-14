@@ -1,3 +1,4 @@
+// vm-ready
 let square = fn(x) => x * x;
 assert_eq(square(5), 25);
 

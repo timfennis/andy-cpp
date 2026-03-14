@@ -1,7 +1,8 @@
+// vm-ready
 let invoked = 0;
 
 fn counter() {
-let   n = 0;
+  let n = 0;
   fn add_one() {
     n = n + 1;
     invoked = invoked + 1;

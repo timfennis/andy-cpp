@@ -41,6 +41,22 @@ fn generate_tests(output: &mut impl Write, base: &Path, dir: &Path) {
             )
             .unwrap();
             writeln!(output, "}}").unwrap();
+
+            let contents = fs::read_to_string(&path).unwrap_or_default();
+            let vm_ready = contents.lines().any(|l| l.trim() == "// vm-ready");
+
+            let vm_test_name = format!("test_vm_{stem}");
+            writeln!(output, "#[test]").unwrap();
+            if !vm_ready {
+                writeln!(output, "#[ignore = \"vm in progress\"]").unwrap();
+            }
+            writeln!(output, "fn {vm_test_name}() {{").unwrap();
+            writeln!(
+                output,
+                "    run_ndc_test_vm(std::path::Path::new(env!(\"CARGO_MANIFEST_DIR\")).join(\"programs/{path_str}\")).expect(\"test failed\");",
+            )
+            .unwrap();
+            writeln!(output, "}}").unwrap();
         }
     }
 }

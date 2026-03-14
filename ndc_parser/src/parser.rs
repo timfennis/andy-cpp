@@ -3,6 +3,7 @@ use std::fmt::Write;
 use crate::expression::Expression;
 use crate::expression::{Binding, ExpressionLocation, ForBody, ForIteration, Lvalue};
 use crate::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
+use crate::{Parameter, StaticType, TypeSignature};
 use ndc_lexer::{Span, Token, TokenLocation};
 
 pub struct Parser {
@@ -29,6 +30,7 @@ impl Parser {
                     | Expression::While { .. }
                     | Expression::For { .. }
                     | Expression::FunctionDeclaration { .. }
+                    | Expression::VariableDeclaration { .. }
             )
         };
         let mut expressions = Vec::new();
@@ -331,9 +333,7 @@ impl Parser {
             self.require_current_token_matches(&Token::Semicolon)?;
         }
 
-        Ok(declaration
-            .to_location(let_token.span.merge(end))
-            .to_statement())
+        Ok(declaration.to_location(let_token.span.merge(end)))
     }
 
     fn expression(&mut self) -> Result<ExpressionLocation, Error> {
@@ -697,12 +697,43 @@ impl Parser {
                     // for now, we require parentheses
                 }
                 Token::LeftSquareBracket => {
+                    let bracket_span = current.span;
                     self.require_current_token_matches(&Token::LeftSquareBracket)?;
                     // self.expression here allows for this syntax which is maybe a good idea
                     // `foo[1, 2] == foo[(1, 2)]`
                     // and
                     // `foo[x := 3]`
-                    let index_expression = self.expression()?;
+                    let mut index_expression = self.expression()?;
+
+                    // Reject `a[x..=]` — inclusive ranges must have an end.
+                    if matches!(
+                        &index_expression.expression,
+                        Expression::RangeInclusive { end: None, .. }
+                    ) {
+                        return Err(Error::text(
+                            "inclusive ranges must have an end".to_string(),
+                            index_expression.span,
+                        ));
+                    }
+
+                    // Normalize open-ended ranges: `a[..3]` → `a[0..3]` so the range
+                    // can be evaluated as a standalone value (ranges without a lower
+                    // bound cannot be evaluated otherwise).
+                    match &mut index_expression.expression {
+                        Expression::RangeExclusive {
+                            start: start @ None,
+                            ..
+                        }
+                        | Expression::RangeInclusive {
+                            start: start @ None,
+                            ..
+                        } => {
+                            *start = Some(Box::new(
+                                Expression::Int64Literal(0).to_location(index_expression.span),
+                            ));
+                        }
+                        _ => {}
+                    }
 
                     // TODO: this error may be triggered in a scenario described below, and it would
                     //       probably be nice if we could have a special message in a later version
@@ -727,9 +758,15 @@ impl Parser {
                     let span = expr.span.merge(end_token.span);
 
                     expr = ExpressionLocation {
-                        expression: Expression::Index {
-                            value: Box::new(expr),
-                            index: Box::new(index_expression),
+                        expression: Expression::Call {
+                            function: Box::new(
+                                Expression::Identifier {
+                                    name: "[]".to_string(),
+                                    resolved: Binding::None,
+                                }
+                                .to_location(bracket_span),
+                            ),
+                            arguments: vec![expr, index_expression],
                         },
                         span,
                     };
@@ -794,7 +831,10 @@ impl Parser {
             }
             // WOAH, this is not a list, it's a list comprehension
             Some(Token::For) => {
-                let result = ForBody::List(expr.simplify());
+                let result = ForBody::List {
+                    expr: expr.simplify(),
+                    accumulator_slot: None,
+                };
                 self.for_comprehension(left_square_bracket_span, result, &Token::RightSquareBracket)
             }
             _ => {
@@ -1145,29 +1185,26 @@ impl Parser {
             None => return Err(Error::end_of_input(argument_list.span)),
         };
 
+        let parameters_span = argument_list.span;
         let span = fn_token.span.merge(body.span);
         Ok(ExpressionLocation {
             expression: Expression::FunctionDeclaration {
                 name: identifier,
-                parameters: Box::new(argument_list),
+                type_signature: argument_list
+                    .try_into()
+                    .expect("INTERNAL ERROR: type of argument list is incorrect"),
+                parameters_span,
                 body: Box::new(body),
                 return_type: None, // At some point in the future we could use type declarations here to insert the type (return type inference is cringe anyway)
-                pure: is_pure,
                 resolved_name: None,
+                captures: vec![],
+                pure: is_pure,
             },
             span,
         })
     }
 
     /// Parses a block expression including the block delimiters `{` and `}`
-    /// example:
-    /// ```ndc
-    /// {
-    ///     func();
-    ///     x := 1 + 1;
-    ///     x
-    /// }
-    /// ```
     fn block(&mut self) -> Result<ExpressionLocation, Error> {
         let left_curly_span = self.require_token(&[Token::LeftCurlyBracket])?;
 
@@ -1323,4 +1360,31 @@ fn tokens_to_string(tokens: &[Token]) -> String {
         }
     }
     buf
+}
+
+impl TryFrom<ExpressionLocation> for TypeSignature {
+    type Error = ();
+
+    fn try_from(
+        ExpressionLocation { expression, .. }: ExpressionLocation,
+    ) -> Result<Self, Self::Error> {
+        let Expression::Tuple { values } = expression else {
+            return Err(());
+        };
+
+        values
+            .into_iter()
+            .map(|expression_location| {
+                let ExpressionLocation { expression, .. } = expression_location;
+
+                match expression {
+                    Expression::Identifier { name, .. } => {
+                        Ok(Parameter::new(name, StaticType::Any))
+                    }
+                    _ => Err(()),
+                }
+            })
+            .collect::<Result<Vec<_>, ()>>()
+            .map(TypeSignature::Exact)
+    }
 }

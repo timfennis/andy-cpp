@@ -1,3 +1,4 @@
+// vm-ready
 fn f() { 2 }
 let l = [1,2,3];
 assert_eq(l[f() - 1], 2);

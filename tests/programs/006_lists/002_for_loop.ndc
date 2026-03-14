@@ -1,3 +1,4 @@
+// vm-ready
 let xs = [1,4,9,16,25];
 let _results = [];
 for x in xs {

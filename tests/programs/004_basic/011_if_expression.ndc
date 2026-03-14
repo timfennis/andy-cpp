@@ -1,2 +1,3 @@
+// vm-ready
 let foo = if true { 5 } else { 3 } + 8;
 assert_eq(foo, 13);

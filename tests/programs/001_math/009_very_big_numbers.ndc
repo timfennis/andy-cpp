@@ -1,2 +1,3 @@
+// vm-ready
 assert_eq(9 / 3, 3); // this can be calculated
 assert_eq(10 / 4, 5/2); // this can be simplified

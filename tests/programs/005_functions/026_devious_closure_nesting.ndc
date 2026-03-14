@@ -1,0 +1,23 @@
+// vm-ready
+// expect-output: return from outer
+// expect-output: create inner closure
+// expect-output: value
+fn outer() {
+    let x = "value";
+
+    fn middle() {
+        fn inner() {
+            print(x);
+        }
+
+        print("create inner closure");
+        return inner;
+    }
+
+    print("return from outer");
+    return middle;
+}
+
+let mid = outer();
+let ins = mid();
+ins();

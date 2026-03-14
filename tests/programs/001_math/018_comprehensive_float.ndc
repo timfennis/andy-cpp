@@ -1,3 +1,4 @@
+// vm-ready
 // Some inspiration was taken from: https://github.com/python/cpython/blob/main/Lib/test/test_float.py
 
 assert(4.20 == 4.20);

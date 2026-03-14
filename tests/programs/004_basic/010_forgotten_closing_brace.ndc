@@ -1,2 +1,3 @@
+// vm-ready
 // expect-error: expected '}'
 let foo = { 3
