@@ -1,3 +1,4 @@
+// vm-ready
 let str = "foobar";
 str[0] = "w";
 assert_eq(str, "woobar");
