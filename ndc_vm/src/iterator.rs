@@ -19,7 +19,7 @@ pub trait VmIterator {
 
 pub type SharedIterator = Rc<RefCell<dyn VmIterator>>;
 
-/// Exclusive range: start..end
+/// Exclusive range: `start..end`
 pub struct RangeIter {
     current: i64,
     end: i64,

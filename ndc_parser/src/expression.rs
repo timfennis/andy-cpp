@@ -168,6 +168,7 @@ pub enum Lvalue {
         value: Box<ExpressionLocation>,
         index: Box<ExpressionLocation>,
         resolved_set: Option<Binding>,
+        resolved_get: Option<Binding>,
     },
     // Example: `let a, b = ...`
     Sequence(Vec<Self>),
@@ -277,6 +278,7 @@ impl TryFrom<ExpressionLocation> for Lvalue {
                     value: Box::new(container),
                     index: Box::new(index),
                     resolved_set: None,
+                    resolved_get: None,
                 })
             }
             Expression::List { values } | Expression::Tuple { values } => Ok(Self::Sequence(
