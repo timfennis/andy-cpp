@@ -1,3 +1,4 @@
+// vm-ready
 // Regression test: accessing a variable from an outer block scope inside a list comprehension
 // guard used to panic with "slot not found in any scope within function".
 //

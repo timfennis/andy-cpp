@@ -3,7 +3,8 @@ use crate::semantic::ScopeTree;
 use itertools::Itertools;
 use ndc_lexer::Span;
 use ndc_parser::{
-    Binding, Expression, ExpressionLocation, ForBody, ForIteration, Lvalue, TypeSignature,
+    Binding, Expression, ExpressionLocation, ForBody, ForIteration, Lvalue, ResolvedVar,
+    TypeSignature,
 };
 use std::fmt::Debug;
 
@@ -191,7 +192,29 @@ impl Analyser {
                 Ok(StaticType::unit())
             }
             Expression::For { iterations, body } => {
-                Ok(self.resolve_for_iterations(iterations, body, *span)?)
+                let return_type = self.resolve_for_iterations(iterations, body, *span)?;
+                // Assign the VM accumulator slot for list comprehensions. We do this after
+                // resolution so we can derive the slot from the resolved loop-variable slots
+                // without touching the scope tree (the interpreter doesn't need this slot).
+                if let ForBody::List { accumulator_slot, .. } = body.as_mut() {
+                    let max_loop_slot = iterations
+                        .iter()
+                        .filter_map(|it| {
+                            if let ForIteration::Iteration { l_value, .. } = it {
+                                if let Lvalue::Identifier {
+                                    resolved: Some(ResolvedVar::Local { slot }),
+                                    ..
+                                } = l_value
+                                {
+                                    return Some(*slot);
+                                }
+                            }
+                            None
+                        })
+                        .max();
+                    *accumulator_slot = Some(max_loop_slot.map_or(0, |s| s + 1));
+                }
+                Ok(return_type)
             }
             Expression::Call {
                 function,
@@ -363,7 +386,7 @@ impl Analyser {
                     self.analyse(block)?;
                     StaticType::unit()
                 }
-                ForBody::List(list) => StaticType::List(Box::new(self.analyse(list)?)),
+                ForBody::List { expr, .. } => StaticType::List(Box::new(self.analyse(expr)?)),
                 ForBody::Map {
                     key,
                     value,

@@ -215,22 +215,24 @@ fn test_if_with_statement_branches() {
 // while true { 1 }
 //
 // 0: Constant(0)      push `true`  ← loop_start
-// 1: JumpIfFalse(3)   if false, jump past body to exit Pop (index 5)
+// 1: JumpIfFalse(4)   if false, jump past body to exit Pop (index 6)
 // 2: Pop              pop condition (true path)
 // 3: Constant(1)      body: push `1`
-// 4: Jump(-5)         jump back to loop_start (index 0)
-// 5: Pop              pop condition (false path, loop exit)
-// 6: Halt
+// 4: Pop              discard body value (loops produce no value)
+// 5: Jump(-6)         jump back to loop_start (index 0)
+// 6: Pop              pop condition (false path, loop exit)
+// 7: Halt
 #[test]
 fn test_while() {
     assert_eq!(
         compile("while true { 1 }"),
         [
             Constant(0),
-            JumpIfFalse(3),
+            JumpIfFalse(4),
             Pop,
             Constant(1),
-            Jump(-5),
+            Pop,
+            Jump(-6),
             Pop,
             Halt
         ]

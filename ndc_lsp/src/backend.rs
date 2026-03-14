@@ -265,7 +265,8 @@ fn collect_hints(expr: &ExpressionLocation, text: &str, hints: &mut Vec<InlayHin
                 }
             }
             match body.as_ref() {
-                ForBody::Block(e) | ForBody::List(e) => collect_hints(e, text, hints),
+                ForBody::Block(e) => collect_hints(e, text, hints),
+                ForBody::List { expr: e, .. } => collect_hints(e, text, hints),
                 ForBody::Map {
                     key,
                     value,

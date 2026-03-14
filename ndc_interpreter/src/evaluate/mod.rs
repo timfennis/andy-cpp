@@ -426,7 +426,7 @@ pub(crate) fn evaluate_expression(
 
             match &**body {
                 ForBody::Block(_) => Value::unit(),
-                ForBody::List(_) => Value::list(out_values),
+                ForBody::List { .. } => Value::list(out_values),
                 ForBody::Map {
                     key: _,
                     value: _,
@@ -723,7 +723,7 @@ fn execute_for_body(
         ForBody::Block(expr) => {
             evaluate_expression(expr, environment)?;
         }
-        ForBody::List(expr) => {
+        ForBody::List { expr, .. } => {
             let value = evaluate_expression(expr, environment)?;
             result.push(value);
         }
