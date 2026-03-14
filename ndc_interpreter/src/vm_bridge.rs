@@ -3,8 +3,8 @@ use std::rc::Rc;
 
 use ndc_core::int::Int;
 use ndc_core::num::Number;
-use ndc_vm::value::{Function as VmFunction, NativeFunction, Object as VmObject, Value as VmValue};
 use ndc_vm::VmIterator;
+use ndc_vm::value::{Function as VmFunction, NativeFunction, Object as VmObject, Value as VmValue};
 
 use crate::environment::Environment;
 use crate::function::{

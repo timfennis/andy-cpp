@@ -1,5 +1,5 @@
 use crate::chunk::OpCode;
-use crate::iterator::{ListIter, RangeIter, RangeInclusiveIter, StringIter, TupleIter};
+use crate::iterator::{ListIter, RangeInclusiveIter, RangeIter, StringIter, TupleIter};
 use crate::value::{CompiledFunction, Function};
 use crate::{ClosureFunction, Object, UpvalueCell, Value};
 use ndc_parser::{CaptureSource, ResolvedVar};
@@ -254,9 +254,10 @@ impl Vm {
                     let (Value::Int(start), Value::Int(end)) = (start, end) else {
                         panic!("range bounds must be integers")
                     };
-                    self.stack.push(Value::iterator(Rc::new(RefCell::new(
-                        RangeIter::new(start, end),
-                    ))));
+                    self.stack
+                        .push(Value::iterator(Rc::new(RefCell::new(RangeIter::new(
+                            start, end,
+                        )))));
                 }
                 OpCode::MakeRangeInclusive => {
                     let end = self.stack.pop().expect("stack underflow");
@@ -283,7 +284,8 @@ impl Vm {
                     let frame_pointer = frame.frame_pointer;
                     // Pre-clone parent upvalue Rcs so we can drop the frame borrow
                     // before calling capture_upvalue (which needs &mut self).
-                    let parent_upvalues: Vec<_> = frame.closure.upvalues.iter().map(Rc::clone).collect();
+                    let parent_upvalues: Vec<_> =
+                        frame.closure.upvalues.iter().map(Rc::clone).collect();
                     let upvalues = values
                         .iter()
                         .map(|c| match c {

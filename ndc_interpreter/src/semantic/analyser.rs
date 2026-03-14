@@ -196,21 +196,13 @@ impl Analyser {
                 // Assign the VM accumulator slot for list comprehensions. We do this after
                 // resolution so we can derive the slot from the resolved loop-variable slots
                 // without touching the scope tree (the interpreter doesn't need this slot).
-                if let ForBody::List { accumulator_slot, .. } = body.as_mut() {
+                if let ForBody::List {
+                    accumulator_slot, ..
+                } = body.as_mut()
+                {
                     let max_loop_slot = iterations
                         .iter()
-                        .filter_map(|it| {
-                            if let ForIteration::Iteration { l_value, .. } = it {
-                                if let Lvalue::Identifier {
-                                    resolved: Some(ResolvedVar::Local { slot }),
-                                    ..
-                                } = l_value
-                                {
-                                    return Some(*slot);
-                                }
-                            }
-                            None
-                        })
+                        .filter_map(iteration_local_slot)
                         .max();
                     *accumulator_slot = Some(max_loop_slot.map_or(0, |s| s + 1));
                 }
@@ -574,6 +566,20 @@ impl Analyser {
 
         Ok(element_type)
     }
+}
+
+/// If `it` is a simple iteration over a local variable, returns that variable's slot index.
+/// Used to find the highest-numbered loop variable slot when assigning the list comprehension
+/// accumulator slot.
+fn iteration_local_slot(it: &ForIteration) -> Option<usize> {
+    let ForIteration::Iteration {
+        l_value: Lvalue::Identifier { resolved: Some(ResolvedVar::Local { slot }), .. },
+        ..
+    } = it
+    else {
+        return None;
+    };
+    Some(*slot)
 }
 
 #[derive(thiserror::Error, Debug)]
