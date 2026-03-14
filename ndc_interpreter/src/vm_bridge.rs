@@ -4,11 +4,27 @@ use std::rc::Rc;
 use ndc_core::int::Int;
 use ndc_core::num::Number;
 use ndc_vm::value::{Function as VmFunction, NativeFunction, Object as VmObject, Value as VmValue};
+use ndc_vm::VmIterator;
 
 use crate::environment::Environment;
-use crate::function::{Function as InterpFunction, FunctionBody, FunctionBuilder, VmFunctionWrapper};
+use crate::function::{
+    Function as InterpFunction, FunctionBody, FunctionBuilder, VmFunctionWrapper,
+};
+use crate::iterator::ValueIterator;
 use crate::sequence::Sequence;
 use crate::value::Value as InterpValue;
+
+/// Adapter that wraps an interpreter ValueIterator as a VM VmIterator
+struct InterpIteratorAdapter {
+    inner: Rc<RefCell<ValueIterator>>,
+}
+
+impl VmIterator for InterpIteratorAdapter {
+    fn next(&mut self) -> Option<VmValue> {
+        let val = self.inner.borrow_mut().next()?;
+        Some(interp_to_vm(val))
+    }
+}
 
 pub fn make_vm_globals(env: &Rc<RefCell<Environment>>) -> Vec<VmValue> {
     env.borrow()
@@ -51,9 +67,7 @@ pub fn vm_to_interp(value: &VmValue) -> InterpValue {
             VmObject::BigInt(b) => InterpValue::Number(Number::Int(Int::BigInt(b.clone()))),
             VmObject::Complex(c) => InterpValue::Number(Number::Complex(*c)),
             VmObject::Rational(r) => InterpValue::Number(Number::Rational(Box::new(r.clone()))),
-            VmObject::String(s) => {
-                InterpValue::Sequence(Sequence::String(Rc::new(RefCell::new(s.clone()))))
-            }
+            VmObject::String(s) => InterpValue::Sequence(Sequence::String(s.clone())),
             VmObject::List(vs) => InterpValue::Sequence(Sequence::List(Rc::new(RefCell::new(
                 vs.borrow().iter().map(vm_to_interp).collect(),
             )))),
@@ -71,6 +85,18 @@ pub fn vm_to_interp(value: &VmValue) -> InterpValue {
                         .build()
                         .expect("must succeed"),
                 )
+            }
+            VmObject::Iterator(iter) => {
+                // Materialize iterator into a list for the interpreter side
+                let mut values = Vec::new();
+                let mut iter = iter.borrow_mut();
+                if let Some(len) = iter.len() {
+                    values.reserve(len);
+                }
+                while let Some(v) = iter.next() {
+                    values.push(vm_to_interp(&v));
+                }
+                InterpValue::Sequence(Sequence::List(Rc::new(RefCell::new(values))))
             }
             VmObject::OverloadSet(slots) => InterpValue::function(
                 FunctionBuilder::default()
@@ -104,7 +130,7 @@ pub fn interp_to_vm(value: InterpValue) -> VmValue {
             VmValue::Object(Box::new(VmObject::Some(interp_to_vm(*inner))))
         }
         InterpValue::Sequence(Sequence::String(s)) => {
-            VmValue::Object(Box::new(VmObject::String(s.borrow().clone())))
+            VmValue::Object(Box::new(VmObject::String(s)))
         }
         InterpValue::Sequence(Sequence::List(list)) => VmValue::Object(Box::new(VmObject::list(
             list.borrow()
@@ -115,6 +141,10 @@ pub fn interp_to_vm(value: InterpValue) -> VmValue {
         InterpValue::Sequence(Sequence::Tuple(tuple)) => VmValue::Object(Box::new(
             VmObject::Tuple(tuple.iter().map(|v| interp_to_vm(v.clone())).collect()),
         )),
+        InterpValue::Sequence(Sequence::Iterator(iter)) => {
+            let adapter = InterpIteratorAdapter { inner: iter };
+            VmValue::iterator(Rc::new(RefCell::new(adapter)))
+        }
         InterpValue::Sequence(seq) => {
             panic!("cannot convert {} to vm value", seq.static_type())
         }

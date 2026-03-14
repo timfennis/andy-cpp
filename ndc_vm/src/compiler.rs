@@ -3,8 +3,8 @@ use crate::value::{CompiledFunction, Function};
 use crate::{Object, Value};
 use ndc_lexer::Span;
 use ndc_parser::{
-    Binding, CaptureSource, Expression, ExpressionLocation, LogicalOperator, Lvalue, ResolvedVar,
-    StaticType, TypeSignature,
+    Binding, CaptureSource, Expression, ExpressionLocation, ForBody, ForIteration,
+    LogicalOperator, Lvalue, ResolvedVar, StaticType, TypeSignature,
 };
 use std::rc::Rc;
 
@@ -48,7 +48,7 @@ impl Compiler {
                 self.chunk.write(OpCode::Constant(idx), span);
             }
             Expression::StringLiteral(s) => {
-                let idx = self.chunk.add_constant(Object::String(s).into());
+                let idx = self.chunk.add_constant(Value::string(s));
                 self.chunk.write(OpCode::Constant(idx), span);
             }
             Expression::Int64Literal(i) => {
@@ -106,28 +106,26 @@ impl Compiler {
             Expression::Assignment {
                 l_value,
                 r_value: value,
-            } => {
-                match l_value {
-                    Lvalue::Index {
-                        value: container,
-                        index,
-                        resolved_set,
-                    } => {
-                        let set_fn = resolved_set.expect("[]= must be resolved");
-                        self.compile_binding(set_fn, span)?;
-                        self.compile_expr(*container)?;
-                        self.compile_expr(*index)?;
-                        self.compile_expr(*value)?;
-                        self.chunk.write(OpCode::Call(3), span);
-                    }
-                    _ => {
-                        self.compile_expr(*value)?;
-                        self.compile_lvalue(l_value)?;
-                        let idx = self.chunk.add_constant(Value::unit());
-                        self.chunk.write(OpCode::Constant(idx), span);
-                    }
+            } => match l_value {
+                Lvalue::Index {
+                    value: container,
+                    index,
+                    resolved_set,
+                } => {
+                    let set_fn = resolved_set.expect("[]= must be resolved");
+                    self.compile_binding(set_fn, span)?;
+                    self.compile_expr(*container)?;
+                    self.compile_expr(*index)?;
+                    self.compile_expr(*value)?;
+                    self.chunk.write(OpCode::Call(3), span);
                 }
-            }
+                _ => {
+                    self.compile_expr(*value)?;
+                    self.compile_lvalue(l_value)?;
+                    let idx = self.chunk.add_constant(Value::unit());
+                    self.chunk.write(OpCode::Constant(idx), span);
+                }
+            },
             Expression::OpAssignment {
                 l_value,
                 r_value,
@@ -192,7 +190,9 @@ impl Compiler {
             } => {
                 self.compile_while(*condition, *loop_body, span)?;
             }
-            Expression::For { .. } => todo!("for loop"),
+            Expression::For { iterations, body } => {
+                self.compile_for(iterations, *body, span)?;
+            }
             Expression::Call {
                 function,
                 arguments,
@@ -245,8 +245,20 @@ impl Compiler {
                     span,
                 );
             }
-            Expression::RangeInclusive { .. } => todo!("inclusive range"),
-            Expression::RangeExclusive { .. } => todo!("exclusive range"),
+            Expression::RangeInclusive { start, end } => {
+                let start = start.expect("unbounded range start not yet supported");
+                let end = end.expect("unbounded range end not yet supported");
+                self.compile_expr(*start)?;
+                self.compile_expr(*end)?;
+                self.chunk.write(OpCode::MakeRangeInclusive, span);
+            }
+            Expression::RangeExclusive { start, end } => {
+                let start = start.expect("unbounded range start not yet supported");
+                let end = end.expect("unbounded range end not yet supported");
+                self.compile_expr(*start)?;
+                self.compile_expr(*end)?;
+                self.chunk.write(OpCode::MakeRange, span);
+            }
         }
 
         Ok(())
@@ -361,9 +373,10 @@ impl Compiler {
         let conditional_jump_idx = self.chunk.write(OpCode::JumpIfFalse(0), condition_span);
         self.chunk.write(OpCode::Pop, span);
         self.compile_expr(loop_body)?;
+        self.chunk.write(OpCode::Pop, span); // body always pushes a value; discard it
         self.chunk.write_jump_back(loop_start, span);
         self.chunk.patch_jump(conditional_jump_idx);
-        self.chunk.write(OpCode::Pop, span);
+        self.chunk.write(OpCode::Pop, span); // pop condition (false/exit path)
         let break_instructions =
             std::mem::take(&mut self.current_loop_context_mut().unwrap().break_instructions);
         for instruction in break_instructions {
@@ -433,6 +446,150 @@ impl Compiler {
         Ok(())
     }
 
+    fn alloc_temp(&mut self) -> usize {
+        let slot = self.max_local;
+        self.max_local += 1;
+        slot
+    }
+
+    fn compile_for(
+        &mut self,
+        iterations: Vec<ForIteration>,
+        body: ForBody,
+        span: Span,
+    ) -> Result<(), CompileError> {
+        match body {
+            ForBody::Block(block) => {
+                self.compile_for_block(&iterations, block, span)?;
+                Ok(())
+            }
+            ForBody::List(expr) => {
+                let tmp_list = self.alloc_temp();
+                self.chunk.write(OpCode::MakeList(0), span);
+                self.chunk.write(OpCode::SetLocal(tmp_list), span);
+                self.compile_for_list(&iterations, expr, tmp_list, span)?;
+                self.chunk.write(OpCode::GetLocal(tmp_list), span);
+                Ok(())
+            }
+            ForBody::Map { .. } => todo!("for map comprehension"),
+        }
+    }
+
+    fn compile_for_block(
+        &mut self,
+        iterations: &[ForIteration],
+        body: ExpressionLocation,
+        span: Span,
+    ) -> Result<(), CompileError> {
+        let Some((first, rest)) = iterations.split_first() else {
+            // The body is always a block, which always pushes exactly one value.
+            // Discard it — the loop itself produces no value.
+            self.compile_expr(body)?;
+            self.chunk.write(OpCode::Pop, span);
+            return Ok(());
+        };
+
+        match first {
+            ForIteration::Iteration { l_value, sequence } => {
+                let x_slot = extract_lvalue_slot(l_value);
+                self.max_local = self.max_local.max(x_slot + 1);
+
+                self.compile_expr(sequence.clone())?;
+                self.chunk.write(OpCode::GetIterator, span);
+
+                let loop_start = self.new_loop_context();
+                let iter_next = self.chunk.write(OpCode::IterNext(0), span);
+                self.chunk.write(OpCode::SetLocal(x_slot), span);
+
+                self.compile_for_block(rest, body, span)?;
+
+                self.chunk.write_jump_back(loop_start, span);
+
+                // Both IterNext-done and break jump to the iterator Pop
+                self.chunk.patch_jump(iter_next);
+                let break_instructions = std::mem::take(
+                    &mut self.current_loop_context_mut().unwrap().break_instructions,
+                );
+                for instruction in break_instructions {
+                    self.chunk.patch_jump(instruction);
+                }
+                self.end_loop_context();
+
+                // Pop the iterator
+                self.chunk.write(OpCode::Pop, span);
+            }
+            ForIteration::Guard(condition) => {
+                self.compile_expr(condition.clone())?;
+                let skip_jump = self.chunk.write(OpCode::JumpIfFalse(0), span);
+                self.chunk.write(OpCode::Pop, span);
+                self.compile_for_block(rest, body, span)?;
+                let end_jump = self.chunk.write(OpCode::Jump(0), span);
+                self.chunk.patch_jump(skip_jump);
+                self.chunk.write(OpCode::Pop, span);
+                self.chunk.patch_jump(end_jump);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn compile_for_list(
+        &mut self,
+        iterations: &[ForIteration],
+        expr: ExpressionLocation,
+        tmp_list: usize,
+        span: Span,
+    ) -> Result<(), CompileError> {
+        let Some((first, rest)) = iterations.split_first() else {
+            self.compile_expr(expr)?;
+            self.chunk.write(OpCode::ListPush(tmp_list), span);
+            return Ok(());
+        };
+
+        match first {
+            ForIteration::Iteration { l_value, sequence } => {
+                let x_slot = extract_lvalue_slot(l_value);
+                self.max_local = self.max_local.max(x_slot + 1);
+
+                self.compile_expr(sequence.clone())?;
+                self.chunk.write(OpCode::GetIterator, span);
+
+                let loop_start = self.new_loop_context();
+                let iter_next = self.chunk.write(OpCode::IterNext(0), span);
+                self.chunk.write(OpCode::SetLocal(x_slot), span);
+
+                self.compile_for_list(rest, expr, tmp_list, span)?;
+
+                self.chunk.write_jump_back(loop_start, span);
+
+                // Both IterNext-done and break jump to the iterator Pop
+                self.chunk.patch_jump(iter_next);
+                let break_instructions = std::mem::take(
+                    &mut self.current_loop_context_mut().unwrap().break_instructions,
+                );
+                for instruction in break_instructions {
+                    self.chunk.patch_jump(instruction);
+                }
+                self.end_loop_context();
+
+                // Pop the iterator
+                self.chunk.write(OpCode::Pop, span);
+            }
+            ForIteration::Guard(condition) => {
+                self.compile_expr(condition.clone())?;
+                let skip_jump = self.chunk.write(OpCode::JumpIfFalse(0), span);
+                self.chunk.write(OpCode::Pop, span);
+                self.compile_for_list(rest, expr, tmp_list, span)?;
+                let end_jump = self.chunk.write(OpCode::Jump(0), span);
+                self.chunk.patch_jump(skip_jump);
+                self.chunk.write(OpCode::Pop, span);
+                self.chunk.patch_jump(end_jump);
+            }
+        }
+
+        Ok(())
+    }
+
     fn new_loop_context(&mut self) -> usize {
         let start = self.chunk.len();
         self.loop_stack.push(LoopContext {
@@ -463,15 +620,23 @@ struct LoopContext {
 }
 
 fn produces_value(expr: &Expression) -> bool {
-    !matches!(
-        expr,
+    match expr {
         Expression::Statement(_)
-            | Expression::VariableDeclaration { .. }
-            | Expression::FunctionDeclaration {
-                resolved_name: Some(_),
-                ..
-            }
-    )
+        | Expression::VariableDeclaration { .. }
+        | Expression::FunctionDeclaration {
+            resolved_name: Some(_),
+            ..
+        }
+        | Expression::While { .. }
+        | Expression::If { on_false: None, .. }
+        | Expression::Break
+        | Expression::Continue
+        | Expression::Return { .. } => false,
+        Expression::For { body, .. } => {
+            matches!(**body, ForBody::List(_) | ForBody::Map { .. })
+        }
+        _ => true,
+    }
 }
 
 fn extract_lvalue_slot(lvalue: &Lvalue) -> usize {

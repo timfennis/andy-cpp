@@ -1,10 +1,12 @@
 pub mod chunk;
 pub mod compiler;
 pub mod disassemble;
+pub mod iterator;
 pub mod value;
 pub mod vm;
 
 pub use compiler::CompileError;
+pub use iterator::{SharedIterator, VmIterator};
 pub use value::*;
 
 #[cfg(test)]
