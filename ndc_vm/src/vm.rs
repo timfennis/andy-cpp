@@ -418,7 +418,10 @@ impl Vm {
                             }
                             if iter.next().is_some() {
                                 return Err(VmError::new(
-                                    format!("string is too long to unpack into {} variables", size),
+                                    format!(
+                                        "cannot unpack a string into {} variables: string is too long",
+                                        size
+                                    ),
                                     span,
                                 ));
                             }
