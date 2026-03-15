@@ -1,3 +1,4 @@
+// vm-ready
 fn foo() { 123 }
 let hashmap = %{
     "foo": 1,
