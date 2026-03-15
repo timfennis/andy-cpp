@@ -10,6 +10,7 @@ use crate::environment::Environment;
 use crate::function::{
     Function as InterpFunction, FunctionBody, FunctionBuilder, VmFunctionWrapper,
 };
+use ndc_vm::vm::Vm;
 use crate::iterator::ValueIterator;
 use crate::sequence::Sequence;
 use crate::value::Value as InterpValue;
@@ -27,17 +28,45 @@ impl VmIterator for InterpIteratorAdapter {
 }
 
 pub fn make_vm_globals(env: &Rc<RefCell<Environment>>) -> Vec<VmValue> {
-    env.borrow()
+    // The globals cell is initially empty; wrappers capture it by Rc.
+    // After all wrappers are built, we fill it in. Callbacks that need
+    // globals (for re-entrant VM calls) only run after this point.
+    let globals_cell: Rc<RefCell<Vec<VmValue>>> = Rc::new(RefCell::new(Vec::new()));
+    let globals: Vec<VmValue> = env
+        .borrow()
         .get_all_functions()
         .into_iter()
-        .map(|func| wrap_function(func, Rc::clone(env)))
-        .collect()
+        .map(|func| wrap_function(func, Rc::clone(env), Rc::clone(&globals_cell)))
+        .collect();
+    *globals_cell.borrow_mut() = globals.clone();
+    globals
 }
 
-fn wrap_function(func: InterpFunction, dummy_env: Rc<RefCell<Environment>>) -> VmValue {
+fn wrap_function(
+    func: InterpFunction,
+    dummy_env: Rc<RefCell<Environment>>,
+    globals_cell: Rc<RefCell<Vec<VmValue>>>,
+) -> VmValue {
     let static_type = func.static_type();
     let native = move |args: &[VmValue]| -> VmValue {
-        let mut interp_args: Vec<InterpValue> = args.iter().map(vm_to_interp).collect();
+        let globals = Rc::new(globals_cell.borrow().clone());
+        let mut interp_args: Vec<InterpValue> = args
+            .iter()
+            .map(|arg| vm_to_interp_callable(arg, Rc::clone(&globals)))
+            .collect();
+        // Keep extra Rc clones of interpreter lists alive so that
+        // SharedVecIterator::from_shared_vec never sees a unique Rc and drains the
+        // list, which would cause sync_list_mutations to zero out the original VM list.
+        let _list_guards: Vec<Rc<RefCell<Vec<InterpValue>>>> = interp_args
+            .iter()
+            .filter_map(|arg| {
+                if let InterpValue::Sequence(Sequence::List(list)) = arg {
+                    Some(Rc::clone(list))
+                } else {
+                    None
+                }
+            })
+            .collect();
         match func.call(&mut interp_args, &dummy_env) {
             Ok(result) => {
                 for (vm_arg, interp_arg) in args.iter().zip(interp_args.iter()) {
@@ -157,6 +186,33 @@ pub fn interp_to_vm(value: InterpValue) -> VmValue {
             panic!("cannot convert interpreter function to vm value")
         }
     }
+}
+
+/// Like `vm_to_interp` but converts VM function values into interpreter `NativeClosure`s
+/// that can be called back by stdlib HOFs (e.g. `all`, `map`, `filter`).
+fn vm_to_interp_callable(value: &VmValue, globals: Rc<Vec<VmValue>>) -> InterpValue {
+    if let VmValue::Object(obj) = value {
+        if let VmObject::Function(f) = obj.as_ref() {
+            let f = f.clone();
+            let static_type = f.static_type();
+            return InterpValue::function(
+                FunctionBuilder::default()
+                    .body(FunctionBody::NativeClosure {
+                        static_type,
+                        call: Rc::new(move |args: &mut [InterpValue]| {
+                            let vm_args: Vec<VmValue> =
+                                args.iter().map(|a| interp_to_vm(a.clone())).collect();
+                            let result =
+                                Vm::call_function(f.clone(), vm_args, (*globals).clone());
+                            Ok(vm_to_interp(&result))
+                        }),
+                    })
+                    .build()
+                    .expect("must succeed"),
+            );
+        }
+    }
+    vm_to_interp(value)
 }
 
 fn sync_list_mutations(vm_arg: &VmValue, interp_arg: &InterpValue) {

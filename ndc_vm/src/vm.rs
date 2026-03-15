@@ -101,7 +101,10 @@ impl Vm {
                     self.close_upvalues(frame_pointer);
                     self.stack.truncate(frame_pointer - 1);
                     self.frames.pop().expect("no frame to pop");
-                    self.stack.push(ret)
+                    self.stack.push(ret);
+                    if self.frames.is_empty() {
+                        return Ok(());
+                    }
                 }
                 OpCode::Constant(idx) => {
                     self.stack
@@ -397,6 +400,31 @@ impl Vm {
                 let result = (native.func)(&self.stack[start..]);
                 self.stack.truncate(start - 1);
                 self.stack.push(result);
+            }
+        }
+    }
+
+    /// Call a VM function with the given arguments, using a fresh VM instance.
+    /// Used to enable callbacks from stdlib HOFs into user-defined VM closures.
+    pub fn call_function(func: Function, args: Vec<Value>, globals: Vec<Value>) -> Value {
+        match func {
+            Function::Native(native) => (native.func)(&args),
+            func => {
+                let n_args = args.len();
+                let mut vm = Vm {
+                    stack: vec![Value::unit()], // dummy callee slot so frame_pointer = 1
+                    globals,
+                    frames: Vec::new(),
+                    open_upvalues: Vec::new(),
+                    #[cfg(feature = "vm-trace")]
+                    source: None,
+                };
+                for arg in args {
+                    vm.stack.push(arg);
+                }
+                vm.dispatch_call(func, n_args);
+                vm.run().expect("callback execution failed");
+                vm.stack.pop().expect("callback must produce a value")
             }
         }
     }
