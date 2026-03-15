@@ -2,6 +2,7 @@ use crate::chunk::OpCode;
 use crate::iterator::{ListIter, RangeInclusiveIter, RangeIter, StringIter, TupleIter};
 use crate::value::{CompiledFunction, Function};
 use crate::{ClosureFunction, Object, UpvalueCell, Value};
+use ndc_core::hash_map::HashMap;
 use ndc_parser::{CaptureSource, ResolvedVar};
 use std::cell::RefCell;
 use std::ops::Deref;
@@ -188,6 +189,22 @@ impl Vm {
                     let data = self.stack.split_off(self.stack.len() - size);
                     self.stack
                         .push(Value::Object(Box::new(Object::Tuple(data))));
+                }
+                OpCode::MakeMap { pairs, has_default } => {
+                    let default = if has_default {
+                        Some(self.stack.pop().expect("expected default value on stack"))
+                    } else {
+                        None
+                    };
+                    let flat = self.stack.split_off(self.stack.len() - pairs * 2);
+                    let mut map = HashMap::new();
+                    let mut flat_iter = flat.into_iter();
+                    for _ in 0..pairs {
+                        let key = flat_iter.next().expect("expected key");
+                        let value = flat_iter.next().expect("expected value");
+                        map.insert(key, value);
+                    }
+                    self.stack.push(Value::Object(Box::new(Object::map(map, default))));
                 }
                 OpCode::GetUpvalue(slot) => match frame.closure.upvalues[slot].borrow().deref() {
                     UpvalueCell::Open(slot) => self.stack.push(self.stack[*slot].clone()),

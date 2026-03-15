@@ -90,6 +90,19 @@ pub fn vm_to_interp(value: &VmValue) -> InterpValue {
             VmObject::Tuple(vs) => InterpValue::Sequence(Sequence::Tuple(Rc::new(
                 vs.iter().map(vm_to_interp).collect(),
             ))),
+            VmObject::Map { entries, default } => {
+                let converted_entries: ndc_core::hash_map::HashMap<InterpValue, InterpValue> =
+                    entries
+                        .borrow()
+                        .iter()
+                        .map(|(k, v)| (vm_to_interp(k), vm_to_interp(v)))
+                        .collect();
+                let converted_default = default.as_ref().map(|d| Box::new(vm_to_interp(d)));
+                InterpValue::Sequence(Sequence::Map(
+                    Rc::new(RefCell::new(converted_entries)),
+                    converted_default,
+                ))
+            }
             VmObject::Function(f) => {
                 let static_type = f.static_type();
                 let identity = f.prototype().map(|p| Rc::as_ptr(p) as usize);

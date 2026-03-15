@@ -1,3 +1,4 @@
+// vm-ready
 let m = %{0.0, 0.0/0.0, 1.0/0.0};
 assert_eq(3, m.len());
 

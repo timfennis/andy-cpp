@@ -1364,6 +1364,7 @@ dependencies = [
 name = "ndc_vm"
 version = "0.2.1"
 dependencies = [
+ "ndc_core",
  "ndc_lexer",
  "ndc_parser",
  "num",
