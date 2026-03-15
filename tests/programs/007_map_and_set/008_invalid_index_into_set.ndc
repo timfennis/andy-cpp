@@ -1,3 +1,4 @@
 // expect-error: Key not found in map: 4
 let set = %{1,2,3};
 let val = set[4]; // not found
+// vm-ready

@@ -1,3 +1,4 @@
 // expect-error: Invalid list index
 let x = [1,2,3];
 x["foo"] = 69; // ERROR
+// vm-ready

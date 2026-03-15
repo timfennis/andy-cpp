@@ -45,7 +45,7 @@ pub enum Function {
 }
 
 pub struct NativeFunction {
-    pub func: Box<dyn Fn(&[Value]) -> Value>,
+    pub func: Box<dyn Fn(&[Value]) -> Result<Value, String>>,
     pub static_type: StaticType,
 }
 
