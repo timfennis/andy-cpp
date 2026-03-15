@@ -349,6 +349,10 @@ impl Vm {
                 OpCode::Unpack(size) => {
                     self.exec_unpack(size, span)?;
                 }
+                OpCode::CloseUpvalue(slot) => {
+                    let frame_pointer = self.frames.last().expect("no frame").frame_pointer;
+                    self.close_upvalues(frame_pointer + slot);
+                }
             }
 
             #[cfg(feature = "vm-trace")]

@@ -616,6 +616,12 @@ impl Compiler {
 
                 self.compile_for_block(rest, body, span)?;
 
+                // Close upvalues for the loop variable so each iteration's closures
+                // get their own frozen copy rather than sharing a mutable slot.
+                if let Some(slot) = min_lvalue_slot(l_value) {
+                    self.chunk.write(OpCode::CloseUpvalue(slot), span);
+                }
+
                 self.chunk.write_jump_back(loop_start, span);
 
                 // Both IterNext-done and break jump to the iterator Pop
@@ -669,6 +675,12 @@ impl Compiler {
                 self.compile_declare_lvalue(l_value.clone(), span)?;
 
                 self.compile_for_list(rest, expr, tmp_list, span)?;
+
+                // Close upvalues for the loop variable so each iteration's closures
+                // get their own frozen copy rather than sharing a mutable slot.
+                if let Some(slot) = min_lvalue_slot(l_value) {
+                    self.chunk.write(OpCode::CloseUpvalue(slot), span);
+                }
 
                 self.chunk.write_jump_back(loop_start, span);
 
@@ -727,6 +739,19 @@ impl Compiler {
 struct LoopContext {
     start: usize,
     break_instructions: Vec<usize>,
+}
+
+/// Returns the minimum local slot referenced by an lvalue, used to determine
+/// which upvalues to close at the end of a loop iteration.
+fn min_lvalue_slot(lv: &Lvalue) -> Option<usize> {
+    match lv {
+        Lvalue::Identifier {
+            resolved: Some(ResolvedVar::Local { slot }),
+            ..
+        } => Some(*slot),
+        Lvalue::Sequence(seq) => seq.iter().filter_map(min_lvalue_slot).min(),
+        _ => None,
+    }
 }
 
 fn produces_value(expr: &Expression) -> bool {
