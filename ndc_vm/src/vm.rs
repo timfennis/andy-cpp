@@ -482,7 +482,10 @@ impl Vm {
                             )
                         })
                 }
-                _ => panic!("callee is unexpected object type"),
+                obj => panic!(
+                    "callee is unexpected object type: {:?}",
+                    std::mem::discriminant(obj)
+                ),
             },
             _ => panic!("callee is unexpected value type"),
         }
