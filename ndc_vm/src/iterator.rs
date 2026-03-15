@@ -16,6 +16,13 @@ pub trait VmIterator {
         let (lo, hi) = self.size_hint();
         hi.filter(|&hi| hi == lo)
     }
+
+    /// If this iterator represents a range, returns `(start, end, inclusive)`.
+    /// Used by the VM bridge to convert ranges back to interpreter range values.
+    /// TODO: remove once the VM bridge (vm_bridge.rs) is gone.
+    fn range_bounds(&self) -> Option<(i64, i64, bool)> {
+        None
+    }
 }
 
 pub type SharedIterator = Rc<RefCell<dyn VmIterator>>;
@@ -49,6 +56,10 @@ impl VmIterator for RangeIter {
     fn size_hint(&self) -> (usize, Option<usize>) {
         let remaining = (self.end - self.current).max(0) as usize;
         (remaining, Some(remaining))
+    }
+
+    fn range_bounds(&self) -> Option<(i64, i64, bool)> {
+        Some((self.current, self.end, false))
     }
 }
 
@@ -89,6 +100,10 @@ impl VmIterator for RangeInclusiveIter {
         }
         let remaining = (self.end - self.current + 1) as usize;
         (remaining, Some(remaining))
+    }
+
+    fn range_bounds(&self) -> Option<(i64, i64, bool)> {
+        Some((self.current, self.end, true))
     }
 }
 

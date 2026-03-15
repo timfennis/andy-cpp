@@ -123,7 +123,22 @@ pub fn vm_to_interp(value: &VmValue) -> InterpValue {
                 )
             }
             VmObject::Iterator(iter) => {
-                // Materialize iterator into a list for the interpreter side
+                // If it's a range, preserve it as an interpreter range iterator so that
+                // value_to_evaluated_index can recognise it for slicing (e.g. list[0..3]).
+                // TODO: remove once the VM bridge (vm_bridge.rs) is gone.
+                if let Some((start, end, inclusive)) = iter.borrow().range_bounds() {
+                    let range_iter = if inclusive {
+                        ValueIterator::ValueRangeInclusive(crate::iterator::ValueRangeInclusive(
+                            start..=end,
+                        ))
+                    } else {
+                        ValueIterator::ValueRange(crate::iterator::ValueRange(start..end))
+                    };
+                    return InterpValue::Sequence(Sequence::Iterator(Rc::new(RefCell::new(
+                        range_iter,
+                    ))));
+                }
+                // Materialize other iterators into a list for the interpreter side
                 let mut values = Vec::new();
                 let mut iter = iter.borrow_mut();
                 if let Some(len) = iter.len() {
