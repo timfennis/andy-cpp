@@ -531,8 +531,11 @@ fn declare_or_assign_variable(
 
             if l_values.len() != r_values.len() {
                 return Err(EvaluationError::syntax_error(
-                    "failed to unpack value into pattern because the lengths do not match"
-                        .to_string(),
+                    format!(
+                        "cannot unpack a sequence of length {} into {} variables",
+                        r_values.len(),
+                        l_values.len()
+                    ),
                     span,
                 )
                 .into());
