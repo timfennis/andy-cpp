@@ -348,12 +348,10 @@ impl PartialEq for Object {
             (Self::Tuple(a), Self::Tuple(b)) => a == b,
             (
                 Self::Map {
-                    entries: a_entries,
-                    ..
+                    entries: a_entries, ..
                 },
                 Self::Map {
-                    entries: b_entries,
-                    ..
+                    entries: b_entries, ..
                 },
             ) => a_entries.borrow().eq(&*b_entries.borrow()),
             (Self::Function(a), Self::Function(b)) => {

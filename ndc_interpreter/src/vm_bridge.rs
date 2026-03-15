@@ -10,10 +10,10 @@ use crate::environment::Environment;
 use crate::function::{
     Function as InterpFunction, FunctionBody, FunctionBuilder, FunctionCarrier, VmFunctionWrapper,
 };
-use ndc_vm::vm::Vm;
 use crate::iterator::ValueIterator;
 use crate::sequence::Sequence;
 use crate::value::Value as InterpValue;
+use ndc_vm::vm::Vm;
 
 /// Adapter that wraps an interpreter ValueIterator as a VM VmIterator
 struct InterpIteratorAdapter {
@@ -218,9 +218,8 @@ fn vm_to_interp_callable(value: &VmValue, globals: Rc<Vec<VmValue>>) -> InterpVa
                         call: Rc::new(move |args: &mut [InterpValue]| {
                             let vm_args: Vec<VmValue> =
                                 args.iter().map(|a| interp_to_vm(a.clone())).collect();
-                            let result =
-                                Vm::call_function(f.clone(), vm_args, (*globals).clone())
-                                    .map_err(|e| anyhow::anyhow!(e))?;
+                            let result = Vm::call_function(f.clone(), vm_args, (*globals).clone())
+                                .map_err(|e| anyhow::anyhow!(e))?;
                             Ok(vm_to_interp(&result))
                         }),
                     })

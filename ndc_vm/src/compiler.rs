@@ -288,7 +288,8 @@ impl Compiler {
                 if let Some(default) = default {
                     self.compile_expr(*default)?;
                 }
-                self.chunk.write(OpCode::MakeMap { pairs, has_default }, span);
+                self.chunk
+                    .write(OpCode::MakeMap { pairs, has_default }, span);
             }
             Expression::Return { value } => {
                 if !self.allow_return {
@@ -747,7 +748,6 @@ fn produces_value(expr: &Expression) -> bool {
         _ => true,
     }
 }
-
 
 #[derive(thiserror::Error, Debug)]
 #[error("{text}")]
