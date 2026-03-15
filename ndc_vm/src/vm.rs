@@ -218,7 +218,8 @@ impl Vm {
                         let value = flat_iter.next().expect("expected value");
                         map.insert(key, value);
                     }
-                    self.stack.push(Value::Object(Box::new(Object::map(map, default))));
+                    self.stack
+                        .push(Value::Object(Box::new(Object::map(map, default))));
                 }
                 OpCode::GetUpvalue(slot) => match frame.closure.upvalues[slot].borrow().deref() {
                     UpvalueCell::Open(slot) => self.stack.push(self.stack[*slot].clone()),
@@ -258,9 +259,9 @@ impl Vm {
                             Object::String(rc) => {
                                 Some(Value::iterator(Rc::new(RefCell::new(StringIter::new(rc)))))
                             }
-                            Object::Map { entries, .. } => {
-                                Some(Value::iterator(Rc::new(RefCell::new(MapIter::new(entries)))))
-                            }
+                            Object::Map { entries, .. } => Some(Value::iterator(Rc::new(
+                                RefCell::new(MapIter::new(entries)),
+                            ))),
                             _ => None,
                         },
                         _ => None,
@@ -369,14 +370,60 @@ impl Vm {
                     match *obj {
                         Object::List(seq) => {
                             let mut seq = std::mem::take(&mut *seq.borrow_mut());
-                            assert_eq!(seq.len(), size, "unpack length mismatch");
+                            if seq.len() != size {
+                                return Err(VmError::new(
+                                    format!(
+                                        "cannot unpack a list of length {} into {} variables",
+                                        seq.len(),
+                                        size
+                                    ),
+                                    span,
+                                ));
+                            }
                             seq.reverse();
                             self.stack.append(&mut seq);
                         }
                         Object::Tuple(mut seq) => {
-                            assert_eq!(seq.len(), size, "unpack length mismatch");
+                            if seq.len() != size {
+                                return Err(VmError::new(
+                                    format!(
+                                        "cannot unpack a tuple of length {} into {} variables",
+                                        seq.len(),
+                                        size
+                                    ),
+                                    span,
+                                ));
+                            }
                             seq.reverse();
                             self.stack.append(&mut seq);
+                        }
+                        Object::String(s) => {
+                            let s = s.borrow();
+                            let mut iter = s.chars();
+                            let mut chars: Vec<Value> = Vec::with_capacity(size);
+                            for _ in 0..size {
+                                match iter.next() {
+                                    Some(c) => chars.push(Value::string(c.to_string())),
+                                    None => {
+                                        return Err(VmError::new(
+                                            format!(
+                                                "cannot unpack a string of length {} into {} variables",
+                                                chars.len(),
+                                                size
+                                            ),
+                                            span,
+                                        ));
+                                    }
+                                }
+                            }
+                            if iter.next().is_some() {
+                                return Err(VmError::new(
+                                    format!("string is too long to unpack into {} variables", size),
+                                    span,
+                                ));
+                            }
+                            chars.reverse();
+                            self.stack.append(&mut chars);
                         }
                         _ => panic!("expected a tuple or list to unpack"),
                     }
@@ -462,7 +509,11 @@ impl Vm {
 
     /// Call a VM function with the given arguments, using a fresh VM instance.
     /// Used to enable callbacks from stdlib HOFs into user-defined VM closures.
-    pub fn call_function(func: Function, args: Vec<Value>, globals: Vec<Value>) -> Result<Value, String> {
+    pub fn call_function(
+        func: Function,
+        args: Vec<Value>,
+        globals: Vec<Value>,
+    ) -> Result<Value, String> {
         match func {
             Function::Native(native) => (native.func)(&args),
             func => {

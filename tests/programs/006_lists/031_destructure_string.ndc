@@ -1,3 +1,4 @@
+// vm-ready
 let a, b, c = "foo";
 assert(a == "f");
 assert(b == c and c == "o");
