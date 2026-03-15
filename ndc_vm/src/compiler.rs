@@ -67,7 +67,14 @@ impl Compiler {
                 let idx = self.chunk.add_constant(Object::Complex(c).into());
                 self.chunk.write(OpCode::Constant(idx), span);
             }
-            Expression::Identifier { resolved, .. } => self.compile_binding(resolved, span)?,
+            Expression::Identifier { name, resolved } => {
+                if name == "None" {
+                    let idx = self.chunk.add_constant(Value::None);
+                    self.chunk.write(OpCode::Constant(idx), span);
+                } else {
+                    self.compile_binding(resolved, span)?;
+                }
+            }
             Expression::Statement(stm) => {
                 let needs_pop = produces_value(&stm.expression);
                 self.compile_expr(*stm)?;

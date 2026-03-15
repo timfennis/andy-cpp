@@ -16,3 +16,4 @@ fn test(heap) {
 
 test(MinHeap());
 test(MaxHeap());
+// vm-ready

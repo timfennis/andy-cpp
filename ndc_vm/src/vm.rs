@@ -1,5 +1,8 @@
 use crate::chunk::OpCode;
-use crate::iterator::{ListIter, MapIter, RangeInclusiveIter, RangeIter, StringIter, TupleIter};
+use crate::iterator::{
+    DequeIter, ListIter, MapIter, MaxHeapIter, MinHeapIter, RangeInclusiveIter, RangeIter,
+    StringIter, TupleIter,
+};
 use crate::value::{CompiledFunction, Function};
 use crate::{ClosureFunction, Object, UpvalueCell, Value};
 use ndc_core::hash_map::HashMap;
@@ -247,6 +250,15 @@ impl Vm {
                             Object::Map { entries, .. } => Some(Value::iterator(Rc::new(
                                 RefCell::new(MapIter::new(entries)),
                             ))),
+                            Object::Deque(rc) => {
+                                Some(Value::iterator(Rc::new(RefCell::new(DequeIter::new(rc)))))
+                            }
+                            Object::MinHeap(rc) => {
+                                Some(Value::iterator(Rc::new(RefCell::new(MinHeapIter::new(rc)))))
+                            }
+                            Object::MaxHeap(rc) => {
+                                Some(Value::iterator(Rc::new(RefCell::new(MaxHeapIter::new(rc)))))
+                            }
                             _ => None,
                         },
                         _ => None,

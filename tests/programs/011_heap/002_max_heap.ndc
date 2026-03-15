@@ -8,3 +8,4 @@ assert_eq(heap.pop?, Some((5,1,2,3)));
 assert_eq(heap.pop, (3,1,2,3));
 assert_eq(heap.pop?, None);
 assert_eq(heap.pop?, None);
+// vm-ready

@@ -1,6 +1,9 @@
-use crate::{Object, Value};
+use crate::{Object, OrdValue, Value};
 use ndc_core::hash_map::HashMap;
 use std::cell::RefCell;
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
+use std::collections::VecDeque;
 use std::rc::Rc;
 
 pub trait VmIterator {
@@ -192,6 +195,100 @@ impl VmIterator for MapIter {
             let (k, v) = self.entries[self.index].clone();
             self.index += 1;
             Some(Value::Object(Box::new(Object::Tuple(vec![k, v]))))
+        } else {
+            None
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.entries.len() - self.index;
+        (remaining, Some(remaining))
+    }
+}
+
+/// Iterates over a deque front-to-back
+pub struct DequeIter {
+    deque: Rc<RefCell<VecDeque<Value>>>,
+    index: usize,
+}
+
+impl DequeIter {
+    pub fn new(deque: Rc<RefCell<VecDeque<Value>>>) -> Self {
+        Self { deque, index: 0 }
+    }
+}
+
+impl VmIterator for DequeIter {
+    fn next(&mut self) -> Option<Value> {
+        let d = self.deque.borrow();
+        if self.index < d.len() {
+            let val = d[self.index].clone();
+            drop(d);
+            self.index += 1;
+            Some(val)
+        } else {
+            None
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.deque.borrow().len().saturating_sub(self.index);
+        (remaining, Some(remaining))
+    }
+}
+
+/// Iterates over a min-heap, yielding elements in sorted (ascending) order.
+/// Drains the heap — snapshot the entries at creation time.
+pub struct MinHeapIter {
+    entries: Vec<Value>,
+    index: usize,
+}
+
+impl MinHeapIter {
+    pub fn new(heap: Rc<RefCell<BinaryHeap<Reverse<OrdValue>>>>) -> Self {
+        let mut entries: Vec<Value> = heap.borrow().iter().map(|Reverse(v)| v.0.clone()).collect();
+        entries.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        Self { entries, index: 0 }
+    }
+}
+
+impl VmIterator for MinHeapIter {
+    fn next(&mut self) -> Option<Value> {
+        if self.index < self.entries.len() {
+            let val = self.entries[self.index].clone();
+            self.index += 1;
+            Some(val)
+        } else {
+            None
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.entries.len() - self.index;
+        (remaining, Some(remaining))
+    }
+}
+
+/// Iterates over a max-heap, yielding elements in arbitrary (heap) order.
+/// Snapshot the entries at creation time.
+pub struct MaxHeapIter {
+    entries: Vec<Value>,
+    index: usize,
+}
+
+impl MaxHeapIter {
+    pub fn new(heap: Rc<RefCell<BinaryHeap<OrdValue>>>) -> Self {
+        let entries: Vec<Value> = heap.borrow().iter().map(|v| v.0.clone()).collect();
+        Self { entries, index: 0 }
+    }
+}
+
+impl VmIterator for MaxHeapIter {
+    fn next(&mut self) -> Option<Value> {
+        if self.index < self.entries.len() {
+            let val = self.entries[self.index].clone();
+            self.index += 1;
+            Some(val)
         } else {
             None
         }
