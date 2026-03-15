@@ -1,4 +1,5 @@
-use crate::Value;
+use crate::{Object, Value};
+use ndc_core::hash_map::HashMap;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -146,6 +147,43 @@ impl VmIterator for TupleIter {
 
     fn size_hint(&self) -> (usize, Option<usize>) {
         let remaining = self.values.len() - self.index;
+        (remaining, Some(remaining))
+    }
+}
+
+/// Iterates over a map, yielding `(key, value)` tuples.
+///
+/// Note: entries are snapshotted at creation time, so mutations to the map
+/// during iteration are not reflected.
+pub struct MapIter {
+    entries: Vec<(Value, Value)>,
+    index: usize,
+}
+
+impl MapIter {
+    pub fn new(map: Rc<RefCell<HashMap<Value, Value>>>) -> Self {
+        let entries = map
+            .borrow()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        Self { entries, index: 0 }
+    }
+}
+
+impl VmIterator for MapIter {
+    fn next(&mut self) -> Option<Value> {
+        if self.index < self.entries.len() {
+            let (k, v) = self.entries[self.index].clone();
+            self.index += 1;
+            Some(Value::Object(Box::new(Object::Tuple(vec![k, v]))))
+        } else {
+            None
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.entries.len() - self.index;
         (remaining, Some(remaining))
     }
 }

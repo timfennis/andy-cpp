@@ -58,6 +58,7 @@ fn wrap_function(
             Ok(result) => {
                 for (vm_arg, interp_arg) in args.iter().zip(interp_args.iter()) {
                     sync_list_mutations(vm_arg, interp_arg);
+                    sync_map_mutations(vm_arg, interp_arg);
                 }
                 Ok(interp_to_vm(result))
             }
@@ -171,6 +172,18 @@ pub fn interp_to_vm(value: InterpValue) -> VmValue {
         InterpValue::Sequence(Sequence::Tuple(tuple)) => VmValue::Object(Box::new(
             VmObject::Tuple(tuple.iter().map(|v| interp_to_vm(v.clone())).collect()),
         )),
+        InterpValue::Sequence(Sequence::Map(map, default)) => {
+            let entries = map
+                .borrow()
+                .iter()
+                .map(|(k, v)| (interp_to_vm(k.clone()), interp_to_vm(v.clone())))
+                .collect();
+            let default = default.as_ref().map(|d| Box::new(interp_to_vm(*d.clone())));
+            VmValue::Object(Box::new(VmObject::Map {
+                entries: Rc::new(RefCell::new(entries)),
+                default,
+            }))
+        }
         InterpValue::Sequence(Sequence::Iterator(iter)) => {
             let adapter = InterpIteratorAdapter { inner: iter };
             VmValue::iterator(Rc::new(RefCell::new(adapter)))
@@ -217,6 +230,28 @@ fn vm_to_interp_callable(value: &VmValue, globals: Rc<Vec<VmValue>>) -> InterpVa
         }
     }
     vm_to_interp(value)
+}
+
+fn sync_map_mutations(vm_arg: &VmValue, interp_arg: &InterpValue) {
+    let VmValue::Object(vm_obj) = vm_arg else {
+        return;
+    };
+    let VmObject::Map {
+        entries: vm_entries,
+        ..
+    } = vm_obj.as_ref()
+    else {
+        return;
+    };
+    let InterpValue::Sequence(Sequence::Map(interp_map, _)) = interp_arg else {
+        return;
+    };
+
+    *vm_entries.borrow_mut() = interp_map
+        .borrow()
+        .iter()
+        .map(|(k, v)| (interp_to_vm(k.clone()), interp_to_vm(v.clone())))
+        .collect();
 }
 
 fn sync_list_mutations(vm_arg: &VmValue, interp_arg: &InterpValue) {
