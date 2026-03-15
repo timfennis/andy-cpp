@@ -156,41 +156,7 @@ impl Vm {
                     self.stack.pop();
                 }
                 OpCode::Call(args) => {
-                    let callee = &self.stack[self.stack.len() - args - 1];
-                    let func =
-                        match callee {
-                            Value::Object(obj) => match obj.as_ref() {
-                                Object::Function(f) => f.clone(),
-                                Object::OverloadSet(candidates) => {
-                                    let candidates = candidates.clone();
-                                    let fp = frame.frame_pointer;
-                                    let arg_types: Vec<_> = self.stack[self.stack.len() - args..]
-                                        .iter()
-                                        .map(Value::static_type)
-                                        .collect();
-                                    candidates
-                                    .iter()
-                                    .find_map(|var| {
-                                        let value = self.resolve_var(var, fp);
-                                        let Value::Object(obj) = value else { return None };
-                                        let Object::Function(f) = obj.as_ref() else {
-                                            return None;
-                                        };
-                                        f.static_type()
-                                            .is_fn_and_matches(&arg_types)
-                                            .then(|| f.clone())
-                                    })
-                                    .unwrap_or_else(|| {
-                                        panic!(
-                                            "no matching overload found for argument types {:?}",
-                                            arg_types
-                                        )
-                                    })
-                                }
-                                _ => panic!("callee is unexpected object type"),
-                            },
-                            _ => panic!("callee is unexpected value type"),
-                        };
+                    let func = self.resolve_callee(args);
                     if let Err(msg) = self.dispatch_call(func, args) {
                         return Err(VmError::new(msg, span));
                     }
@@ -237,11 +203,10 @@ impl Vm {
                     let val = self.stack.pop().expect("stack underflow");
 
                     // Check if already an iterator
-                    if let Value::Object(ref obj) = val {
-                        if matches!(**obj, Object::Iterator(_)) {
-                            self.stack.push(val);
-                            continue;
-                        }
+                    if matches!(val, Value::Object(ref obj) if matches!(**obj, Object::Iterator(_)))
+                    {
+                        self.stack.push(val);
+                        continue;
                     }
 
                     // Get type string before moving val
@@ -362,81 +327,13 @@ impl Vm {
                     self.stack.push(closure);
                 }
                 OpCode::Unpack(size) => {
-                    let top = self.stack.pop().expect("stack underflow");
-                    let Value::Object(obj) = top else {
-                        panic!("expected a tuple or list to unpack");
-                    };
-
-                    match *obj {
-                        Object::List(seq) => {
-                            let mut seq = std::mem::take(&mut *seq.borrow_mut());
-                            if seq.len() != size {
-                                return Err(VmError::new(
-                                    format!(
-                                        "cannot unpack a list of length {} into {} variables",
-                                        seq.len(),
-                                        size
-                                    ),
-                                    span,
-                                ));
-                            }
-                            seq.reverse();
-                            self.stack.append(&mut seq);
-                        }
-                        Object::Tuple(mut seq) => {
-                            if seq.len() != size {
-                                return Err(VmError::new(
-                                    format!(
-                                        "cannot unpack a tuple of length {} into {} variables",
-                                        seq.len(),
-                                        size
-                                    ),
-                                    span,
-                                ));
-                            }
-                            seq.reverse();
-                            self.stack.append(&mut seq);
-                        }
-                        Object::String(s) => {
-                            let s = s.borrow();
-                            let mut iter = s.chars();
-                            let mut chars: Vec<Value> = Vec::with_capacity(size);
-                            for _ in 0..size {
-                                match iter.next() {
-                                    Some(c) => chars.push(Value::string(c.to_string())),
-                                    None => {
-                                        return Err(VmError::new(
-                                            format!(
-                                                "cannot unpack a string of length {} into {} variables",
-                                                chars.len(),
-                                                size
-                                            ),
-                                            span,
-                                        ));
-                                    }
-                                }
-                            }
-                            if iter.next().is_some() {
-                                return Err(VmError::new(
-                                    format!(
-                                        "cannot unpack a string into {} variables: string is too long",
-                                        size
-                                    ),
-                                    span,
-                                ));
-                            }
-                            chars.reverse();
-                            self.stack.append(&mut chars);
-                        }
-                        _ => panic!("expected a tuple or list to unpack"),
-                    }
+                    self.exec_unpack(size, span)?;
                 }
             }
 
             #[cfg(feature = "vm-trace")]
             {
                 dbg!(&self.stack);
-                // eprintln!("[VM] stack: {:?}", self.stack);
             }
         }
     }
@@ -469,43 +366,34 @@ impl Vm {
                 *borrow = UpvalueCell::Closed(self.stack[slot].clone());
             }
         }
+        // Remove the cells we just closed; outer-frame Open cells stay.
         self.open_upvalues
             .retain(|c| matches!(*c.borrow(), UpvalueCell::Open(_)));
     }
 
     fn dispatch_call(&mut self, func: Function, args: usize) -> Result<(), String> {
-        match func {
-            Function::Closure(c) => {
-                let num_locals = c.prototype.num_locals;
-                self.frames.push(CallFrame {
-                    closure: c,
-                    ip: 0,
-                    frame_pointer: self.stack.len() - args,
-                });
-                for _ in args..num_locals {
-                    self.stack.push(Value::unit());
-                }
-            }
-            Function::Compiled(f) => {
-                let num_locals = f.num_locals;
-                self.frames.push(CallFrame {
-                    closure: ClosureFunction {
-                        prototype: f,
-                        upvalues: vec![],
-                    },
-                    ip: 0,
-                    frame_pointer: self.stack.len() - args,
-                });
-                for _ in args..num_locals {
-                    self.stack.push(Value::unit());
-                }
-            }
+        let closure = match func {
             Function::Native(native) => {
                 let start = self.stack.len() - args;
                 let result = (native.func)(&self.stack[start..])?;
                 self.stack.truncate(start - 1);
                 self.stack.push(result);
+                return Ok(());
             }
+            Function::Closure(c) => c,
+            Function::Compiled(f) => ClosureFunction {
+                prototype: f,
+                upvalues: vec![],
+            },
+        };
+        let num_locals = closure.prototype.num_locals;
+        self.frames.push(CallFrame {
+            closure,
+            ip: 0,
+            frame_pointer: self.stack.len() - args,
+        });
+        for _ in args..num_locals {
+            self.stack.push(Value::unit());
         }
         Ok(())
     }
@@ -529,14 +417,123 @@ impl Vm {
                     #[cfg(feature = "vm-trace")]
                     source: None,
                 };
-                for arg in args {
-                    vm.stack.push(arg);
-                }
+                vm.stack.extend(args);
                 vm.dispatch_call(func, n_args)?;
                 vm.run().map_err(|e| e.message)?;
                 Ok(vm.stack.pop().expect("callback must produce a value"))
             }
         }
+    }
+
+    /// Resolves the callee on the stack to a concrete `Function`, handling both
+    /// direct function values and overload sets (by matching argument types).
+    fn resolve_callee(&self, args: usize) -> Function {
+        let frame_pointer = self.frames.last().expect("no frame").frame_pointer;
+        match &self.stack[self.stack.len() - args - 1] {
+            Value::Object(obj) => match obj.as_ref() {
+                Object::Function(f) => f.clone(),
+                Object::OverloadSet(candidates) => {
+                    let arg_types: Vec<_> = self.stack[self.stack.len() - args..]
+                        .iter()
+                        .map(Value::static_type)
+                        .collect();
+                    candidates
+                        .iter()
+                        .find_map(|var| {
+                            let value = self.resolve_var(var, frame_pointer);
+                            let Value::Object(obj) = value else {
+                                return None;
+                            };
+                            let Object::Function(f) = obj.as_ref() else {
+                                return None;
+                            };
+                            f.static_type()
+                                .is_fn_and_matches(&arg_types)
+                                .then(|| f.clone())
+                        })
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "no matching overload found for argument types {:?}",
+                                arg_types
+                            )
+                        })
+                }
+                _ => panic!("callee is unexpected object type"),
+            },
+            _ => panic!("callee is unexpected value type"),
+        }
+    }
+
+    /// Pops a value from the stack and pushes `size` unpacked elements back.
+    fn exec_unpack(&mut self, size: usize, span: Span) -> Result<(), VmError> {
+        let top = self.stack.pop().expect("stack underflow");
+        let Value::Object(obj) = top else {
+            panic!("expected a tuple or list to unpack");
+        };
+        match *obj {
+            Object::List(seq) => {
+                let mut seq = std::mem::take(&mut *seq.borrow_mut());
+                if seq.len() != size {
+                    return Err(VmError::new(
+                        format!(
+                            "cannot unpack a list of length {} into {} variables",
+                            seq.len(),
+                            size
+                        ),
+                        span,
+                    ));
+                }
+                seq.reverse();
+                self.stack.append(&mut seq);
+            }
+            Object::Tuple(mut seq) => {
+                if seq.len() != size {
+                    return Err(VmError::new(
+                        format!(
+                            "cannot unpack a tuple of length {} into {} variables",
+                            seq.len(),
+                            size
+                        ),
+                        span,
+                    ));
+                }
+                seq.reverse();
+                self.stack.append(&mut seq);
+            }
+            Object::String(s) => {
+                let s = s.borrow();
+                let mut iter = s.chars();
+                let mut chars: Vec<Value> = Vec::with_capacity(size);
+                for _ in 0..size {
+                    match iter.next() {
+                        Some(c) => chars.push(Value::string(c.to_string())),
+                        None => {
+                            return Err(VmError::new(
+                                format!(
+                                    "cannot unpack a string of length {} into {} variables",
+                                    chars.len(),
+                                    size
+                                ),
+                                span,
+                            ));
+                        }
+                    }
+                }
+                if iter.next().is_some() {
+                    return Err(VmError::new(
+                        format!(
+                            "cannot unpack a string into {} variables: string is too long",
+                            size
+                        ),
+                        span,
+                    ));
+                }
+                chars.reverse();
+                self.stack.append(&mut chars);
+            }
+            _ => panic!("expected a tuple or list to unpack"),
+        }
+        Ok(())
     }
 
     fn resolve_var(&self, var: &ResolvedVar, frame_pointer: usize) -> &Value {
