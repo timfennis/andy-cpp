@@ -127,7 +127,7 @@ impl Interpreter {
             vm = vm.with_source(input);
         }
 
-        vm.run().expect("VM failed");
+        vm.run()?;
 
         Ok(Value::unit())
     }
@@ -197,4 +197,6 @@ pub enum InterpreterError {
         #[from]
         cause: EvaluationError,
     },
+    #[error("{0}")]
+    Vm(#[from] ndc_vm::VmError),
 }

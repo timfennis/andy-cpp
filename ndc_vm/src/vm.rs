@@ -3,6 +3,7 @@ use crate::iterator::{ListIter, RangeInclusiveIter, RangeIter, StringIter, Tuple
 use crate::value::{CompiledFunction, Function};
 use crate::{ClosureFunction, Object, UpvalueCell, Value};
 use ndc_core::hash_map::HashMap;
+use ndc_lexer::Span;
 use ndc_parser::{CaptureSource, ResolvedVar};
 use std::cell::RefCell;
 use std::ops::Deref;
@@ -23,9 +24,19 @@ pub struct Vm {
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum VmError {
-    #[error("runtime error")]
-    RuntimeError,
+#[error("{message}")]
+pub struct VmError {
+    pub message: String,
+    pub span: Span,
+}
+
+impl VmError {
+    pub fn new(message: impl Into<String>, span: Span) -> Self {
+        Self {
+            message: message.into(),
+            span,
+        }
+    }
 }
 
 pub struct CallFrame {
@@ -90,6 +101,7 @@ impl Vm {
                 }
             }
 
+            let span = frame.closure.prototype.body.span(frame.ip);
             frame.ip += 1;
 
             match op {
@@ -220,23 +232,44 @@ impl Vm {
                 }
                 OpCode::GetIterator => {
                     let val = self.stack.pop().expect("stack underflow");
+
+                    // Check if already an iterator
+                    if let Value::Object(ref obj) = val {
+                        if matches!(**obj, Object::Iterator(_)) {
+                            self.stack.push(val);
+                            continue;
+                        }
+                    }
+
+                    // Get type string before moving val
+                    let type_str = format!("{}", val.static_type());
+
+                    // Try to create an iterator
                     let iter_val = match val {
-                        Value::Object(ref obj) if matches!(**obj, Object::Iterator(_)) => val,
                         Value::Object(obj) => match *obj {
                             Object::List(rc) => {
-                                Value::iterator(Rc::new(RefCell::new(ListIter::new(rc))))
+                                Some(Value::iterator(Rc::new(RefCell::new(ListIter::new(rc)))))
                             }
                             Object::Tuple(vec) => {
-                                Value::iterator(Rc::new(RefCell::new(TupleIter::new(vec))))
+                                Some(Value::iterator(Rc::new(RefCell::new(TupleIter::new(vec)))))
                             }
                             Object::String(rc) => {
-                                Value::iterator(Rc::new(RefCell::new(StringIter::new(rc))))
+                                Some(Value::iterator(Rc::new(RefCell::new(StringIter::new(rc)))))
                             }
-                            other => panic!("value is not iterable: {other}"),
+                            _ => None,
                         },
-                        other => panic!("value is not iterable: {:?}", other),
+                        _ => None,
                     };
-                    self.stack.push(iter_val);
+
+                    match iter_val {
+                        Some(iter) => self.stack.push(iter),
+                        None => {
+                            return Err(VmError::new(
+                                format!("{} is not iterable", type_str),
+                                span,
+                            ));
+                        }
+                    }
                 }
                 OpCode::IterNext(offset) => {
                     let top = self.stack.last().expect("stack underflow");
