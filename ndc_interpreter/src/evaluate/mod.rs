@@ -431,6 +431,7 @@ pub(crate) fn evaluate_expression(
                     key: _,
                     value: _,
                     default,
+                    ..
                 } => Value::Sequence(Sequence::Map(
                     Rc::new(RefCell::new(
                         out_values

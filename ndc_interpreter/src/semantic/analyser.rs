@@ -196,12 +196,16 @@ impl Analyser {
                 // Assign the VM accumulator slot for list comprehensions. We do this after
                 // resolution so we can derive the slot from the resolved loop-variable slots
                 // without touching the scope tree (the interpreter doesn't need this slot).
-                if let ForBody::List {
-                    accumulator_slot, ..
-                } = body.as_mut()
-                {
-                    let max_loop_slot = iterations.iter().filter_map(iteration_local_slot).max();
-                    *accumulator_slot = Some(max_loop_slot.map_or(0, |s| s + 1));
+                let max_loop_slot = iterations.iter().filter_map(iteration_local_slot).max();
+                let acc_slot = Some(max_loop_slot.map_or(0, |s| s + 1));
+                match body.as_mut() {
+                    ForBody::List {
+                        accumulator_slot, ..
+                    } => *accumulator_slot = acc_slot,
+                    ForBody::Map {
+                        accumulator_slot, ..
+                    } => *accumulator_slot = acc_slot,
+                    ForBody::Block(_) => {}
                 }
                 Ok(return_type)
             }
@@ -380,6 +384,7 @@ impl Analyser {
                     key,
                     value,
                     default,
+                    ..
                 } => {
                     let key_type = self.analyse(key)?;
                     let value_type = if let Some(value) = value {
@@ -575,22 +580,25 @@ impl Analyser {
     }
 }
 
-/// If `it` is a simple iteration over a local variable, returns that variable's slot index.
-/// Used to find the highest-numbered loop variable slot when assigning the list comprehension
-/// accumulator slot.
+/// Returns the highest local slot index used by the loop variable of `it`.
+/// Used to find the highest-numbered loop variable slot when assigning the comprehension
+/// accumulator slot (which must sit above all loop variable slots).
 fn iteration_local_slot(it: &ForIteration) -> Option<usize> {
-    let ForIteration::Iteration {
-        l_value:
-            Lvalue::Identifier {
-                resolved: Some(ResolvedVar::Local { slot }),
-                ..
-            },
-        ..
-    } = it
-    else {
+    let ForIteration::Iteration { l_value, .. } = it else {
         return None;
     };
-    Some(*slot)
+    max_lvalue_slot(l_value)
+}
+
+fn max_lvalue_slot(lv: &Lvalue) -> Option<usize> {
+    match lv {
+        Lvalue::Identifier {
+            resolved: Some(ResolvedVar::Local { slot }),
+            ..
+        } => Some(*slot),
+        Lvalue::Sequence(seq) => seq.iter().filter_map(max_lvalue_slot).max(),
+        _ => None,
+    }
 }
 
 #[derive(thiserror::Error, Debug)]

@@ -1,0 +1,8 @@
+// vm-ready
+// Regression test: list comprehension with a destructuring loop variable used to produce wrong
+// results because iteration_local_slot() only handled Lvalue::Identifier. With a Lvalue::Sequence
+// loop variable (e.g. `for a, b in pairs`), it returned None, so max_loop_slot was None and the
+// accumulator was placed at slot 0 — the same slot as `a` — silently corrupting the result.
+let pairs = [(1, 2), (3, 4), (5, 6)];
+let sums = [a + b for a, b in pairs];
+assert_eq(sums, [3, 7, 11]);

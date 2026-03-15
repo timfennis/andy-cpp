@@ -588,7 +588,31 @@ impl Compiler {
                 self.chunk.write(OpCode::GetLocal(tmp_list), span);
                 Ok(())
             }
-            ForBody::Map { .. } => todo!("for map comprehension"),
+            ForBody::Map {
+                key,
+                value,
+                default,
+                accumulator_slot,
+            } => {
+                let tmp_map = accumulator_slot
+                    .expect("map accumulator slot must be assigned by the analyser");
+                self.max_local = self.max_local.max(tmp_map + 1);
+                let has_default = default.is_some();
+                if let Some(default) = default {
+                    self.compile_expr(*default)?;
+                }
+                self.chunk.write(
+                    OpCode::MakeMap {
+                        pairs: 0,
+                        has_default,
+                    },
+                    span,
+                );
+                self.chunk.write(OpCode::SetLocal(tmp_map), span);
+                self.compile_for_map(&iterations, key, value, tmp_map, span)?;
+                self.chunk.write(OpCode::GetLocal(tmp_map), span);
+                Ok(())
+            }
         }
     }
 
@@ -703,6 +727,69 @@ impl Compiler {
                 let skip_jump = self.chunk.write(OpCode::JumpIfFalse(0), span);
                 self.chunk.write(OpCode::Pop, Span::new(0, 0));
                 self.compile_for_list(rest, expr, tmp_list, span)?;
+                let end_jump = self.chunk.write(OpCode::Jump(0), span);
+                self.chunk.patch_jump(skip_jump);
+                self.chunk.write(OpCode::Pop, Span::new(0, 0));
+                self.chunk.patch_jump(end_jump);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn compile_for_map(
+        &mut self,
+        iterations: &[ForIteration],
+        key: ExpressionLocation,
+        value: Option<ExpressionLocation>,
+        tmp_map: usize,
+        span: Span,
+    ) -> Result<(), CompileError> {
+        let Some((first, rest)) = iterations.split_first() else {
+            self.compile_expr(key)?;
+            if let Some(value) = value {
+                self.compile_expr(value)?;
+            } else {
+                let idx = self.chunk.add_constant(Value::unit());
+                self.chunk.write(OpCode::Constant(idx), Span::new(0, 0));
+            }
+            self.chunk.write(OpCode::MapInsert(tmp_map), span);
+            return Ok(());
+        };
+
+        match first {
+            ForIteration::Iteration { l_value, sequence } => {
+                self.compile_expr(sequence.clone())?;
+                self.chunk.write(OpCode::GetIterator, sequence.span);
+
+                let loop_start = self.new_loop_context();
+                let iter_next = self.chunk.write(OpCode::IterNext(0), span);
+                self.compile_declare_lvalue(l_value.clone(), span)?;
+
+                self.compile_for_map(rest, key, value, tmp_map, span)?;
+
+                if let Some(slot) = min_lvalue_slot(l_value) {
+                    self.chunk.write(OpCode::CloseUpvalue(slot), span);
+                }
+
+                self.chunk.write_jump_back(loop_start, span);
+
+                self.chunk.patch_jump(iter_next);
+                let break_instructions = std::mem::take(
+                    &mut self.current_loop_context_mut().unwrap().break_instructions,
+                );
+                for instruction in break_instructions {
+                    self.chunk.patch_jump(instruction);
+                }
+                self.end_loop_context();
+
+                self.chunk.write(OpCode::Pop, Span::new(0, 0));
+            }
+            ForIteration::Guard(condition) => {
+                self.compile_expr(condition.clone())?;
+                let skip_jump = self.chunk.write(OpCode::JumpIfFalse(0), span);
+                self.chunk.write(OpCode::Pop, Span::new(0, 0));
+                self.compile_for_map(rest, key, value, tmp_map, span)?;
                 let end_jump = self.chunk.write(OpCode::Jump(0), span);
                 self.chunk.patch_jump(skip_jump);
                 self.chunk.write(OpCode::Pop, Span::new(0, 0));
