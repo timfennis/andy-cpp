@@ -194,6 +194,7 @@ impl Compiler {
                         self.compile_expr(*r_value)?;
                         self.chunk.write(OpCode::Call(2), span); // op(current_value, r_value) → new_value
                         self.chunk.write(OpCode::Call(3), span); // []=(container, index, new_value)
+                        self.chunk.write(OpCode::Pop, span); // discard []= result; common code below pushes unit
                     }
                     Lvalue::Sequence(_) => {
                         return Err(CompileError::lvalue_required_to_be_single_identifier(span));
