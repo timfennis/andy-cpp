@@ -1,3 +1,4 @@
+// vm-ready
 let map = %{
   0: "foo",
   1: "bar",

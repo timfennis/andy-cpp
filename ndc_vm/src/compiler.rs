@@ -606,15 +606,12 @@ impl Compiler {
 
         match first {
             ForIteration::Iteration { l_value, sequence } => {
-                let x_slot = extract_lvalue_slot(l_value);
-                self.max_local = self.max_local.max(x_slot + 1);
-
                 self.compile_expr(sequence.clone())?;
                 self.chunk.write(OpCode::GetIterator, sequence.span);
 
                 let loop_start = self.new_loop_context();
                 let iter_next = self.chunk.write(OpCode::IterNext(0), span);
-                self.chunk.write(OpCode::SetLocal(x_slot), span);
+                self.compile_declare_lvalue(l_value.clone(), span)?;
 
                 self.compile_for_block(rest, body, span)?;
 
@@ -663,15 +660,12 @@ impl Compiler {
 
         match first {
             ForIteration::Iteration { l_value, sequence } => {
-                let x_slot = extract_lvalue_slot(l_value);
-                self.max_local = self.max_local.max(x_slot + 1);
-
                 self.compile_expr(sequence.clone())?;
                 self.chunk.write(OpCode::GetIterator, sequence.span);
 
                 let loop_start = self.new_loop_context();
                 let iter_next = self.chunk.write(OpCode::IterNext(0), span);
-                self.chunk.write(OpCode::SetLocal(x_slot), span);
+                self.compile_declare_lvalue(l_value.clone(), span)?;
 
                 self.compile_for_list(rest, expr, tmp_list, span)?;
 
