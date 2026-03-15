@@ -1,3 +1,4 @@
+// vm-ready
 let v, n = 100, 100;
 while n > 1 {
     n -= 1;
