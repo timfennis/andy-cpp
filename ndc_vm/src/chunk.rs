@@ -33,6 +33,8 @@ pub enum OpCode {
     MakeList(usize),
     /// Create a tuple using n arguments on the stack
     MakeTuple(usize),
+    /// Create a map from n key-value pairs on the stack. If has_default is true, an extra default value is on top of the pairs.
+    MakeMap { pairs: usize, has_default: bool },
     /// Create a closure by capturing some values
     Closure {
         constant_idx: usize,
@@ -72,6 +74,7 @@ impl std::fmt::Debug for OpCode {
             Self::SetUpvalue(n) => write!(f, "SetUpvalue({n})"),
             Self::MakeList(n) => write!(f, "MakeList({n})"),
             Self::MakeTuple(n) => write!(f, "MakeTuple({n})"),
+            Self::MakeMap { pairs, has_default } => write!(f, "MakeMap({pairs}, default={has_default})"),
             Self::Closure {
                 constant_idx,
                 values,

@@ -272,7 +272,25 @@ impl Compiler {
                 }
                 self.chunk.write(OpCode::MakeList(size), span);
             }
-            Expression::Map { .. } => todo!("map literal"),
+            Expression::Map { values, default } => {
+                let pairs = values.len();
+                let has_default = default.is_some();
+                for (key, value) in values {
+                    self.compile_expr(key)?;
+                    match value {
+                        Some(v) => self.compile_expr(v)?,
+                        None => {
+                            // set-style entry (no colon) — store unit as value
+                            let idx = self.chunk.add_constant(Value::unit());
+                            self.chunk.write(OpCode::Constant(idx), span);
+                        }
+                    }
+                }
+                if let Some(default) = default {
+                    self.compile_expr(*default)?;
+                }
+                self.chunk.write(OpCode::MakeMap { pairs, has_default }, span);
+            }
             Expression::Return { value } => {
                 if !self.allow_return {
                     return Err(CompileError::return_outside_function(span));
