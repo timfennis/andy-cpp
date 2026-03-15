@@ -292,6 +292,19 @@ impl Vm {
                     };
                     rc.borrow_mut().push(value);
                 }
+                OpCode::MapInsert(slot) => {
+                    let value = self.stack.pop().expect("stack underflow");
+                    let key = self.stack.pop().expect("stack underflow");
+                    let frame = self.frames.last().expect("no frame");
+                    let map_val = &self.stack[frame.slot(slot)];
+                    let Value::Object(obj) = map_val else {
+                        panic!("MapInsert expects a map")
+                    };
+                    let Object::Map { entries, .. } = &**obj else {
+                        panic!("MapInsert expects a map")
+                    };
+                    entries.borrow_mut().insert(key, value);
+                }
                 OpCode::MakeRange => {
                     let end = self.stack.pop().expect("stack underflow");
                     let start = self.stack.pop().expect("stack underflow");

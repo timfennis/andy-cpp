@@ -1277,6 +1277,7 @@ impl Parser {
                         key: key_expr,
                         value: value_expr,
                         default,
+                        accumulator_slot: None,
                     },
                     &Token::RightCurlyBracket,
                 );

@@ -151,6 +151,7 @@ pub enum ForBody {
         key: ExpressionLocation,
         value: Option<ExpressionLocation>,
         default: Option<Box<ExpressionLocation>>,
+        accumulator_slot: Option<usize>,
     },
 }
 

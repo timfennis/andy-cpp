@@ -271,6 +271,7 @@ fn collect_hints(expr: &ExpressionLocation, text: &str, hints: &mut Vec<InlayHin
                     key,
                     value,
                     default,
+                    ..
                 } => {
                     collect_hints(key, text, hints);
                     if let Some(v) = value {

@@ -46,6 +46,8 @@ pub enum OpCode {
     IterNext(isize),
     /// Pop top-of-stack, append to list at local slot.
     ListPush(usize),
+    /// Pop value then key from stack, insert into map at local slot.
+    MapInsert(usize),
     /// Pop end, pop start (both i64), push exclusive range iterator.
     MakeRange,
     /// Pop end, pop start (both i64), push inclusive range iterator.
@@ -96,6 +98,7 @@ impl std::fmt::Debug for OpCode {
             Self::GetIterator => write!(f, "GetIterator"),
             Self::IterNext(n) => write!(f, "IterNext({n})"),
             Self::ListPush(n) => write!(f, "ListPush({n})"),
+            Self::MapInsert(n) => write!(f, "MapInsert({n})"),
             Self::MakeRange => write!(f, "MakeRange"),
             Self::MakeRangeInclusive => write!(f, "MakeRangeInclusive"),
             Self::Halt => write!(f, "Halt"),
