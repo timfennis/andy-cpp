@@ -12,3 +12,4 @@
     assert(mm1 == mm1);
     assert(mm2 != mm1);
 }
+// vm-ready

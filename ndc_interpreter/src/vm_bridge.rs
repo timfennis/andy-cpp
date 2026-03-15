@@ -1,10 +1,15 @@
 use std::cell::RefCell;
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
+use std::collections::VecDeque;
 use std::rc::Rc;
 
 use ndc_core::int::Int;
 use ndc_core::num::Number;
 use ndc_vm::VmIterator;
-use ndc_vm::value::{Function as VmFunction, NativeFunction, Object as VmObject, Value as VmValue};
+use ndc_vm::value::{
+    Function as VmFunction, NativeFunction, Object as VmObject, OrdValue, Value as VmValue,
+};
 
 use crate::environment::Environment;
 use crate::evaluate::EvaluationResult;
@@ -51,15 +56,31 @@ fn wrap_function(
     let static_type = func.static_type();
     let native = move |args: &[VmValue]| -> Result<VmValue, String> {
         let globals = Rc::new(globals_cell.borrow().clone());
+        // Convert VM args to interpreter args, preserving Rc identity for heap/deque
+        // values that appear more than once (so pointer-equality comparisons like `h == h` work).
+        let mut identity_cache: std::collections::HashMap<usize, InterpValue> =
+            std::collections::HashMap::new();
         let mut interp_args: Vec<InterpValue> = args
             .iter()
-            .map(|arg| vm_to_interp_callable(arg, Rc::clone(&globals)))
+            .map(|arg| {
+                if let Some(key) = vm_identity_key(arg) {
+                    identity_cache
+                        .entry(key)
+                        .or_insert_with(|| vm_to_interp_callable(arg, Rc::clone(&globals)))
+                        .clone()
+                } else {
+                    vm_to_interp_callable(arg, Rc::clone(&globals))
+                }
+            })
             .collect();
         match func.call(&mut interp_args, &dummy_env) {
             Ok(result) => {
                 for (vm_arg, interp_arg) in args.iter().zip(interp_args.iter()) {
                     sync_list_mutations(vm_arg, interp_arg);
                     sync_map_mutations(vm_arg, interp_arg);
+                    sync_deque_mutations(vm_arg, interp_arg);
+                    sync_min_heap_mutations(vm_arg, interp_arg);
+                    sync_max_heap_mutations(vm_arg, interp_arg);
                 }
                 Ok(interp_to_vm(result))
             }
@@ -149,6 +170,27 @@ pub fn vm_to_interp(value: &VmValue) -> InterpValue {
                 }
                 InterpValue::Sequence(Sequence::List(Rc::new(RefCell::new(values))))
             }
+            VmObject::Deque(d) => InterpValue::Sequence(Sequence::Deque(Rc::new(RefCell::new(
+                d.borrow().iter().map(vm_to_interp).collect::<VecDeque<_>>(),
+            )))),
+            VmObject::MinHeap(h) => {
+                use crate::heap::MinHeap;
+                InterpValue::Sequence(Sequence::MinHeap(Rc::new(RefCell::new(
+                    h.borrow()
+                        .iter()
+                        .map(|Reverse(v)| vm_to_interp(&v.0))
+                        .collect::<MinHeap>(),
+                ))))
+            }
+            VmObject::MaxHeap(h) => {
+                use crate::heap::MaxHeap;
+                InterpValue::Sequence(Sequence::MaxHeap(Rc::new(RefCell::new(
+                    h.borrow()
+                        .iter()
+                        .map(|v| vm_to_interp(&v.0))
+                        .collect::<MaxHeap>(),
+                ))))
+            }
             VmObject::OverloadSet(slots) => InterpValue::function(
                 FunctionBuilder::default()
                     .body(FunctionBody::Opaque {
@@ -208,8 +250,29 @@ pub fn interp_to_vm(value: InterpValue) -> VmValue {
             let adapter = InterpIteratorAdapter { inner: iter };
             VmValue::iterator(Rc::new(RefCell::new(adapter)))
         }
-        InterpValue::Sequence(seq) => {
-            panic!("cannot convert {} to vm value", seq.static_type())
+        InterpValue::Sequence(Sequence::Deque(d)) => {
+            VmValue::Object(Box::new(VmObject::Deque(Rc::new(RefCell::new(
+                d.borrow()
+                    .iter()
+                    .map(|v| interp_to_vm(v.clone()))
+                    .collect::<VecDeque<_>>(),
+            )))))
+        }
+        InterpValue::Sequence(Sequence::MinHeap(h)) => {
+            let entries: BinaryHeap<Reverse<OrdValue>> = h
+                .borrow()
+                .iter()
+                .map(|v| Reverse(OrdValue(interp_to_vm(v.0.0.clone()))))
+                .collect();
+            VmValue::Object(Box::new(VmObject::MinHeap(Rc::new(RefCell::new(entries)))))
+        }
+        InterpValue::Sequence(Sequence::MaxHeap(h)) => {
+            let entries: BinaryHeap<OrdValue> = h
+                .borrow()
+                .iter()
+                .map(|v| OrdValue(interp_to_vm(v.0.clone())))
+                .collect();
+            VmValue::Object(Box::new(VmObject::MaxHeap(Rc::new(RefCell::new(entries)))))
         }
         InterpValue::Function(f) => {
             if let FunctionBody::Opaque { data, .. } = f.body() {
@@ -274,6 +337,72 @@ fn sync_map_mutations(vm_arg: &VmValue, interp_arg: &InterpValue) {
         .borrow()
         .iter()
         .map(|(k, v)| (interp_to_vm(k.clone()), interp_to_vm(v.clone())))
+        .collect();
+}
+
+/// Returns a stable identity key for VM values whose equality is pointer-based
+/// (heaps and deques), so the same instance appearing twice in an argument list
+/// converts to the same interpreter Rc.
+fn vm_identity_key(value: &VmValue) -> Option<usize> {
+    let VmValue::Object(obj) = value else {
+        return None;
+    };
+    match obj.as_ref() {
+        VmObject::Deque(rc) => Some(Rc::as_ptr(rc) as usize),
+        VmObject::MinHeap(rc) => Some(Rc::as_ptr(rc) as usize),
+        VmObject::MaxHeap(rc) => Some(Rc::as_ptr(rc) as usize),
+        _ => None,
+    }
+}
+
+fn sync_deque_mutations(vm_arg: &VmValue, interp_arg: &InterpValue) {
+    let VmValue::Object(vm_obj) = vm_arg else {
+        return;
+    };
+    let VmObject::Deque(vm_deque) = vm_obj.as_ref() else {
+        return;
+    };
+    let InterpValue::Sequence(Sequence::Deque(interp_deque)) = interp_arg else {
+        return;
+    };
+    *vm_deque.borrow_mut() = interp_deque
+        .borrow()
+        .iter()
+        .map(|v| interp_to_vm(v.clone()))
+        .collect();
+}
+
+fn sync_min_heap_mutations(vm_arg: &VmValue, interp_arg: &InterpValue) {
+    let VmValue::Object(vm_obj) = vm_arg else {
+        return;
+    };
+    let VmObject::MinHeap(vm_heap) = vm_obj.as_ref() else {
+        return;
+    };
+    let InterpValue::Sequence(Sequence::MinHeap(interp_heap)) = interp_arg else {
+        return;
+    };
+    *vm_heap.borrow_mut() = interp_heap
+        .borrow()
+        .iter()
+        .map(|v| Reverse(OrdValue(interp_to_vm(v.0.0.clone()))))
+        .collect();
+}
+
+fn sync_max_heap_mutations(vm_arg: &VmValue, interp_arg: &InterpValue) {
+    let VmValue::Object(vm_obj) = vm_arg else {
+        return;
+    };
+    let VmObject::MaxHeap(vm_heap) = vm_obj.as_ref() else {
+        return;
+    };
+    let InterpValue::Sequence(Sequence::MaxHeap(interp_heap)) = interp_arg else {
+        return;
+    };
+    *vm_heap.borrow_mut() = interp_heap
+        .borrow()
+        .iter()
+        .map(|v| OrdValue(interp_to_vm(v.0.clone())))
         .collect();
 }
 

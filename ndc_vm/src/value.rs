@@ -3,6 +3,9 @@ use crate::iterator::SharedIterator;
 use ndc_core::hash_map::{DefaultHasher, HashMap};
 use ndc_parser::{ResolvedVar, StaticType, TypeSignature};
 use std::cell::RefCell;
+use std::cmp::{Ordering, Reverse};
+use std::collections::BinaryHeap;
+use std::collections::VecDeque;
 use std::fmt;
 use std::fmt::Formatter;
 use std::hash::{Hash, Hasher};
@@ -35,6 +38,31 @@ pub enum Object {
     Function(Function),
     OverloadSet(Vec<ResolvedVar>),
     Iterator(SharedIterator),
+    Deque(Rc<RefCell<VecDeque<Value>>>),
+    MinHeap(Rc<RefCell<BinaryHeap<Reverse<OrdValue>>>>),
+    MaxHeap(Rc<RefCell<BinaryHeap<OrdValue>>>),
+}
+
+/// Newtype wrapper around `Value` that imposes a total order so values can be
+/// stored in a `BinaryHeap`.  The ordering mirrors the interpreter's `HeapValue`.
+#[derive(Clone)]
+pub struct OrdValue(pub Value);
+
+impl PartialEq for OrdValue {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+impl Eq for OrdValue {}
+impl PartialOrd for OrdValue {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for OrdValue {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.partial_cmp(&other.0).unwrap_or(Ordering::Equal)
+    }
 }
 
 #[derive(Clone)]
@@ -133,6 +161,9 @@ impl Object {
             Self::Function(f) => f.static_type(),
             Self::OverloadSet(_) => StaticType::Any,
             Self::Iterator(_) => StaticType::Iterator(Box::new(StaticType::Any)),
+            Self::Deque(_) => StaticType::Deque(Box::new(StaticType::Any)),
+            Self::MinHeap(_) => StaticType::MinHeap(Box::new(StaticType::Any)),
+            Self::MaxHeap(_) => StaticType::MaxHeap(Box::new(StaticType::Any)),
         }
     }
 }
@@ -257,6 +288,9 @@ impl fmt::Display for Object {
                 Some(n) => write!(f, "<iterator (len={n})>"),
                 None => write!(f, "<iterator>"),
             },
+            Self::Deque(d) => write!(f, "Deque(len={})", d.borrow().len()),
+            Self::MinHeap(h) => write!(f, "MinHeap(len={})", h.borrow().len()),
+            Self::MaxHeap(h) => write!(f, "MaxHeap(len={})", h.borrow().len()),
         }
     }
 }
@@ -282,6 +316,9 @@ impl fmt::Debug for Object {
                 Some(n) => write!(f, "<iterator (len={n})>"),
                 None => write!(f, "<iterator>"),
             },
+            Self::Deque(d) => write!(f, "Deque(len={})", d.borrow().len()),
+            Self::MinHeap(h) => write!(f, "MinHeap(len={})", h.borrow().len()),
+            Self::MaxHeap(h) => write!(f, "MaxHeap(len={})", h.borrow().len()),
         }
     }
 }
@@ -295,6 +332,63 @@ impl fmt::Display for Function {
             }
             Self::Native(native) => write!(f, "<native fn {:?}>", native.static_type),
             Self::Closure(closure) => write!(f, "<closure over {:?}>", closure.prototype.name),
+        }
+    }
+}
+
+impl PartialOrd for Value {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        match (self, other) {
+            // Same-type numeric comparisons
+            (Self::Int(a), Self::Int(b)) => Some(a.cmp(b)),
+            // Cross int/float: mirror the interpreter's compare_int_to_float logic,
+            // simplified for i64 (no BigInt needed at VM top level).
+            (Self::Int(a), Self::Float(b)) => compare_i64_to_f64(*a, *b),
+            (Self::Float(a), Self::Int(b)) => compare_i64_to_f64(*b, *a).map(Ordering::reverse),
+            (Self::Float(a), Self::Float(b)) => {
+                // Use total order for floats (NaN sorts consistently), matching OrderedFloat
+                Some(a.total_cmp(b))
+            }
+            (Self::Bool(a), Self::Bool(b)) => a.partial_cmp(b),
+            (Self::Object(a), Self::Object(b)) => a.partial_cmp(b),
+            _ => None,
+        }
+    }
+}
+
+/// Compare an i64 to an f64, handling infinity and NaN consistently.
+/// Mirrors the interpreter's `compare_int_to_float` (simplified for i64 not BigInt).
+fn compare_i64_to_f64(a: i64, b: f64) -> Option<Ordering> {
+    if b.is_nan() {
+        // Treat NaN as greater than everything (consistent total order)
+        return Some(Ordering::Less);
+    }
+    if b == f64::INFINITY {
+        return Some(Ordering::Less);
+    }
+    if b == f64::NEG_INFINITY {
+        return Some(Ordering::Greater);
+    }
+    // Safe cast: b is finite, compare integer part then fractional tiebreak
+    let trunc = b.trunc() as i64;
+    let ord = a.cmp(&trunc);
+    if ord == Ordering::Equal {
+        // if fract > 0.0 then the float is slightly larger than a
+        Some(0.0f64.total_cmp(&b.fract()).reverse())
+    } else {
+        Some(ord)
+    }
+}
+
+impl PartialOrd for Object {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        match (self, other) {
+            (Self::BigInt(a), Self::BigInt(b)) => a.partial_cmp(b),
+            (Self::Rational(a), Self::Rational(b)) => a.partial_cmp(b),
+            (Self::String(a), Self::String(b)) => a.borrow().partial_cmp(&*b.borrow()),
+            (Self::List(a), Self::List(b)) => a.borrow().partial_cmp(&*b.borrow()),
+            (Self::Tuple(a), Self::Tuple(b)) => a.partial_cmp(b),
+            _ => None,
         }
     }
 }
@@ -374,6 +468,10 @@ impl PartialEq for Object {
                 // Compare iterators by pointer identity
                 std::ptr::addr_eq(Rc::as_ptr(a), Rc::as_ptr(b))
             }
+            (Self::Deque(a), Self::Deque(b)) => a.borrow().eq(&*b.borrow()),
+            // Heaps: pointer identity (no meaningful value equality)
+            (Self::MinHeap(a), Self::MinHeap(b)) => Rc::ptr_eq(a, b),
+            (Self::MaxHeap(a), Self::MaxHeap(b)) => Rc::ptr_eq(a, b),
             _ => false,
         }
     }
@@ -458,6 +556,20 @@ impl Hash for Object {
             Self::Iterator(iter) => {
                 state.write_u8(11);
                 Rc::as_ptr(iter).hash(state);
+            }
+            Self::Deque(d) => {
+                state.write_u8(12);
+                for v in d.borrow().iter() {
+                    v.hash(state);
+                }
+            }
+            Self::MinHeap(h) => {
+                state.write_u8(13);
+                Rc::as_ptr(h).hash(state);
+            }
+            Self::MaxHeap(h) => {
+                state.write_u8(14);
+                Rc::as_ptr(h).hash(state);
             }
         }
     }
