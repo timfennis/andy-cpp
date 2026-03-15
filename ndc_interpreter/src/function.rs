@@ -16,9 +16,12 @@ use std::rc::Rc;
 /// Wraps a VM function value for round-tripping through interpreter values.
 /// `identity` is the raw pointer of the `Rc<CompiledFunction>` prototype,
 /// used to implement stable equality for VM-compiled functions.
+/// `call` is optionally populated by `vm_to_interp_callable` so that the
+/// interpreter can invoke the VM function when used as a HOF callback.
 pub(crate) struct VmFunctionWrapper {
     pub(crate) vm_value: ndc_vm::Value,
     pub(crate) identity: Option<usize>,
+    pub(crate) call: Option<Rc<dyn Fn(&mut [Value]) -> EvaluationResult>>,
 }
 
 /// Callable is a wrapper around a `OverloadedFunction` pointer and the environment to make it
@@ -308,11 +311,18 @@ impl FunctionBody {
                 .into()),
             },
             Self::GenericFunction { function, .. } => function(args, env),
-            Self::Opaque { .. } => Err(FunctionCallError::ArgumentCountError {
-                expected: 0,
-                actual: args.len(),
+            Self::Opaque { data, .. } => {
+                if let Some(wrapper) = data.downcast_ref::<VmFunctionWrapper>() {
+                    if let Some(call) = &wrapper.call {
+                        return call(args);
+                    }
+                }
+                Err(FunctionCallError::ArgumentCountError {
+                    expected: 0,
+                    actual: args.len(),
+                }
+                .into())
             }
-            .into()),
             Self::NativeClosure { call, .. } => call(args),
             Self::Memoized { cache, function } => {
                 let mut hasher = DefaultHasher::default();

@@ -56,6 +56,9 @@ pub enum OpCode {
     Halt,
     /// Return from function call
     Return,
+    /// Close all open upvalues whose absolute stack slot is >= frame_pointer + slot.
+    /// Used at the end of each loop iteration to give each iteration's closures their own copy.
+    CloseUpvalue(usize),
 }
 
 impl std::fmt::Debug for OpCode {
@@ -98,6 +101,7 @@ impl std::fmt::Debug for OpCode {
             Self::Halt => write!(f, "Halt"),
             Self::Return => write!(f, "Return"),
             Self::Unpack(n) => write!(f, "Unpack({n})"),
+            Self::CloseUpvalue(n) => write!(f, "CloseUpvalue({n})"),
         }
     }
 }

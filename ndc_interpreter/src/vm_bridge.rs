@@ -7,6 +7,7 @@ use ndc_vm::VmIterator;
 use ndc_vm::value::{Function as VmFunction, NativeFunction, Object as VmObject, Value as VmValue};
 
 use crate::environment::Environment;
+use crate::evaluate::EvaluationResult;
 use crate::function::{
     Function as InterpFunction, FunctionBody, FunctionBuilder, FunctionCarrier, VmFunctionWrapper,
 };
@@ -109,7 +110,11 @@ pub fn vm_to_interp(value: &VmValue) -> InterpValue {
                 let static_type = f.static_type();
                 let identity = f.prototype().map(|p| Rc::as_ptr(p) as usize);
                 let vm_value = VmValue::Object(Box::new(VmObject::Function(f.clone())));
-                let data: Rc<dyn std::any::Any> = Rc::new(VmFunctionWrapper { vm_value, identity });
+                let data: Rc<dyn std::any::Any> = Rc::new(VmFunctionWrapper {
+                    vm_value,
+                    identity,
+                    call: None,
+                });
                 InterpValue::function(
                     FunctionBuilder::default()
                         .body(FunctionBody::Opaque { data, static_type })
@@ -210,19 +215,23 @@ fn vm_to_interp_callable(value: &VmValue, globals: Rc<Vec<VmValue>>) -> InterpVa
             let identity = f.prototype().map(|p| Rc::as_ptr(p) as usize);
             let f = f.clone();
             let static_type = f.static_type();
+            let vm_value = value.clone();
+            let call: Rc<dyn Fn(&mut [InterpValue]) -> EvaluationResult> =
+                Rc::new(move |args: &mut [InterpValue]| {
+                    let vm_args: Vec<VmValue> =
+                        args.iter().map(|a| interp_to_vm(a.clone())).collect();
+                    let result = Vm::call_function(f.clone(), vm_args, (*globals).clone())
+                        .map_err(|e| anyhow::anyhow!(e))?;
+                    Ok(vm_to_interp(&result))
+                });
+            let data: Rc<dyn std::any::Any> = Rc::new(VmFunctionWrapper {
+                vm_value,
+                identity,
+                call: Some(call),
+            });
             return InterpValue::function(
                 FunctionBuilder::default()
-                    .body(FunctionBody::NativeClosure {
-                        static_type,
-                        identity,
-                        call: Rc::new(move |args: &mut [InterpValue]| {
-                            let vm_args: Vec<VmValue> =
-                                args.iter().map(|a| interp_to_vm(a.clone())).collect();
-                            let result = Vm::call_function(f.clone(), vm_args, (*globals).clone())
-                                .map_err(|e| anyhow::anyhow!(e))?;
-                            Ok(vm_to_interp(&result))
-                        }),
-                    })
+                    .body(FunctionBody::Opaque { data, static_type })
                     .build()
                     .expect("must succeed"),
             );
