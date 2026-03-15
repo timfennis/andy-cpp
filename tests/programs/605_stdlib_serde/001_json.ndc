@@ -1,3 +1,4 @@
+// vm-ready
 let object = %{
     "foo": "bar",
     "int": 123,

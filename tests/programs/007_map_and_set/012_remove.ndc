@@ -1,3 +1,4 @@
+// vm-ready
 let set = %{1,2,3};
 set.remove(2);
 assert(set == %{1,3});

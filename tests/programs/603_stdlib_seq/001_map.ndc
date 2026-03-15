@@ -1,3 +1,4 @@
+// vm-ready
 let l = [1,2,3];
 assert_eq(l.map(fn(x) { x + 1 }), [2,3,4]);
 

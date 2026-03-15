@@ -1,3 +1,4 @@
+// vm-ready
 let map = %{:0}; // map with default 0
 map["foo"] += 3;
 map[0] += 10;
