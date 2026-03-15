@@ -611,7 +611,7 @@ impl Compiler {
                 self.max_local = self.max_local.max(x_slot + 1);
 
                 self.compile_expr(sequence.clone())?;
-                self.chunk.write(OpCode::GetIterator, span);
+                self.chunk.write(OpCode::GetIterator, sequence.span);
 
                 let loop_start = self.new_loop_context();
                 let iter_next = self.chunk.write(OpCode::IterNext(0), span);
@@ -668,7 +668,7 @@ impl Compiler {
                 self.max_local = self.max_local.max(x_slot + 1);
 
                 self.compile_expr(sequence.clone())?;
-                self.chunk.write(OpCode::GetIterator, span);
+                self.chunk.write(OpCode::GetIterator, sequence.span);
 
                 let loop_start = self.new_loop_context();
                 let iter_next = self.chunk.write(OpCode::IterNext(0), span);
