@@ -360,10 +360,10 @@ impl PartialEq for Object {
                 // Compare function values by identity (pointer equality)
                 match (a, b) {
                     (Function::Compiled(a), Function::Compiled(b)) => {
-                        Rc::as_ptr(a) == Rc::as_ptr(b)
+                        std::ptr::addr_eq(Rc::as_ptr(a), Rc::as_ptr(b))
                     }
                     (Function::Native(a), Function::Native(b)) => {
-                        Rc::as_ptr(a) == Rc::as_ptr(b)
+                        std::ptr::addr_eq(Rc::as_ptr(a), Rc::as_ptr(b))
                     }
                     (Function::Closure(a), Function::Closure(b)) => {
                         Rc::as_ptr(&a.prototype) == Rc::as_ptr(&b.prototype)
@@ -374,7 +374,7 @@ impl PartialEq for Object {
             (Self::OverloadSet(a), Self::OverloadSet(b)) => a == b,
             (Self::Iterator(a), Self::Iterator(b)) => {
                 // Compare iterators by pointer identity
-                Rc::as_ptr(a) == Rc::as_ptr(b)
+                std::ptr::addr_eq(Rc::as_ptr(a), Rc::as_ptr(b))
             }
             _ => false,
         }

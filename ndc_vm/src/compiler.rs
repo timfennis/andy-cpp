@@ -429,7 +429,7 @@ impl Compiler {
     fn compile_block(
         &mut self,
         statements: Vec<ExpressionLocation>,
-        span: Span,
+        _span: Span,
     ) -> Result<(), CompileError> {
         if statements.is_empty() {
             let idx = self.chunk.add_constant(Value::unit());
@@ -456,7 +456,7 @@ impl Compiler {
         condition: ExpressionLocation,
         on_true: ExpressionLocation,
         on_false: Option<ExpressionLocation>,
-        span: Span,
+        _span: Span,
     ) -> Result<(), CompileError> {
         let condition_span = condition.span;
         self.compile_expr(condition)?;
@@ -481,7 +481,7 @@ impl Compiler {
         &mut self,
         condition: ExpressionLocation,
         loop_body: ExpressionLocation,
-        span: Span,
+        _span: Span,
     ) -> Result<(), CompileError> {
         let condition_span = condition.span;
         let loop_start = self.new_loop_context();
@@ -748,15 +748,6 @@ fn produces_value(expr: &Expression) -> bool {
     }
 }
 
-fn extract_lvalue_slot(lvalue: &Lvalue) -> usize {
-    match lvalue {
-        Lvalue::Identifier {
-            resolved: Some(ResolvedVar::Local { slot }),
-            ..
-        } => *slot,
-        _ => panic!("expected a single resolved local identifier"),
-    }
-}
 
 #[derive(thiserror::Error, Debug)]
 #[error("{text}")]
