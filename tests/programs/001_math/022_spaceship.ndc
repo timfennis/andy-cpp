@@ -26,6 +26,15 @@ assert_eq(-0.0 <=> 0.0, 0); // Negative zero is equal becuase total ordering
 assert_eq(0.0 <=> 0.0, 0);
 assert_eq((0.0 / 0.0) <=> (0.0 / 0.0), 0); // NaN comparison, assuming NaN == NaN in your language
 
+// Int vs Float (fractional tiebreaker)
+assert_eq(5 <=> 5.0, 0);   // equal
+assert_eq(5 <=> 5.3, -1);  // int < float with positive fraction
+assert_eq(5 <=> 4.9, 1);   // int > float (integer part is larger)
+assert_eq(-5 <=> -5.3, 1); // int > float with negative fraction
+assert_eq(-5 <=> -4.9, -1); // int < float (less negative)
+assert_eq(0 <=> 0.1, -1);  // zero < small positive float
+assert_eq(0 <=> -0.1, 1);  // zero > small negative float
+
 // Rational Numbers
 assert_eq((5 / 3) <=> (7 / 4), -1); // 5/3 < 7/4
 assert_eq((7 / 4) <=> (5 / 3), 1); // 7/4 > 5/3

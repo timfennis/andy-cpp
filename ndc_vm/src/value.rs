@@ -369,15 +369,14 @@ fn compare_i64_to_f64(a: i64, b: f64) -> Option<Ordering> {
     if b == f64::NEG_INFINITY {
         return Some(Ordering::Greater);
     }
-    // Safe cast: b is finite, compare integer part then fractional tiebreak
+    // Safe cast: b is finite, compare integer part then fractional tiebreak.
+    // Mirrors the interpreter: ord.then(0.0f64.total_cmp(&b.fract()))
+    // e.g. 5 vs 5.3: equal integer parts, fract=0.3 → 0.0.total_cmp(0.3)=Less → 5 < 5.3 ✓
+    //      5 vs 4.9: 5 > 4 (trunc) → Greater, no tiebreak needed ✓
+    //     -5 vs -5.3: trunc(-5.3)=-5, equal, fract=-0.3 → 0.0.total_cmp(-0.3)=Greater → -5 > -5.3 ✓
     let trunc = b.trunc() as i64;
     let ord = a.cmp(&trunc);
-    if ord == Ordering::Equal {
-        // if fract > 0.0 then the float is slightly larger than a
-        Some(0.0f64.total_cmp(&b.fract()).reverse())
-    } else {
-        Some(ord)
-    }
+    Some(ord.then(0.0f64.total_cmp(&b.fract())))
 }
 
 impl PartialOrd for Object {
