@@ -323,7 +323,30 @@ impl Compiler {
             } => {
                 self.emit_set_var(resolved.expect("identifiers must be resolved"), lv_span);
             }
-            Lvalue::Index { .. } => todo!("index assignment lvalue"),
+            Lvalue::Index {
+                value,
+                index,
+                resolved_set,
+                ..
+            } => {
+                // Value to store is on top of stack. We need to:
+                // 1. Save it to a temp slot
+                // 2. Compile container and index
+                // 3. Get the value back
+                // 4. Call []= function
+                // 5. Pop the return value
+
+                let tmp_value = self.max_local;
+                self.max_local += 1;
+                self.chunk.write(OpCode::SetLocal(tmp_value), span);
+
+                self.compile_binding(resolved_set.expect("[]= must be resolved"), span)?;
+                self.compile_expr(*value)?;
+                self.compile_expr(*index)?;
+                self.chunk.write(OpCode::GetLocal(tmp_value), span);
+                self.chunk.write(OpCode::Call(3), span);
+                self.chunk.write(OpCode::Pop, span);
+            }
             Lvalue::Sequence(seq) => {
                 self.chunk.write(OpCode::Unpack(seq.len()), span);
                 for lv in seq {
