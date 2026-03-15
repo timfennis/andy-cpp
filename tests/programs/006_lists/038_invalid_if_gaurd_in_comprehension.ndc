@@ -1,2 +1,3 @@
+// vm-ready
 // expect-error: mismatched types: expected Bool, found Int
 [x for x in 0..10, if x]
