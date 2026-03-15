@@ -191,6 +191,11 @@ pub enum FunctionBody {
         data: Rc<dyn std::any::Any>,
         static_type: StaticType,
     },
+    /// A callable VM function wrapped for use in interpreter callbacks (e.g. HOFs).
+    NativeClosure {
+        static_type: StaticType,
+        call: Rc<dyn Fn(&mut [Value]) -> EvaluationResult>,
+    },
 }
 
 impl FunctionBody {
@@ -201,7 +206,7 @@ impl FunctionBody {
             Self::NumericBinaryOp { .. } => Some(2),
             Self::GenericFunction { type_signature, .. } => type_signature.arity(),
             Self::Memoized { function, .. } => function.arity(),
-            Self::Opaque { .. } => None,
+            Self::Opaque { .. } | Self::NativeClosure { .. } => None,
         }
     }
 
@@ -229,7 +234,7 @@ impl FunctionBody {
                 Parameter::new("right", StaticType::Number),
             ]),
             Self::GenericFunction { type_signature, .. } => type_signature.clone(),
-            Self::Opaque { .. } => TypeSignature::Variadic,
+            Self::Opaque { .. } | Self::NativeClosure { .. } => TypeSignature::Variadic,
         }
     }
 
@@ -240,7 +245,9 @@ impl FunctionBody {
             }
             Self::NumericUnaryOp { .. } | Self::NumericBinaryOp { .. } => &StaticType::Number,
             Self::Memoized { function, .. } => function.return_type(),
-            Self::Opaque { static_type, .. } => static_type,
+            Self::Opaque { static_type, .. } | Self::NativeClosure { static_type, .. } => {
+                static_type
+            }
         }
     }
     pub fn call(&self, args: &mut [Value], env: &Rc<RefCell<Environment>>) -> EvaluationResult {
@@ -304,6 +311,7 @@ impl FunctionBody {
                 actual: args.len(),
             }
             .into()),
+            Self::NativeClosure { call, .. } => call(args),
             Self::Memoized { cache, function } => {
                 let mut hasher = DefaultHasher::default();
                 for arg in &*args {
