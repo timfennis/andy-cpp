@@ -191,7 +191,9 @@ impl Vm {
                             },
                             _ => panic!("callee is unexpected value type"),
                         };
-                    self.dispatch_call(func, args);
+                    if let Err(msg) = self.dispatch_call(func, args) {
+                        return Err(VmError::new(msg, span));
+                    }
                 }
                 OpCode::MakeList(size) => {
                     let data = self.stack.split_off(self.stack.len() - size);
@@ -418,7 +420,7 @@ impl Vm {
             .retain(|c| matches!(*c.borrow(), UpvalueCell::Open(_)));
     }
 
-    fn dispatch_call(&mut self, func: Function, args: usize) {
+    fn dispatch_call(&mut self, func: Function, args: usize) -> Result<(), String> {
         match func {
             Function::Closure(c) => {
                 let num_locals = c.prototype.num_locals;
@@ -447,16 +449,17 @@ impl Vm {
             }
             Function::Native(native) => {
                 let start = self.stack.len() - args;
-                let result = (native.func)(&self.stack[start..]);
+                let result = (native.func)(&self.stack[start..])?;
                 self.stack.truncate(start - 1);
                 self.stack.push(result);
             }
         }
+        Ok(())
     }
 
     /// Call a VM function with the given arguments, using a fresh VM instance.
     /// Used to enable callbacks from stdlib HOFs into user-defined VM closures.
-    pub fn call_function(func: Function, args: Vec<Value>, globals: Vec<Value>) -> Value {
+    pub fn call_function(func: Function, args: Vec<Value>, globals: Vec<Value>) -> Result<Value, String> {
         match func {
             Function::Native(native) => (native.func)(&args),
             func => {
@@ -472,9 +475,9 @@ impl Vm {
                 for arg in args {
                     vm.stack.push(arg);
                 }
-                vm.dispatch_call(func, n_args);
-                vm.run().expect("callback execution failed");
-                vm.stack.pop().expect("callback must produce a value")
+                vm.dispatch_call(func, n_args)?;
+                vm.run().map_err(|e| e.message)?;
+                Ok(vm.stack.pop().expect("callback must produce a value"))
             }
         }
     }

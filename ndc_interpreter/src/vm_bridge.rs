@@ -8,7 +8,7 @@ use ndc_vm::value::{Function as VmFunction, NativeFunction, Object as VmObject, 
 
 use crate::environment::Environment;
 use crate::function::{
-    Function as InterpFunction, FunctionBody, FunctionBuilder, VmFunctionWrapper,
+    Function as InterpFunction, FunctionBody, FunctionBuilder, FunctionCarrier, VmFunctionWrapper,
 };
 use ndc_vm::vm::Vm;
 use crate::iterator::ValueIterator;
@@ -48,7 +48,7 @@ fn wrap_function(
     globals_cell: Rc<RefCell<Vec<VmValue>>>,
 ) -> VmValue {
     let static_type = func.static_type();
-    let native = move |args: &[VmValue]| -> VmValue {
+    let native = move |args: &[VmValue]| -> Result<VmValue, String> {
         let globals = Rc::new(globals_cell.borrow().clone());
         let mut interp_args: Vec<InterpValue> = args
             .iter()
@@ -59,9 +59,10 @@ fn wrap_function(
                 for (vm_arg, interp_arg) in args.iter().zip(interp_args.iter()) {
                     sync_list_mutations(vm_arg, interp_arg);
                 }
-                interp_to_vm(result)
+                Ok(interp_to_vm(result))
             }
-            Err(e) => panic!("stdlib function failed: {:?}", e),
+            Err(FunctionCarrier::IntoEvaluationError(e)) => return Err(e.to_string()),
+            Err(e) => return Err(e.to_string()),
         }
     };
     VmValue::Object(Box::new(VmObject::Function(VmFunction::Native(Rc::new(
@@ -205,7 +206,8 @@ fn vm_to_interp_callable(value: &VmValue, globals: Rc<Vec<VmValue>>) -> InterpVa
                             let vm_args: Vec<VmValue> =
                                 args.iter().map(|a| interp_to_vm(a.clone())).collect();
                             let result =
-                                Vm::call_function(f.clone(), vm_args, (*globals).clone());
+                                Vm::call_function(f.clone(), vm_args, (*globals).clone())
+                                    .map_err(|e| anyhow::anyhow!(e))?;
                             Ok(vm_to_interp(&result))
                         }),
                     })
