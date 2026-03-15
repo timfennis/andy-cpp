@@ -275,6 +275,17 @@ impl PartialEq for Value {
                         };
                     }
                 }
+                // For NativeClosure (VM function callable from interpreter), compare by identity too.
+                if let (
+                    FunctionBody::NativeClosure { identity: id1, .. },
+                    FunctionBody::NativeClosure { identity: id2, .. },
+                ) = (f1.body(), f2.body())
+                {
+                    return match (id1, id2) {
+                        (Some(id1), Some(id2)) => id1 == id2,
+                        _ => false,
+                    };
+                }
                 // Interpreter-native functions: use Rc pointer identity.
                 Rc::as_ptr(f1) == Rc::as_ptr(f2)
             }

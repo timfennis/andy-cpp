@@ -54,19 +54,6 @@ fn wrap_function(
             .iter()
             .map(|arg| vm_to_interp_callable(arg, Rc::clone(&globals)))
             .collect();
-        // Keep extra Rc clones of interpreter lists alive so that
-        // SharedVecIterator::from_shared_vec never sees a unique Rc and drains the
-        // list, which would cause sync_list_mutations to zero out the original VM list.
-        let _list_guards: Vec<Rc<RefCell<Vec<InterpValue>>>> = interp_args
-            .iter()
-            .filter_map(|arg| {
-                if let InterpValue::Sequence(Sequence::List(list)) = arg {
-                    Some(Rc::clone(list))
-                } else {
-                    None
-                }
-            })
-            .collect();
         match func.call(&mut interp_args, &dummy_env) {
             Ok(result) => {
                 for (vm_arg, interp_arg) in args.iter().zip(interp_args.iter()) {
@@ -193,12 +180,14 @@ pub fn interp_to_vm(value: InterpValue) -> VmValue {
 fn vm_to_interp_callable(value: &VmValue, globals: Rc<Vec<VmValue>>) -> InterpValue {
     if let VmValue::Object(obj) = value {
         if let VmObject::Function(f) = obj.as_ref() {
+            let identity = f.prototype().map(|p| Rc::as_ptr(p) as usize);
             let f = f.clone();
             let static_type = f.static_type();
             return InterpValue::function(
                 FunctionBuilder::default()
                     .body(FunctionBody::NativeClosure {
                         static_type,
+                        identity,
                         call: Rc::new(move |args: &mut [InterpValue]| {
                             let vm_args: Vec<VmValue> =
                                 args.iter().map(|a| interp_to_vm(a.clone())).collect();

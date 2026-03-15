@@ -195,6 +195,8 @@ pub enum FunctionBody {
     NativeClosure {
         static_type: StaticType,
         call: Rc<dyn Fn(&mut [Value]) -> EvaluationResult>,
+        /// Prototype pointer identity, used for equality comparison (same as Opaque/VmFunctionWrapper).
+        identity: Option<usize>,
     },
 }
 
