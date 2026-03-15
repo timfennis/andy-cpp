@@ -245,6 +245,20 @@ impl Hash for Value {
             },
             Self::Function(f) => {
                 state.write_u8(13);
+                // Must match the identity used in PartialEq.
+                match f.body() {
+                    FunctionBody::Opaque { data, .. } => {
+                        if let Some(w) = data.downcast_ref::<VmFunctionWrapper>() {
+                            w.identity.hash(state);
+                            return;
+                        }
+                    }
+                    FunctionBody::NativeClosure { identity, .. } => {
+                        identity.hash(state);
+                        return;
+                    }
+                    _ => {}
+                }
                 Rc::as_ptr(f).hash(state);
             }
         }
