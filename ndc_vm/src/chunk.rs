@@ -48,6 +48,8 @@ pub enum OpCode {
     MakeRange,
     /// Pop end, pop start (both i64), push inclusive range iterator.
     MakeRangeInclusive,
+    /// Pop a tuple/list of exactly `usize` elements, push them in reverse order (first on top)
+    Unpack(usize),
     /// Stop execution
     Halt,
     /// Return from function call
@@ -90,6 +92,7 @@ impl std::fmt::Debug for OpCode {
             Self::MakeRangeInclusive => write!(f, "MakeRangeInclusive"),
             Self::Halt => write!(f, "Halt"),
             Self::Return => write!(f, "Return"),
+            Self::Unpack(n) => write!(f, "Unpack({n})"),
         }
     }
 }

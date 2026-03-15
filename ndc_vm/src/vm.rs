@@ -302,6 +302,27 @@ impl Vm {
 
                     self.stack.push(closure);
                 }
+                OpCode::Unpack(size) => {
+                    let top = self.stack.pop().expect("stack underflow");
+                    let Value::Object(obj) = top else {
+                        panic!("expected a tuple or list to unpack");
+                    };
+
+                    match *obj {
+                        Object::List(seq) => {
+                            let mut seq = std::mem::take(&mut *seq.borrow_mut());
+                            assert_eq!(seq.len(), size, "unpack length mismatch");
+                            seq.reverse();
+                            self.stack.append(&mut seq);
+                        }
+                        Object::Tuple(mut seq) => {
+                            assert_eq!(seq.len(), size, "unpack length mismatch");
+                            seq.reverse();
+                            self.stack.append(&mut seq);
+                        }
+                        _ => panic!("expected a tuple or list to unpack"),
+                    }
+                }
             }
 
             #[cfg(feature = "vm-trace")]
@@ -334,10 +355,10 @@ impl Vm {
     fn close_upvalues(&mut self, frame_pointer: usize) {
         for cell in &self.open_upvalues {
             let mut borrow = cell.borrow_mut();
-            if let UpvalueCell::Open(slot) = *borrow {
-                if slot >= frame_pointer {
-                    *borrow = UpvalueCell::Closed(self.stack[slot].clone());
-                }
+            if let UpvalueCell::Open(slot) = *borrow
+                && slot >= frame_pointer
+            {
+                *borrow = UpvalueCell::Closed(self.stack[slot].clone());
             }
         }
         self.open_upvalues

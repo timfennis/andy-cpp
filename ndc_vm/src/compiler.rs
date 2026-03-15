@@ -99,9 +99,7 @@ impl Compiler {
             }
             Expression::VariableDeclaration { value, l_value } => {
                 self.compile_expr(*value)?;
-                let slot = extract_lvalue_slot(&l_value);
-                self.chunk.write(OpCode::SetLocal(slot), span);
-                self.max_local = self.max_local.max(slot + 1);
+                self.compile_declare_lvalue(l_value, span)?;
             }
             Expression::Assignment {
                 l_value,
@@ -120,9 +118,18 @@ impl Compiler {
                     self.compile_expr(*value)?;
                     self.chunk.write(OpCode::Call(3), span);
                 }
-                _ => {
+                l_value @ Lvalue::Identifier { .. } => {
                     self.compile_expr(*value)?;
-                    self.compile_lvalue(l_value)?;
+                    self.compile_lvalue(l_value, span)?;
+                    let idx = self.chunk.add_constant(Value::unit());
+                    self.chunk.write(OpCode::Constant(idx), span);
+                }
+                Lvalue::Sequence(seq) => {
+                    self.compile_expr(*value)?;
+                    self.chunk.write(OpCode::Unpack(seq.len()), span);
+                    for l_value in seq {
+                        self.compile_lvalue(l_value, span)?;
+                    }
                     let idx = self.chunk.add_constant(Value::unit());
                     self.chunk.write(OpCode::Constant(idx), span);
                 }
@@ -162,7 +169,8 @@ impl Compiler {
                         self.max_local += 2;
 
                         self.compile_expr(*value)?;
-                        self.chunk.write(OpCode::SetLocal(tmp_container), container_span);
+                        self.chunk
+                            .write(OpCode::SetLocal(tmp_container), container_span);
                         self.compile_expr(*index)?;
                         self.chunk.write(OpCode::SetLocal(tmp_index), index_span);
 
@@ -304,7 +312,7 @@ impl Compiler {
         Ok(())
     }
 
-    fn compile_lvalue(&mut self, l_value: Lvalue) -> Result<(), CompileError> {
+    fn compile_lvalue(&mut self, l_value: Lvalue, span: Span) -> Result<(), CompileError> {
         match l_value {
             Lvalue::Identifier {
                 resolved,
@@ -313,10 +321,36 @@ impl Compiler {
             } => {
                 self.emit_set_var(resolved.expect("identifiers must be resolved"), lv_span);
             }
-            Lvalue::Index { .. } => todo!("?"),
-            Lvalue::Sequence(_) => todo!("?"),
+            Lvalue::Index { .. } => todo!("index assignment lvalue"),
+            Lvalue::Sequence(seq) => {
+                self.chunk.write(OpCode::Unpack(seq.len()), span);
+                for lv in seq {
+                    self.compile_lvalue(lv, span)?;
+                }
+            }
         }
 
+        Ok(())
+    }
+
+    fn compile_declare_lvalue(&mut self, l_value: Lvalue, span: Span) -> Result<(), CompileError> {
+        match l_value {
+            Lvalue::Identifier { resolved, .. } => {
+                let slot = match resolved.expect("declaration lvalue must be resolved") {
+                    ResolvedVar::Local { slot } => slot,
+                    _ => unreachable!("declaration lvalue must be a local"),
+                };
+                self.chunk.write(OpCode::SetLocal(slot), span);
+                self.max_local = self.max_local.max(slot + 1);
+            }
+            Lvalue::Index { .. } => unreachable!("cannot declare into index"),
+            Lvalue::Sequence(seq) => {
+                self.chunk.write(OpCode::Unpack(seq.len()), span);
+                for lv in seq {
+                    self.compile_declare_lvalue(lv, span)?;
+                }
+            }
+        }
         Ok(())
     }
 
@@ -684,7 +718,7 @@ fn extract_lvalue_slot(lvalue: &Lvalue) -> usize {
             resolved: Some(ResolvedVar::Local { slot }),
             ..
         } => *slot,
-        _ => panic!("expected resolved local identifier"),
+        _ => panic!("expected a single resolved local identifier"),
     }
 }
 
