@@ -74,7 +74,9 @@ impl std::fmt::Debug for OpCode {
             Self::SetUpvalue(n) => write!(f, "SetUpvalue({n})"),
             Self::MakeList(n) => write!(f, "MakeList({n})"),
             Self::MakeTuple(n) => write!(f, "MakeTuple({n})"),
-            Self::MakeMap { pairs, has_default } => write!(f, "MakeMap({pairs}, default={has_default})"),
+            Self::MakeMap { pairs, has_default } => {
+                write!(f, "MakeMap({pairs}, default={has_default})")
+            }
             Self::Closure {
                 constant_idx,
                 values,

@@ -139,14 +139,34 @@ impl Vm {
                 }
                 OpCode::JumpIfFalse(offset) => {
                     let top = self.stack.last().expect("stack underflow");
-                    if let Value::Bool(false) = top {
-                        frame.ip = frame.ip.wrapping_add_signed(offset);
+                    match top {
+                        Value::Bool(false) => {
+                            frame.ip = frame.ip.wrapping_add_signed(offset);
+                        }
+                        Value::Bool(true) => {}
+                        value => {
+                            let type_str = value.static_type().to_string();
+                            return Err(VmError::new(
+                                format!("mismatched types: expected Bool, found {type_str}"),
+                                span,
+                            ));
+                        }
                     }
                 }
                 OpCode::JumpIfTrue(offset) => {
                     let top = self.stack.last().expect("stack underflow");
-                    if let Value::Bool(true) = top {
-                        frame.ip = frame.ip.wrapping_add_signed(offset);
+                    match top {
+                        Value::Bool(true) => {
+                            frame.ip = frame.ip.wrapping_add_signed(offset);
+                        }
+                        Value::Bool(false) => {}
+                        value => {
+                            let type_str = value.static_type().to_string();
+                            return Err(VmError::new(
+                                format!("mismatched types: expected Bool, found {type_str}"),
+                                span,
+                            ));
+                        }
                     }
                 }
                 OpCode::Jump(offset) => {
