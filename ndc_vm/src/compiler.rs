@@ -195,7 +195,9 @@ impl Compiler {
                         self.chunk.write(OpCode::Call(2), span); // op(current_value, r_value) → new_value
                         self.chunk.write(OpCode::Call(3), span); // []=(container, index, new_value)
                     }
-                    Lvalue::Sequence(_) => todo!("sequence op-assignment"),
+                    Lvalue::Sequence(_) => {
+                        return Err(CompileError::lvalue_required_to_be_single_identifier(span));
+                    }
                 }
                 let idx = self.chunk.add_constant(Value::unit());
                 self.chunk.write(OpCode::Constant(idx), span);
@@ -753,6 +755,13 @@ impl CompileError {
     fn return_outside_function(span: Span) -> Self {
         Self {
             text: "unexpected return statement outside of function body".to_string(),
+            span,
+        }
+    }
+
+    fn lvalue_required_to_be_single_identifier(span: Span) -> Self {
+        Self {
+            text: "This lvalue is required to be a single identifier".to_string(),
             span,
         }
     }
