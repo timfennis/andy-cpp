@@ -1,6 +1,8 @@
 use crate::chunk::{Chunk, OpCode};
 use crate::iterator::SharedIterator;
 use ndc_core::hash_map::{DefaultHasher, HashMap};
+use ndc_core::int::Int;
+use ndc_core::num::Number;
 use ndc_parser::{ResolvedVar, StaticType, TypeSignature};
 use std::cell::RefCell;
 use std::cmp::{Ordering, Reverse};
@@ -339,44 +341,42 @@ impl fmt::Display for Function {
 impl PartialOrd for Value {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         match (self, other) {
-            // Same-type numeric comparisons
+            // Same-type fast paths
             (Self::Int(a), Self::Int(b)) => Some(a.cmp(b)),
-            // Cross int/float: mirror the interpreter's compare_int_to_float logic,
-            // simplified for i64 (no BigInt needed at VM top level).
-            (Self::Int(a), Self::Float(b)) => compare_i64_to_f64(*a, *b),
-            (Self::Float(a), Self::Int(b)) => compare_i64_to_f64(*b, *a).map(Ordering::reverse),
-            (Self::Float(a), Self::Float(b)) => {
-                // Use total order for floats (NaN sorts consistently), matching OrderedFloat
-                Some(a.total_cmp(b))
-            }
+            (Self::Float(a), Self::Float(b)) => Some(a.total_cmp(b)),
             (Self::Bool(a), Self::Bool(b)) => a.partial_cmp(b),
             (Self::Object(a), Self::Object(b)) => a.partial_cmp(b),
-            _ => None,
+            // Any numeric cross-type comparison (Int/Float vs BigInt/Rational/Complex etc.)
+            // delegates to ndc_core::Number which handles all cases the interpreter does.
+            (a, b) => vm_value_to_number(a)?.partial_cmp(&vm_value_to_number(b)?),
         }
     }
 }
 
-/// Compare an i64 to an f64, handling infinity and NaN consistently.
-/// Mirrors the interpreter's `compare_int_to_float` (simplified for i64 not BigInt).
-fn compare_i64_to_f64(a: i64, b: f64) -> Option<Ordering> {
-    if b.is_nan() {
-        // Treat NaN as greater than everything (consistent total order)
-        return Some(Ordering::Less);
+/// Convert a VM numeric value to a `ndc_core::Number` for cross-type comparison.
+/// Returns `None` for non-numeric values (Bool, None, String, List, …).
+fn vm_value_to_number(v: &Value) -> Option<Number> {
+    match v {
+        Value::Int(i) => Some(Number::Int(Int::Int64(*i))),
+        Value::Float(f) => Some(Number::Float(*f)),
+        Value::Object(obj) => match obj.as_ref() {
+            Object::BigInt(b) => Some(Number::Int(Int::BigInt(b.clone()))),
+            Object::Rational(r) => Some(Number::Rational(Box::new(r.clone()))),
+            Object::Complex(c) => Some(Number::Complex(*c)),
+            _ => None,
+        },
+        _ => None,
     }
-    if b == f64::INFINITY {
-        return Some(Ordering::Less);
+}
+
+/// Convert an `Object` numeric value to a `ndc_core::Number` for cross-type comparison.
+fn obj_to_number(obj: &Object) -> Option<Number> {
+    match obj {
+        Object::BigInt(b) => Some(Number::Int(Int::BigInt(b.clone()))),
+        Object::Rational(r) => Some(Number::Rational(Box::new(r.clone()))),
+        Object::Complex(c) => Some(Number::Complex(*c)),
+        _ => None,
     }
-    if b == f64::NEG_INFINITY {
-        return Some(Ordering::Greater);
-    }
-    // Safe cast: b is finite, compare integer part then fractional tiebreak.
-    // Mirrors the interpreter: ord.then(0.0f64.total_cmp(&b.fract()))
-    // e.g. 5 vs 5.3: equal integer parts, fract=0.3 → 0.0.total_cmp(0.3)=Less → 5 < 5.3 ✓
-    //      5 vs 4.9: 5 > 4 (trunc) → Greater, no tiebreak needed ✓
-    //     -5 vs -5.3: trunc(-5.3)=-5, equal, fract=-0.3 → 0.0.total_cmp(-0.3)=Greater → -5 > -5.3 ✓
-    let trunc = b.trunc() as i64;
-    let ord = a.cmp(&trunc);
-    Some(ord.then(0.0f64.total_cmp(&b.fract())))
 }
 
 impl PartialOrd for Object {
@@ -387,7 +387,8 @@ impl PartialOrd for Object {
             (Self::String(a), Self::String(b)) => a.borrow().partial_cmp(&*b.borrow()),
             (Self::List(a), Self::List(b)) => a.borrow().partial_cmp(&*b.borrow()),
             (Self::Tuple(a), Self::Tuple(b)) => a.partial_cmp(b),
-            _ => None,
+            // Cross-type numeric: BigInt vs Rational, BigInt vs Complex, Rational vs Complex, etc.
+            (a, b) => obj_to_number(a)?.partial_cmp(&obj_to_number(b)?),
         }
     }
 }
