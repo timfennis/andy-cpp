@@ -1,7 +1,7 @@
 use crate::chunk::OpCode;
 use crate::iterator::{
     DequeIter, ListIter, MapIter, MaxHeapIter, MinHeapIter, RangeInclusiveIter, RangeIter,
-    StringIter, TupleIter,
+    StringIter, TupleIter, UnboundedRangeIter, VmIterator,
 };
 use crate::value::{CompiledFunction, Function};
 use crate::{ClosureFunction, Object, UpvalueCell, Value};
@@ -317,26 +317,28 @@ impl Vm {
                     };
                     entries.borrow_mut().insert(key, value);
                 }
-                OpCode::MakeRange => {
-                    let end = self.stack.pop().expect("stack underflow");
-                    let start = self.stack.pop().expect("stack underflow");
-                    let (Value::Int(start), Value::Int(end)) = (start, end) else {
-                        panic!("range bounds must be integers")
+                OpCode::MakeRange { inclusive, bounded } => {
+                    let end = if bounded {
+                        let v = self.stack.pop().expect("stack underflow");
+                        let Value::Int(n) = v else {
+                            panic!("range end must be integer")
+                        };
+                        Some(n)
+                    } else {
+                        None
                     };
-                    self.stack
-                        .push(Value::iterator(Rc::new(RefCell::new(RangeIter::new(
-                            start, end,
-                        )))));
-                }
-                OpCode::MakeRangeInclusive => {
-                    let end = self.stack.pop().expect("stack underflow");
                     let start = self.stack.pop().expect("stack underflow");
-                    let (Value::Int(start), Value::Int(end)) = (start, end) else {
-                        panic!("range bounds must be integers")
+                    let Value::Int(start) = start else {
+                        panic!("range start must be integer")
                     };
-                    self.stack.push(Value::iterator(Rc::new(RefCell::new(
-                        RangeInclusiveIter::new(start, end),
-                    ))));
+                    let iter: Rc<RefCell<dyn VmIterator>> = match (inclusive, end) {
+                        (_, None) => Rc::new(RefCell::new(UnboundedRangeIter::new(start))),
+                        (false, Some(end)) => Rc::new(RefCell::new(RangeIter::new(start, end))),
+                        (true, Some(end)) => {
+                            Rc::new(RefCell::new(RangeInclusiveIter::new(start, end)))
+                        }
+                    };
+                    self.stack.push(Value::iterator(iter));
                 }
                 OpCode::Closure {
                     constant_idx: idx,

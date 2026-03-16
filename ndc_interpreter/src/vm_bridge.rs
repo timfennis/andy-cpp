@@ -147,6 +147,13 @@ pub fn vm_to_interp(value: &VmValue) -> InterpValue {
                 // If it's a range, preserve it as an interpreter range iterator so that
                 // value_to_evaluated_index can recognise it for slicing (e.g. list[0..3]).
                 // TODO: remove once the VM bridge (vm_bridge.rs) is gone.
+                if let Some(start) = iter.borrow().unbounded_range_start() {
+                    let range_iter =
+                        ValueIterator::ValueRangeFrom(crate::iterator::ValueRangeFrom(start..));
+                    return InterpValue::Sequence(Sequence::Iterator(Rc::new(RefCell::new(
+                        range_iter,
+                    ))));
+                }
                 if let Some((start, end, inclusive)) = iter.borrow().range_bounds() {
                     let range_iter = if inclusive {
                         ValueIterator::ValueRangeInclusive(crate::iterator::ValueRangeInclusive(
