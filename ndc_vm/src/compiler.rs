@@ -511,8 +511,12 @@ impl Compiler {
             self.compile_expr(on_false)?;
             self.chunk.patch_jump(jump_to_end);
         } else {
+            let jump_to_end = self.chunk.write(OpCode::Jump(0), Span::new(0, 0));
             self.chunk.patch_jump(conditional_jump_idx);
             self.chunk.write(OpCode::Pop, Span::new(0, 0));
+            let idx = self.chunk.add_constant(Value::unit());
+            self.chunk.write(OpCode::Constant(idx), Span::new(0, 0));
+            self.chunk.patch_jump(jump_to_end);
         }
 
         Ok(())
@@ -898,7 +902,6 @@ fn produces_value(expr: &Expression) -> bool {
             ..
         }
         | Expression::While { .. }
-        | Expression::If { on_false: None, .. }
         | Expression::Break
         | Expression::Continue
         | Expression::Return { .. } => false,

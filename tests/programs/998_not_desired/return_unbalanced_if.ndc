@@ -1,3 +1,4 @@
+// vm-ready
 // NOTE: this is definitely a weird one that should probably generate a type error in the future
 fn is_positive(n) {
     return if n >= 0 {
