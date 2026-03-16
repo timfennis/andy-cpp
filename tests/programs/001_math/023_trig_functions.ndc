@@ -1,0 +1,77 @@
+// Tests for trig and math functions (acos, acosh, asin, asinh, atan, atanh,
+// cbrt, cos, exp, ln, log2, log10, sin, sqrt, tan, tanh)
+//
+// Strategy:
+//  - Use exact IEEE values where the result is trivially representable (0, 1, powers of 2)
+//  - Use epsilon checks for everything else to avoid brittle float-equality
+
+let eps = 0.000000000001;
+
+// --- sqrt ---
+assert(sqrt(0.0) == 0.0);
+assert(sqrt(1.0) == 1.0);
+assert(sqrt(4.0) == 2.0);
+assert(sqrt(9.0) == 3.0);
+assert(sqrt(100.0) == 10.0);
+assert(sqrt(-1.0) == NaN, "sqrt of negative is NaN");
+
+// --- cbrt ---
+assert(cbrt(0.0) == 0.0);
+assert(cbrt(1.0) == 1.0);
+assert(cbrt(8.0) == 2.0);
+assert(cbrt(-8.0) == -2.0);
+
+// --- exp / ln ---
+assert(exp(0.0) == 1.0);
+assert(ln(1.0) == 0.0);
+assert(abs(exp(1.0) - 2.718281828459045) < eps, "exp(1) ≈ e");
+assert(abs(ln(exp(1.0)) - 1.0) < eps, "ln(exp(1)) == 1");
+
+// --- log2 / log10 ---
+assert(log2(1.0) == 0.0);
+assert(log2(2.0) == 1.0);
+assert(log2(4.0) == 2.0);
+assert(log10(1.0) == 0.0);
+assert(log10(10.0) == 1.0);
+
+// --- sin / cos / tan at exact-result inputs ---
+assert(sin(0.0) == 0.0);
+assert(cos(0.0) == 1.0);
+assert(tan(0.0) == 0.0);
+assert(abs(sin(1.5707963267948966) - 1.0) < eps, "sin(pi/2) == 1");  // pi/2
+
+// --- asin / acos / atan ---
+assert(asin(0.0) == 0.0);
+assert(acos(1.0) == 0.0);
+assert(atan(0.0) == 0.0);
+assert(abs(asin(1.0) - 1.5707963267948966) < eps, "asin(1) == pi/2");
+assert(abs(acos(0.0) - 1.5707963267948966) < eps, "acos(0) == pi/2");
+
+// --- hyperbolic ---
+assert(tanh(0.0) == 0.0);
+assert(asinh(0.0) == 0.0);
+assert(acosh(1.0) == 0.0);
+assert(atanh(0.0) == 0.0);
+assert(abs(tanh(1.0) - 0.7615941559557649) < eps);
+
+// --- Round-trip inverses with epsilon ---
+assert(abs(sin(asin(0.5)) - 0.5) < eps);
+assert(abs(sin(asin(-0.5)) - -0.5) < eps);
+assert(abs(cos(acos(0.5)) - 0.5) < eps);
+assert(abs(tan(atan(1.0)) - 1.0) < eps);
+assert(abs(exp(ln(2.0)) - 2.0) < eps);
+
+// --- NaN propagation ---
+assert(sin(NaN) == NaN);
+assert(sqrt(NaN) == NaN);
+assert(ln(NaN) == NaN);
+assert(asin(2.0) == NaN, "asin out of range is NaN");
+assert(acos(2.0) == NaN, "acos out of range is NaN");
+assert(acosh(0.5) == NaN, "acosh below 1 is NaN");
+assert(atanh(2.0) == NaN, "atanh outside (-1,1) is NaN");
+
+// --- Integer inputs are accepted and return float ---
+assert(sqrt(4) == 2.0);
+assert(sin(0) == 0.0);
+assert(exp(0) == 1.0);
+assert(ln(1) == 0.0);

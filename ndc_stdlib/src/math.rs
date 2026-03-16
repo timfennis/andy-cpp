@@ -695,6 +695,28 @@ pub mod f64 {
                     })
                     .name(stringify!($method).to_string())
                     .documentation(String::from($docs))
+                    .vm_native(Rc::new(VmNativeFunction {
+                        name: stringify!($method).to_string(),
+                        static_type: StaticType::Function {
+                            parameters: Some(vec![StaticType::Number]),
+                            return_type: Box::new(StaticType::Number),
+                        },
+                        func: Box::new(|args| match args {
+                            [v] => v
+                                .to_number()
+                                .map(|num| match num {
+                                    Number::Int(i) => Number::Float(f64::from(i).$method()),
+                                    Number::Float(f) => Number::Float(f.$method()),
+                                    Number::Rational(r) => {
+                                        Number::Float(r.to_f64().unwrap_or(f64::NAN).$method())
+                                    }
+                                    Number::Complex(c) => Number::Complex(c.$method()),
+                                })
+                                .map(VmValue::from_number)
+                                .ok_or_else(|| format!("expected number, got {}", v.static_type())),
+                            _ => Err(format!("expected 1 argument, got {}", args.len())),
+                        }),
+                    }))
                     .build()
                     .expect("expected delegate_to_f64 to always create function object correctly");
                 env.declare_global_fn(function);
