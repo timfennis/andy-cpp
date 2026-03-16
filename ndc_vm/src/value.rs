@@ -220,6 +220,22 @@ impl Value {
             Int::BigInt(b) => Value::Object(Box::new(Object::BigInt(b))),
         }
     }
+
+    /// Convert a numeric VM value to `f64`, coercing integers and rationals.
+    /// Returns `None` for non-numeric values (Bool, None, String, …).
+    pub fn to_f64(&self) -> Option<f64> {
+        use num::ToPrimitive;
+        match self {
+            Value::Float(f) => Some(*f),
+            Value::Int(i) => Some(*i as f64),
+            Value::Object(obj) => match obj.as_ref() {
+                Object::BigInt(b) => b.to_f64(),
+                Object::Rational(r) => r.to_f64(),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
 }
 
 impl Object {

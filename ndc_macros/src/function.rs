@@ -307,7 +307,8 @@ fn wrap_single(
         let mut inner = function.clone();
         // Remove attributes to prevent compilation errors
         inner.attrs.clear();
-
+        // Make public so the vm_native closure in register() can call it
+        inner.vis = syn::Visibility::Public(syn::token::Pub::default());
         // Change the name
         inner.sig.ident = inner_ident.clone();
         inner
@@ -336,7 +337,7 @@ fn wrap_single(
         syn::ReturnType::Default => quote! {
             return Ok(ndc_interpreter::value::Value::unit());
         },
-        syn::ReturnType::Type(_, typ) => match &*typ {
+        syn::ReturnType::Type(_, ref typ) => match &**typ {
             // If the function returns a result we unpack it using the question mark operator
             ty @ syn::Type::Path(_) if path_ends_with(ty, "EvaluationResult") => quote! {
                 return result;
@@ -352,25 +353,32 @@ fn wrap_single(
         },
     };
 
-    // This generates a function declaration from a rust function
-    // The expansion looks something like this
+    // Try to generate a vm_native builder call. Returns an empty TokenStream when
+    // any parameter or return type is unsupported — the function will fall back to
+    // the interpreter bridge as before.
+    let vm_native_call = try_generate_vm_native(&function, &inner_ident, register_as_function_name)
+        .unwrap_or_default();
+
+    // The inner helper is hoisted to module scope (not nested inside the wrapper)
+    // so that both the tree-walk wrapper and the vm_native closure can call it.
     //
-    // fn wrapper_function(values: &[Value]) -> EvaluationResult {
-    //     fn original_function(....) { .... }
-    //     let arg0 = ....; // from values[0]
-    //     let arg1 = ....; // from values[1]
+    // Expansion:
+    //   pub fn wrapper_inner(...) { /* original body */ }
     //
-    //     return original_function(arg0, arg1);
-    // }
+    //   pub fn wrapper(values: &mut [Value], env: ...) -> EvaluationResult {
+    //       let arg0 = ...; // from values[0]
+    //       ...
+    //       let result = wrapper_inner(arg0, ...);
+    //       return Ok(Value::from(result));
+    //   }
     let function_declaration = quote! {
+        #[inline]
+        #inner
+
         pub fn #identifier (
             values: &mut [ndc_interpreter::value::Value],
             environment: &std::rc::Rc<std::cell::RefCell<ndc_interpreter::environment::Environment>>
         ) -> ndc_interpreter::evaluate::EvaluationResult {
-            // Define the inner function that has the rust type signature
-            #[inline]
-            #inner
-
             // Initialize the arguments and map them from the Andy C types to the rust types
             let [#(#arguments, )*] = values else { panic!("actual argument count did not match expected argument count when calling native method, this should be prevented by the runtime") };
             #(#argument_init_code_blocks; )*
@@ -394,6 +402,7 @@ fn wrap_single(
             })
             .name(String::from(#register_as_function_name))
             .documentation(String::from(#docs))
+            #vm_native_call
             .build()
             .expect("expected function creation in proc macro to always succeed");
 
@@ -404,6 +413,58 @@ fn wrap_single(
         function_declaration,
         function_registration,
     }
+}
+
+/// Attempt to generate a `.vm_native(...)` builder call for a function.
+///
+/// Returns `None` (producing an empty TokenStream via `unwrap_or_default`) when
+/// any parameter or the return type cannot be expressed in VM-native terms.
+/// In that case the function silently falls back to the interpreter bridge.
+fn try_generate_vm_native(
+    function: &syn::ItemFn,
+    inner_ident: &syn::Ident,
+    fn_name: &proc_macro2::Literal,
+) -> Option<TokenStream> {
+    use crate::vm_convert::{try_vm_input, try_vm_return};
+
+    let mut extracts = Vec::new();
+    let mut passes = Vec::new();
+    let mut param_types = Vec::new();
+    let raw_args: Vec<_> = (0..function.sig.inputs.len())
+        .map(|i| format_ident!("vm_raw{i}"))
+        .collect();
+
+    for (i, arg) in function.sig.inputs.iter().enumerate() {
+        let ty = match arg {
+            syn::FnArg::Typed(pat_ty) => &*pat_ty.ty,
+            syn::FnArg::Receiver(_) => return None,
+        };
+        let conv = try_vm_input(ty, i)?;
+        extracts.push(conv.extract);
+        passes.push(conv.pass);
+        param_types.push(conv.static_type);
+    }
+
+    let (return_code, return_static_type) = try_vm_return(&function.sig.output)?;
+    let n = function.sig.inputs.len();
+
+    Some(quote! {
+        .vm_native(std::rc::Rc::new(ndc_vm::value::NativeFunction {
+            name: String::from(#fn_name),
+            static_type: ndc_interpreter::function::StaticType::Function {
+                parameters: Some(vec![#(#param_types),*]),
+                return_type: Box::new(#return_static_type),
+            },
+            func: Box::new(|args| match args {
+                [#(#raw_args),*] => {
+                    #(#extracts)*
+                    let result = #inner_ident(#(#passes),*);
+                    #return_code
+                }
+                _ => Err(format!("expected {} arguments, got {}", #n, args.len())),
+            }),
+        }))
+    })
 }
 
 fn into_param_type(ty: &syn::Type) -> TokenStream {

@@ -568,7 +568,7 @@ pub mod f64 {
                     func: Box::new(|args| match args {
                         [v] => v
                             .to_number()
-                            .map(std::ops::Not::not)
+                            .map(Not::not)
                             .map(VmValue::from_number)
                             .ok_or_else(|| format!("expected number, got {}", v.static_type())),
                         _ => Err(format!("expected 1 argument, got {}", args.len())),
