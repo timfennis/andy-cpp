@@ -106,7 +106,15 @@ impl Environment {
                     .set(var, value);
             }
             ResolvedVar::Upvalue { slot } => {
-                *self.upvalues[slot].borrow_mut() = value;
+                if let Some(cell) = self.upvalues.get(slot) {
+                    *cell.borrow_mut() = value;
+                } else {
+                    self.parent
+                        .clone()
+                        .expect("Upvalue slot not in current scope and no parent")
+                        .borrow_mut()
+                        .set(var, value);
+                }
             }
             ResolvedVar::Global { .. } => {
                 unreachable!("cannot assign value to global")
@@ -140,7 +148,17 @@ impl Environment {
                 .expect("Local slot below base_offset but no parent")
                 .borrow()
                 .get(var),
-            ResolvedVar::Upvalue { slot } => self.upvalues[slot].borrow().clone(),
+            ResolvedVar::Upvalue { slot } => {
+                if let Some(cell) = self.upvalues.get(slot) {
+                    cell.borrow().clone()
+                } else {
+                    self.parent
+                        .as_ref()
+                        .expect("Upvalue slot not in current scope and no parent")
+                        .borrow()
+                        .get(var)
+                }
+            }
             ResolvedVar::Global { slot } => {
                 Value::function(self.root.borrow().global_functions[slot].clone())
             }
@@ -168,8 +186,15 @@ impl Environment {
                 .borrow_mut()
                 .take(var),
             ResolvedVar::Upvalue { slot } => {
-                let cell = &self.upvalues[slot];
-                Some(std::mem::replace(&mut *cell.borrow_mut(), Value::unit()))
+                if let Some(cell) = self.upvalues.get(slot) {
+                    Some(std::mem::replace(&mut *cell.borrow_mut(), Value::unit()))
+                } else {
+                    self.parent
+                        .clone()
+                        .expect("Upvalue slot not in current scope and no parent")
+                        .borrow_mut()
+                        .take(var)
+                }
             }
             ResolvedVar::Global { .. } => panic!("cannot take global variable from environment"),
         }
