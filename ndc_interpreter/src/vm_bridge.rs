@@ -53,6 +53,7 @@ fn wrap_function(
     dummy_env: Rc<RefCell<Environment>>,
     globals_cell: Rc<RefCell<Vec<VmValue>>>,
 ) -> VmValue {
+    let name = func.name().to_string();
     let static_type = func.static_type();
     let native = move |args: &[VmValue]| -> Result<VmValue, String> {
         let globals = Rc::new(globals_cell.borrow().clone());
@@ -90,6 +91,7 @@ fn wrap_function(
     };
     VmValue::Object(Box::new(VmObject::Function(VmFunction::Native(Rc::new(
         NativeFunction {
+            name,
             func: Box::new(native),
             static_type,
         },

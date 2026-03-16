@@ -79,6 +79,7 @@ pub enum Function {
 }
 
 pub struct NativeFunction {
+    pub name: String,
     pub func: Box<dyn Fn(&[Value]) -> Result<Value, String>>,
     pub static_type: StaticType,
 }
@@ -195,6 +196,15 @@ impl Function {
             Self::Closure(c) => Some(&c.prototype),
             Self::Native(_) => None,
             Self::Memoized { function, .. } => function.prototype(),
+        }
+    }
+
+    pub fn name(&self) -> Option<&str> {
+        match self {
+            Self::Compiled(f) => f.name.as_deref(),
+            Self::Native(f) => Some(&f.name),
+            Self::Closure(c) => c.prototype.name.as_deref(),
+            Self::Memoized { function, .. } => function.name(),
         }
     }
 

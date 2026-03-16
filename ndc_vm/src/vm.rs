@@ -7,7 +7,7 @@ use crate::value::{CompiledFunction, Function};
 use crate::{ClosureFunction, Object, UpvalueCell, Value};
 use ndc_core::hash_map::{DefaultHasher, HashMap};
 use ndc_lexer::Span;
-use ndc_parser::{CaptureSource, ResolvedVar};
+use ndc_parser::{CaptureSource, ResolvedVar, StaticType};
 use std::cell::RefCell;
 use std::hash::{Hash, Hasher};
 use std::ops::Deref;
@@ -191,9 +191,30 @@ impl Vm {
                     self.stack.pop();
                 }
                 OpCode::Call(args) => {
-                    let func = self.resolve_callee(args);
-                    if let Err(msg) = self.dispatch_call(func, args) {
-                        return Err(VmError::new(msg, span));
+                    if let Some(func) = self.resolve_callee(args) {
+                        if let Err(msg) = self.dispatch_call(func, args) {
+                            return Err(VmError::new(msg, span));
+                        }
+                    } else if let Some(result) = self.try_vectorized_call(args, span)? {
+                        self.stack.push(result);
+                    } else {
+                        let arg_types: Vec<_> = self.stack[self.stack.len() - args..]
+                            .iter()
+                            .map(Value::static_type)
+                            .collect();
+                        let callee_name = self.callee_name(args);
+                        return Err(VmError::new(
+                            format!(
+                                "no function called '{}' found matches the arguments: ({})",
+                                callee_name.as_deref().unwrap_or("?"),
+                                arg_types
+                                    .iter()
+                                    .map(|t| t.to_string())
+                                    .collect::<Vec<_>>()
+                                    .join(", "),
+                            ),
+                            span,
+                        ));
                     }
                 }
                 OpCode::MakeList(size) => {
@@ -540,7 +561,7 @@ impl Vm {
             Function::Native(native) => (native.func)(&args),
             func => {
                 let n_args = args.len();
-                let mut vm = Vm {
+                let mut vm = Self {
                     stack: vec![Value::unit()], // dummy callee slot so frame_pointer = 1
                     globals,
                     frames: Vec::new(),
@@ -556,38 +577,19 @@ impl Vm {
         }
     }
 
-    /// Resolves the callee on the stack to a concrete `Function`, handling both
-    /// direct function values and overload sets (by matching argument types).
-    fn resolve_callee(&self, args: usize) -> Function {
-        let frame_pointer = self.frames.last().expect("no frame").frame_pointer;
+    /// Resolves the callee on the stack to a concrete `Function`. Returns `None`
+    /// when the callee is an overload set and no candidate matches the argument
+    /// types — the caller should then try a vectorized fallback.
+    fn resolve_callee(&self, args: usize) -> Option<Function> {
         match &self.stack[self.stack.len() - args - 1] {
             Value::Object(obj) => match obj.as_ref() {
-                Object::Function(f) => f.clone(),
+                Object::Function(f) => Some(f.clone()),
                 Object::OverloadSet(candidates) => {
                     let arg_types: Vec<_> = self.stack[self.stack.len() - args..]
                         .iter()
                         .map(Value::static_type)
                         .collect();
-                    candidates
-                        .iter()
-                        .find_map(|var| {
-                            let value = self.resolve_var(var, frame_pointer);
-                            let Value::Object(obj) = value else {
-                                return None;
-                            };
-                            let Object::Function(f) = obj.as_ref() else {
-                                return None;
-                            };
-                            f.static_type()
-                                .is_fn_and_matches(&arg_types)
-                                .then(|| f.clone())
-                        })
-                        .unwrap_or_else(|| {
-                            panic!(
-                                "no matching overload found for argument types {:?}",
-                                arg_types
-                            )
-                        })
+                    self.find_overload(candidates, &arg_types)
                 }
                 obj => panic!(
                     "callee is unexpected object type: {:?}",
@@ -596,6 +598,96 @@ impl Vm {
             },
             _ => panic!("callee is unexpected value type"),
         }
+    }
+
+    /// Returns the name of the callee at the given stack position, if known.
+    /// For a direct `Function` this is its own name; for an `OverloadSet` it
+    /// reads the name off the first resolved candidate.
+    fn callee_name(&self, args: usize) -> Option<String> {
+        let frame_pointer = self.frames.last()?.frame_pointer;
+        match &self.stack[self.stack.len() - args - 1] {
+            Value::Object(obj) => match obj.as_ref() {
+                Object::Function(f) => f.name().map(str::to_string),
+                Object::OverloadSet(candidates) => candidates.first().and_then(|var| {
+                    let value = self.resolve_var(var, frame_pointer);
+                    let Value::Object(obj) = value else {
+                        return None;
+                    };
+                    let Object::Function(f) = obj.as_ref() else {
+                        return None;
+                    };
+                    f.name().map(str::to_string)
+                }),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Searches an overload set for the first candidate whose type signature
+    /// accepts the given argument types.
+    fn find_overload(
+        &self,
+        candidates: &[ResolvedVar],
+        arg_types: &[StaticType],
+    ) -> Option<Function> {
+        let frame_pointer = self.frames.last().expect("no frame").frame_pointer;
+        candidates.iter().find_map(|var| {
+            let value = self.resolve_var(var, frame_pointer);
+            let Value::Object(obj) = value else {
+                return None;
+            };
+            let Object::Function(f) = obj.as_ref() else {
+                return None;
+            };
+            f.static_type()
+                .is_fn_and_matches(arg_types)
+                .then(|| f.clone())
+        })
+    }
+
+    /// Applies a binary operator element-wise over numeric tuples.
+    ///
+    /// Returns `Some(result_tuple)` when both arguments (or one argument and
+    /// one scalar) are numeric tuples of compatible shape and an inner function
+    /// can be found for the element types.  Returns `None` when vectorization
+    /// does not apply.
+    fn try_vectorized_call(&mut self, args: usize, span: Span) -> Result<Option<Value>, VmError> {
+        if args != 2 {
+            return Ok(None);
+        }
+
+        let callee_idx = self.stack.len() - args - 1;
+        let candidates = match &self.stack[callee_idx] {
+            Value::Object(obj) => match obj.as_ref() {
+                Object::OverloadSet(candidates) => candidates.clone(),
+                _ => return Ok(None),
+            },
+            _ => return Ok(None),
+        };
+
+        let left = self.stack[self.stack.len() - 2].clone();
+        let right = self.stack[self.stack.len() - 1].clone();
+
+        let Some(pairs) = vectorization_pairs(&left, &right) else {
+            return Ok(None);
+        };
+
+        // Use the first pair's element types to find a matching inner function.
+        let first_elem_types = [pairs[0].0.static_type(), pairs[0].1.static_type()];
+        let Some(inner_fn) = self.find_overload(&candidates, &first_elem_types) else {
+            return Ok(None);
+        };
+
+        let results: Result<Vec<Value>, String> = pairs
+            .into_iter()
+            .map(|(l, r)| Vm::call_function(inner_fn.clone(), vec![l, r], self.globals.clone()))
+            .collect();
+        let results = results.map_err(|e| VmError::new(e, span))?;
+
+        // Replace callee + args on the stack with the result tuple.
+        self.stack.truncate(callee_idx);
+        Ok(Some(Value::Object(Box::new(Object::Tuple(results)))))
     }
 
     /// Pops a value from the stack and pushes `size` unpacked elements back.
@@ -676,6 +768,50 @@ impl Vm {
             ResolvedVar::Local { slot } => &self.stack[frame_pointer + slot],
             ResolvedVar::Upvalue { .. } => todo!("upvalue resolution in overload sets"),
         }
+    }
+}
+
+/// If `value` is a tuple whose elements are all numeric, returns a reference to
+/// its element vec.  Returns `None` for empty tuples, non-tuples, or tuples
+/// that contain non-numeric elements.
+fn as_numeric_tuple(value: &Value) -> Option<&Vec<Value>> {
+    let Value::Object(obj) = value else {
+        return None;
+    };
+    let Object::Tuple(elems) = obj.as_ref() else {
+        return None;
+    };
+    if !elems.is_empty() && elems.iter().all(|e| e.static_type().is_number()) {
+        Some(elems)
+    } else {
+        None
+    }
+}
+
+/// Returns the element pairs to apply a binary op to when vectorizing over
+/// numeric tuples, or `None` when the arguments do not support vectorization.
+///
+/// Three shapes are supported:
+///   - `(tuple, tuple)` — same-length numeric tuples: paired element-wise
+///   - `(scalar, tuple)` — scalar broadcast over each tuple element
+///   - `(tuple, scalar)` — tuple element paired with scalar
+fn vectorization_pairs(left: &Value, right: &Value) -> Option<Vec<(Value, Value)>> {
+    let left_tuple = as_numeric_tuple(left);
+    let right_tuple = as_numeric_tuple(right);
+    let left_is_scalar = left.static_type().is_number();
+    let right_is_scalar = right.static_type().is_number();
+
+    match (left_tuple, right_tuple) {
+        (Some(ls), Some(rs)) if ls.len() == rs.len() => {
+            Some(ls.iter().cloned().zip(rs.iter().cloned()).collect())
+        }
+        (None, Some(rs)) if left_is_scalar => {
+            Some(rs.iter().map(|r| (left.clone(), r.clone())).collect())
+        }
+        (Some(ls), None) if right_is_scalar => {
+            Some(ls.iter().map(|l| (l.clone(), right.clone())).collect())
+        }
+        _ => None,
     }
 }
 
