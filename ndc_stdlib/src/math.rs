@@ -214,8 +214,10 @@ pub mod f64 {
     };
     use ndc_interpreter::num::BinaryOperatorError;
     use ndc_interpreter::value::Value;
+    use ndc_vm::value::{NativeFunction as VmNativeFunction, Value as VmValue};
     use std::cmp::Ordering;
     use std::ops::Not;
+    use std::rc::Rc;
 
     pub fn register(env: &mut Environment) {
         macro_rules! implement_binary_operator_on_num {
@@ -224,6 +226,27 @@ pub mod f64 {
                     FunctionBuilder::default()
                         .name($operator.to_string())
                         .body(FunctionBody::NumericBinaryOp { body: $method })
+                        .vm_native(Rc::new(VmNativeFunction {
+                            name: $operator.to_string(),
+                            static_type: StaticType::Function {
+                                parameters: Some(vec![StaticType::Number, StaticType::Number]),
+                                return_type: Box::new(StaticType::Number),
+                            },
+                            func: Box::new(|args| match args {
+                                [left, right] => {
+                                    let l = left.to_number().ok_or_else(|| {
+                                        format!("expected number, got {}", left.static_type())
+                                    })?;
+                                    let r = right.to_number().ok_or_else(|| {
+                                        format!("expected number, got {}", right.static_type())
+                                    })?;
+                                    $method(l, r)
+                                        .map(VmValue::from_number)
+                                        .map_err(|e: BinaryOperatorError| e.to_string())
+                                }
+                                _ => Err(format!("expected 2 arguments, got {}", args.len())),
+                            }),
+                        }))
                         .build()
                         .expect("must be valid"),
                 );
@@ -245,6 +268,21 @@ pub mod f64 {
                     body: std::ops::Neg::neg,
                 })
                 .name("-".to_string())
+                .vm_native(Rc::new(VmNativeFunction {
+                    name: "-".to_string(),
+                    static_type: StaticType::Function {
+                        parameters: Some(vec![StaticType::Number]),
+                        return_type: Box::new(StaticType::Number),
+                    },
+                    func: Box::new(|args| match args {
+                        [v] => v
+                            .to_number()
+                            .map(std::ops::Neg::neg)
+                            .map(VmValue::from_number)
+                            .ok_or_else(|| format!("expected number, got {}", v.static_type())),
+                        _ => Err(format!("expected 1 argument, got {}", args.len())),
+                    }),
+                }))
                 .build()
                 .expect("must succeed"),
         );

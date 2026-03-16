@@ -9,6 +9,7 @@ factorial.workspace = true
 itertools.workspace = true
 ndc_interpreter = { workspace = true }
 ndc_macros.workspace = true
+ndc_vm = { workspace = true }
 num.workspace = true
 once_cell.workspace = true
 tap.workspace = true

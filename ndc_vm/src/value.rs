@@ -180,6 +180,24 @@ impl Value {
         let Self::Object(obj) = self else { return None };
         obj.function_prototype()
     }
+
+    /// Convert a numeric VM value to a `ndc_core::Number`.
+    /// Returns `None` for non-numeric values (Bool, None, String, List, …).
+    pub fn to_number(&self) -> Option<Number> {
+        vm_value_to_number(self)
+    }
+
+    /// Convert a `ndc_core::Number` to a VM value.
+    /// `Int64` maps to `Value::Int`; all other variants become `Value::Object`.
+    pub fn from_number(n: Number) -> Self {
+        match n {
+            Number::Int(Int::Int64(i)) => Value::Int(i),
+            Number::Int(Int::BigInt(b)) => Value::Object(Box::new(Object::BigInt(b))),
+            Number::Float(f) => Value::Float(f),
+            Number::Rational(r) => Value::Object(Box::new(Object::Rational(*r))),
+            Number::Complex(c) => Value::Object(Box::new(Object::Complex(c))),
+        }
+    }
 }
 
 impl Object {

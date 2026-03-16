@@ -15,7 +15,8 @@ Andy C++ has four number types that you should keep in mind when programming.
 | `-` | Subtraction | `true` | `false` |
 | unary `-` | Negation | `true` | `false` |
 | `*` | Multiplication | `true` | `false` |
-| `/` | Division | `true` | `false` |
+| `/` | Division (returns rational for integers) | `true` | `false` |
+| `\` | Floor division (integer result, rounds toward negative infinity) | `true` | `false` |
 | `^` | Exponentiation | `true` | `false` |
 | `%` | C-style modulo (can be negative) | `true` | `false` |
 | `%%` | Remainder of [euclidean division](https://en.wikipedia.org/wiki/Euclidean_division) | `true` | `false` |
