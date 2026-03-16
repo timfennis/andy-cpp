@@ -4,7 +4,7 @@
 //! without the interpreter bridge, causing `export_module` to silently skip
 //! vm_native generation for that function.
 
-use crate::r#match::{is_ref, path_ends_with};
+use crate::r#match::{is_ref, is_ref_mut, is_str_ref, path_ends_with};
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
@@ -20,8 +20,8 @@ pub struct VmInputArg {
 
 /// Try to generate extraction code for a single parameter type.
 ///
-/// Supported: `Number`, `&Number`, `f64`, `bool`.
-/// Returns `None` for everything else (Sequence, String, BigInt, Value, …).
+/// Supported: `Number`, `&Number`, `f64`, `bool`, `&str`, `String`, `i64`.
+/// Returns `None` for everything else (Sequence, BigInt, Value, …).
 pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
     let raw = format_ident!("vm_raw{position}");
     let temp = format_ident!("vm_temp{position}");
@@ -68,13 +68,50 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
         });
     }
 
+    // &str or owned String — both extracted as an owned String, then passed as &str or String.
+    // Skip &mut String — mutation syncing is not supported.
+    if (is_str_ref(ty) || path_ends_with(ty, "String")) && !is_ref_mut(ty) {
+        let pass = if is_str_ref(ty) {
+            quote! { &#temp }
+        } else {
+            quote! { #temp }
+        };
+        return Some(VmInputArg {
+            extract: quote! {
+                let #temp = match #raw {
+                    ndc_vm::value::Value::Object(obj) => match obj.as_ref() {
+                        ndc_vm::value::Object::String(s) => s.borrow().clone(),
+                        _ => return Err(format!("arg {}: expected string, got {}", #position, #raw.static_type())),
+                    },
+                    _ => return Err(format!("arg {}: expected string, got {}", #position, #raw.static_type())),
+                };
+            },
+            pass,
+            static_type: quote! { ndc_interpreter::function::StaticType::String },
+        });
+    }
+
+    if path_ends_with(ty, "i64") {
+        return Some(VmInputArg {
+            extract: quote! {
+                let #temp = match #raw {
+                    ndc_vm::value::Value::Int(i) => *i,
+                    _ => return Err(format!("arg {}: expected int, got {}", #position, #raw.static_type())),
+                };
+            },
+            pass: quote! { #temp },
+            static_type: quote! { ndc_interpreter::function::StaticType::Int },
+        });
+    }
+
     None
 }
 
 /// Try to generate the return expression (producing `Result<VmValue, String>`)
 /// and the `StaticType` token for the return type.
 ///
-/// Supported: `Number`, `f64`, `bool`, `()` / `Default`, `Result<T>` wrapping any of those.
+/// Supported: `Number`, `f64`, `bool`, `String`, `&str`, `i64`, `()` / `Default`,
+/// `Result<T>` wrapping any of those.
 /// Returns `None` for unsupported types.
 pub fn try_vm_return(output: &syn::ReturnType) -> Option<(TokenStream, TokenStream)> {
     match output {
@@ -103,6 +140,25 @@ fn try_vm_return_type(ty: &syn::Type) -> Option<(TokenStream, TokenStream)> {
         return Some((
             quote! { Ok(ndc_vm::value::Value::Bool(result)) },
             quote! { ndc_interpreter::function::StaticType::Bool },
+        ));
+    }
+    // &str return — borrow tied to input, must convert to owned before returning
+    if is_str_ref(ty) {
+        return Some((
+            quote! { Ok(ndc_vm::value::Value::string(result.to_owned())) },
+            quote! { ndc_interpreter::function::StaticType::String },
+        ));
+    }
+    if path_ends_with(ty, "String") {
+        return Some((
+            quote! { Ok(ndc_vm::value::Value::string(result)) },
+            quote! { ndc_interpreter::function::StaticType::String },
+        ));
+    }
+    if path_ends_with(ty, "i64") {
+        return Some((
+            quote! { Ok(ndc_vm::value::Value::Int(result)) },
+            quote! { ndc_interpreter::function::StaticType::Int },
         ));
     }
 
