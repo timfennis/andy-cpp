@@ -46,7 +46,13 @@ pub fn make_vm_globals(env: &Rc<RefCell<Environment>>) -> Vec<VmValue> {
         .borrow()
         .get_all_functions()
         .into_iter()
-        .map(|func| wrap_function(func, Rc::clone(env), Rc::clone(&globals_cell)))
+        .map(|func| {
+            if let Some(native) = func.vm_native() {
+                VmValue::Object(Box::new(VmObject::Function(VmFunction::Native(native))))
+            } else {
+                wrap_function(func, Rc::clone(env), Rc::clone(&globals_cell))
+            }
+        })
         .collect();
     *globals_cell.borrow_mut() = globals.clone();
     globals
