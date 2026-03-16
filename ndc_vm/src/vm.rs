@@ -191,7 +191,10 @@ impl Vm {
                     self.stack.pop();
                 }
                 OpCode::Call(args) => {
-                    if let Some(func) = self.resolve_callee(args) {
+                    if let Some(func) = self
+                        .resolve_callee(args)
+                        .map_err(|msg| VmError::new(msg, span))?
+                    {
                         if let Err(msg) = self.dispatch_call(func, args) {
                             return Err(VmError::new(msg, span));
                         }
@@ -577,26 +580,30 @@ impl Vm {
         }
     }
 
-    /// Resolves the callee on the stack to a concrete `Function`. Returns `None`
+    /// Resolves the callee on the stack to a concrete `Function`. Returns `Ok(None)`
     /// when the callee is an overload set and no candidate matches the argument
-    /// types — the caller should then try a vectorized fallback.
-    fn resolve_callee(&self, args: usize) -> Option<Function> {
+    /// types — the caller should then try a vectorized fallback. Returns `Err` when
+    /// the callee is not callable at all.
+    fn resolve_callee(&self, args: usize) -> Result<Option<Function>, String> {
         match &self.stack[self.stack.len() - args - 1] {
             Value::Object(obj) => match obj.as_ref() {
-                Object::Function(f) => Some(f.clone()),
+                Object::Function(f) => Ok(Some(f.clone())),
                 Object::OverloadSet(candidates) => {
                     let arg_types: Vec<_> = self.stack[self.stack.len() - args..]
                         .iter()
                         .map(Value::static_type)
                         .collect();
-                    self.find_overload(candidates, &arg_types)
+                    Ok(self.find_overload(candidates, &arg_types))
                 }
                 obj => panic!(
                     "callee is unexpected object type: {:?}",
                     std::mem::discriminant(obj)
                 ),
             },
-            _ => panic!("callee is unexpected value type"),
+            callee => Err(format!(
+                "Unable to invoke {} as a function.",
+                callee.static_type()
+            )),
         }
     }
 
