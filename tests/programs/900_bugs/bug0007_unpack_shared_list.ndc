@@ -1,4 +1,3 @@
-// vm-ready
 // BUG#0007: exec_unpack used std::mem::take to steal the Vec out of an
 // Rc<RefCell<Vec>>, emptying the list in-place.  Any other binding that
 // still referenced the same Rc (e.g. the caller's variable) would
