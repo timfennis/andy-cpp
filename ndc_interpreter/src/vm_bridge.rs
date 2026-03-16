@@ -355,6 +355,8 @@ fn vm_identity_key(value: &VmValue) -> Option<usize> {
         return None;
     };
     match obj.as_ref() {
+        VmObject::List(rc) => Some(Rc::as_ptr(rc) as usize),
+        VmObject::Map { entries, .. } => Some(Rc::as_ptr(entries) as usize),
         VmObject::Deque(rc) => Some(Rc::as_ptr(rc) as usize),
         VmObject::MinHeap(rc) => Some(Rc::as_ptr(rc) as usize),
         VmObject::MaxHeap(rc) => Some(Rc::as_ptr(rc) as usize),
