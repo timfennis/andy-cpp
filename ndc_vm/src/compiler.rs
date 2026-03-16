@@ -144,7 +144,7 @@ impl Compiler {
             Expression::OpAssignment {
                 l_value,
                 r_value,
-                resolved_assign_operation: _todo_in_place,
+                resolved_assign_operation,
                 resolved_operation,
                 ..
             } => {
@@ -155,11 +155,25 @@ impl Compiler {
                         ..
                     } => {
                         let var = resolved.expect("lvalue must be resolved");
-                        self.compile_binding(resolved_operation, span)?;
-                        self.emit_get_var(var, lv_span);
-                        self.compile_expr(*r_value)?;
-                        self.chunk.write(OpCode::Call(2), span);
-                        self.emit_set_var(var, lv_span);
+                        if matches!(resolved_assign_operation, Binding::Resolved(_)) {
+                            // In-place operation (e.g. |=, &=) resolved exactly: modifies
+                            // the value's Rc in place via sync_map_mutations in the bridge,
+                            // so all aliases sharing the Rc see the change. We discard the
+                            // unit return value; the variable slot already holds the
+                            // (now-updated) shared reference.
+                            self.compile_binding(resolved_assign_operation, span)?;
+                            self.emit_get_var(var, lv_span);
+                            self.compile_expr(*r_value)?;
+                            self.chunk.write(OpCode::Call(2), span);
+                            self.chunk.write(OpCode::Pop, span);
+                        } else {
+                            // No exact in-place op: call the regular operation and store result.
+                            self.compile_binding(resolved_operation, span)?;
+                            self.emit_get_var(var, lv_span);
+                            self.compile_expr(*r_value)?;
+                            self.chunk.write(OpCode::Call(2), span);
+                            self.emit_set_var(var, lv_span);
+                        }
                     }
                     Lvalue::Index {
                         value,
