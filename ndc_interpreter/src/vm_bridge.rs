@@ -31,6 +31,10 @@ impl VmIterator for InterpIteratorAdapter {
         let val = self.inner.borrow_mut().next()?;
         Some(interp_to_vm(val))
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 pub fn make_vm_globals(env: &Rc<RefCell<Environment>>) -> Vec<VmValue> {
@@ -146,6 +150,18 @@ pub fn vm_to_interp(value: &VmValue) -> InterpValue {
                 )
             }
             VmObject::Iterator(iter) => {
+                // If this is an interpreter iterator that was wrapped for the VM, unwrap it
+                // directly to preserve shared iterator state (e.g. for repeat().transposed).
+                // TODO: remove once the VM bridge (vm_bridge.rs) is gone.
+                {
+                    let borrowed = iter.borrow();
+                    if let Some(adapter) = borrowed.as_any().downcast_ref::<InterpIteratorAdapter>()
+                    {
+                        return InterpValue::Sequence(Sequence::Iterator(Rc::clone(
+                            &adapter.inner,
+                        )));
+                    }
+                }
                 // If it's a range, preserve it as an interpreter range iterator so that
                 // value_to_evaluated_index can recognise it for slicing (e.g. list[0..3]).
                 // TODO: remove once the VM bridge (vm_bridge.rs) is gone.

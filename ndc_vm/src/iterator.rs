@@ -32,6 +32,11 @@ pub trait VmIterator {
     fn unbounded_range_start(&self) -> Option<i64> {
         None
     }
+
+    /// For downcasting — returns `self` as `&dyn Any`.
+    /// Used by the VM bridge to detect and round-trip interpreter iterators.
+    /// TODO: remove once the VM bridge (vm_bridge.rs) is gone.
+    fn as_any(&self) -> &dyn std::any::Any;
 }
 
 pub type SharedIterator = Rc<RefCell<dyn VmIterator>>;
@@ -69,6 +74,10 @@ impl VmIterator for RangeIter {
 
     fn range_bounds(&self) -> Option<(i64, i64, bool)> {
         Some((self.current, self.end, false))
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 
@@ -114,6 +123,10 @@ impl VmIterator for RangeInclusiveIter {
     fn range_bounds(&self) -> Option<(i64, i64, bool)> {
         Some((self.current, self.end, true))
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 /// Unbounded range: `start..`
@@ -136,6 +149,10 @@ impl VmIterator for UnboundedRangeIter {
 
     fn unbounded_range_start(&self) -> Option<i64> {
         Some(self.current)
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 
@@ -167,6 +184,10 @@ impl VmIterator for ListIter {
         let remaining = self.list.borrow().len().saturating_sub(self.index);
         (remaining, Some(remaining))
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 /// Iterates over a tuple
@@ -195,6 +216,10 @@ impl VmIterator for TupleIter {
     fn size_hint(&self) -> (usize, Option<usize>) {
         let remaining = self.values.len() - self.index;
         (remaining, Some(remaining))
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 
@@ -233,6 +258,10 @@ impl VmIterator for MapIter {
         let remaining = self.entries.len() - self.index;
         (remaining, Some(remaining))
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 /// Iterates over a deque front-to-back
@@ -263,6 +292,10 @@ impl VmIterator for DequeIter {
     fn size_hint(&self) -> (usize, Option<usize>) {
         let remaining = self.deque.borrow().len().saturating_sub(self.index);
         (remaining, Some(remaining))
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 
@@ -296,6 +329,10 @@ impl VmIterator for MinHeapIter {
         let remaining = self.entries.len() - self.index;
         (remaining, Some(remaining))
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 /// Iterates over a max-heap, yielding elements in arbitrary (heap) order.
@@ -326,6 +363,10 @@ impl VmIterator for MaxHeapIter {
     fn size_hint(&self) -> (usize, Option<usize>) {
         let remaining = self.entries.len() - self.index;
         (remaining, Some(remaining))
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 
@@ -358,5 +399,9 @@ impl VmIterator for StringIter {
         let remaining = &s[self.byte_offset..];
         let len = remaining.chars().count();
         (len, Some(len))
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
