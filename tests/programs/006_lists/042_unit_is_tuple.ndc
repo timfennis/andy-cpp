@@ -1,4 +1,3 @@
-// vm-ready
 // Unit equals itself
 assert_eq((), ());
 

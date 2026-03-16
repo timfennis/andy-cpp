@@ -1,3 +1,2 @@
-// vm-ready
 let s = "Ohana means 👪";
 assert("👪" == s[-1]);

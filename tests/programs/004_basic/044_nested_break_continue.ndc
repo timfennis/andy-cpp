@@ -1,4 +1,3 @@
-// vm-ready
 // Break in outer loop, continue in inner loop
 let result = 0;
 for i in 0..10 {

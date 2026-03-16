@@ -1,4 +1,3 @@
-// vm-ready
 
 fn is_even(num) {
     if num == 0 {

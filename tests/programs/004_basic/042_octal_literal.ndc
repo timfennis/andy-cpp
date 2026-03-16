@@ -1,2 +1,1 @@
-// vm-ready
 assert(0o7777 == 4095);

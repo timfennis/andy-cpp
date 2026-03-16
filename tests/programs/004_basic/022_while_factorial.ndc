@@ -1,4 +1,3 @@
-// vm-ready
 let n = 10;
 let v = 10;
 while { n = n - 1; n } > 0 {

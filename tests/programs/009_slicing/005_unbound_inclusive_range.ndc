@@ -1,3 +1,2 @@
-// vm-ready
 // expect-error: inclusive ranges must have an end
 [][0..=]

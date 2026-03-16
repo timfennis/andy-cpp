@@ -1,4 +1,3 @@
-// vm-ready
 let xx = repeat(1);
 let limit = 0;
 for x in xx {

@@ -1,4 +1,3 @@
-// vm-ready
 fn create(n) {
   fn get_n() { n }
   n = n + 1;

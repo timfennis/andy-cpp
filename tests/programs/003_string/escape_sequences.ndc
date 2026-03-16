@@ -1,2 +1,1 @@
-// vm-ready
 assert_eq("foo\nbar\\\"", "foo\nbar\\\"");

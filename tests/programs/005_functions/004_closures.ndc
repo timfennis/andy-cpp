@@ -1,4 +1,3 @@
-// vm-ready
 let invoked = 0;
 
 fn counter() {

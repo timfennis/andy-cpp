@@ -1,4 +1,3 @@
-// vm-ready
 assert("foobar".starts_with("foo"));
 assert(!"foobar".starts_with("baz"));
 assert("foobar".ends_with("bar"));

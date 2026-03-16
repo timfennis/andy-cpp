@@ -1,4 +1,3 @@
-// vm-ready
 fn foo() {
     return (return 5) + 1;
 }

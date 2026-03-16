@@ -1,4 +1,3 @@
-// vm-ready
 assert_eq("foo" <> "bar", "foobar");
 assert_eq("foo" <> 123, "foo123");
 assert_eq(123 <> 123, "123123");

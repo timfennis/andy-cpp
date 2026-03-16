@@ -1,4 +1,3 @@
-// vm-ready
 let d = Deque();
 for x in 0..10 { d.push_back(x); }
 assert_eq(d[0], 0);

@@ -1,4 +1,3 @@
-// vm-ready
 // This is a very strange implementation of a map function that changes the list in place
 fn mut_map(list, function) {
 let   len = list.len();

@@ -1,4 +1,3 @@
-// vm-ready
 let my_list = ["Foo", "Bar", "Baz"];
 let out = my_list.enumerate();
 

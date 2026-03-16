@@ -1,4 +1,3 @@
-// vm-ready
 let string = "The quick brown fox jumps over the lazy dog.";
 
 // Test exclusive ranges

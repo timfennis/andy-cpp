@@ -1,4 +1,3 @@
-// vm-ready
 let foo = 3;
 let _results = [];
 {

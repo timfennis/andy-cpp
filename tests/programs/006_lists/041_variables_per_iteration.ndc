@@ -1,4 +1,3 @@
-// vm-ready
 let functions = [fn(x) { x + i } for i in 0..10];
 let _results = [];
 for func in functions { _results.push(func(0)) }
