@@ -5,10 +5,11 @@ use crate::iterator::{
 };
 use crate::value::{CompiledFunction, Function};
 use crate::{ClosureFunction, Object, UpvalueCell, Value};
-use ndc_core::hash_map::HashMap;
+use ndc_core::hash_map::{DefaultHasher, HashMap};
 use ndc_lexer::Span;
 use ndc_parser::{CaptureSource, ResolvedVar};
 use std::cell::RefCell;
+use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::rc::Rc;
 
@@ -45,8 +46,12 @@ impl VmError {
 pub struct CallFrame {
     closure: ClosureFunction,
     ip: usize,
-    // offset into the locals array for this call frame
+    /// Absolute index of the first local slot for this frame.
     frame_pointer: usize,
+    /// If this frame was called from a `pure` (memoized) function, holds the
+    /// cache to write into and the hash key when the frame returns.  `None`
+    /// for ordinary (non-memoized) calls.
+    memo: Option<(Rc<RefCell<HashMap<u64, Value>>>, u64)>,
 }
 
 impl Vm {
@@ -62,6 +67,7 @@ impl Vm {
                 },
                 ip: 0,
                 frame_pointer: 0,
+                memo: None,
             }],
             open_upvalues: Vec::new(),
             #[cfg(feature = "vm-trace")]
@@ -113,7 +119,13 @@ impl Vm {
                 }
                 OpCode::Return => {
                     let ret = self.stack.pop().expect("stack underflow");
-                    let frame_pointer = self.frames.last().expect("no frame").frame_pointer;
+                    let frame = self.frames.last().expect("no frame");
+                    let frame_pointer = frame.frame_pointer;
+                    // If this was a memoized call, cache the return value now,
+                    // before the frame is torn down.
+                    if let Some((cache, key)) = &frame.memo {
+                        cache.borrow_mut().insert(*key, ret.clone());
+                    }
                     self.close_upvalues(frame_pointer);
                     self.stack.truncate(frame_pointer - 1);
                     self.frames.pop().expect("no frame to pop");
@@ -380,6 +392,23 @@ impl Vm {
                     let frame_pointer = self.frames.last().expect("no frame").frame_pointer;
                     self.close_upvalues(frame_pointer + slot);
                 }
+                // Wraps the function on top of the stack in a fresh memoization
+                // cache.  Emitted by the compiler for every `pure fn` declaration.
+                // On subsequent calls with the same arguments, the cached result
+                // is returned without executing the function body.
+                OpCode::Memoize => {
+                    let val = self.stack.pop().expect("stack underflow");
+                    let Value::Object(obj) = val else {
+                        panic!("Memoize: expected a function on the stack");
+                    };
+                    let Object::Function(func) = *obj else {
+                        panic!("Memoize: expected a function on the stack");
+                    };
+                    self.stack.push(Value::function(Function::Memoized {
+                        cache: Rc::new(RefCell::new(HashMap::default())),
+                        function: Box::new(func),
+                    }));
+                }
             }
 
             #[cfg(feature = "vm-trace")]
@@ -423,12 +452,56 @@ impl Vm {
     }
 
     fn dispatch_call(&mut self, func: Function, args: usize) -> Result<(), String> {
+        // Memoized functions check the cache first.  On a hit we short-circuit
+        // without pushing a new frame.  On a miss we dispatch the inner
+        // function normally and tag the new frame so `Return` will populate
+        // the cache once the call finishes.
+        let memo = if let Function::Memoized { cache, function } = func {
+            let start = self.stack.len() - args;
+            let mut hasher = DefaultHasher::default();
+            for arg in &self.stack[start..] {
+                arg.hash(&mut hasher);
+            }
+            let key = hasher.finish();
+
+            if let Some(cached) = cache.borrow().get(&key).cloned() {
+                // Cache hit: discard the callee slot and arguments, push result.
+                self.stack.truncate(start - 1);
+                self.stack.push(cached);
+                return Ok(());
+            }
+
+            // Cache miss: dispatch the inner function and remember to store
+            // the result in the cache when this frame returns.
+            return self.dispatch_call_with_memo(*function, args, Some((cache, key)));
+        } else {
+            None
+        };
+
+        self.dispatch_call_with_memo(func, args, memo)
+    }
+
+    /// Inner helper that pushes a new call frame.  `memo` is `Some` when the
+    /// call originates from a memoized function and the return value should be
+    /// stored in the cache.
+    fn dispatch_call_with_memo(
+        &mut self,
+        func: Function,
+        args: usize,
+        memo: Option<(Rc<RefCell<HashMap<u64, Value>>>, u64)>,
+    ) -> Result<(), String> {
         let closure = match func {
             Function::Native(native) => {
                 let start = self.stack.len() - args;
                 let result = (native.func)(&self.stack[start..])?;
                 self.stack.truncate(start - 1);
                 self.stack.push(result);
+                // Native calls return immediately, so cache the result now if
+                // this was a memoized call.
+                if let Some((cache, key)) = memo {
+                    let ret = self.stack.last().expect("stack underflow").clone();
+                    cache.borrow_mut().insert(key, ret);
+                }
                 return Ok(());
             }
             Function::Closure(c) => c,
@@ -436,12 +509,19 @@ impl Vm {
                 prototype: f,
                 upvalues: vec![],
             },
+            Function::Memoized { .. } => {
+                // Already unwrapped in dispatch_call; this branch is unreachable.
+                unreachable!(
+                    "Memoized function should have been unwrapped before dispatch_call_with_memo"
+                )
+            }
         };
         let num_locals = closure.prototype.num_locals;
         self.frames.push(CallFrame {
             closure,
             ip: 0,
             frame_pointer: self.stack.len() - args,
+            memo,
         });
         for _ in args..num_locals {
             self.stack.push(Value::unit());

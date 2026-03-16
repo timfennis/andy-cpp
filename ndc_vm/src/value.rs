@@ -72,6 +72,10 @@ pub enum Function {
     Closure(ClosureFunction),
     Compiled(Rc<CompiledFunction>),
     Native(Rc<NativeFunction>),
+    Memoized {
+        cache: Rc<RefCell<HashMap<u64, Value>>>,
+        function: Box<Function>,
+    },
 }
 
 pub struct NativeFunction {
@@ -190,6 +194,7 @@ impl Function {
             Self::Compiled(f) => Some(f),
             Self::Closure(c) => Some(&c.prototype),
             Self::Native(_) => None,
+            Self::Memoized { function, .. } => function.prototype(),
         }
     }
 
@@ -206,6 +211,7 @@ impl Function {
             },
             Self::Native(f) => f.static_type.clone(),
             Self::Closure(c) => Function::Compiled(c.prototype.clone()).static_type(),
+            Self::Memoized { function, .. } => function.static_type(),
         }
     }
 }
@@ -222,6 +228,7 @@ impl fmt::Debug for Function {
             Self::Compiled(func) => write!(f, "function {:?}", func.name),
             Self::Native(native) => write!(f, "<native function {:?}>", native.static_type),
             Self::Closure(closure) => write!(f, "<closure over {:?}>", closure.prototype.name),
+            Self::Memoized { function, .. } => write!(f, "<memoized {:?}>", function),
         }
     }
 }
@@ -334,6 +341,7 @@ impl fmt::Display for Function {
             }
             Self::Native(native) => write!(f, "<native fn {:?}>", native.static_type),
             Self::Closure(closure) => write!(f, "<closure over {:?}>", closure.prototype.name),
+            Self::Memoized { function, .. } => write!(f, "<memoized {function}>"),
         }
     }
 }
@@ -460,6 +468,9 @@ impl PartialEq for Object {
                     (Function::Closure(a), Function::Closure(b)) => {
                         Rc::as_ptr(&a.prototype) == Rc::as_ptr(&b.prototype)
                     }
+                    (Function::Memoized { cache: a, .. }, Function::Memoized { cache: b, .. }) => {
+                        Rc::ptr_eq(a, b)
+                    }
                     _ => false,
                 }
             }
@@ -545,6 +556,9 @@ impl Hash for Object {
                     }
                     Function::Closure(closure) => {
                         Rc::as_ptr(&closure.prototype).hash(state);
+                    }
+                    Function::Memoized { cache, .. } => {
+                        Rc::as_ptr(cache).hash(state);
                     }
                 }
             }
