@@ -1,0 +1,31 @@
+// vm-ready
+// BUG#0006: When a closure with open upvalues (stack-slot references) was
+// immediately passed to a native stdlib HOF (like `any`), the HOF would call
+// it back via Vm::call_function in a fresh VM context where those stack slots
+// no longer existed, causing an index-out-of-bounds panic.
+
+let x = 10;
+let y = 20;
+
+// Closure captures x and y as open upvalues, then is immediately passed to any()
+let found = [1, 5, 10, 15].any(fn(v) => v == x);
+assert_eq(found, true);
+
+let found2 = [1, 5, 7, 15].any(fn(v) => v == x);
+assert_eq(found2, false);
+
+// Multiple captured variables
+let result = [1, 2, 3, 4, 5].any(fn(v) => v > x and v < y);
+assert_eq(result, false);
+
+// Inside a loop – new closure each iteration capturing fresh locals
+let hits = 0;
+for threshold in [3, 6, 9] {
+    if [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].any(fn(v) => v == threshold) {
+        hits += 1;
+    }
+}
+assert_eq(hits, 3);
+
+print("ok");
+// expect-output: ok

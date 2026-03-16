@@ -195,6 +195,13 @@ impl Vm {
                         .resolve_callee(args)
                         .map_err(|msg| VmError::new(msg, span))?
                     {
+                        // Native functions bridge to the tree-walk interpreter, which may call
+                        // closures back via `Vm::call_function` in a fresh VM context. In that
+                        // context, Open upvalue cells (stack-slot references) are invalid.
+                        // Materialize them now while the current stack is still live.
+                        if func.is_native() {
+                            self.materialize_upvalues_in_args(args);
+                        }
                         if let Err(msg) = self.dispatch_call(func, args) {
                             return Err(VmError::new(msg, span));
                         }
@@ -475,6 +482,49 @@ impl Vm {
             .retain(|c| matches!(*c.borrow(), UpvalueCell::Open(_)));
     }
 
+    /// Materializes (closes) any Open upvalues in the immediate arguments.
+    /// This is necessary when closures are about to be passed to functions
+    /// that may call them in a different VM context (e.g., stdlib HOFs
+    /// that bridge back to the tree-walk interpreter). We only materialize
+    /// direct function arguments, not nested closures.
+    fn materialize_upvalues_in_args(&mut self, arg_count: usize) {
+        let start = self.stack.len() - arg_count;
+
+        // Capture the stack state before any mutations
+        let current_stack_len = self.stack.len();
+        let mut materialized = Vec::new();
+
+        // Identify closures and their open upvalues that need materializing
+        for i in start..current_stack_len {
+            if let Value::Object(obj) = &self.stack[i] {
+                if let Object::Function(Function::Closure(closure)) = &**obj {
+                    for (j, cell) in closure.upvalues.iter().enumerate() {
+                        if let UpvalueCell::Open(slot) = *cell.borrow() {
+                            materialized.push((i, j, slot));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Now materialize them
+        for (arg_idx, upvalue_idx, slot) in materialized {
+            if slot < self.stack.len() {
+                let value = self.stack[slot].clone();
+                if let Value::Object(obj) = &mut self.stack[arg_idx] {
+                    if let Object::Function(Function::Closure(closure)) = obj.as_mut() {
+                        let mut cell_borrow = closure.upvalues[upvalue_idx].borrow_mut();
+                        *cell_borrow = UpvalueCell::Closed(value);
+                    }
+                }
+            }
+        }
+
+        // Remove cells we just closed from open_upvalues; they're no longer open.
+        self.open_upvalues
+            .retain(|c| matches!(*c.borrow(), UpvalueCell::Open(_)));
+    }
+
     fn dispatch_call(&mut self, func: Function, args: usize) -> Result<(), String> {
         // Memoized functions check the cache first.  On a hit we short-circuit
         // without pushing a new frame.  On a miss we dispatch the inner
@@ -705,19 +755,22 @@ impl Vm {
         };
         match *obj {
             Object::List(seq) => {
-                let mut seq = std::mem::take(&mut *seq.borrow_mut());
-                if seq.len() != size {
+                // Clone elements rather than taking from the Rc<RefCell> so we
+                // don't corrupt other references to the same list (e.g. a list
+                // stored in a variable that is also referenced via an upvalue).
+                let mut elements: Vec<Value> = seq.borrow().iter().cloned().collect();
+                if elements.len() != size {
                     return Err(VmError::new(
                         format!(
                             "cannot unpack a list of length {} into {} variables",
-                            seq.len(),
+                            elements.len(),
                             size
                         ),
                         span,
                     ));
                 }
-                seq.reverse();
-                self.stack.append(&mut seq);
+                elements.reverse();
+                self.stack.append(&mut elements);
             }
             Object::Tuple(mut seq) => {
                 if seq.len() != size {
