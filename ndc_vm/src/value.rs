@@ -4,6 +4,7 @@ use ndc_core::hash_map::{DefaultHasher, HashMap};
 use ndc_core::int::Int;
 use ndc_core::num::Number;
 use ndc_parser::{ResolvedVar, StaticType, TypeSignature};
+use ordered_float::OrderedFloat;
 use std::cell::RefCell;
 use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;
@@ -196,6 +197,27 @@ impl Value {
             Number::Float(f) => Value::Float(f),
             Number::Rational(r) => Value::Object(Box::new(Object::Rational(*r))),
             Number::Complex(c) => Value::Object(Box::new(Object::Complex(c))),
+        }
+    }
+
+    /// Extract an integer VM value as a `ndc_core::Int`.
+    /// Returns `None` for non-integer values.
+    pub fn to_int(&self) -> Option<Int> {
+        match self {
+            Value::Int(i) => Some(Int::Int64(*i)),
+            Value::Object(obj) => match obj.as_ref() {
+                Object::BigInt(b) => Some(Int::BigInt(b.clone())),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Convert a `ndc_core::Int` to a VM value.
+    pub fn from_int(i: Int) -> Self {
+        match i {
+            Int::Int64(n) => Value::Int(n),
+            Int::BigInt(b) => Value::Object(Box::new(Object::BigInt(b))),
         }
     }
 }
@@ -391,7 +413,7 @@ impl PartialOrd for Value {
         match (self, other) {
             // Same-type fast paths
             (Self::Int(a), Self::Int(b)) => Some(a.cmp(b)),
-            (Self::Float(a), Self::Float(b)) => Some(a.total_cmp(b)),
+            (Self::Float(a), Self::Float(b)) => OrderedFloat(*a).partial_cmp(&OrderedFloat(*b)),
             (Self::Bool(a), Self::Bool(b)) => a.partial_cmp(b),
             (Self::Object(a), Self::Object(b)) => a.partial_cmp(b),
             // Any numeric cross-type comparison (Int/Float vs BigInt/Rational/Complex etc.)
@@ -445,7 +467,7 @@ impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Int(a), Self::Int(b)) => a == b,
-            (Self::Float(a), Self::Float(b)) => a.to_bits() == b.to_bits(),
+            (Self::Float(a), Self::Float(b)) => OrderedFloat(*a) == OrderedFloat(*b),
             (Self::Bool(a), Self::Bool(b)) => a == b,
             (Self::None, Self::None) => true,
             (Self::Object(a), Self::Object(b)) => a == b,
@@ -465,7 +487,7 @@ impl Hash for Value {
             }
             Self::Float(f) => {
                 state.write_u8(2);
-                f.to_bits().hash(state);
+                OrderedFloat(*f).hash(state);
             }
             Self::Bool(true) => state.write_u8(3),
             Self::Bool(false) => state.write_u8(4),

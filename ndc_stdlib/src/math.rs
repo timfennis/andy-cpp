@@ -307,6 +307,25 @@ pub mod f64 {
                             },
                             return_type: StaticType::Bool,
                         })
+                        .vm_native(Rc::new(VmNativeFunction {
+                            name: $operator.to_string(),
+                            static_type: StaticType::Function {
+                                parameters: Some(vec![StaticType::Any, StaticType::Any]),
+                                return_type: Box::new(StaticType::Bool),
+                            },
+                            func: Box::new(|args| match args {
+                                [left, right] => match left.partial_cmp(right) {
+                                    Some($expected) => Ok(VmValue::Bool(true)),
+                                    Some(_) => Ok(VmValue::Bool(false)),
+                                    None => Err(format!(
+                                        "cannot compare {} and {}",
+                                        left.static_type(),
+                                        right.static_type()
+                                    )),
+                                },
+                                _ => Err(format!("expected 2 arguments, got {}", args.len())),
+                            }),
+                        }))
                         .build()
                         .expect("must succeed")
                 );
@@ -332,6 +351,17 @@ pub mod f64 {
                     },
                     return_type: StaticType::Bool,
                 })
+                .vm_native(Rc::new(VmNativeFunction {
+                    name: "==".to_string(),
+                    static_type: StaticType::Function {
+                        parameters: Some(vec![StaticType::Any, StaticType::Any]),
+                        return_type: Box::new(StaticType::Bool),
+                    },
+                    func: Box::new(|args| match args {
+                        [left, right] => Ok(VmValue::Bool(left == right)),
+                        _ => Err(format!("expected 2 arguments, got {}", args.len())),
+                    }),
+                }))
                 .build()
                 .expect("must succeed")
         );
@@ -350,6 +380,17 @@ pub mod f64 {
                     },
                     return_type: StaticType::Bool,
                 })
+                .vm_native(Rc::new(VmNativeFunction {
+                    name: "!=".to_string(),
+                    static_type: StaticType::Function {
+                        parameters: Some(vec![StaticType::Any, StaticType::Any]),
+                        return_type: Box::new(StaticType::Bool),
+                    },
+                    func: Box::new(|args| match args {
+                        [left, right] => Ok(VmValue::Bool(left != right)),
+                        _ => Err(format!("expected 2 arguments, got {}", args.len())),
+                    }),
+                }))
                 .build()
                 .expect("must succeed")
         );
@@ -373,6 +414,26 @@ pub mod f64 {
                     },
                     return_type: StaticType::Int,
                 })
+                .vm_native(Rc::new(VmNativeFunction {
+                    name: "<=>".to_string(),
+                    static_type: StaticType::Function {
+                        parameters: Some(vec![StaticType::Any, StaticType::Any]),
+                        return_type: Box::new(StaticType::Int),
+                    },
+                    func: Box::new(|args| match args {
+                        [left, right] => match left.partial_cmp(right) {
+                            Some(Ordering::Equal) => Ok(VmValue::Int(0)),
+                            Some(Ordering::Less) => Ok(VmValue::Int(-1)),
+                            Some(Ordering::Greater) => Ok(VmValue::Int(1)),
+                            None => Err(format!(
+                                "cannot compare {} and {}",
+                                left.static_type(),
+                                right.static_type()
+                            )),
+                        },
+                        _ => Err(format!("expected 2 arguments, got {}", args.len())),
+                    }),
+                }))
                 .build()
                 .expect("must succeed")
         );
@@ -396,6 +457,26 @@ pub mod f64 {
                     },
                     return_type: StaticType::Int,
                 })
+                .vm_native(Rc::new(VmNativeFunction {
+                    name: ">=<".to_string(),
+                    static_type: StaticType::Function {
+                        parameters: Some(vec![StaticType::Any, StaticType::Any]),
+                        return_type: Box::new(StaticType::Int),
+                    },
+                    func: Box::new(|args| match args {
+                        [left, right] => match left.partial_cmp(right) {
+                            Some(Ordering::Equal) => Ok(VmValue::Int(0)),
+                            Some(Ordering::Less) => Ok(VmValue::Int(1)),
+                            Some(Ordering::Greater) => Ok(VmValue::Int(-1)),
+                            None => Err(format!(
+                                "cannot compare {} and {}",
+                                left.static_type(),
+                                right.static_type()
+                            )),
+                        },
+                        _ => Err(format!("expected 2 arguments, got {}", args.len())),
+                    }),
+                }))
                 .build()
                 .expect("must succeed")
         );
@@ -416,6 +497,17 @@ pub mod f64 {
                             },
                             return_type: StaticType::Bool,
                         })
+                        .vm_native(Rc::new(VmNativeFunction {
+                            name: $operator.to_string(),
+                            static_type: StaticType::Function {
+                                parameters: Some(vec![StaticType::Bool, StaticType::Bool]),
+                                return_type: Box::new(StaticType::Bool),
+                            },
+                            func: Box::new(|args| match args {
+                                [VmValue::Bool(l), VmValue::Bool(r)] => Ok(VmValue::Bool($operation(*l, *r))),
+                                _ => Err(format!("expected 2 bool arguments, got {}", args.len())),
+                            }),
+                        }))
                         .build()
                         .expect("must succeed")
                 );
@@ -434,6 +526,25 @@ pub mod f64 {
                             },
                             return_type: StaticType::Int,
                         })
+                        .vm_native(Rc::new(VmNativeFunction {
+                            name: $operator.to_string(),
+                            static_type: StaticType::Function {
+                                parameters: Some(vec![StaticType::Int, StaticType::Int]),
+                                return_type: Box::new(StaticType::Int),
+                            },
+                            func: Box::new(|args| match args {
+                                [left, right] => {
+                                    let l = left.to_int().ok_or_else(|| {
+                                        format!("expected int, got {}", left.static_type())
+                                    })?;
+                                    let r = right.to_int().ok_or_else(|| {
+                                        format!("expected int, got {}", right.static_type())
+                                    })?;
+                                    Ok(VmValue::from_int($operation(l, r)))
+                                }
+                                _ => Err(format!("expected 2 arguments, got {}", args.len())),
+                            }),
+                        }))
                         .build()
                         .expect("must succeed"),
                 );
@@ -448,6 +559,21 @@ pub mod f64 {
             FunctionBuilder::default()
                 .body(FunctionBody::NumericUnaryOp { body: |x| x.not() })
                 .name("~".to_string())
+                .vm_native(Rc::new(VmNativeFunction {
+                    name: "~".to_string(),
+                    static_type: StaticType::Function {
+                        parameters: Some(vec![StaticType::Number]),
+                        return_type: Box::new(StaticType::Number),
+                    },
+                    func: Box::new(|args| match args {
+                        [v] => v
+                            .to_number()
+                            .map(std::ops::Not::not)
+                            .map(VmValue::from_number)
+                            .ok_or_else(|| format!("expected number, got {}", v.static_type())),
+                        _ => Err(format!("expected 1 argument, got {}", args.len())),
+                    }),
+                }))
                 .build()
                 .expect("must succeed"),
         );
@@ -464,6 +590,17 @@ pub mod f64 {
                         return_type: StaticType::Bool,
                     })
                     .name(ident.to_string())
+                    .vm_native(Rc::new(VmNativeFunction {
+                        name: ident.to_string(),
+                        static_type: StaticType::Function {
+                            parameters: Some(vec![StaticType::Bool]),
+                            return_type: Box::new(StaticType::Bool),
+                        },
+                        func: Box::new(|args| match args {
+                            [VmValue::Bool(b)] => Ok(VmValue::Bool(b.not())),
+                            _ => Err(format!("expected 1 bool argument, got {}", args.len())),
+                        }),
+                    }))
                     .build()
                     .expect("must succeed")
             );
@@ -485,6 +622,23 @@ pub mod f64 {
                     },
                     return_type: StaticType::Int,
                 })
+                .vm_native(Rc::new(VmNativeFunction {
+                    name: ">>".to_string(),
+                    static_type: StaticType::Function {
+                        parameters: Some(vec![StaticType::Int, StaticType::Int]),
+                        return_type: Box::new(StaticType::Int),
+                    },
+                    func: Box::new(|args| match args {
+                        [left, right] => {
+                            let l = left.to_int().ok_or_else(|| format!("expected int, got {}", left.static_type()))?;
+                            let r = right.to_int().ok_or_else(|| format!("expected int, got {}", right.static_type()))?;
+                            l.checked_shr(r)
+                                .map(VmValue::from_int)
+                                .ok_or_else(|| "cannot apply >> operator to operands".to_string())
+                        }
+                        _ => Err(format!("expected 2 arguments, got {}", args.len())),
+                    }),
+                }))
                 .build()
                 .expect("must succeed")
         );
@@ -505,6 +659,23 @@ pub mod f64 {
                     },
                     return_type: StaticType::Int,
                 })
+                .vm_native(Rc::new(VmNativeFunction {
+                    name: "<<".to_string(),
+                    static_type: StaticType::Function {
+                        parameters: Some(vec![StaticType::Int, StaticType::Int]),
+                        return_type: Box::new(StaticType::Int),
+                    },
+                    func: Box::new(|args| match args {
+                        [left, right] => {
+                            let l = left.to_int().ok_or_else(|| format!("expected int, got {}", left.static_type()))?;
+                            let r = right.to_int().ok_or_else(|| format!("expected int, got {}", right.static_type()))?;
+                            l.checked_shl(r)
+                                .map(VmValue::from_int)
+                                .ok_or_else(|| "cannot apply << operator to operands".to_string())
+                        }
+                        _ => Err(format!("expected 2 arguments, got {}", args.len())),
+                    }),
+                }))
                 .build()
                 .expect("must succeed")
         );
