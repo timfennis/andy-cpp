@@ -1,4 +1,3 @@
-// vm-ready
 // continue in inner loop must not affect outer loop
 let outer_count = 0;
 let inner_count = 0;

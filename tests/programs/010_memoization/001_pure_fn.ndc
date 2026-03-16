@@ -1,4 +1,3 @@
-// vm-ready
 let n = 0;
 pure fn add(x, y) {
     n += 1;

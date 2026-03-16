@@ -1,3 +1,2 @@
 // expect-error: cannot index into Int
 1[2]
-// vm-ready

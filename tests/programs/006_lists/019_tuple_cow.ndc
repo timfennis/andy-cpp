@@ -1,4 +1,3 @@
-// vm-ready
 // We had to sacrifice this feature to improve the typesystem
 // let x = (1,2);
 // let y = x;

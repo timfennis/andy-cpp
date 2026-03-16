@@ -1,4 +1,3 @@
-// vm-ready
 // expect-error: Illegal redefinition of parameter a
 fn foo(a, a, a, a) {
     print(a)

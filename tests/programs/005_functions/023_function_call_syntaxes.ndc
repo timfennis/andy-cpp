@@ -1,4 +1,3 @@
-// vm-ready
 // Define 1-ary functions for testing
 fn square(x) {
     return x * x;

@@ -1,2 +1,1 @@
-// vm-ready
 assert_eq(chr(3486), "ඞ");

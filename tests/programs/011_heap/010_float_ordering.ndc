@@ -1,4 +1,3 @@
-// vm-ready
 // Tests heap ordering with floats and mixed int/float values,
 // which exercises the VM's OrdValue comparator path.
 

@@ -1,4 +1,3 @@
-// vm-ready
 fn say_hi() {
     "hi"
 }

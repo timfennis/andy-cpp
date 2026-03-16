@@ -1,4 +1,3 @@
-// vm-ready
 let tuple = (1,1+1,1+1+1);
 let sum = 0;
 for v in tuple {

@@ -1,4 +1,3 @@
-// vm-ready
 // this is a program
 let init = "foo"; // we init foo!
 // let's print foo

@@ -1,3 +1,2 @@
-// vm-ready
 let var = "Hello, World!";
 assert_eq(var, "Hello, World!");

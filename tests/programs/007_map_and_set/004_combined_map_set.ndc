@@ -1,4 +1,3 @@
-// vm-ready
 let map_set = %{
     "key": "value",
     "just_key",

@@ -1,4 +1,3 @@
-// vm-ready
 // expect-error: Int is not iterable
 for i in 1 {
     print(i);

@@ -1,4 +1,3 @@
-// vm-ready
 if true {
     assert_eq("a", "a");
 } else {

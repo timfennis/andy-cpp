@@ -1,4 +1,3 @@
-// vm-ready
 // This test validates that using the |= operator modifies the variable in place
 
 let x = %{

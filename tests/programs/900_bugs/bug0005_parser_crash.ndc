@@ -1,3 +1,2 @@
-// vm-ready
 // expect-error: Unexpected end of input
 [["mul", "add", "cat", 1..10]

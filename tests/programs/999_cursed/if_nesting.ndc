@@ -1,4 +1,3 @@
-// vm-ready
 if if {
     let x = 5;
     let y = 9;

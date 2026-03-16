@@ -1,4 +1,3 @@
-// vm-ready
 let one_tup = (1,);
 assert_eq(one_tup, one_tup);
 assert(one_tup != 1);

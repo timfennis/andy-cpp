@@ -1,4 +1,3 @@
-// vm-ready
 // Normal for loop
 {
     let fns = [];

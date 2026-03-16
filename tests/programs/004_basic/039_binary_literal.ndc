@@ -1,4 +1,3 @@
-// vm-ready
 // Simple binary number
 assert(0b1111 == 15);
 // Really big binary numbers are valid too!

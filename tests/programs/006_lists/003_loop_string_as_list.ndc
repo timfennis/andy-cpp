@@ -1,4 +1,3 @@
-// vm-ready
 let text = "hello";
 let _results = [];
 for char in text {

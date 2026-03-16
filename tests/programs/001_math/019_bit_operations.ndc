@@ -1,4 +1,3 @@
-// vm-ready
 
 // booleans
 assert(true & true == true);

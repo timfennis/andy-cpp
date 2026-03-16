@@ -1,4 +1,3 @@
-// vm-ready
 // expect-output: return from outer
 // expect-output: create inner closure
 // expect-output: value

@@ -1,4 +1,3 @@
-// vm-ready
 let n = 0;
 fn inc() {
     n = n + 1;

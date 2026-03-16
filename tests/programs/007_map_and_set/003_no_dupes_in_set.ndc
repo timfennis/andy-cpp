@@ -1,3 +1,2 @@
-// vm-ready
 let set = %{1,2,3,4,4};
 assert_eq(set.len(), 4);

@@ -1,4 +1,3 @@
-// vm-ready
 let i = 1..10;
 let j = deepcopy(i);
 for ii in i { }; // consumes the iterator

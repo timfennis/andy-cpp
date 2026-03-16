@@ -1,2 +1,1 @@
-// vm-ready
 let x = %{"foo": "bar"};

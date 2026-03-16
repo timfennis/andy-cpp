@@ -1,3 +1,2 @@
-// vm-ready
 let set = %{1,2,3};
 assert(set[1] == ());

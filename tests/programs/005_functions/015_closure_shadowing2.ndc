@@ -1,4 +1,3 @@
-// vm-ready
 let a = "global";
 
 let _results = [];

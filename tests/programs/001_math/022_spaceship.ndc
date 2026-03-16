@@ -1,4 +1,3 @@
-// vm-ready
 // Testing <=> and >=< operators
 
 // Integers (inside and outside i64 range)

@@ -1,4 +1,3 @@
-// vm-ready
 assert("1".is_digit());
 assert("2".is_digit());
 assert("9".is_digit());

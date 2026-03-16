@@ -1,4 +1,3 @@
-// vm-ready
 assert("FOOBAR".is_upper());
 assert(not "FOOBAR".is_lower());
 

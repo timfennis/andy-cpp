@@ -1,4 +1,3 @@
-// vm-ready
 let a = true or true and false;
 let b = false and true or true;
 if a and b {
