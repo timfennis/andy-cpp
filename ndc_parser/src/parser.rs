@@ -1225,6 +1225,21 @@ impl Parser {
             }
         };
 
+        // Non-last items in a block are in statement position: wrap bare expressions
+        // (e.g. `if` without else) in Statement so the compiler discards their values.
+        let last = statements.len().saturating_sub(1);
+        let statements = statements
+            .into_iter()
+            .enumerate()
+            .map(|(i, stmt)| {
+                if i < last && !matches!(stmt.expression, Expression::Statement(_)) {
+                    stmt.to_statement()
+                } else {
+                    stmt
+                }
+            })
+            .collect();
+
         Ok(Expression::Block { statements }.to_location(left_curly_span.merge(loop_span)))
     }
 

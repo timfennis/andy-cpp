@@ -27,16 +27,27 @@ fn compile_with_analysis(input: &str) -> Vec<OpCode> {
 // if true { 1 }
 //
 // 0: Constant(0)      push `true`
-// 1: JumpIfFalse(2)   if false, skip true-branch and land on final Pop
+// 1: JumpIfFalse(3)   if false, jump to else path (index 5)
 // 2: Pop              pop condition (true path)
 // 3: Constant(1)      push `1`
-// 4: Pop              pop condition (false path, jumped here)
-// 5: Halt
+// 4: Jump(2)          skip else path (jump to Halt at index 7)
+// 5: Pop              pop condition (false path, jumped here)
+// 6: Constant(2)      push `None` (unit, no else branch)
+// 7: Halt
 #[test]
 fn test_if_without_else() {
     assert_eq!(
         compile("if true { 1 }"),
-        [Constant(0), JumpIfFalse(2), Pop, Constant(1), Pop, Halt]
+        [
+            Constant(0),
+            JumpIfFalse(3),
+            Pop,
+            Constant(1),
+            Jump(2),
+            Pop,
+            Constant(2),
+            Halt
+        ]
     );
 }
 
