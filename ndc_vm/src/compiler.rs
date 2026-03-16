@@ -323,17 +323,33 @@ impl Compiler {
             }
             Expression::RangeInclusive { start, end } => {
                 let start = start.expect("unbounded range start not yet supported");
-                let end = end.expect("unbounded range end not yet supported");
                 self.compile_expr(*start)?;
-                self.compile_expr(*end)?;
-                self.chunk.write(OpCode::MakeRangeInclusive, span);
+                let bounded = end.is_some();
+                if let Some(end) = end {
+                    self.compile_expr(*end)?;
+                }
+                self.chunk.write(
+                    OpCode::MakeRange {
+                        inclusive: true,
+                        bounded,
+                    },
+                    span,
+                );
             }
             Expression::RangeExclusive { start, end } => {
                 let start = start.expect("unbounded range start not yet supported");
-                let end = end.expect("unbounded range end not yet supported");
                 self.compile_expr(*start)?;
-                self.compile_expr(*end)?;
-                self.chunk.write(OpCode::MakeRange, span);
+                let bounded = end.is_some();
+                if let Some(end) = end {
+                    self.compile_expr(*end)?;
+                }
+                self.chunk.write(
+                    OpCode::MakeRange {
+                        inclusive: false,
+                        bounded,
+                    },
+                    span,
+                );
             }
         }
 

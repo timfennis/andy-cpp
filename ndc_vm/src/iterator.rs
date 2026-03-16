@@ -26,6 +26,12 @@ pub trait VmIterator {
     fn range_bounds(&self) -> Option<(i64, i64, bool)> {
         None
     }
+
+    /// If this iterator represents an unbounded range (`start..`), returns the start.
+    /// TODO: remove once the VM bridge (vm_bridge.rs) is gone.
+    fn unbounded_range_start(&self) -> Option<i64> {
+        None
+    }
 }
 
 pub type SharedIterator = Rc<RefCell<dyn VmIterator>>;
@@ -107,6 +113,29 @@ impl VmIterator for RangeInclusiveIter {
 
     fn range_bounds(&self) -> Option<(i64, i64, bool)> {
         Some((self.current, self.end, true))
+    }
+}
+
+/// Unbounded range: `start..`
+pub struct UnboundedRangeIter {
+    current: i64,
+}
+
+impl UnboundedRangeIter {
+    pub fn new(start: i64) -> Self {
+        Self { current: start }
+    }
+}
+
+impl VmIterator for UnboundedRangeIter {
+    fn next(&mut self) -> Option<Value> {
+        let val = self.current;
+        self.current += 1;
+        Some(Value::Int(val))
+    }
+
+    fn unbounded_range_start(&self) -> Option<i64> {
+        Some(self.current)
     }
 }
 

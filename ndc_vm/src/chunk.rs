@@ -48,10 +48,9 @@ pub enum OpCode {
     ListPush(usize),
     /// Pop value then key from stack, insert into map at local slot.
     MapInsert(usize),
-    /// Pop end, pop start (both i64), push exclusive range iterator.
-    MakeRange,
-    /// Pop end, pop start (both i64), push inclusive range iterator.
-    MakeRangeInclusive,
+    /// Build a range iterator. Pops start (always) and end (if `bounded`).
+    /// `inclusive` controls whether the end bound is inclusive.
+    MakeRange { inclusive: bool, bounded: bool },
     /// Pop a tuple/list of exactly `usize` elements, push them in reverse order (first on top)
     Unpack(usize),
     /// Stop execution
@@ -99,8 +98,9 @@ impl std::fmt::Debug for OpCode {
             Self::IterNext(n) => write!(f, "IterNext({n})"),
             Self::ListPush(n) => write!(f, "ListPush({n})"),
             Self::MapInsert(n) => write!(f, "MapInsert({n})"),
-            Self::MakeRange => write!(f, "MakeRange"),
-            Self::MakeRangeInclusive => write!(f, "MakeRangeInclusive"),
+            Self::MakeRange { inclusive, bounded } => {
+                write!(f, "MakeRange(inclusive={inclusive}, bounded={bounded})")
+            }
             Self::Halt => write!(f, "Halt"),
             Self::Return => write!(f, "Return"),
             Self::Unpack(n) => write!(f, "Unpack({n})"),
