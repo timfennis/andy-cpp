@@ -199,6 +199,18 @@ impl Function {
         }
     }
 
+    /// Returns true if this function (or the inner function of a memoized wrapper)
+    /// is a native function. Native functions bridge to the tree-walk interpreter,
+    /// which may call closures back via `Vm::call_function` in a fresh VM context,
+    /// where open upvalues pointing to the current stack would be invalid.
+    pub fn is_native(&self) -> bool {
+        match self {
+            Self::Native(_) => true,
+            Self::Memoized { function, .. } => function.is_native(),
+            _ => false,
+        }
+    }
+
     pub fn name(&self) -> Option<&str> {
         match self {
             Self::Compiled(f) => f.name.as_deref(),
