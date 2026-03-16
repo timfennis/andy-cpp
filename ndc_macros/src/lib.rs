@@ -1,6 +1,7 @@
 mod convert;
 mod function;
 mod r#match;
+mod vm_convert;
 
 use proc_macro::TokenStream;
 use quote::quote;
