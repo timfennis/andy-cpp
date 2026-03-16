@@ -8,6 +8,7 @@ use derive_builder::Builder;
 use ndc_lexer::Span;
 use ndc_parser::{ExpressionLocation, ResolvedVar};
 pub use ndc_parser::{Parameter, StaticType, TypeSignature};
+use ndc_vm::value::NativeFunction as VmNativeFunction;
 use std::cell::{BorrowError, BorrowMutError, RefCell};
 use std::fmt;
 use std::hash::{Hash, Hasher};
@@ -44,6 +45,10 @@ pub struct Function {
     #[builder(default, setter(strip_option))]
     documentation: Option<String>,
     body: FunctionBody,
+    /// VM-native implementation of this function. When set, `make_vm_globals` uses this
+    /// directly instead of wrapping the interpreter body through the bridge.
+    #[builder(default, setter(strip_option))]
+    vm_native: Option<Rc<VmNativeFunction>>,
 }
 
 impl fmt::Debug for Function {
@@ -82,7 +87,12 @@ impl Function {
             name: None,
             documentation: None,
             body,
+            vm_native: None,
         }
+    }
+
+    pub fn vm_native(&self) -> Option<Rc<VmNativeFunction>> {
+        self.vm_native.clone()
     }
 
     pub fn body(&self) -> &FunctionBody {
