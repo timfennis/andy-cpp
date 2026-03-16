@@ -231,6 +231,7 @@ impl Compiler {
                 type_signature,
                 return_type,
                 captures,
+                pure,
                 ..
             } => {
                 self.compile_function_decl(
@@ -240,6 +241,7 @@ impl Compiler {
                     type_signature,
                     return_type,
                     captures,
+                    pure,
                     span,
                 )?;
             }
@@ -550,6 +552,7 @@ impl Compiler {
         type_signature: TypeSignature,
         return_type: Option<StaticType>,
         captures: Vec<CaptureSource>,
+        pure: bool,
         span: Span,
     ) -> Result<(), CompileError> {
         let num_params = match &type_signature {
@@ -585,6 +588,13 @@ impl Compiler {
             );
         } else {
             self.chunk.write(OpCode::Constant(idx), span);
+        }
+
+        // For `pure fn`, wrap the function in a memoization cache.  The cache
+        // is allocated fresh each time the declaration is evaluated, so each
+        // closure instance has its own independent cache.
+        if pure {
+            self.chunk.write(OpCode::Memoize, span);
         }
 
         match resolved_name {
