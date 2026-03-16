@@ -357,7 +357,7 @@ impl Vm {
                     let end = if bounded {
                         let v = self.stack.pop().expect("stack underflow");
                         let Value::Int(n) = v else {
-                            panic!("range end must be integer")
+                            return Err(VmError::new("Integer too large for range bounds", span));
                         };
                         Some(n)
                     } else {
@@ -365,7 +365,7 @@ impl Vm {
                     };
                     let start = self.stack.pop().expect("stack underflow");
                     let Value::Int(start) = start else {
-                        panic!("range start must be integer")
+                        return Err(VmError::new("Integer too large for range bounds", span));
                     };
                     let iter: Rc<RefCell<dyn VmIterator>> = match (inclusive, end) {
                         (_, None) => Rc::new(RefCell::new(UnboundedRangeIter::new(start))),

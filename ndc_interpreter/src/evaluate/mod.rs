@@ -469,11 +469,21 @@ pub(crate) fn evaluate_expression(
                 .into());
             };
 
-            let range_start = i64::try_from(range_start).into_evaluation_result(span)?;
+            let range_start = i64::try_from(range_start).map_err(|_| {
+                FunctionCarrier::EvaluationError(EvaluationError::new(
+                    "Integer too large for range bounds".into(),
+                    span,
+                ))
+            })?;
 
             if let Some(range_end) = range_end {
                 let range_end = evaluate_expression(range_end, environment)?;
-                let range_end = i64::try_from(range_end).into_evaluation_result(span)?;
+                let range_end = i64::try_from(range_end).map_err(|_| {
+                    FunctionCarrier::EvaluationError(EvaluationError::new(
+                        "Integer too large for range bounds".into(),
+                        span,
+                    ))
+                })?;
 
                 Value::from(range_start..=range_end)
             } else {
@@ -494,11 +504,21 @@ pub(crate) fn evaluate_expression(
                 .into());
             };
 
-            let range_start = i64::try_from(range_start).into_evaluation_result(span)?;
+            let range_start = i64::try_from(range_start).map_err(|_| {
+                FunctionCarrier::EvaluationError(EvaluationError::new(
+                    "Integer too large for range bounds".into(),
+                    span,
+                ))
+            })?;
 
             if let Some(range_end) = range_end {
                 let range_end = evaluate_expression(range_end, environment)?;
-                let range_end = i64::try_from(range_end).into_evaluation_result(span)?;
+                let range_end = i64::try_from(range_end).map_err(|_| {
+                    FunctionCarrier::EvaluationError(EvaluationError::new(
+                        "Integer too large for range bounds".into(),
+                        span,
+                    ))
+                })?;
 
                 Value::from(range_start..range_end)
             } else {
