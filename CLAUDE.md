@@ -5,8 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Before commit
 - Run `cargo fmt`
 - Run `cargo check` and fix warnings and errors
-- Ensure all non-ignored tests pass
-- Check if any ignored tests pass, if they do mark them with `// vm-ready` first
+- Ensure all tests pass (`cargo test`)
 
 ## Common Commands
 
@@ -19,10 +18,6 @@ cargo test
 
 # Run a single test by name (substring match on the filename)
 cargo test test_001_math_001_addition
-
-# Run VM tests (ignored by default)
-cargo test -- --ignored
-cargo test test_vm_001_math -- --ignored
 
 # Run benchmarks
 cargo bench -p benches
@@ -67,7 +62,7 @@ Source → [Lexer] → Tokens → [Parser] → AST → [Analyser] → Annotated 
 
 ### Key Concepts
 
-**Two execution modes** — The tree-walk interpreter in `ndc_interpreter` is the reference implementation. The bytecode VM in `ndc_vm` is the work-in-progress performance path. Tests with `// vm-ready` are known to pass on both.
+**Two execution modes** — The tree-walk interpreter in `ndc_interpreter` is the reference implementation. The bytecode VM in `ndc_vm` is the target default path. Both run on every test via the VM bridge in `ndc_interpreter/src/vm_bridge.rs`.
 
 **Value types** — `ndc_interpreter/src/value.rs` and `ndc_vm/src/value.rs` are separate enums. The VM `Value` is constrained to 16 bytes (`Int(i64)`, `Float(f64)`, `Bool`, `None`, `Object(Box<Object>)`).
 
@@ -81,11 +76,10 @@ Source → [Lexer] → Tokens → [Parser] → AST → [Analyser] → Annotated 
 
 The `tests` crate auto-generates test functions at build time via `tests/build.rs`. For every `.ndc` file under `tests/programs/`, two Rust test functions are generated:
 - `test_<path>` — runs with tree-walk interpreter
-- `test_vm_<path>` — runs with VM (marked `#[ignore]` unless the file contains `// vm-ready`)
+- `test_vm_<path>` — runs with VM (via the bridge in `ndc_interpreter/src/vm_bridge.rs`)
 
-Test directives are comments inside `.ndc` files:
+Both variants run by default (`cargo test`). Test directives are comments inside `.ndc` files:
 ```ndc
-// vm-ready               ← enable test_vm_* function
 // expect-output: 42      ← assert stdout equals this
 // expect-error: divide   ← assert error message contains this substring
 ```

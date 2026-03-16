@@ -1,4 +1,3 @@
-// vm-ready
 // BUG#0006: When a closure with open upvalues (stack-slot references) was
 // immediately passed to a native stdlib HOF (like `any`), the HOF would call
 // it back via Vm::call_function in a fresh VM context where those stack slots
