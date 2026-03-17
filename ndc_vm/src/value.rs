@@ -112,13 +112,22 @@ pub enum Function {
     Native(Rc<NativeFunction>),
     Memoized {
         cache: Rc<RefCell<HashMap<u64, Value>>>,
-        function: Box<Function>,
+        function: Box<Self>,
     },
+}
+
+pub enum NativeFunc {
+    /// Zero-allocation path: args are a slice directly into the VM stack.
+    /// Use for functions that do not invoke VM callbacks (no `VmCallable` params).
+    Simple(Box<dyn Fn(&[Value]) -> Result<Value, VmError>>),
+    /// HOF path: args are drained off the stack before the call so `&mut Vm`
+    /// can be passed safely. Use for functions with `&VmCallable` params.
+    WithVm(Box<dyn Fn(&[Value], &mut crate::vm::Vm) -> Result<Value, VmError>>),
 }
 
 pub struct NativeFunction {
     pub name: String,
-    pub func: Box<dyn Fn(&[Value], &[Value]) -> Result<Value, VmError>>,
+    pub func: NativeFunc,
     pub static_type: StaticType,
 }
 

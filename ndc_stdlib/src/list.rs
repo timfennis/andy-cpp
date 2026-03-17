@@ -197,7 +197,9 @@ pub mod ops {
     use ndc_interpreter::sequence::Sequence;
     use ndc_interpreter::value::Value as InterpValue;
     use ndc_vm::error::VmError;
-    use ndc_vm::value::{NativeFunction as VmNativeFunction, Object as VmObject, Value as VmValue};
+    use ndc_vm::value::{
+        NativeFunc, NativeFunction as VmNativeFunction, Object as VmObject, Value as VmValue,
+    };
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -277,7 +279,7 @@ pub mod ops {
                 ]),
                 return_type: Box::new(StaticType::List(Box::new(StaticType::Any))),
             },
-            func: Box::new(|args, _globals| {
+            func: NativeFunc::Simple(Box::new(|args| {
                 let [left, right] = args else {
                     return Err(VmError::native(format!(
                         "++ requires exactly 2 arguments, got {}",
@@ -323,7 +325,7 @@ pub mod ops {
                         .collect();
                     Ok(VmValue::Object(Rc::new(VmObject::list(new_list))))
                 }
-            }),
+            })),
         });
         env.declare_global_fn(
             FunctionBuilder::default()
@@ -352,7 +354,7 @@ pub mod ops {
                 ]),
                 return_type: Box::new(StaticType::Tuple(vec![])),
             },
-            func: Box::new(|args, _globals| {
+            func: NativeFunc::Simple(Box::new(|args| {
                 let [left, right] = args else {
                     return Err(VmError::native(format!(
                         "++= requires exactly 2 arguments, got {}",
@@ -398,7 +400,7 @@ pub mod ops {
                         .extend_from_slice(&right_cell.borrow());
                 }
                 Ok(VmValue::unit())
-            }),
+            })),
         });
         env.declare_global_fn(
             FunctionBuilder::default()

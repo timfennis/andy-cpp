@@ -5,7 +5,7 @@ use ndc_interpreter::function::{
 };
 use ndc_interpreter::value::Value;
 use ndc_vm::error::VmError;
-use ndc_vm::value::{NativeFunction, Object as VmObject, Value as VmValue};
+use ndc_vm::value::{NativeFunc, NativeFunction, Object as VmObject, Value as VmValue};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -13,7 +13,7 @@ pub fn register(env: &mut Environment) {
     let get_native = Rc::new(NativeFunction {
         name: "[]".to_string(),
         static_type: StaticType::Any,
-        func: Box::new(|args: &[VmValue], _globals: &[VmValue]| {
+        func: NativeFunc::Simple(Box::new(|args: &[VmValue]| {
             let [container, index_value] = args else {
                 return Err(VmError::native(format!(
                     "[] requires exactly 2 arguments, got {}",
@@ -21,7 +21,7 @@ pub fn register(env: &mut Environment) {
                 )));
             };
             vm_get_at_index(container, index_value)
-        }),
+        })),
     });
     env.declare_global_fn(
         FunctionBuilder::default()
@@ -39,7 +39,7 @@ pub fn register(env: &mut Environment) {
     let set_native = Rc::new(NativeFunction {
         name: "[]=".to_string(),
         static_type: StaticType::Tuple(vec![]),
-        func: Box::new(|args: &[VmValue], _globals: &[VmValue]| {
+        func: NativeFunc::Simple(Box::new(|args: &[VmValue]| {
             let [container, index_value, rhs] = args else {
                 return Err(VmError::native(format!(
                     "[]= requires exactly 3 arguments, got {}",
@@ -48,7 +48,7 @@ pub fn register(env: &mut Environment) {
             };
             vm_set_at_index(container, index_value, rhs.clone())?;
             Ok(VmValue::unit())
-        }),
+        })),
     });
     env.declare_global_fn(
         FunctionBuilder::default()
@@ -308,7 +308,9 @@ fn vm_set_at_index(
                                 }
                             },
                             _ => {
-                                return Err(VmError::native("cannot assign non-list to list slice"));
+                                return Err(VmError::native(
+                                    "cannot assign non-list to list slice",
+                                ));
                             }
                         };
                         let tail: Vec<VmValue> = list.drain(from..).collect();

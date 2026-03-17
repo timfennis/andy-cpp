@@ -354,7 +354,13 @@ impl FunctionBody {
                                 .iter()
                                 .map(|a| crate::vm_bridge::interp_to_vm(a.clone()))
                                 .collect();
-                            let result = (native.func)(&vm_args, &[]).map_err(|e| {
+                            let result = match &native.func {
+                                ndc_vm::value::NativeFunc::Simple(f) => f(&vm_args),
+                                ndc_vm::value::NativeFunc::WithVm(f) => {
+                                    f(&vm_args, &mut ndc_vm::vm::Vm::stub())
+                                }
+                            }
+                            .map_err(|e: ndc_vm::error::VmError| {
                                 FunctionCarrier::IntoEvaluationError(Box::new(anyhow::anyhow!(e)))
                             })?;
                             return Ok(crate::vm_bridge::vm_to_interp(&result));

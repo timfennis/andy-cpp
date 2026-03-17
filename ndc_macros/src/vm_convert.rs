@@ -511,7 +511,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                     ndc_vm::value::Value::Object(_obj) => match _obj.as_ref() {
                         ndc_vm::value::Object::Function(f) => ndc_vm::vm::VmCallable {
                             function: f.clone(),
-                            globals: _globals,
+                            vm: std::cell::RefCell::new(_vm),
                         },
                         _ => return Err(ndc_vm::error::VmError::native(format!(
                             "arg {}: expected function, got {}",
