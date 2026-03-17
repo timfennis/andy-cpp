@@ -1,4 +1,5 @@
 use crate::chunk::OpCode;
+use crate::error::VmError;
 use crate::iterator::{
     MapIter, MaxHeapIter, MinHeapIter, RangeInclusiveIter, RangeIter, SeqIter, StringIter,
     UnboundedRangeIter, VmIterator,
@@ -25,22 +26,6 @@ pub struct Vm {
     open_upvalues: Vec<Rc<RefCell<UpvalueCell>>>,
     #[cfg(feature = "vm-trace")]
     source: Option<String>,
-}
-
-#[derive(thiserror::Error, Debug)]
-#[error("{message}")]
-pub struct VmError {
-    pub message: String,
-    pub span: Span,
-}
-
-impl VmError {
-    pub fn new(message: impl Into<String>, span: Span) -> Self {
-        Self {
-            message: message.into(),
-            span,
-        }
-    }
 }
 
 pub struct CallFrame {
@@ -202,8 +187,9 @@ impl Vm {
                         if func.is_native() {
                             self.materialize_upvalues_in_args(args);
                         }
-                        if let Err(msg) = self.dispatch_call(func, args) {
-                            return Err(VmError::new(msg, span));
+                        if let Err(mut e) = self.dispatch_call(func, args) {
+                            e.span.get_or_insert(span);
+                            return Err(e);
                         }
                     } else if let Some(result) = self.try_vectorized_call(args, span)? {
                         self.stack.push(result);
@@ -521,7 +507,7 @@ impl Vm {
             .retain(|c| matches!(*c.borrow(), UpvalueCell::Open(_)));
     }
 
-    fn dispatch_call(&mut self, func: Function, args: usize) -> Result<(), String> {
+    fn dispatch_call(&mut self, func: Function, args: usize) -> Result<(), VmError> {
         // Memoized functions check the cache first.  On a hit we short-circuit
         // without pushing a new frame.  On a miss we dispatch the inner
         // function normally and tag the new frame so `Return` will populate
@@ -559,11 +545,11 @@ impl Vm {
         func: Function,
         args: usize,
         memo: Option<(Rc<RefCell<HashMap<u64, Value>>>, u64)>,
-    ) -> Result<(), String> {
+    ) -> Result<(), VmError> {
         let closure = match func {
             Function::Native(native) => {
                 let start = self.stack.len() - args;
-                let result = (native.func)(&self.stack[start..])?;
+                let result = (native.func)(&self.stack[start..], &self.globals)?;
                 self.stack.truncate(start - 1);
                 self.stack.push(result);
                 // Native calls return immediately, so cache the result now if
@@ -605,9 +591,9 @@ impl Vm {
         func: Function,
         args: Vec<Value>,
         globals: Vec<Value>,
-    ) -> Result<Value, String> {
+    ) -> Result<Value, VmError> {
         match func {
-            Function::Native(native) => (native.func)(&args),
+            Function::Native(native) => (native.func)(&args, &globals),
             func => {
                 let n_args = args.len();
                 let mut vm = Self {
@@ -620,7 +606,7 @@ impl Vm {
                 };
                 vm.stack.extend(args);
                 vm.dispatch_call(func, n_args)?;
-                vm.run().map_err(|e| e.message)?;
+                vm.run()?;
                 Ok(vm.stack.pop().expect("callback must produce a value"))
             }
         }
@@ -732,11 +718,14 @@ impl Vm {
             return Ok(None);
         };
 
-        let results: Result<Vec<Value>, String> = pairs
+        let results: Result<Vec<Value>, VmError> = pairs
             .into_iter()
             .map(|(l, r)| Vm::call_function(inner_fn.clone(), vec![l, r], self.globals.clone()))
             .collect();
-        let results = results.map_err(|e| VmError::new(e, span))?;
+        let results = results.map_err(|mut e| {
+            e.span.get_or_insert(span);
+            e
+        })?;
 
         // Replace callee + args on the stack with the result tuple.
         self.stack.truncate(callee_idx);
@@ -898,5 +887,20 @@ impl CallFrame {
     #[inline(always)]
     fn slot(&self, slot: usize) -> usize {
         self.frame_pointer + slot
+    }
+}
+
+/// A callable VM function with access to the globals vector, for use in
+/// VmNative HOF implementations. Produced by the `&VmCallable` input-type
+/// handler in `ndc_macros::vm_convert`.
+pub struct VmCallable<'a> {
+    pub function: Function,
+    pub globals: &'a [Value],
+}
+
+impl VmCallable<'_> {
+    /// Call this function with the given arguments.
+    pub fn call(&self, args: Vec<Value>) -> Result<Value, VmError> {
+        Vm::call_function(self.function.clone(), args, self.globals.to_vec())
     }
 }

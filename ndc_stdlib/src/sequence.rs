@@ -4,11 +4,13 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use ndc_interpreter::iterator::{MutableValueIntoIterator, mut_seq_to_iterator};
 use ndc_interpreter::sequence::Sequence;
+use ndc_interpreter::vm_bridge::{interp_to_vm, vm_to_interp};
 use ndc_interpreter::{
     compare::FallibleOrd,
-    {evaluate::EvaluationResult, function::Callable, value::Value},
+    {evaluate::EvaluationResult, value::Value},
 };
 use ndc_macros::export_module;
+use ndc_vm::vm::VmCallable;
 use std::cmp::Ordering;
 use std::rc::Rc;
 
@@ -79,8 +81,8 @@ fn try_sort_by<E>(
 
 #[export_module]
 mod inner {
+    use ndc_interpreter::iterator::mut_value_to_iterator;
     use ndc_interpreter::iterator::{Repeat, ValueIterator};
-    use ndc_interpreter::{function::FunctionCarrier, iterator::mut_value_to_iterator};
     use std::cell::RefCell;
 
     #[function(name = "in")]
@@ -112,12 +114,12 @@ mod inner {
         }
     }
     /// Returns the element for which the key function returns the highest value.
-    pub fn max_by_key(seq: &mut Sequence, func: &Callable<'_>) -> EvaluationResult {
+    pub fn max_by_key(seq: &mut Sequence, func: &VmCallable<'_>) -> EvaluationResult {
         by_key(seq, func, Ordering::Greater)
     }
 
     /// Returns the element for which the key function returns the lowest value.
-    pub fn min_by_key(seq: &mut Sequence, func: &Callable<'_>) -> EvaluationResult {
+    pub fn min_by_key(seq: &mut Sequence, func: &VmCallable<'_>) -> EvaluationResult {
         by_key(seq, func, Ordering::Less)
     }
 
@@ -126,7 +128,7 @@ mod inner {
     /// The comparator function takes two elements and returns a number. A positive result means the
     /// first argument is greater than the second, a negative result means the first argument is
     /// less than the second, and zero means they are equal.
-    pub fn max_by(seq: &mut Sequence, comp: &Callable<'_>) -> EvaluationResult {
+    pub fn max_by(seq: &mut Sequence, comp: &VmCallable<'_>) -> EvaluationResult {
         by_comp(seq, comp, Ordering::Greater)
     }
 
@@ -135,7 +137,7 @@ mod inner {
     /// The comparator function takes two elements and returns a number. A positive result means the
     /// first argument is greater than the second, a negative result means the first argument is
     /// less than the second, and zero means they are equal.
-    pub fn min_by(seq: &mut Sequence, comp: &Callable<'_>) -> EvaluationResult {
+    pub fn min_by(seq: &mut Sequence, comp: &VmCallable<'_>) -> EvaluationResult {
         by_comp(seq, comp, Ordering::Less)
     }
 
@@ -197,13 +199,33 @@ mod inner {
     ///
     /// This function only works for strings and lists and will throw errors otherwise.
     #[function(return_type = ())]
-    pub fn sort_by(list: &mut Vec<Value>, comp: &Callable<'_>) -> EvaluationResult {
-        try_sort_by::<FunctionCarrier>(list, |left, right| {
-            let ret = comp.call(&mut [left.clone(), right.clone()])?;
-
-            Ok(ret.try_cmp(&Value::from(0))?)
-        })?;
-        Ok(Value::unit())
+    pub fn sort_by(
+        list: &mut Vec<ndc_vm::value::Value>,
+        comp: &VmCallable<'_>,
+    ) -> anyhow::Result<()> {
+        let mut err: Option<String> = None;
+        list.sort_by(|left, right| {
+            if err.is_some() {
+                return Ordering::Equal;
+            }
+            match comp.call(vec![left.clone(), right.clone()]) {
+                Ok(ret) => match ret.cmp_to_zero() {
+                    Ok(ord) => ord,
+                    Err(e) => {
+                        err = Some(e);
+                        Ordering::Equal
+                    }
+                },
+                Err(e) => {
+                    err = Some(e.message);
+                    Ordering::Equal
+                }
+            }
+        });
+        if let Some(e) = err {
+            return Err(anyhow::anyhow!(e));
+        }
+        Ok(())
     }
 
     /// Returns a sorted copy of the input sequence as a list.
@@ -221,13 +243,33 @@ mod inner {
     /// - for values higher than `0` the first argument is greater than the second argument
     /// - for values equal to `0` the first argument is equal to the second argument
     #[function(return_type = Vec<Value>)]
-    pub fn sorted_by(seq: &mut Sequence, comp: &Callable<'_>) -> EvaluationResult {
+    pub fn sorted_by(seq: &mut Sequence, comp: &VmCallable<'_>) -> EvaluationResult {
         let mut list = mut_seq_to_iterator(seq).collect::<Vec<Value>>();
-        try_sort_by::<FunctionCarrier>(&mut list, |left, right| {
-            let ret = comp.call(&mut [left.clone(), right.clone()])?;
-
-            Ok(ret.try_cmp(&Value::from(0))?)
-        })?;
+        let mut err: Option<String> = None;
+        list.sort_by(|left, right| {
+            if err.is_some() {
+                return Ordering::Equal;
+            }
+            match comp.call(vec![
+                interp_to_vm(left.clone()),
+                interp_to_vm(right.clone()),
+            ]) {
+                Ok(ret) => match ret.cmp_to_zero() {
+                    Ok(ord) => ord,
+                    Err(e) => {
+                        err = Some(e);
+                        Ordering::Equal
+                    }
+                },
+                Err(e) => {
+                    err = Some(e.message);
+                    Ordering::Equal
+                }
+            }
+        });
+        if let Some(e) = err {
+            return Err(anyhow::anyhow!(e).into());
+        }
         Ok(Value::list(list))
     }
 
@@ -298,13 +340,13 @@ mod inner {
 
     /// Reduces/folds the given sequence using the given combining function and a custom initial value.
     #[function(return_type = Vec<_>)]
-    pub fn fold(seq: &mut Sequence, initial: Value, function: &Callable<'_>) -> EvaluationResult {
+    pub fn fold(seq: &mut Sequence, initial: Value, function: &VmCallable<'_>) -> EvaluationResult {
         fold_iterator(mut_seq_to_iterator(seq), initial, function)
     }
 
     /// Reduces/folds the given sequence using the given combining function.
     #[function(return_type = Value)]
-    pub fn reduce(seq: &mut Sequence, function: &Callable<'_>) -> EvaluationResult {
+    pub fn reduce(seq: &mut Sequence, function: &VmCallable<'_>) -> EvaluationResult {
         let mut iterator = mut_seq_to_iterator(seq);
         let fst = iterator
             .next()
@@ -315,73 +357,67 @@ mod inner {
 
     /// Filters the given sequence using the `predicate`.
     #[function(return_type = Vec<_>)]
-    pub fn filter(seq: &mut Sequence, predicate: &Callable<'_>) -> EvaluationResult {
-        let iterator = mut_seq_to_iterator(seq);
+    pub fn filter(seq: &mut Sequence, predicate: &VmCallable<'_>) -> EvaluationResult {
         let mut out = Vec::new();
-        for element in iterator {
-            out.push(element);
-            let last_idx = out.len() - 1;
-            let result = predicate.call(&mut out[last_idx..])?;
+        for element in mut_seq_to_iterator(seq) {
+            let result = predicate
+                .call(vec![interp_to_vm(element.clone())])
+                .map_err(|e| anyhow!(e))?;
             match result {
-                Value::Bool(true) => {}
-                Value::Bool(false) => {
-                    out.pop();
-                }
+                ndc_vm::value::Value::Bool(true) => out.push(element),
+                ndc_vm::value::Value::Bool(false) => {}
                 _ => return Err(anyhow!("return value of predicate must be a boolean").into()),
             }
         }
-
         Ok(Value::list(out))
     }
 
     /// Returns the number of elements in the input sequence for which the given `predicate` returns `true`.
     #[function(return_type = i64)]
-    pub fn count(seq: &mut Sequence, predicate: &Callable<'_>) -> EvaluationResult {
-        let iterator = mut_seq_to_iterator(seq);
-        let mut out = 0;
-        for element in iterator {
-            let result = predicate.call(&mut [element])?;
+    pub fn count(seq: &mut Sequence, predicate: &VmCallable<'_>) -> EvaluationResult {
+        let mut out = 0i64;
+        for element in mut_seq_to_iterator(seq) {
+            let result = predicate
+                .call(vec![interp_to_vm(element)])
+                .map_err(|e| anyhow!(e))?;
             match result {
-                Value::Bool(true) => {
-                    out += 1;
-                }
-                Value::Bool(false) => {}
+                ndc_vm::value::Value::Bool(true) => out += 1,
+                ndc_vm::value::Value::Bool(false) => {}
                 _ => return Err(anyhow!("return value of predicate must be a boolean").into()),
             }
         }
-
-        Ok(Value::number(out))
+        Ok(Value::from(out))
     }
 
     /// Returns the value of the first element for which the `predicate` is true for the given input sequence.
     #[function(return_type = Value)]
-    pub fn find(seq: &mut Sequence, predicate: &Callable<'_>) -> EvaluationResult {
-        let iterator = mut_seq_to_iterator(seq);
-        for element in iterator {
-            let result = predicate.call(&mut [element.clone()])?;
+    pub fn find(seq: &mut Sequence, predicate: &VmCallable<'_>) -> EvaluationResult {
+        for element in mut_seq_to_iterator(seq) {
+            let result = predicate
+                .call(vec![interp_to_vm(element.clone())])
+                .map_err(|e| anyhow!(e))?;
             match result {
-                Value::Bool(true) => return Ok(element),
-                Value::Bool(false) => {}
+                ndc_vm::value::Value::Bool(true) => return Ok(element),
+                ndc_vm::value::Value::Bool(false) => {}
                 _ => return Err(anyhow!("return value of predicate must be a boolean").into()),
             }
         }
-
         Err(anyhow!("find did not find anything").into())
     }
 
     /// Returns the first index of the element for which the `predicate` is true in the input sequence.
     #[function(return_type = usize)]
-    pub fn locate(seq: &mut Sequence, predicate: &Callable<'_>) -> EvaluationResult {
-        let iterator = mut_seq_to_iterator(seq);
-        for (idx, element) in iterator.enumerate() {
-            let result = predicate.call(&mut [element])?;
+    pub fn locate(seq: &mut Sequence, predicate: &VmCallable<'_>) -> EvaluationResult {
+        for (idx, element) in mut_seq_to_iterator(seq).enumerate() {
+            let result = predicate
+                .call(vec![interp_to_vm(element)])
+                .map_err(|e| anyhow!(e))?;
             match result {
-                Value::Bool(true) => return Ok(Value::from(idx)),
-                Value::Bool(false) => {}
+                ndc_vm::value::Value::Bool(true) => return Ok(Value::from(idx)),
+                ndc_vm::value::Value::Bool(false) => {}
                 _ => return Err(anyhow!("return value of predicate must be a boolean").into()),
             }
         }
-
         Err(anyhow!("locate did not find anything").into())
     }
 
@@ -400,55 +436,63 @@ mod inner {
 
     /// Returns `true` if the `predicate` is true for none of the elements in `seq`.
     #[function(return_type = bool)]
-    pub fn none(seq: &mut Sequence, function: &Callable<'_>) -> EvaluationResult {
+    pub fn none(seq: &mut Sequence, function: &VmCallable<'_>) -> EvaluationResult {
         for item in mut_seq_to_iterator(seq) {
-            match function.call(&mut [item])? {
-                Value::Bool(true) => return Ok(Value::Bool(false)),
-                Value::Bool(false) => {}
+            match function
+                .call(vec![interp_to_vm(item)])
+                .map_err(|e| anyhow!(e))?
+            {
+                ndc_vm::value::Value::Bool(true) => return Ok(Value::Bool(false)),
+                ndc_vm::value::Value::Bool(false) => {}
                 v => {
-                    return Err(anyhow!(format!(
+                    return Err(anyhow!(
                         "invalid return type, predicate returned {}",
                         v.static_type()
-                    ))
+                    )
                     .into());
                 }
             }
         }
-
         Ok(Value::Bool(true))
     }
+
     /// Returns `true` if the `predicate` is true for all the elements in `seq`.
     #[function(return_type = bool)]
-    pub fn all(seq: &mut Sequence, function: &Callable<'_>) -> EvaluationResult {
+    pub fn all(seq: &mut Sequence, function: &VmCallable<'_>) -> EvaluationResult {
         for item in mut_seq_to_iterator(seq) {
-            match function.call(&mut [item])? {
-                Value::Bool(true) => {}
-                Value::Bool(false) => return Ok(Value::Bool(false)),
+            match function
+                .call(vec![interp_to_vm(item)])
+                .map_err(|e| anyhow!(e))?
+            {
+                ndc_vm::value::Value::Bool(true) => {}
+                ndc_vm::value::Value::Bool(false) => return Ok(Value::Bool(false)),
                 v => {
-                    return Err(anyhow!(format!(
+                    return Err(anyhow!(
                         "invalid return type, predicate returned {}",
                         v.static_type()
-                    ))
+                    )
                     .into());
                 }
             }
         }
-
         Ok(Value::Bool(true))
     }
 
     /// Returns `true` if the `predicate` is true for any of the elements in `seq`.
     #[function(return_type = bool)]
-    pub fn any(seq: &mut Sequence, predicate: &Callable<'_>) -> EvaluationResult {
+    pub fn any(seq: &mut Sequence, predicate: &VmCallable<'_>) -> EvaluationResult {
         for item in mut_seq_to_iterator(seq) {
-            match predicate.call(&mut [item])? {
-                Value::Bool(true) => return Ok(Value::Bool(true)),
-                Value::Bool(false) => {}
+            match predicate
+                .call(vec![interp_to_vm(item)])
+                .map_err(|e| anyhow!(e))?
+            {
+                ndc_vm::value::Value::Bool(true) => return Ok(Value::Bool(true)),
+                ndc_vm::value::Value::Bool(false) => {}
                 v => {
-                    return Err(anyhow!(format!(
+                    return Err(anyhow!(
                         "invalid return type, predicate returned {}",
                         v.static_type()
-                    ))
+                    )
                     .into());
                 }
             }
@@ -459,25 +503,28 @@ mod inner {
 
     /// Applies the function to each element in a sequence returning the result as a list.
     #[function(return_type = Vec<_>)]
-    pub fn map(seq: &mut Sequence, function: &Callable<'_>) -> EvaluationResult {
-        let iterator = mut_seq_to_iterator(seq);
+    pub fn map(seq: &mut Sequence, function: &VmCallable<'_>) -> EvaluationResult {
         let mut out = Vec::new();
-
-        for item in iterator {
-            out.push(function.call(&mut [item])?);
+        for item in mut_seq_to_iterator(seq) {
+            let result_vm = function
+                .call(vec![interp_to_vm(item)])
+                .map_err(|e| anyhow!(e))?;
+            out.push(vm_to_interp(&result_vm));
         }
-
         Ok(Value::list(out))
     }
 
     /// Applies a function to each item in a sequence, flattens the resulting sequences, and returns a single combined sequence.
     #[function(return_type = Vec<_>)]
-    pub fn flat_map(seq: &mut Sequence, function: &Callable<'_>) -> EvaluationResult {
-        // let iterator = ;
+    pub fn flat_map(seq: &mut Sequence, function: &VmCallable<'_>) -> EvaluationResult {
         let mut out = Vec::new();
 
         for item in mut_seq_to_iterator(seq) {
-            let fnout = function.call(&mut [item])?;
+            let fnout = vm_to_interp(
+                &function
+                    .call(vec![interp_to_vm(item)])
+                    .map_err(|e| anyhow!(e))?,
+            );
             match fnout {
                 Value::Sequence(mut inner_seq) => {
                     out.extend(mut_seq_to_iterator(&mut inner_seq));
@@ -504,12 +551,12 @@ mod inner {
     }
 
     /// Returns the first element of the sequence or the return value of the given function.
-    pub fn first_or_else(seq: &mut Sequence, default: &Callable<'_>) -> EvaluationResult {
+    pub fn first_or_else(seq: &mut Sequence, default: &VmCallable<'_>) -> EvaluationResult {
         let mut iterator = mut_seq_to_iterator(seq);
         Ok(if let Some(item) = iterator.next() {
             item
         } else {
-            default.call(&mut [])?
+            vm_to_interp(&default.call(vec![]).map_err(|e| anyhow!(e))?)
         })
     }
 
@@ -644,14 +691,15 @@ mod inner {
     /// Applies a function to each pair of consecutive elements in a sequence and returns the results as a list.
     #[function(name = "pairwise")]
     #[function(return_type = Vec<(Value, Value)>)]
-    pub fn pairwise_map(seq: &mut Sequence, function: &Callable<'_>) -> EvaluationResult {
+    pub fn pairwise_map(seq: &mut Sequence, function: &VmCallable<'_>) -> EvaluationResult {
         let main = mut_seq_to_iterator(seq).collect::<Vec<_>>();
-
-        let mut out = Vec::with_capacity(main.len() - 1);
+        let mut out = Vec::with_capacity(main.len().saturating_sub(1));
         for (a, b) in main.into_iter().tuple_windows() {
-            out.push(function.call(&mut [a, b])?);
+            let result_vm = function
+                .call(vec![interp_to_vm(a), interp_to_vm(b)])
+                .map_err(|e| anyhow!(e))?;
+            out.push(vm_to_interp(&result_vm));
         }
-
         Ok(Value::list(out))
     }
 
@@ -781,12 +829,15 @@ mod inner {
     }
 }
 
-fn by_key(seq: &mut Sequence, func: &Callable<'_>, better: Ordering) -> EvaluationResult {
+fn by_key(seq: &mut Sequence, func: &VmCallable<'_>, better: Ordering) -> EvaluationResult {
     let mut best_value = None;
     let mut best_key: Option<Value> = None;
 
     for value in mut_seq_to_iterator(seq) {
-        let new_key = func.call(&mut [value.clone()])?;
+        let new_key_vm = func
+            .call(vec![interp_to_vm(value.clone())])
+            .map_err(|e| anyhow::anyhow!(e))?;
+        let new_key = vm_to_interp(&new_key_vm);
         let is_better = match &best_key {
             None => true,
             Some(current_best) => new_key.try_cmp(current_best)? == better,
@@ -800,15 +851,20 @@ fn by_key(seq: &mut Sequence, func: &Callable<'_>, better: Ordering) -> Evaluati
     best_value.ok_or_else(|| anyhow::anyhow!("sequence was empty").into())
 }
 
-fn by_comp(seq: &mut Sequence, comp: &Callable<'_>, better: Ordering) -> EvaluationResult {
+fn by_comp(seq: &mut Sequence, comp: &VmCallable<'_>, better: Ordering) -> EvaluationResult {
     let mut best: Option<Value> = None;
 
     for value in mut_seq_to_iterator(seq) {
         let is_better = match &best {
             None => true,
             Some(current) => {
-                let result = comp.call(&mut [value.clone(), current.clone()])?;
-                result.try_cmp(&Value::from(0))? == better
+                let result_vm = comp
+                    .call(vec![
+                        interp_to_vm(value.clone()),
+                        interp_to_vm(current.clone()),
+                    ])
+                    .map_err(|e| anyhow::anyhow!(e))?;
+                result_vm.cmp_to_zero().map_err(|e| anyhow::anyhow!(e))? == better
             }
         };
         if is_better {
@@ -822,13 +878,16 @@ fn by_comp(seq: &mut Sequence, comp: &Callable<'_>, better: Ordering) -> Evaluat
 fn fold_iterator(
     iterator: MutableValueIntoIterator<'_>,
     initial: Value,
-    function: &Callable<'_>,
+    function: &VmCallable<'_>,
 ) -> EvaluationResult {
     let mut acc = initial;
     for item in iterator {
-        acc = function.call(&mut [acc, item])?;
+        acc = vm_to_interp(
+            &function
+                .call(vec![interp_to_vm(acc), interp_to_vm(item)])
+                .map_err(|e| anyhow::anyhow!(e))?,
+        );
     }
-
     Ok(acc)
 }
 

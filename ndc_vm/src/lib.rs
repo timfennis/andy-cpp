@@ -1,14 +1,15 @@
 pub mod chunk;
 pub mod compiler;
 pub mod disassemble;
+pub mod error;
 pub mod iterator;
 pub mod value;
 pub mod vm;
 
 pub use compiler::CompileError;
+pub use error::VmError;
 pub use iterator::{SharedIterator, VmIterator};
 pub use value::*;
-pub use vm::VmError;
 
 #[cfg(test)]
 mod test {

@@ -194,6 +194,7 @@ pub mod ops {
     };
     use ndc_interpreter::sequence::Sequence;
     use ndc_interpreter::value::Value as InterpValue;
+    use ndc_vm::error::VmError;
     use ndc_vm::value::{NativeFunction as VmNativeFunction, Object as VmObject, Value as VmValue};
     use std::cell::RefCell;
     use std::rc::Rc;
@@ -274,36 +275,36 @@ pub mod ops {
                 ]),
                 return_type: Box::new(StaticType::List(Box::new(StaticType::Any))),
             },
-            func: Box::new(|args| {
+            func: Box::new(|args, _globals| {
                 let [left, right] = args else {
-                    return Err(format!(
+                    return Err(VmError::native(format!(
                         "++ requires exactly 2 arguments, got {}",
                         args.len()
-                    ));
+                    )));
                 };
                 let VmValue::Object(left_obj) = left else {
-                    return Err(format!(
+                    return Err(VmError::native(format!(
                         "++ left requires a list, got {}",
                         left.static_type()
-                    ));
+                    )));
                 };
                 let VmValue::Object(right_obj) = right else {
-                    return Err(format!(
+                    return Err(VmError::native(format!(
                         "++ right requires a list, got {}",
                         right.static_type()
-                    ));
+                    )));
                 };
                 let VmObject::List(left_cell) = left_obj.as_ref() else {
-                    return Err(format!(
+                    return Err(VmError::native(format!(
                         "++ left requires a list, got {}",
                         left.static_type()
-                    ));
+                    )));
                 };
                 let VmObject::List(right_cell) = right_obj.as_ref() else {
-                    return Err(format!(
+                    return Err(VmError::native(format!(
                         "++ right requires a list, got {}",
                         right.static_type()
-                    ));
+                    )));
                 };
 
                 if Rc::strong_count(left_obj) == 1 {
@@ -349,36 +350,36 @@ pub mod ops {
                 ]),
                 return_type: Box::new(StaticType::Tuple(vec![])),
             },
-            func: Box::new(|args| {
+            func: Box::new(|args, _globals| {
                 let [left, right] = args else {
-                    return Err(format!(
+                    return Err(VmError::native(format!(
                         "++= requires exactly 2 arguments, got {}",
                         args.len()
-                    ));
+                    )));
                 };
                 let VmValue::Object(left_obj) = left else {
-                    return Err(format!(
+                    return Err(VmError::native(format!(
                         "++= left requires a list, got {}",
                         left.static_type()
-                    ));
+                    )));
                 };
                 let VmValue::Object(right_obj) = right else {
-                    return Err(format!(
+                    return Err(VmError::native(format!(
                         "++= right requires a list, got {}",
                         right.static_type()
-                    ));
+                    )));
                 };
                 let VmObject::List(left_cell) = left_obj.as_ref() else {
-                    return Err(format!(
+                    return Err(VmError::native(format!(
                         "++= left requires a list, got {}",
                         left.static_type()
-                    ));
+                    )));
                 };
                 let VmObject::List(right_cell) = right_obj.as_ref() else {
-                    return Err(format!(
+                    return Err(VmError::native(format!(
                         "++= right requires a list, got {}",
                         right.static_type()
-                    ));
+                    )));
                 };
 
                 if Rc::ptr_eq(left_obj, right_obj) {

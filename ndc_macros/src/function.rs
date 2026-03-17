@@ -512,13 +512,13 @@ fn try_generate_vm_native(
                     parameters: Some(vec![#(#param_types.clone()),*]),
                     return_type: Box::new(#return_static_type),
                 },
-                func: Box::new(|args| match args {
+                func: Box::new(|args, _globals| match args {
                     [#(#raw_args),*] => {
                         #(#extracts)*
                         let result = #inner_ident(#(#passes),*);
                         #return_code
                     }
-                    _ => Err(format!("expected {} arguments, got {}", #n, args.len())),
+                    _ => Err(ndc_vm::error::VmError::native(format!("expected {} arguments, got {}", #n, args.len()))),
                 }),
             });
     };
@@ -802,6 +802,43 @@ fn create_temp_variable(
                 initialize_code: quote! {
                     let #argument_var_name =
                         ndc_interpreter::vm_bridge::interp_to_vm(#argument_var_name.clone());
+                },
+            }];
+        }
+
+        // &VmCallable — only used in VmNative functions (HOF path).
+        // Dead-code stub for the interpreter wrapper: extract function from InterpValue,
+        // convert to VmValue, then construct a VmCallable with empty globals.
+        // This code path is unreachable at runtime since VmNative bodies bypass the wrapper.
+        if path_ends_with(ty, "VmCallable") {
+            let tmp_ident = syn::Ident::new(
+                &format!("tmp_{argument_var_name}"),
+                argument_var_name.span(),
+            );
+            return vec![Argument {
+                param_type: quote! {
+                    ndc_interpreter::function::StaticType::Function {
+                        parameters: None,
+                        return_type: Box::new(ndc_interpreter::function::StaticType::Any),
+                    }
+                },
+                param_name: quote! { #original_name },
+                argument: quote! { #argument_var_name },
+                initialize_code: quote! {
+                    // Dead-code stub: VmCallable params only appear in functions with
+                    // FunctionBody::VmNative, so this interpreter wrapper is never called.
+                    let #tmp_ident =
+                        ndc_interpreter::vm_bridge::interp_to_vm(#argument_var_name.clone());
+                    let #argument_var_name = if let ndc_vm::value::Value::Object(obj) = &#tmp_ident {
+                        if let ndc_vm::value::Object::Function(f) = obj.as_ref() {
+                            ndc_vm::vm::VmCallable { function: f.clone(), globals: &[] }
+                        } else {
+                            panic!("VmCallable stub: expected Function variant");
+                        }
+                    } else {
+                        panic!("VmCallable stub: expected function object");
+                    };
+                    let #argument_var_name = &#argument_var_name;
                 },
             }];
         }
