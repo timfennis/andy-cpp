@@ -131,6 +131,118 @@ pub fn is_ref_mut_of_vec_of_ndc_vm_value(ty: &syn::Type) -> bool {
     })
 }
 
+fn is_hashmap_of_ndc_vm_value(ty: &syn::Type) -> bool {
+    let syn::Type::Path(syn::TypePath { path, .. }) = ty else {
+        return false;
+    };
+    let Some(last) = path.segments.last() else {
+        return false;
+    };
+    if last.ident != "HashMap" {
+        return false;
+    }
+    let syn::PathArguments::AngleBracketed(args) = &last.arguments else {
+        return false;
+    };
+    let mut iter = args.args.iter();
+    let Some(syn::GenericArgument::Type(key)) = iter.next() else {
+        return false;
+    };
+    let Some(syn::GenericArgument::Type(val)) = iter.next() else {
+        return false;
+    };
+    is_ndc_vm_value(key) && is_ndc_vm_value(val)
+}
+
+/// Returns true if the type is `&mut HashMap<ndc_vm::value::Value, ndc_vm::value::Value>`.
+pub fn is_ref_mut_of_hashmap_of_ndc_vm_value(ty: &syn::Type) -> bool {
+    is_ref_mut_of(ty, is_hashmap_of_ndc_vm_value)
+}
+
+/// Returns true if the type is `&HashMap<ndc_vm::value::Value, ndc_vm::value::Value>`.
+pub fn is_ref_of_hashmap_of_ndc_vm_value(ty: &syn::Type) -> bool {
+    is_ref_of(ty, is_hashmap_of_ndc_vm_value)
+}
+
+fn is_vecdeque_of_ndc_vm_value(ty: &syn::Type) -> bool {
+    match ty {
+        syn::Type::Path(syn::TypePath { path, .. }) => {
+            if let Some(last) = path.segments.last() {
+                if last.ident != "VecDeque" {
+                    return false;
+                }
+                if let syn::PathArguments::AngleBracketed(args) = &last.arguments {
+                    if let Some(syn::GenericArgument::Type(elem)) = args.args.first() {
+                        return is_ndc_vm_value(elem);
+                    }
+                }
+            }
+            false
+        }
+        _ => false,
+    }
+}
+
+/// Returns true if the type is `&mut VecDeque<ndc_vm::value::Value>`.
+pub fn is_ref_mut_of_vecdeque_of_ndc_vm_value(ty: &syn::Type) -> bool {
+    is_ref_mut_of(ty, is_vecdeque_of_ndc_vm_value)
+}
+
+/// Returns true if the type is `&VecDeque<ndc_vm::value::Value>`.
+pub fn is_ref_of_vecdeque_of_ndc_vm_value(ty: &syn::Type) -> bool {
+    is_ref_of(ty, is_vecdeque_of_ndc_vm_value)
+}
+
+fn is_binaryheap_of<F: Fn(&syn::Type) -> bool>(ty: &syn::Type, check_inner: F) -> bool {
+    let syn::Type::Path(syn::TypePath { path, .. }) = ty else {
+        return false;
+    };
+    let Some(last) = path.segments.last() else {
+        return false;
+    };
+    if last.ident != "BinaryHeap" {
+        return false;
+    }
+    let syn::PathArguments::AngleBracketed(args) = &last.arguments else {
+        return false;
+    };
+    let Some(syn::GenericArgument::Type(inner)) = args.args.first() else {
+        return false;
+    };
+    check_inner(inner)
+}
+
+fn is_reverse_of_ord_value(ty: &syn::Type) -> bool {
+    let syn::Type::Path(syn::TypePath { path, .. }) = ty else {
+        return false;
+    };
+    let Some(last) = path.segments.last() else {
+        return false;
+    };
+    if last.ident != "Reverse" {
+        return false;
+    }
+    let syn::PathArguments::AngleBracketed(args) = &last.arguments else {
+        return false;
+    };
+    let Some(syn::GenericArgument::Type(inner)) = args.args.first() else {
+        return false;
+    };
+    path_ends_with(inner, "OrdValue")
+}
+
+/// Returns true if the type is `&mut BinaryHeap<Reverse<OrdValue>>` (min-heap).
+pub fn is_ref_mut_of_min_heap(ty: &syn::Type) -> bool {
+    is_ref_mut_of(ty, |inner| is_binaryheap_of(inner, is_reverse_of_ord_value))
+}
+
+/// Returns true if the type is `&mut BinaryHeap<OrdValue>` (max-heap).
+pub fn is_ref_mut_of_max_heap(ty: &syn::Type) -> bool {
+    is_ref_mut_of(ty, |inner| {
+        is_binaryheap_of(inner, |t| path_ends_with(t, "OrdValue"))
+    })
+}
+
 pub fn is_string(ty: &syn::Type) -> bool {
     match ty {
         // If ref just recurse :haha:

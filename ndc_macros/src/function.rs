@@ -1,8 +1,10 @@
 use crate::convert::{Argument, TypeConverter, build};
 use crate::r#match::{
-    is_ndc_vm_value, is_ref, is_ref_mut, is_ref_mut_of_slice_of_value,
-    is_ref_mut_of_vec_of_ndc_vm_value, is_ref_of_bigint, is_ref_of_slice_of_ndc_vm_value,
-    is_ref_of_slice_of_value, is_str_ref, path_ends_with,
+    is_ndc_vm_value, is_ref, is_ref_mut, is_ref_mut_of_hashmap_of_ndc_vm_value,
+    is_ref_mut_of_max_heap, is_ref_mut_of_min_heap, is_ref_mut_of_slice_of_value,
+    is_ref_mut_of_vec_of_ndc_vm_value, is_ref_mut_of_vecdeque_of_ndc_vm_value, is_ref_of_bigint,
+    is_ref_of_hashmap_of_ndc_vm_value, is_ref_of_slice_of_ndc_vm_value, is_ref_of_slice_of_value,
+    is_ref_of_vecdeque_of_ndc_vm_value, is_str_ref, path_ends_with,
 };
 use itertools::Itertools;
 use proc_macro2::TokenStream;
@@ -387,6 +389,7 @@ fn wrap_single(
         #[inline]
         #inner
 
+        #[allow(unused_variables, unused_assignments)]
         pub fn #identifier (
             values: &mut [ndc_interpreter::value::Value],
             environment: &std::rc::Rc<std::cell::RefCell<ndc_interpreter::environment::Environment>>
@@ -650,6 +653,140 @@ fn create_temp_variable(
                 initialize_code: quote! {
                     let mut #tmp_ident: Vec<ndc_vm::value::Value> = Vec::new();
                     let #argument_var_name = &mut #tmp_ident;
+                },
+            }];
+        }
+
+        // &mut HashMap<ndc_vm::value::Value, ndc_vm::value::Value> — only used in VmNative functions.
+        // Dead-code stub for the interpreter wrapper.
+        if is_ref_mut_of_hashmap_of_ndc_vm_value(ty) {
+            let tmp_ident = syn::Ident::new(
+                &format!("tmp_{argument_var_name}"),
+                argument_var_name.span(),
+            );
+            return vec![Argument {
+                param_type: quote! {
+                    ndc_interpreter::function::StaticType::Map {
+                        key: Box::new(ndc_interpreter::function::StaticType::Any),
+                        value: Box::new(ndc_interpreter::function::StaticType::Any),
+                    }
+                },
+                param_name: quote! { #original_name },
+                argument: quote! { #argument_var_name },
+                initialize_code: quote! {
+                    let mut #tmp_ident: ndc_interpreter::hash_map::HashMap<ndc_vm::value::Value, ndc_vm::value::Value> = ndc_interpreter::hash_map::HashMap::default();
+                    let #argument_var_name = &mut #tmp_ident;
+                },
+            }];
+        }
+
+        // &HashMap<ndc_vm::value::Value, ndc_vm::value::Value> — only used in VmNative functions.
+        // Dead-code stub for the interpreter wrapper.
+        if is_ref_of_hashmap_of_ndc_vm_value(ty) {
+            let tmp_ident = syn::Ident::new(
+                &format!("tmp_{argument_var_name}"),
+                argument_var_name.span(),
+            );
+            return vec![Argument {
+                param_type: quote! {
+                    ndc_interpreter::function::StaticType::Map {
+                        key: Box::new(ndc_interpreter::function::StaticType::Any),
+                        value: Box::new(ndc_interpreter::function::StaticType::Any),
+                    }
+                },
+                param_name: quote! { #original_name },
+                argument: quote! { #argument_var_name },
+                initialize_code: quote! {
+                    let #tmp_ident: ndc_interpreter::hash_map::HashMap<ndc_vm::value::Value, ndc_vm::value::Value> = ndc_interpreter::hash_map::HashMap::default();
+                    let #argument_var_name = &#tmp_ident;
+                },
+            }];
+        }
+
+        // &mut BinaryHeap<Reverse<OrdValue>> — only used in VmNative functions (min-heap).
+        // Dead-code stub for the interpreter wrapper.
+        if is_ref_mut_of_min_heap(ty) {
+            let tmp_ident = syn::Ident::new(
+                &format!("tmp_{argument_var_name}"),
+                argument_var_name.span(),
+            );
+            return vec![Argument {
+                param_type: quote! {
+                    ndc_interpreter::function::StaticType::MinHeap(Box::new(
+                        ndc_interpreter::function::StaticType::Any,
+                    ))
+                },
+                param_name: quote! { #original_name },
+                argument: quote! { #argument_var_name },
+                initialize_code: quote! {
+                    let mut #tmp_ident: std::collections::BinaryHeap<std::cmp::Reverse<ndc_vm::value::OrdValue>> = std::collections::BinaryHeap::new();
+                    let #argument_var_name = &mut #tmp_ident;
+                },
+            }];
+        }
+
+        // &mut BinaryHeap<OrdValue> — only used in VmNative functions (max-heap).
+        // Dead-code stub for the interpreter wrapper.
+        if is_ref_mut_of_max_heap(ty) {
+            let tmp_ident = syn::Ident::new(
+                &format!("tmp_{argument_var_name}"),
+                argument_var_name.span(),
+            );
+            return vec![Argument {
+                param_type: quote! {
+                    ndc_interpreter::function::StaticType::MaxHeap(Box::new(
+                        ndc_interpreter::function::StaticType::Any,
+                    ))
+                },
+                param_name: quote! { #original_name },
+                argument: quote! { #argument_var_name },
+                initialize_code: quote! {
+                    let mut #tmp_ident: std::collections::BinaryHeap<ndc_vm::value::OrdValue> = std::collections::BinaryHeap::new();
+                    let #argument_var_name = &mut #tmp_ident;
+                },
+            }];
+        }
+
+        // &mut VecDeque<ndc_vm::value::Value> — only used in VmNative functions.
+        // Dead-code stub for the interpreter wrapper.
+        if is_ref_mut_of_vecdeque_of_ndc_vm_value(ty) {
+            let tmp_ident = syn::Ident::new(
+                &format!("tmp_{argument_var_name}"),
+                argument_var_name.span(),
+            );
+            return vec![Argument {
+                param_type: quote! {
+                    ndc_interpreter::function::StaticType::Deque(Box::new(
+                        ndc_interpreter::function::StaticType::Any,
+                    ))
+                },
+                param_name: quote! { #original_name },
+                argument: quote! { #argument_var_name },
+                initialize_code: quote! {
+                    let mut #tmp_ident: std::collections::VecDeque<ndc_vm::value::Value> = std::collections::VecDeque::new();
+                    let #argument_var_name = &mut #tmp_ident;
+                },
+            }];
+        }
+
+        // &VecDeque<ndc_vm::value::Value> — only used in VmNative functions.
+        // Dead-code stub for the interpreter wrapper.
+        if is_ref_of_vecdeque_of_ndc_vm_value(ty) {
+            let tmp_ident = syn::Ident::new(
+                &format!("tmp_{argument_var_name}"),
+                argument_var_name.span(),
+            );
+            return vec![Argument {
+                param_type: quote! {
+                    ndc_interpreter::function::StaticType::Deque(Box::new(
+                        ndc_interpreter::function::StaticType::Any,
+                    ))
+                },
+                param_name: quote! { #original_name },
+                argument: quote! { #argument_var_name },
+                initialize_code: quote! {
+                    let #tmp_ident: std::collections::VecDeque<ndc_vm::value::Value> = std::collections::VecDeque::new();
+                    let #argument_var_name = &#tmp_ident;
                 },
             }];
         }

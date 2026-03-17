@@ -2,58 +2,70 @@ use ndc_macros::export_module;
 
 #[export_module]
 mod inner {
-    use ndc_interpreter::sequence::Sequence;
-    use ndc_interpreter::value::Value;
-    use std::cell::RefCell;
     use std::collections::VecDeque;
-    use std::rc::Rc;
 
     /// Creates a new `Deque` type.
     ///
     /// The `Deque` type allows the user to quickly append and remove elements from both the start and the end of the list.
     #[function(name = "Deque", return_type = VecDeque)]
-    pub fn create_deque() -> Value {
-        Value::Sequence(Sequence::Deque(Rc::new(RefCell::new(VecDeque::new()))))
+    pub fn create_deque() -> ndc_vm::value::Value {
+        ndc_vm::value::Value::Object(std::rc::Rc::new(ndc_vm::value::Object::Deque(
+            std::cell::RefCell::new(VecDeque::new()),
+        )))
     }
 
     /// Pushes the `value` to the front of the `deque`.
-    pub fn push_front(deque: &mut VecDeque<Value>, value: Value) {
+    pub fn push_front(deque: &mut VecDeque<ndc_vm::value::Value>, value: ndc_vm::value::Value) {
         deque.push_front(value);
     }
 
     /// Appends the `value` to the end of the `deque`.
-    pub fn push_back(deque: &mut VecDeque<Value>, value: Value) {
+    pub fn push_back(deque: &mut VecDeque<ndc_vm::value::Value>, value: ndc_vm::value::Value) {
         deque.push_back(value);
     }
 
     /// Removes and returns the first element of the `deque`.
-    pub fn pop_front(deque: &mut VecDeque<Value>) -> anyhow::Result<Value> {
+    pub fn pop_front(
+        deque: &mut VecDeque<ndc_vm::value::Value>,
+    ) -> anyhow::Result<ndc_vm::value::Value> {
         deque
             .pop_front()
             .ok_or_else(|| anyhow::anyhow!("the queue is empty"))
     }
 
     /// Removes and returns the first element of the `deque` as an `Option` returning `None` if the queue is empty.
-    #[function(name = "pop_front?", return_type = Option<Value>)]
-    pub fn maybe_pop_front(deque: &mut VecDeque<Value>) -> Value {
-        deque.pop_front().map_or_else(Value::none, Value::some)
+    #[function(name = "pop_front?", return_type = Option<ndc_vm::value::Value>)]
+    pub fn maybe_pop_front(deque: &mut VecDeque<ndc_vm::value::Value>) -> ndc_vm::value::Value {
+        match deque.pop_front() {
+            None => ndc_vm::value::Value::None,
+            Some(val) => {
+                ndc_vm::value::Value::Object(std::rc::Rc::new(ndc_vm::value::Object::Some(val)))
+            }
+        }
     }
 
     /// Removes and returns the last element of the `deque`.
-    pub fn pop_back(deque: &mut VecDeque<Value>) -> anyhow::Result<Value> {
+    pub fn pop_back(
+        deque: &mut VecDeque<ndc_vm::value::Value>,
+    ) -> anyhow::Result<ndc_vm::value::Value> {
         deque
             .pop_back()
             .ok_or_else(|| anyhow::anyhow!("the queue is empty"))
     }
 
     /// Removes and returns the last element of the `deque` as an `Option` returning `None` if the queue is empty.
-    #[function(name = "pop_back?", return_type = Option<Value>)]
-    pub fn maybe_pop_back(deque: &mut VecDeque<Value>) -> Value {
-        deque.pop_back().map_or_else(Value::none, Value::some)
+    #[function(name = "pop_back?", return_type = Option<ndc_vm::value::Value>)]
+    pub fn maybe_pop_back(deque: &mut VecDeque<ndc_vm::value::Value>) -> ndc_vm::value::Value {
+        match deque.pop_back() {
+            None => ndc_vm::value::Value::None,
+            Some(val) => {
+                ndc_vm::value::Value::Object(std::rc::Rc::new(ndc_vm::value::Object::Some(val)))
+            }
+        }
     }
 
     /// Returns (but does not remove) the first element of the `deque`.
-    pub fn front(deque: &VecDeque<Value>) -> anyhow::Result<Value> {
+    pub fn front(deque: &VecDeque<ndc_vm::value::Value>) -> anyhow::Result<ndc_vm::value::Value> {
         deque
             .front()
             .cloned()
@@ -61,13 +73,18 @@ mod inner {
     }
 
     /// Returns (but does not remove) the first element of the `deque` as an `Option` returning `None` if the queue is empty.
-    #[function(name = "front?", return_type = Option<Value>)]
-    pub fn maybe_front(deque: &VecDeque<Value>) -> Value {
-        deque.front().cloned().map_or_else(Value::none, Value::some)
+    #[function(name = "front?", return_type = Option<ndc_vm::value::Value>)]
+    pub fn maybe_front(deque: &VecDeque<ndc_vm::value::Value>) -> ndc_vm::value::Value {
+        match deque.front().cloned() {
+            None => ndc_vm::value::Value::None,
+            Some(val) => {
+                ndc_vm::value::Value::Object(std::rc::Rc::new(ndc_vm::value::Object::Some(val)))
+            }
+        }
     }
 
     /// Returns (but does not remove) the last element of the `deque`.
-    pub fn back(deque: &VecDeque<Value>) -> anyhow::Result<Value> {
+    pub fn back(deque: &VecDeque<ndc_vm::value::Value>) -> anyhow::Result<ndc_vm::value::Value> {
         deque
             .back()
             .cloned()
@@ -75,23 +92,28 @@ mod inner {
     }
 
     /// Returns (but does not remove) the last element of the `deque` as an `Option` returning `None` if the queue is empty.
-    #[function(name = "back?", return_type = Option<Value>)]
-    pub fn maybe_back(deque: &VecDeque<Value>) -> Value {
-        deque.back().cloned().map_or_else(Value::none, Value::some)
+    #[function(name = "back?", return_type = Option<ndc_vm::value::Value>)]
+    pub fn maybe_back(deque: &VecDeque<ndc_vm::value::Value>) -> ndc_vm::value::Value {
+        match deque.back().cloned() {
+            None => ndc_vm::value::Value::None,
+            Some(val) => {
+                ndc_vm::value::Value::Object(std::rc::Rc::new(ndc_vm::value::Object::Some(val)))
+            }
+        }
     }
 
     /// Returns `true` if the `deque` contains the `value` or `false` otherwise.
-    pub fn contains(deque: &VecDeque<Value>, value: &Value) -> bool {
-        deque.contains(value)
+    pub fn contains(deque: &VecDeque<ndc_vm::value::Value>, value: ndc_vm::value::Value) -> bool {
+        deque.contains(&value)
     }
 
     /// Returns `true` if the `deque` is empty and `false` otherwise.
-    pub fn is_empty(deque: &VecDeque<Value>) -> bool {
+    pub fn is_empty(deque: &VecDeque<ndc_vm::value::Value>) -> bool {
         deque.is_empty()
     }
 
     /// Removes all elements from the `deque`
-    pub fn clear(deque: &mut VecDeque<Value>) {
+    pub fn clear(deque: &mut VecDeque<ndc_vm::value::Value>) {
         deque.clear();
     }
 }
