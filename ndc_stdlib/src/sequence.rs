@@ -165,28 +165,24 @@ mod inner {
         }
     }
 
-    /// Sorts the input sequence in place.
-    ///
-    /// This function only works for strings and lists and will throw errors otherwise.
-    pub fn sort(seq: &mut Sequence) -> anyhow::Result<()> {
-        match seq {
-            Sequence::String(str) => {
-                let r = &mut *str.borrow_mut();
-                *r = r.chars().sorted().collect::<String>();
+    /// Sorts the list in place.
+    #[function(return_type = ())]
+    pub fn sort(list: &mut Vec<ndc_vm::value::Value>) -> anyhow::Result<()> {
+        let mut err: Option<String> = None;
+        list.sort_by(|a, b| match a.partial_cmp(b) {
+            Some(ord) => ord,
+            None => {
+                err = Some(format!(
+                    "cannot compare {} and {}",
+                    a.static_type(),
+                    b.static_type()
+                ));
+                Ordering::Equal
             }
-            Sequence::List(list) => {
-                let mut m = list.borrow_mut();
-                try_sort_by(&mut m, Value::try_cmp)?;
-            }
-            Sequence::Tuple(_) => return Err(anyhow!("tuple cannot be sorted in place")),
-            Sequence::Map(_, _) => return Err(anyhow!("map cannot be sorted in place")),
-            Sequence::Iterator(_) => return Err(anyhow!("iterator cannot be sorted in place")),
-            Sequence::MaxHeap(_) | Sequence::MinHeap(_) => {
-                return Err(anyhow!("heap is already sorted"));
-            }
-            Sequence::Deque(_) => return Err(anyhow!("deque cannot be sorted in place")),
+        });
+        if let Some(e) = err {
+            return Err(anyhow::anyhow!(e));
         }
-
         Ok(())
     }
 
