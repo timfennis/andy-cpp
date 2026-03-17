@@ -2,7 +2,7 @@
 mod inner {
     use itertools::Itertools;
     use ndc_interpreter::iterator::mut_seq_to_iterator;
-    use ndc_interpreter::sequence::{ListRepr, Sequence};
+    use ndc_interpreter::sequence::Sequence;
     use ndc_interpreter::value::Value;
     use std::rc::Rc;
 
@@ -72,62 +72,6 @@ mod inner {
     /// Moves elements from `other` to `list` leaving `other` empty
     pub fn append(list: &mut Vec<ndc_vm::value::Value>, other: &mut Vec<ndc_vm::value::Value>) {
         list.append(other);
-    }
-
-    // A price we have to pay for the type system
-    // #[function(name = "++")]
-    // pub fn tup_concat(left: TupleRepr, mut right: TupleRepr) -> Value {
-    //     match Rc::try_unwrap(left) {
-    //         Ok(mut left) => {
-    //             left.append(Rc::make_mut(&mut right));
-    //             Value::tuple(left)
-    //         }
-    //         Err(left) => Value::tuple(
-    //             left.iter()
-    //                 .chain(right.iter())
-    //                 .cloned()
-    //                 .collect::<Vec<Value>>(),
-    //         ),
-    //     }
-    // }
-
-    #[function(name = "++")]
-    pub fn list_concat(left: &mut ListRepr, right: &mut ListRepr) -> Value {
-        if Rc::strong_count(left) == 1 {
-            left.borrow_mut().extend_from_slice(&right.borrow());
-
-            Value::Sequence(Sequence::List(left.clone()))
-        } else {
-            Value::list(
-                left.borrow()
-                    .iter()
-                    .chain(right.borrow().iter())
-                    .cloned()
-                    .collect::<Vec<Value>>(),
-            )
-        }
-    }
-
-    #[function(name = "++=")]
-    pub fn list_append_operator(left: &mut ListRepr, right: &mut ListRepr) {
-        // The ++= operator has 3 implementation paths, this first one is the case where a list extends itself
-        if Rc::ptr_eq(left, right) {
-            left.borrow_mut().extend_from_within(..);
-        } else if Rc::strong_count(right) == 1 {
-            // The second path deals with a RHS that has an RC of one, in this case we can drain the RHS which should be faster than copying?
-            left.borrow_mut().append(
-                &mut right
-                    .try_borrow_mut()
-                    .expect("Failed to borrow_mut in `list_append_operator`"),
-            );
-            // The last path is if the RHS has an RC that's higher than 1, in this case we copy all the elements into the LHS
-        } else {
-            left.borrow_mut().extend_from_slice(
-                &right
-                    .try_borrow()
-                    .expect("Failed to borrow in `list_append_operator`"),
-            );
-        }
     }
 
     /// Copies elements from `other` to `list` not touching `other`.
@@ -240,5 +184,233 @@ mod inner {
                 .map(|(a, b)| Value::tuple(vec![a.clone(), b.clone()]))
                 .collect_vec(),
         )
+    }
+}
+
+pub mod ops {
+    use ndc_interpreter::environment::Environment;
+    use ndc_interpreter::function::{
+        FunctionBody, FunctionBuilder, FunctionCarrier, Parameter, StaticType, TypeSignature,
+    };
+    use ndc_interpreter::sequence::Sequence;
+    use ndc_interpreter::value::Value as InterpValue;
+    use ndc_vm::value::{NativeFunction as VmNativeFunction, Object as VmObject, Value as VmValue};
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    pub fn register(env: &mut Environment) {
+        register_list_concat(env);
+        register_list_append(env);
+    }
+
+    // Interpreter path for `++`: works on ListRepr (Rc<RefCell<Vec<InterpValue>>>) directly.
+    #[deprecated = "interpreter path — remove when tree-walk interpreter is dropped"]
+    fn interp_list_concat(
+        args: &mut [InterpValue],
+        _env: &Rc<RefCell<Environment>>,
+    ) -> Result<InterpValue, FunctionCarrier> {
+        let [left, right] = args else {
+            return Err(anyhow::anyhow!("++ requires 2 arguments").into());
+        };
+        let (left_rc, right_rc) = match (left, right) {
+            (
+                InterpValue::Sequence(Sequence::List(l)),
+                InterpValue::Sequence(Sequence::List(r)),
+            ) => (l.clone(), r.clone()),
+            _ => return Err(anyhow::anyhow!("++ requires list arguments").into()),
+        };
+        if Rc::strong_count(&left_rc) == 1 {
+            left_rc.borrow_mut().extend_from_slice(&right_rc.borrow());
+            Ok(InterpValue::Sequence(Sequence::List(left_rc)))
+        } else {
+            Ok(InterpValue::list(
+                left_rc
+                    .borrow()
+                    .iter()
+                    .chain(right_rc.borrow().iter())
+                    .cloned()
+                    .collect::<Vec<InterpValue>>(),
+            ))
+        }
+    }
+
+    // Interpreter path for `++=`: works on ListRepr directly, handles self-alias correctly.
+    #[deprecated = "interpreter path — remove when tree-walk interpreter is dropped"]
+    fn interp_list_append(
+        args: &mut [InterpValue],
+        _env: &Rc<RefCell<Environment>>,
+    ) -> Result<InterpValue, FunctionCarrier> {
+        let [left, right] = args else {
+            return Err(anyhow::anyhow!("++=  requires 2 arguments").into());
+        };
+        let (left_rc, right_rc) = match (left, right) {
+            (
+                InterpValue::Sequence(Sequence::List(l)),
+                InterpValue::Sequence(Sequence::List(r)),
+            ) => (l.clone(), r.clone()),
+            _ => return Err(anyhow::anyhow!("++= requires list arguments").into()),
+        };
+        if Rc::ptr_eq(&left_rc, &right_rc) {
+            left_rc.borrow_mut().extend_from_within(..);
+        } else if Rc::strong_count(&right_rc) == 1 {
+            left_rc.borrow_mut().append(
+                &mut right_rc
+                    .try_borrow_mut()
+                    .expect("Failed to borrow_mut in `++=`"),
+            );
+        } else {
+            left_rc.borrow_mut().extend_from_slice(&right_rc.borrow());
+        }
+        Ok(InterpValue::unit())
+    }
+
+    fn register_list_concat(env: &mut Environment) {
+        let native = Rc::new(VmNativeFunction {
+            name: "++".to_string(),
+            static_type: StaticType::Function {
+                parameters: Some(vec![
+                    StaticType::List(Box::new(StaticType::Any)),
+                    StaticType::List(Box::new(StaticType::Any)),
+                ]),
+                return_type: Box::new(StaticType::List(Box::new(StaticType::Any))),
+            },
+            func: Box::new(|args| {
+                let [left, right] = args else {
+                    return Err(format!(
+                        "++ requires exactly 2 arguments, got {}",
+                        args.len()
+                    ));
+                };
+                let VmValue::Object(left_obj) = left else {
+                    return Err(format!(
+                        "++ left requires a list, got {}",
+                        left.static_type()
+                    ));
+                };
+                let VmValue::Object(right_obj) = right else {
+                    return Err(format!(
+                        "++ right requires a list, got {}",
+                        right.static_type()
+                    ));
+                };
+                let VmObject::List(left_cell) = left_obj.as_ref() else {
+                    return Err(format!(
+                        "++ left requires a list, got {}",
+                        left.static_type()
+                    ));
+                };
+                let VmObject::List(right_cell) = right_obj.as_ref() else {
+                    return Err(format!(
+                        "++ right requires a list, got {}",
+                        right.static_type()
+                    ));
+                };
+
+                if Rc::strong_count(left_obj) == 1 {
+                    left_cell
+                        .borrow_mut()
+                        .extend_from_slice(&right_cell.borrow());
+                    Ok(VmValue::Object(left_obj.clone()))
+                } else {
+                    let new_list: Vec<VmValue> = left_cell
+                        .borrow()
+                        .iter()
+                        .chain(right_cell.borrow().iter())
+                        .cloned()
+                        .collect();
+                    Ok(VmValue::Object(Rc::new(VmObject::list(new_list))))
+                }
+            }),
+        });
+        env.declare_global_fn(
+            FunctionBuilder::default()
+                .name("++".to_string())
+                .body(FunctionBody::GenericFunction {
+                    function: interp_list_concat,
+                    type_signature: TypeSignature::Exact(vec![
+                        Parameter::new("left", StaticType::List(Box::new(StaticType::Any))),
+                        Parameter::new("right", StaticType::List(Box::new(StaticType::Any))),
+                    ]),
+                    return_type: StaticType::List(Box::new(StaticType::Any)),
+                })
+                .vm_native(native)
+                .build()
+                .expect("must succeed"),
+        );
+    }
+
+    fn register_list_append(env: &mut Environment) {
+        let native = Rc::new(VmNativeFunction {
+            name: "++=".to_string(),
+            static_type: StaticType::Function {
+                parameters: Some(vec![
+                    StaticType::List(Box::new(StaticType::Any)),
+                    StaticType::List(Box::new(StaticType::Any)),
+                ]),
+                return_type: Box::new(StaticType::Tuple(vec![])),
+            },
+            func: Box::new(|args| {
+                let [left, right] = args else {
+                    return Err(format!(
+                        "++= requires exactly 2 arguments, got {}",
+                        args.len()
+                    ));
+                };
+                let VmValue::Object(left_obj) = left else {
+                    return Err(format!(
+                        "++= left requires a list, got {}",
+                        left.static_type()
+                    ));
+                };
+                let VmValue::Object(right_obj) = right else {
+                    return Err(format!(
+                        "++= right requires a list, got {}",
+                        right.static_type()
+                    ));
+                };
+                let VmObject::List(left_cell) = left_obj.as_ref() else {
+                    return Err(format!(
+                        "++= left requires a list, got {}",
+                        left.static_type()
+                    ));
+                };
+                let VmObject::List(right_cell) = right_obj.as_ref() else {
+                    return Err(format!(
+                        "++= right requires a list, got {}",
+                        right.static_type()
+                    ));
+                };
+
+                if Rc::ptr_eq(left_obj, right_obj) {
+                    left_cell.borrow_mut().extend_from_within(..);
+                } else if Rc::strong_count(right_obj) == 1 {
+                    left_cell.borrow_mut().append(
+                        &mut right_cell
+                            .try_borrow_mut()
+                            .expect("Failed to borrow_mut right in `++=`"),
+                    );
+                } else {
+                    left_cell
+                        .borrow_mut()
+                        .extend_from_slice(&right_cell.borrow());
+                }
+                Ok(VmValue::unit())
+            }),
+        });
+        env.declare_global_fn(
+            FunctionBuilder::default()
+                .name("++=".to_string())
+                .body(FunctionBody::GenericFunction {
+                    function: interp_list_append,
+                    type_signature: TypeSignature::Exact(vec![
+                        Parameter::new("left", StaticType::List(Box::new(StaticType::Any))),
+                        Parameter::new("right", StaticType::List(Box::new(StaticType::Any))),
+                    ]),
+                    return_type: StaticType::Tuple(vec![]),
+                })
+                .vm_native(native)
+                .build()
+                .expect("must succeed"),
+        );
     }
 }

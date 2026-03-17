@@ -70,13 +70,17 @@ mod inner {
     }
 
     /// Returns true if the argument is Some<T>
-    pub fn is_some(value: &Value) -> bool {
-        matches!(value, Value::Option(Some(_)))
+    pub fn is_some(value: ndc_vm::value::Value) -> bool {
+        matches!(
+            value,
+            ndc_vm::value::Value::Object(ref obj)
+                if matches!(obj.as_ref(), ndc_vm::value::Object::Some(_))
+        )
     }
 
     /// Returns true if the argument is None
-    pub fn is_none(value: &Value) -> bool {
-        matches!(value, Value::Option(None))
+    pub fn is_none(value: ndc_vm::value::Value) -> bool {
+        matches!(value, ndc_vm::value::Value::None)
     }
 
     /// Extracts the value from an Option or errors if it's either None or a non-Option type

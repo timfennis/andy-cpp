@@ -34,6 +34,7 @@ pub fn register(env: &mut Environment) {
     hash_map::register(env);
     heap::register(env);
     index::register(env);
+    list::ops::register(env);
     list::register(env);
     math::f64::register(env);
     math::register(env);
