@@ -22,7 +22,7 @@ pub enum Value {
     Float(f64),
     Bool(bool),
     None,
-    Object(Box<Object>),
+    Object(Rc<Object>),
 }
 
 #[derive(Clone)]
@@ -31,19 +31,21 @@ pub enum Object {
     BigInt(num::BigInt),
     Complex(num::Complex<f64>),
     Rational(num::BigRational),
+    // String keeps its inner Rc<RefCell<String>> so the vm_bridge can share the
+    // allocation directly with the interpreter side without a separate sync step.
     String(Rc<RefCell<String>>),
-    List(Rc<RefCell<Vec<Value>>>),
+    List(RefCell<Vec<Value>>),
     Tuple(Vec<Value>),
     Map {
-        entries: Rc<RefCell<HashMap<Value, Value>>>,
-        default: Option<Box<Value>>,
+        entries: RefCell<HashMap<Value, Value>>,
+        default: Option<Value>,
     },
     Function(Function),
     OverloadSet(Vec<ResolvedVar>),
     Iterator(SharedIterator),
-    Deque(Rc<RefCell<VecDeque<Value>>>),
-    MinHeap(Rc<RefCell<BinaryHeap<Reverse<OrdValue>>>>),
-    MaxHeap(Rc<RefCell<BinaryHeap<OrdValue>>>),
+    Deque(RefCell<VecDeque<Value>>),
+    MinHeap(RefCell<BinaryHeap<Reverse<OrdValue>>>),
+    MaxHeap(RefCell<BinaryHeap<OrdValue>>),
 }
 
 /// Newtype wrapper around `Value` that imposes a total order so values can be
@@ -112,21 +114,21 @@ impl CompiledFunction {
 
 impl Value {
     pub fn unit() -> Self {
-        Self::Object(Box::new(Object::Tuple(vec![])))
+        Self::Object(Rc::new(Object::Tuple(vec![])))
     }
 
     pub fn function(function: Function) -> Self {
-        Self::Object(Box::new(Object::Function(function)))
+        Self::Object(Rc::new(Object::Function(function)))
     }
 
     pub fn string<S: Into<String>>(string: S) -> Self {
-        Self::Object(Box::new(Object::String(Rc::new(RefCell::new(
+        Self::Object(Rc::new(Object::String(Rc::new(RefCell::new(
             string.into(),
         )))))
     }
 
     pub fn iterator(iter: SharedIterator) -> Self {
-        Self::Object(Box::new(Object::Iterator(iter)))
+        Self::Object(Rc::new(Object::Iterator(iter)))
     }
 
     pub fn static_type(&self) -> StaticType {
@@ -142,13 +144,13 @@ impl Value {
 
 impl Object {
     pub fn list(values: Vec<Value>) -> Self {
-        Self::List(Rc::new(RefCell::new(values)))
+        Self::List(RefCell::new(values))
     }
 
     pub fn map(entries: HashMap<Value, Value>, default: Option<Value>) -> Self {
         Self::Map {
-            entries: Rc::new(RefCell::new(entries)),
-            default: default.map(Box::new),
+            entries: RefCell::new(entries),
+            default,
         }
     }
 
@@ -193,10 +195,10 @@ impl Value {
     pub fn from_number(n: Number) -> Self {
         match n {
             Number::Int(Int::Int64(i)) => Value::Int(i),
-            Number::Int(Int::BigInt(b)) => Value::Object(Box::new(Object::BigInt(b))),
+            Number::Int(Int::BigInt(b)) => Value::Object(Rc::new(Object::BigInt(b))),
             Number::Float(f) => Value::Float(f),
-            Number::Rational(r) => Value::Object(Box::new(Object::Rational(*r))),
-            Number::Complex(c) => Value::Object(Box::new(Object::Complex(c))),
+            Number::Rational(r) => Value::Object(Rc::new(Object::Rational(*r))),
+            Number::Complex(c) => Value::Object(Rc::new(Object::Complex(c))),
         }
     }
 
@@ -217,7 +219,7 @@ impl Value {
     pub fn from_int(i: Int) -> Self {
         match i {
             Int::Int64(n) => Value::Int(n),
-            Int::BigInt(b) => Value::Object(Box::new(Object::BigInt(b))),
+            Int::BigInt(b) => Value::Object(Rc::new(Object::BigInt(b))),
         }
     }
 
@@ -296,7 +298,7 @@ impl Function {
 
 impl From<Object> for Value {
     fn from(value: Object) -> Self {
-        Self::Object(Box::new(value))
+        Self::Object(Rc::new(value))
     }
 }
 
@@ -576,9 +578,11 @@ impl PartialEq for Object {
                 std::ptr::addr_eq(Rc::as_ptr(a), Rc::as_ptr(b))
             }
             (Self::Deque(a), Self::Deque(b)) => a.borrow().eq(&*b.borrow()),
-            // Heaps: pointer identity (no meaningful value equality)
-            (Self::MinHeap(a), Self::MinHeap(b)) => Rc::ptr_eq(a, b),
-            (Self::MaxHeap(a), Self::MaxHeap(b)) => Rc::ptr_eq(a, b),
+            // Heaps: pointer identity (no meaningful value equality).
+            // The RefCell lives inside the Rc<Object> allocation, so comparing its
+            // address is equivalent to comparing the outer Rc pointers.
+            (Self::MinHeap(a), Self::MinHeap(b)) => std::ptr::eq(a, b),
+            (Self::MaxHeap(a), Self::MaxHeap(b)) => std::ptr::eq(a, b),
             _ => false,
         }
     }
@@ -675,11 +679,13 @@ impl Hash for Object {
             }
             Self::MinHeap(h) => {
                 state.write_u8(13);
-                Rc::as_ptr(h).hash(state);
+                // Hash by address: the RefCell lives inside the Rc<Object> allocation,
+                // so this is equivalent to hashing the outer Rc pointer.
+                (h as *const RefCell<BinaryHeap<Reverse<OrdValue>>>).hash(state);
             }
             Self::MaxHeap(h) => {
                 state.write_u8(14);
-                Rc::as_ptr(h).hash(state);
+                (h as *const RefCell<BinaryHeap<OrdValue>>).hash(state);
             }
         }
     }

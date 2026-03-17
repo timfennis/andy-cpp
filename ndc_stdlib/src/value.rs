@@ -60,7 +60,7 @@ mod inner {
     /// Creates a new instance of `Some`
     #[function(name = "Some", return_type = Option<Value>)]
     pub fn some(value: ndc_vm::value::Value) -> ndc_vm::value::Value {
-        VmValue::Object(Box::new(VmObject::Some(value)))
+        VmValue::Object(Rc::new(VmObject::Some(value)))
     }
 
     /// Creates a new instance of `None`
@@ -82,8 +82,8 @@ mod inner {
     /// Extracts the value from an Option or errors if it's either None or a non-Option type
     pub fn unwrap(value: ndc_vm::value::Value) -> anyhow::Result<ndc_vm::value::Value> {
         match value {
-            VmValue::Object(obj) => match *obj {
-                VmObject::Some(inner) => Ok(inner),
+            VmValue::Object(obj) => match obj.as_ref() {
+                VmObject::Some(inner) => Ok(inner.clone()),
                 _ => Err(anyhow::anyhow!("incorrect argument to unwrap")),
             },
             VmValue::None => Err(anyhow::anyhow!("option was none")),

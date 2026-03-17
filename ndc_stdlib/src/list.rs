@@ -146,7 +146,7 @@ mod inner {
     pub fn maybe_pop(list: &mut Vec<ndc_vm::value::Value>) -> ndc_vm::value::Value {
         match list.pop() {
             None => ndc_vm::value::Value::None,
-            Some(val) => ndc_vm::value::Value::Object(Box::new(ndc_vm::value::Object::Some(val))),
+            Some(val) => ndc_vm::value::Value::Object(Rc::new(ndc_vm::value::Object::Some(val))),
         }
     }
 
@@ -159,7 +159,7 @@ mod inner {
         if list.is_empty() {
             return ndc_vm::value::Value::None;
         }
-        ndc_vm::value::Value::Object(Box::new(ndc_vm::value::Object::Some(list.remove(0))))
+        ndc_vm::value::Value::Object(Rc::new(ndc_vm::value::Object::Some(list.remove(0))))
     }
 
     pub fn pop_left(list: &mut Vec<ndc_vm::value::Value>) -> ndc_vm::value::Value {
@@ -194,7 +194,7 @@ mod inner {
             return Err(anyhow!("index {index} is out of bounds"));
         }
 
-        Ok(ndc_vm::value::Value::Object(Box::new(
+        Ok(ndc_vm::value::Value::Object(Rc::new(
             ndc_vm::value::Object::list(list.split_off(index)),
         )))
     }
