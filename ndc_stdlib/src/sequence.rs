@@ -232,14 +232,14 @@ mod inner {
     }
 
     /// Returns the length of a string in bytes.
-    pub fn byte_len(str: &str) -> usize {
-        str.len()
+    pub fn byte_len(str: &str) -> i64 {
+        str.len() as i64
     }
 
     /// Returns the length of the sequence, for strings this returns the number of UTF-8 characters.
-    pub fn len(seq: &Sequence) -> anyhow::Result<usize> {
+    pub fn len(seq: &Sequence) -> anyhow::Result<i64> {
         match seq.length() {
-            Some(n) => Ok(n),
+            Some(n) => Ok(n as i64),
             None => Err(anyhow!(
                 "cannot determine the length of {}",
                 seq.static_type()
@@ -515,7 +515,8 @@ mod inner {
 
     /// Returns the `k` sized combinations of the given sequence `seq` as a list of tuples.
     #[function(return_type = Vec<_>)]
-    pub fn combinations(seq: &mut Sequence, k: usize) -> Value {
+    pub fn combinations(seq: &mut Sequence, k: i64) -> Value {
+        let k = k as usize;
         Value::list(
             mut_seq_to_iterator(seq)
                 .combinations(k)
@@ -526,7 +527,8 @@ mod inner {
 
     /// Returns the `k` sized permutations of the given sequence `seq` as a list of tuples.
     #[function(return_type = Vec<_>)]
-    pub fn permutations(seq: &mut Sequence, k: usize) -> Value {
+    pub fn permutations(seq: &mut Sequence, k: i64) -> Value {
+        let k = k as usize;
         Value::list(
             mut_seq_to_iterator(seq)
                 .permutations(k)
@@ -655,7 +657,8 @@ mod inner {
 
     /// Returns a list of all contiguous windows of `length` size. The windows overlap. If the `seq` is shorter than size, the iterator returns no values.
     #[function(return_type = Vec<Vec<Value>>)]
-    pub fn windows(seq: &mut Sequence, length: usize) -> Value {
+    pub fn windows(seq: &mut Sequence, length: i64) -> Value {
+        let length = length as usize;
         Value::list(
             mut_seq_to_iterator(seq)
                 .collect::<Vec<Value>>()
@@ -682,7 +685,8 @@ mod inner {
     /// Return a list that represents the powerset of the elements of `seq` that are exactly `length` long.
     #[function(name = "subsequences")]
     #[function(return_type = Vec<Vec<Value>>)]
-    pub fn subsequences_len(seq: &mut Sequence, length: usize) -> Value {
+    pub fn subsequences_len(seq: &mut Sequence, length: i64) -> Value {
+        let length = length as usize;
         Value::list(
             mut_seq_to_iterator(seq)
                 .powerset()

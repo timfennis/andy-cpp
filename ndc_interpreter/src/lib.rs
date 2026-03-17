@@ -8,7 +8,7 @@ pub mod iterator;
 pub mod semantic;
 pub mod sequence;
 pub mod value;
-mod vm_bridge;
+pub mod vm_bridge;
 
 use crate::environment::{Environment, InterpreterOutput};
 use crate::evaluate::{EvaluationError, evaluate_expression};

@@ -16,7 +16,7 @@ use std::rc::Rc;
 
 /// Enumerates all the different types of values that exist in the language
 /// All values should be pretty cheap to clone because the bigger ones are wrapped using Rc's
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub enum Value {
     Int(i64),
     Float(f64),
@@ -336,7 +336,8 @@ impl fmt::Display for Object {
             Self::BigInt(n) => write!(f, "{n}"),
             Self::Complex(c) => write!(f, "{c}"),
             Self::Rational(r) => write!(f, "{r}"),
-            Self::String(s) => write!(f, "\"{}\"", s.borrow()),
+            // Strings display without quotes at the top level.
+            Self::String(s) => write!(f, "{}", s.borrow()),
             Self::List(vs) => {
                 let vs = vs.borrow();
                 write!(f, "[")?;
@@ -344,17 +345,20 @@ impl fmt::Display for Object {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
-                    write!(f, "{v}")?;
+                    // Use Debug (repr) for elements so strings appear quoted inside lists.
+                    write!(f, "{v:?}")?;
                 }
                 write!(f, "]")
             }
+            // Empty tuple is the unit value — prints as nothing, matching the interpreter.
+            Self::Tuple(vs) if vs.is_empty() => Ok(()),
             Self::Tuple(vs) => {
                 write!(f, "(")?;
                 for (i, v) in vs.iter().enumerate() {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
-                    write!(f, "{v}")?;
+                    write!(f, "{v:?}")?;
                 }
                 write!(f, ")")
             }
@@ -365,7 +369,7 @@ impl fmt::Display for Object {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
-                    write!(f, "{k}: {v}")?;
+                    write!(f, "{k:?}: {v:?}")?;
                 }
                 write!(f, "}}")
             }
@@ -382,6 +386,19 @@ impl fmt::Display for Object {
     }
 }
 
+impl fmt::Debug for Value {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            // Strings in repr/debug context are quoted.
+            Self::Object(obj) if matches!(obj.as_ref(), Object::String(_)) => {
+                write!(f, "{obj:?}")
+            }
+            // Everything else uses Display.
+            _ => write!(f, "{self}"),
+        }
+    }
+}
+
 impl fmt::Debug for Object {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
@@ -389,7 +406,8 @@ impl fmt::Debug for Object {
             Self::BigInt(n) => f.debug_tuple("BigInt").field(n).finish(),
             Self::Complex(c) => f.debug_tuple("Complex").field(c).finish(),
             Self::Rational(r) => f.debug_tuple("Rational").field(r).finish(),
-            Self::String(s) => f.debug_tuple("String").field(&s.borrow()).finish(),
+            // Strings in debug/repr context are shown quoted.
+            Self::String(s) => write!(f, "\"{}\"", s.borrow()),
             Self::List(vs) => f.debug_tuple("List").field(&vs.borrow()).finish(),
             Self::Tuple(vs) => f.debug_tuple("Tuple").field(vs).finish(),
             Self::Map { entries, default } => f

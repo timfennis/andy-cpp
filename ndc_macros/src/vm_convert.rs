@@ -4,7 +4,11 @@
 //! without the interpreter bridge, causing `export_module` to silently skip
 //! vm_native generation for that function.
 
-use crate::r#match::{is_ref, is_ref_mut, is_str_ref, path_ends_with};
+use crate::r#match::{
+    is_ndc_vm_value, is_ref, is_ref_mut, is_ref_mut_of_vec_of_ndc_vm_value,
+    is_ref_of_slice_of_ndc_vm_value, is_ref_of_slice_of_value, is_str_ref, is_string,
+    path_ends_with,
+};
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
@@ -20,8 +24,9 @@ pub struct VmInputArg {
 
 /// Try to generate extraction code for a single parameter type.
 ///
-/// Supported: `Number`, `&Number`, `f64`, `bool`, `&str`, `String`, `i64`.
-/// Returns `None` for everything else (Sequence, BigInt, Value, …).
+/// Supported: `Number`, `&Number`, `f64`, `bool`, `&str`, `String`, `i64`,
+/// `&Value`, `&mut String`, `StringRepr`, `&mut StringRepr`, `&mut Sequence`.
+/// Returns `None` for everything else (BigInt, owned Sequence, …).
 pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
     let raw = format_ident!("vm_raw{position}");
     let temp = format_ident!("vm_temp{position}");
@@ -104,6 +109,216 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
         });
     }
 
+    if path_ends_with(ty, "usize") {
+        return Some(VmInputArg {
+            extract: quote! {
+                let #temp = match #raw {
+                    ndc_vm::value::Value::Int(i) => *i as usize,
+                    _ => return Err(format!("arg {}: expected int, got {}", #position, #raw.static_type())),
+                };
+            },
+            pass: quote! { #temp },
+            static_type: quote! { ndc_interpreter::function::StaticType::Int },
+        });
+    }
+
+    // &Value — convert any VmValue to an interpreter Value on the fly.
+    if path_ends_with(ty, "Value") && is_ref(ty) {
+        return Some(VmInputArg {
+            extract: quote! {
+                let #temp = ndc_interpreter::vm_bridge::vm_to_interp(#raw);
+            },
+            pass: quote! { &#temp },
+            static_type: quote! { ndc_interpreter::function::StaticType::Any },
+        });
+    }
+
+    // &mut String — mutate the inner String through the Rc<RefCell<String>> stored in
+    // Object::String. Interior mutability means the original VmValue sees the change.
+    if is_ref_mut(ty) && is_string(ty) {
+        let rc_ident = format_ident!("{temp}_rc");
+        let guard_ident = format_ident!("{temp}_guard");
+        return Some(VmInputArg {
+            extract: quote! {
+                let ndc_vm::value::Value::Object(ref #rc_ident) = *#raw else {
+                    return Err(format!("arg {}: expected string, got {}", #position, #raw.static_type()));
+                };
+                let ndc_vm::value::Object::String(ref #rc_ident) = *#rc_ident.as_ref() else {
+                    return Err(format!("arg {}: expected string, got {}", #position, #raw.static_type()));
+                };
+                let mut #guard_ident = #rc_ident.borrow_mut();
+            },
+            pass: quote! { &mut *#guard_ident },
+            static_type: quote! { ndc_interpreter::function::StaticType::String },
+        });
+    }
+
+    // StringRepr (&Rc<RefCell<String>>) / &mut StringRepr — clone the Rc so both
+    // the VM value and the Rc local point at the same allocation. Any interior
+    // mutation (via borrow_mut) is immediately visible through the original VmValue.
+    if path_ends_with(ty, "StringRepr") {
+        let obj_ident = format_ident!("{temp}_obj");
+        let inner_ident = format_ident!("{temp}_inner");
+        let pass = if is_ref_mut(ty) {
+            quote! { &mut #temp }
+        } else {
+            quote! { &#temp }
+        };
+        return Some(VmInputArg {
+            extract: quote! {
+                let ndc_vm::value::Value::Object(ref #obj_ident) = *#raw else {
+                    return Err(format!("arg {}: expected string, got {}", #position, #raw.static_type()));
+                };
+                let ndc_vm::value::Object::String(ref #inner_ident) = *#obj_ident.as_ref() else {
+                    return Err(format!("arg {}: expected string, got {}", #position, #raw.static_type()));
+                };
+                let mut #temp = #inner_ident.clone();
+            },
+            pass,
+            static_type: quote! { ndc_interpreter::function::StaticType::String },
+        });
+    }
+
+    // &mut Sequence — convert VmValue to an interpreter Sequence. Functions that take
+    // &mut Sequence here only iterate (join, unlines, …) and do not mutate back, so
+    // no sync step is needed.
+    if path_ends_with(ty, "Sequence") && is_ref_mut(ty) {
+        let interp_ident = format_ident!("{temp}_interp");
+        return Some(VmInputArg {
+            extract: quote! {
+                let #interp_ident = ndc_interpreter::vm_bridge::vm_to_interp(#raw);
+                let ndc_interpreter::value::Value::Sequence(mut #temp) = #interp_ident else {
+                    return Err(format!("arg {}: expected sequence, got {}", #position, #raw.static_type()));
+                };
+            },
+            pass: quote! { &mut #temp },
+            static_type: quote! {
+                ndc_interpreter::function::StaticType::Sequence(Box::new(
+                    ndc_interpreter::function::StaticType::Any
+                ))
+            },
+        });
+    }
+
+    // &Sequence (immutable) — same conversion as &mut Sequence but passed as a shared ref.
+    if path_ends_with(ty, "Sequence") && is_ref(ty) {
+        let interp_ident = format_ident!("{temp}_interp");
+        return Some(VmInputArg {
+            extract: quote! {
+                let #interp_ident = ndc_interpreter::vm_bridge::vm_to_interp(#raw);
+                let ndc_interpreter::value::Value::Sequence(#temp) = #interp_ident else {
+                    return Err(format!("arg {}: expected sequence, got {}", #position, #raw.static_type()));
+                };
+            },
+            pass: quote! { &#temp },
+            static_type: quote! {
+                ndc_interpreter::function::StaticType::Sequence(Box::new(
+                    ndc_interpreter::function::StaticType::Any
+                ))
+            },
+        });
+    }
+
+    // &mut Vec<ndc_vm::value::Value> — mutate the inner list via Rc<RefCell<Vec<VmValue>>>.
+    // Interior mutability means the original VmValue sees changes immediately; no external
+    // sync step is needed on the VM path.
+    if is_ref_mut_of_vec_of_ndc_vm_value(ty) {
+        let rc_ident = format_ident!("{temp}_rc");
+        let guard_ident = format_ident!("{temp}_guard");
+        return Some(VmInputArg {
+            extract: quote! {
+                let ndc_vm::value::Value::Object(ref #rc_ident) = *#raw else {
+                    return Err(format!("arg {}: expected list, got {}", #position, #raw.static_type()));
+                };
+                let ndc_vm::value::Object::List(ref #rc_ident) = *#rc_ident.as_ref() else {
+                    return Err(format!("arg {}: expected list, got {}", #position, #raw.static_type()));
+                };
+                let mut #guard_ident = #rc_ident.borrow_mut();
+            },
+            pass: quote! { &mut *#guard_ident },
+            static_type: quote! {
+                ndc_interpreter::function::StaticType::List(Box::new(
+                    ndc_interpreter::function::StaticType::Any
+                ))
+            },
+        });
+    }
+
+    // ndc_vm::value::Value — pass through directly (zero conversion on the VM path).
+    // The interpreter path uses call_vm_native which handles the interp→vm conversion.
+    // Only matches the fully-qualified path ndc_vm::value::Value.
+    if is_ndc_vm_value(ty) {
+        return Some(VmInputArg {
+            extract: quote! {},
+            pass: quote! { #raw.clone() },
+            static_type: quote! { ndc_interpreter::function::StaticType::Any },
+        });
+    }
+
+    // &[ndc_vm::value::Value] — pass a borrow of the inner Vec directly, zero conversion.
+    // Must come before the &[Value] check because is_ref_of_slice_of_value also matches this type.
+    if is_ref_of_slice_of_ndc_vm_value(ty) {
+        let vec_ident = format_ident!("{temp}_vec");
+        return Some(VmInputArg {
+            extract: quote! {
+                let #vec_ident: Vec<ndc_vm::value::Value> = match #raw {
+                    ndc_vm::value::Value::Object(obj) => match obj.as_ref() {
+                        ndc_vm::value::Object::List(list) => list.borrow().clone(),
+                        ndc_vm::value::Object::Tuple(tuple) => tuple.clone(),
+                        _ => return Err(format!(
+                            "arg {}: expected list, got {}",
+                            #position, #raw.static_type()
+                        )),
+                    },
+                    _ => return Err(format!(
+                        "arg {}: expected list, got {}",
+                        #position, #raw.static_type()
+                    )),
+                };
+            },
+            pass: quote! { &#vec_ident },
+            static_type: quote! {
+                ndc_interpreter::function::StaticType::List(Box::new(
+                    ndc_interpreter::function::StaticType::Any
+                ))
+            },
+        });
+    }
+
+    // &[Value] — convert a VM list or tuple to a Vec of interpreter Values and pass as a slice.
+    // Read-only; no mutation sync needed.
+    if is_ref_of_slice_of_value(ty) {
+        let vec_ident = format_ident!("{temp}_vec");
+        return Some(VmInputArg {
+            extract: quote! {
+                let #vec_ident: Vec<ndc_interpreter::value::Value> = match #raw {
+                    ndc_vm::value::Value::Object(obj) => match obj.as_ref() {
+                        ndc_vm::value::Object::List(list) => {
+                            list.borrow().iter().map(ndc_interpreter::vm_bridge::vm_to_interp).collect()
+                        }
+                        ndc_vm::value::Object::Tuple(tuple) => {
+                            tuple.iter().map(ndc_interpreter::vm_bridge::vm_to_interp).collect()
+                        }
+                        _ => return Err(format!(
+                            "arg {}: expected list, got {}",
+                            #position, #raw.static_type()
+                        )),
+                    },
+                    _ => return Err(format!(
+                        "arg {}: expected list, got {}",
+                        #position, #raw.static_type()
+                    )),
+                };
+            },
+            pass: quote! { &#vec_ident },
+            static_type: quote! {
+                ndc_interpreter::function::StaticType::List(Box::new(
+                    ndc_interpreter::function::StaticType::Any
+                ))
+            },
+        });
+    }
+
     None
 }
 
@@ -124,6 +339,14 @@ pub fn try_vm_return(output: &syn::ReturnType) -> Option<(TokenStream, TokenStre
 }
 
 fn try_vm_return_type(ty: &syn::Type) -> Option<(TokenStream, TokenStream)> {
+    // ndc_vm::value::Value — already a VmValue, return as-is.
+    if is_ndc_vm_value(ty) {
+        return Some((
+            quote! { Ok(result) },
+            quote! { ndc_interpreter::function::StaticType::Any },
+        ));
+    }
+
     if path_ends_with(ty, "Number") {
         return Some((
             quote! { Ok(ndc_vm::value::Value::from_number(result)) },
@@ -161,6 +384,21 @@ fn try_vm_return_type(ty: &syn::Type) -> Option<(TokenStream, TokenStream)> {
             quote! { ndc_interpreter::function::StaticType::Int },
         ));
     }
+    if path_ends_with(ty, "usize") {
+        return Some((
+            quote! { Ok(ndc_vm::value::Value::Int(result as i64)) },
+            quote! { ndc_interpreter::function::StaticType::Int },
+        ));
+    }
+
+    // Value (interpreter type) — convert to VmValue via interp_to_vm.
+    // Handles functions like paragraphs/lines/words/split that build and return a Value.
+    if path_ends_with(ty, "Value") {
+        return Some((
+            quote! { Ok(ndc_interpreter::vm_bridge::interp_to_vm(result)) },
+            quote! { ndc_interpreter::function::StaticType::Any },
+        ));
+    }
 
     // Result<T, _> or anyhow::Result<T> — unwrap the Ok type and recurse
     if path_ends_with(ty, "Result") {
@@ -195,6 +433,13 @@ fn try_vm_return_inner(ty: &syn::Type) -> Option<(TokenStream, TokenStream)> {
                 quote! { ndc_interpreter::function::StaticType::Tuple(vec![]) },
             ));
         }
+    }
+    // ndc_vm::value::Value inside Result<ndc_vm::value::Value> — pass through.
+    if is_ndc_vm_value(ty) {
+        return Some((
+            quote! { Ok(result) },
+            quote! { ndc_interpreter::function::StaticType::Any },
+        ));
     }
     try_vm_return_type(ty)
 }
