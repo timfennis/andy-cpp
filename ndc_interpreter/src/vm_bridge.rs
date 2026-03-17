@@ -6,6 +6,7 @@ use std::rc::Rc;
 
 use ndc_core::int::Int;
 use ndc_core::num::Number;
+use ndc_vm::VmError;
 use ndc_vm::VmIterator;
 use ndc_vm::value::{
     Function as VmFunction, NativeFunction, Object as VmObject, OrdValue, Value as VmValue,
@@ -82,7 +83,7 @@ fn wrap_function(
 ) -> VmValue {
     let name = func.name().to_string();
     let static_type = func.static_type();
-    let native = move |args: &[VmValue]| -> Result<VmValue, String> {
+    let native = move |args: &[VmValue], _globals: &[VmValue]| -> Result<VmValue, VmError> {
         let globals = Rc::new(globals_cell.borrow().clone());
         // Convert VM args to interpreter args, preserving Rc identity for heap/deque
         // values that appear more than once (so pointer-equality comparisons like `h == h` work).
@@ -112,8 +113,10 @@ fn wrap_function(
                 }
                 Ok(interp_to_vm(result))
             }
-            Err(FunctionCarrier::IntoEvaluationError(e)) => return Err(e.to_string()),
-            Err(e) => return Err(e.to_string()),
+            Err(FunctionCarrier::IntoEvaluationError(e)) => {
+                return Err(VmError::native(e.to_string()));
+            }
+            Err(e) => return Err(VmError::native(e.to_string())),
         }
     };
     VmValue::Object(Rc::new(VmObject::Function(VmFunction::Native(Rc::new(
@@ -363,12 +366,12 @@ fn interp_to_vm_for_inverted_bridge(value: &InterpValue) -> VmValue {
         let callback = Rc::new(NativeFunction {
             name,
             static_type,
-            func: Box::new(move |vm_args: &[VmValue]| {
+            func: Box::new(move |vm_args: &[VmValue], _globals: &[VmValue]| {
                 let mut interp_args: Vec<InterpValue> = vm_args.iter().map(vm_to_interp).collect();
                 let dummy_env = Rc::new(RefCell::new(Environment::new(Box::new(Vec::<u8>::new()))));
                 f.call(&mut interp_args, &dummy_env)
                     .map(|v| interp_to_vm(v))
-                    .map_err(|e| e.to_string())
+                    .map_err(|e| VmError::native(e.to_string()))
             }),
         });
         return VmValue::Object(Rc::new(VmObject::Function(VmFunction::Native(callback))));
@@ -408,8 +411,8 @@ pub(crate) fn call_vm_native(
     let vm_args: Vec<VmValue> = args.iter().map(interp_to_vm_for_inverted_bridge).collect();
 
     // 2. Call the vm_native closure
-    let vm_result = (native.func)(&vm_args)
-        .map_err(|e| FunctionCarrier::IntoEvaluationError(Box::new(anyhow::anyhow!(e))))?;
+    let vm_result = (native.func)(&vm_args, &[])
+        .map_err(|e| FunctionCarrier::IntoEvaluationError(Box::new(anyhow::anyhow!(e.message))))?;
 
     // 3. Sync mutations back (vm → interp direction).
     //    Strings do NOT need syncing — interp_to_vm_for_inverted_bridge shares the
@@ -440,7 +443,7 @@ fn vm_to_interp_callable(value: &VmValue, globals: Rc<Vec<VmValue>>) -> InterpVa
                     let vm_args: Vec<VmValue> =
                         args.iter().map(|a| interp_to_vm(a.clone())).collect();
                     let result = Vm::call_function(f.clone(), vm_args, (*globals).clone())
-                        .map_err(|e| anyhow::anyhow!(e))?;
+                        .map_err(|e| anyhow::anyhow!(e.message))?;
                     Ok(vm_to_interp(&result))
                 });
             let data: Rc<dyn std::any::Any> = Rc::new(VmFunctionWrapper {

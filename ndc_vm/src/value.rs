@@ -1,5 +1,7 @@
 use crate::chunk::{Chunk, OpCode};
+use crate::error::VmError;
 use crate::iterator::SharedIterator;
+use ndc_core::compare::FallibleOrd;
 use ndc_core::hash_map::{DefaultHasher, HashMap};
 use ndc_core::int::Int;
 use ndc_core::num::Number;
@@ -83,7 +85,7 @@ pub enum Function {
 
 pub struct NativeFunction {
     pub name: String,
-    pub func: Box<dyn Fn(&[Value]) -> Result<Value, String>>,
+    pub func: Box<dyn Fn(&[Value], &[Value]) -> Result<Value, VmError>>,
     pub static_type: StaticType,
 }
 
@@ -495,6 +497,45 @@ impl PartialOrd for Object {
             (Self::Tuple(a), Self::Tuple(b)) => a.partial_cmp(b),
             // Cross-type numeric: BigInt vs Rational, BigInt vs Complex, Rational vs Complex, etc.
             (a, b) => obj_to_number(a)?.partial_cmp(&obj_to_number(b)?),
+        }
+    }
+}
+
+impl FallibleOrd for Value {
+    type Error = String;
+
+    fn try_cmp(&self, other: &Self) -> Result<Ordering, String> {
+        self.partial_cmp(other).ok_or_else(|| {
+            format!(
+                "{} cannot be compared to {}",
+                self.static_type(),
+                other.static_type()
+            )
+        })
+    }
+}
+
+impl Value {
+    /// Compare a comparator return value to zero, returning the ordering.
+    /// Comparators return a number: negative means less, zero means equal, positive means greater.
+    pub fn cmp_to_zero(&self) -> Result<Ordering, String> {
+        match self {
+            Self::Int(n) => Ok(n.cmp(&0)),
+            Self::Float(f) => f
+                .partial_cmp(&0.0)
+                .ok_or_else(|| "NaN in comparator result".to_string()),
+            Self::Object(obj) => match obj.as_ref() {
+                Object::BigInt(b) => Ok(b.cmp(&num::BigInt::from(0))),
+                Object::Rational(r) => Ok(r.cmp(&num::BigRational::from(num::BigInt::from(0)))),
+                _ => Err(format!(
+                    "comparator must return a number, got {}",
+                    self.static_type()
+                )),
+            },
+            _ => Err(format!(
+                "comparator must return a number, got {}",
+                self.static_type()
+            )),
         }
     }
 }

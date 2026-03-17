@@ -91,6 +91,11 @@ impl Function {
         }
     }
 
+    /// Attaches or replaces the VmNative body on this function.
+    pub fn set_vm_native(&mut self, native: Rc<VmNativeFunction>) {
+        self.vm_native = Some(native);
+    }
+
     pub fn vm_native(&self) -> Option<Rc<VmNativeFunction>> {
         self.vm_native.clone()
     }
@@ -349,7 +354,7 @@ impl FunctionBody {
                                 .iter()
                                 .map(|a| crate::vm_bridge::interp_to_vm(a.clone()))
                                 .collect();
-                            let result = (native.func)(&vm_args).map_err(|e| {
+                            let result = (native.func)(&vm_args, &[]).map_err(|e| {
                                 FunctionCarrier::IntoEvaluationError(Box::new(anyhow::anyhow!(e)))
                             })?;
                             return Ok(crate::vm_bridge::vm_to_interp(&result));

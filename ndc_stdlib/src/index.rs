@@ -4,6 +4,7 @@ use ndc_interpreter::function::{
     FunctionBody, FunctionBuilder, FunctionCarrier, StaticType, TypeSignature,
 };
 use ndc_interpreter::value::Value;
+use ndc_vm::error::VmError;
 use ndc_vm::value::{NativeFunction, Object as VmObject, Value as VmValue};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -12,12 +13,12 @@ pub fn register(env: &mut Environment) {
     let get_native = Rc::new(NativeFunction {
         name: "[]".to_string(),
         static_type: StaticType::Any,
-        func: Box::new(|args: &[VmValue]| {
+        func: Box::new(|args: &[VmValue], _globals: &[VmValue]| {
             let [container, index_value] = args else {
-                return Err(format!(
+                return Err(VmError::native(format!(
                     "[] requires exactly 2 arguments, got {}",
                     args.len()
-                ));
+                )));
             };
             vm_get_at_index(container, index_value)
         }),
@@ -38,12 +39,12 @@ pub fn register(env: &mut Environment) {
     let set_native = Rc::new(NativeFunction {
         name: "[]=".to_string(),
         static_type: StaticType::Tuple(vec![]),
-        func: Box::new(|args: &[VmValue]| {
+        func: Box::new(|args: &[VmValue], _globals: &[VmValue]| {
             let [container, index_value, rhs] = args else {
-                return Err(format!(
+                return Err(VmError::native(format!(
                     "[]= requires exactly 3 arguments, got {}",
                     args.len()
-                ));
+                )));
             };
             vm_set_at_index(container, index_value, rhs.clone())?;
             Ok(VmValue::unit())
@@ -105,21 +106,21 @@ fn vm_sequence_length(v: &VmValue) -> Option<usize> {
     }
 }
 
-fn to_forward_index(i: i64, size: usize, for_slice: bool) -> Result<usize, String> {
+fn to_forward_index(i: i64, size: usize, for_slice: bool) -> Result<usize, VmError> {
     if i < 0 {
         let abs = i.unsigned_abs() as usize;
         if for_slice {
             Ok(size.saturating_sub(abs))
         } else {
             size.checked_sub(abs)
-                .ok_or_else(|| "index out of bounds".to_string())
+                .ok_or_else(|| VmError::native("index out of bounds"))
         }
     } else {
         let idx = i as usize;
         if for_slice {
             Ok(idx.min(size))
         } else if idx >= size {
-            Err("index out of bounds".to_string())
+            Err(VmError::native("index out of bounds"))
         } else {
             Ok(idx)
         }
@@ -131,7 +132,7 @@ enum VmOffset {
     Range(usize, usize),
 }
 
-fn extract_vm_offset(index_value: &VmValue, size: usize) -> Result<VmOffset, String> {
+fn extract_vm_offset(index_value: &VmValue, size: usize) -> Result<VmOffset, VmError> {
     if let VmValue::Object(obj) = index_value {
         if let VmObject::Iterator(iter) = obj.as_ref() {
             let iter_ref = iter.borrow();
@@ -149,33 +150,35 @@ fn extract_vm_offset(index_value: &VmValue, size: usize) -> Result<VmOffset, Str
                 let from_idx = to_forward_index(start, size, true)?;
                 return Ok(VmOffset::Range(from_idx, size));
             }
-            return Err("cannot use non-range iterator as index".to_string());
+            return Err(VmError::native("cannot use non-range iterator as index"));
         }
     }
     let i = match index_value {
         VmValue::Int(i) => *i,
         VmValue::Object(obj) => match obj.as_ref() {
-            VmObject::BigInt(n) => {
-                num::ToPrimitive::to_i64(n).ok_or_else(|| "index too large for i64".to_string())?
+            VmObject::BigInt(n) => num::ToPrimitive::to_i64(n)
+                .ok_or_else(|| VmError::native("index too large for i64"))?,
+            _ => {
+                return Err(VmError::native(
+                    "Invalid list index. List indices must be convertible to a signed 64-bit integer.",
+                ));
             }
-            _ => return Err(
-                "Invalid list index. List indices must be convertible to a signed 64-bit integer."
-                    .to_string(),
-            ),
         },
         _ => {
-            return Err(
-                "Invalid list index. List indices must be convertible to a signed 64-bit integer."
-                    .to_string(),
-            );
+            return Err(VmError::native(
+                "Invalid list index. List indices must be convertible to a signed 64-bit integer.",
+            ));
         }
     };
     Ok(VmOffset::Element(to_forward_index(i, size, false)?))
 }
 
-fn vm_get_at_index(container: &VmValue, index_value: &VmValue) -> Result<VmValue, String> {
+fn vm_get_at_index(container: &VmValue, index_value: &VmValue) -> Result<VmValue, VmError> {
     let Some(size) = vm_sequence_length(container) else {
-        return Err(format!("cannot index into {}", container.static_type()));
+        return Err(VmError::native(format!(
+            "cannot index into {}",
+            container.static_type()
+        )));
     };
     match container {
         VmValue::Object(obj) => match obj.as_ref() {
@@ -184,9 +187,9 @@ fn vm_get_at_index(container: &VmValue, index_value: &VmValue) -> Result<VmValue
                 match extract_vm_offset(index_value, size)? {
                     VmOffset::Element(idx) => Ok(list[idx].clone()),
                     VmOffset::Range(from, to) => {
-                        let values = list
-                            .get(from..to)
-                            .ok_or_else(|| format!("{from}..{to} out of bounds"))?;
+                        let values = list.get(from..to).ok_or_else(|| {
+                            VmError::native(format!("{from}..{to} out of bounds"))
+                        })?;
                         Ok(VmValue::Object(Rc::new(VmObject::list(values.to_vec()))))
                     }
                 }
@@ -209,7 +212,9 @@ fn vm_get_at_index(container: &VmValue, index_value: &VmValue) -> Result<VmValue
                     index_value,
                     VmValue::Object(o) if matches!(o.as_ref(), VmObject::Iterator(_))
                 ) {
-                    return Err("cannot use range expression as index in map".to_string());
+                    return Err(VmError::native(
+                        "cannot use range expression as index in map",
+                    ));
                 }
                 let key = index_value.clone();
                 let value = entries.borrow().get(&key).cloned();
@@ -217,7 +222,7 @@ fn vm_get_at_index(container: &VmValue, index_value: &VmValue) -> Result<VmValue
                     return Ok(v);
                 }
                 match default {
-                    None => Err(format!("Key not found in map: {key}")),
+                    None => Err(VmError::native(format!("Key not found in map: {key}"))),
                     Some(default_val) => match default_val {
                         VmValue::Object(o) if matches!(o.as_ref(), VmObject::Function(_)) => {
                             todo!(
@@ -236,11 +241,11 @@ fn vm_get_at_index(container: &VmValue, index_value: &VmValue) -> Result<VmValue
                 VmOffset::Element(idx) => tuple
                     .get(idx)
                     .cloned()
-                    .ok_or_else(|| "index out of bounds".to_string()),
+                    .ok_or_else(|| VmError::native("index out of bounds")),
                 VmOffset::Range(from, to) => {
                     let values = tuple
                         .get(from..to)
-                        .ok_or_else(|| "index out of bounds".to_string())?;
+                        .ok_or_else(|| VmError::native("index out of bounds"))?;
                     Ok(VmValue::Object(Rc::new(VmObject::Tuple(values.to_vec()))))
                 }
             },
@@ -250,7 +255,7 @@ fn vm_get_at_index(container: &VmValue, index_value: &VmValue) -> Result<VmValue
                     VmOffset::Element(idx) => deque
                         .get(idx)
                         .cloned()
-                        .ok_or_else(|| "index out of bounds".to_string()),
+                        .ok_or_else(|| VmError::native("index out of bounds")),
                     VmOffset::Range(from, to) => {
                         let out: Vec<VmValue> =
                             deque.iter().skip(from).take(to - from).cloned().collect();
@@ -258,24 +263,34 @@ fn vm_get_at_index(container: &VmValue, index_value: &VmValue) -> Result<VmValue
                     }
                 }
             }
-            _ => Err(format!("cannot index into {}", container.static_type())),
+            _ => Err(VmError::native(format!(
+                "cannot index into {}",
+                container.static_type()
+            ))),
         },
-        _ => Err(format!("cannot index into {}", container.static_type())),
+        _ => Err(VmError::native(format!(
+            "cannot index into {}",
+            container.static_type()
+        ))),
     }
 }
 
-fn vm_set_at_index(container: &VmValue, index_value: &VmValue, rhs: VmValue) -> Result<(), String> {
+fn vm_set_at_index(
+    container: &VmValue,
+    index_value: &VmValue,
+    rhs: VmValue,
+) -> Result<(), VmError> {
     let Some(size) = vm_sequence_length(container) else {
-        return Err(format!(
+        return Err(VmError::native(format!(
             "cannot insert into {} at index",
             container.static_type()
-        ));
+        )));
     };
     match container {
         VmValue::Object(obj) => match obj.as_ref() {
             VmObject::List(list) => {
                 let mut list = list.try_borrow_mut().map_err(|_| {
-                    "Mutation error: you cannot mutate a value in a list while you're iterating over this list".to_string()
+                    VmError::native("Mutation error: you cannot mutate a value in a list while you're iterating over this list")
                 })?;
                 match extract_vm_offset(index_value, size)? {
                     VmOffset::Element(idx) => {
@@ -286,9 +301,15 @@ fn vm_set_at_index(container: &VmValue, index_value: &VmValue, rhs: VmValue) -> 
                             VmValue::Object(o) => match o.as_ref() {
                                 VmObject::List(l) => l.borrow().clone(),
                                 VmObject::Tuple(t) => t.clone(),
-                                _ => return Err("cannot assign non-list to list slice".to_string()),
+                                _ => {
+                                    return Err(VmError::native(
+                                        "cannot assign non-list to list slice",
+                                    ));
+                                }
                             },
-                            _ => return Err("cannot assign non-list to list slice".to_string()),
+                            _ => {
+                                return Err(VmError::native("cannot assign non-list to list slice"));
+                            }
                         };
                         let tail: Vec<VmValue> = list.drain(from..).collect();
                         list.extend(rhs_vec);
@@ -301,13 +322,18 @@ fn vm_set_at_index(container: &VmValue, index_value: &VmValue, rhs: VmValue) -> 
                     VmValue::Object(o) => match o.as_ref() {
                         VmObject::String(r) => r.borrow().clone(),
                         _ => {
-                            return Err(format!(
+                            return Err(VmError::native(format!(
                                 "cannot insert {} into a string",
                                 rhs.static_type()
-                            ));
+                            )));
                         }
                     },
-                    _ => return Err(format!("cannot insert {} into a string", rhs.static_type())),
+                    _ => {
+                        return Err(VmError::native(format!(
+                            "cannot insert {} into a string",
+                            rhs.static_type()
+                        )));
+                    }
                 };
                 let mut s = s.borrow_mut();
                 match extract_vm_offset(index_value, size)? {
@@ -324,22 +350,22 @@ fn vm_set_at_index(container: &VmValue, index_value: &VmValue, rhs: VmValue) -> 
                     index_value,
                     VmValue::Object(o) if matches!(o.as_ref(), VmObject::Iterator(_))
                 ) {
-                    return Err("cannot use range expression as index".to_string());
+                    return Err(VmError::native("cannot use range expression as index"));
                 }
                 entries.borrow_mut().insert(index_value.clone(), rhs);
             }
             _ => {
-                return Err(format!(
+                return Err(VmError::native(format!(
                     "cannot insert into {} at index",
                     container.static_type()
-                ));
+                )));
             }
         },
         _ => {
-            return Err(format!(
+            return Err(VmError::native(format!(
                 "cannot insert into {} at index",
                 container.static_type()
-            ));
+            )));
         }
     }
     Ok(())

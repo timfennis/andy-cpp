@@ -77,7 +77,7 @@ impl From<InterpreterError> for NdcReport {
             },
             InterpreterError::Vm(err) => Self {
                 message: err.message.clone(),
-                span: Some(span_to_source_span(err.span)),
+                span: err.span.map(span_to_source_span),
                 label: "related to this",
                 help: None,
             },
