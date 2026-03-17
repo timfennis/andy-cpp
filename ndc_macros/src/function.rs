@@ -1,10 +1,11 @@
 use crate::convert::{Argument, TypeConverter, build};
 use crate::r#match::{
-    is_ndc_vm_value, is_ref, is_ref_mut, is_ref_mut_of_hashmap_of_ndc_vm_value,
-    is_ref_mut_of_max_heap, is_ref_mut_of_min_heap, is_ref_mut_of_slice_of_value,
-    is_ref_mut_of_vec_of_ndc_vm_value, is_ref_mut_of_vecdeque_of_ndc_vm_value, is_ref_of_bigint,
-    is_ref_of_hashmap_of_ndc_vm_value, is_ref_of_slice_of_ndc_vm_value, is_ref_of_slice_of_value,
-    is_ref_of_vecdeque_of_ndc_vm_value, is_str_ref, path_ends_with,
+    is_ndc_vm_seq_value, is_ndc_vm_value, is_ref, is_ref_mut,
+    is_ref_mut_of_hashmap_of_ndc_vm_value, is_ref_mut_of_max_heap, is_ref_mut_of_min_heap,
+    is_ref_mut_of_slice_of_value, is_ref_mut_of_vec_of_ndc_vm_value,
+    is_ref_mut_of_vecdeque_of_ndc_vm_value, is_ref_of_bigint, is_ref_of_hashmap_of_ndc_vm_value,
+    is_ref_of_slice_of_ndc_vm_value, is_ref_of_slice_of_value, is_ref_of_vecdeque_of_ndc_vm_value,
+    is_str_ref, path_ends_with,
 };
 use itertools::Itertools;
 use proc_macro2::TokenStream;
@@ -345,11 +346,11 @@ fn wrap_single(
             ty @ syn::Type::Path(_) if path_ends_with(ty, "EvaluationResult") => quote! {
                 return result;
             },
-            // ndc_vm::value::Value — dead code for VmNative body but must compile.
-            ty @ syn::Type::Path(_) if is_ndc_vm_value(ty) => quote! {
+            // ndc_vm::value::Value / SeqValue — dead code for VmNative body but must compile.
+            ty @ syn::Type::Path(_) if is_ndc_vm_value(ty) || is_ndc_vm_seq_value(ty) => quote! {
                 return Ok(ndc_interpreter::vm_bridge::vm_to_interp(&result));
             },
-            // Result<ndc_vm::value::Value> — dead code for VmNative body but must compile.
+            // Result<ndc_vm::value::Value / SeqValue> — dead code for VmNative body but must compile.
             ty @ syn::Type::Path(_)
                 if path_ends_with(ty, "Result") && result_inner_is_ndc_vm_value(ty) =>
             {
@@ -797,6 +798,19 @@ fn create_temp_variable(
         if is_ndc_vm_value(ty) {
             return vec![Argument {
                 param_type: quote! { ndc_interpreter::function::StaticType::Any },
+                param_name: quote! { #original_name },
+                argument: quote! { #argument_var_name },
+                initialize_code: quote! {
+                    let #argument_var_name =
+                        ndc_interpreter::vm_bridge::interp_to_vm(#argument_var_name.clone());
+                },
+            }];
+        }
+
+        // ndc_vm::value::SeqValue — same bridge stub as Value but with Sequence static type.
+        if is_ndc_vm_seq_value(ty) {
+            return vec![Argument {
+                param_type: quote! { ndc_interpreter::function::StaticType::Sequence(Box::new(ndc_interpreter::function::StaticType::Any)) },
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {

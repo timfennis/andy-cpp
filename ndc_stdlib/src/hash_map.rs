@@ -159,50 +159,17 @@ mod inner {
     }
 
     /// Converts the given sequence to set.
-    #[function(return_type = DefaultMap<'_>)]
-    pub fn set(seq: &mut Sequence) -> Value {
-        let out: hash_map::HashMap<Value, Value> = match seq {
-            Sequence::String(rc) => rc
-                .borrow()
-                .chars()
-                .map(|c| (c.into(), Value::unit()))
-                .collect(),
-            Sequence::List(rc) => rc
-                .borrow()
-                .iter()
-                .map(|v| (v.to_owned(), Value::unit()))
-                .collect(),
-            Sequence::Tuple(rc) => rc.iter().map(|v| (v.to_owned(), Value::unit())).collect(),
-            Sequence::Map(rc, _) => rc
-                .borrow()
-                .keys()
-                .map(|key| (key.to_owned(), Value::unit()))
-                .collect(),
-            Sequence::Iterator(rc) => {
-                let mut iter = rc.borrow_mut();
-                let mut out = hash_map::HashMap::new();
-                for item in iter.by_ref() {
-                    out.insert(item, Value::unit());
-                }
-                out
-            }
-            Sequence::MaxHeap(h) => h
-                .borrow()
-                .iter()
-                .map(|value| (value.0.clone(), Value::unit()))
-                .collect(),
-            Sequence::MinHeap(h) => h
-                .borrow()
-                .iter()
-                .map(|value| (value.0.0.clone(), Value::unit()))
-                .collect(),
-            Sequence::Deque(rc) => rc
-                .borrow()
-                .iter()
-                .map(|v| (v.to_owned(), Value::unit()))
-                .collect(),
-        };
+    pub fn set(seq: ndc_vm::value::SeqValue) -> anyhow::Result<ndc_vm::value::Value> {
+        use ndc_core::hash_map::HashMap;
+        use ndc_vm::value::{Object, Value};
+        use std::rc::Rc;
 
-        Value::Sequence(Sequence::Map(Rc::new(RefCell::new(out)), None))
+        let entries: HashMap<Value, Value> = seq
+            .try_into_iter()
+            .ok_or_else(|| anyhow::anyhow!("set requires a sequence"))?
+            .map(|v| (v, Value::unit()))
+            .collect();
+
+        Ok(Value::Object(Rc::new(Object::map(entries, None))))
     }
 }

@@ -1,0 +1,19 @@
+let f = [1, 2, 1, 3, 2, 1].frequencies();
+assert_eq(3, f[1]);
+assert_eq(2, f[2]);
+assert_eq(1, f[3]);
+
+// default value is 0 for missing keys
+assert_eq(0, f[99]);
+
+// string characters
+let g = "abcaab".frequencies();
+assert_eq(3, g["a"]);
+assert_eq(2, g["b"]);
+assert_eq(1, g["c"]);
+
+// range
+let h = (1..=3).frequencies();
+assert_eq(1, h[1]);
+assert_eq(1, h[2]);
+assert_eq(1, h[3]);

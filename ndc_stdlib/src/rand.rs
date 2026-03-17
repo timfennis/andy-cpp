@@ -20,9 +20,7 @@ pub fn random_n<N: SampleUniform + std::fmt::Display + Copy>(
 #[export_module]
 mod inner {
     use itertools::Itertools;
-    use ndc_interpreter::iterator::mut_seq_to_iterator;
     use ndc_interpreter::num::Number;
-    use ndc_interpreter::sequence::Sequence;
     use ndc_interpreter::value::Value;
 
     /// Randomly shuffles the elements of the list in place.
@@ -33,13 +31,13 @@ mod inner {
     /// Returns a copy of the input sequence converted to a list with the elements shuffled in random order.
     ///
     /// Note: this currently does consume iterators
-    #[function(return_type = Vec<Value>)]
-    pub fn shuffled(list: &mut Sequence) -> Value {
-        Value::list(
-            mut_seq_to_iterator(list)
+    pub fn shuffled(list: ndc_vm::value::SeqValue) -> anyhow::Result<ndc_vm::value::Value> {
+        Ok(ndc_vm::value::Value::list(
+            list.try_into_iter()
+                .ok_or_else(|| anyhow::anyhow!("shuffled requires a sequence"))?
                 .collect_vec()
                 .tap_mut(|v| v.shuffle(&mut rand::rng())),
-        )
+        ))
     }
 
     #[function(name = "randf")]

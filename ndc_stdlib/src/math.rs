@@ -2,59 +2,19 @@ use factorial::Factorial;
 use ndc_interpreter::environment::Environment;
 use ndc_interpreter::num::{BinaryOperatorError, Number};
 use ndc_interpreter::sequence::Sequence;
-use ndc_interpreter::value::Value;
 use ndc_macros::export_module;
 use num::ToPrimitive;
 use std::ops::{Add, Mul};
-
-trait FallibleSum {
-    fn try_sum(&mut self) -> Result<Number, BinaryOperatorError>;
-}
-
-impl<C, T> FallibleSum for C
-where
-    C: Iterator<Item = T>,
-    T: std::borrow::Borrow<Value>,
-{
-    fn try_sum(&mut self) -> Result<Number, BinaryOperatorError> {
-        self.try_fold(Number::from(0), |acc, cur| match cur.borrow() {
-            Value::Number(n) => acc.add(n),
-            value => Err(BinaryOperatorError::new(format!(
-                "cannot sum {} and number",
-                value.static_type()
-            ))),
-        })
-    }
-}
-
-trait FallibleProduct {
-    fn try_product(&mut self) -> Result<Number, BinaryOperatorError>;
-}
-
-impl<C, T> FallibleProduct for C
-where
-    C: Iterator<Item = T>,
-    T: std::borrow::Borrow<Value>,
-{
-    fn try_product(&mut self) -> Result<Number, BinaryOperatorError> {
-        self.try_fold(Number::from(1), |acc, cur| match cur.borrow() {
-            Value::Number(n) => acc.mul(n),
-            value => Err(BinaryOperatorError::new(format!(
-                "cannot multiply {} and number",
-                value.static_type()
-            ))),
-        })
-    }
-}
 
 #[export_module]
 mod inner {
     use std::ops::Sub;
 
-    use super::FallibleSum;
     use anyhow::Context;
     use ndc_interpreter::int::Int;
     use ndc_interpreter::num::Number;
+    use ndc_interpreter::sequence::Sequence;
+    use ndc_interpreter::value::Value;
     use num::{BigInt, BigRational, BigUint, Integer, complex::Complex64};
 
     /// Returns the sign of a number.
@@ -85,36 +45,34 @@ mod inner {
         r.denom().clone()
     }
 
-    pub fn sum(seq: &Sequence) -> anyhow::Result<Number> {
-        match seq {
-            Sequence::String(_s) => Err(BinaryOperatorError::new(
-                "string cannot be summed".to_string(),
-            )),
-            Sequence::List(list) => list.borrow().iter().try_sum(),
-            Sequence::Tuple(tup) => tup.iter().try_sum(),
-            Sequence::Map(map, _) => map.borrow().keys().try_sum(),
-            Sequence::Iterator(iter) => iter.borrow_mut().try_sum(),
-            Sequence::MaxHeap(h) => h.borrow().iter().map(|v| &v.0).try_sum(),
-            Sequence::MinHeap(h) => h.borrow().iter().map(|v| &v.0.0).try_sum(),
-            Sequence::Deque(d) => d.borrow().iter().try_sum(),
+    pub fn sum(seq: ndc_vm::value::SeqValue) -> anyhow::Result<Number> {
+        if matches!(&seq, ndc_vm::value::Value::Object(o) if matches!(o.as_ref(), ndc_vm::value::Object::String(_)))
+        {
+            anyhow::bail!("string cannot be summed");
         }
-        .context("type error while multiplying sequence")
+        seq.try_into_iter()
+            .ok_or_else(|| anyhow::anyhow!("cannot sum non-sequence"))?
+            .try_fold(Number::from(0), |acc, val| {
+                let n = val
+                    .to_number()
+                    .ok_or_else(|| anyhow::anyhow!("cannot sum {}", val.static_type()))?;
+                acc.add(&n).map_err(|e| anyhow::anyhow!("{e}"))
+            })
     }
 
-    pub fn product(seq: &Sequence) -> anyhow::Result<Number> {
-        match seq {
-            Sequence::String(_s) => Err(BinaryOperatorError::new(
-                "string cannot be multiplied".to_string(),
-            )),
-            Sequence::List(list) => list.borrow().iter().try_product(),
-            Sequence::Tuple(tup) => tup.iter().try_product(),
-            Sequence::Map(map, _) => map.borrow().keys().try_product(),
-            Sequence::Iterator(iter) => iter.borrow_mut().try_product(),
-            Sequence::MaxHeap(h) => h.borrow().iter().map(|v| &v.0).try_product(),
-            Sequence::MinHeap(h) => h.borrow().iter().map(|v| &v.0.0).try_product(),
-            Sequence::Deque(d) => d.borrow().iter().try_product(),
+    pub fn product(seq: ndc_vm::value::SeqValue) -> anyhow::Result<Number> {
+        if matches!(&seq, ndc_vm::value::Value::Object(o) if matches!(o.as_ref(), ndc_vm::value::Object::String(_)))
+        {
+            anyhow::bail!("string cannot be multiplied");
         }
-        .context("type error while multiplying sequence")
+        seq.try_into_iter()
+            .ok_or_else(|| anyhow::anyhow!("cannot multiply non-sequence"))?
+            .try_fold(Number::from(1), |acc, val| {
+                let n = val
+                    .to_number()
+                    .ok_or_else(|| anyhow::anyhow!("cannot multiply {}", val.static_type()))?;
+                acc.mul(&n).map_err(|e| anyhow::anyhow!("{e}"))
+            })
     }
 
     pub fn factorial(a: &BigInt) -> anyhow::Result<BigInt> {

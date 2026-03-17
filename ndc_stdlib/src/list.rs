@@ -1,7 +1,6 @@
 #[ndc_macros::export_module]
 mod inner {
     use itertools::Itertools;
-    use ndc_interpreter::iterator::mut_seq_to_iterator;
     use ndc_interpreter::sequence::Sequence;
     use ndc_interpreter::value::Value;
     use std::rc::Rc;
@@ -9,9 +8,12 @@ mod inner {
     use anyhow::anyhow;
 
     /// Converts any sequence into a list
-    #[function(return_type = Vec<Value>)]
-    pub fn list(seq: &mut Sequence) -> Value {
-        Value::list(mut_seq_to_iterator(seq).collect::<Vec<_>>())
+    pub fn list(seq: ndc_vm::value::SeqValue) -> anyhow::Result<ndc_vm::value::Value> {
+        Ok(ndc_vm::value::Value::list(
+            seq.try_into_iter()
+                .ok_or_else(|| anyhow!("list requires a sequence"))?
+                .collect::<Vec<_>>(),
+        ))
     }
 
     pub fn contains(list: &[Value], elem: &Value) -> bool {
