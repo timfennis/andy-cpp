@@ -5,9 +5,11 @@
 //! vm_native generation for that function.
 
 use crate::r#match::{
-    is_ndc_vm_value, is_ref, is_ref_mut, is_ref_mut_of_vec_of_ndc_vm_value,
-    is_ref_of_slice_of_ndc_vm_value, is_ref_of_slice_of_value, is_str_ref, is_string,
-    path_ends_with,
+    is_ndc_vm_value, is_ref, is_ref_mut, is_ref_mut_of_hashmap_of_ndc_vm_value,
+    is_ref_mut_of_max_heap, is_ref_mut_of_min_heap, is_ref_mut_of_vec_of_ndc_vm_value,
+    is_ref_mut_of_vecdeque_of_ndc_vm_value, is_ref_of_hashmap_of_ndc_vm_value,
+    is_ref_of_slice_of_ndc_vm_value, is_ref_of_slice_of_value, is_ref_of_vecdeque_of_ndc_vm_value,
+    is_str_ref, is_string, path_ends_with,
 };
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
@@ -238,6 +240,146 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
             pass: quote! { &mut *#guard_ident },
             static_type: quote! {
                 ndc_interpreter::function::StaticType::List(Box::new(
+                    ndc_interpreter::function::StaticType::Any
+                ))
+            },
+        });
+    }
+
+    // &mut HashMap<ndc_vm::value::Value, ndc_vm::value::Value> — mutate map entries via RefCell.
+    if is_ref_mut_of_hashmap_of_ndc_vm_value(ty) {
+        let rc_ident = format_ident!("{temp}_rc");
+        let guard_ident = format_ident!("{temp}_guard");
+        return Some(VmInputArg {
+            extract: quote! {
+                let ndc_vm::value::Value::Object(ref #rc_ident) = *#raw else {
+                    return Err(format!("arg {}: expected map, got {}", #position, #raw.static_type()));
+                };
+                let ndc_vm::value::Object::Map { entries: ref #rc_ident, .. } = *#rc_ident.as_ref() else {
+                    return Err(format!("arg {}: expected map, got {}", #position, #raw.static_type()));
+                };
+                let mut #guard_ident = #rc_ident.borrow_mut();
+            },
+            pass: quote! { &mut *#guard_ident },
+            static_type: quote! {
+                ndc_interpreter::function::StaticType::Map {
+                    key: Box::new(ndc_interpreter::function::StaticType::Any),
+                    value: Box::new(ndc_interpreter::function::StaticType::Any),
+                }
+            },
+        });
+    }
+
+    // &HashMap<ndc_vm::value::Value, ndc_vm::value::Value> — immutable borrow of map entries.
+    if is_ref_of_hashmap_of_ndc_vm_value(ty) {
+        let rc_ident = format_ident!("{temp}_rc");
+        let guard_ident = format_ident!("{temp}_guard");
+        return Some(VmInputArg {
+            extract: quote! {
+                let ndc_vm::value::Value::Object(ref #rc_ident) = *#raw else {
+                    return Err(format!("arg {}: expected map, got {}", #position, #raw.static_type()));
+                };
+                let ndc_vm::value::Object::Map { entries: ref #rc_ident, .. } = *#rc_ident.as_ref() else {
+                    return Err(format!("arg {}: expected map, got {}", #position, #raw.static_type()));
+                };
+                let #guard_ident = #rc_ident.borrow();
+            },
+            pass: quote! { &*#guard_ident },
+            static_type: quote! {
+                ndc_interpreter::function::StaticType::Map {
+                    key: Box::new(ndc_interpreter::function::StaticType::Any),
+                    value: Box::new(ndc_interpreter::function::StaticType::Any),
+                }
+            },
+        });
+    }
+
+    // &mut BinaryHeap<Reverse<OrdValue>> — min-heap (uses Reverse<OrdValue> for ordering).
+    if is_ref_mut_of_min_heap(ty) {
+        let rc_ident = format_ident!("{temp}_rc");
+        let guard_ident = format_ident!("{temp}_guard");
+        return Some(VmInputArg {
+            extract: quote! {
+                let ndc_vm::value::Value::Object(ref #rc_ident) = *#raw else {
+                    return Err(format!("arg {}: expected min heap, got {}", #position, #raw.static_type()));
+                };
+                let ndc_vm::value::Object::MinHeap(ref #rc_ident) = *#rc_ident.as_ref() else {
+                    return Err(format!("arg {}: expected min heap, got {}", #position, #raw.static_type()));
+                };
+                let mut #guard_ident = #rc_ident.borrow_mut();
+            },
+            pass: quote! { &mut *#guard_ident },
+            static_type: quote! {
+                ndc_interpreter::function::StaticType::MinHeap(Box::new(
+                    ndc_interpreter::function::StaticType::Any
+                ))
+            },
+        });
+    }
+
+    // &mut BinaryHeap<OrdValue> — max-heap.
+    if is_ref_mut_of_max_heap(ty) {
+        let rc_ident = format_ident!("{temp}_rc");
+        let guard_ident = format_ident!("{temp}_guard");
+        return Some(VmInputArg {
+            extract: quote! {
+                let ndc_vm::value::Value::Object(ref #rc_ident) = *#raw else {
+                    return Err(format!("arg {}: expected max heap, got {}", #position, #raw.static_type()));
+                };
+                let ndc_vm::value::Object::MaxHeap(ref #rc_ident) = *#rc_ident.as_ref() else {
+                    return Err(format!("arg {}: expected max heap, got {}", #position, #raw.static_type()));
+                };
+                let mut #guard_ident = #rc_ident.borrow_mut();
+            },
+            pass: quote! { &mut *#guard_ident },
+            static_type: quote! {
+                ndc_interpreter::function::StaticType::MaxHeap(Box::new(
+                    ndc_interpreter::function::StaticType::Any
+                ))
+            },
+        });
+    }
+
+    // &mut VecDeque<ndc_vm::value::Value> — mutate via RefCell inside VmObject::Deque.
+    if is_ref_mut_of_vecdeque_of_ndc_vm_value(ty) {
+        let rc_ident = format_ident!("{temp}_rc");
+        let guard_ident = format_ident!("{temp}_guard");
+        return Some(VmInputArg {
+            extract: quote! {
+                let ndc_vm::value::Value::Object(ref #rc_ident) = *#raw else {
+                    return Err(format!("arg {}: expected deque, got {}", #position, #raw.static_type()));
+                };
+                let ndc_vm::value::Object::Deque(ref #rc_ident) = *#rc_ident.as_ref() else {
+                    return Err(format!("arg {}: expected deque, got {}", #position, #raw.static_type()));
+                };
+                let mut #guard_ident = #rc_ident.borrow_mut();
+            },
+            pass: quote! { &mut *#guard_ident },
+            static_type: quote! {
+                ndc_interpreter::function::StaticType::Deque(Box::new(
+                    ndc_interpreter::function::StaticType::Any
+                ))
+            },
+        });
+    }
+
+    // &VecDeque<ndc_vm::value::Value> — immutable borrow via RefCell inside VmObject::Deque.
+    if is_ref_of_vecdeque_of_ndc_vm_value(ty) {
+        let rc_ident = format_ident!("{temp}_rc");
+        let guard_ident = format_ident!("{temp}_guard");
+        return Some(VmInputArg {
+            extract: quote! {
+                let ndc_vm::value::Value::Object(ref #rc_ident) = *#raw else {
+                    return Err(format!("arg {}: expected deque, got {}", #position, #raw.static_type()));
+                };
+                let ndc_vm::value::Object::Deque(ref #rc_ident) = *#rc_ident.as_ref() else {
+                    return Err(format!("arg {}: expected deque, got {}", #position, #raw.static_type()));
+                };
+                let #guard_ident = #rc_ident.borrow();
+            },
+            pass: quote! { &*#guard_ident },
+            static_type: quote! {
+                ndc_interpreter::function::StaticType::Deque(Box::new(
                     ndc_interpreter::function::StaticType::Any
                 ))
             },
