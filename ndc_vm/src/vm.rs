@@ -4,7 +4,7 @@ use crate::iterator::{
     MapIter, MaxHeapIter, MinHeapIter, RangeInclusiveIter, RangeIter, SeqIter, StringIter,
     UnboundedRangeIter, VmIterator,
 };
-use crate::value::{CompiledFunction, Function};
+use crate::value::{CompiledFunction, Function, NativeFunc};
 use crate::{ClosureFunction, Object, UpvalueCell, Value};
 use ndc_core::hash_map::{DefaultHasher, HashMap};
 use ndc_lexer::Span;
@@ -64,6 +64,22 @@ impl Vm {
         vm
     }
 
+    /// Create a minimal VM with no call frames, used as a `&mut Vm` context
+    /// when calling a native function from outside the VM (e.g. the inverted
+    /// interpreter bridge). The native function receives `&mut self` but in
+    /// these paths it is only used for `VmCallable` construction; `globals()`
+    /// returns an empty slice matching the previous `&[]` behaviour.
+    pub fn stub() -> Self {
+        Self {
+            stack: Vec::new(),
+            globals: Vec::new(),
+            frames: Vec::new(),
+            open_upvalues: Vec::new(),
+            #[cfg(feature = "vm-trace")]
+            source: None,
+        }
+    }
+
     #[cfg(feature = "vm-trace")]
     pub fn with_source(mut self, source: impl Into<String>) -> Self {
         self.source = Some(source.into());
@@ -71,6 +87,13 @@ impl Vm {
     }
 
     pub fn run(&mut self) -> Result<(), VmError> {
+        self.run_to_depth(0)
+    }
+
+    /// Run the VM until the frame stack drops back to `target_depth`.
+    /// Used by `call_callback` to execute a single callback frame inline
+    /// on the parent VM, stopping when that frame's `Return` opcode fires.
+    pub fn run_to_depth(&mut self, target_depth: usize) -> Result<(), VmError> {
         if self.frames.is_empty() {
             panic!("no call frames")
         }
@@ -115,7 +138,7 @@ impl Vm {
                     self.stack.truncate(frame_pointer - 1);
                     self.frames.pop().expect("no frame to pop");
                     self.stack.push(ret);
-                    if self.frames.is_empty() {
+                    if self.frames.len() == target_depth {
                         return Ok(());
                     }
                 }
@@ -549,15 +572,25 @@ impl Vm {
         let closure = match func {
             Function::Native(native) => {
                 let start = self.stack.len() - args;
-                let result = (native.func)(&self.stack[start..], &self.globals)?;
-                self.stack.truncate(start - 1);
-                self.stack.push(result);
-                // Native calls return immediately, so cache the result now if
-                // this was a memoized call.
+                let result = match &native.func {
+                    NativeFunc::Simple(f) => {
+                        // Zero-copy: args are a slice directly into the stack.
+                        let result = f(&self.stack[start..])?;
+                        self.stack.truncate(start);
+                        self.stack.pop(); // callee slot
+                        result
+                    }
+                    NativeFunc::WithVm(f) => {
+                        // Drain args so we can pass `&mut self` to the HOF.
+                        let call_args: Vec<Value> = self.stack.drain(start..).collect();
+                        self.stack.pop(); // callee slot
+                        f(&call_args, self)?
+                    }
+                };
                 if let Some((cache, key)) = memo {
-                    let ret = self.stack.last().expect("stack underflow").clone();
-                    cache.borrow_mut().insert(key, ret);
+                    cache.borrow_mut().insert(key, result.clone());
                 }
+                self.stack.push(result);
                 return Ok(());
             }
             Function::Closure(c) => c,
@@ -586,30 +619,49 @@ impl Vm {
     }
 
     /// Call a VM function with the given arguments, using a fresh VM instance.
-    /// Used to enable callbacks from stdlib HOFs into user-defined VM closures.
+    /// Used by the interpreter bridge (`vm_to_interp_callable`) to re-enter the
+    /// VM from the tree-walk interpreter side. The hot path for VM-native HOFs
+    /// uses `call_callback` instead, which runs inline on the parent VM.
     pub fn call_function(
         func: Function,
         args: Vec<Value>,
         globals: Vec<Value>,
     ) -> Result<Value, VmError> {
+        let mut vm = Self {
+            stack: Vec::new(),
+            globals,
+            frames: Vec::new(),
+            open_upvalues: Vec::new(),
+            #[cfg(feature = "vm-trace")]
+            source: None,
+        };
+        vm.call_callback(func, args)
+    }
+
+    /// Call a function inline on this VM, without spawning a child VM.
+    /// Used by `VmCallable::call` so stdlib HOFs run their predicates/mappers
+    /// directly on the parent stack — zero allocation per callback invocation.
+    pub fn call_callback(&mut self, func: Function, args: Vec<Value>) -> Result<Value, VmError> {
         match func {
-            Function::Native(native) => (native.func)(&args, &globals),
-            func => {
-                let n_args = args.len();
-                let mut vm = Self {
-                    stack: vec![Value::unit()], // dummy callee slot so frame_pointer = 1
-                    globals,
-                    frames: Vec::new(),
-                    open_upvalues: Vec::new(),
-                    #[cfg(feature = "vm-trace")]
-                    source: None,
-                };
-                vm.stack.extend(args);
-                vm.dispatch_call(func, n_args)?;
-                vm.run()?;
-                Ok(vm.stack.pop().expect("callback must produce a value"))
+            Function::Native(native) => match &native.func {
+                NativeFunc::Simple(f) => f(&args),
+                NativeFunc::WithVm(f) => f(&args, self),
+            },
+            _ => {
+                let depth = self.frames.len();
+                let n = args.len();
+                self.stack.push(Value::unit()); // dummy callee slot
+                self.stack.extend(args);
+                self.dispatch_call_with_memo(func, n, None)?;
+                self.run_to_depth(depth)?;
+                Ok(self.stack.pop().expect("callback must produce a value"))
             }
         }
+    }
+
+    /// Expose the globals slice for use by the interpreter bridge.
+    pub fn globals(&self) -> &[Value] {
+        &self.globals
     }
 
     /// Resolves the callee on the stack to a concrete `Function`. Returns `Ok(None)`
@@ -890,17 +942,24 @@ impl CallFrame {
     }
 }
 
-/// A callable VM function with access to the globals vector, for use in
-/// VmNative HOF implementations. Produced by the `&VmCallable` input-type
-/// handler in `ndc_macros::vm_convert`.
+/// A callable VM function bound to the parent VM, for use in VmNative HOF
+/// implementations. Produced by the `&VmCallable` input-type handler in
+/// `ndc_macros::vm_convert`.
+///
+/// Calling `call()` runs the function inline on the parent VM via
+/// `Vm::call_callback` — no child VM is allocated. `RefCell` gives interior
+/// mutability so `call(&self)` works without changing any HOF signatures.
 pub struct VmCallable<'a> {
     pub function: Function,
-    pub globals: &'a [Value],
+    pub vm: RefCell<&'a mut Vm>,
 }
 
 impl VmCallable<'_> {
-    /// Call this function with the given arguments.
+    /// Call this function with the given arguments, running inline on the
+    /// parent VM.
     pub fn call(&self, args: Vec<Value>) -> Result<Value, VmError> {
-        Vm::call_function(self.function.clone(), args, self.globals.to_vec())
+        self.vm
+            .borrow_mut()
+            .call_callback(self.function.clone(), args)
     }
 }

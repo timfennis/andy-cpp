@@ -132,7 +132,6 @@ impl Environment {
         root.global_functions.push(new_function.clone());
     }
 
-
     #[must_use]
     pub fn get(&self, var: ResolvedVar) -> Value {
         match var {

@@ -481,6 +481,7 @@ fn try_generate_vm_native(
     let mut passes = Vec::new();
     let mut param_types = Vec::new();
     let mut param_names = Vec::new();
+    let mut has_vm_callable = false;
     let raw_args: Vec<_> = (0..function.sig.inputs.len())
         .map(|i| format_ident!("vm_raw{i}"))
         .collect();
@@ -491,6 +492,9 @@ fn try_generate_vm_native(
             syn::FnArg::Receiver(_) => return None,
         };
         let ty = &*pat_ty.ty;
+        if path_ends_with(ty, "VmCallable") && is_ref(ty) {
+            has_vm_callable = true;
+        }
         let conv = try_vm_input(ty, i)?;
         extracts.push(conv.extract);
         passes.push(conv.pass);
@@ -505,6 +509,30 @@ fn try_generate_vm_native(
     let (return_code, return_static_type) = try_vm_return(&function.sig.output)?;
     let n = function.sig.inputs.len();
 
+    let func_variant = if has_vm_callable {
+        quote! {
+            ndc_vm::value::NativeFunc::WithVm(Box::new(|args, _vm| match args {
+                [#(#raw_args),*] => {
+                    #(#extracts)*
+                    let result = #inner_ident(#(#passes),*);
+                    #return_code
+                }
+                _ => Err(ndc_vm::error::VmError::native(format!("expected {} arguments, got {}", #n, args.len()))),
+            }))
+        }
+    } else {
+        quote! {
+            ndc_vm::value::NativeFunc::Simple(Box::new(|args| match args {
+                [#(#raw_args),*] => {
+                    #(#extracts)*
+                    let result = #inner_ident(#(#passes),*);
+                    #return_code
+                }
+                _ => Err(ndc_vm::error::VmError::native(format!("expected {} arguments, got {}", #n, args.len()))),
+            }))
+        }
+    };
+
     let native_let = quote! {
         let native: std::rc::Rc<ndc_vm::value::NativeFunction> =
             std::rc::Rc::new(ndc_vm::value::NativeFunction {
@@ -513,14 +541,7 @@ fn try_generate_vm_native(
                     parameters: Some(vec![#(#param_types.clone()),*]),
                     return_type: Box::new(#return_static_type),
                 },
-                func: Box::new(|args, _globals| match args {
-                    [#(#raw_args),*] => {
-                        #(#extracts)*
-                        let result = #inner_ident(#(#passes),*);
-                        #return_code
-                    }
-                    _ => Err(ndc_vm::error::VmError::native(format!("expected {} arguments, got {}", #n, args.len()))),
-                }),
+                func: #func_variant,
             });
     };
 
@@ -843,9 +864,10 @@ fn create_temp_variable(
                     // FunctionBody::VmNative, so this interpreter wrapper is never called.
                     let #tmp_ident =
                         ndc_interpreter::vm_bridge::interp_to_vm(#argument_var_name.clone());
+                    let mut vm_stub = ndc_vm::vm::Vm::stub();
                     let #argument_var_name = if let ndc_vm::value::Value::Object(obj) = &#tmp_ident {
                         if let ndc_vm::value::Object::Function(f) = obj.as_ref() {
-                            ndc_vm::vm::VmCallable { function: f.clone(), globals: &[] }
+                            ndc_vm::vm::VmCallable { function: f.clone(), vm: std::cell::RefCell::new(&mut vm_stub) }
                         } else {
                             panic!("VmCallable stub: expected Function variant");
                         }

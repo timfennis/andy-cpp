@@ -173,7 +173,7 @@ pub mod f64 {
     use ndc_interpreter::num::BinaryOperatorError;
     use ndc_interpreter::value::Value;
     use ndc_vm::error::VmError;
-    use ndc_vm::value::{NativeFunction as VmNativeFunction, Value as VmValue};
+    use ndc_vm::value::{NativeFunc, NativeFunction as VmNativeFunction, Value as VmValue};
     use std::cmp::Ordering;
     use std::ops::Not;
     use std::rc::Rc;
@@ -191,7 +191,7 @@ pub mod f64 {
                                 parameters: Some(vec![StaticType::Number, StaticType::Number]),
                                 return_type: Box::new(StaticType::Number),
                             },
-                            func: Box::new(|args, _globals| match args {
+                            func: NativeFunc::Simple(Box::new(|args| match args {
                                 [left, right] => {
                                     let l = left.to_number().ok_or_else(|| {
                                         VmError::native(format!(
@@ -213,7 +213,7 @@ pub mod f64 {
                                     "expected 2 arguments, got {}",
                                     args.len()
                                 ))),
-                            }),
+                            })),
                         }))
                         .build()
                         .expect("must be valid"),
@@ -242,7 +242,7 @@ pub mod f64 {
                         parameters: Some(vec![StaticType::Number]),
                         return_type: Box::new(StaticType::Number),
                     },
-                    func: Box::new(|args, _globals| match args {
+                    func: NativeFunc::Simple(Box::new(|args| match args {
                         [v] => v
                             .to_number()
                             .map(std::ops::Neg::neg)
@@ -254,7 +254,7 @@ pub mod f64 {
                             "expected 1 argument, got {}",
                             args.len()
                         ))),
-                    }),
+                    })),
                 }))
                 .build()
                 .expect("must succeed"),
@@ -286,7 +286,7 @@ pub mod f64 {
                                 parameters: Some(vec![StaticType::Any, StaticType::Any]),
                                 return_type: Box::new(StaticType::Bool),
                             },
-                            func: Box::new(|args, _globals| match args {
+                            func: NativeFunc::Simple(Box::new(|args| match args {
                                 [left, right] => match left.partial_cmp(right) {
                                     Some($expected) => Ok(VmValue::Bool(true)),
                                     Some(_) => Ok(VmValue::Bool(false)),
@@ -297,7 +297,7 @@ pub mod f64 {
                                     ))),
                                 },
                                 _ => Err(VmError::native(format!("expected 2 arguments, got {}", args.len()))),
-                            }),
+                            })),
                         }))
                         .build()
                         .expect("must succeed")
@@ -330,10 +330,10 @@ pub mod f64 {
                         parameters: Some(vec![StaticType::Any, StaticType::Any]),
                         return_type: Box::new(StaticType::Bool),
                     },
-                    func: Box::new(|args, _globals| match args {
+                    func: NativeFunc::Simple(Box::new(|args| match args {
                         [left, right] => Ok(VmValue::Bool(left == right)),
                         _ => Err(VmError::native(format!("expected 2 arguments, got {}", args.len()))),
-                    }),
+                    })),
                 }))
                 .build()
                 .expect("must succeed")
@@ -359,10 +359,10 @@ pub mod f64 {
                         parameters: Some(vec![StaticType::Any, StaticType::Any]),
                         return_type: Box::new(StaticType::Bool),
                     },
-                    func: Box::new(|args, _globals| match args {
+                    func: NativeFunc::Simple(Box::new(|args| match args {
                         [left, right] => Ok(VmValue::Bool(left != right)),
                         _ => Err(VmError::native(format!("expected 2 arguments, got {}", args.len()))),
-                    }),
+                    })),
                 }))
                 .build()
                 .expect("must succeed")
@@ -393,7 +393,7 @@ pub mod f64 {
                         parameters: Some(vec![StaticType::Any, StaticType::Any]),
                         return_type: Box::new(StaticType::Int),
                     },
-                    func: Box::new(|args, _globals| match args {
+                    func: NativeFunc::Simple(Box::new(|args| match args {
                         [left, right] => match left.partial_cmp(right) {
                             Some(Ordering::Equal) => Ok(VmValue::Int(0)),
                             Some(Ordering::Less) => Ok(VmValue::Int(-1)),
@@ -405,7 +405,7 @@ pub mod f64 {
                             ))),
                         },
                         _ => Err(VmError::native(format!("expected 2 arguments, got {}", args.len()))),
-                    }),
+                    })),
                 }))
                 .build()
                 .expect("must succeed")
@@ -436,7 +436,7 @@ pub mod f64 {
                         parameters: Some(vec![StaticType::Any, StaticType::Any]),
                         return_type: Box::new(StaticType::Int),
                     },
-                    func: Box::new(|args, _globals| match args {
+                    func: NativeFunc::Simple(Box::new(|args| match args {
                         [left, right] => match left.partial_cmp(right) {
                             Some(Ordering::Equal) => Ok(VmValue::Int(0)),
                             Some(Ordering::Less) => Ok(VmValue::Int(1)),
@@ -448,7 +448,7 @@ pub mod f64 {
                             ))),
                         },
                         _ => Err(VmError::native(format!("expected 2 arguments, got {}", args.len()))),
-                    }),
+                    })),
                 }))
                 .build()
                 .expect("must succeed")
@@ -476,10 +476,10 @@ pub mod f64 {
                                 parameters: Some(vec![StaticType::Bool, StaticType::Bool]),
                                 return_type: Box::new(StaticType::Bool),
                             },
-                            func: Box::new(|args, _globals| match args {
+                            func: NativeFunc::Simple(Box::new(|args| match args {
                                 [VmValue::Bool(l), VmValue::Bool(r)] => Ok(VmValue::Bool($operation(*l, *r))),
                                 _ => Err(VmError::native(format!("expected 2 bool arguments, got {}", args.len()))),
-                            }),
+                            })),
                         }))
                         .build()
                         .expect("must succeed")
@@ -505,7 +505,7 @@ pub mod f64 {
                                 parameters: Some(vec![StaticType::Int, StaticType::Int]),
                                 return_type: Box::new(StaticType::Int),
                             },
-                            func: Box::new(|args, _globals| match args {
+                            func: NativeFunc::Simple(Box::new(|args| match args {
                                 [left, right] => {
                                     let l = left.to_int().ok_or_else(|| {
                                         VmError::native(format!("expected int, got {}", left.static_type()))
@@ -516,7 +516,7 @@ pub mod f64 {
                                     Ok(VmValue::from_int($operation(l, r)))
                                 }
                                 _ => Err(VmError::native(format!("expected 2 arguments, got {}", args.len()))),
-                            }),
+                            })),
                         }))
                         .build()
                         .expect("must succeed"),
@@ -538,7 +538,7 @@ pub mod f64 {
                         parameters: Some(vec![StaticType::Number]),
                         return_type: Box::new(StaticType::Number),
                     },
-                    func: Box::new(|args, _globals| match args {
+                    func: NativeFunc::Simple(Box::new(|args| match args {
                         [v] => v
                             .to_number()
                             .map(Not::not)
@@ -550,7 +550,7 @@ pub mod f64 {
                             "expected 1 argument, got {}",
                             args.len()
                         ))),
-                    }),
+                    })),
                 }))
                 .build()
                 .expect("must succeed"),
@@ -574,10 +574,10 @@ pub mod f64 {
                             parameters: Some(vec![StaticType::Bool]),
                             return_type: Box::new(StaticType::Bool),
                         },
-                        func: Box::new(|args, _globals| match args {
+                        func: NativeFunc::Simple(Box::new(|args| match args {
                             [VmValue::Bool(b)] => Ok(VmValue::Bool(b.not())),
                             _ => Err(VmError::native(format!("expected 1 bool argument, got {}", args.len()))),
-                        }),
+                        })),
                     }))
                     .build()
                     .expect("must succeed")
@@ -606,7 +606,7 @@ pub mod f64 {
                         parameters: Some(vec![StaticType::Int, StaticType::Int]),
                         return_type: Box::new(StaticType::Int),
                     },
-                    func: Box::new(|args, _globals| match args {
+                    func: NativeFunc::Simple(Box::new(|args| match args {
                         [left, right] => {
                             let l = left.to_int().ok_or_else(|| VmError::native(format!("expected int, got {}", left.static_type())))?;
                             let r = right.to_int().ok_or_else(|| VmError::native(format!("expected int, got {}", right.static_type())))?;
@@ -615,7 +615,7 @@ pub mod f64 {
                                 .ok_or_else(|| VmError::native("cannot apply >> operator to operands".to_string()))
                         }
                         _ => Err(VmError::native(format!("expected 2 arguments, got {}", args.len()))),
-                    }),
+                    })),
                 }))
                 .build()
                 .expect("must succeed")
@@ -643,7 +643,7 @@ pub mod f64 {
                         parameters: Some(vec![StaticType::Int, StaticType::Int]),
                         return_type: Box::new(StaticType::Int),
                     },
-                    func: Box::new(|args, _globals| match args {
+                    func: NativeFunc::Simple(Box::new(|args| match args {
                         [left, right] => {
                             let l = left.to_int().ok_or_else(|| VmError::native(format!("expected int, got {}", left.static_type())))?;
                             let r = right.to_int().ok_or_else(|| VmError::native(format!("expected int, got {}", right.static_type())))?;
@@ -652,7 +652,7 @@ pub mod f64 {
                                 .ok_or_else(|| VmError::native("cannot apply << operator to operands".to_string()))
                         }
                         _ => Err(VmError::native(format!("expected 2 arguments, got {}", args.len()))),
-                    }),
+                    })),
                 }))
                 .build()
                 .expect("must succeed")
@@ -679,7 +679,7 @@ pub mod f64 {
                             parameters: Some(vec![StaticType::Number]),
                             return_type: Box::new(StaticType::Number),
                         },
-                        func: Box::new(|args, _globals| match args {
+                        func: NativeFunc::Simple(Box::new(|args| match args {
                             [v] => v
                                 .to_number()
                                 .map(|num| match num {
@@ -701,7 +701,7 @@ pub mod f64 {
                                 "expected 1 argument, got {}",
                                 args.len()
                             ))),
-                        }),
+                        })),
                     }))
                     .build()
                     .expect("expected delegate_to_f64 to always create function object correctly");
