@@ -5,11 +5,11 @@
 //! vm_native generation for that function.
 
 use crate::r#match::{
-    is_ndc_vm_value, is_ref, is_ref_mut, is_ref_mut_of_hashmap_of_ndc_vm_value,
-    is_ref_mut_of_max_heap, is_ref_mut_of_min_heap, is_ref_mut_of_vec_of_ndc_vm_value,
-    is_ref_mut_of_vecdeque_of_ndc_vm_value, is_ref_of_bigint, is_ref_of_hashmap_of_ndc_vm_value,
-    is_ref_of_slice_of_ndc_vm_value, is_ref_of_slice_of_value, is_ref_of_vecdeque_of_ndc_vm_value,
-    is_str_ref, is_string, path_ends_with,
+    is_ndc_vm_seq_value, is_ndc_vm_value, is_ref, is_ref_mut,
+    is_ref_mut_of_hashmap_of_ndc_vm_value, is_ref_mut_of_max_heap, is_ref_mut_of_min_heap,
+    is_ref_mut_of_vec_of_ndc_vm_value, is_ref_mut_of_vecdeque_of_ndc_vm_value, is_ref_of_bigint,
+    is_ref_of_hashmap_of_ndc_vm_value, is_ref_of_slice_of_ndc_vm_value, is_ref_of_slice_of_value,
+    is_ref_of_vecdeque_of_ndc_vm_value, is_str_ref, is_string, path_ends_with,
 };
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
@@ -462,6 +462,16 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
         });
     }
 
+    // ndc_vm::value::SeqValue — identical extraction to Value, but emits
+    // StaticType::Sequence so the type checker and dispatch see the correct type.
+    if is_ndc_vm_seq_value(ty) {
+        return Some(VmInputArg {
+            extract: quote! {},
+            pass: quote! { #raw.clone() },
+            static_type: quote! { ndc_interpreter::function::StaticType::Sequence(Box::new(ndc_interpreter::function::StaticType::Any)) },
+        });
+    }
+
     // &[ndc_vm::value::Value] — pass a borrow of the inner Vec directly, zero conversion.
     // Must come before the &[Value] check because is_ref_of_slice_of_value also matches this type.
     if is_ref_of_slice_of_ndc_vm_value(ty) {
@@ -579,7 +589,7 @@ pub fn try_vm_return(output: &syn::ReturnType) -> Option<(TokenStream, TokenStre
 
 fn try_vm_return_type(ty: &syn::Type) -> Option<(TokenStream, TokenStream)> {
     // ndc_vm::value::Value — already a VmValue, return as-is.
-    if is_ndc_vm_value(ty) {
+    if is_ndc_vm_value(ty) || is_ndc_vm_seq_value(ty) {
         return Some((
             quote! { Ok(result) },
             quote! { ndc_interpreter::function::StaticType::Any },
@@ -706,8 +716,8 @@ fn try_vm_return_inner(ty: &syn::Type) -> Option<(TokenStream, TokenStream)> {
             ));
         }
     }
-    // ndc_vm::value::Value inside Result<ndc_vm::value::Value> — pass through.
-    if is_ndc_vm_value(ty) {
+    // ndc_vm::value::Value / SeqValue inside Result<...> — pass through.
+    if is_ndc_vm_value(ty) || is_ndc_vm_seq_value(ty) {
         return Some((
             quote! { Ok(result) },
             quote! { ndc_interpreter::function::StaticType::Any },

@@ -72,6 +72,39 @@ impl Ord for OrdValue {
     }
 }
 
+/// Type alias for [`Value`] that signals `StaticType::Sequence` to the `#[export_module]` macro.
+///
+/// Use this instead of `ndc_vm::value::Value` in stdlib function signatures when the parameter
+/// must accept any iterable sequence. The extraction is identical (zero-copy pass-through on the
+/// VM path) but the macro emits `StaticType::Sequence(Any)` instead of `StaticType::Any`, which
+/// preserves the correct type for dispatch and static analysis.
+pub type SeqValue = Value;
+
+/// An iterator that yields VM [`Value`]s from any iterable object.
+///
+/// Created by [`Value::try_into_iter`]. If the caller holds the only `Rc`
+/// reference to the underlying collection it is moved out in O(1) via
+/// `Rc::unwrap_or_clone`; otherwise it is cloned first.
+pub enum ValueIter {
+    List(std::vec::IntoIter<Value>),
+    Deque(std::collections::vec_deque::IntoIter<Value>),
+    Map(std::collections::hash_map::IntoIter<Value, Value>),
+    Shared(SharedIterator),
+}
+
+impl Iterator for ValueIter {
+    type Item = Value;
+
+    fn next(&mut self) -> Option<Value> {
+        match self {
+            Self::List(i) => i.next(),
+            Self::Deque(i) => i.next(),
+            Self::Map(i) => i.next().map(|(k, v)| Value::tuple(vec![k, v])),
+            Self::Shared(i) => i.borrow_mut().next(),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub enum Function {
     Closure(ClosureFunction),
@@ -133,6 +166,14 @@ impl Value {
         Self::Object(Rc::new(Object::Iterator(iter)))
     }
 
+    pub fn list(values: Vec<Value>) -> Self {
+        Self::Object(Rc::new(Object::list(values)))
+    }
+
+    pub fn tuple(values: Vec<Value>) -> Self {
+        Self::Object(Rc::new(Object::Tuple(values)))
+    }
+
     pub fn static_type(&self) -> StaticType {
         match self {
             Self::Int(_) => StaticType::Int,
@@ -181,6 +222,38 @@ impl Object {
 }
 
 impl Value {
+    /// Consume this value and produce an iterator over its elements.
+    ///
+    /// Returns `None` for non-iterable types (`Int`, `Float`, `Bool`, `None`,
+    /// functions, numbers, …).
+    ///
+    /// For `Map`, yields `(key, value)` tuples — the same behaviour as
+    /// iterating a map in a for-loop.
+    ///
+    /// Uses `Rc::unwrap_or_clone` so no extra clone occurs when this value
+    /// holds the sole reference to its object.
+    pub fn try_into_iter(self) -> Option<ValueIter> {
+        let Value::Object(obj) = self else {
+            return None;
+        };
+        match Rc::unwrap_or_clone(obj) {
+            Object::List(l) => Some(ValueIter::List(l.into_inner().into_iter())),
+            Object::Tuple(t) => Some(ValueIter::List(t.into_iter())),
+            Object::Deque(d) => Some(ValueIter::Deque(d.into_inner().into_iter())),
+            Object::Iterator(i) => Some(ValueIter::Shared(i)),
+            Object::String(s) => {
+                let chars: Vec<Value> = s
+                    .borrow()
+                    .chars()
+                    .map(|c| Value::string(c.to_string()))
+                    .collect();
+                Some(ValueIter::List(chars.into_iter()))
+            }
+            Object::Map { entries, .. } => Some(ValueIter::Map(entries.into_inner().into_iter())),
+            _ => None,
+        }
+    }
+
     pub fn function_prototype(&self) -> Option<&Rc<CompiledFunction>> {
         let Self::Object(obj) = self else { return None };
         obj.function_prototype()
@@ -346,11 +419,11 @@ impl fmt::Display for Object {
                 let vs = vs.borrow();
                 write!(f, "[")?;
                 for (i, v) in vs.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
-                    }
                     // Use Debug (repr) for elements so strings appear quoted inside lists.
                     write!(f, "{v:?}")?;
+                    if i + 1 < vs.len() {
+                        write!(f, ",")?;
+                    }
                 }
                 write!(f, "]")
             }
@@ -359,10 +432,10 @@ impl fmt::Display for Object {
             Self::Tuple(vs) => {
                 write!(f, "(")?;
                 for (i, v) in vs.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
-                    }
                     write!(f, "{v:?}")?;
+                    if i + 1 < vs.len() {
+                        write!(f, ",")?;
+                    }
                 }
                 write!(f, ")")
             }
@@ -370,10 +443,10 @@ impl fmt::Display for Object {
                 write!(f, "%{{")?;
                 let entries = entries.borrow();
                 for (i, (k, v)) in entries.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
-                    }
                     write!(f, "{k:?}: {v:?}")?;
+                    if i + 1 < entries.len() {
+                        write!(f, ",")?;
+                    }
                 }
                 write!(f, "}}")
             }
@@ -545,6 +618,10 @@ impl PartialEq for Value {
         match (self, other) {
             (Self::Int(a), Self::Int(b)) => a == b,
             (Self::Float(a), Self::Float(b)) => OrderedFloat(*a) == OrderedFloat(*b),
+            // Cross-type numeric equality: consistent with PartialOrd's cross-numeric path.
+            (Self::Int(_), Self::Float(_)) | (Self::Float(_), Self::Int(_)) => {
+                vm_value_to_number(self) == vm_value_to_number(other)
+            }
             (Self::Bool(a), Self::Bool(b)) => a == b,
             (Self::None, Self::None) => true,
             (Self::Object(a), Self::Object(b)) => a == b,
@@ -563,8 +640,18 @@ impl Hash for Value {
                 n.hash(state);
             }
             Self::Float(f) => {
-                state.write_u8(2);
-                OrderedFloat(*f).hash(state);
+                // Normalise whole-number floats to the same hash as their integer equivalent,
+                // so that Int(1) and Float(1.0) hash identically (consistent with PartialEq).
+                match Int::from_f64_if_int(*f) {
+                    Some(i) => {
+                        state.write_u8(1);
+                        i.hash(state);
+                    }
+                    None => {
+                        state.write_u8(2);
+                        OrderedFloat(*f).hash(state);
+                    }
+                }
             }
             Self::Bool(true) => state.write_u8(3),
             Self::Bool(false) => state.write_u8(4),
