@@ -448,6 +448,14 @@ impl ScopeTree {
         }
     }
 
+    /// Reserve a slot in the current scope without creating a named binding.
+    /// Used to allocate the list/map accumulator before analysing the body of a
+    /// for-comprehension, so that any nested comprehensions receive strictly
+    /// higher slot numbers and cannot collide with this accumulator.
+    pub(crate) fn reserve_anonymous_slot(&mut self) -> usize {
+        self.scopes[self.current_scope_idx].allocate("\x00".to_string(), StaticType::Any)
+    }
+
     pub(crate) fn update_binding_type(&mut self, var: ResolvedVar, new_type: StaticType) {
         match var {
             ResolvedVar::Local { slot } => {

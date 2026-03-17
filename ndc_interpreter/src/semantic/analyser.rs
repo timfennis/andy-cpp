@@ -3,8 +3,7 @@ use crate::semantic::ScopeTree;
 use itertools::Itertools;
 use ndc_lexer::Span;
 use ndc_parser::{
-    Binding, Expression, ExpressionLocation, ForBody, ForIteration, Lvalue, ResolvedVar,
-    TypeSignature,
+    Binding, Expression, ExpressionLocation, ForBody, ForIteration, Lvalue, TypeSignature,
 };
 use std::fmt::Debug;
 
@@ -193,20 +192,6 @@ impl Analyser {
             }
             Expression::For { iterations, body } => {
                 let return_type = self.resolve_for_iterations(iterations, body, *span)?;
-                // Assign the VM accumulator slot for list comprehensions. We do this after
-                // resolution so we can derive the slot from the resolved loop-variable slots
-                // without touching the scope tree (the interpreter doesn't need this slot).
-                let max_loop_slot = iterations.iter().filter_map(iteration_local_slot).max();
-                let acc_slot = Some(max_loop_slot.map_or(0, |s| s + 1));
-                match body.as_mut() {
-                    ForBody::List {
-                        accumulator_slot, ..
-                    } => *accumulator_slot = acc_slot,
-                    ForBody::Map {
-                        accumulator_slot, ..
-                    } => *accumulator_slot = acc_slot,
-                    ForBody::Block(_) => {}
-                }
                 Ok(return_type)
             }
             Expression::Call {
@@ -379,13 +364,25 @@ impl Analyser {
                     self.analyse(block)?;
                     StaticType::unit()
                 }
-                ForBody::List { expr, .. } => StaticType::List(Box::new(self.analyse(expr)?)),
+                ForBody::List {
+                    expr,
+                    accumulator_slot,
+                    ..
+                } => {
+                    // Reserve the accumulator slot BEFORE analysing the body so
+                    // that nested for-comprehensions receive strictly higher slot
+                    // numbers and cannot collide with this accumulator.
+                    *accumulator_slot = Some(self.scope_tree.reserve_anonymous_slot());
+                    StaticType::List(Box::new(self.analyse(expr)?))
+                }
                 ForBody::Map {
                     key,
                     value,
                     default,
+                    accumulator_slot,
                     ..
                 } => {
+                    *accumulator_slot = Some(self.scope_tree.reserve_anonymous_slot());
                     let key_type = self.analyse(key)?;
                     let value_type = if let Some(value) = value {
                         self.analyse(value)?
@@ -577,27 +574,6 @@ impl Analyser {
         }
 
         Ok(element_type)
-    }
-}
-
-/// Returns the highest local slot index used by the loop variable of `it`.
-/// Used to find the highest-numbered loop variable slot when assigning the comprehension
-/// accumulator slot (which must sit above all loop variable slots).
-fn iteration_local_slot(it: &ForIteration) -> Option<usize> {
-    let ForIteration::Iteration { l_value, .. } = it else {
-        return None;
-    };
-    max_lvalue_slot(l_value)
-}
-
-fn max_lvalue_slot(lv: &Lvalue) -> Option<usize> {
-    match lv {
-        Lvalue::Identifier {
-            resolved: Some(ResolvedVar::Local { slot }),
-            ..
-        } => Some(*slot),
-        Lvalue::Sequence(seq) => seq.iter().filter_map(max_lvalue_slot).max(),
-        _ => None,
     }
 }
 
