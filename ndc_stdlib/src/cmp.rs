@@ -2,7 +2,6 @@
 mod inner {
     use anyhow::anyhow;
 
-    use ndc_interpreter::compare::FallibleOrd;
     use ndc_interpreter::value::Value;
     use std::cmp::Ordering;
 
@@ -48,18 +47,34 @@ mod inner {
     }
 
     /// Returns the larger of `left` and `right`, preferring `left` if they are equal.
-    pub fn max(left: &Value, right: &Value) -> Result<Value, anyhow::Error> {
-        match left.try_cmp(right)? {
-            Ordering::Equal | Ordering::Greater => Ok(left.clone()),
-            Ordering::Less => Ok(right.clone()),
+    pub fn max(
+        left: ndc_vm::value::Value,
+        right: ndc_vm::value::Value,
+    ) -> anyhow::Result<ndc_vm::value::Value> {
+        match left.partial_cmp(&right) {
+            Some(Ordering::Equal) | Some(Ordering::Greater) => Ok(left),
+            Some(Ordering::Less) => Ok(right),
+            None => Err(anyhow!(
+                "cannot compare {} and {}",
+                left.static_type(),
+                right.static_type()
+            )),
         }
     }
 
     /// Returns the smaller of `left` and `right`, preferring `left` if they are equal.
-    pub fn min(left: &Value, right: &Value) -> Result<Value, anyhow::Error> {
-        match left.try_cmp(right)? {
-            Ordering::Equal | Ordering::Less => Ok(left.clone()),
-            Ordering::Greater => Ok(right.clone()),
+    pub fn min(
+        left: ndc_vm::value::Value,
+        right: ndc_vm::value::Value,
+    ) -> anyhow::Result<ndc_vm::value::Value> {
+        match left.partial_cmp(&right) {
+            Some(Ordering::Equal) | Some(Ordering::Less) => Ok(left),
+            Some(Ordering::Greater) => Ok(right),
+            None => Err(anyhow!(
+                "cannot compare {} and {}",
+                left.static_type(),
+                right.static_type()
+            )),
         }
     }
 }
