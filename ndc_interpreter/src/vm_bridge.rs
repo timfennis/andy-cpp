@@ -32,6 +32,23 @@ impl VmIterator for InterpIteratorAdapter {
         Some(interp_to_vm(val))
     }
 
+    fn range_bounds(&self) -> Option<(i64, i64, bool)> {
+        let iter = self.inner.borrow();
+        match &*iter {
+            ValueIterator::ValueRange(r) => Some((r.0.start, r.0.end, false)),
+            ValueIterator::ValueRangeInclusive(r) => Some((*r.0.start(), *r.0.end(), true)),
+            _ => None,
+        }
+    }
+
+    fn unbounded_range_start(&self) -> Option<i64> {
+        let iter = self.inner.borrow();
+        match &*iter {
+            ValueIterator::ValueRangeFrom(r) => Some(r.0.start),
+            _ => None,
+        }
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -306,6 +323,11 @@ pub fn interp_to_vm(value: InterpValue) -> VmValue {
             VmValue::Object(Box::new(VmObject::MaxHeap(Rc::new(RefCell::new(entries)))))
         }
         InterpValue::Function(f) => {
+            if let FunctionBody::VmNative { native, .. } = f.body() {
+                return VmValue::Object(Box::new(VmObject::Function(VmFunction::Native(
+                    Rc::clone(native),
+                ))));
+            }
             if let FunctionBody::Opaque { data, .. } = f.body() {
                 if let Some(wrapper) = data.downcast_ref::<VmFunctionWrapper>() {
                     return wrapper.vm_value.clone();
@@ -314,6 +336,96 @@ pub fn interp_to_vm(value: InterpValue) -> VmValue {
             panic!("cannot convert interpreter function to vm value")
         }
     }
+}
+
+/// Convert an interpreter value to a VM value for the inverted bridge
+/// (`call_vm_native`). Unlike `interp_to_vm`, this handles interpreter-side
+/// closures by wrapping them in a `VmNativeFunction` that calls back into the
+/// interpreter. Containers (Tuple, List) are converted element-wise using this
+/// function so nested closures are also handled.
+fn interp_to_vm_for_inverted_bridge(value: &InterpValue) -> VmValue {
+    if let InterpValue::Function(f) = value {
+        // VmNative — lossless round-trip: extract the native directly
+        if let FunctionBody::VmNative { native, .. } = f.body() {
+            return VmValue::Object(Box::new(VmObject::Function(VmFunction::Native(Rc::clone(
+                native,
+            )))));
+        }
+        // Opaque wrapping a VmFunctionWrapper — already a VM value
+        if let FunctionBody::Opaque { data, .. } = f.body() {
+            if let Some(wrapper) = data.downcast_ref::<VmFunctionWrapper>() {
+                return wrapper.vm_value.clone();
+            }
+        }
+        // Interpreter closure passed as a callback to a VmNative HOF.
+        // Wrap it so the VM can call it by routing back through the interpreter.
+        let f = f.clone();
+        let name = f.name().to_string();
+        let static_type = f.static_type();
+        let callback = Rc::new(NativeFunction {
+            name,
+            static_type,
+            func: Box::new(move |vm_args: &[VmValue]| {
+                let mut interp_args: Vec<InterpValue> = vm_args.iter().map(vm_to_interp).collect();
+                let dummy_env = Rc::new(RefCell::new(Environment::new(Box::new(Vec::<u8>::new()))));
+                f.call(&mut interp_args, &dummy_env)
+                    .map(|v| interp_to_vm(v))
+                    .map_err(|e| e.to_string())
+            }),
+        });
+        return VmValue::Object(Box::new(VmObject::Function(VmFunction::Native(callback))));
+    }
+    // Containers may contain closures — recurse element-wise.
+    if let InterpValue::Sequence(seq) = value {
+        match seq {
+            Sequence::Tuple(rc) => {
+                return VmValue::Object(Box::new(VmObject::Tuple(
+                    rc.iter().map(interp_to_vm_for_inverted_bridge).collect(),
+                )));
+            }
+            Sequence::List(rc) => {
+                return VmValue::Object(Box::new(VmObject::list(
+                    rc.borrow()
+                        .iter()
+                        .map(interp_to_vm_for_inverted_bridge)
+                        .collect(),
+                )));
+            }
+            _ => {}
+        }
+    }
+    interp_to_vm(value.clone())
+}
+
+/// Call a `VmNativeFunction` from the interpreter side (the inverted bridge).
+///
+/// Converts interpreter args → VM values, invokes the native closure,
+/// syncs back any mutations on heap-allocated containers, then converts
+/// the result back to an interpreter value.
+pub(crate) fn call_vm_native(
+    native: &Rc<NativeFunction>,
+    args: &mut [InterpValue],
+) -> EvaluationResult {
+    // 1. Convert each arg to VmValue
+    let vm_args: Vec<VmValue> = args.iter().map(interp_to_vm_for_inverted_bridge).collect();
+
+    // 2. Call the vm_native closure
+    let vm_result = (native.func)(&vm_args)
+        .map_err(|e| FunctionCarrier::IntoEvaluationError(Box::new(anyhow::anyhow!(e))))?;
+
+    // 3. Sync mutations back (vm → interp direction).
+    //    Strings do NOT need syncing — interp_to_vm_for_inverted_bridge shares the
+    //    Rc<RefCell<String>>, so mutations are already visible on both sides.
+    for (vm_arg, interp_arg) in vm_args.iter().zip(args.iter_mut()) {
+        sync_list_mutations_to_interp(vm_arg, interp_arg);
+        sync_map_mutations_to_interp(vm_arg, interp_arg);
+        sync_deque_mutations_to_interp(vm_arg, interp_arg);
+        sync_min_heap_mutations_to_interp(vm_arg, interp_arg);
+        sync_max_heap_mutations_to_interp(vm_arg, interp_arg);
+    }
+
+    // 4. Convert result back
+    Ok(vm_to_interp(&vm_result))
 }
 
 /// Like `vm_to_interp` but converts VM function values into interpreter `NativeClosure`s
@@ -455,4 +567,87 @@ fn sync_list_mutations(vm_arg: &VmValue, interp_arg: &InterpValue) {
         .iter()
         .map(|v| interp_to_vm(v.clone()))
         .collect();
+}
+
+fn sync_list_mutations_to_interp(vm_arg: &VmValue, interp_arg: &mut InterpValue) {
+    let VmValue::Object(vm_obj) = vm_arg else {
+        return;
+    };
+    let VmObject::List(vm_list) = vm_obj.as_ref() else {
+        return;
+    };
+    let InterpValue::Sequence(Sequence::List(interp_list)) = interp_arg else {
+        return;
+    };
+    *interp_list.borrow_mut() = vm_list.borrow().iter().map(vm_to_interp).collect();
+}
+
+fn sync_map_mutations_to_interp(vm_arg: &VmValue, interp_arg: &mut InterpValue) {
+    let VmValue::Object(vm_obj) = vm_arg else {
+        return;
+    };
+    let VmObject::Map {
+        entries: vm_entries,
+        ..
+    } = vm_obj.as_ref()
+    else {
+        return;
+    };
+    let InterpValue::Sequence(Sequence::Map(interp_map, _)) = interp_arg else {
+        return;
+    };
+    *interp_map.borrow_mut() = vm_entries
+        .borrow()
+        .iter()
+        .map(|(k, v)| (vm_to_interp(k), vm_to_interp(v)))
+        .collect();
+}
+
+fn sync_deque_mutations_to_interp(vm_arg: &VmValue, interp_arg: &mut InterpValue) {
+    let VmValue::Object(vm_obj) = vm_arg else {
+        return;
+    };
+    let VmObject::Deque(vm_deque) = vm_obj.as_ref() else {
+        return;
+    };
+    let InterpValue::Sequence(Sequence::Deque(interp_deque)) = interp_arg else {
+        return;
+    };
+    *interp_deque.borrow_mut() = vm_deque.borrow().iter().map(vm_to_interp).collect();
+}
+
+fn sync_min_heap_mutations_to_interp(vm_arg: &VmValue, interp_arg: &mut InterpValue) {
+    let VmValue::Object(vm_obj) = vm_arg else {
+        return;
+    };
+    let VmObject::MinHeap(vm_heap) = vm_obj.as_ref() else {
+        return;
+    };
+    let InterpValue::Sequence(Sequence::MinHeap(interp_heap)) = interp_arg else {
+        return;
+    };
+    use crate::heap::MinHeap;
+    *interp_heap.borrow_mut() = vm_heap
+        .borrow()
+        .iter()
+        .map(|Reverse(v)| vm_to_interp(&v.0))
+        .collect::<MinHeap>();
+}
+
+fn sync_max_heap_mutations_to_interp(vm_arg: &VmValue, interp_arg: &mut InterpValue) {
+    let VmValue::Object(vm_obj) = vm_arg else {
+        return;
+    };
+    let VmObject::MaxHeap(vm_heap) = vm_obj.as_ref() else {
+        return;
+    };
+    let InterpValue::Sequence(Sequence::MaxHeap(interp_heap)) = interp_arg else {
+        return;
+    };
+    use crate::heap::MaxHeap;
+    *interp_heap.borrow_mut() = vm_heap
+        .borrow()
+        .iter()
+        .map(|v| vm_to_interp(&v.0))
+        .collect::<MaxHeap>();
 }

@@ -88,6 +88,49 @@ fn has_path_match(ty: &syn::Type, ident: &str) -> bool {
     }
 }
 
+/// Returns true if the type is the fully-qualified `ndc_vm::value::Value`.
+/// Single-segment `Value` is NOT matched (ambiguous — could be interpreter Value).
+pub fn is_ndc_vm_value(ty: &syn::Type) -> bool {
+    match ty {
+        syn::Type::Path(syn::TypePath { path, .. }) => {
+            let segs: Vec<_> = path.segments.iter().collect();
+            matches!(
+                segs.as_slice(),
+                [a, b, c] if a.ident == "ndc_vm" && b.ident == "value" && c.ident == "Value"
+            )
+        }
+        _ => false,
+    }
+}
+
+/// Returns true if the type is `&[ndc_vm::value::Value]`.
+pub fn is_ref_of_slice_of_ndc_vm_value(ty: &syn::Type) -> bool {
+    is_ref_of(ty, |inner| match inner {
+        syn::Type::Slice(syn::TypeSlice { elem, .. }) => is_ndc_vm_value(elem.as_ref()),
+        _ => false,
+    })
+}
+
+/// Returns true if the type is `&mut Vec<ndc_vm::value::Value>`.
+pub fn is_ref_mut_of_vec_of_ndc_vm_value(ty: &syn::Type) -> bool {
+    is_ref_mut_of(ty, |inner| match inner {
+        syn::Type::Path(syn::TypePath { path, .. }) => {
+            if let Some(last) = path.segments.last() {
+                if last.ident != "Vec" {
+                    return false;
+                }
+                if let syn::PathArguments::AngleBracketed(args) = &last.arguments {
+                    if let Some(syn::GenericArgument::Type(elem)) = args.args.first() {
+                        return is_ndc_vm_value(elem);
+                    }
+                }
+            }
+            false
+        }
+        _ => false,
+    })
+}
+
 pub fn is_string(ty: &syn::Type) -> bool {
     match ty {
         // If ref just recurse :haha:

@@ -1,7 +1,8 @@
 use crate::convert::{Argument, TypeConverter, build};
 use crate::r#match::{
-    is_ref, is_ref_mut, is_ref_mut_of_slice_of_value, is_ref_of_bigint, is_ref_of_slice_of_value,
-    is_str_ref, path_ends_with,
+    is_ndc_vm_value, is_ref, is_ref_mut, is_ref_mut_of_slice_of_value,
+    is_ref_mut_of_vec_of_ndc_vm_value, is_ref_of_bigint, is_ref_of_slice_of_ndc_vm_value,
+    is_ref_of_slice_of_value, is_str_ref, path_ends_with,
 };
 use itertools::Itertools;
 use proc_macro2::TokenStream;
@@ -342,6 +343,19 @@ fn wrap_single(
             ty @ syn::Type::Path(_) if path_ends_with(ty, "EvaluationResult") => quote! {
                 return result;
             },
+            // ndc_vm::value::Value — dead code for VmNative body but must compile.
+            ty @ syn::Type::Path(_) if is_ndc_vm_value(ty) => quote! {
+                return Ok(ndc_interpreter::vm_bridge::vm_to_interp(&result));
+            },
+            // Result<ndc_vm::value::Value> — dead code for VmNative body but must compile.
+            ty @ syn::Type::Path(_)
+                if path_ends_with(ty, "Result") && result_inner_is_ndc_vm_value(ty) =>
+            {
+                quote! {
+                    let value = result.map_err(|err| ndc_interpreter::function::FunctionCarrier::IntoEvaluationError(Box::new(err)))?;
+                    return Ok(ndc_interpreter::vm_bridge::vm_to_interp(&value));
+                }
+            }
             ty @ syn::Type::Path(_) if path_ends_with(ty, "Result") => quote! {
                 let value = result.map_err(|err| ndc_interpreter::function::FunctionCarrier::IntoEvaluationError(Box::new(err)))?;
                 return Ok(ndc_interpreter::value::Value::from(value));
@@ -353,11 +367,9 @@ fn wrap_single(
         },
     };
 
-    // Try to generate a vm_native builder call. Returns an empty TokenStream when
-    // any parameter or return type is unsupported — the function will fall back to
-    // the interpreter bridge as before.
-    let vm_native_call = try_generate_vm_native(&function, &inner_ident, register_as_function_name)
-        .unwrap_or_default();
+    // Try to generate vm_native tokens. When successful, the body becomes
+    // `FunctionBody::VmNative` instead of `GenericFunction`.
+    let maybe_vm = try_generate_vm_native(&function, &inner_ident, register_as_function_name);
 
     // The inner helper is hoisted to module scope (not nested inside the wrapper)
     // so that both the tree-walk wrapper and the vm_native closure can call it.
@@ -391,22 +403,47 @@ fn wrap_single(
         }
     };
 
-    let function_registration = quote! {
-        let func = ndc_interpreter::function::FunctionBuilder::default()
-            .body(ndc_interpreter::function::FunctionBody::GenericFunction {
-                function: #identifier,
-                type_signature: ndc_interpreter::function::TypeSignature::Exact(vec![
-                    #( ndc_interpreter::function::Parameter::new(#param_names, #param_types,) ),*
-                ]),
-                return_type: #return_type,
-            })
-            .name(String::from(#register_as_function_name))
-            .documentation(String::from(#docs))
-            #vm_native_call
-            .build()
-            .expect("expected function creation in proc macro to always succeed");
+    let function_registration = if let Some(vm) = maybe_vm {
+        let VmNativeTokens {
+            native_let,
+            param_types: vm_param_types,
+            param_names: vm_param_names,
+        } = vm;
+        quote! {
+            #native_let
+            let func = ndc_interpreter::function::FunctionBuilder::default()
+                .body(ndc_interpreter::function::FunctionBody::VmNative {
+                    native: std::rc::Rc::clone(&native),
+                    type_signature: ndc_interpreter::function::TypeSignature::Exact(vec![
+                        #( ndc_interpreter::function::Parameter::new(#vm_param_names, #vm_param_types,) ),*
+                    ]),
+                    return_type: #return_type,
+                })
+                .name(String::from(#register_as_function_name))
+                .documentation(String::from(#docs))
+                .vm_native(native)
+                .build()
+                .expect("expected function creation in proc macro to always succeed");
 
-        env.declare_global_fn(func);
+            env.declare_global_fn(func);
+        }
+    } else {
+        quote! {
+            let func = ndc_interpreter::function::FunctionBuilder::default()
+                .body(ndc_interpreter::function::FunctionBody::GenericFunction {
+                    function: #identifier,
+                    type_signature: ndc_interpreter::function::TypeSignature::Exact(vec![
+                        #( ndc_interpreter::function::Parameter::new(#param_names, #param_types,) ),*
+                    ]),
+                    return_type: #return_type,
+                })
+                .name(String::from(#register_as_function_name))
+                .documentation(String::from(#docs))
+                .build()
+                .expect("expected function creation in proc macro to always succeed");
+
+            env.declare_global_fn(func);
+        }
     };
 
     WrappedFunction {
@@ -415,55 +452,78 @@ fn wrap_single(
     }
 }
 
-/// Attempt to generate a `.vm_native(...)` builder call for a function.
+/// Tokens emitted by `try_generate_vm_native` when vm_native is possible.
+struct VmNativeTokens {
+    /// `let native: Rc<NativeFunction> = Rc::new(NativeFunction { ... });`
+    native_let: TokenStream,
+    /// StaticType expressions for each parameter (used in `TypeSignature::Exact`)
+    param_types: Vec<TokenStream>,
+    /// Parameter name strings (used in `Parameter::new`)
+    param_names: Vec<TokenStream>,
+}
+
+/// Attempt to generate vm_native tokens for a function.
 ///
-/// Returns `None` (producing an empty TokenStream via `unwrap_or_default`) when
-/// any parameter or the return type cannot be expressed in VM-native terms.
-/// In that case the function silently falls back to the interpreter bridge.
+/// Returns `None` when any parameter or the return type cannot be expressed in
+/// VM-native terms. In that case the function falls back to the interpreter bridge.
 fn try_generate_vm_native(
     function: &syn::ItemFn,
     inner_ident: &syn::Ident,
     fn_name: &proc_macro2::Literal,
-) -> Option<TokenStream> {
+) -> Option<VmNativeTokens> {
     use crate::vm_convert::{try_vm_input, try_vm_return};
 
     let mut extracts = Vec::new();
     let mut passes = Vec::new();
     let mut param_types = Vec::new();
+    let mut param_names = Vec::new();
     let raw_args: Vec<_> = (0..function.sig.inputs.len())
         .map(|i| format_ident!("vm_raw{i}"))
         .collect();
 
     for (i, arg) in function.sig.inputs.iter().enumerate() {
-        let ty = match arg {
-            syn::FnArg::Typed(pat_ty) => &*pat_ty.ty,
+        let pat_ty = match arg {
+            syn::FnArg::Typed(pat_ty) => pat_ty,
             syn::FnArg::Receiver(_) => return None,
         };
+        let ty = &*pat_ty.ty;
         let conv = try_vm_input(ty, i)?;
         extracts.push(conv.extract);
         passes.push(conv.pass);
         param_types.push(conv.static_type);
+        let name = match &*pat_ty.pat {
+            syn::Pat::Ident(ident) => ident.ident.to_string(),
+            _ => format!("arg{i}"),
+        };
+        param_names.push(quote! { #name });
     }
 
     let (return_code, return_static_type) = try_vm_return(&function.sig.output)?;
     let n = function.sig.inputs.len();
 
-    Some(quote! {
-        .vm_native(std::rc::Rc::new(ndc_vm::value::NativeFunction {
-            name: String::from(#fn_name),
-            static_type: ndc_interpreter::function::StaticType::Function {
-                parameters: Some(vec![#(#param_types),*]),
-                return_type: Box::new(#return_static_type),
-            },
-            func: Box::new(|args| match args {
-                [#(#raw_args),*] => {
-                    #(#extracts)*
-                    let result = #inner_ident(#(#passes),*);
-                    #return_code
-                }
-                _ => Err(format!("expected {} arguments, got {}", #n, args.len())),
-            }),
-        }))
+    let native_let = quote! {
+        let native: std::rc::Rc<ndc_vm::value::NativeFunction> =
+            std::rc::Rc::new(ndc_vm::value::NativeFunction {
+                name: String::from(#fn_name),
+                static_type: ndc_interpreter::function::StaticType::Function {
+                    parameters: Some(vec![#(#param_types.clone()),*]),
+                    return_type: Box::new(#return_static_type),
+                },
+                func: Box::new(|args| match args {
+                    [#(#raw_args),*] => {
+                        #(#extracts)*
+                        let result = #inner_ident(#(#passes),*);
+                        #return_code
+                    }
+                    _ => Err(format!("expected {} arguments, got {}", #n, args.len())),
+                }),
+            });
+    };
+
+    Some(VmNativeTokens {
+        native_let,
+        param_types,
+        param_names,
     })
 }
 
@@ -547,6 +607,66 @@ fn create_temp_variable(
             if converter.matches(ty) {
                 return converter.convert(temp_var, original_name, argument_var_name);
             }
+        }
+
+        // &[ndc_vm::value::Value] — only used in VmNative functions.
+        // Dead-code stub; must come before is_ref_of_slice_of_value which also matches this type.
+        if is_ref_of_slice_of_ndc_vm_value(ty) {
+            let tmp_ident = syn::Ident::new(
+                &format!("tmp_{argument_var_name}"),
+                argument_var_name.span(),
+            );
+            return vec![Argument {
+                param_type: quote! {
+                    ndc_interpreter::function::StaticType::List(Box::new(
+                        ndc_interpreter::function::StaticType::Any,
+                    ))
+                },
+                param_name: quote! { #original_name },
+                argument: quote! { #argument_var_name },
+                initialize_code: quote! {
+                    let #tmp_ident: Vec<ndc_vm::value::Value> = Vec::new();
+                    let #argument_var_name = #tmp_ident.as_slice();
+                },
+            }];
+        }
+
+        // &mut Vec<ndc_vm::value::Value> — only used in VmNative functions.
+        // Dead-code stub for the interpreter wrapper: bind a fresh empty Vec and
+        // re-bind argument_var_name as &mut so the function call site compiles.
+        if is_ref_mut_of_vec_of_ndc_vm_value(ty) {
+            let tmp_ident = syn::Ident::new(
+                &format!("tmp_{argument_var_name}"),
+                argument_var_name.span(),
+            );
+            return vec![Argument {
+                param_type: quote! {
+                    ndc_interpreter::function::StaticType::List(Box::new(
+                        ndc_interpreter::function::StaticType::Any,
+                    ))
+                },
+                param_name: quote! { #original_name },
+                argument: quote! { #argument_var_name },
+                initialize_code: quote! {
+                    let mut #tmp_ident: Vec<ndc_vm::value::Value> = Vec::new();
+                    let #argument_var_name = &mut #tmp_ident;
+                },
+            }];
+        }
+
+        // ndc_vm::value::Value — only used in VmNative functions.
+        // The interpreter wrapper is dead code for VmNative bodies but must compile;
+        // generate a stub that converts through the bridge (never actually executed).
+        if is_ndc_vm_value(ty) {
+            return vec![Argument {
+                param_type: quote! { ndc_interpreter::function::StaticType::Any },
+                param_name: quote! { #original_name },
+                argument: quote! { #argument_var_name },
+                initialize_code: quote! {
+                    let #argument_var_name =
+                        ndc_interpreter::vm_bridge::interp_to_vm(#argument_var_name.clone());
+                },
+            }];
         }
 
         // The pattern is Callable
@@ -936,6 +1056,21 @@ fn create_temp_variable(
     }
 
     panic!("Not sure how to handle receivers");
+}
+
+/// Returns true if the return type is `Result<ndc_vm::value::Value, _>`,
+/// so the interpreter wrapper can use `vm_to_interp` instead of `Value::from`.
+fn result_inner_is_ndc_vm_value(ty: &syn::Type) -> bool {
+    if let syn::Type::Path(tp) = ty {
+        if let Some(last) = tp.path.segments.last() {
+            if let syn::PathArguments::AngleBracketed(ab) = &last.arguments {
+                if let Some(syn::GenericArgument::Type(inner)) = ab.args.first() {
+                    return is_ndc_vm_value(inner);
+                }
+            }
+        }
+    }
+    false
 }
 
 // TODO: just adding Any as type here is lazy AF but CBA fixing generics

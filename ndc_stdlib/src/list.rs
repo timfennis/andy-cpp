@@ -35,7 +35,11 @@ mod inner {
         }
     }
 
-    pub fn insert(list: &mut Vec<Value>, index: usize, elem: Value) -> anyhow::Result<()> {
+    pub fn insert(
+        list: &mut Vec<ndc_vm::value::Value>,
+        index: usize,
+        elem: ndc_vm::value::Value,
+    ) -> anyhow::Result<()> {
         if index > list.len() {
             return Err(anyhow!("index {index} is out of bounds"));
         }
@@ -44,7 +48,10 @@ mod inner {
     }
 
     /// Removes and returns the element at position `index` within the list, shifting all elements after it to the left.
-    pub fn remove(list: &mut Vec<Value>, index: usize) -> anyhow::Result<Value> {
+    pub fn remove(
+        list: &mut Vec<ndc_vm::value::Value>,
+        index: usize,
+    ) -> anyhow::Result<ndc_vm::value::Value> {
         if index > list.len() {
             return Err(anyhow!("index {index} is out of bounds"));
         }
@@ -53,17 +60,17 @@ mod inner {
     }
 
     /// Removes all instances of `element` from `list`
-    pub fn remove_element(list: &mut Vec<Value>, element: &Value) {
-        list.retain(|cur| cur != element);
+    pub fn remove_element(list: &mut Vec<ndc_vm::value::Value>, element: ndc_vm::value::Value) {
+        list.retain(|cur| cur != &element);
     }
 
     /// Appends `elem` to the back of `list`
-    pub fn push(list: &mut Vec<Value>, elem: Value) {
+    pub fn push(list: &mut Vec<ndc_vm::value::Value>, elem: ndc_vm::value::Value) {
         list.push(elem);
     }
 
     /// Moves elements from `other` to `list` leaving `other` empty
-    pub fn append(list: &mut Vec<Value>, other: &mut Vec<Value>) {
+    pub fn append(list: &mut Vec<ndc_vm::value::Value>, other: &mut Vec<ndc_vm::value::Value>) {
         list.append(other);
     }
 
@@ -124,7 +131,7 @@ mod inner {
     }
 
     /// Copies elements from `other` to `list` not touching `other`.
-    pub fn extend(list: &mut Vec<Value>, other: &[Value]) {
+    pub fn extend(list: &mut Vec<ndc_vm::value::Value>, other: &[ndc_vm::value::Value]) {
         list.extend_from_slice(other);
     }
 
@@ -135,29 +142,30 @@ mod inner {
     }
 
     /// Removes the last element from a list and returns it, or `Unit` if it is empty
-    #[function(name = "pop?")]
-    pub fn maybe_pop(list: &mut Vec<Value>) -> Value {
-        list.pop().map_or_else(Value::none, Value::some)
+    #[function(name = "pop?", return_type = Option<Value>)]
+    pub fn maybe_pop(list: &mut Vec<ndc_vm::value::Value>) -> ndc_vm::value::Value {
+        match list.pop() {
+            None => ndc_vm::value::Value::None,
+            Some(val) => ndc_vm::value::Value::Object(Box::new(ndc_vm::value::Object::Some(val))),
+        }
     }
 
-    pub fn pop(list: &mut Vec<Value>) -> Value {
-        list.pop().unwrap_or(Value::unit())
+    pub fn pop(list: &mut Vec<ndc_vm::value::Value>) -> ndc_vm::value::Value {
+        list.pop().unwrap_or_else(ndc_vm::value::Value::unit)
     }
 
     #[function(name = "pop_left?", return_type = Option<Value>)]
-    pub fn maybe_pop_left(list: &mut Vec<Value>) -> Value {
+    pub fn maybe_pop_left(list: &mut Vec<ndc_vm::value::Value>) -> ndc_vm::value::Value {
         if list.is_empty() {
-            return Value::none();
+            return ndc_vm::value::Value::None;
         }
-
-        Value::some(list.remove(0))
+        ndc_vm::value::Value::Object(Box::new(ndc_vm::value::Object::Some(list.remove(0))))
     }
 
-    pub fn pop_left(list: &mut Vec<Value>) -> Value {
+    pub fn pop_left(list: &mut Vec<ndc_vm::value::Value>) -> ndc_vm::value::Value {
         if list.is_empty() {
-            return Value::unit();
+            return ndc_vm::value::Value::unit();
         }
-
         list.remove(0)
     }
 
@@ -168,7 +176,7 @@ mod inner {
     }
 
     /// Removes all values from the list
-    pub fn clear(list: &mut Vec<Value>) {
+    pub fn clear(list: &mut Vec<ndc_vm::value::Value>) {
         list.clear();
     }
 
@@ -178,17 +186,22 @@ mod inner {
     }
 
     /// Splits the collection into two at the given index.
-    pub fn split_off(list: &mut Vec<Value>, index: usize) -> anyhow::Result<Value> {
+    pub fn split_off(
+        list: &mut Vec<ndc_vm::value::Value>,
+        index: usize,
+    ) -> anyhow::Result<ndc_vm::value::Value> {
         if index > list.len() {
             return Err(anyhow!("index {index} is out of bounds"));
         }
 
-        Ok(Value::list(list.split_off(index)))
+        Ok(ndc_vm::value::Value::Object(Box::new(
+            ndc_vm::value::Object::list(list.split_off(index)),
+        )))
     }
 
     /// Shortens the list, keeping the first `len` elements and dropping the rest.
     /// If `len` is greater or equal to the length of the list, nothing happens.
-    pub fn truncate(list: &mut Vec<Value>, len: usize) {
+    pub fn truncate(list: &mut Vec<ndc_vm::value::Value>, len: usize) {
         list.truncate(len);
     }
 

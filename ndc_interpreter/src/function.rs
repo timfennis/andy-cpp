@@ -211,6 +211,13 @@ pub enum FunctionBody {
         /// Prototype pointer identity, used for equality comparison (same as Opaque/VmFunctionWrapper).
         identity: Option<usize>,
     },
+    /// A stdlib function whose canonical implementation is a VM-native closure.
+    /// The interpreter calls it via a thin adapter in `vm_bridge::call_vm_native`.
+    VmNative {
+        native: Rc<VmNativeFunction>,
+        type_signature: TypeSignature,
+        return_type: StaticType,
+    },
 }
 
 impl FunctionBody {
@@ -222,6 +229,7 @@ impl FunctionBody {
             Self::GenericFunction { type_signature, .. } => type_signature.arity(),
             Self::Memoized { function, .. } => function.arity(),
             Self::Opaque { .. } | Self::NativeClosure { .. } => None,
+            Self::VmNative { type_signature, .. } => type_signature.arity(),
         }
     }
 
@@ -250,6 +258,7 @@ impl FunctionBody {
             ]),
             Self::GenericFunction { type_signature, .. } => type_signature.clone(),
             Self::Opaque { .. } | Self::NativeClosure { .. } => TypeSignature::Variadic,
+            Self::VmNative { type_signature, .. } => type_signature.clone(),
         }
     }
 
@@ -263,6 +272,7 @@ impl FunctionBody {
             Self::Opaque { static_type, .. } | Self::NativeClosure { static_type, .. } => {
                 static_type
             }
+            Self::VmNative { return_type, .. } => return_type,
         }
     }
     pub fn call(&self, args: &mut [Value], env: &Rc<RefCell<Environment>>) -> EvaluationResult {
@@ -326,6 +336,25 @@ impl FunctionBody {
                     if let Some(call) = &wrapper.call {
                         return call(args);
                     }
+                    // Fallback: call a Native VM function directly (no globals needed).
+                    // This handles closures that were interp→vm→interp round-tripped through
+                    // a list mutation sync (e.g. push/pop), where call is None but the
+                    // underlying NativeFunction wraps the original interpreter closure.
+                    if let ndc_vm::Value::Object(obj) = &wrapper.vm_value {
+                        if let ndc_vm::value::Object::Function(ndc_vm::value::Function::Native(
+                            native,
+                        )) = obj.as_ref()
+                        {
+                            let vm_args: Vec<ndc_vm::Value> = args
+                                .iter()
+                                .map(|a| crate::vm_bridge::interp_to_vm(a.clone()))
+                                .collect();
+                            let result = (native.func)(&vm_args).map_err(|e| {
+                                FunctionCarrier::IntoEvaluationError(Box::new(anyhow::anyhow!(e)))
+                            })?;
+                            return Ok(crate::vm_bridge::vm_to_interp(&result));
+                        }
+                    }
                 }
                 Err(FunctionCallError::ArgumentCountError {
                     expected: 0,
@@ -334,6 +363,7 @@ impl FunctionBody {
                 .into())
             }
             Self::NativeClosure { call, .. } => call(args),
+            Self::VmNative { native, .. } => crate::vm_bridge::call_vm_native(native, args),
             Self::Memoized { cache, function } => {
                 let mut hasher = DefaultHasher::default();
                 for arg in &*args {

@@ -7,6 +7,7 @@ mod inner {
     use ndc_interpreter::heap::{MaxHeap, MinHeap};
     use ndc_interpreter::sequence::Sequence;
     use ndc_interpreter::value::Value;
+    use ndc_vm::value::{Object as VmObject, Value as VmValue};
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -57,15 +58,15 @@ mod inner {
     }
 
     /// Creates a new instance of `Some`
-    #[function(name = "Some", return_type = Option<Value>)] // <-- fake type constructor
-    pub fn some(value: Value) -> Value {
-        Value::Option(Some(Box::new(value)))
+    #[function(name = "Some", return_type = Option<Value>)]
+    pub fn some(value: ndc_vm::value::Value) -> ndc_vm::value::Value {
+        VmValue::Object(Box::new(VmObject::Some(value)))
     }
 
     /// Creates a new instance of `None`
     #[function(return_type = Option<_>)]
-    pub fn none() -> Value {
-        Value::Option(None)
+    pub fn none() -> ndc_vm::value::Value {
+        VmValue::None
     }
 
     /// Returns true if the argument is Some<T>
@@ -79,16 +80,14 @@ mod inner {
     }
 
     /// Extracts the value from an Option or errors if it's either None or a non-Option type
-    ///
-    /// Note: this function should take an Option as parameter
-    // TODO: the type of value should be `Option<Value>` but the macro crate probably doesn't support that yet
-    pub fn unwrap(value: Value) -> anyhow::Result<Value> {
+    pub fn unwrap(value: ndc_vm::value::Value) -> anyhow::Result<ndc_vm::value::Value> {
         match value {
-            Value::Option(Some(val)) => Ok(*val),
-            Value::Option(None) => Err(anyhow::anyhow!("option was none")),
-            _ => Err(anyhow::anyhow!(
-                "incorrect argument to unwrap (temporary error)"
-            )),
+            VmValue::Object(obj) => match *obj {
+                VmObject::Some(inner) => Ok(inner),
+                _ => Err(anyhow::anyhow!("incorrect argument to unwrap")),
+            },
+            VmValue::None => Err(anyhow::anyhow!("option was none")),
+            _ => Err(anyhow::anyhow!("incorrect argument to unwrap")),
         }
     }
 
