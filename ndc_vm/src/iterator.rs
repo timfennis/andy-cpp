@@ -3,7 +3,6 @@ use ndc_core::hash_map::HashMap;
 use std::cell::RefCell;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
-use std::collections::VecDeque;
 use std::rc::Rc;
 
 pub trait VmIterator {
@@ -156,65 +155,59 @@ impl VmIterator for UnboundedRangeIter {
     }
 }
 
-/// Iterates over a list by index
-pub struct ListIter {
-    list: Rc<RefCell<Vec<Value>>>,
+/// Iterates over a List, Tuple, or Deque by index.
+/// Holds an `Rc<Object>` to keep the sequence alive without an extra allocation.
+pub struct SeqIter {
+    obj: Rc<Object>,
     index: usize,
 }
 
-impl ListIter {
-    pub fn new(list: Rc<RefCell<Vec<Value>>>) -> Self {
-        Self { list, index: 0 }
+impl SeqIter {
+    pub fn new(obj: Rc<Object>) -> Self {
+        Self { obj, index: 0 }
+    }
+
+    fn len_of(&self) -> usize {
+        match self.obj.as_ref() {
+            Object::List(v) => v.borrow().len(),
+            Object::Tuple(v) => v.len(),
+            Object::Deque(d) => d.borrow().len(),
+            _ => unreachable!("SeqIter holds a non-sequence Object"),
+        }
     }
 }
 
-impl VmIterator for ListIter {
+impl VmIterator for SeqIter {
     fn next(&mut self) -> Option<Value> {
-        let list = self.list.borrow();
-        if self.index < list.len() {
-            let val = list[self.index].clone();
-            self.index += 1;
-            Some(val)
-        } else {
-            None
-        }
+        let val = match self.obj.as_ref() {
+            Object::List(v) => {
+                let v = v.borrow();
+                if self.index >= v.len() {
+                    return None;
+                }
+                v[self.index].clone()
+            }
+            Object::Tuple(v) => {
+                if self.index >= v.len() {
+                    return None;
+                }
+                v[self.index].clone()
+            }
+            Object::Deque(d) => {
+                let d = d.borrow();
+                if self.index >= d.len() {
+                    return None;
+                }
+                d[self.index].clone()
+            }
+            _ => unreachable!("SeqIter holds a non-sequence Object"),
+        };
+        self.index += 1;
+        Some(val)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.list.borrow().len().saturating_sub(self.index);
-        (remaining, Some(remaining))
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-}
-
-/// Iterates over a tuple
-pub struct TupleIter {
-    values: Vec<Value>,
-    index: usize,
-}
-
-impl TupleIter {
-    pub fn new(values: Vec<Value>) -> Self {
-        Self { values, index: 0 }
-    }
-}
-
-impl VmIterator for TupleIter {
-    fn next(&mut self) -> Option<Value> {
-        if self.index < self.values.len() {
-            let val = self.values[self.index].clone();
-            self.index += 1;
-            Some(val)
-        } else {
-            None
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.values.len() - self.index;
+        let remaining = self.len_of().saturating_sub(self.index);
         (remaining, Some(remaining))
     }
 
@@ -233,7 +226,7 @@ pub struct MapIter {
 }
 
 impl MapIter {
-    pub fn new(map: Rc<RefCell<HashMap<Value, Value>>>) -> Self {
+    pub fn new(map: &RefCell<HashMap<Value, Value>>) -> Self {
         let entries = map
             .borrow()
             .iter()
@@ -248,7 +241,7 @@ impl VmIterator for MapIter {
         if self.index < self.entries.len() {
             let (k, v) = self.entries[self.index].clone();
             self.index += 1;
-            Some(Value::Object(Box::new(Object::Tuple(vec![k, v]))))
+            Some(Value::Object(Rc::new(Object::Tuple(vec![k, v]))))
         } else {
             None
         }
@@ -256,41 +249,6 @@ impl VmIterator for MapIter {
 
     fn size_hint(&self) -> (usize, Option<usize>) {
         let remaining = self.entries.len() - self.index;
-        (remaining, Some(remaining))
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-}
-
-/// Iterates over a deque front-to-back
-pub struct DequeIter {
-    deque: Rc<RefCell<VecDeque<Value>>>,
-    index: usize,
-}
-
-impl DequeIter {
-    pub fn new(deque: Rc<RefCell<VecDeque<Value>>>) -> Self {
-        Self { deque, index: 0 }
-    }
-}
-
-impl VmIterator for DequeIter {
-    fn next(&mut self) -> Option<Value> {
-        let d = self.deque.borrow();
-        if self.index < d.len() {
-            let val = d[self.index].clone();
-            drop(d);
-            self.index += 1;
-            Some(val)
-        } else {
-            None
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.deque.borrow().len().saturating_sub(self.index);
         (remaining, Some(remaining))
     }
 
@@ -307,7 +265,7 @@ pub struct MinHeapIter {
 }
 
 impl MinHeapIter {
-    pub fn new(heap: Rc<RefCell<BinaryHeap<Reverse<OrdValue>>>>) -> Self {
+    pub fn new(heap: &RefCell<BinaryHeap<Reverse<OrdValue>>>) -> Self {
         let mut entries: Vec<Value> = heap.borrow().iter().map(|Reverse(v)| v.0.clone()).collect();
         entries.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         Self { entries, index: 0 }
@@ -343,7 +301,7 @@ pub struct MaxHeapIter {
 }
 
 impl MaxHeapIter {
-    pub fn new(heap: Rc<RefCell<BinaryHeap<OrdValue>>>) -> Self {
+    pub fn new(heap: &RefCell<BinaryHeap<OrdValue>>) -> Self {
         let entries: Vec<Value> = heap.borrow().iter().map(|v| v.0.clone()).collect();
         Self { entries, index: 0 }
     }

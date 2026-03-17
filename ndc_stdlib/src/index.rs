@@ -187,7 +187,7 @@ fn vm_get_at_index(container: &VmValue, index_value: &VmValue) -> Result<VmValue
                         let values = list
                             .get(from..to)
                             .ok_or_else(|| format!("{from}..{to} out of bounds"))?;
-                        Ok(VmValue::Object(Box::new(VmObject::list(values.to_vec()))))
+                        Ok(VmValue::Object(Rc::new(VmObject::list(values.to_vec()))))
                     }
                 }
             }
@@ -218,7 +218,7 @@ fn vm_get_at_index(container: &VmValue, index_value: &VmValue) -> Result<VmValue
                 }
                 match default {
                     None => Err(format!("Key not found in map: {key}")),
-                    Some(default_val) => match default_val.as_ref() {
+                    Some(default_val) => match default_val {
                         VmValue::Object(o) if matches!(o.as_ref(), VmObject::Function(_)) => {
                             todo!(
                                 "map default functions require an environment and cannot be called from vm_native"
@@ -241,7 +241,7 @@ fn vm_get_at_index(container: &VmValue, index_value: &VmValue) -> Result<VmValue
                     let values = tuple
                         .get(from..to)
                         .ok_or_else(|| "index out of bounds".to_string())?;
-                    Ok(VmValue::Object(Box::new(VmObject::Tuple(values.to_vec()))))
+                    Ok(VmValue::Object(Rc::new(VmObject::Tuple(values.to_vec()))))
                 }
             },
             VmObject::Deque(deque) => {
@@ -254,7 +254,7 @@ fn vm_get_at_index(container: &VmValue, index_value: &VmValue) -> Result<VmValue
                     VmOffset::Range(from, to) => {
                         let out: Vec<VmValue> =
                             deque.iter().skip(from).take(to - from).cloned().collect();
-                        Ok(VmValue::Object(Box::new(VmObject::list(out))))
+                        Ok(VmValue::Object(Rc::new(VmObject::list(out))))
                     }
                 }
             }
@@ -283,9 +283,9 @@ fn vm_set_at_index(container: &VmValue, index_value: &VmValue, rhs: VmValue) -> 
                     }
                     VmOffset::Range(from, to) => {
                         let rhs_vec = match rhs {
-                            VmValue::Object(o) => match *o {
+                            VmValue::Object(o) => match o.as_ref() {
                                 VmObject::List(l) => l.borrow().clone(),
-                                VmObject::Tuple(t) => t,
+                                VmObject::Tuple(t) => t.clone(),
                                 _ => return Err("cannot assign non-list to list slice".to_string()),
                             },
                             _ => return Err("cannot assign non-list to list slice".to_string()),

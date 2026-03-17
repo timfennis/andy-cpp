@@ -1,7 +1,7 @@
 use crate::chunk::OpCode;
 use crate::iterator::{
-    DequeIter, ListIter, MapIter, MaxHeapIter, MinHeapIter, RangeInclusiveIter, RangeIter,
-    StringIter, TupleIter, UnboundedRangeIter, VmIterator,
+    MapIter, MaxHeapIter, MinHeapIter, RangeInclusiveIter, RangeIter, SeqIter, StringIter,
+    UnboundedRangeIter, VmIterator,
 };
 use crate::value::{CompiledFunction, Function};
 use crate::{ClosureFunction, Object, UpvalueCell, Value};
@@ -229,12 +229,11 @@ impl Vm {
                 }
                 OpCode::MakeList(size) => {
                     let data = self.stack.split_off(self.stack.len() - size);
-                    self.stack.push(Value::Object(Box::new(Object::list(data))));
+                    self.stack.push(Value::Object(Rc::new(Object::list(data))));
                 }
                 OpCode::MakeTuple(size) => {
                     let data = self.stack.split_off(self.stack.len() - size);
-                    self.stack
-                        .push(Value::Object(Box::new(Object::Tuple(data))));
+                    self.stack.push(Value::Object(Rc::new(Object::Tuple(data))));
                 }
                 OpCode::MakeMap { pairs, has_default } => {
                     let default = if has_default {
@@ -251,7 +250,7 @@ impl Vm {
                         map.insert(key, value);
                     }
                     self.stack
-                        .push(Value::Object(Box::new(Object::map(map, default))));
+                        .push(Value::Object(Rc::new(Object::map(map, default))));
                 }
                 OpCode::GetUpvalue(slot) => match frame.closure.upvalues[slot].borrow().deref() {
                     UpvalueCell::Open(slot) => self.stack.push(self.stack[*slot].clone()),
@@ -280,27 +279,23 @@ impl Vm {
 
                     // Try to create an iterator
                     let iter_val = match val {
-                        Value::Object(obj) => match *obj {
-                            Object::List(rc) => {
-                                Some(Value::iterator(Rc::new(RefCell::new(ListIter::new(rc)))))
+                        Value::Object(rc) => match rc.as_ref() {
+                            Object::List(_) | Object::Tuple(_) | Object::Deque(_) => {
+                                Some(Value::iterator(Rc::new(RefCell::new(SeqIter::new(
+                                    Rc::clone(&rc),
+                                )))))
                             }
-                            Object::Tuple(vec) => {
-                                Some(Value::iterator(Rc::new(RefCell::new(TupleIter::new(vec)))))
-                            }
-                            Object::String(rc) => {
-                                Some(Value::iterator(Rc::new(RefCell::new(StringIter::new(rc)))))
-                            }
+                            Object::String(s) => Some(Value::iterator(Rc::new(RefCell::new(
+                                StringIter::new(Rc::clone(s)),
+                            )))),
                             Object::Map { entries, .. } => Some(Value::iterator(Rc::new(
                                 RefCell::new(MapIter::new(entries)),
                             ))),
-                            Object::Deque(rc) => {
-                                Some(Value::iterator(Rc::new(RefCell::new(DequeIter::new(rc)))))
+                            Object::MinHeap(h) => {
+                                Some(Value::iterator(Rc::new(RefCell::new(MinHeapIter::new(h)))))
                             }
-                            Object::MinHeap(rc) => {
-                                Some(Value::iterator(Rc::new(RefCell::new(MinHeapIter::new(rc)))))
-                            }
-                            Object::MaxHeap(rc) => {
-                                Some(Value::iterator(Rc::new(RefCell::new(MaxHeapIter::new(rc)))))
+                            Object::MaxHeap(h) => {
+                                Some(Value::iterator(Rc::new(RefCell::new(MaxHeapIter::new(h)))))
                             }
                             _ => None,
                         },
@@ -432,9 +427,10 @@ impl Vm {
                     let Value::Object(obj) = val else {
                         panic!("Memoize: expected a function on the stack");
                     };
-                    let Object::Function(func) = *obj else {
+                    let Object::Function(func) = obj.as_ref() else {
                         panic!("Memoize: expected a function on the stack");
                     };
+                    let func = func.clone();
                     self.stack.push(Value::function(Function::Memoized {
                         cache: Rc::new(RefCell::new(HashMap::default())),
                         function: Box::new(func),
@@ -511,8 +507,8 @@ impl Vm {
         for (arg_idx, upvalue_idx, slot) in materialized {
             if slot < self.stack.len() {
                 let value = self.stack[slot].clone();
-                if let Value::Object(obj) = &mut self.stack[arg_idx] {
-                    if let Object::Function(Function::Closure(closure)) = obj.as_mut() {
+                if let Value::Object(obj) = &self.stack[arg_idx] {
+                    if let Object::Function(Function::Closure(closure)) = obj.as_ref() {
                         let mut cell_borrow = closure.upvalues[upvalue_idx].borrow_mut();
                         *cell_borrow = UpvalueCell::Closed(value);
                     }
@@ -744,7 +740,7 @@ impl Vm {
 
         // Replace callee + args on the stack with the result tuple.
         self.stack.truncate(callee_idx);
-        Ok(Some(Value::Object(Box::new(Object::Tuple(results)))))
+        Ok(Some(Value::Object(Rc::new(Object::Tuple(results)))))
     }
 
     /// Pops a value from the stack and pushes `size` unpacked elements back.
@@ -753,26 +749,33 @@ impl Vm {
         let Value::Object(obj) = top else {
             panic!("expected a tuple or list to unpack");
         };
-        match *obj {
+        match obj.as_ref() {
             Object::List(seq) => {
-                // Clone elements rather than taking from the Rc<RefCell> so we
-                // don't corrupt other references to the same list (e.g. a list
-                // stored in a variable that is also referenced via an upvalue).
-                let mut elements: Vec<Value> = seq.borrow().iter().cloned().collect();
-                if elements.len() != size {
+                let len = seq.borrow().len();
+                if len != size {
                     return Err(VmError::new(
                         format!(
                             "cannot unpack a list of length {} into {} variables",
-                            elements.len(),
-                            size
+                            len, size
                         ),
                         span,
                     ));
                 }
+                // Try to avoid a clone when we're the sole owner.
+                let mut elements = match Rc::try_unwrap(obj) {
+                    Ok(Object::List(seq)) => seq.into_inner(),
+                    Ok(_) => unreachable!(),
+                    Err(rc) => {
+                        let Object::List(seq) = rc.as_ref() else {
+                            unreachable!()
+                        };
+                        seq.borrow().to_vec()
+                    }
+                };
                 elements.reverse();
                 self.stack.append(&mut elements);
             }
-            Object::Tuple(mut seq) => {
+            Object::Tuple(seq) => {
                 if seq.len() != size {
                     return Err(VmError::new(
                         format!(
@@ -783,8 +786,19 @@ impl Vm {
                         span,
                     ));
                 }
-                seq.reverse();
-                self.stack.append(&mut seq);
+                // Try to avoid a clone when we're the sole owner.
+                let mut elements = match Rc::try_unwrap(obj) {
+                    Ok(Object::Tuple(seq)) => seq,
+                    Ok(_) => unreachable!(),
+                    Err(rc) => {
+                        let Object::Tuple(seq) = rc.as_ref() else {
+                            unreachable!()
+                        };
+                        seq.clone()
+                    }
+                };
+                elements.reverse();
+                self.stack.append(&mut elements);
             }
             Object::String(s) => {
                 let s = s.borrow();

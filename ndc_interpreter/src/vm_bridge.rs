@@ -65,7 +65,7 @@ pub fn make_vm_globals(env: &Rc<RefCell<Environment>>) -> Vec<VmValue> {
         .into_iter()
         .map(|func| {
             if let Some(native) = func.vm_native() {
-                VmValue::Object(Box::new(VmObject::Function(VmFunction::Native(native))))
+                VmValue::Object(Rc::new(VmObject::Function(VmFunction::Native(native))))
             } else {
                 wrap_function(func, Rc::clone(env), Rc::clone(&globals_cell))
             }
@@ -116,7 +116,7 @@ fn wrap_function(
             Err(e) => return Err(e.to_string()),
         }
     };
-    VmValue::Object(Box::new(VmObject::Function(VmFunction::Native(Rc::new(
+    VmValue::Object(Rc::new(VmObject::Function(VmFunction::Native(Rc::new(
         NativeFunction {
             name,
             func: Box::new(native),
@@ -159,7 +159,7 @@ pub fn vm_to_interp(value: &VmValue) -> InterpValue {
             VmObject::Function(f) => {
                 let static_type = f.static_type();
                 let identity = f.prototype().map(|p| Rc::as_ptr(p) as usize);
-                let vm_value = VmValue::Object(Box::new(VmObject::Function(f.clone())));
+                let vm_value = VmValue::Object(Rc::new(VmObject::Function(f.clone())));
                 let data: Rc<dyn std::any::Any> = Rc::new(VmFunctionWrapper {
                     vm_value,
                     identity,
@@ -242,7 +242,7 @@ pub fn vm_to_interp(value: &VmValue) -> InterpValue {
             VmObject::OverloadSet(slots) => InterpValue::function(
                 FunctionBuilder::default()
                     .body(FunctionBody::Opaque {
-                        data: Rc::new(VmValue::Object(Box::new(VmObject::OverloadSet(
+                        data: Rc::new(VmValue::Object(Rc::new(VmObject::OverloadSet(
                             slots.clone(),
                         )))),
                         static_type: ndc_parser::StaticType::Any,
@@ -258,39 +258,37 @@ pub fn interp_to_vm(value: InterpValue) -> VmValue {
     match value {
         InterpValue::Number(Number::Int(Int::Int64(i))) => VmValue::Int(i),
         InterpValue::Number(Number::Int(Int::BigInt(b))) => {
-            VmValue::Object(Box::new(VmObject::BigInt(b)))
+            VmValue::Object(Rc::new(VmObject::BigInt(b)))
         }
         InterpValue::Number(Number::Float(f)) => VmValue::Float(f),
         InterpValue::Number(Number::Rational(r)) => {
-            VmValue::Object(Box::new(VmObject::Rational(*r)))
+            VmValue::Object(Rc::new(VmObject::Rational(*r)))
         }
-        InterpValue::Number(Number::Complex(c)) => VmValue::Object(Box::new(VmObject::Complex(c))),
+        InterpValue::Number(Number::Complex(c)) => VmValue::Object(Rc::new(VmObject::Complex(c))),
         InterpValue::Bool(b) => VmValue::Bool(b),
         InterpValue::Option(None) => VmValue::None,
         InterpValue::Option(Some(inner)) => {
-            VmValue::Object(Box::new(VmObject::Some(interp_to_vm(*inner))))
+            VmValue::Object(Rc::new(VmObject::Some(interp_to_vm(*inner))))
         }
-        InterpValue::Sequence(Sequence::String(s)) => {
-            VmValue::Object(Box::new(VmObject::String(s)))
-        }
-        InterpValue::Sequence(Sequence::List(list)) => VmValue::Object(Box::new(VmObject::list(
+        InterpValue::Sequence(Sequence::String(s)) => VmValue::Object(Rc::new(VmObject::String(s))),
+        InterpValue::Sequence(Sequence::List(list)) => VmValue::Object(Rc::new(VmObject::list(
             list.borrow()
                 .iter()
                 .map(|v| interp_to_vm(v.clone()))
                 .collect(),
         ))),
-        InterpValue::Sequence(Sequence::Tuple(tuple)) => VmValue::Object(Box::new(
-            VmObject::Tuple(tuple.iter().map(|v| interp_to_vm(v.clone())).collect()),
-        )),
+        InterpValue::Sequence(Sequence::Tuple(tuple)) => VmValue::Object(Rc::new(VmObject::Tuple(
+            tuple.iter().map(|v| interp_to_vm(v.clone())).collect(),
+        ))),
         InterpValue::Sequence(Sequence::Map(map, default)) => {
             let entries = map
                 .borrow()
                 .iter()
                 .map(|(k, v)| (interp_to_vm(k.clone()), interp_to_vm(v.clone())))
                 .collect();
-            let default = default.as_ref().map(|d| Box::new(interp_to_vm(*d.clone())));
-            VmValue::Object(Box::new(VmObject::Map {
-                entries: Rc::new(RefCell::new(entries)),
+            let default = default.as_ref().map(|d| interp_to_vm(*d.clone()));
+            VmValue::Object(Rc::new(VmObject::Map {
+                entries: RefCell::new(entries),
                 default,
             }))
         }
@@ -299,12 +297,12 @@ pub fn interp_to_vm(value: InterpValue) -> VmValue {
             VmValue::iterator(Rc::new(RefCell::new(adapter)))
         }
         InterpValue::Sequence(Sequence::Deque(d)) => {
-            VmValue::Object(Box::new(VmObject::Deque(Rc::new(RefCell::new(
+            VmValue::Object(Rc::new(VmObject::Deque(RefCell::new(
                 d.borrow()
                     .iter()
                     .map(|v| interp_to_vm(v.clone()))
                     .collect::<VecDeque<_>>(),
-            )))))
+            ))))
         }
         InterpValue::Sequence(Sequence::MinHeap(h)) => {
             let entries: BinaryHeap<Reverse<OrdValue>> = h
@@ -312,7 +310,7 @@ pub fn interp_to_vm(value: InterpValue) -> VmValue {
                 .iter()
                 .map(|v| Reverse(OrdValue(interp_to_vm(v.0.0.clone()))))
                 .collect();
-            VmValue::Object(Box::new(VmObject::MinHeap(Rc::new(RefCell::new(entries)))))
+            VmValue::Object(Rc::new(VmObject::MinHeap(RefCell::new(entries))))
         }
         InterpValue::Sequence(Sequence::MaxHeap(h)) => {
             let entries: BinaryHeap<OrdValue> = h
@@ -320,11 +318,11 @@ pub fn interp_to_vm(value: InterpValue) -> VmValue {
                 .iter()
                 .map(|v| OrdValue(interp_to_vm(v.0.clone())))
                 .collect();
-            VmValue::Object(Box::new(VmObject::MaxHeap(Rc::new(RefCell::new(entries)))))
+            VmValue::Object(Rc::new(VmObject::MaxHeap(RefCell::new(entries))))
         }
         InterpValue::Function(f) => {
             if let FunctionBody::VmNative { native, .. } = f.body() {
-                return VmValue::Object(Box::new(VmObject::Function(VmFunction::Native(
+                return VmValue::Object(Rc::new(VmObject::Function(VmFunction::Native(
                     Rc::clone(native),
                 ))));
             }
@@ -347,7 +345,7 @@ fn interp_to_vm_for_inverted_bridge(value: &InterpValue) -> VmValue {
     if let InterpValue::Function(f) = value {
         // VmNative — lossless round-trip: extract the native directly
         if let FunctionBody::VmNative { native, .. } = f.body() {
-            return VmValue::Object(Box::new(VmObject::Function(VmFunction::Native(Rc::clone(
+            return VmValue::Object(Rc::new(VmObject::Function(VmFunction::Native(Rc::clone(
                 native,
             )))));
         }
@@ -373,18 +371,18 @@ fn interp_to_vm_for_inverted_bridge(value: &InterpValue) -> VmValue {
                     .map_err(|e| e.to_string())
             }),
         });
-        return VmValue::Object(Box::new(VmObject::Function(VmFunction::Native(callback))));
+        return VmValue::Object(Rc::new(VmObject::Function(VmFunction::Native(callback))));
     }
     // Containers may contain closures — recurse element-wise.
     if let InterpValue::Sequence(seq) = value {
         match seq {
             Sequence::Tuple(rc) => {
-                return VmValue::Object(Box::new(VmObject::Tuple(
+                return VmValue::Object(Rc::new(VmObject::Tuple(
                     rc.iter().map(interp_to_vm_for_inverted_bridge).collect(),
                 )));
             }
             Sequence::List(rc) => {
-                return VmValue::Object(Box::new(VmObject::list(
+                return VmValue::Object(Rc::new(VmObject::list(
                     rc.borrow()
                         .iter()
                         .map(interp_to_vm_for_inverted_bridge)
@@ -491,11 +489,11 @@ fn vm_identity_key(value: &VmValue) -> Option<usize> {
         return None;
     };
     match obj.as_ref() {
-        VmObject::List(rc) => Some(Rc::as_ptr(rc) as usize),
-        VmObject::Map { entries, .. } => Some(Rc::as_ptr(entries) as usize),
-        VmObject::Deque(rc) => Some(Rc::as_ptr(rc) as usize),
-        VmObject::MinHeap(rc) => Some(Rc::as_ptr(rc) as usize),
-        VmObject::MaxHeap(rc) => Some(Rc::as_ptr(rc) as usize),
+        VmObject::List(_)
+        | VmObject::Map { .. }
+        | VmObject::Deque(_)
+        | VmObject::MinHeap(_)
+        | VmObject::MaxHeap(_) => Some(Rc::as_ptr(obj) as usize),
         _ => None,
     }
 }
