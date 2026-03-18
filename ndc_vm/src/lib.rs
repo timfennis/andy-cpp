@@ -8,7 +8,7 @@ pub mod vm;
 
 pub use compiler::CompileError;
 pub use error::VmError;
-pub use iterator::{SharedIterator, VmIterator};
+pub use iterator::{RepeatIter, SharedIterator, VmIterator};
 pub use value::*;
 
 #[cfg(test)]
