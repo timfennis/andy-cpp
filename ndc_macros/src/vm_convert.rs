@@ -5,7 +5,7 @@
 //! vm_native generation for that function.
 
 use crate::r#match::{
-    is_ndc_vm_seq_value, is_ndc_vm_value, is_ref, is_ref_mut,
+    is_ndc_vm_map_value, is_ndc_vm_seq_value, is_ndc_vm_value, is_ref, is_ref_mut,
     is_ref_mut_of_hashmap_of_ndc_vm_value, is_ref_mut_of_max_heap, is_ref_mut_of_min_heap,
     is_ref_mut_of_vec_of_ndc_vm_value, is_ref_mut_of_vecdeque_of_ndc_vm_value, is_ref_of_bigint,
     is_ref_of_hashmap_of_ndc_vm_value, is_ref_of_slice_of_ndc_vm_value, is_ref_of_slice_of_value,
@@ -472,6 +472,21 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
         });
     }
 
+    // ndc_vm::value::MapValue — identical extraction to Value, but emits
+    // StaticType::Map so the type checker and dispatch see the correct type.
+    if is_ndc_vm_map_value(ty) {
+        return Some(VmInputArg {
+            extract: quote! {},
+            pass: quote! { #raw.clone() },
+            static_type: quote! {
+                ndc_interpreter::function::StaticType::Map {
+                    key: Box::new(ndc_interpreter::function::StaticType::Any),
+                    value: Box::new(ndc_interpreter::function::StaticType::Any),
+                }
+            },
+        });
+    }
+
     // &[ndc_vm::value::Value] — pass a borrow of the inner Vec directly, zero conversion.
     // Must come before the &[Value] check because is_ref_of_slice_of_value also matches this type.
     if is_ref_of_slice_of_ndc_vm_value(ty) {
@@ -593,6 +608,19 @@ fn try_vm_return_type(ty: &syn::Type) -> Option<(TokenStream, TokenStream)> {
         return Some((
             quote! { Ok(result) },
             quote! { ndc_interpreter::function::StaticType::Any },
+        ));
+    }
+
+    // ndc_vm::value::MapValue — already a VmValue, return as-is, but emit StaticType::Map.
+    if is_ndc_vm_map_value(ty) {
+        return Some((
+            quote! { Ok(result) },
+            quote! {
+                ndc_interpreter::function::StaticType::Map {
+                    key: Box::new(ndc_interpreter::function::StaticType::Any),
+                    value: Box::new(ndc_interpreter::function::StaticType::Any),
+                }
+            },
         ));
     }
 
@@ -721,6 +749,18 @@ fn try_vm_return_inner(ty: &syn::Type) -> Option<(TokenStream, TokenStream)> {
         return Some((
             quote! { Ok(result) },
             quote! { ndc_interpreter::function::StaticType::Any },
+        ));
+    }
+    // ndc_vm::value::MapValue inside Result<...> — pass through with StaticType::Map.
+    if is_ndc_vm_map_value(ty) {
+        return Some((
+            quote! { Ok(result) },
+            quote! {
+                ndc_interpreter::function::StaticType::Map {
+                    key: Box::new(ndc_interpreter::function::StaticType::Any),
+                    value: Box::new(ndc_interpreter::function::StaticType::Any),
+                }
+            },
         ));
     }
     try_vm_return_type(ty)

@@ -1,6 +1,6 @@
 use crate::convert::{Argument, TypeConverter, build};
 use crate::r#match::{
-    is_ndc_vm_seq_value, is_ndc_vm_value, is_ref, is_ref_mut,
+    is_ndc_vm_map_value, is_ndc_vm_seq_value, is_ndc_vm_value, is_ref, is_ref_mut,
     is_ref_mut_of_hashmap_of_ndc_vm_value, is_ref_mut_of_max_heap, is_ref_mut_of_min_heap,
     is_ref_mut_of_slice_of_value, is_ref_mut_of_vec_of_ndc_vm_value,
     is_ref_mut_of_vecdeque_of_ndc_vm_value, is_ref_of_bigint, is_ref_of_hashmap_of_ndc_vm_value,
@@ -288,7 +288,13 @@ fn map_type_path(p: &syn::TypePath) -> TokenStream {
             _ => panic!("Result without angle bracketed args"),
         },
         "Number" => quote::quote! { ndc_interpreter::function::StaticType::Number },
-        "Value" | "EvaluationResult" => {
+        "MapValue" => quote::quote! {
+            ndc_interpreter::function::StaticType::Map {
+                key: Box::new(ndc_interpreter::function::StaticType::Any),
+                value: Box::new(ndc_interpreter::function::StaticType::Any),
+            }
+        },
+        "Value" | "EvaluationResult" | "SeqValue" => {
             quote::quote! { ndc_interpreter::function::StaticType::Any }
         }
         unmatched => panic!("Cannot map type string '{unmatched}' to StaticType"),
@@ -346,11 +352,15 @@ fn wrap_single(
             ty @ syn::Type::Path(_) if path_ends_with(ty, "EvaluationResult") => quote! {
                 return result;
             },
-            // ndc_vm::value::Value / SeqValue — dead code for VmNative body but must compile.
-            ty @ syn::Type::Path(_) if is_ndc_vm_value(ty) || is_ndc_vm_seq_value(ty) => quote! {
-                return Ok(ndc_interpreter::vm_bridge::vm_to_interp(&result));
-            },
-            // Result<ndc_vm::value::Value / SeqValue> — dead code for VmNative body but must compile.
+            // ndc_vm::value::Value / SeqValue / MapValue — dead code for VmNative body but must compile.
+            ty @ syn::Type::Path(_)
+                if is_ndc_vm_value(ty) || is_ndc_vm_seq_value(ty) || is_ndc_vm_map_value(ty) =>
+            {
+                quote! {
+                    return Ok(ndc_interpreter::vm_bridge::vm_to_interp(&result));
+                }
+            }
+            // Result<ndc_vm::value::Value / SeqValue / MapValue> — dead code for VmNative body but must compile.
             ty @ syn::Type::Path(_)
                 if path_ends_with(ty, "Result") && result_inner_is_ndc_vm_value(ty) =>
             {
@@ -841,6 +851,24 @@ fn create_temp_variable(
             }];
         }
 
+        // ndc_vm::value::MapValue — same bridge stub as Value but with Map static type.
+        if is_ndc_vm_map_value(ty) {
+            return vec![Argument {
+                param_type: quote! {
+                    ndc_interpreter::function::StaticType::Map {
+                        key: Box::new(ndc_interpreter::function::StaticType::Any),
+                        value: Box::new(ndc_interpreter::function::StaticType::Any),
+                    }
+                },
+                param_name: quote! { #original_name },
+                argument: quote! { #argument_var_name },
+                initialize_code: quote! {
+                    let #argument_var_name =
+                        ndc_interpreter::vm_bridge::interp_to_vm(#argument_var_name.clone());
+                },
+            }];
+        }
+
         // &VmCallable — only used in VmNative functions (HOF path).
         // Dead-code stub for the interpreter wrapper: extract function from InterpValue,
         // convert to VmValue, then construct a VmCallable with empty globals.
@@ -1268,14 +1296,16 @@ fn create_temp_variable(
     panic!("Not sure how to handle receivers");
 }
 
-/// Returns true if the return type is `Result<ndc_vm::value::Value, _>`,
+/// Returns true if the return type is `Result<ndc_vm::value::Value / SeqValue / MapValue, _>`,
 /// so the interpreter wrapper can use `vm_to_interp` instead of `Value::from`.
 fn result_inner_is_ndc_vm_value(ty: &syn::Type) -> bool {
     if let syn::Type::Path(tp) = ty {
         if let Some(last) = tp.path.segments.last() {
             if let syn::PathArguments::AngleBracketed(ab) = &last.arguments {
                 if let Some(syn::GenericArgument::Type(inner)) = ab.args.first() {
-                    return is_ndc_vm_value(inner);
+                    return is_ndc_vm_value(inner)
+                        || is_ndc_vm_seq_value(inner)
+                        || is_ndc_vm_map_value(inner);
                 }
             }
         }

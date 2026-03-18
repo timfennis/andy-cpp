@@ -80,6 +80,14 @@ impl Ord for OrdValue {
 /// preserves the correct type for dispatch and static analysis.
 pub type SeqValue = Value;
 
+/// Type alias for [`Value`] that signals `StaticType::Map` to the `#[export_module]` macro.
+///
+/// Use this instead of `ndc_vm::value::Value` in stdlib function signatures when the parameter
+/// must be a map or set. The extraction is identical (zero-copy pass-through on the VM path) but
+/// the macro emits `StaticType::Map { key: Any, value: Any }` instead of `StaticType::Any`, which
+/// preserves the correct type for dispatch and static analysis.
+pub type MapValue = Value;
+
 /// An iterator that yields VM [`Value`]s from any iterable object.
 ///
 /// Created by [`Value::try_into_iter`]. If the caller holds the only `Rc`
