@@ -76,7 +76,7 @@ mod inner {
     }
 
     #[function(name = "&=")]
-    pub fn intersect_assign(lhs: &mut MapRepr, rhs: &mut MapRepr) {
+    pub fn intersect_assign(lhs: &mut MapRepr, rhs: &mut MapRepr) -> Value {
         let left_map: &mut hash_map::HashMap<Value, Value> = &mut lhs
             .try_borrow_mut()
             .expect("Failed to mutably borrow the lhs of &= operator");
@@ -86,10 +86,11 @@ mod inner {
                 .try_borrow()
                 .expect("Failed borrow the rhs of &= operator"),
         );
+        Value::Sequence(Sequence::Map(Rc::clone(lhs), None))
     }
 
     #[function(name = "|=")]
-    pub fn union_assign(lhs: &mut MapRepr, rhs: &mut MapRepr) {
+    pub fn union_assign(lhs: &mut MapRepr, rhs: &mut MapRepr) -> Value {
         let left_map: &mut hash_map::HashMap<Value, Value> = &mut lhs.borrow_mut();
 
         if Rc::strong_count(rhs) == 1 {
@@ -101,16 +102,18 @@ mod inner {
                 left_map.insert(key.clone(), value.clone());
             }
         }
+        Value::Sequence(Sequence::Map(Rc::clone(lhs), None))
     }
 
     #[function(name = "-=")]
-    pub fn difference_assign(lhs: &mut MapRepr, rhs: &mut MapRepr) {
+    pub fn difference_assign(lhs: &mut MapRepr, rhs: &mut MapRepr) -> Value {
         let left_map: &mut hash_map::HashMap<Value, Value> = &mut lhs.borrow_mut();
         left_map.difference(&*rhs.borrow());
+        Value::Sequence(Sequence::Map(Rc::clone(lhs), None))
     }
 
     #[function(name = "~=")]
-    pub fn symmetric_difference_assign(lhs: &mut MapRepr, rhs: &mut MapRepr) {
+    pub fn symmetric_difference_assign(lhs: &mut MapRepr, rhs: &mut MapRepr) -> Value {
         let diff = hash_map::symmetric_difference(
             &*lhs
                 .try_borrow()
@@ -120,6 +123,7 @@ mod inner {
                 .expect("Failed borrow the rhs of ~= operator"),
         );
         *lhs.borrow_mut() = diff;
+        Value::Sequence(Sequence::Map(Rc::clone(lhs), None))
     }
 
     /// Returns the union (elements that are in either `left` or `right`) of two maps or sets.
