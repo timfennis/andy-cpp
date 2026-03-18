@@ -249,6 +249,9 @@ impl fmt::Debug for Sequence {
                 while let Some((key, value)) = iter.next() {
                     match value {
                         Value::Option(opt) if opt.is_none() => write!(f, "{key:?}")?,
+                        Value::Sequence(Sequence::Tuple(t)) if t.is_empty() => {
+                            write!(f, "{key:?}")?
+                        }
                         _ => write!(f, "{key:?}: {value:?}")?,
                     }
 

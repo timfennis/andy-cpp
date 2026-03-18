@@ -112,9 +112,9 @@ mod inner {
             ndc_vm::value::Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
             ndc_vm::value::Value::Object(obj) => match obj.as_ref() {
                 ndc_vm::value::Object::String(s) => Ok(s.borrow().parse::<f64>()?),
-                _ => value
-                    .to_f64()
-                    .ok_or_else(|| anyhow::anyhow!("cannot convert {} to float", value.static_type())),
+                _ => value.to_f64().ok_or_else(|| {
+                    anyhow::anyhow!("cannot convert {} to float", value.static_type())
+                }),
             },
             _ => value
                 .to_f64()
@@ -144,7 +144,9 @@ mod inner {
                 }
                 _ => value
                     .to_number()
-                    .ok_or_else(|| anyhow::anyhow!("cannot convert {} to int", value.static_type()))?
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("cannot convert {} to int", value.static_type())
+                    })?
                     .to_int_lossy()
                     .map_err(|e| anyhow::anyhow!("{e}")),
             },
