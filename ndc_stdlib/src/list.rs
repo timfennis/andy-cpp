@@ -399,7 +399,7 @@ pub mod ops {
                         .borrow_mut()
                         .extend_from_slice(&right_cell.borrow());
                 }
-                Ok(VmValue::unit())
+                Ok(left.clone())
             })),
         });
         env.declare_global_fn(
@@ -411,7 +411,7 @@ pub mod ops {
                         Parameter::new("left", StaticType::List(Box::new(StaticType::Any))),
                         Parameter::new("right", StaticType::List(Box::new(StaticType::Any))),
                     ]),
-                    return_type: StaticType::Tuple(vec![]),
+                    return_type: StaticType::List(Box::new(StaticType::Any)),
                 })
                 .vm_native(native)
                 .build()

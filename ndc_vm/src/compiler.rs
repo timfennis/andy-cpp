@@ -166,6 +166,29 @@ impl Compiler {
                             self.compile_expr(*r_value)?;
                             self.chunk.write(OpCode::Call(2), span);
                             self.chunk.write(OpCode::Pop, span);
+                        } else if let Binding::Dynamic(assign_candidates) =
+                            resolved_assign_operation
+                        {
+                            // Assign-op exists but type was unknown at compile time (Any).
+                            // Build a merged overload set: assign-op candidates first so they
+                            // win for map/string/list args, then binary-op candidates as
+                            // fallback for numeric args. Assign-ops return lhs so SET_VAR
+                            // stores a meaningful value; sync_map_mutations propagates in-place
+                            // changes to VM Rcs via the bridge.
+                            let binary_candidates = match resolved_operation {
+                                Binding::Dynamic(c) => c,
+                                Binding::Resolved(v) => vec![v],
+                                Binding::None => vec![],
+                            };
+                            let merged: Vec<_> = assign_candidates
+                                .into_iter()
+                                .chain(binary_candidates)
+                                .collect();
+                            self.compile_binding(Binding::Dynamic(merged), span)?;
+                            self.emit_get_var(var, lv_span);
+                            self.compile_expr(*r_value)?;
+                            self.chunk.write(OpCode::Call(2), span);
+                            self.emit_set_var(var, lv_span);
                         } else {
                             // No exact in-place op: call the regular operation and store result.
                             self.compile_binding(resolved_operation, span)?;
