@@ -120,7 +120,8 @@ impl Interpreter {
         let code = Compiler::compile(expressions)?;
 
         let globals = vm_bridge::make_vm_globals(&self.environment);
-        let mut vm = Vm::new(code, globals);
+        let sink = vm_bridge::WriteSink(self.environment.borrow().output_rc());
+        let mut vm = Vm::new(code, globals).with_output(Box::new(sink));
 
         #[cfg(feature = "vm-trace")]
         {

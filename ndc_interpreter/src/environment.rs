@@ -9,7 +9,7 @@ use std::io::{Stdout, Write, stdout};
 use std::rc::Rc;
 
 pub struct RootEnvironment {
-    pub output: Box<dyn InterpreterOutput>,
+    output: Rc<RefCell<Box<dyn InterpreterOutput>>>,
     // These are global values
     global_functions: Vec<Function>,
 }
@@ -41,23 +41,27 @@ impl Environment {
     where
         F: FnOnce(&mut Box<dyn InterpreterOutput>) -> Result<(), std::io::Error>,
     {
-        let mut root = self.root.borrow_mut();
-        let output = &mut root.output;
-        f(output)
+        let root = self.root.borrow();
+        let mut output = root.output.borrow_mut();
+        f(&mut output)
     }
 
     #[must_use]
     pub fn get_output(&self) -> Option<Vec<u8>> {
-        let root = self.root.clone();
-        let root = root.borrow();
-        let output = root.output.get_output();
-        output.cloned()
+        let root = self.root.borrow();
+        root.output.borrow().get_output().cloned()
+    }
+
+    /// Returns a shared reference to the output sink so it can be passed to
+    /// the VM, allowing VM-native I/O built-ins to write to the same buffer.
+    pub fn output_rc(&self) -> Rc<RefCell<Box<dyn InterpreterOutput>>> {
+        Rc::clone(&self.root.borrow().output)
     }
 
     #[must_use]
     pub fn new(writer: Box<dyn InterpreterOutput>) -> Self {
         let root = RootEnvironment {
-            output: writer,
+            output: Rc::new(RefCell::new(writer)),
             global_functions: Default::default(),
         };
 

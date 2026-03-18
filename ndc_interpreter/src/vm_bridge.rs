@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 use std::collections::VecDeque;
+use std::io::Write;
 use std::rc::Rc;
 
 use ndc_core::int::Int;
@@ -14,7 +15,22 @@ use ndc_vm::value::{
 };
 use ndc_vm::vm::Vm;
 
-use crate::environment::Environment;
+use crate::environment::{Environment, InterpreterOutput};
+
+/// Wraps a shared interpreter output `Rc` as a plain `Write` for the VM.
+/// Writes go to the same buffer that `Environment::get_output()` reads from,
+/// so output captured by VM-native built-ins (e.g. `print`) is visible after
+/// the VM finishes running.
+pub(crate) struct WriteSink(pub Rc<RefCell<Box<dyn InterpreterOutput>>>);
+
+impl Write for WriteSink {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.borrow_mut().write(buf)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0.borrow_mut().flush()
+    }
+}
 use crate::evaluate::EvaluationResult;
 use crate::function::{
     Function as InterpFunction, FunctionBody, FunctionBuilder, FunctionCarrier, VmFunctionWrapper,
