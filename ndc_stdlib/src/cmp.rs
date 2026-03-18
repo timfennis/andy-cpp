@@ -2,7 +2,6 @@
 mod inner {
     use anyhow::anyhow;
 
-    use ndc_interpreter::value::Value;
     use std::cmp::Ordering;
 
     /// Produces an error if the argument is not true.
@@ -15,7 +14,10 @@ mod inner {
     }
 
     /// Produces an error if the arguments aren't equal to each other.
-    pub fn assert_eq(left: &Value, right: &Value) -> anyhow::Result<()> {
+    pub fn assert_eq(
+        left: ndc_vm::value::Value,
+        right: ndc_vm::value::Value,
+    ) -> anyhow::Result<()> {
         if left == right {
             Ok(())
         } else {
@@ -26,7 +28,10 @@ mod inner {
     }
 
     /// Produces an error if the arguments are equal to each other.
-    pub fn assert_ne(left: &Value, right: &Value) -> anyhow::Result<()> {
+    pub fn assert_ne(
+        left: ndc_vm::value::Value,
+        right: ndc_vm::value::Value,
+    ) -> anyhow::Result<()> {
         if left == right {
             Err(anyhow!(format!(
                 "failed asserting that {left} does not equal {right}"

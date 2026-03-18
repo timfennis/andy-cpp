@@ -627,14 +627,15 @@ impl PartialEq for Value {
         match (self, other) {
             (Self::Int(a), Self::Int(b)) => a == b,
             (Self::Float(a), Self::Float(b)) => OrderedFloat(*a) == OrderedFloat(*b),
-            // Cross-type numeric equality: consistent with PartialOrd's cross-numeric path.
-            (Self::Int(_), Self::Float(_)) | (Self::Float(_), Self::Int(_)) => {
-                vm_value_to_number(self) == vm_value_to_number(other)
-            }
             (Self::Bool(a), Self::Bool(b)) => a == b,
             (Self::None, Self::None) => true,
             (Self::Object(a), Self::Object(b)) => a == b,
-            _ => false,
+            // Cross-type numeric equality: delegate to Number, consistent with PartialOrd.
+            // Covers Int vs Float, Int vs Rational, Int vs BigInt, Float vs Rational, etc.
+            (a, b) => match (vm_value_to_number(a), vm_value_to_number(b)) {
+                (Some(a), Some(b)) => a == b,
+                _ => false,
+            },
         }
     }
 }
@@ -677,9 +678,6 @@ impl PartialEq for Object {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Some(a), Self::Some(b)) => a == b,
-            (Self::BigInt(a), Self::BigInt(b)) => a == b,
-            (Self::Complex(a), Self::Complex(b)) => a == b,
-            (Self::Rational(a), Self::Rational(b)) => a == b,
             (Self::String(a), Self::String(b)) => a.borrow().eq(&*b.borrow()),
             (Self::List(a), Self::List(b)) => a.borrow().eq(&*b.borrow()),
             (Self::Tuple(a), Self::Tuple(b)) => a == b,
@@ -720,7 +718,12 @@ impl PartialEq for Object {
             // address is equivalent to comparing the outer Rc pointers.
             (Self::MinHeap(a), Self::MinHeap(b)) => std::ptr::eq(a, b),
             (Self::MaxHeap(a), Self::MaxHeap(b)) => std::ptr::eq(a, b),
-            _ => false,
+            // Numeric types: delegate to Number for cross-type equality
+            // (e.g. BigInt(5) == Rational(5/1), Rational(5/1) == Complex(5+0i)).
+            (a, b) => match (obj_to_number(a), obj_to_number(b)) {
+                (Some(a), Some(b)) => a == b,
+                _ => false,
+            },
         }
     }
 }

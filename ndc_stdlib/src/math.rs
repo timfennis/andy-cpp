@@ -1,7 +1,6 @@
 use factorial::Factorial;
 use ndc_interpreter::environment::Environment;
 use ndc_interpreter::num::{BinaryOperatorError, Number};
-use ndc_interpreter::sequence::Sequence;
 use ndc_macros::export_module;
 use num::ToPrimitive;
 use std::ops::{Add, Mul};
@@ -13,8 +12,6 @@ mod inner {
     use anyhow::Context;
     use ndc_interpreter::int::Int;
     use ndc_interpreter::num::Number;
-    use ndc_interpreter::sequence::Sequence;
-    use ndc_interpreter::value::Value;
     use num::{BigInt, BigRational, BigUint, Integer, complex::Complex64};
 
     /// Returns the sign of a number.
@@ -110,28 +107,18 @@ mod inner {
         Ok(left.sub(right)?.abs())
     }
 
-    pub fn float(value: &Value) -> anyhow::Result<f64> {
-        match value {
-            Value::Number(Number::Int(Int::BigInt(i))) => i
+    pub fn float(value: ndc_vm::value::Value) -> anyhow::Result<f64> {
+        match &value {
+            ndc_vm::value::Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
+            ndc_vm::value::Value::Object(obj) => match obj.as_ref() {
+                ndc_vm::value::Object::String(s) => Ok(s.borrow().parse::<f64>()?),
+                _ => value
+                    .to_f64()
+                    .ok_or_else(|| anyhow::anyhow!("cannot convert {} to float", value.static_type())),
+            },
+            _ => value
                 .to_f64()
-                .ok_or_else(|| anyhow::anyhow!("failed to convert int to float (overflow?)")),
-            Value::Number(Number::Int(Int::Int64(i))) => i
-                .to_f64()
-                .ok_or_else(|| anyhow::anyhow!("failed to convert int to float (overflow?)")),
-            Value::Number(Number::Rational(r)) => r
-                .to_f64()
-                .ok_or_else(|| anyhow::anyhow!("failed to convert rational to float (overflow?)")),
-            Value::Number(Number::Float(f)) => Ok(*f),
-            Value::Bool(true) => Ok(1.0),
-            Value::Bool(false) => Ok(0.0),
-            Value::Sequence(Sequence::String(string)) => {
-                let string = string.borrow();
-                Ok(string.parse::<f64>()?)
-            }
-            value => Err(anyhow::anyhow!(
-                "cannot convert {} to float",
-                value.static_type()
-            )),
+                .ok_or_else(|| anyhow::anyhow!("cannot convert {} to float", value.static_type())),
         }
     }
 
@@ -147,20 +134,25 @@ mod inner {
     /// - Rational numbers are rounded down
     /// - `true` is converted to `1`, and `false` to `0`
     /// - Strings are parsed as decimal integers; other representations result in an error
-    pub fn int(value: &Value) -> anyhow::Result<Number> {
-        match value {
-            Value::Number(number) => Ok(number.to_int_lossy()?),
-            Value::Bool(true) => Ok(Number::from(1)),
-            Value::Bool(false) => Ok(Number::from(0)),
-            Value::Sequence(Sequence::String(string)) => {
-                let string = string.borrow();
-                let bi = string.parse::<BigInt>()?;
-                Ok(Number::Int(Int::BigInt(bi).simplified()))
-            }
-            value => Err(anyhow::anyhow!(
-                "cannot convert {} to int",
-                value.static_type()
-            )),
+    pub fn int(value: ndc_vm::value::Value) -> anyhow::Result<Number> {
+        match &value {
+            ndc_vm::value::Value::Bool(b) => Ok(Number::from(if *b { 1i32 } else { 0i32 })),
+            ndc_vm::value::Value::Object(obj) => match obj.as_ref() {
+                ndc_vm::value::Object::String(s) => {
+                    let bi = s.borrow().parse::<BigInt>()?;
+                    Ok(Number::Int(Int::BigInt(bi).simplified()))
+                }
+                _ => value
+                    .to_number()
+                    .ok_or_else(|| anyhow::anyhow!("cannot convert {} to int", value.static_type()))?
+                    .to_int_lossy()
+                    .map_err(|e| anyhow::anyhow!("{e}")),
+            },
+            _ => value
+                .to_number()
+                .ok_or_else(|| anyhow::anyhow!("cannot convert {} to int", value.static_type()))?
+                .to_int_lossy()
+                .map_err(|e| anyhow::anyhow!("{e}")),
         }
     }
 }
