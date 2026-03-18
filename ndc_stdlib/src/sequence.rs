@@ -877,9 +877,9 @@ mod inner {
 
     #[function(return_type = Iterator<Value>)]
     pub fn repeat(value: ndc_vm::value::Value) -> ndc_vm::value::Value {
-        ndc_vm::value::Value::iterator(Rc::new(std::cell::RefCell::new(
-            ndc_vm::RepeatIter::new(value),
-        )))
+        ndc_vm::value::Value::iterator(Rc::new(std::cell::RefCell::new(ndc_vm::RepeatIter::new(
+            value,
+        ))))
     }
 
     #[function(name = "repeat", return_type = Iterator<Value>)]

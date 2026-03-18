@@ -190,9 +190,9 @@ impl Value {
     pub fn shallow_clone(&self) -> Self {
         match self {
             Self::Object(obj) => match obj.as_ref() {
-                Object::String(rc) => Self::Object(Rc::new(Object::String(Rc::new(
-                    RefCell::new(rc.borrow().clone()),
-                )))),
+                Object::String(rc) => Self::Object(Rc::new(Object::String(Rc::new(RefCell::new(
+                    rc.borrow().clone(),
+                ))))),
                 Object::List(refcell) => Self::Object(Rc::new(Object::List(RefCell::new(
                     refcell.borrow().clone(),
                 )))),
@@ -252,9 +252,7 @@ impl Object {
     pub fn deep_copy(&self) -> Self {
         match self {
             Self::Some(v) => Self::Some(v.deep_copy()),
-            Self::String(rc) => {
-                Self::String(Rc::new(RefCell::new(rc.borrow().clone())))
-            }
+            Self::String(rc) => Self::String(Rc::new(RefCell::new(rc.borrow().clone()))),
             Self::List(refcell) => Self::List(RefCell::new(
                 refcell.borrow().iter().map(Value::deep_copy).collect(),
             )),
@@ -272,12 +270,8 @@ impl Object {
             Self::Deque(refcell) => Self::Deque(RefCell::new(
                 refcell.borrow().iter().map(Value::deep_copy).collect(),
             )),
-            Self::MinHeap(refcell) => {
-                Self::MinHeap(RefCell::new(refcell.borrow().clone()))
-            }
-            Self::MaxHeap(refcell) => {
-                Self::MaxHeap(RefCell::new(refcell.borrow().clone()))
-            }
+            Self::MinHeap(refcell) => Self::MinHeap(RefCell::new(refcell.borrow().clone())),
+            Self::MaxHeap(refcell) => Self::MaxHeap(RefCell::new(refcell.borrow().clone())),
             // Iterator: deep_copy if supported, otherwise share the Rc.
             Self::Iterator(shared) => {
                 if let Some(copy) = shared.borrow().deep_copy() {

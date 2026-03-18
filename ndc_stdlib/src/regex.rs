@@ -63,10 +63,7 @@ mod inner {
 
     /// Returns the first capture group from the first match of the regular expression.
     #[function(return_type = Vec<String>)]
-    pub fn capture_once(
-        haystack: &str,
-        regex: &str,
-    ) -> Result<ndc_vm::value::Value, regex::Error> {
+    pub fn capture_once(haystack: &str, regex: &str) -> Result<ndc_vm::value::Value, regex::Error> {
         let r = Regex::new(regex)?;
 
         let Some(captures) = r.captures(haystack) else {
