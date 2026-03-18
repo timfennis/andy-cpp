@@ -1,7 +1,9 @@
 use ndc_macros::export_module;
 
-use ndc_interpreter::sequence::StringRepr;
+use std::cell::RefCell;
 use std::rc::Rc;
+
+type StringRepr = Rc<RefCell<String>>;
 
 use anyhow::{Context, anyhow};
 
