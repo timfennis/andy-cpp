@@ -11,6 +11,7 @@ use ndc_lexer::Span;
 use ndc_parser::{CaptureSource, ResolvedVar, StaticType};
 use std::cell::RefCell;
 use std::hash::{Hash, Hasher};
+use std::io::Write;
 use std::ops::Deref;
 use std::rc::Rc;
 
@@ -24,6 +25,10 @@ pub struct Vm {
     /// the closure can still read/write it after the frame is gone.
     /// Two closures capturing the same local share one cell via this list.
     open_upvalues: Vec<Rc<RefCell<UpvalueCell>>>,
+    /// Output sink for `print`, `dbg`, and similar I/O built-ins.
+    /// Defaults to stdout; replaced by a shared sink when running inside the
+    /// interpreter so that output capture in tests works correctly.
+    output: Box<dyn Write>,
     #[cfg(feature = "vm-trace")]
     source: Option<String>,
 }
@@ -55,6 +60,7 @@ impl Vm {
                 memo: None,
             }],
             open_upvalues: Vec::new(),
+            output: Box::new(std::io::stdout()),
             #[cfg(feature = "vm-trace")]
             source: None,
         };
@@ -75,9 +81,24 @@ impl Vm {
             globals: Vec::new(),
             frames: Vec::new(),
             open_upvalues: Vec::new(),
+            output: Box::new(std::io::stdout()),
             #[cfg(feature = "vm-trace")]
             source: None,
         }
+    }
+
+    /// Replace the output sink used by I/O built-ins (e.g. `print`, `dbg`).
+    /// Call this before `run()` to redirect output away from stdout.
+    pub fn with_output(mut self, output: Box<dyn Write>) -> Self {
+        self.output = output;
+        self
+    }
+
+    /// Write a pre-formatted string to the VM's output sink.
+    pub fn write_output(&mut self, s: &str) -> Result<(), VmError> {
+        self.output
+            .write_all(s.as_bytes())
+            .map_err(|e| VmError::native(e.to_string()))
     }
 
     #[cfg(feature = "vm-trace")]
@@ -632,6 +653,7 @@ impl Vm {
             globals,
             frames: Vec::new(),
             open_upvalues: Vec::new(),
+            output: Box::new(std::io::stdout()),
             #[cfg(feature = "vm-trace")]
             source: None,
         };

@@ -4,7 +4,11 @@ use ndc_interpreter::function::{
 };
 use ndc_interpreter::value::Value;
 use ndc_macros::export_module;
+use ndc_vm::error::VmError;
+use ndc_vm::value::{NativeFunc, NativeFunction, Value as VmValue};
+use std::fmt::Write as FmtWrite;
 use std::fs::read_to_string;
+use std::rc::Rc;
 
 #[export_module]
 mod inner {
@@ -18,7 +22,47 @@ mod inner {
 }
 
 pub fn register_variadic(env: &mut Environment) {
-    (env).declare_global_fn(
+    let print_native = Rc::new(NativeFunction {
+        name: "print".to_string(),
+        static_type: StaticType::unit(),
+        func: NativeFunc::WithVm(Box::new(|args, vm| {
+            let mut buf = String::new();
+            let mut iter = args.iter().peekable();
+            if iter.peek().is_none() {
+                buf.push('\n');
+            } else {
+                while let Some(arg) = iter.next() {
+                    if iter.peek().is_some() {
+                        write!(buf, "{arg} ").map_err(|e| VmError::native(e.to_string()))?;
+                    } else {
+                        writeln!(buf, "{arg}").map_err(|e| VmError::native(e.to_string()))?;
+                    }
+                }
+            }
+            vm.write_output(&buf)?;
+            Ok(VmValue::unit())
+        })),
+    });
+
+    let dbg_native = Rc::new(NativeFunction {
+        name: "dbg".to_string(),
+        static_type: StaticType::unit(),
+        func: NativeFunc::WithVm(Box::new(|args, vm| {
+            let mut buf = String::new();
+            let mut iter = args.iter().peekable();
+            while let Some(arg) = iter.next() {
+                if iter.peek().is_some() {
+                    write!(buf, "{arg:?} ").map_err(|e| VmError::native(e.to_string()))?;
+                } else {
+                    writeln!(buf, "{arg:?}").map_err(|e| VmError::native(e.to_string()))?;
+                }
+            }
+            vm.write_output(&buf)?;
+            Ok(VmValue::unit())
+        })),
+    });
+
+    env.declare_global_fn(
         FunctionBuilder::default()
             .name("print".to_string())
             .documentation("Print the value.".to_string())
@@ -27,14 +71,10 @@ pub fn register_variadic(env: &mut Environment) {
                     env.borrow_mut()
                         .with_output(|output| {
                             let mut iter = args.iter().peekable();
-
-                            // If no arguments are passed to the print function just print an empty line
                             if iter.peek().is_none() {
                                 writeln!(output)?;
                                 return Ok(());
                             }
-
-                            // Otherwise
                             while let Some(arg) = iter.next() {
                                 if iter.peek().is_some() {
                                     write!(output, "{arg} ")?;
@@ -50,6 +90,7 @@ pub fn register_variadic(env: &mut Environment) {
                 type_signature: TypeSignature::Variadic,
                 return_type: StaticType::unit(),
             })
+            .vm_native(print_native)
             .build()
             .expect("function definition defined in code must be valid"),
     );
@@ -78,6 +119,7 @@ pub fn register_variadic(env: &mut Environment) {
                 type_signature: TypeSignature::Variadic,
                 return_type: StaticType::unit(),
             })
+            .vm_native(dbg_native)
             .build()
             .expect("function definition defined in code must be valid"),
     );
