@@ -171,6 +171,10 @@ impl Value {
         )))))
     }
 
+    pub fn from_string_rc(rc: Rc<RefCell<String>>) -> Self {
+        Self::Object(Rc::new(Object::String(rc)))
+    }
+
     pub fn iterator(iter: SharedIterator) -> Self {
         Self::Object(Rc::new(Object::Iterator(iter)))
     }

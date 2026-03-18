@@ -53,8 +53,6 @@ fn vm_try_min(mut iter: impl Iterator<Item = VmValue>) -> anyhow::Result<VmValue
 
 #[export_module]
 mod inner {
-    use std::cell::RefCell;
-
     use super::{try_sort_by, vm_try_max, vm_try_min};
     use itertools::Itertools;
     use ndc_interpreter::compare::FallibleOrd;
