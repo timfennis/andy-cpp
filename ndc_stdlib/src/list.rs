@@ -1,7 +1,6 @@
 #[ndc_macros::export_module]
 mod inner {
     use itertools::Itertools;
-    use ndc_interpreter::sequence::Sequence;
     use ndc_interpreter::value::Value;
     use std::rc::Rc;
 

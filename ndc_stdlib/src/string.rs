@@ -33,19 +33,14 @@ mod inner {
     }
 
     #[function(name = "++=")]
-    pub fn op_list_concat(
-        left: &mut StringRepr,
-        right: &mut StringRepr,
-    ) -> ndc_interpreter::value::Value {
+    pub fn op_list_concat(left: &mut StringRepr, right: &mut StringRepr) -> ndc_vm::value::Value {
         if Rc::ptr_eq(left, right) {
             let new = right.borrow().repeat(2).clone();
             *left.borrow_mut() = new;
         } else {
             left.borrow_mut().push_str(&right.borrow())
         }
-        ndc_interpreter::value::Value::Sequence(ndc_interpreter::sequence::Sequence::String(
-            Rc::clone(left),
-        ))
+        ndc_vm::value::Value::from_string_rc(Rc::clone(left))
     }
 
     /// Returns the provided value as a string
