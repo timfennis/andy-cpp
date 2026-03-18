@@ -58,9 +58,6 @@ mod inner {
     use super::{try_sort_by, vm_try_max, vm_try_min};
     use itertools::Itertools;
     use ndc_interpreter::compare::FallibleOrd;
-    use ndc_interpreter::iterator::{Repeat, ValueIterator};
-    use ndc_interpreter::sequence::Sequence;
-    use ndc_interpreter::value::Value as InterpValue;
     use ndc_vm::value::{Object, Value as VmValue};
     use ndc_vm::vm::VmCallable;
     use std::cmp::Ordering;
@@ -879,28 +876,17 @@ mod inner {
     }
 
     #[function(return_type = Iterator<Value>)]
-    pub fn repeat(value: ndc_interpreter::value::Value) -> ndc_interpreter::value::Value {
-        InterpValue::Sequence(Sequence::Iterator(Rc::new(RefCell::new(
-            ValueIterator::Repeat(Repeat {
-                value,
-                cur: 0,
-                limit: None,
-            }),
-        ))))
+    pub fn repeat(value: ndc_vm::value::Value) -> ndc_vm::value::Value {
+        ndc_vm::value::Value::iterator(Rc::new(std::cell::RefCell::new(
+            ndc_vm::RepeatIter::new(value),
+        )))
     }
 
     #[function(name = "repeat", return_type = Iterator<Value>)]
-    pub fn repeat_times(
-        value: ndc_interpreter::value::Value,
-        times: usize,
-    ) -> ndc_interpreter::value::Value {
-        InterpValue::Sequence(Sequence::Iterator(Rc::new(RefCell::new(
-            ValueIterator::Repeat(Repeat {
-                value,
-                cur: 0,
-                limit: Some(times),
-            }),
-        ))))
+    pub fn repeat_times(value: ndc_vm::value::Value, times: usize) -> ndc_vm::value::Value {
+        ndc_vm::value::Value::iterator(Rc::new(std::cell::RefCell::new(
+            ndc_vm::RepeatIter::new_limited(value, times),
+        )))
     }
 }
 

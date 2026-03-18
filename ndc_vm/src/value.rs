@@ -183,6 +183,48 @@ impl Value {
         Self::Object(Rc::new(Object::Tuple(values)))
     }
 
+    /// Creates a shallow copy: scalars are copied by value; mutable collection
+    /// types (String, List, Map, Deque, heaps) get new independent containers
+    /// with cloned contents; immutable / identity types (Tuple, Function,
+    /// Iterator, BigInt, Rational, Complex, Some, OverloadSet) share the Rc.
+    pub fn shallow_clone(&self) -> Self {
+        match self {
+            Self::Object(obj) => match obj.as_ref() {
+                Object::String(rc) => Self::Object(Rc::new(Object::String(Rc::new(
+                    RefCell::new(rc.borrow().clone()),
+                )))),
+                Object::List(refcell) => Self::Object(Rc::new(Object::List(RefCell::new(
+                    refcell.borrow().clone(),
+                )))),
+                Object::Deque(refcell) => Self::Object(Rc::new(Object::Deque(RefCell::new(
+                    refcell.borrow().clone(),
+                )))),
+                Object::MinHeap(refcell) => Self::Object(Rc::new(Object::MinHeap(RefCell::new(
+                    refcell.borrow().clone(),
+                )))),
+                Object::MaxHeap(refcell) => Self::Object(Rc::new(Object::MaxHeap(RefCell::new(
+                    refcell.borrow().clone(),
+                )))),
+                Object::Map { entries, default } => Self::Object(Rc::new(Object::Map {
+                    entries: RefCell::new(entries.borrow().clone()),
+                    default: default.clone(),
+                })),
+                _ => Self::Object(obj.clone()),
+            },
+            // Scalars are already independent — just copy.
+            other => other.clone(),
+        }
+    }
+
+    /// Creates a deep copy: all nested mutable containers are recursively
+    /// duplicated so the result shares no mutable state with the original.
+    pub fn deep_copy(&self) -> Self {
+        match self {
+            Self::Object(obj) => Self::Object(Rc::new(obj.deep_copy())),
+            other => other.clone(),
+        }
+    }
+
     pub fn static_type(&self) -> StaticType {
         match self {
             Self::Int(_) => StaticType::Int,
@@ -203,6 +245,49 @@ impl Object {
         Self::Map {
             entries: RefCell::new(entries),
             default,
+        }
+    }
+
+    /// Recursively deep-copies all mutable containers.
+    pub fn deep_copy(&self) -> Self {
+        match self {
+            Self::Some(v) => Self::Some(v.deep_copy()),
+            Self::String(rc) => {
+                Self::String(Rc::new(RefCell::new(rc.borrow().clone())))
+            }
+            Self::List(refcell) => Self::List(RefCell::new(
+                refcell.borrow().iter().map(Value::deep_copy).collect(),
+            )),
+            Self::Tuple(v) => Self::Tuple(v.iter().map(Value::deep_copy).collect()),
+            Self::Map { entries, default } => Self::Map {
+                entries: RefCell::new(
+                    entries
+                        .borrow()
+                        .iter()
+                        .map(|(k, v)| (k.deep_copy(), v.deep_copy()))
+                        .collect(),
+                ),
+                default: default.as_ref().map(Value::deep_copy),
+            },
+            Self::Deque(refcell) => Self::Deque(RefCell::new(
+                refcell.borrow().iter().map(Value::deep_copy).collect(),
+            )),
+            Self::MinHeap(refcell) => {
+                Self::MinHeap(RefCell::new(refcell.borrow().clone()))
+            }
+            Self::MaxHeap(refcell) => {
+                Self::MaxHeap(RefCell::new(refcell.borrow().clone()))
+            }
+            // Iterator: deep_copy if supported, otherwise share the Rc.
+            Self::Iterator(shared) => {
+                if let Some(copy) = shared.borrow().deep_copy() {
+                    Self::Iterator(copy)
+                } else {
+                    Self::Iterator(Rc::clone(shared))
+                }
+            }
+            // Immutable / identity types: clone the Rc via Object's derive.
+            other => other.clone(),
         }
     }
 

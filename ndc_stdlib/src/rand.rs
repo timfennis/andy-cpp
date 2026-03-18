@@ -21,10 +21,9 @@ pub fn random_n<N: SampleUniform + std::fmt::Display + Copy>(
 mod inner {
     use itertools::Itertools;
     use ndc_interpreter::num::Number;
-    use ndc_interpreter::value::Value;
 
     /// Randomly shuffles the elements of the list in place.
-    pub fn shuffle(list: &mut [Value]) {
+    pub fn shuffle(list: &mut Vec<ndc_vm::value::Value>) {
         list.shuffle(&mut rand::rng());
     }
 

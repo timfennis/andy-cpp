@@ -54,6 +54,13 @@ impl VmIterator for InterpIteratorAdapter {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn deep_copy(&self) -> Option<ndc_vm::SharedIterator> {
+        let cloned = ValueIterator::clone(&*self.inner.borrow());
+        Some(Rc::new(RefCell::new(InterpIteratorAdapter {
+            inner: Rc::new(RefCell::new(cloned)),
+        })))
+    }
 }
 
 pub fn make_vm_globals(env: &Rc<RefCell<Environment>>) -> Vec<VmValue> {
@@ -187,6 +194,23 @@ pub fn vm_to_interp(value: &VmValue) -> InterpValue {
                         return InterpValue::Sequence(Sequence::Iterator(Rc::clone(
                             &adapter.inner,
                         )));
+                    }
+                }
+                // If it's a RepeatIter, convert back to an interpreter Repeat iterator.
+                // TODO: remove once the VM bridge (vm_bridge.rs) is gone.
+                {
+                    let borrowed = iter.borrow();
+                    if let Some(rep) = borrowed.as_any().downcast_ref::<ndc_vm::RepeatIter>() {
+                        let value = vm_to_interp(rep.value());
+                        let limit = rep.remaining();
+                        let repeat = crate::iterator::Repeat {
+                            value,
+                            cur: 0,
+                            limit,
+                        };
+                        return InterpValue::Sequence(Sequence::Iterator(Rc::new(RefCell::new(
+                            ValueIterator::Repeat(repeat),
+                        ))));
                     }
                 }
                 // If it's a range, preserve it as an interpreter range iterator so that

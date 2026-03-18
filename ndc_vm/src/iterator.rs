@@ -36,6 +36,12 @@ pub trait VmIterator {
     /// Used by the VM bridge to detect and round-trip interpreter iterators.
     /// TODO: remove once the VM bridge (vm_bridge.rs) is gone.
     fn as_any(&self) -> &dyn std::any::Any;
+
+    /// Returns a new independent iterator with the same current state (for `deepcopy`).
+    /// The default implementation returns `None`; override for clonable iterator types.
+    fn deep_copy(&self) -> Option<SharedIterator> {
+        None
+    }
 }
 
 pub type SharedIterator = Rc<RefCell<dyn VmIterator>>;
@@ -77,6 +83,13 @@ impl VmIterator for RangeIter {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn deep_copy(&self) -> Option<SharedIterator> {
+        Some(Rc::new(RefCell::new(Self {
+            current: self.current,
+            end: self.end,
+        })))
     }
 }
 
@@ -126,6 +139,14 @@ impl VmIterator for RangeInclusiveIter {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn deep_copy(&self) -> Option<SharedIterator> {
+        Some(Rc::new(RefCell::new(Self {
+            current: self.current,
+            end: self.end,
+            done: self.done,
+        })))
+    }
 }
 
 /// Unbounded range: `start..`
@@ -152,6 +173,12 @@ impl VmIterator for UnboundedRangeIter {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn deep_copy(&self) -> Option<SharedIterator> {
+        Some(Rc::new(RefCell::new(Self {
+            current: self.current,
+        })))
     }
 }
 
@@ -213,6 +240,13 @@ impl VmIterator for SeqIter {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn deep_copy(&self) -> Option<SharedIterator> {
+        Some(Rc::new(RefCell::new(Self {
+            obj: Rc::clone(&self.obj),
+            index: self.index,
+        })))
     }
 }
 
@@ -325,6 +359,67 @@ impl VmIterator for MaxHeapIter {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+}
+
+/// Infinitely (or finitely) repeats a single value.
+pub struct RepeatIter {
+    value: Value,
+    remaining: Option<usize>,
+}
+
+impl RepeatIter {
+    pub fn new(value: Value) -> Self {
+        Self {
+            value,
+            remaining: None,
+        }
+    }
+
+    pub fn new_limited(value: Value, count: usize) -> Self {
+        Self {
+            value,
+            remaining: Some(count),
+        }
+    }
+
+    pub fn value(&self) -> &Value {
+        &self.value
+    }
+
+    pub fn remaining(&self) -> Option<usize> {
+        self.remaining
+    }
+}
+
+impl VmIterator for RepeatIter {
+    fn next(&mut self) -> Option<Value> {
+        match self.remaining.as_mut() {
+            Some(0) => None,
+            Some(n) => {
+                *n -= 1;
+                Some(self.value.clone())
+            }
+            None => Some(self.value.clone()),
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self.remaining {
+            Some(n) => (n, Some(n)),
+            None => (usize::MAX, None),
+        }
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn deep_copy(&self) -> Option<SharedIterator> {
+        Some(Rc::new(RefCell::new(Self {
+            value: self.value.clone(),
+            remaining: self.remaining,
+        })))
     }
 }
 

@@ -4,11 +4,7 @@ use std::fmt::Write;
 #[export_module]
 mod inner {
     use ndc_interpreter::function::Callable;
-    use ndc_interpreter::heap::{MaxHeap, MinHeap};
-    use ndc_interpreter::sequence::Sequence;
-    use ndc_interpreter::value::Value;
     use ndc_vm::value::{Object as VmObject, Value as VmValue};
-    use std::cell::RefCell;
     use std::rc::Rc;
 
     /// Returns the documentation as a string for a given function in Andy C++.
@@ -40,20 +36,10 @@ mod inner {
     /// Returns the reference count for the value, if the value is not reference counted it will return 0
     ///
     /// Note: this function does increase the ref count by 1
-    pub fn ref_count(value: Value) -> usize {
+    pub fn ref_count(value: ndc_vm::value::Value) -> usize {
         match value {
-            Value::Option(_) | Value::Number(_) | Value::Bool(_) => 0,
-            Value::Sequence(seq) => match seq {
-                Sequence::String(rc) => Rc::strong_count(&rc),
-                Sequence::List(rc) => Rc::strong_count(&rc),
-                Sequence::Tuple(rc) => Rc::strong_count(&rc),
-                Sequence::Map(rc, _) => Rc::strong_count(&rc),
-                Sequence::Iterator(rc) => Rc::strong_count(&rc),
-                Sequence::MaxHeap(rc) => Rc::strong_count(&rc),
-                Sequence::MinHeap(rc) => Rc::strong_count(&rc),
-                Sequence::Deque(rc) => Rc::strong_count(&rc),
-            },
-            Value::Function(r) => Rc::strong_count(&r),
+            ndc_vm::value::Value::Object(rc) => Rc::strong_count(&rc),
+            _ => 0,
         }
     }
 
@@ -96,39 +82,12 @@ mod inner {
     }
 
     /// Returns a shallow copy of the given value.
-    pub fn clone(value: &Value) -> Value {
-        match value {
-            Value::Option(o) => Value::Option(o.clone()),
-            number @ Value::Number(_) => number.clone(),
-            Value::Bool(b) => Value::Bool(*b),
-            Value::Sequence(Sequence::String(string)) => Value::string(string.borrow().to_owned()),
-            Value::Sequence(Sequence::List(list)) => Value::list(list.borrow().to_owned()),
-            Value::Sequence(Sequence::Map(map, default)) => Value::Sequence(Sequence::Map(
-                Rc::new(RefCell::new(map.borrow().clone())),
-                default.to_owned(),
-            )),
-            Value::Sequence(Sequence::Tuple(tuple)) => {
-                Value::Sequence(Sequence::Tuple(tuple.clone()))
-            }
-            Value::Sequence(Sequence::Iterator(iterator)) => {
-                Value::Sequence(Sequence::Iterator(iterator.clone()))
-            }
-            Value::Sequence(Sequence::MaxHeap(heap)) => Value::Sequence(Sequence::MaxHeap(
-                Rc::new(RefCell::new(MaxHeap::from_heap(heap.borrow().to_owned()))),
-            )),
-            Value::Sequence(Sequence::MinHeap(heap)) => Value::Sequence(Sequence::MinHeap(
-                Rc::new(RefCell::new(MinHeap::from_heap(heap.borrow().to_owned()))),
-            )),
-            Value::Sequence(Sequence::Deque(deque)) => Value::Sequence(Sequence::Deque(Rc::new(
-                RefCell::new(deque.borrow().to_owned()),
-            ))),
-            // TODO: for function should deepcopy have some special behavior
-            Value::Function(f) => Value::Function(f.clone()),
-        }
+    pub fn clone(value: ndc_vm::value::Value) -> ndc_vm::value::Value {
+        value.shallow_clone()
     }
 
     /// Returns a deep copy of the given value, duplicating all nested structures.
-    pub fn deepcopy(value: &Value) -> Value {
-        value.deepcopy()
+    pub fn deepcopy(value: ndc_vm::value::Value) -> ndc_vm::value::Value {
+        value.deep_copy()
     }
 }
