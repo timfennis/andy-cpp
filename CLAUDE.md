@@ -47,6 +47,10 @@ Source → [Lexer] → Tokens → [Parser] → AST → [Analyser] → Annotated 
                                                  Value           [Bytecode VM] → Value
 ```
 
+### Git Workflow
+- Prefer short commit messages, only use multiple lines in case of unrelated changes
+- Pull request titles must start with an emoji
+
 ### Crate Layout
 
 | Crate | Role |
