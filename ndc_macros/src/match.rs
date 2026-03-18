@@ -118,6 +118,21 @@ pub fn is_ndc_vm_seq_value(ty: &syn::Type) -> bool {
     }
 }
 
+/// Returns true if the type is the fully-qualified `ndc_vm::value::MapValue`.
+/// Like `ndc_vm::value::Value` but signals `StaticType::Map` to the macro.
+pub fn is_ndc_vm_map_value(ty: &syn::Type) -> bool {
+    match ty {
+        syn::Type::Path(syn::TypePath { path, .. }) => {
+            let segs: Vec<_> = path.segments.iter().collect();
+            matches!(
+                segs.as_slice(),
+                [a, b, c] if a.ident == "ndc_vm" && b.ident == "value" && c.ident == "MapValue"
+            )
+        }
+        _ => false,
+    }
+}
+
 /// Returns true if the type is `&[ndc_vm::value::Value]`.
 pub fn is_ref_of_slice_of_ndc_vm_value(ty: &syn::Type) -> bool {
     is_ref_of(ty, |inner| match inner {
