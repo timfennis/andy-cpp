@@ -85,15 +85,6 @@ mod inner {
         list.extend_from_slice(other);
     }
 
-    /// Extends this `list` with elements from `iter` leaving the iterator empty
-    #[function(name = "extend")]
-    pub fn extend_from_iter(
-        list: &mut Vec<ndc_interpreter::value::Value>,
-        iter: impl Iterator<Item = ndc_interpreter::value::Value>,
-    ) {
-        list.extend(iter);
-    }
-
     /// Removes the last element from a list and returns it, or `Unit` if it is empty
     #[function(name = "pop?", return_type = Option<_>)]
     pub fn maybe_pop(list: &mut Vec<ndc_vm::value::Value>) -> ndc_vm::value::Value {
@@ -211,77 +202,12 @@ mod inner {
 
 pub mod ops {
     use ndc_interpreter::environment::Environment;
-    use ndc_interpreter::function::{
-        FunctionBody, FunctionBuilder, FunctionCarrier, Parameter, StaticType, TypeSignature,
-    };
-    use ndc_interpreter::sequence::Sequence;
-    use ndc_interpreter::value::Value as InterpValue;
+    use ndc_interpreter::function::{FunctionBody, FunctionBuilder, StaticType};
     use ndc_vm::error::VmError;
     use ndc_vm::value::{
         NativeFunc, NativeFunction as VmNativeFunction, Object as VmObject, Value as VmValue,
     };
     use std::rc::Rc;
-
-    // Interpreter path for `++`: works on ListRepr (Rc<RefCell<Vec<InterpValue>>>) directly.
-    #[deprecated = "interpreter path — remove when tree-walk interpreter is dropped"]
-    fn interp_list_concat(
-        args: &mut [InterpValue],
-        _env: &std::rc::Rc<std::cell::RefCell<Environment>>,
-    ) -> Result<InterpValue, FunctionCarrier> {
-        let [left, right] = args else {
-            return Err(anyhow::anyhow!("++ requires 2 arguments").into());
-        };
-        let (left_rc, right_rc) = match (left, right) {
-            (
-                InterpValue::Sequence(Sequence::List(l)),
-                InterpValue::Sequence(Sequence::List(r)),
-            ) => (l.clone(), r.clone()),
-            _ => return Err(anyhow::anyhow!("++ requires list arguments").into()),
-        };
-        if Rc::strong_count(&left_rc) == 1 {
-            left_rc.borrow_mut().extend_from_slice(&right_rc.borrow());
-            Ok(InterpValue::Sequence(Sequence::List(left_rc)))
-        } else {
-            Ok(InterpValue::list(
-                left_rc
-                    .borrow()
-                    .iter()
-                    .chain(right_rc.borrow().iter())
-                    .cloned()
-                    .collect::<Vec<InterpValue>>(),
-            ))
-        }
-    }
-
-    // Interpreter path for `++=`: works on ListRepr directly, handles self-alias correctly.
-    #[deprecated = "interpreter path — remove when tree-walk interpreter is dropped"]
-    fn interp_list_append(
-        args: &mut [InterpValue],
-        _env: &std::rc::Rc<std::cell::RefCell<Environment>>,
-    ) -> Result<InterpValue, FunctionCarrier> {
-        let [left, right] = args else {
-            return Err(anyhow::anyhow!("++=  requires 2 arguments").into());
-        };
-        let (left_rc, right_rc) = match (left, right) {
-            (
-                InterpValue::Sequence(Sequence::List(l)),
-                InterpValue::Sequence(Sequence::List(r)),
-            ) => (l.clone(), r.clone()),
-            _ => return Err(anyhow::anyhow!("++= requires list arguments").into()),
-        };
-        if Rc::ptr_eq(&left_rc, &right_rc) {
-            left_rc.borrow_mut().extend_from_within(..);
-        } else if Rc::strong_count(&right_rc) == 1 {
-            left_rc.borrow_mut().append(
-                &mut right_rc
-                    .try_borrow_mut()
-                    .expect("Failed to borrow_mut in `++=`"),
-            );
-        } else {
-            left_rc.borrow_mut().extend_from_slice(&right_rc.borrow());
-        }
-        Ok(InterpValue::unit())
-    }
 
     pub fn register(env: &mut Environment) {
         register_list_concat(env);
@@ -346,17 +272,12 @@ pub mod ops {
                 }
             })),
         });
-        #[allow(deprecated)]
         env.declare_global_fn(
             FunctionBuilder::default()
                 .name("++".to_string())
-                .body(FunctionBody::GenericFunction {
-                    function: interp_list_concat,
-                    type_signature: TypeSignature::Exact(vec![
-                        Parameter::new("left", StaticType::List(Box::new(StaticType::Any))),
-                        Parameter::new("right", StaticType::List(Box::new(StaticType::Any))),
-                    ]),
-                    return_type: StaticType::List(Box::new(StaticType::Any)),
+                .body(FunctionBody::Opaque {
+                    data: Rc::new(()),
+                    static_type: StaticType::List(Box::new(StaticType::Any)),
                 })
                 .vm_native(native)
                 .build()
@@ -422,17 +343,12 @@ pub mod ops {
                 Ok(left.clone())
             })),
         });
-        #[allow(deprecated)]
         env.declare_global_fn(
             FunctionBuilder::default()
                 .name("++=".to_string())
-                .body(FunctionBody::GenericFunction {
-                    function: interp_list_append,
-                    type_signature: TypeSignature::Exact(vec![
-                        Parameter::new("left", StaticType::List(Box::new(StaticType::Any))),
-                        Parameter::new("right", StaticType::List(Box::new(StaticType::Any))),
-                    ]),
-                    return_type: StaticType::List(Box::new(StaticType::Any)),
+                .body(FunctionBody::Opaque {
+                    data: Rc::new(()),
+                    static_type: StaticType::Tuple(vec![]),
                 })
                 .vm_native(native)
                 .build()

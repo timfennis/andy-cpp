@@ -1,8 +1,5 @@
 use ndc_interpreter::environment::Environment;
-use ndc_interpreter::function::{
-    FunctionBody, FunctionBuilder, FunctionCarrier, StaticType, TypeSignature,
-};
-use ndc_interpreter::value::Value;
+use ndc_interpreter::function::{FunctionBody, FunctionBuilder, StaticType};
 use ndc_macros::export_module;
 use ndc_vm::error::VmError;
 use ndc_vm::value::{NativeFunc, NativeFunction, Value as VmValue};
@@ -66,29 +63,9 @@ pub fn register_variadic(env: &mut Environment) {
         FunctionBuilder::default()
             .name("print".to_string())
             .documentation("Print the value.".to_string())
-            .body(FunctionBody::GenericFunction {
-                function: |args, env| {
-                    env.borrow_mut()
-                        .with_output(|output| {
-                            let mut iter = args.iter().peekable();
-                            if iter.peek().is_none() {
-                                writeln!(output)?;
-                                return Ok(());
-                            }
-                            while let Some(arg) = iter.next() {
-                                if iter.peek().is_some() {
-                                    write!(output, "{arg} ")?;
-                                } else {
-                                    writeln!(output, "{arg}")?;
-                                }
-                            }
-                            Ok(())
-                        })
-                        .map_err(|err| FunctionCarrier::IntoEvaluationError(Box::new(err)))?;
-                    Ok(Value::unit())
-                },
-                type_signature: TypeSignature::Variadic,
-                return_type: StaticType::unit(),
+            .body(FunctionBody::Opaque {
+                data: Rc::new(()),
+                static_type: StaticType::unit(),
             })
             .vm_native(print_native)
             .build()
@@ -99,25 +76,9 @@ pub fn register_variadic(env: &mut Environment) {
         FunctionBuilder::default()
             .name("dbg".to_string())
             .documentation("Prints the values for quick and dirty debugging (using the value's debug representation).".to_string())
-            .body(FunctionBody::GenericFunction {
-                function: |args, env| {
-                    env.borrow_mut()
-                        .with_output(|output| {
-                            let mut iter = args.iter().peekable();
-                            while let Some(arg) = iter.next() {
-                                if iter.peek().is_some() {
-                                    write!(output, "{arg:?} ")?;
-                                } else {
-                                    writeln!(output, "{arg:?}")?;
-                                }
-                            }
-                            Ok(())
-                        })
-                        .map_err(|err| FunctionCarrier::IntoEvaluationError(Box::new(err)))?;
-                    Ok(Value::unit())
-                },
-                type_signature: TypeSignature::Variadic,
-                return_type: StaticType::unit(),
+            .body(FunctionBody::Opaque {
+                data: Rc::new(()),
+                static_type: StaticType::unit(),
             })
             .vm_native(dbg_native)
             .build()

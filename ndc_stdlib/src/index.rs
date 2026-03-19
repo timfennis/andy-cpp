@@ -1,12 +1,7 @@
 use ndc_interpreter::environment::Environment;
-use ndc_interpreter::evaluate::index::{get_at_index, set_at_index, value_to_evaluated_index};
-use ndc_interpreter::function::{
-    FunctionBody, FunctionBuilder, FunctionCarrier, StaticType, TypeSignature,
-};
-use ndc_interpreter::value::Value;
+use ndc_interpreter::function::{FunctionBody, FunctionBuilder, StaticType};
 use ndc_vm::error::VmError;
 use ndc_vm::value::{NativeFunc, NativeFunction, Object as VmObject, Value as VmValue};
-use std::cell::RefCell;
 use std::rc::Rc;
 
 pub fn register(env: &mut Environment) {
@@ -26,10 +21,9 @@ pub fn register(env: &mut Environment) {
     env.declare_global_fn(
         FunctionBuilder::default()
             .name("[]".to_string())
-            .body(FunctionBody::GenericFunction {
-                type_signature: TypeSignature::Variadic,
-                function: index_function,
-                return_type: StaticType::Any,
+            .body(FunctionBody::Opaque {
+                data: Rc::new(()),
+                static_type: StaticType::Any,
             })
             .vm_native(get_native)
             .build()
@@ -53,43 +47,14 @@ pub fn register(env: &mut Environment) {
     env.declare_global_fn(
         FunctionBuilder::default()
             .name("[]=".to_string())
-            .body(FunctionBody::GenericFunction {
-                type_signature: TypeSignature::Variadic,
-                function: set_index_function,
-                return_type: StaticType::Tuple(vec![]),
+            .body(FunctionBody::Opaque {
+                data: Rc::new(()),
+                static_type: StaticType::Tuple(vec![]),
             })
             .vm_native(set_native)
             .build()
             .expect("must succeed"),
     );
-}
-
-fn set_index_function(
-    args: &mut [Value],
-    _env: &Rc<RefCell<Environment>>,
-) -> Result<Value, FunctionCarrier> {
-    let [container, index_value, rhs] = args else {
-        return Err(FunctionCarrier::IntoEvaluationError(Box::new(
-            anyhow::anyhow!("[]= requires exactly 3 arguments, got {}", args.len()),
-        )));
-    };
-    let evaluated_index = value_to_evaluated_index(index_value.clone());
-    let rhs = rhs.clone();
-    set_at_index(container, rhs, evaluated_index)?;
-    Ok(Value::unit())
-}
-
-fn index_function(
-    args: &mut [Value],
-    env: &Rc<RefCell<Environment>>,
-) -> Result<Value, FunctionCarrier> {
-    let [container, index_value] = args else {
-        return Err(FunctionCarrier::IntoEvaluationError(Box::new(
-            anyhow::anyhow!("[] requires exactly 2 arguments, got {}", args.len()),
-        )));
-    };
-    let evaluated_index = value_to_evaluated_index(index_value.clone());
-    get_at_index(container, evaluated_index, env)
 }
 
 fn vm_sequence_length(v: &VmValue) -> Option<usize> {
