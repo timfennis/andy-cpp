@@ -6,9 +6,10 @@ use crate::iterator::{
 };
 use crate::value::{CompiledFunction, Function, NativeFunc};
 use crate::{ClosureFunction, Object, UpvalueCell, Value};
+use ndc_core::StaticType;
 use ndc_core::hash_map::{DefaultHasher, HashMap};
 use ndc_lexer::Span;
-use ndc_parser::{CaptureSource, ResolvedVar, StaticType};
+use ndc_parser::{CaptureSource, ResolvedVar};
 use std::cell::RefCell;
 use std::hash::{Hash, Hasher};
 use std::io::Write;
@@ -669,20 +670,19 @@ impl Vm {
     /// Used by `VmCallable::call` so stdlib HOFs run their predicates/mappers
     /// directly on the parent stack — zero allocation per callback invocation.
     pub fn call_callback(&mut self, func: Function, args: Vec<Value>) -> Result<Value, VmError> {
-        match func {
-            Function::Native(native) => match &native.func {
+        if let Function::Native(native) = func {
+            match &native.func {
                 NativeFunc::Simple(f) => f(&args),
                 NativeFunc::WithVm(f) => f(&args, self),
-            },
-            _ => {
-                let depth = self.frames.len();
-                let n = args.len();
-                self.stack.push(Value::unit()); // dummy callee slot
-                self.stack.extend(args);
-                self.dispatch_call_with_memo(func, n, None)?;
-                self.run_to_depth(depth)?;
-                Ok(self.stack.pop().expect("callback must produce a value"))
             }
+        } else {
+            let depth = self.frames.len();
+            let n = args.len();
+            self.stack.push(Value::unit()); // dummy callee slot
+            self.stack.extend(args);
+            self.dispatch_call_with_memo(func, n, None)?;
+            self.run_to_depth(depth)?;
+            Ok(self.stack.pop().expect("callback must produce a value"))
         }
     }
 

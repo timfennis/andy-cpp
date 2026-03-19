@@ -1,10 +1,11 @@
 use crate::chunk::{Chunk, OpCode};
 use crate::value::{CompiledFunction, Function};
 use crate::{Object, Value};
+use ndc_core::{StaticType, TypeSignature};
 use ndc_lexer::Span;
 use ndc_parser::{
     Binding, CaptureSource, Expression, ExpressionLocation, ForBody, ForIteration, LogicalOperator,
-    Lvalue, ResolvedVar, StaticType, TypeSignature,
+    Lvalue, ResolvedVar,
 };
 use std::rc::Rc;
 

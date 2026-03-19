@@ -126,7 +126,7 @@ fn map_return_type(output: &syn::ReturnType) -> TokenStream {
     match output {
         syn::ReturnType::Default => {
             // in case return type is not specified (for closures rust defaults to type inference which doesn't help us here)
-            quote! { ndc_interpreter::function::StaticType::Tuple(vec![]) }
+            quote! { ndc_core::StaticType::Tuple(vec![]) }
         }
         syn::ReturnType::Type(_, ty) => map_type(ty),
     }
@@ -139,13 +139,13 @@ fn map_type(ty: &syn::Type) -> TokenStream {
         syn::Type::Tuple(t) => {
             let inner = t.elems.iter().map(map_type);
             quote::quote! {
-                ndc_interpreter::function::StaticType::Tuple(vec![
+                ndc_core::StaticType::Tuple(vec![
                     #(#inner),*
                 ])
             }
         }
         syn::Type::Infer(_) => {
-            quote::quote! { ndc_interpreter::function::StaticType::Any }
+            quote::quote! { ndc_core::StaticType::Any }
         }
         _ => {
             panic!("unmapped type: {ty:?}");
@@ -159,29 +159,29 @@ fn map_type_path(p: &syn::TypePath) -> TokenStream {
 
     match segment.ident.to_string().as_str() {
         "i32" | "i64" | "isize" | "u32" | "u64" | "usize" | "BigInt" => {
-            quote::quote! { ndc_interpreter::function::StaticType::Int }
+            quote::quote! { ndc_core::StaticType::Int }
         }
         "f32" | "f64" => {
-            quote::quote! { ndc_interpreter::function::StaticType::Float }
+            quote::quote! { ndc_core::StaticType::Float }
         }
         "bool" => {
-            quote::quote! { ndc_interpreter::function::StaticType::Bool }
+            quote::quote! { ndc_core::StaticType::Bool }
         }
         "String" | "str" => {
-            quote::quote! { ndc_interpreter::function::StaticType::String }
+            quote::quote! { ndc_core::StaticType::String }
         }
         "Vec" | "List" => match &segment.arguments {
             syn::PathArguments::AngleBracketed(args) => {
                 let inner = args.args.first().expect("Vec<> requires inner type");
                 if let syn::GenericArgument::Type(inner_ty) = inner {
                     let mapped = map_type(inner_ty);
-                    quote::quote! { ndc_interpreter::function::StaticType::List(Box::new(#mapped)) }
+                    quote::quote! { ndc_core::StaticType::List(Box::new(#mapped)) }
                 } else {
                     panic!("Vec inner not a type");
                 }
             }
             _ => {
-                quote::quote! { ndc_interpreter::function::StaticType::List(Box::new(ndc_interpreter::function::StaticType::Any)) }
+                quote::quote! { ndc_core::StaticType::List(Box::new(ndc_core::StaticType::Any)) }
             }
         },
         "VecDeque" | "Deque" => match &segment.arguments {
@@ -189,14 +189,14 @@ fn map_type_path(p: &syn::TypePath) -> TokenStream {
                 let inner = args.args.first().expect("VecDeque<> requires inner type");
                 if let syn::GenericArgument::Type(inner_ty) = inner {
                     let mapped = map_type(inner_ty);
-                    quote::quote! { ndc_interpreter::function::StaticType::Deque(Box::new(#mapped)) }
+                    quote::quote! { ndc_core::StaticType::Deque(Box::new(#mapped)) }
                 } else {
                     panic!("VecDeque inner not a type");
                 }
             }
             _ => quote::quote! {
-                ndc_interpreter::function::StaticType::Deque(Box::new(
-                    ndc_interpreter::function::StaticType::Any
+                ndc_core::StaticType::Deque(Box::new(
+                    ndc_core::StaticType::Any
                 ))
             },
         },
@@ -219,7 +219,7 @@ fn map_type_path(p: &syn::TypePath) -> TokenStream {
                 };
                 let key_mapped = map_type(key_ty);
                 let val_mapped = map_type(val_ty);
-                quote::quote! { ndc_interpreter::function::StaticType::Map { key: Box::new(#key_mapped), value: Box::new(#val_mapped) } }
+                quote::quote! { ndc_core::StaticType::Map { key: Box::new(#key_mapped), value: Box::new(#val_mapped) } }
             }
             _ => temp_create_map_any(),
         },
@@ -228,14 +228,14 @@ fn map_type_path(p: &syn::TypePath) -> TokenStream {
                 let inner = args.args.first().expect("MinHeap requires inner");
                 if let syn::GenericArgument::Type(inner_ty) = inner {
                     let mapped = map_type(inner_ty);
-                    quote::quote! { ndc_interpreter::function::StaticType::MinHeap(Box::new(#mapped)) }
+                    quote::quote! { ndc_core::StaticType::MinHeap(Box::new(#mapped)) }
                 } else {
                     panic!("MinHeap inner invalid");
                 }
             }
             _ => quote::quote! {
-                ndc_interpreter::function::StaticType::MinHeap(Box::new(
-                    ndc_interpreter::function::StaticType::Any
+                ndc_core::StaticType::MinHeap(Box::new(
+                    ndc_core::StaticType::Any
                 ))
             },
         },
@@ -244,7 +244,7 @@ fn map_type_path(p: &syn::TypePath) -> TokenStream {
                 let inner = args.args.first().expect("MaxHeap requires inner");
                 if let syn::GenericArgument::Type(inner_ty) = inner {
                     let mapped = map_type(inner_ty);
-                    quote::quote! { ndc_interpreter::function::StaticType::MaxHeap(Box::new(#mapped)) }
+                    quote::quote! { ndc_core::StaticType::MaxHeap(Box::new(#mapped)) }
                 } else {
                     panic!("MaxHeap inner invalid");
                 }
@@ -256,13 +256,13 @@ fn map_type_path(p: &syn::TypePath) -> TokenStream {
                 let inner = args.args.first().expect("Iterator requires inner");
                 if let syn::GenericArgument::Type(inner_ty) = inner {
                     let mapped = map_type(inner_ty);
-                    quote::quote! { ndc_interpreter::function::StaticType::Iterator(Box::new(#mapped)) }
+                    quote::quote! { ndc_core::StaticType::Iterator(Box::new(#mapped)) }
                 } else {
                     panic!("Iterator inner invalid");
                 }
             }
             _ => {
-                quote::quote! { ndc_interpreter::function::StaticType::Iterator(Box::new(ndc_interpreter::function::StaticType::Any)) }
+                quote::quote! { ndc_core::StaticType::Iterator(Box::new(ndc_core::StaticType::Any)) }
             }
         },
         "Option" => match &segment.arguments {
@@ -270,7 +270,7 @@ fn map_type_path(p: &syn::TypePath) -> TokenStream {
                 let inner = args.args.first().expect("Option requires inner type");
                 if let syn::GenericArgument::Type(inner_ty) = inner {
                     let mapped = map_type(inner_ty);
-                    quote::quote! { ndc_interpreter::function::StaticType::Option(Box::new(#mapped)) }
+                    quote::quote! { ndc_core::StaticType::Option(Box::new(#mapped)) }
                 } else {
                     panic!("Option inner invalid");
                 }
@@ -287,15 +287,15 @@ fn map_type_path(p: &syn::TypePath) -> TokenStream {
             }
             _ => panic!("Result without angle bracketed args"),
         },
-        "Number" => quote::quote! { ndc_interpreter::function::StaticType::Number },
+        "Number" => quote::quote! { ndc_core::StaticType::Number },
         "MapValue" => quote::quote! {
-            ndc_interpreter::function::StaticType::Map {
-                key: Box::new(ndc_interpreter::function::StaticType::Any),
-                value: Box::new(ndc_interpreter::function::StaticType::Any),
+            ndc_core::StaticType::Map {
+                key: Box::new(ndc_core::StaticType::Any),
+                value: Box::new(ndc_core::StaticType::Any),
             }
         },
         "Value" | "EvaluationResult" | "SeqValue" => {
-            quote::quote! { ndc_interpreter::function::StaticType::Any }
+            quote::quote! { ndc_core::StaticType::Any }
         }
         unmatched => panic!("Cannot map type string '{unmatched}' to StaticType"),
     }
@@ -428,8 +428,8 @@ fn wrap_single(
             let func = ndc_interpreter::function::FunctionBuilder::default()
                 .body(ndc_interpreter::function::FunctionBody::VmNative {
                     native: std::rc::Rc::clone(&native),
-                    type_signature: ndc_interpreter::function::TypeSignature::Exact(vec![
-                        #( ndc_interpreter::function::Parameter::new(#vm_param_names, #vm_param_types,) ),*
+                    type_signature: ndc_core::TypeSignature::Exact(vec![
+                        #( ndc_core::Parameter::new(#vm_param_names, #vm_param_types,) ),*
                     ]),
                     return_type: #return_type,
                 })
@@ -446,8 +446,8 @@ fn wrap_single(
             let func = ndc_interpreter::function::FunctionBuilder::default()
                 .body(ndc_interpreter::function::FunctionBody::GenericFunction {
                     function: #identifier,
-                    type_signature: ndc_interpreter::function::TypeSignature::Exact(vec![
-                        #( ndc_interpreter::function::Parameter::new(#param_names, #param_types,) ),*
+                    type_signature: ndc_core::TypeSignature::Exact(vec![
+                        #( ndc_core::Parameter::new(#param_names, #param_types,) ),*
                     ]),
                     return_type: #return_type,
                 })
@@ -547,7 +547,7 @@ fn try_generate_vm_native(
         let native: std::rc::Rc<ndc_vm::value::NativeFunction> =
             std::rc::Rc::new(ndc_vm::value::NativeFunction {
                 name: String::from(#fn_name),
-                static_type: ndc_interpreter::function::StaticType::Function {
+                static_type: ndc_core::StaticType::Function {
                     parameters: Some(vec![#(#param_types.clone()),*]),
                     return_type: Box::new(#return_static_type),
                 },
@@ -565,10 +565,10 @@ fn try_generate_vm_native(
 fn into_param_type(ty: &syn::Type) -> TokenStream {
     match ty {
         ty if path_ends_with(ty, "Vec") => {
-            quote! { ndc_interpreter::function::StaticType::List(Box::new(ndc_interpreter::function::StaticType::Any)) }
+            quote! { ndc_core::StaticType::List(Box::new(ndc_core::StaticType::Any)) }
         }
         ty if path_ends_with(ty, "VecDeque") => {
-            quote! { ndc_interpreter::function::StaticType::Deque(Box::new(ndc_interpreter::function::StaticType::Any)) }
+            quote! { ndc_core::StaticType::Deque(Box::new(ndc_core::StaticType::Any)) }
         }
         ty if path_ends_with(ty, "DefaultMap")
             || path_ends_with(ty, "DefaultMapMut")
@@ -577,48 +577,48 @@ fn into_param_type(ty: &syn::Type) -> TokenStream {
             temp_create_map_any()
         }
         ty if path_ends_with(ty, "MinHeap") => {
-            quote! { ndc_interpreter::function::StaticType::MinHeap(Box::new(ndc_interpreter::function::StaticType::Any)) }
+            quote! { ndc_core::StaticType::MinHeap(Box::new(ndc_core::StaticType::Any)) }
         }
         ty if path_ends_with(ty, "MaxHeap") => {
-            quote! { ndc_interpreter::function::StaticType::MaxHeap(Box::new(ndc_interpreter::function::StaticType::Any)) }
+            quote! { ndc_core::StaticType::MaxHeap(Box::new(ndc_core::StaticType::Any)) }
         }
         ty if path_ends_with(ty, "ListRepr") => {
-            quote! { ndc_interpreter::function::StaticType::List(Box::new(ndc_interpreter::function::StaticType::Any)) }
+            quote! { ndc_core::StaticType::List(Box::new(ndc_core::StaticType::Any)) }
         }
         ty if path_ends_with(ty, "MapRepr") => temp_create_map_any(),
         syn::Type::Reference(syn::TypeReference { elem, .. }) => into_param_type(elem),
         syn::Type::Path(syn::TypePath { path, .. }) => match path {
-            _ if path.is_ident("i64") => quote! { ndc_interpreter::function::StaticType::Int },
+            _ if path.is_ident("i64") => quote! { ndc_core::StaticType::Int },
             _ if path.is_ident("usize") => {
-                quote! { ndc_interpreter::function::StaticType::Int }
+                quote! { ndc_core::StaticType::Int }
             }
             _ if path.is_ident("f64") => {
-                quote! { ndc_interpreter::function::StaticType::Float }
+                quote! { ndc_core::StaticType::Float }
             }
             _ if path.is_ident("bool") => {
-                quote! { ndc_interpreter::function::StaticType::Bool }
+                quote! { ndc_core::StaticType::Bool }
             }
             _ if path.is_ident("Value") => {
-                quote! { ndc_interpreter::function::StaticType::Any }
+                quote! { ndc_core::StaticType::Any }
             }
             _ if path.is_ident("Number") => {
-                quote! { ndc_interpreter::function::StaticType::Number }
+                quote! { ndc_core::StaticType::Number }
             }
             _ if path.is_ident("Sequence") => {
-                quote! { ndc_interpreter::function::StaticType::Sequence(Box::new(ndc_interpreter::function::StaticType::Any)) }
+                quote! { ndc_core::StaticType::Sequence(Box::new(ndc_core::StaticType::Any)) }
             }
             _ if path.is_ident("Callable") => {
                 quote! {
-                    ndc_interpreter::function::StaticType::Function {
+                    ndc_core::StaticType::Function {
                         parameters: None,
-                        return_type: Box::new(ndc_interpreter::function::StaticType::Any)
+                        return_type: Box::new(ndc_core::StaticType::Any)
                     }
                 }
             }
             _ => panic!("Don't know how to convert Path into StaticType\n\n{path:?}"),
         },
         syn::Type::ImplTrait(_) => {
-            quote! { ndc_interpreter::function::StaticType::Iterator(Box::new(ndc_interpreter::function::StaticType::Any)) }
+            quote! { ndc_core::StaticType::Iterator(Box::new(ndc_core::StaticType::Any)) }
         }
         x => panic!("Don't know how to convert {x:?} into StaticType"),
     }
@@ -653,8 +653,8 @@ fn create_temp_variable(
             );
             return vec![Argument {
                 param_type: quote! {
-                    ndc_interpreter::function::StaticType::List(Box::new(
-                        ndc_interpreter::function::StaticType::Any,
+                    ndc_core::StaticType::List(Box::new(
+                        ndc_core::StaticType::Any,
                     ))
                 },
                 param_name: quote! { #original_name },
@@ -676,8 +676,8 @@ fn create_temp_variable(
             );
             return vec![Argument {
                 param_type: quote! {
-                    ndc_interpreter::function::StaticType::List(Box::new(
-                        ndc_interpreter::function::StaticType::Any,
+                    ndc_core::StaticType::List(Box::new(
+                        ndc_core::StaticType::Any,
                     ))
                 },
                 param_name: quote! { #original_name },
@@ -698,9 +698,9 @@ fn create_temp_variable(
             );
             return vec![Argument {
                 param_type: quote! {
-                    ndc_interpreter::function::StaticType::Map {
-                        key: Box::new(ndc_interpreter::function::StaticType::Any),
-                        value: Box::new(ndc_interpreter::function::StaticType::Any),
+                    ndc_core::StaticType::Map {
+                        key: Box::new(ndc_core::StaticType::Any),
+                        value: Box::new(ndc_core::StaticType::Any),
                     }
                 },
                 param_name: quote! { #original_name },
@@ -721,9 +721,9 @@ fn create_temp_variable(
             );
             return vec![Argument {
                 param_type: quote! {
-                    ndc_interpreter::function::StaticType::Map {
-                        key: Box::new(ndc_interpreter::function::StaticType::Any),
-                        value: Box::new(ndc_interpreter::function::StaticType::Any),
+                    ndc_core::StaticType::Map {
+                        key: Box::new(ndc_core::StaticType::Any),
+                        value: Box::new(ndc_core::StaticType::Any),
                     }
                 },
                 param_name: quote! { #original_name },
@@ -744,8 +744,8 @@ fn create_temp_variable(
             );
             return vec![Argument {
                 param_type: quote! {
-                    ndc_interpreter::function::StaticType::MinHeap(Box::new(
-                        ndc_interpreter::function::StaticType::Any,
+                    ndc_core::StaticType::MinHeap(Box::new(
+                        ndc_core::StaticType::Any,
                     ))
                 },
                 param_name: quote! { #original_name },
@@ -766,8 +766,8 @@ fn create_temp_variable(
             );
             return vec![Argument {
                 param_type: quote! {
-                    ndc_interpreter::function::StaticType::MaxHeap(Box::new(
-                        ndc_interpreter::function::StaticType::Any,
+                    ndc_core::StaticType::MaxHeap(Box::new(
+                        ndc_core::StaticType::Any,
                     ))
                 },
                 param_name: quote! { #original_name },
@@ -788,8 +788,8 @@ fn create_temp_variable(
             );
             return vec![Argument {
                 param_type: quote! {
-                    ndc_interpreter::function::StaticType::Deque(Box::new(
-                        ndc_interpreter::function::StaticType::Any,
+                    ndc_core::StaticType::Deque(Box::new(
+                        ndc_core::StaticType::Any,
                     ))
                 },
                 param_name: quote! { #original_name },
@@ -810,8 +810,8 @@ fn create_temp_variable(
             );
             return vec![Argument {
                 param_type: quote! {
-                    ndc_interpreter::function::StaticType::Deque(Box::new(
-                        ndc_interpreter::function::StaticType::Any,
+                    ndc_core::StaticType::Deque(Box::new(
+                        ndc_core::StaticType::Any,
                     ))
                 },
                 param_name: quote! { #original_name },
@@ -828,7 +828,7 @@ fn create_temp_variable(
         // generate a stub that converts through the bridge (never actually executed).
         if is_ndc_vm_value(ty) {
             return vec![Argument {
-                param_type: quote! { ndc_interpreter::function::StaticType::Any },
+                param_type: quote! { ndc_core::StaticType::Any },
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
@@ -841,7 +841,7 @@ fn create_temp_variable(
         // ndc_vm::value::SeqValue — same bridge stub as Value but with Sequence static type.
         if is_ndc_vm_seq_value(ty) {
             return vec![Argument {
-                param_type: quote! { ndc_interpreter::function::StaticType::Sequence(Box::new(ndc_interpreter::function::StaticType::Any)) },
+                param_type: quote! { ndc_core::StaticType::Sequence(Box::new(ndc_core::StaticType::Any)) },
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
@@ -855,9 +855,9 @@ fn create_temp_variable(
         if is_ndc_vm_map_value(ty) {
             return vec![Argument {
                 param_type: quote! {
-                    ndc_interpreter::function::StaticType::Map {
-                        key: Box::new(ndc_interpreter::function::StaticType::Any),
-                        value: Box::new(ndc_interpreter::function::StaticType::Any),
+                    ndc_core::StaticType::Map {
+                        key: Box::new(ndc_core::StaticType::Any),
+                        value: Box::new(ndc_core::StaticType::Any),
                     }
                 },
                 param_name: quote! { #original_name },
@@ -880,9 +880,9 @@ fn create_temp_variable(
             );
             return vec![Argument {
                 param_type: quote! {
-                    ndc_interpreter::function::StaticType::Function {
+                    ndc_core::StaticType::Function {
                         parameters: None,
-                        return_type: Box::new(ndc_interpreter::function::StaticType::Any),
+                        return_type: Box::new(ndc_core::StaticType::Any),
                     }
                 },
                 param_name: quote! { #original_name },
@@ -913,9 +913,9 @@ fn create_temp_variable(
             return vec![Argument {
                 param_type: quote! {
                     // TODO: how are we going to figure out the exact type of function here
-                    ndc_interpreter::function::StaticType::Function {
+                    ndc_core::StaticType::Function {
                         parameters: None,
-                        return_type: Box::new(ndc_interpreter::function::StaticType::Any)
+                        return_type: Box::new(ndc_core::StaticType::Any)
                     }
                 },
                 param_name: quote! { #original_name },
@@ -1001,7 +1001,7 @@ fn create_temp_variable(
             let rc_temp_var =
                 syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
             return vec![Argument {
-                param_type: quote! { ndc_interpreter::function::StaticType::List(Box::new(ndc_interpreter::function::StaticType::Any)) },
+                param_type: quote! { ndc_core::StaticType::List(Box::new(ndc_core::StaticType::Any)) },
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
@@ -1113,7 +1113,7 @@ fn create_temp_variable(
             let rc_temp_var =
                 syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
             return vec![Argument {
-                param_type: quote! { ndc_interpreter::function::StaticType::String },
+                param_type: quote! { ndc_core::StaticType::String },
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
@@ -1129,7 +1129,7 @@ fn create_temp_variable(
         else if is_ref_of_bigint(ty) {
             let big_int = syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
             return vec![Argument {
-                param_type: quote! { ndc_interpreter::function::StaticType::Int },
+                param_type: quote! { ndc_core::StaticType::Int },
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
@@ -1150,7 +1150,7 @@ fn create_temp_variable(
         // If we need an owned Value
         else if path_ends_with(ty, "Value") && !is_ref(ty) {
             return vec![Argument {
-                param_type: quote! { ndc_interpreter::function::StaticType::Any },
+                param_type: quote! { ndc_core::StaticType::Any },
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
@@ -1163,7 +1163,7 @@ fn create_temp_variable(
             let rc_temp_var =
                 syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
             return vec![Argument {
-                param_type: quote! { ndc_interpreter::function::StaticType::List(Box::new(ndc_interpreter::function::StaticType::Any)) },
+                param_type: quote! { ndc_core::StaticType::List(Box::new(ndc_core::StaticType::Any)) },
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
@@ -1180,7 +1180,7 @@ fn create_temp_variable(
                 syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
             return vec![
                 Argument {
-                    param_type: quote! { ndc_interpreter::function::StaticType::List(Box::new(ndc_interpreter::function::StaticType::Any)) },
+                    param_type: quote! { ndc_core::StaticType::List(Box::new(ndc_core::StaticType::Any)) },
                     param_name: quote! { #original_name },
                     argument: quote! { #argument_var_name },
                     initialize_code: quote! {
@@ -1191,7 +1191,7 @@ fn create_temp_variable(
                     },
                 },
                 // Argument {
-                //     param_type: quote! { ndc_interpreter::function::StaticType::Tuple },
+                //     param_type: quote! { ndc_core::StaticType::Tuple },
                 //     param_name: quote! { #original_name },
                 //     argument: quote! { #argument_var_name },
                 //     initialize_code: quote! {
@@ -1206,7 +1206,7 @@ fn create_temp_variable(
         // The pattern is &BigRational
         else if path_ends_with(ty, "BigRational") && is_ref(ty) {
             return vec![Argument {
-                param_type: quote! { ndc_interpreter::function::StaticType::Rational },
+                param_type: quote! { ndc_core::StaticType::Rational },
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
@@ -1221,7 +1221,7 @@ fn create_temp_variable(
         // The pattern is BigRational
         else if path_ends_with(ty, "BigRational") && !is_ref(ty) {
             return vec![Argument {
-                param_type: quote! { ndc_interpreter::function::StaticType::Rational },
+                param_type: quote! { ndc_core::StaticType::Rational },
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
@@ -1236,7 +1236,7 @@ fn create_temp_variable(
         // The pattern is Complex64
         else if path_ends_with(ty, "Complex64") && !is_ref(ty) {
             return vec![Argument {
-                param_type: quote! { ndc_interpreter::function::StaticType::Complex },
+                param_type: quote! { ndc_core::StaticType::Complex },
                 param_name: quote! { #original_name },
                 argument: quote! { #argument_var_name },
                 initialize_code: quote! {
@@ -1316,9 +1316,9 @@ fn result_inner_is_ndc_vm_value(ty: &syn::Type) -> bool {
 // TODO: just adding Any as type here is lazy AF but CBA fixing generics
 pub fn temp_create_map_any() -> TokenStream {
     quote! {
-       ndc_interpreter::function::StaticType::Map {
-           key: Box::new(ndc_interpreter::function::StaticType::Any),
-           value: Box::new(ndc_interpreter::function::StaticType::Any)
+       ndc_core::StaticType::Map {
+           key: Box::new(ndc_core::StaticType::Any),
+           value: Box::new(ndc_core::StaticType::Any)
        }
     }
 }

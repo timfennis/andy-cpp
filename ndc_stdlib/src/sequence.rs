@@ -951,7 +951,8 @@ pub mod extra {
     use anyhow::anyhow;
     use itertools::izip;
 
-    use ndc_interpreter::function::{FunctionBuilder, StaticType};
+    use ndc_core::StaticType;
+    use ndc_interpreter::function::FunctionBuilder;
     use ndc_interpreter::{
         environment::Environment, function::FunctionBody, iterator::mut_value_to_iterator,
         value::Value,
@@ -963,7 +964,7 @@ pub mod extra {
                     .name("zip".to_string())
                     .documentation("Combines multiple sequences (or iterables) into a single sequence of tuples, where the ith tuple contains the ith element from each input sequence.\n\nIf the input sequences are of different lengths, the resulting sequence is truncated to the length of the shortest input.".to_string())
                     .body(FunctionBody::generic(
-                        ndc_interpreter::function::TypeSignature::Variadic,
+                        ndc_core::TypeSignature::Variadic,
                         StaticType::List(Box::new(StaticType::Tuple(vec![StaticType::Any, StaticType::Any]))),
                         |args, _env| match args {
                             [_] => {

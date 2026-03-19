@@ -1,5 +1,6 @@
+use ndc_core::StaticType;
 use ndc_interpreter::environment::Environment;
-use ndc_interpreter::function::{FunctionBody, FunctionBuilder, StaticType};
+use ndc_interpreter::function::{FunctionBody, FunctionBuilder};
 use ndc_vm::error::VmError;
 use ndc_vm::value::{NativeFunc, NativeFunction, Object as VmObject, Value as VmValue};
 use std::rc::Rc;

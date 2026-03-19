@@ -3,13 +3,14 @@
 //! The implementation of the various iterators in this module were heavily inspired by the ones in
 //! noulith which can be found [here](https://github.com/betaveros/noulith/blob/441d52ea433527b7ada5bc6cabd952f9ae8fb791/src/streams.rs)
 //!
-use super::function::{FunctionCarrier, StaticType};
+use super::function::FunctionCarrier;
 use super::int::Int::Int64;
 use super::num::Number;
 use crate::hash_map::HashMap;
 use crate::heap::{MaxHeap, MinHeap};
 use crate::sequence::Sequence;
 use crate::value::Value;
+use ndc_core::StaticType;
 use self_cell::self_cell;
 use std::cell::{Ref, RefCell};
 use std::collections::VecDeque;

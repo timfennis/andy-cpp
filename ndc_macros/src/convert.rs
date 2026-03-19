@@ -28,7 +28,7 @@ impl TypeConverter for MutRefString {
     }
 
     fn static_type(&self) -> TokenStream {
-        quote! { ndc_interpreter::function::StaticType::String }
+        quote! { ndc_core::StaticType::String }
     }
 
     fn convert(
@@ -89,7 +89,7 @@ impl TypeConverter for InternalString {
     }
 
     fn static_type(&self) -> TokenStream {
-        quote! { ndc_interpreter::function::StaticType::String }
+        quote! { ndc_core::StaticType::String }
     }
 
     fn convert(
@@ -122,8 +122,8 @@ impl TypeConverter for InternalList {
     fn static_type(&self) -> TokenStream {
         // TODO: just hardcoding Any here is lazy
         quote! {
-            ndc_interpreter::function::StaticType::List(Box::new(
-                ndc_interpreter::function::StaticType::Any
+            ndc_core::StaticType::List(Box::new(
+                ndc_core::StaticType::Any
             ))
         }
     }
@@ -164,7 +164,7 @@ impl TypeConverter for InternalList {
 //         argument_var_name: syn::Ident,
 //     ) -> Vec<Argument> {
 //         vec![Argument {
-//             param_type: quote! { ndc_interpreter::function::StaticType::Tuple },
+//             param_type: quote! { ndc_core::StaticType::Tuple },
 //             param_name: quote! { #original_name },
 //             argument: quote! { #argument_var_name },
 //             initialize_code: quote! {

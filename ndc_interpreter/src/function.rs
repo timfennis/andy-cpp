@@ -5,15 +5,14 @@ use crate::num::{BinaryOperatorError, Number};
 use crate::sequence::Sequence;
 use crate::value::Value;
 use derive_builder::Builder;
+use ndc_core::{Parameter, StaticType, TypeSignature};
 use ndc_lexer::Span;
 use ndc_parser::{ExpressionLocation, ResolvedVar};
-pub use ndc_parser::{Parameter, StaticType, TypeSignature};
 use ndc_vm::value::NativeFunction as VmNativeFunction;
 use std::cell::{BorrowError, BorrowMutError, RefCell};
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
-
 /// Wraps a VM function value for round-tripping through interpreter values.
 /// `identity` is the raw pointer of the `Rc<CompiledFunction>` prototype,
 /// used to implement stable equality for VM-compiled functions.

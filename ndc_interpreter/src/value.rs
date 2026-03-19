@@ -9,11 +9,12 @@ use itertools::Itertools;
 use num::BigInt;
 
 use crate::compare::FallibleOrd;
-use crate::function::{Function, FunctionBody, StaticType, VmFunctionWrapper};
+use crate::function::{Function, FunctionBody, VmFunctionWrapper};
 use crate::hash_map::DefaultHasher;
 use crate::int::Int;
 use crate::num::{Number, NumberToFloatError, NumberToUsizeError};
 use crate::sequence::Sequence;
+use ndc_core::StaticType;
 
 use super::iterator::{ValueIterator, ValueRange, ValueRangeFrom, ValueRangeInclusive};
 

@@ -1,6 +1,7 @@
-use crate::function::{Function, StaticType};
+use crate::function::Function;
 use crate::hash_map::HashMap;
 use crate::value::Value;
+use ndc_core::StaticType;
 use ndc_parser::{CaptureSource, ResolvedVar};
 use std::cell::RefCell;
 use std::fmt;

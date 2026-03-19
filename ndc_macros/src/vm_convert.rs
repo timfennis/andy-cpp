@@ -46,7 +46,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                     .ok_or_else(|| ndc_vm::error::VmError::native(format!("arg {}: expected number, got {}", #position, #raw.static_type())))?;
             },
             pass,
-            static_type: quote! { ndc_interpreter::function::StaticType::Number },
+            static_type: quote! { ndc_core::StaticType::Number },
         });
     }
 
@@ -58,7 +58,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                     .ok_or_else(|| ndc_vm::error::VmError::native(format!("arg {}: expected float, got {}", #position, #raw.static_type())))?;
             },
             pass: quote! { #temp },
-            static_type: quote! { ndc_interpreter::function::StaticType::Float },
+            static_type: quote! { ndc_core::StaticType::Float },
         });
     }
 
@@ -71,7 +71,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                 let #temp = *#temp;
             },
             pass: quote! { #temp },
-            static_type: quote! { ndc_interpreter::function::StaticType::Bool },
+            static_type: quote! { ndc_core::StaticType::Bool },
         });
     }
 
@@ -94,7 +94,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                 };
             },
             pass,
-            static_type: quote! { ndc_interpreter::function::StaticType::String },
+            static_type: quote! { ndc_core::StaticType::String },
         });
     }
 
@@ -107,7 +107,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                 };
             },
             pass: quote! { #temp },
-            static_type: quote! { ndc_interpreter::function::StaticType::Int },
+            static_type: quote! { ndc_core::StaticType::Int },
         });
     }
 
@@ -120,7 +120,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                 };
             },
             pass: quote! { #temp },
-            static_type: quote! { ndc_interpreter::function::StaticType::Int },
+            static_type: quote! { ndc_core::StaticType::Int },
         });
     }
 
@@ -138,7 +138,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                 };
             },
             pass: quote! { &#temp },
-            static_type: quote! { ndc_interpreter::function::StaticType::Int },
+            static_type: quote! { ndc_core::StaticType::Int },
         });
     }
 
@@ -156,7 +156,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                 };
             },
             pass: quote! { &#temp },
-            static_type: quote! { ndc_interpreter::function::StaticType::Rational },
+            static_type: quote! { ndc_core::StaticType::Rational },
         });
     }
 
@@ -174,7 +174,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                 };
             },
             pass: quote! { #temp },
-            static_type: quote! { ndc_interpreter::function::StaticType::Complex },
+            static_type: quote! { ndc_core::StaticType::Complex },
         });
     }
 
@@ -185,7 +185,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                 let #temp = ndc_interpreter::vm_bridge::vm_to_interp(#raw);
             },
             pass: quote! { #temp },
-            static_type: quote! { ndc_interpreter::function::StaticType::Any },
+            static_type: quote! { ndc_core::StaticType::Any },
         });
     }
 
@@ -196,7 +196,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                 let #temp = ndc_interpreter::vm_bridge::vm_to_interp(#raw);
             },
             pass: quote! { &#temp },
-            static_type: quote! { ndc_interpreter::function::StaticType::Any },
+            static_type: quote! { ndc_core::StaticType::Any },
         });
     }
 
@@ -216,7 +216,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                 let mut #guard_ident = #rc_ident.borrow_mut();
             },
             pass: quote! { &mut *#guard_ident },
-            static_type: quote! { ndc_interpreter::function::StaticType::String },
+            static_type: quote! { ndc_core::StaticType::String },
         });
     }
 
@@ -242,7 +242,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                 let mut #temp = #inner_ident.clone();
             },
             pass,
-            static_type: quote! { ndc_interpreter::function::StaticType::String },
+            static_type: quote! { ndc_core::StaticType::String },
         });
     }
 
@@ -260,8 +260,8 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
             },
             pass: quote! { &mut #temp },
             static_type: quote! {
-                ndc_interpreter::function::StaticType::Sequence(Box::new(
-                    ndc_interpreter::function::StaticType::Any
+                ndc_core::StaticType::Sequence(Box::new(
+                    ndc_core::StaticType::Any
                 ))
             },
         });
@@ -279,8 +279,8 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
             },
             pass: quote! { &#temp },
             static_type: quote! {
-                ndc_interpreter::function::StaticType::Sequence(Box::new(
-                    ndc_interpreter::function::StaticType::Any
+                ndc_core::StaticType::Sequence(Box::new(
+                    ndc_core::StaticType::Any
                 ))
             },
         });
@@ -304,8 +304,8 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
             },
             pass: quote! { &mut *#guard_ident },
             static_type: quote! {
-                ndc_interpreter::function::StaticType::List(Box::new(
-                    ndc_interpreter::function::StaticType::Any
+                ndc_core::StaticType::List(Box::new(
+                    ndc_core::StaticType::Any
                 ))
             },
         });
@@ -327,9 +327,9 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
             },
             pass: quote! { &mut *#guard_ident },
             static_type: quote! {
-                ndc_interpreter::function::StaticType::Map {
-                    key: Box::new(ndc_interpreter::function::StaticType::Any),
-                    value: Box::new(ndc_interpreter::function::StaticType::Any),
+                ndc_core::StaticType::Map {
+                    key: Box::new(ndc_core::StaticType::Any),
+                    value: Box::new(ndc_core::StaticType::Any),
                 }
             },
         });
@@ -351,9 +351,9 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
             },
             pass: quote! { &*#guard_ident },
             static_type: quote! {
-                ndc_interpreter::function::StaticType::Map {
-                    key: Box::new(ndc_interpreter::function::StaticType::Any),
-                    value: Box::new(ndc_interpreter::function::StaticType::Any),
+                ndc_core::StaticType::Map {
+                    key: Box::new(ndc_core::StaticType::Any),
+                    value: Box::new(ndc_core::StaticType::Any),
                 }
             },
         });
@@ -375,8 +375,8 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
             },
             pass: quote! { &mut *#guard_ident },
             static_type: quote! {
-                ndc_interpreter::function::StaticType::MinHeap(Box::new(
-                    ndc_interpreter::function::StaticType::Any
+                ndc_core::StaticType::MinHeap(Box::new(
+                    ndc_core::StaticType::Any
                 ))
             },
         });
@@ -398,8 +398,8 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
             },
             pass: quote! { &mut *#guard_ident },
             static_type: quote! {
-                ndc_interpreter::function::StaticType::MaxHeap(Box::new(
-                    ndc_interpreter::function::StaticType::Any
+                ndc_core::StaticType::MaxHeap(Box::new(
+                    ndc_core::StaticType::Any
                 ))
             },
         });
@@ -421,8 +421,8 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
             },
             pass: quote! { &mut *#guard_ident },
             static_type: quote! {
-                ndc_interpreter::function::StaticType::Deque(Box::new(
-                    ndc_interpreter::function::StaticType::Any
+                ndc_core::StaticType::Deque(Box::new(
+                    ndc_core::StaticType::Any
                 ))
             },
         });
@@ -444,8 +444,8 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
             },
             pass: quote! { &*#guard_ident },
             static_type: quote! {
-                ndc_interpreter::function::StaticType::Deque(Box::new(
-                    ndc_interpreter::function::StaticType::Any
+                ndc_core::StaticType::Deque(Box::new(
+                    ndc_core::StaticType::Any
                 ))
             },
         });
@@ -458,7 +458,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
         return Some(VmInputArg {
             extract: quote! {},
             pass: quote! { #raw.clone() },
-            static_type: quote! { ndc_interpreter::function::StaticType::Any },
+            static_type: quote! { ndc_core::StaticType::Any },
         });
     }
 
@@ -468,7 +468,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
         return Some(VmInputArg {
             extract: quote! {},
             pass: quote! { #raw.clone() },
-            static_type: quote! { ndc_interpreter::function::StaticType::Sequence(Box::new(ndc_interpreter::function::StaticType::Any)) },
+            static_type: quote! { ndc_core::StaticType::Sequence(Box::new(ndc_core::StaticType::Any)) },
         });
     }
 
@@ -479,9 +479,9 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
             extract: quote! {},
             pass: quote! { #raw.clone() },
             static_type: quote! {
-                ndc_interpreter::function::StaticType::Map {
-                    key: Box::new(ndc_interpreter::function::StaticType::Any),
-                    value: Box::new(ndc_interpreter::function::StaticType::Any),
+                ndc_core::StaticType::Map {
+                    key: Box::new(ndc_core::StaticType::Any),
+                    value: Box::new(ndc_core::StaticType::Any),
                 }
             },
         });
@@ -510,8 +510,8 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
             },
             pass: quote! { &#vec_ident },
             static_type: quote! {
-                ndc_interpreter::function::StaticType::List(Box::new(
-                    ndc_interpreter::function::StaticType::Any
+                ndc_core::StaticType::List(Box::new(
+                    ndc_core::StaticType::Any
                 ))
             },
         });
@@ -541,9 +541,9 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
             },
             pass: quote! { &#temp },
             static_type: quote! {
-                ndc_interpreter::function::StaticType::Function {
+                ndc_core::StaticType::Function {
                     parameters: None,
-                    return_type: Box::new(ndc_interpreter::function::StaticType::Any),
+                    return_type: Box::new(ndc_core::StaticType::Any),
                 }
             },
         });
@@ -576,8 +576,8 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
             },
             pass: quote! { &#vec_ident },
             static_type: quote! {
-                ndc_interpreter::function::StaticType::List(Box::new(
-                    ndc_interpreter::function::StaticType::Any
+                ndc_core::StaticType::List(Box::new(
+                    ndc_core::StaticType::Any
                 ))
             },
         });
@@ -596,7 +596,7 @@ pub fn try_vm_return(output: &syn::ReturnType) -> Option<(TokenStream, TokenStre
     match output {
         syn::ReturnType::Default => Some((
             quote! { Ok(ndc_vm::value::Value::unit()) },
-            quote! { ndc_interpreter::function::StaticType::Tuple(vec![]) },
+            quote! { ndc_core::StaticType::Tuple(vec![]) },
         )),
         syn::ReturnType::Type(_, ty) => try_vm_return_type(ty),
     }
@@ -605,10 +605,7 @@ pub fn try_vm_return(output: &syn::ReturnType) -> Option<(TokenStream, TokenStre
 fn try_vm_return_type(ty: &syn::Type) -> Option<(TokenStream, TokenStream)> {
     // ndc_vm::value::Value — already a VmValue, return as-is.
     if is_ndc_vm_value(ty) || is_ndc_vm_seq_value(ty) {
-        return Some((
-            quote! { Ok(result) },
-            quote! { ndc_interpreter::function::StaticType::Any },
-        ));
+        return Some((quote! { Ok(result) }, quote! { ndc_core::StaticType::Any }));
     }
 
     // ndc_vm::value::MapValue — already a VmValue, return as-is, but emit StaticType::Map.
@@ -616,9 +613,9 @@ fn try_vm_return_type(ty: &syn::Type) -> Option<(TokenStream, TokenStream)> {
         return Some((
             quote! { Ok(result) },
             quote! {
-                ndc_interpreter::function::StaticType::Map {
-                    key: Box::new(ndc_interpreter::function::StaticType::Any),
-                    value: Box::new(ndc_interpreter::function::StaticType::Any),
+                ndc_core::StaticType::Map {
+                    key: Box::new(ndc_core::StaticType::Any),
+                    value: Box::new(ndc_core::StaticType::Any),
                 }
             },
         ));
@@ -627,44 +624,44 @@ fn try_vm_return_type(ty: &syn::Type) -> Option<(TokenStream, TokenStream)> {
     if path_ends_with(ty, "Number") {
         return Some((
             quote! { Ok(ndc_vm::value::Value::from_number(result)) },
-            quote! { ndc_interpreter::function::StaticType::Number },
+            quote! { ndc_core::StaticType::Number },
         ));
     }
     if path_ends_with(ty, "f64") {
         return Some((
             quote! { Ok(ndc_vm::value::Value::Float(result)) },
-            quote! { ndc_interpreter::function::StaticType::Float },
+            quote! { ndc_core::StaticType::Float },
         ));
     }
     if path_ends_with(ty, "bool") {
         return Some((
             quote! { Ok(ndc_vm::value::Value::Bool(result)) },
-            quote! { ndc_interpreter::function::StaticType::Bool },
+            quote! { ndc_core::StaticType::Bool },
         ));
     }
     // &str return — borrow tied to input, must convert to owned before returning
     if is_str_ref(ty) {
         return Some((
             quote! { Ok(ndc_vm::value::Value::string(result.to_owned())) },
-            quote! { ndc_interpreter::function::StaticType::String },
+            quote! { ndc_core::StaticType::String },
         ));
     }
     if path_ends_with(ty, "String") {
         return Some((
             quote! { Ok(ndc_vm::value::Value::string(result)) },
-            quote! { ndc_interpreter::function::StaticType::String },
+            quote! { ndc_core::StaticType::String },
         ));
     }
     if path_ends_with(ty, "i64") {
         return Some((
             quote! { Ok(ndc_vm::value::Value::Int(result)) },
-            quote! { ndc_interpreter::function::StaticType::Int },
+            quote! { ndc_core::StaticType::Int },
         ));
     }
     if path_ends_with(ty, "usize") {
         return Some((
             quote! { Ok(ndc_vm::value::Value::Int(result as i64)) },
-            quote! { ndc_interpreter::function::StaticType::Int },
+            quote! { ndc_core::StaticType::Int },
         ));
     }
     if path_ends_with(ty, "BigInt") {
@@ -676,7 +673,7 @@ fn try_vm_return_type(ty: &syn::Type) -> Option<(TokenStream, TokenStream)> {
                     )
                 ))
             },
-            quote! { ndc_interpreter::function::StaticType::Int },
+            quote! { ndc_core::StaticType::Int },
         ));
     }
     if path_ends_with(ty, "BigRational") {
@@ -686,7 +683,7 @@ fn try_vm_return_type(ty: &syn::Type) -> Option<(TokenStream, TokenStream)> {
                     ndc_interpreter::num::Number::Rational(Box::new(result))
                 ))
             },
-            quote! { ndc_interpreter::function::StaticType::Rational },
+            quote! { ndc_core::StaticType::Rational },
         ));
     }
 
@@ -695,7 +692,7 @@ fn try_vm_return_type(ty: &syn::Type) -> Option<(TokenStream, TokenStream)> {
     if path_ends_with(ty, "Value") {
         return Some((
             quote! { Ok(ndc_interpreter::vm_bridge::interp_to_vm(result)) },
-            quote! { ndc_interpreter::function::StaticType::Any },
+            quote! { ndc_core::StaticType::Any },
         ));
     }
 
@@ -706,7 +703,7 @@ fn try_vm_return_type(ty: &syn::Type) -> Option<(TokenStream, TokenStream)> {
                 let result = result.map_err(|e| ndc_vm::error::VmError::native(e.to_string()))?;
                 Ok(ndc_interpreter::vm_bridge::interp_to_vm(result))
             },
-            quote! { ndc_interpreter::function::StaticType::Any },
+            quote! { ndc_core::StaticType::Any },
         ));
     }
 
@@ -740,25 +737,22 @@ fn try_vm_return_inner(ty: &syn::Type) -> Option<(TokenStream, TokenStream)> {
         if t.elems.is_empty() {
             return Some((
                 quote! { Ok(ndc_vm::value::Value::unit()) },
-                quote! { ndc_interpreter::function::StaticType::Tuple(vec![]) },
+                quote! { ndc_core::StaticType::Tuple(vec![]) },
             ));
         }
     }
     // ndc_vm::value::Value / SeqValue inside Result<...> — pass through.
     if is_ndc_vm_value(ty) || is_ndc_vm_seq_value(ty) {
-        return Some((
-            quote! { Ok(result) },
-            quote! { ndc_interpreter::function::StaticType::Any },
-        ));
+        return Some((quote! { Ok(result) }, quote! { ndc_core::StaticType::Any }));
     }
     // ndc_vm::value::MapValue inside Result<...> — pass through with StaticType::Map.
     if is_ndc_vm_map_value(ty) {
         return Some((
             quote! { Ok(result) },
             quote! {
-                ndc_interpreter::function::StaticType::Map {
-                    key: Box::new(ndc_interpreter::function::StaticType::Any),
-                    value: Box::new(ndc_interpreter::function::StaticType::Any),
+                ndc_core::StaticType::Map {
+                    key: Box::new(ndc_core::StaticType::Any),
+                    value: Box::new(ndc_core::StaticType::Any),
                 }
             },
         ));
