@@ -234,7 +234,7 @@ impl Vm {
                         // closures back via `Vm::call_function` in a fresh VM context. In that
                         // context, Open upvalue cells (stack-slot references) are invalid.
                         // Materialize them now while the current stack is still live.
-                        if func.is_native() {
+                        if func.needs_arg_materialization() {
                             self.materialize_upvalues_in_args(args);
                         }
                         if let Err(mut e) = self.dispatch_call(func, args) {
@@ -804,9 +804,7 @@ impl Vm {
             let Object::Function(f) = obj.as_ref() else {
                 return None;
             };
-            f.static_type()
-                .is_fn_and_matches(arg_types)
-                .then(|| f.clone())
+            f.matches_arg_types(arg_types).then(|| f.clone())
         })
     }
 
