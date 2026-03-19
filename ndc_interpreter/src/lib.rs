@@ -70,6 +70,10 @@ impl Interpreter {
         self.environment
     }
 
+    pub fn functions(&self) -> impl Iterator<Item = &Rc<NativeFunction>> {
+        self.registry.iter()
+    }
+
     pub fn analyse_str(
         &mut self,
         input: &str,

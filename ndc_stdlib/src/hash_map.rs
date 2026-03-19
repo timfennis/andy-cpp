@@ -216,6 +216,7 @@ mod inner {
     }
 
     /// Converts the given sequence to set.
+    #[function(return_type = Map<_, ()>)]
     pub fn set(seq: ndc_vm::value::SeqValue) -> anyhow::Result<ndc_vm::value::Value> {
         use ndc_core::hash_map::HashMap;
         use ndc_vm::value::{Object, Value};

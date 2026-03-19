@@ -1,10 +1,9 @@
-use ndc_core::{Parameter, TypeSignature};
+use ndc_core::{Parameter, StaticType, TypeSignature};
 use ndc_interpreter::Interpreter;
 use ndc_stdlib::WithStdlib;
 use std::cmp::Ordering;
 use std::fmt::Write;
 use strsim::normalized_damerau_levenshtein;
-use tap::Tap;
 use termimad::crossterm::style::Stylize;
 use termimad::{Alignment, MadSkin};
 
@@ -17,30 +16,27 @@ pub fn docs(query: Option<&str>) -> anyhow::Result<()> {
     let interpreter = Interpreter::new(Vec::new()) // Discard the output
         .with_stdlib();
 
-    let functions = interpreter.environment().borrow().get_all_functions();
-
-    let matched_functions = functions
-        .into_iter()
+    let mut functions: Vec<_> = interpreter
+        .functions()
         .filter(|func| {
             if let Some(query) = query {
-                string_match(query, func.name())
+                string_match(query, &func.name)
             } else {
                 true
             }
         })
-        .collect::<Vec<_>>()
-        .tap_mut(|list| {
-            list.sort_by(|l, r| {
-                if let Some(query) = query {
-                    normalized_damerau_levenshtein(l.name(), query)
-                        .partial_cmp(&normalized_damerau_levenshtein(r.name(), query))
-                        .unwrap_or(Ordering::Equal)
-                        .reverse()
-                } else {
-                    l.name().cmp(r.name())
-                }
-            })
-        });
+        .collect();
+
+    functions.sort_by(|l, r| {
+        if let Some(query) = query {
+            normalized_damerau_levenshtein(&l.name, query)
+                .partial_cmp(&normalized_damerau_levenshtein(&r.name, query))
+                .unwrap_or(Ordering::Equal)
+                .reverse()
+        } else {
+            l.name.cmp(&r.name)
+        }
+    });
 
     let mut skin = MadSkin::default();
 
@@ -48,10 +44,29 @@ pub fn docs(query: Option<&str>) -> anyhow::Result<()> {
     skin.headers[1].align = Alignment::Left;
     skin.headers[2].align = Alignment::Left;
 
-    for function in matched_functions {
+    for function in functions {
+        let (type_sig, return_type) = match &function.static_type {
+            StaticType::Function {
+                parameters,
+                return_type,
+            } => {
+                let sig = match parameters {
+                    None => TypeSignature::Variadic,
+                    Some(types) => TypeSignature::Exact(
+                        types
+                            .iter()
+                            .enumerate()
+                            .map(|(i, t)| Parameter::new(format!("arg{i}"), t.clone()))
+                            .collect(),
+                    ),
+                };
+                (sig, return_type.as_ref())
+            }
+            other => (TypeSignature::Variadic, other),
+        };
+
         let mut signature = String::new();
-        let type_sig = function.type_signature();
-        match type_sig {
+        match &type_sig {
             TypeSignature::Variadic => {
                 write!(signature, "(*args**)")?;
             }
@@ -64,18 +79,21 @@ pub fn docs(query: Option<&str>) -> anyhow::Result<()> {
                         "*{name}*: **{}**",
                         format!("{}", type_name).green()
                     )?;
-
                     if param_iter.peek().is_some() {
                         write!(signature, ", ")?;
                     }
                 }
-
                 write!(signature, ")")?;
             }
         }
-        let name = function.name();
-        let documentation = function.documentation().trim();
-        let return_type = function.return_type();
+
+        let name = function.name.clone();
+        let documentation = function
+            .documentation
+            .as_deref()
+            .unwrap_or("")
+            .trim()
+            .to_string();
         let markdown = format!(
             "---\n\n## **{}**{signature} -> {}\n\n{documentation}{}",
             name.green(),

@@ -6,6 +6,7 @@ mod inner {
     use anyhow::anyhow;
 
     /// Converts any sequence into a list
+    #[function(return_type = Vec<_>)]
     pub fn list(seq: ndc_vm::value::SeqValue) -> anyhow::Result<ndc_vm::value::Value> {
         Ok(ndc_vm::value::Value::list(
             seq.try_into_iter()
