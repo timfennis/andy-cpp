@@ -8,7 +8,7 @@ use ndc_parser::{
 };
 use std::rc::Rc;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Compiler {
     chunk: Chunk,
     max_local: usize,
@@ -20,21 +20,64 @@ impl Compiler {
     pub fn compile(
         expressions: impl Iterator<Item = ExpressionLocation>,
     ) -> Result<CompiledFunction, CompileError> {
-        let mut compiler = Self::default();
+        Ok(Self::compile_resumable(expressions)?.0)
+    }
 
+    /// Compile expressions and return both the finished function and a
+    /// checkpoint that can be passed to `resume` to append more code later.
+    /// The checkpoint is the compiler state *before* the `Halt` instruction,
+    /// so `resume` can extend the bytecode without re-running old instructions.
+    pub fn compile_resumable(
+        expressions: impl Iterator<Item = ExpressionLocation>,
+    ) -> Result<(CompiledFunction, Self), CompileError> {
+        let mut compiler = Self::default();
         for expr_loc in expressions {
             compiler.compile_expr(expr_loc)?;
         }
+        compiler.finish()
+    }
 
-        compiler.chunk.write(OpCode::Halt, Span::new(0, 0));
+    /// Resume from a checkpoint produced by `compile_resumable` or a previous
+    /// `resume` call.  Compiles `new_expressions` starting where the checkpoint
+    /// left off, returning the extended function and a new checkpoint.
+    ///
+    /// The returned `CompiledFunction` contains all instructions (old + new),
+    /// so the VM can be pointed at `checkpoint.halt_ip()` to execute only the
+    /// new part while the stack already holds the old locals.
+    pub fn resume(
+        self,
+        new_expressions: impl Iterator<Item = ExpressionLocation>,
+    ) -> Result<(CompiledFunction, Self), CompileError> {
+        let mut compiler = self; // checkpoint has no trailing Halt
+        for expr_loc in new_expressions {
+            compiler.compile_expr(expr_loc)?;
+        }
+        compiler.finish()
+    }
 
-        Ok(CompiledFunction {
+    /// The instruction index where the trailing `Halt` was written.
+    /// When resuming, this is the `ip` to start from in the new function.
+    pub fn halt_ip(&self) -> usize {
+        self.chunk.len()
+    }
+
+    /// Number of top-level local slots used so far.
+    pub fn num_locals(&self) -> usize {
+        self.max_local
+    }
+
+    /// Internal: clone a checkpoint (pre-Halt), write Halt, return both.
+    fn finish(mut self) -> Result<(CompiledFunction, Self), CompileError> {
+        let checkpoint = self.clone();
+        self.chunk.write(OpCode::Halt, Span::new(0, 0));
+        let function = CompiledFunction {
             name: None,
             type_signature: TypeSignature::default(),
-            body: compiler.chunk,
+            body: self.chunk,
             return_type: StaticType::Any,
-            num_locals: compiler.max_local,
-        })
+            num_locals: self.max_local,
+        };
+        Ok((function, checkpoint))
     }
 
     fn compile_expr(
@@ -898,6 +941,7 @@ impl Compiler {
     }
 }
 
+#[derive(Clone)]
 struct LoopContext {
     start: usize,
     break_instructions: Vec<usize>,

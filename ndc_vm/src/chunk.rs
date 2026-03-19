@@ -113,7 +113,7 @@ impl std::fmt::Debug for OpCode {
 }
 
 /// A chunk of bytecode along with the constants it references.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Chunk {
     constants: Vec<Value>,
     code: Vec<OpCode>,
