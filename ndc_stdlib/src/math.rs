@@ -1,4 +1,5 @@
 use factorial::Factorial;
+use ndc_core::StaticType;
 use ndc_core::num::{BinaryOperatorError, Number};
 use ndc_interpreter::environment::Environment;
 use ndc_macros::export_module;
@@ -162,9 +163,8 @@ mod inner {
 pub mod f64 {
     use super::{Environment, Number, ToPrimitive, f64};
     use ndc_core::num::BinaryOperatorError;
-    use ndc_interpreter::function::{
-        FunctionBody, FunctionBuilder, FunctionCarrier, Parameter, StaticType, TypeSignature,
-    };
+    use ndc_core::{Parameter, StaticType, TypeSignature};
+    use ndc_interpreter::function::{FunctionBody, FunctionBuilder, FunctionCarrier};
     use ndc_interpreter::value::Value;
     use ndc_vm::error::VmError;
     use ndc_vm::value::{NativeFunc, NativeFunction as VmNativeFunction, Value as VmValue};

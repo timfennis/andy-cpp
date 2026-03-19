@@ -1258,6 +1258,7 @@ dependencies = [
  "clap",
  "itertools 0.14.0",
  "miette",
+ "ndc_core",
  "ndc_interpreter",
  "ndc_lexer",
  "ndc_lsp",
@@ -1335,7 +1336,6 @@ name = "ndc_parser"
 version = "0.2.1"
 dependencies = [
  "derive_more",
- "itertools 0.14.0",
  "ndc_core",
  "ndc_lexer",
  "num",

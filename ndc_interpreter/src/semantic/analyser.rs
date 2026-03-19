@@ -1,10 +1,8 @@
-use crate::function::StaticType;
 use crate::semantic::ScopeTree;
 use itertools::Itertools;
+use ndc_core::{StaticType, TypeSignature};
 use ndc_lexer::Span;
-use ndc_parser::{
-    Binding, Expression, ExpressionLocation, ForBody, ForIteration, Lvalue, TypeSignature,
-};
+use ndc_parser::{Binding, Expression, ExpressionLocation, ForBody, ForIteration, Lvalue};
 use std::fmt::Debug;
 
 #[derive(Debug)]

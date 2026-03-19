@@ -5,6 +5,7 @@ use std::collections::VecDeque;
 use std::io::Write;
 use std::rc::Rc;
 
+use ndc_core::StaticType;
 use ndc_core::int::Int;
 use ndc_core::num::Number;
 use ndc_vm::VmError;
@@ -289,7 +290,7 @@ pub fn vm_to_interp(value: &VmValue) -> InterpValue {
                         data: Rc::new(VmValue::Object(Rc::new(VmObject::OverloadSet(
                             slots.clone(),
                         )))),
-                        static_type: ndc_parser::StaticType::Any,
+                        static_type: StaticType::Any,
                     })
                     .build()
                     .expect("must succeed"),

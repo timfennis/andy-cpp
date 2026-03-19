@@ -1,4 +1,5 @@
-use ndc_parser::{Binding, CaptureSource, ResolvedVar, StaticType};
+use ndc_core::StaticType;
+use ndc_parser::{Binding, CaptureSource, ResolvedVar};
 use std::fmt::{Debug, Formatter};
 
 #[derive(Debug, Clone)]

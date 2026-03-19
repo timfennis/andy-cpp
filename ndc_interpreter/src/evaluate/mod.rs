@@ -1,5 +1,5 @@
 use crate::environment::Environment;
-use crate::function::{Function, FunctionBody, FunctionCarrier, StaticType};
+use crate::function::{Function, FunctionBody, FunctionCarrier};
 use crate::hash_map::HashMap;
 use crate::int::Int;
 use crate::iterator::mut_value_to_iterator;
@@ -8,6 +8,7 @@ use crate::sequence::Sequence;
 use crate::value::Value;
 use index::{Offset, evaluate_as_index, get_at_index, set_at_index};
 use itertools::Itertools;
+use ndc_core::StaticType;
 use ndc_lexer::Span;
 use ndc_parser::{
     Binding, Expression, ExpressionLocation, ForBody, ForIteration, LogicalOperator, Lvalue,

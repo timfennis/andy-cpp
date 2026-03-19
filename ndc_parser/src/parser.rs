@@ -3,7 +3,7 @@ use std::fmt::Write;
 use crate::expression::Expression;
 use crate::expression::{Binding, ExpressionLocation, ForBody, ForIteration, Lvalue};
 use crate::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
-use crate::{Parameter, StaticType, TypeSignature};
+use ndc_core::{Parameter, StaticType, TypeSignature};
 use ndc_lexer::{Span, Token, TokenLocation};
 
 pub struct Parser {

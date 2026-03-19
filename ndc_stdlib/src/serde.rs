@@ -1,11 +1,11 @@
-use ndc_macros::export_module;
-use std::rc::Rc;
-
 use anyhow::Context;
+use ndc_core::StaticType;
 use ndc_core::hash_map::HashMap;
+use ndc_macros::export_module;
 use ndc_vm::value::{Object as VmObject, Value as VmValue};
 use num::ToPrimitive;
 use serde_json::{Map, Number, Value as JsonValue, json};
+use std::rc::Rc;
 
 fn value_to_json(value: VmValue) -> Result<JsonValue, anyhow::Error> {
     match value {

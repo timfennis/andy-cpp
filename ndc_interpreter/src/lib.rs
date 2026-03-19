@@ -1,4 +1,4 @@
-pub use ndc_core::{compare, hash_map, int, num};
+pub use ndc_core::{Parameter, StaticType, TypeSignature, compare, hash_map, int, num};
 
 pub mod environment;
 pub mod evaluate;
