@@ -14,16 +14,19 @@ use crate::environment::{Environment, InterpreterOutput};
 use crate::evaluate::EvaluationError;
 use crate::semantic::{Analyser, ScopeTree};
 use crate::value::Value;
+use ndc_core::FunctionRegistry;
 use ndc_lexer::{Lexer, TokenLocation};
 use ndc_parser::ExpressionLocation;
-use ndc_vm::Vm;
 use ndc_vm::compiler::Compiler;
 use ndc_vm::value::CompiledFunction;
+use ndc_vm::{Function as VmFunction, Object as VmObject, Value as VmValue};
+use ndc_vm::{NativeFunction, Vm};
 use std::cell::RefCell;
 use std::rc::Rc;
 
 pub struct Interpreter {
-    environment: Rc<RefCell<Environment>>,
+    registry: FunctionRegistry<Rc<NativeFunction>>,
+    environment: Rc<RefCell<Environment>>, // TODO: remove this
     analyser: Analyser,
     /// Persistent REPL VM and the compiler checkpoint from the last run.
     /// `None` until the first `run_str` call; kept alive afterwards so that
@@ -44,16 +47,22 @@ impl Interpreter {
     pub fn from_env(environment: Environment) -> Self {
         let global_identifiers = environment.get_global_identifiers();
         Self {
+            registry: FunctionRegistry::default(),
             environment: Rc::new(RefCell::new(environment)),
             analyser: Analyser::from_scope_tree(ScopeTree::from_global_scope(global_identifiers)),
             repl_state: None,
         }
     }
 
-    pub fn configure<F: FnOnce(&mut Environment)>(&mut self, f: F) {
-        f(&mut self.environment.borrow_mut());
-        let global_identifiers = self.environment.borrow().get_global_identifiers();
-        self.analyser = Analyser::from_scope_tree(ScopeTree::from_global_scope(global_identifiers));
+    pub fn configure<F: FnOnce(&mut FunctionRegistry<Rc<NativeFunction>>)>(&mut self, f: F) {
+        f(&mut self.registry);
+        let functions = self
+            .registry
+            .iter()
+            .map(|fun| (fun.name.clone(), fun.static_type.clone()))
+            .collect();
+
+        self.analyser = Analyser::from_scope_tree(ScopeTree::from_global_scope(functions));
     }
 
     #[must_use]
@@ -109,7 +118,15 @@ impl Interpreter {
         #[cfg(not(feature = "vm-trace"))] _input: &str,
         expressions: impl Iterator<Item = ExpressionLocation>,
     ) -> Result<Value, InterpreterError> {
-        let globals = vm_bridge::make_vm_globals(&self.environment);
+        let globals: Vec<VmValue> = self
+            .registry
+            .iter()
+            .map(|native| {
+                VmValue::Object(Rc::new(VmObject::Function(VmFunction::Native(Rc::clone(
+                    native,
+                )))))
+            })
+            .collect();
 
         let result = match self.repl_state.take() {
             None => {

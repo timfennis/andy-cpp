@@ -1,37 +1,36 @@
 use ndc_macros::export_module;
-use std::fmt::Write;
 
 #[export_module]
 mod inner {
-    use ndc_interpreter::function::Callable;
     use ndc_vm::value::{Object as VmObject, Value as VmValue};
     use std::rc::Rc;
 
     /// Returns the documentation as a string for a given function in Andy C++.
     ///
     /// This function takes a function as its argument and returns a string containing its documentation.
-    pub fn docs(func: &Callable<'_>) -> anyhow::Result<String> {
-        let mut buf = String::new();
-
-        let sig = func.function.type_signature();
-        let fun = &func.function;
-
-        if fun.name().is_empty() {
-            write!(buf, "fn({sig})")?;
-        } else {
-            write!(buf, "fn {}({sig})", fun.name())?;
-        }
-
-        if !fun.short_documentation().is_empty() {
-            writeln!(buf, " -> {}", fun.short_documentation())?;
-        } else {
-            writeln!(buf)?;
-        }
-
-        buf.pop(); // Remove last newline
-
-        Ok(buf)
-    }
+    // TODO: @Claude let's fix this later
+    // pub fn docs(func: &Callable<'_>) -> anyhow::Result<String> {
+    //     let mut buf = String::new();
+    //
+    //     let sig = func.function.type_signature();
+    //     let fun = &func.function;
+    //
+    //     if fun.name().is_empty() {
+    //         write!(buf, "fn({sig})")?;
+    //     } else {
+    //         write!(buf, "fn {}({sig})", fun.name())?;
+    //     }
+    //
+    //     if !fun.short_documentation().is_empty() {
+    //         writeln!(buf, " -> {}", fun.short_documentation())?;
+    //     } else {
+    //         writeln!(buf)?;
+    //     }
+    //
+    //     buf.pop(); // Remove last newline
+    //
+    //     Ok(buf)
+    // }
 
     /// Returns the reference count for the value, if the value is not reference counted it will return 0
     ///

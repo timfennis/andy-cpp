@@ -44,7 +44,7 @@ pub fn export_module(_attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 
     let register_function = quote! {
-        pub fn register(env: &mut ndc_interpreter::environment::Environment) {
+        pub fn register(env: &mut ndc_core::FunctionRegistry<std::rc::Rc<ndc_vm::value::NativeFunction>>) {
             #(#registrations)*
         }
     };
