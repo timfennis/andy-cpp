@@ -505,6 +505,13 @@ impl PartialOrd for Value {
             (Self::Float(a), Self::Float(b)) => OrderedFloat(*a).partial_cmp(&OrderedFloat(*b)),
             (Self::Bool(a), Self::Bool(b)) => a.partial_cmp(b),
             (Self::Object(a), Self::Object(b)) => a.partial_cmp(b),
+            // Cross-type int/float fast paths (avoid BigInt allocation)
+            (Self::Float(a), Self::Int(b)) => {
+                OrderedFloat(*a).partial_cmp(&OrderedFloat(*b as f64))
+            }
+            (Self::Int(a), Self::Float(b)) => {
+                OrderedFloat(*a as f64).partial_cmp(&OrderedFloat(*b))
+            }
             // Any numeric cross-type comparison (Int/Float vs BigInt/Rational/Complex etc.)
             // delegates to ndc_core::Number which handles all cases the interpreter does.
             (a, b) => vm_value_to_number(a)?.partial_cmp(&vm_value_to_number(b)?),

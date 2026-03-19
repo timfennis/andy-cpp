@@ -11,9 +11,9 @@ pub fn random_n<N: SampleUniform + std::fmt::Display + Copy>(
     upper: N,
 ) -> anyhow::Result<N> {
     let mut rng = rand::rng();
-    let side: Uniform<N> = Uniform::new(lower, upper).context(format!(
-        "Lower bound ({lower}) cannot be greater than upper bound ({upper})."
-    ))?;
+    let side: Uniform<N> = Uniform::new(lower, upper).with_context(|| {
+        format!("Lower bound ({lower}) cannot be greater than upper bound ({upper}).")
+    })?;
     Ok(rng.sample(side))
 }
 
