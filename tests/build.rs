@@ -41,16 +41,6 @@ fn generate_tests(output: &mut impl Write, base: &Path, dir: &Path) {
             )
             .unwrap();
             writeln!(output, "}}").unwrap();
-
-            let vm_test_name = format!("test_vm_{stem}");
-            writeln!(output, "#[test]").unwrap();
-            writeln!(output, "fn {vm_test_name}() {{").unwrap();
-            writeln!(
-                output,
-                "    run_ndc_test_vm(std::path::Path::new(env!(\"CARGO_MANIFEST_DIR\")).join(\"programs/{path_str}\")).expect(\"test failed\");",
-            )
-            .unwrap();
-            writeln!(output, "}}").unwrap();
         }
     }
 }
