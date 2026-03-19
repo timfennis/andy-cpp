@@ -1,0 +1,6 @@
+// This script recurses 10_000 times, asserting that the interpreter can handle this without overflowing it's stack.
+fn recurse(i) {
+  if i > 0 { recurse(i - 1); };
+}
+
+print(recurse(10_000));
