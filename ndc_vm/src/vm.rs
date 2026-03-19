@@ -691,6 +691,18 @@ impl Vm {
         &self.globals
     }
 
+    /// Returns the expression result left on top of the stack after `run()`.
+    /// If the last top-level expression was a statement (semicolon-terminated)
+    /// its value was already popped, so the stack is exactly `num_locals` deep
+    /// and this returns `Value::unit()`.
+    pub fn last_value(&self, num_locals: usize) -> Value {
+        if self.stack.len() > num_locals {
+            self.stack.last().cloned().unwrap_or_else(Value::unit)
+        } else {
+            Value::unit()
+        }
+    }
+
     /// Resume execution with a new (extended) compiled function, starting at
     /// `resume_ip` — the instruction index where the previous `Halt` was.
     /// Used by the REPL to keep a single VM alive across lines.

@@ -111,7 +111,7 @@ impl Interpreter {
     ) -> Result<Value, InterpreterError> {
         let globals = vm_bridge::make_vm_globals(&self.environment);
 
-        match self.repl_state.take() {
+        let result = match self.repl_state.take() {
             None => {
                 let (code, checkpoint) = Compiler::compile_resumable(expressions)?;
                 let sink = vm_bridge::WriteSink(self.environment.borrow().output_rc());
@@ -121,7 +121,9 @@ impl Interpreter {
                     vm = vm.with_source(input);
                 }
                 vm.run()?;
+                let result = vm_bridge::vm_to_interp(&vm.last_value(checkpoint.num_locals()));
                 self.repl_state = Some((vm, checkpoint));
+                result
             }
             Some((mut vm, checkpoint)) => {
                 let resume_ip = checkpoint.halt_ip();
@@ -133,11 +135,13 @@ impl Interpreter {
                     vm.set_source(input);
                 }
                 vm.run()?;
+                let result = vm_bridge::vm_to_interp(&vm.last_value(new_checkpoint.num_locals()));
                 self.repl_state = Some((vm, new_checkpoint));
+                result
             }
-        }
+        };
 
-        Ok(Value::unit())
+        Ok(result)
     }
 }
 

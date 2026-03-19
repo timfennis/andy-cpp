@@ -82,6 +82,27 @@ fn error_on_undefined_variable() {
 }
 
 #[test]
+fn expression_result_is_returned() {
+    let mut interp = Interpreter::new(Vec::<u8>::new()).with_stdlib();
+    let result = interp.run_str("2 + 3").unwrap();
+    assert_eq!(result, "5");
+}
+
+#[test]
+fn statement_returns_empty() {
+    let mut interp = Interpreter::new(Vec::<u8>::new()).with_stdlib();
+    let result = interp.run_str("2 + 3;").unwrap();
+    assert_eq!(result, "");
+}
+
+#[test]
+fn unit_returns_empty() {
+    let mut interp = Interpreter::new(Vec::<u8>::new()).with_stdlib();
+    let result = interp.run_str("let x = 5;").unwrap();
+    assert_eq!(result, "");
+}
+
+#[test]
 fn error_does_not_corrupt_state() {
     // After a failed line the previously-defined variable should still work.
     let mut interp = Interpreter::new(Vec::<u8>::new()).with_stdlib();
