@@ -1,6 +1,6 @@
 use factorial::Factorial;
+use ndc_core::num::{BinaryOperatorError, Number};
 use ndc_interpreter::environment::Environment;
-use ndc_interpreter::num::{BinaryOperatorError, Number};
 use ndc_macros::export_module;
 use num::ToPrimitive;
 use std::ops::{Add, Mul};
@@ -10,8 +10,8 @@ mod inner {
     use std::ops::Sub;
 
     use anyhow::Context;
-    use ndc_interpreter::int::Int;
-    use ndc_interpreter::num::Number;
+    use ndc_core::int::Int;
+    use ndc_core::num::Number;
     use num::{BigInt, BigRational, BigUint, Integer, complex::Complex64};
 
     /// Returns the sign of a number.
@@ -161,10 +161,10 @@ mod inner {
 
 pub mod f64 {
     use super::{Environment, Number, ToPrimitive, f64};
+    use ndc_core::num::BinaryOperatorError;
     use ndc_interpreter::function::{
         FunctionBody, FunctionBuilder, FunctionCarrier, Parameter, StaticType, TypeSignature,
     };
-    use ndc_interpreter::num::BinaryOperatorError;
     use ndc_interpreter::value::Value;
     use ndc_vm::error::VmError;
     use ndc_vm::value::{NativeFunc, NativeFunction as VmNativeFunction, Value as VmValue};
