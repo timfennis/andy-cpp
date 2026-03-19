@@ -4,7 +4,9 @@ pub mod disassemble;
 pub mod error;
 pub mod iterator;
 pub mod value;
-pub mod vm;
+mod vm;
+
+pub use vm::*;
 
 pub use compiler::CompileError;
 pub use error::VmError;

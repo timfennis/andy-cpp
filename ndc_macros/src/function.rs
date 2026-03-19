@@ -892,10 +892,10 @@ fn create_temp_variable(
                     // FunctionBody::VmNative, so this interpreter wrapper is never called.
                     let #tmp_ident =
                         ndc_interpreter::vm_bridge::interp_to_vm(#argument_var_name.clone());
-                    let mut vm_stub = ndc_vm::vm::Vm::stub();
+                    let mut vm_stub = ndc_vm::Vm::stub();
                     let #argument_var_name = if let ndc_vm::value::Value::Object(obj) = &#tmp_ident {
                         if let ndc_vm::value::Object::Function(f) = obj.as_ref() {
-                            ndc_vm::vm::VmCallable { function: f.clone(), vm: std::cell::RefCell::new(&mut vm_stub) }
+                            ndc_vm::VmCallable { function: f.clone(), vm: std::cell::RefCell::new(&mut vm_stub) }
                         } else {
                             panic!("VmCallable stub: expected Function variant");
                         }

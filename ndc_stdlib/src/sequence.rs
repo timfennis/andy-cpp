@@ -3,8 +3,8 @@
 use anyhow::anyhow;
 use ndc_core::compare::FallibleOrd;
 use ndc_macros::export_module;
+use ndc_vm::VmCallable;
 use ndc_vm::value::Value as VmValue;
-use ndc_vm::vm::VmCallable;
 use std::cmp::Ordering;
 
 fn try_sort_by<E>(
@@ -56,8 +56,8 @@ mod inner {
     use super::{try_sort_by, vm_try_max, vm_try_min};
     use itertools::Itertools;
     use ndc_core::compare::FallibleOrd;
+    use ndc_vm::VmCallable;
     use ndc_vm::value::{Object, Value as VmValue};
-    use ndc_vm::vm::VmCallable;
     use std::cmp::Ordering;
     use std::rc::Rc;
 

@@ -356,7 +356,7 @@ impl FunctionBody {
                             let result = match &native.func {
                                 ndc_vm::value::NativeFunc::Simple(f) => f(&vm_args),
                                 ndc_vm::value::NativeFunc::WithVm(f) => {
-                                    f(&vm_args, &mut ndc_vm::vm::Vm::stub())
+                                    f(&vm_args, &mut ndc_vm::Vm::stub())
                                 }
                             }
                             .map_err(|e: ndc_vm::error::VmError| {

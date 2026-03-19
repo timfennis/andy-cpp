@@ -1,4 +1,3 @@
-use ndc_core::StaticType;
 use once_cell::sync::Lazy;
 use regex::Regex;
 

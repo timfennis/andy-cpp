@@ -16,9 +16,9 @@ use crate::semantic::{Analyser, ScopeTree};
 use crate::value::Value;
 use ndc_lexer::{Lexer, TokenLocation};
 use ndc_parser::ExpressionLocation;
+use ndc_vm::Vm;
 use ndc_vm::compiler::Compiler;
 use ndc_vm::value::CompiledFunction;
-use ndc_vm::vm::Vm;
 use std::cell::RefCell;
 use std::rc::Rc;
 

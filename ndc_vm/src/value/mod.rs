@@ -2,14 +2,12 @@ mod function;
 
 pub use function::*;
 
-use crate::chunk::{Chunk, OpCode};
-use crate::error::VmError;
 use crate::iterator::SharedIterator;
+use ndc_core::StaticType;
 use ndc_core::compare::FallibleOrd;
 use ndc_core::hash_map::{DefaultHasher, HashMap};
 use ndc_core::int::Int;
 use ndc_core::num::Number;
-use ndc_core::{StaticType, TypeSignature};
 use ndc_parser::ResolvedVar;
 use ordered_float::OrderedFloat;
 use std::cell::RefCell;
@@ -149,6 +147,22 @@ impl Value {
         Self::Object(Rc::new(Object::Tuple(values)))
     }
 
+    pub fn int(i: i64) -> Self {
+        Self::Int(i)
+    }
+
+    pub fn float(f: f64) -> Self {
+        Self::Float(f)
+    }
+
+    pub fn bigint(i: num::BigInt) -> Self {
+        Self::Object(Rc::new(Object::BigInt(i)))
+    }
+
+    pub fn complex(c: num::complex::Complex64) -> Self {
+        Self::Object(Rc::new(Object::Complex(c)))
+    }
+
     /// Creates a shallow copy: scalars are copied by value; mutable collection
     /// types (String, List, Map, Deque, heaps) get new independent containers
     /// with cloned contents; immutable / identity types (Tuple, Function,
@@ -200,82 +214,7 @@ impl Value {
             Self::Object(obj) => obj.static_type(),
         }
     }
-}
 
-impl Object {
-    pub fn list(values: Vec<Value>) -> Self {
-        Self::List(RefCell::new(values))
-    }
-
-    pub fn map(entries: HashMap<Value, Value>, default: Option<Value>) -> Self {
-        Self::Map {
-            entries: RefCell::new(entries),
-            default,
-        }
-    }
-
-    /// Recursively deep-copies all mutable containers.
-    pub fn deep_copy(&self) -> Self {
-        match self {
-            Self::Some(v) => Self::Some(v.deep_copy()),
-            Self::String(rc) => Self::String(Rc::new(RefCell::new(rc.borrow().clone()))),
-            Self::List(refcell) => Self::List(RefCell::new(
-                refcell.borrow().iter().map(Value::deep_copy).collect(),
-            )),
-            Self::Tuple(v) => Self::Tuple(v.iter().map(Value::deep_copy).collect()),
-            Self::Map { entries, default } => Self::Map {
-                entries: RefCell::new(
-                    entries
-                        .borrow()
-                        .iter()
-                        .map(|(k, v)| (k.deep_copy(), v.deep_copy()))
-                        .collect(),
-                ),
-                default: default.as_ref().map(Value::deep_copy),
-            },
-            Self::Deque(refcell) => Self::Deque(RefCell::new(
-                refcell.borrow().iter().map(Value::deep_copy).collect(),
-            )),
-            Self::MinHeap(refcell) => Self::MinHeap(RefCell::new(refcell.borrow().clone())),
-            Self::MaxHeap(refcell) => Self::MaxHeap(RefCell::new(refcell.borrow().clone())),
-            // Iterator: deep_copy if supported, otherwise share the Rc.
-            Self::Iterator(shared) => {
-                if let Some(copy) = shared.borrow().deep_copy() {
-                    Self::Iterator(copy)
-                } else {
-                    Self::Iterator(Rc::clone(shared))
-                }
-            }
-            // Immutable / identity types: clone the Rc via Object's derive.
-            other => other.clone(),
-        }
-    }
-
-    // TODO: why are we returning stupid types
-    pub fn static_type(&self) -> StaticType {
-        match self {
-            Self::Some(inner) => StaticType::Option(Box::new(inner.static_type())),
-            Self::BigInt(_) => StaticType::Int,
-            Self::Complex(_) => StaticType::Complex,
-            Self::Rational(_) => StaticType::Rational,
-            Self::String(_) => StaticType::String,
-            Self::List(_) => StaticType::List(Box::new(StaticType::Any)),
-            Self::Tuple(_) => StaticType::Tuple(Vec::new()),
-            Self::Map { .. } => StaticType::Map {
-                key: Box::new(StaticType::Any),
-                value: Box::new(StaticType::Any),
-            },
-            Self::Function(f) => f.static_type(),
-            Self::OverloadSet(_) => StaticType::Any,
-            Self::Iterator(_) => StaticType::Iterator(Box::new(StaticType::Any)),
-            Self::Deque(_) => StaticType::Deque(Box::new(StaticType::Any)),
-            Self::MinHeap(_) => StaticType::MinHeap(Box::new(StaticType::Any)),
-            Self::MaxHeap(_) => StaticType::MaxHeap(Box::new(StaticType::Any)),
-        }
-    }
-}
-
-impl Value {
     /// Consume this value and produce an iterator over its elements.
     ///
     /// Returns `None` for non-iterable types (`Int`, `Float`, `Bool`, `None`,
@@ -370,15 +309,80 @@ impl Value {
 }
 
 impl Object {
+    pub fn list(values: Vec<Value>) -> Self {
+        Self::List(RefCell::new(values))
+    }
+
+    pub fn map(entries: HashMap<Value, Value>, default: Option<Value>) -> Self {
+        Self::Map {
+            entries: RefCell::new(entries),
+            default,
+        }
+    }
+
+    /// Recursively deep-copies all mutable containers.
+    pub fn deep_copy(&self) -> Self {
+        match self {
+            Self::Some(v) => Self::Some(v.deep_copy()),
+            Self::String(rc) => Self::String(Rc::new(RefCell::new(rc.borrow().clone()))),
+            Self::List(refcell) => Self::List(RefCell::new(
+                refcell.borrow().iter().map(Value::deep_copy).collect(),
+            )),
+            Self::Tuple(v) => Self::Tuple(v.iter().map(Value::deep_copy).collect()),
+            Self::Map { entries, default } => Self::Map {
+                entries: RefCell::new(
+                    entries
+                        .borrow()
+                        .iter()
+                        .map(|(k, v)| (k.deep_copy(), v.deep_copy()))
+                        .collect(),
+                ),
+                default: default.as_ref().map(Value::deep_copy),
+            },
+            Self::Deque(refcell) => Self::Deque(RefCell::new(
+                refcell.borrow().iter().map(Value::deep_copy).collect(),
+            )),
+            Self::MinHeap(refcell) => Self::MinHeap(RefCell::new(refcell.borrow().clone())),
+            Self::MaxHeap(refcell) => Self::MaxHeap(RefCell::new(refcell.borrow().clone())),
+            // Iterator: deep_copy if supported, otherwise share the Rc.
+            Self::Iterator(shared) => {
+                if let Some(copy) = shared.borrow().deep_copy() {
+                    Self::Iterator(copy)
+                } else {
+                    Self::Iterator(Rc::clone(shared))
+                }
+            }
+            // Immutable / identity types: clone the Rc via Object's derive.
+            other => other.clone(),
+        }
+    }
+
+    // TODO: why are we returning stupid types
+    pub fn static_type(&self) -> StaticType {
+        match self {
+            Self::Some(inner) => StaticType::Option(Box::new(inner.static_type())),
+            Self::BigInt(_) => StaticType::Int,
+            Self::Complex(_) => StaticType::Complex,
+            Self::Rational(_) => StaticType::Rational,
+            Self::String(_) => StaticType::String,
+            Self::List(_) => StaticType::List(Box::new(StaticType::Any)),
+            Self::Tuple(_) => StaticType::Tuple(Vec::new()),
+            Self::Map { .. } => StaticType::Map {
+                key: Box::new(StaticType::Any),
+                value: Box::new(StaticType::Any),
+            },
+            Self::Function(f) => f.static_type(),
+            Self::OverloadSet(_) => StaticType::Any,
+            Self::Iterator(_) => StaticType::Iterator(Box::new(StaticType::Any)),
+            Self::Deque(_) => StaticType::Deque(Box::new(StaticType::Any)),
+            Self::MinHeap(_) => StaticType::MinHeap(Box::new(StaticType::Any)),
+            Self::MaxHeap(_) => StaticType::MaxHeap(Box::new(StaticType::Any)),
+        }
+    }
+
     pub fn function_prototype(&self) -> Option<&Rc<CompiledFunction>> {
         let Self::Function(f) = self else { return None };
         f.prototype()
-    }
-}
-
-impl From<Object> for Value {
-    fn from(value: Object) -> Self {
-        Self::Object(Rc::new(value))
     }
 }
 

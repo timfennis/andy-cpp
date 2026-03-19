@@ -524,7 +524,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
             extract: quote! {
                 let #temp = match #raw {
                     ndc_vm::value::Value::Object(_obj) => match _obj.as_ref() {
-                        ndc_vm::value::Object::Function(f) => ndc_vm::vm::VmCallable {
+                        ndc_vm::value::Object::Function(f) => ndc_vm::VmCallable {
                             function: f.clone(),
                             vm: std::cell::RefCell::new(_vm),
                         },

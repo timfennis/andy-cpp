@@ -1,5 +1,3 @@
-use ndc_core::StaticType;
-
 #[ndc_macros::export_module]
 mod inner {
     use anyhow::anyhow;
