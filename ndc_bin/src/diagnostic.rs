@@ -46,37 +46,37 @@ impl From<InterpreterError> for NdcReport {
     fn from(err: InterpreterError) -> Self {
         match err {
             InterpreterError::Lexer { cause } => Self {
-                message: cause.to_string(),
+                message: format!("LexerError: {}", cause),
                 span: Some(span_to_source_span(cause.span())),
                 label: "here",
                 help: cause.help_text().map(str::to_owned),
             },
             InterpreterError::Parser { cause } => Self {
-                message: cause.to_string(),
+                message: format!("ParserError: {}", cause),
                 span: Some(span_to_source_span(cause.span())),
                 label: "here",
                 help: cause.help_text().map(str::to_owned),
             },
             InterpreterError::Resolver { cause } => Self {
-                message: cause.to_string(),
+                message: format!("ResolverError: {}", cause),
                 span: Some(span_to_source_span(cause.span())),
                 label: "related to this",
                 help: None,
             },
             InterpreterError::Evaluation { cause } => Self {
-                message: cause.to_string(),
+                message: format!("EvaluationError: {}", cause),
                 span: Some(span_to_source_span(cause.span())),
                 label: "related to this",
                 help: cause.help_text().map(str::to_owned),
             },
             InterpreterError::Compiler { cause } => Self {
-                message: cause.to_string(),
+                message: format!("CompilerError: {}", cause),
                 span: Some(span_to_source_span(cause.span())),
                 label: "related to this",
                 help: None,
             },
             InterpreterError::Vm(err) => Self {
-                message: err.message.clone(),
+                message: format!("VMError: {}", err.message),
                 span: err.span.map(span_to_source_span),
                 label: "related to this",
                 help: None,
