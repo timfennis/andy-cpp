@@ -20,6 +20,7 @@ ndc_stdlib.workspace = true
 ndc_core.workspace = true
 ndc_lsp.workspace = true
 owo-colors.workspace = true
+yansi.workspace = true
 rustyline.workspace = true
 termimad = "0.34.1"
 tokio.workspace = true
