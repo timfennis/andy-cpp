@@ -25,7 +25,7 @@ fn run_ndc_test_vm(path: PathBuf) -> Result<(), std::io::Error> {
     print!("Running {path:?} (vm)...");
 
     let mut interpreter = Interpreter::new(Vec::new()).with_stdlib();
-    let interpreter_result = interpreter.run_str_with_options(&contents, true);
+    let interpreter_result = interpreter.run_str(&contents);
 
     let program_had_error = interpreter_result.is_err();
     let actual_error = interpreter_result.unwrap_or_else(|err| format!("{err:?}"));

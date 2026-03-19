@@ -33,12 +33,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Execute an .ndc file or start the repl (this default action may be omitted)
-    Run {
-        file: Option<PathBuf>,
-        /// Run using the bytecode VM instead of the tree-walk interpreter
-        #[arg(long)]
-        vm: bool,
-    },
+    Run { file: Option<PathBuf> },
     /// Output an .ndc file using the built-in syntax highlighting engine
     Highlight { file: PathBuf },
 
@@ -61,16 +56,13 @@ enum Command {
 
 impl Default for Command {
     fn default() -> Self {
-        Self::Run {
-            file: None,
-            vm: false,
-        }
+        Self::Run { file: None }
     }
 }
 
 enum Action {
     RunLsp,
-    RunFile { path: PathBuf, vm: bool },
+    RunFile { path: PathBuf },
     DisassembleFile(PathBuf),
     HighlightFile(PathBuf),
     StartRepl,
@@ -82,11 +74,8 @@ impl TryFrom<Command> for Action {
 
     fn try_from(value: Command) -> Result<Self, Self::Error> {
         let action = match value {
-            Command::Run {
-                file: Some(file),
-                vm,
-            } => Self::RunFile { path: file, vm },
-            Command::Run { file: None, .. } => Self::StartRepl,
+            Command::Run { file: Some(file) } => Self::RunFile { path: file },
+            Command::Run { file: None } => Self::StartRepl,
             Command::Lsp { stdio: _ } => Self::RunLsp,
             Command::Disassemble { file } => Self::DisassembleFile(file),
             Command::Highlight { file } => Self::HighlightFile(file),
@@ -99,7 +88,6 @@ impl TryFrom<Command> for Action {
                     }
                     1 => Self::RunFile {
                         path: args[0].parse::<PathBuf>().context("invalid path")?,
-                        vm: false,
                     },
                     n => return Err(anyhow!("invalid number of arguments: {n}")),
                 }
@@ -129,7 +117,7 @@ fn main() -> anyhow::Result<()> {
     let action: Action = cli.command.unwrap_or_default().try_into()?;
 
     match action {
-        Action::RunFile { path, vm } => {
+        Action::RunFile { path } => {
             let filename = path
                 .file_name()
                 .and_then(|name| name.to_str())
@@ -139,7 +127,7 @@ fn main() -> anyhow::Result<()> {
 
             let stdout = std::io::stdout();
             let mut interpreter = Interpreter::new(stdout).with_stdlib();
-            match into_miette_result(interpreter.run_str_with_options(&string, vm)) {
+            match into_miette_result(interpreter.run_str(&string)) {
                 // we can just ignore successful runs because we have print statements
                 Ok(_final_value) => {}
                 Err(report) => {
