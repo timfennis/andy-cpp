@@ -47,7 +47,12 @@ enum Command {
     Disassemble { file: PathBuf },
 
     /// Output the documentation optionally searched using a query string
-    Docs { query: Option<String> },
+    Docs {
+        query: Option<String>,
+        /// Disable color output
+        #[arg(long)]
+        no_color: bool,
+    },
 
     // This is a fallback case
     #[command(external_subcommand)]
@@ -62,11 +67,16 @@ impl Default for Command {
 
 enum Action {
     RunLsp,
-    RunFile { path: PathBuf },
+    RunFile {
+        path: PathBuf,
+    },
     DisassembleFile(PathBuf),
     HighlightFile(PathBuf),
     StartRepl,
-    Docs(Option<String>),
+    Docs {
+        query: Option<String>,
+        no_color: bool,
+    },
 }
 
 impl TryFrom<Command> for Action {
@@ -79,7 +89,7 @@ impl TryFrom<Command> for Action {
             Command::Lsp { stdio: _ } => Self::RunLsp,
             Command::Disassemble { file } => Self::DisassembleFile(file),
             Command::Highlight { file } => Self::HighlightFile(file),
-            Command::Docs { query } => Self::Docs(query),
+            Command::Docs { query, no_color } => Self::Docs { query, no_color },
             Command::Unknown(args) => {
                 match args.len() {
                     0 => {
@@ -162,7 +172,7 @@ fn main() -> anyhow::Result<()> {
             }
             std::io::stdout().flush()?;
         }
-        Action::Docs(query) => return docs(query.as_deref()),
+        Action::Docs { query, no_color } => return docs(query.as_deref(), no_color),
         Action::StartRepl => {
             repl::run()?;
         }

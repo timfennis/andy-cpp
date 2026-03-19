@@ -1,8 +1,8 @@
 use ndc_interpreter::Interpreter;
 use ndc_stdlib::WithStdlib;
-use owo_colors::OwoColorize;
 use std::fs;
 use std::path::PathBuf;
+use yansi::Paint;
 
 include!(concat!(env!("OUT_DIR"), "/generated_tests.rs"));
 

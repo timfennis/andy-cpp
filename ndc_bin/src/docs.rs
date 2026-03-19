@@ -4,17 +4,58 @@ use ndc_stdlib::WithStdlib;
 use std::cmp::Ordering;
 use std::fmt::Write;
 use strsim::normalized_damerau_levenshtein;
-use termimad::crossterm::style::Stylize;
-use termimad::{Alignment, MadSkin};
+use yansi::Paint;
 
-/// Returns `true` if `needle` is a substring of `haystack` or if they are at least 80% similar
 fn string_match(needle: &str, haystack: &str) -> bool {
     haystack.contains(needle) || normalized_damerau_levenshtein(needle, haystack) > 0.8
 }
 
-pub fn docs(query: Option<&str>) -> anyhow::Result<()> {
-    let interpreter = Interpreter::new(Vec::new()) // Discard the output
-        .with_stdlib();
+fn terminal_width() -> usize {
+    termimad::crossterm::terminal::size()
+        .map(|(w, _)| w as usize)
+        .unwrap_or(80)
+        .min(120)
+}
+
+/// Wraps `text` to `max_width` columns, indenting every line with `indent`.
+/// Blank lines in the input are treated as paragraph breaks and preserved.
+fn wrap_text(text: &str, max_width: usize, indent: &str) -> String {
+    let available = max_width.saturating_sub(indent.len());
+    let mut result = String::new();
+
+    for (i, paragraph) in text.split("\n\n").enumerate() {
+        if i > 0 {
+            result.push('\n');
+            result.push_str(indent);
+            result.push('\n');
+        }
+        result.push_str(indent);
+        let mut col = 0usize;
+        for word in paragraph.split_whitespace() {
+            if col > 0 && col + 1 + word.len() > available {
+                result.push('\n');
+                result.push_str(indent);
+                col = 0;
+            } else if col > 0 {
+                result.push(' ');
+                col += 1;
+            }
+            result.push_str(word);
+            col += word.len();
+        }
+    }
+
+    result
+}
+
+pub fn docs(query: Option<&str>, no_color: bool) -> anyhow::Result<()> {
+    if no_color {
+        yansi::disable();
+    } else {
+        yansi::whenever(yansi::Condition::TTY_AND_COLOR);
+    }
+
+    let interpreter = Interpreter::new(Vec::new()).with_stdlib();
 
     let mut functions: Vec<_> = interpreter
         .functions()
@@ -38,13 +79,13 @@ pub fn docs(query: Option<&str>) -> anyhow::Result<()> {
         }
     });
 
-    let mut skin = MadSkin::default();
+    let width = terminal_width();
 
-    skin.headers[0].align = Alignment::Left;
-    skin.headers[1].align = Alignment::Left;
-    skin.headers[2].align = Alignment::Left;
+    for (i, function) in functions.iter().enumerate() {
+        if i > 0 {
+            println!();
+        }
 
-    for function in functions {
         let (type_sig, return_type) = match &function.static_type {
             StaticType::Function {
                 parameters,
@@ -65,43 +106,36 @@ pub fn docs(query: Option<&str>) -> anyhow::Result<()> {
             other => (TypeSignature::Variadic, other),
         };
 
-        let mut signature = String::new();
+        let mut line = String::new();
+        write!(line, "{}", function.name.bold().yellow())?;
         match &type_sig {
             TypeSignature::Variadic => {
-                write!(signature, "(*args**)")?;
+                write!(line, "{}", "(...)".dim())?;
             }
             TypeSignature::Exact(params) => {
-                write!(signature, "(")?;
-                let mut param_iter = params.iter().peekable();
-                while let Some(Parameter { name, type_name }) = param_iter.next() {
-                    write!(
-                        signature,
-                        "*{name}*: **{}**",
-                        format!("{}", type_name).green()
-                    )?;
-                    if param_iter.peek().is_some() {
-                        write!(signature, ", ")?;
+                write!(line, "(")?;
+                for (i, Parameter { name, type_name }) in params.iter().enumerate() {
+                    if i > 0 {
+                        write!(line, "{}", ", ".dim())?;
                     }
+                    write!(line, "{}", name.italic())?;
+                    write!(line, "{}", ":".dim())?;
+                    write!(line, " {}", type_name.to_string().cyan())?;
                 }
-                write!(signature, ")")?;
+                write!(line, ")")?;
             }
         }
+        write!(line, " {} ", "->".dim())?;
+        write!(line, "{}", return_type.to_string().bold().cyan())?;
+        println!("{line}");
 
-        let name = function.name.clone();
-        let documentation = function
-            .documentation
-            .as_deref()
-            .unwrap_or("")
-            .trim()
-            .to_string();
-        let markdown = format!(
-            "---\n\n## **{}**{signature} -> {}\n\n{documentation}{}",
-            name.green(),
-            format!("{}", return_type).green().bold(),
-            if documentation.is_empty() { "" } else { "\n\n" }
-        );
-
-        skin.print_text(&markdown);
+        if let Some(docs) = &function.documentation {
+            let docs = docs.trim();
+            if !docs.is_empty() {
+                let wrapped = wrap_text(docs, width, "  ");
+                println!("{}", wrapped.dim());
+            }
+        }
     }
 
     Ok(())

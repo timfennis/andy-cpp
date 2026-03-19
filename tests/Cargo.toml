@@ -6,7 +6,7 @@ version.workspace = true
 [dev-dependencies]
 ndc_interpreter.workspace = true
 ndc_stdlib.workspace = true
-owo-colors.workspace = true
+yansi.workspace = true
 
 [[test]]
 name = "ndc_tests"
