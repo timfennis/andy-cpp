@@ -1,7 +1,6 @@
 #[ndc_macros::export_module]
 mod inner {
     use itertools::Itertools;
-    use ndc_interpreter::value::Value;
     use std::rc::Rc;
 
     use anyhow::anyhow;
@@ -15,24 +14,30 @@ mod inner {
         ))
     }
 
-    pub fn contains(list: &[Value], elem: &Value) -> bool {
-        list.contains(elem)
+    pub fn contains(list: &[ndc_vm::value::Value], elem: ndc_vm::value::Value) -> bool {
+        list.contains(&elem)
     }
 
-    pub fn contains_subsequence(list: &[Value], subsequence: &[Value]) -> bool {
+    pub fn contains_subsequence(
+        list: &[ndc_vm::value::Value],
+        subsequence: &[ndc_vm::value::Value],
+    ) -> bool {
         list.windows(subsequence.len()).contains(&subsequence)
     }
 
-    pub fn find_subsequence(list: &[Value], subsequence: &[Value]) -> Value {
+    pub fn find_subsequence(
+        list: &[ndc_vm::value::Value],
+        subsequence: &[ndc_vm::value::Value],
+    ) -> ndc_vm::value::Value {
         let result = list
             .windows(subsequence.len())
             .enumerate()
             .find(|(_, seq)| *seq == subsequence)
             .map(|(idx, _)| idx);
         if let Some(result) = result {
-            Value::from(result)
+            ndc_vm::value::Value::Int(result as i64)
         } else {
-            Value::unit()
+            ndc_vm::value::Value::unit()
         }
     }
 
@@ -82,12 +87,15 @@ mod inner {
 
     /// Extends this `list` with elements from `iter` leaving the iterator empty
     #[function(name = "extend")]
-    pub fn extend_from_iter(list: &mut Vec<Value>, iter: impl Iterator<Item = Value>) {
+    pub fn extend_from_iter(
+        list: &mut Vec<ndc_interpreter::value::Value>,
+        iter: impl Iterator<Item = ndc_interpreter::value::Value>,
+    ) {
         list.extend(iter);
     }
 
     /// Removes the last element from a list and returns it, or `Unit` if it is empty
-    #[function(name = "pop?", return_type = Option<Value>)]
+    #[function(name = "pop?", return_type = Option<_>)]
     pub fn maybe_pop(list: &mut Vec<ndc_vm::value::Value>) -> ndc_vm::value::Value {
         match list.pop() {
             None => ndc_vm::value::Value::None,
@@ -99,7 +107,7 @@ mod inner {
         list.pop().unwrap_or_else(ndc_vm::value::Value::unit)
     }
 
-    #[function(name = "pop_left?", return_type = Option<Value>)]
+    #[function(name = "pop_left?", return_type = Option<_>)]
     pub fn maybe_pop_left(list: &mut Vec<ndc_vm::value::Value>) -> ndc_vm::value::Value {
         if list.is_empty() {
             return ndc_vm::value::Value::None;
@@ -115,9 +123,9 @@ mod inner {
     }
 
     /// Creates a copy of the list with its elements in reverse order
-    #[function(return_type = Vec<Value>)]
-    pub fn reversed(list: &[Value]) -> Value {
-        Value::list(list.iter().rev().cloned().collect::<Vec<Value>>())
+    #[function(return_type = Vec<_>)]
+    pub fn reversed(list: &[ndc_vm::value::Value]) -> ndc_vm::value::Value {
+        ndc_vm::value::Value::list(list.iter().rev().cloned().collect())
     }
 
     /// Removes all values from the list
@@ -126,7 +134,7 @@ mod inner {
     }
 
     /// Returns `true` if the list contains no elements
-    pub fn is_empty(list: &[Value]) -> bool {
+    pub fn is_empty(list: &[ndc_vm::value::Value]) -> bool {
         list.is_empty()
     }
 
@@ -151,38 +159,51 @@ mod inner {
     }
 
     /// Returns a copy of the first element of the list or results in an error if the list is empty.
-    pub fn first(list: &[Value]) -> anyhow::Result<Value> {
+    pub fn first(list: &[ndc_vm::value::Value]) -> anyhow::Result<ndc_vm::value::Value> {
         list.first()
             .cloned()
             .ok_or_else(|| anyhow!("collection is empty"))
     }
 
     /// Returns a copy of the first element or `unit` if the list is empty.
-    #[function(name = "first?")]
-    pub fn maybe_first(list: &[Value]) -> Value {
-        list.first().cloned().map_or_else(Value::none, Value::some)
+    #[function(name = "first?", return_type = Option<_>)]
+    pub fn maybe_first(list: &[ndc_vm::value::Value]) -> ndc_vm::value::Value {
+        match list.first() {
+            None => ndc_vm::value::Value::None,
+            Some(v) => {
+                ndc_vm::value::Value::Object(Rc::new(ndc_vm::value::Object::Some(v.clone())))
+            }
+        }
     }
 
     /// Returns a copy of the last element of the list or results in an error if the list is empty.
-    pub fn last(list: &[Value]) -> anyhow::Result<Value> {
+    pub fn last(list: &[ndc_vm::value::Value]) -> anyhow::Result<ndc_vm::value::Value> {
         list.last()
             .cloned()
             .ok_or_else(|| anyhow!("the list is empty"))
     }
 
     /// Returns a copy of the last element or `unit` if the list is empty.
-    #[function(name = "last?")]
-    pub fn maybe_last(list: &[Value]) -> Value {
-        list.last().cloned().map_or_else(Value::none, Value::some)
+    #[function(name = "last?", return_type = Option<_>)]
+    pub fn maybe_last(list: &[ndc_vm::value::Value]) -> ndc_vm::value::Value {
+        match list.last() {
+            None => ndc_vm::value::Value::None,
+            Some(v) => {
+                ndc_vm::value::Value::Object(Rc::new(ndc_vm::value::Object::Some(v.clone())))
+            }
+        }
     }
 
-    #[function(return_type = Vec<(Value, Value)>)]
-    pub fn cartesian_product(list_a: &[Value], list_b: &[Value]) -> Value {
-        Value::list(
+    #[function(return_type = Vec<_>)]
+    pub fn cartesian_product(
+        list_a: &[ndc_vm::value::Value],
+        list_b: &[ndc_vm::value::Value],
+    ) -> ndc_vm::value::Value {
+        ndc_vm::value::Value::list(
             list_a
                 .iter()
                 .cartesian_product(list_b)
-                .map(|(a, b)| Value::tuple(vec![a.clone(), b.clone()]))
+                .map(|(a, b)| ndc_vm::value::Value::tuple(vec![a.clone(), b.clone()]))
                 .collect_vec(),
         )
     }
@@ -199,19 +220,13 @@ pub mod ops {
     use ndc_vm::value::{
         NativeFunc, NativeFunction as VmNativeFunction, Object as VmObject, Value as VmValue,
     };
-    use std::cell::RefCell;
     use std::rc::Rc;
-
-    pub fn register(env: &mut Environment) {
-        register_list_concat(env);
-        register_list_append(env);
-    }
 
     // Interpreter path for `++`: works on ListRepr (Rc<RefCell<Vec<InterpValue>>>) directly.
     #[deprecated = "interpreter path — remove when tree-walk interpreter is dropped"]
     fn interp_list_concat(
         args: &mut [InterpValue],
-        _env: &Rc<RefCell<Environment>>,
+        _env: &std::rc::Rc<std::cell::RefCell<Environment>>,
     ) -> Result<InterpValue, FunctionCarrier> {
         let [left, right] = args else {
             return Err(anyhow::anyhow!("++ requires 2 arguments").into());
@@ -242,7 +257,7 @@ pub mod ops {
     #[deprecated = "interpreter path — remove when tree-walk interpreter is dropped"]
     fn interp_list_append(
         args: &mut [InterpValue],
-        _env: &Rc<RefCell<Environment>>,
+        _env: &std::rc::Rc<std::cell::RefCell<Environment>>,
     ) -> Result<InterpValue, FunctionCarrier> {
         let [left, right] = args else {
             return Err(anyhow::anyhow!("++=  requires 2 arguments").into());
@@ -266,6 +281,11 @@ pub mod ops {
             left_rc.borrow_mut().extend_from_slice(&right_rc.borrow());
         }
         Ok(InterpValue::unit())
+    }
+
+    pub fn register(env: &mut Environment) {
+        register_list_concat(env);
+        register_list_append(env);
     }
 
     fn register_list_concat(env: &mut Environment) {
@@ -326,6 +346,7 @@ pub mod ops {
                 }
             })),
         });
+        #[allow(deprecated)]
         env.declare_global_fn(
             FunctionBuilder::default()
                 .name("++".to_string())
@@ -401,6 +422,7 @@ pub mod ops {
                 Ok(left.clone())
             })),
         });
+        #[allow(deprecated)]
         env.declare_global_fn(
             FunctionBuilder::default()
                 .name("++=".to_string())
