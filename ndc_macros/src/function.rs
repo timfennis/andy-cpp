@@ -543,10 +543,12 @@ fn try_generate_vm_native(
         }
     };
 
+    // TODO: figure out how to get the documentation in
     let native_let = quote! {
         let native: std::rc::Rc<ndc_vm::value::NativeFunction> =
             std::rc::Rc::new(ndc_vm::value::NativeFunction {
                 name: String::from(#fn_name),
+                documentation: None,
                 static_type: ndc_core::StaticType::Function {
                     parameters: Some(vec![#(#param_types.clone()),*]),
                     return_type: Box::new(#return_static_type),

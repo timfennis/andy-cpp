@@ -22,6 +22,7 @@ mod inner {
 pub fn register_variadic(env: &mut Environment) {
     let print_native = Rc::new(NativeFunction {
         name: "print".to_string(),
+        documentation: None, // TODO figure out how to get the docs in here
         static_type: StaticType::unit(),
         func: NativeFunc::WithVm(Box::new(|args, vm| {
             let mut buf = String::new();
@@ -44,6 +45,7 @@ pub fn register_variadic(env: &mut Environment) {
 
     let dbg_native = Rc::new(NativeFunction {
         name: "dbg".to_string(),
+        documentation: None, // TODO figure out how to get the docs in here
         static_type: StaticType::unit(),
         func: NativeFunc::WithVm(Box::new(|args, vm| {
             let mut buf = String::new();

@@ -147,6 +147,7 @@ fn wrap_function(
     VmValue::Object(Rc::new(VmObject::Function(VmFunction::Native(Rc::new(
         NativeFunction {
             name,
+            documentation: None, // TODO: figure this out
             func: NativeFunc::Simple(Box::new(native)),
             static_type,
         },
@@ -407,6 +408,7 @@ fn interp_to_vm_for_inverted_bridge(value: &InterpValue) -> VmValue {
         let static_type = f.static_type();
         let callback = Rc::new(NativeFunction {
             name,
+            documentation: None, // TODO: figure this out
             static_type,
             func: NativeFunc::Simple(Box::new(move |vm_args: &[VmValue]| {
                 let mut interp_args: Vec<InterpValue> = vm_args.iter().map(vm_to_interp).collect();

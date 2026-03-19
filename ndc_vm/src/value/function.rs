@@ -25,6 +25,7 @@ pub enum Function {
 
 pub struct NativeFunction {
     pub name: String,
+    pub documentation: Option<String>,
     pub func: NativeFunc,
     pub static_type: StaticType,
 }
