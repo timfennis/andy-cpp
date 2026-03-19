@@ -1,4 +1,3 @@
-use ndc_core::StaticType;
 use ndc_core::hash_map::{self, HashMapExt};
 use std::rc::Rc;
 

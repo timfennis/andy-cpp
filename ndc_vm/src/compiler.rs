@@ -96,19 +96,19 @@ impl Compiler {
                 self.chunk.write(OpCode::Constant(idx), span);
             }
             Expression::Int64Literal(i) => {
-                let idx = self.chunk.add_constant(Value::Int(i));
+                let idx = self.chunk.add_constant(Value::int(i));
                 self.chunk.write(OpCode::Constant(idx), span);
             }
             Expression::Float64Literal(f) => {
-                let idx = self.chunk.add_constant(Value::Float(f));
+                let idx = self.chunk.add_constant(Value::float(f));
                 self.chunk.write(OpCode::Constant(idx), span);
             }
             Expression::BigIntLiteral(i) => {
-                let idx = self.chunk.add_constant(Object::BigInt(i).into());
+                let idx = self.chunk.add_constant(Value::bigint(i));
                 self.chunk.write(OpCode::Constant(idx), span);
             }
             Expression::ComplexLiteral(c) => {
-                let idx = self.chunk.add_constant(Object::Complex(c).into());
+                let idx = self.chunk.add_constant(Value::complex(c));
                 self.chunk.write(OpCode::Constant(idx), span);
             }
             Expression::Identifier { name, resolved } => {
@@ -511,7 +511,7 @@ impl Compiler {
             Binding::Dynamic(candidates) => {
                 let idx = self
                     .chunk
-                    .add_constant(Object::OverloadSet(candidates).into());
+                    .add_constant(Value::Object(Rc::new(Object::OverloadSet(candidates))));
                 self.chunk.write(OpCode::Constant(idx), span);
             }
         }

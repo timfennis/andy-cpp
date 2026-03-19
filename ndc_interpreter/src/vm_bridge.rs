@@ -8,13 +8,13 @@ use std::rc::Rc;
 use ndc_core::StaticType;
 use ndc_core::int::Int;
 use ndc_core::num::Number;
+use ndc_vm::Vm;
 use ndc_vm::VmError;
 use ndc_vm::VmIterator;
 use ndc_vm::value::{
     Function as VmFunction, NativeFunc, NativeFunction, Object as VmObject, OrdValue,
     Value as VmValue,
 };
-use ndc_vm::vm::Vm;
 
 use crate::environment::{Environment, InterpreterOutput};
 

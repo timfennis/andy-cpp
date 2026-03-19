@@ -1,5 +1,4 @@
 use anyhow::Context;
-use ndc_core::StaticType;
 use ndc_core::hash_map::HashMap;
 use ndc_macros::export_module;
 use ndc_vm::value::{Object as VmObject, Value as VmValue};

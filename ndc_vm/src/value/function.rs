@@ -1,21 +1,11 @@
 use super::Value;
 use crate::chunk::{Chunk, OpCode};
 use crate::error::VmError;
-use crate::iterator::SharedIterator;
-use ndc_core::compare::FallibleOrd;
-use ndc_core::hash_map::{DefaultHasher, HashMap};
-use ndc_core::int::Int;
-use ndc_core::num::Number;
+use ndc_core::hash_map::HashMap;
 use ndc_core::{StaticType, TypeSignature};
-use ndc_parser::ResolvedVar;
-use ordered_float::OrderedFloat;
 use std::cell::RefCell;
-use std::cmp::{Ordering, Reverse};
-use std::collections::BinaryHeap;
-use std::collections::VecDeque;
 use std::fmt;
 use std::fmt::Formatter;
-use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 #[derive(Clone)]
@@ -45,7 +35,7 @@ pub enum NativeFunc {
     Simple(Box<dyn Fn(&[Value]) -> Result<Value, VmError>>),
     /// HOF path: args are drained off the stack before the call so `&mut Vm`
     /// can be passed safely. Use for functions with `&VmCallable` params.
-    WithVm(Box<dyn Fn(&[Value], &mut crate::vm::Vm) -> Result<Value, VmError>>),
+    WithVm(Box<dyn Fn(&[Value], &mut crate::Vm) -> Result<Value, VmError>>),
 }
 
 pub struct CompiledFunction {

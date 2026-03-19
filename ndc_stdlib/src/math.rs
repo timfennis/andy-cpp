@@ -1,5 +1,4 @@
 use factorial::Factorial;
-use ndc_core::StaticType;
 use ndc_core::num::{BinaryOperatorError, Number};
 use ndc_interpreter::environment::Environment;
 use ndc_macros::export_module;

@@ -1,4 +1,3 @@
-use ndc_core::StaticType;
 use ndc_macros::export_module;
 use std::fmt::Write;
 
