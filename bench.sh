@@ -30,7 +30,7 @@ echo "Building release binary..."
 cargo build --release --manifest-path "$SCRIPT_DIR/Cargo.toml" -q
 
 echo ""
-echo "Validating all three versions can run '$FILE' without crashing..."
+echo "Validating the VM version can run '$FILE' without crashing..."
 
 validate() {
     local label="$1"
@@ -42,9 +42,8 @@ validate() {
     echo "  OK:   $label"
 }
 
-validate "ndc (PATH)"             ndc             run "$FILE"
-validate "local release (tree-walk)" "$LOCAL"     run "$FILE"
-validate "local release (vm)"    "$LOCAL"         run --vm "$FILE"
+validate "ndc (PATH)"        ndc       run "$FILE"
+validate "local release (VM)" "$LOCAL" run "$FILE"
 
 echo ""
 echo "Running benchmark..."
@@ -52,6 +51,5 @@ echo ""
 
 hyperfine \
     --warmup 3 \
-    --command-name "ndc (installed)"         "ndc run '$FILE'" \
-    --command-name "local release (tree-walk)" "'$LOCAL' run '$FILE'" \
-    --command-name "local release (vm)"      "'$LOCAL' run --vm '$FILE'"
+    --command-name "ndc (installed)" "ndc run '$FILE'" \
+    --command-name "local release (VM)" "'$LOCAL' run '$FILE'"
