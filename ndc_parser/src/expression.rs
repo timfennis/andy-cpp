@@ -1,7 +1,6 @@
-use crate::TypeSignature;
 use crate::operator::LogicalOperator;
 use crate::parser::Error as ParseError;
-use crate::static_type::StaticType;
+use crate::{StaticType, TypeSignature};
 use ndc_lexer::Span;
 use num::BigInt;
 use num::complex::Complex64;

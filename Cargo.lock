@@ -1275,7 +1275,7 @@ name = "ndc_core"
 version = "0.2.1"
 dependencies = [
  "ahash",
- "ndc_parser",
+ "itertools 0.14.0",
  "num",
  "ordered-float",
  "ryu",
@@ -1336,6 +1336,7 @@ version = "0.2.1"
 dependencies = [
  "derive_more",
  "itertools 0.14.0",
+ "ndc_core",
  "ndc_lexer",
  "num",
  "thiserror",

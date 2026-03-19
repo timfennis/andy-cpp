@@ -4,8 +4,8 @@ use std::hash::{Hash, Hasher};
 use std::num::TryFromIntError;
 use std::ops::{Add, Div, Mul, Neg, Not, Rem, Sub};
 
+use crate::StaticType;
 use crate::int::Int;
-use ndc_parser::{BinaryOperator, StaticType};
 use num::bigint::TryFromBigIntError;
 use num::complex::{Complex64, ComplexFloat};
 use num::{BigInt, BigRational, Complex, FromPrimitive, Signed, ToPrimitive, Zero};
@@ -219,11 +219,7 @@ impl BinaryOperatorError {
         Self(message)
     }
 
-    pub fn undefined_operation(
-        operator: BinaryOperator,
-        left: &StaticType,
-        right: &StaticType,
-    ) -> Self {
+    pub fn undefined_operation(operator: &str, left: &StaticType, right: &StaticType) -> Self {
         Self(format!(
             "operator {operator} is not defined for {left} and {right}"
         ))
@@ -392,7 +388,7 @@ impl Number {
 
             (Self::Float(p1), Self::Float(p2)) => Ok(Self::Float(p1.rem_euclid(p2))),
             (left, right) => Err(BinaryOperatorError::undefined_operation(
-                BinaryOperator::EuclideanModulo,
+                "%%",
                 &left.static_type(),
                 &right.static_type(),
             )),
