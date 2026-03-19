@@ -5,7 +5,7 @@ version.workspace = true
 
 [dependencies]
 ahash.workspace = true
-ndc_parser.workspace = true
+itertools.workspace = true
 num.workspace = true
 ordered-float.workspace = true
 ryu.workspace = true

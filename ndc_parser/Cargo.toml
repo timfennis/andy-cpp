@@ -4,6 +4,7 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
+ndc_core.workspace = true
 ndc_lexer.workspace = true
 num.workspace = true
 derive_more = { workspace = true }
