@@ -180,6 +180,7 @@ pub mod f64 {
                         .body(FunctionBody::NumericBinaryOp { body: $method })
                         .vm_native(Rc::new(VmNativeFunction {
                             name: $operator.to_string(),
+                            documentation: None, // TODO figure out how to get the docs in here
                             static_type: StaticType::Function {
                                 parameters: Some(vec![StaticType::Number, StaticType::Number]),
                                 return_type: Box::new(StaticType::Number),
@@ -231,6 +232,7 @@ pub mod f64 {
                 .name("-".to_string())
                 .vm_native(Rc::new(VmNativeFunction {
                     name: "-".to_string(),
+                    documentation: None, // TODO figure out how to get the docs in here
                     static_type: StaticType::Function {
                         parameters: Some(vec![StaticType::Number]),
                         return_type: Box::new(StaticType::Number),
@@ -275,6 +277,7 @@ pub mod f64 {
                         })
                         .vm_native(Rc::new(VmNativeFunction {
                             name: $operator.to_string(),
+                            documentation: None, // TODO figure out how to get the docs in here
                             static_type: StaticType::Function {
                                 parameters: Some(vec![StaticType::Any, StaticType::Any]),
                                 return_type: Box::new(StaticType::Bool),
@@ -319,6 +322,7 @@ pub mod f64 {
                 })
                 .vm_native(Rc::new(VmNativeFunction {
                     name: "==".to_string(),
+                    documentation: None, // TODO figure out how to get the docs in here
                     static_type: StaticType::Function {
                         parameters: Some(vec![StaticType::Any, StaticType::Any]),
                         return_type: Box::new(StaticType::Bool),
@@ -348,6 +352,7 @@ pub mod f64 {
                 })
                 .vm_native(Rc::new(VmNativeFunction {
                     name: "!=".to_string(),
+                    documentation: None, // TODO figure out how to get the docs in here
                     static_type: StaticType::Function {
                         parameters: Some(vec![StaticType::Any, StaticType::Any]),
                         return_type: Box::new(StaticType::Bool),
@@ -382,6 +387,7 @@ pub mod f64 {
                 })
                 .vm_native(Rc::new(VmNativeFunction {
                     name: "<=>".to_string(),
+                    documentation: None, // TODO: add actual docs
                     static_type: StaticType::Function {
                         parameters: Some(vec![StaticType::Any, StaticType::Any]),
                         return_type: Box::new(StaticType::Int),
@@ -425,6 +431,7 @@ pub mod f64 {
                 })
                 .vm_native(Rc::new(VmNativeFunction {
                     name: ">=<".to_string(),
+                    documentation: None, // TODO figure out how to get the docs in here
                     static_type: StaticType::Function {
                         parameters: Some(vec![StaticType::Any, StaticType::Any]),
                         return_type: Box::new(StaticType::Int),
@@ -465,6 +472,7 @@ pub mod f64 {
                         })
                         .vm_native(Rc::new(VmNativeFunction {
                             name: $operator.to_string(),
+                            documentation: None, // TODO figure out how to get the docs in here
                             static_type: StaticType::Function {
                                 parameters: Some(vec![StaticType::Bool, StaticType::Bool]),
                                 return_type: Box::new(StaticType::Bool),
@@ -494,6 +502,7 @@ pub mod f64 {
                         })
                         .vm_native(Rc::new(VmNativeFunction {
                             name: $operator.to_string(),
+                            documentation: None, // TODO figure out how to get the docs in here
                             static_type: StaticType::Function {
                                 parameters: Some(vec![StaticType::Int, StaticType::Int]),
                                 return_type: Box::new(StaticType::Int),
@@ -527,6 +536,7 @@ pub mod f64 {
                 .name("~".to_string())
                 .vm_native(Rc::new(VmNativeFunction {
                     name: "~".to_string(),
+                    documentation: None, // TODO figure out how to get the docs in here
                     static_type: StaticType::Function {
                         parameters: Some(vec![StaticType::Number]),
                         return_type: Box::new(StaticType::Number),
@@ -563,6 +573,7 @@ pub mod f64 {
                     .name(ident.to_string())
                     .vm_native(Rc::new(VmNativeFunction {
                         name: ident.to_string(),
+                        documentation: None, // TODO figure out how to get the docs in here
                         static_type: StaticType::Function {
                             parameters: Some(vec![StaticType::Bool]),
                             return_type: Box::new(StaticType::Bool),
@@ -595,6 +606,7 @@ pub mod f64 {
                 })
                 .vm_native(Rc::new(VmNativeFunction {
                     name: ">>".to_string(),
+                    documentation: None, // TODO figure out how to get the docs in here
                     static_type: StaticType::Function {
                         parameters: Some(vec![StaticType::Int, StaticType::Int]),
                         return_type: Box::new(StaticType::Int),
@@ -632,6 +644,7 @@ pub mod f64 {
                 })
                 .vm_native(Rc::new(VmNativeFunction {
                     name: "<<".to_string(),
+                    documentation: None, // TODO figure out how to get the docs in here
                     static_type: StaticType::Function {
                         parameters: Some(vec![StaticType::Int, StaticType::Int]),
                         return_type: Box::new(StaticType::Int),
@@ -668,6 +681,7 @@ pub mod f64 {
                     .documentation(String::from($docs))
                     .vm_native(Rc::new(VmNativeFunction {
                         name: stringify!($method).to_string(),
+                        documentation: None, // TODO figure out how to get the docs in here
                         static_type: StaticType::Function {
                             parameters: Some(vec![StaticType::Number]),
                             return_type: Box::new(StaticType::Number),

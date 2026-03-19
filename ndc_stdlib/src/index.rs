@@ -8,6 +8,7 @@ use std::rc::Rc;
 pub fn register(env: &mut Environment) {
     let get_native = Rc::new(NativeFunction {
         name: "[]".to_string(),
+        documentation: None, // TODO figure out how to get the docs in here
         static_type: StaticType::Any,
         func: NativeFunc::Simple(Box::new(|args: &[VmValue]| {
             let [container, index_value] = args else {
@@ -33,6 +34,7 @@ pub fn register(env: &mut Environment) {
 
     let set_native = Rc::new(NativeFunction {
         name: "[]=".to_string(),
+        documentation: None, // TODO figure out how to get the docs in here
         static_type: StaticType::Tuple(vec![]),
         func: NativeFunc::Simple(Box::new(|args: &[VmValue]| {
             let [container, index_value, rhs] = args else {

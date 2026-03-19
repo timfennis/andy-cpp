@@ -3,18 +3,16 @@ use regex::Regex;
 
 #[ndc_macros::export_module]
 mod inner {
-    use ndc_vm::value::Value;
-
     /// Extracts all signed integers from the given string.
     #[function(return_type = Vec<i64>)]
     pub fn nums(haystack: &str) -> ndc_vm::value::Value {
         static RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"-?\d+").unwrap());
 
-        Value::list(
+        ndc_vm::value::Value::list(
             RE.captures_iter(haystack)
                 .filter_map(|cap| {
                     let (full, []) = cap.extract();
-                    full.parse::<i64>().ok().map(Value::Int)
+                    full.parse::<i64>().ok().map(ndc_vm::value::Value::Int)
                 })
                 .collect(),
         )
@@ -25,11 +23,11 @@ mod inner {
     pub fn unsigned_nums(haystack: &str) -> ndc_vm::value::Value {
         static RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\d+").unwrap());
 
-        Value::list(
+        ndc_vm::value::Value::list(
             RE.captures_iter(haystack)
                 .filter_map(|cap| {
                     let (full, []) = cap.extract();
-                    full.parse::<i64>().ok().map(Value::Int)
+                    full.parse::<i64>().ok().map(ndc_vm::value::Value::Int)
                 })
                 .collect(),
         )
@@ -49,16 +47,16 @@ mod inner {
         let list = r
             .captures_iter(haystack)
             .map(|captures| {
-                Value::list(
+                ndc_vm::value::Value::list(
                     captures
                         .iter()
-                        .filter_map(|x| x.map(|x| Value::string(x.as_str())))
+                        .filter_map(|x| x.map(|x| ndc_vm::value::Value::string(x.as_str())))
                         .collect::<Vec<_>>(),
                 )
             })
-            .collect::<Vec<Value>>();
+            .collect::<Vec<ndc_vm::value::Value>>();
 
-        Ok(Value::list(list))
+        Ok(ndc_vm::value::Value::list(list))
     }
 
     /// Returns the first capture group from the first match of the regular expression.
@@ -67,14 +65,14 @@ mod inner {
         let r = Regex::new(regex)?;
 
         let Some(captures) = r.captures(haystack) else {
-            return Ok(Value::list(vec![]));
+            return Ok(ndc_vm::value::Value::list(vec![]));
         };
 
         let list = captures
             .iter()
-            .filter_map(|x| x.map(|x| Value::string(x.as_str())))
+            .filter_map(|x| x.map(|x| ndc_vm::value::Value::string(x.as_str())))
             .collect::<Vec<_>>();
 
-        Ok(Value::list(list))
+        Ok(ndc_vm::value::Value::list(list))
     }
 }
