@@ -1,7 +1,7 @@
 
 let vectors = [(x, y) for x in -1..=1, y in -1..=1, if x != 0 or y != 0];
 
-pure fn fade(t) => t * t * t * (t * (t * 6 - 15) + 10);
+fn fade(t) => t * t * t * (t * (t * 6 - 15) + 10);
 
 fn lerp(a, b, t) => a + t * (b - a);
 

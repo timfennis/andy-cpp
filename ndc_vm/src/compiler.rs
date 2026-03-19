@@ -73,9 +73,11 @@ impl Compiler {
         self.chunk.write(OpCode::Halt, Span::new(0, 0));
         let function = CompiledFunction {
             name: None,
-            type_signature: TypeSignature::default(),
+            static_type: StaticType::Function {
+                parameters: Some(vec![]),
+                return_type: Box::new(StaticType::Any),
+            },
             body: self.chunk,
-            return_type: StaticType::Any,
             num_locals: self.max_local,
         };
         Ok((function, checkpoint))
@@ -630,6 +632,16 @@ impl Compiler {
             TypeSignature::Exact(params) => params.len(),
             TypeSignature::Variadic => 0,
         };
+        let return_type = return_type.unwrap_or_default();
+        let static_type = StaticType::Function {
+            parameters: match &type_signature {
+                TypeSignature::Variadic => None,
+                TypeSignature::Exact(types) => {
+                    Some(types.iter().map(|x| x.type_name.clone()).collect())
+                }
+            },
+            return_type: Box::new(return_type.clone()),
+        };
         let mut fn_compiler = Self {
             max_local: num_params,
             allow_return: true,
@@ -640,9 +652,8 @@ impl Compiler {
 
         let compiled = CompiledFunction {
             name,
-            type_signature,
+            static_type,
             body: fn_compiler.chunk,
-            return_type: return_type.unwrap_or_default(),
             num_locals: fn_compiler.max_local,
         };
         let idx = self

@@ -1,8 +1,8 @@
 use super::Value;
 use crate::chunk::{Chunk, OpCode};
 use crate::error::VmError;
+use ndc_core::StaticType;
 use ndc_core::hash_map::HashMap;
-use ndc_core::{StaticType, TypeSignature};
 use std::cell::RefCell;
 use std::fmt;
 use std::fmt::Formatter;
@@ -41,9 +41,8 @@ pub enum NativeFunc {
 
 pub struct CompiledFunction {
     pub name: Option<String>,
-    pub(crate) type_signature: TypeSignature,
+    pub(crate) static_type: StaticType,
     pub(crate) body: Chunk,
-    pub(crate) return_type: StaticType,
     pub(crate) num_locals: usize,
 }
 
@@ -96,17 +95,9 @@ impl Function {
 
     pub fn static_type(&self) -> StaticType {
         match self {
-            Self::Compiled(f) => StaticType::Function {
-                parameters: match &f.type_signature {
-                    TypeSignature::Variadic => None,
-                    TypeSignature::Exact(types) => {
-                        Some(types.iter().map(|x| x.type_name.clone()).collect())
-                    }
-                },
-                return_type: Box::new(f.return_type.clone()),
-            },
+            Self::Compiled(f) => f.static_type.clone(),
             Self::Native(f) => f.static_type.clone(),
-            Self::Closure(c) => Function::Compiled(c.prototype.clone()).static_type(),
+            Self::Closure(c) => c.prototype.static_type.clone(),
             Self::Memoized { function, .. } => function.static_type(),
         }
     }
