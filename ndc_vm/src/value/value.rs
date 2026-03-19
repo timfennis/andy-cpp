@@ -7,6 +7,7 @@ use ndc_core::int::Int;
 use ndc_core::num::Number;
 use ndc_core::{StaticType, TypeSignature};
 use ndc_parser::ResolvedVar;
+use num::ToPrimitive;
 use ordered_float::OrderedFloat;
 use std::cell::RefCell;
 use std::cmp::{Ordering, Reverse};
@@ -116,13 +117,23 @@ impl Iterator for ValueIter {
 
 #[derive(Clone)]
 pub enum Function {
+    /// A closure is a compiled function lifted to closure
     Closure(ClosureFunction),
+    /// A compiled function is a function written in Andy C++ that has been compiled by the bytecode compiler
     Compiled(Rc<CompiledFunction>),
+    /// A native function is one defined in rust (as part of the stdlib for instance)
     Native(Rc<NativeFunction>),
+
     Memoized {
         cache: Rc<RefCell<HashMap<u64, Value>>>,
         function: Box<Self>,
     },
+}
+
+pub struct NativeFunction {
+    pub name: String,
+    pub func: NativeFunc,
+    pub static_type: StaticType,
 }
 
 pub enum NativeFunc {
@@ -132,12 +143,6 @@ pub enum NativeFunc {
     /// HOF path: args are drained off the stack before the call so `&mut Vm`
     /// can be passed safely. Use for functions with `&VmCallable` params.
     WithVm(Box<dyn Fn(&[Value], &mut crate::vm::Vm) -> Result<Value, VmError>>),
-}
-
-pub struct NativeFunction {
-    pub name: String,
-    pub func: NativeFunc,
-    pub static_type: StaticType,
 }
 
 pub struct CompiledFunction {
@@ -188,11 +193,11 @@ impl Value {
         Self::Object(Rc::new(Object::Iterator(iter)))
     }
 
-    pub fn list(values: Vec<Value>) -> Self {
+    pub fn list(values: Vec<Self>) -> Self {
         Self::Object(Rc::new(Object::list(values)))
     }
 
-    pub fn tuple(values: Vec<Value>) -> Self {
+    pub fn tuple(values: Vec<Self>) -> Self {
         Self::Object(Rc::new(Object::Tuple(values)))
     }
 
@@ -370,11 +375,11 @@ impl Value {
     /// `Int64` maps to `Value::Int`; all other variants become `Value::Object`.
     pub fn from_number(n: Number) -> Self {
         match n {
-            Number::Int(Int::Int64(i)) => Value::Int(i),
-            Number::Int(Int::BigInt(b)) => Value::Object(Rc::new(Object::BigInt(b))),
-            Number::Float(f) => Value::Float(f),
-            Number::Rational(r) => Value::Object(Rc::new(Object::Rational(*r))),
-            Number::Complex(c) => Value::Object(Rc::new(Object::Complex(c))),
+            Number::Int(Int::Int64(i)) => Self::Int(i),
+            Number::Int(Int::BigInt(b)) => Self::Object(Rc::new(Object::BigInt(b))),
+            Number::Float(f) => Self::Float(f),
+            Number::Rational(r) => Self::Object(Rc::new(Object::Rational(*r))),
+            Number::Complex(c) => Self::Object(Rc::new(Object::Complex(c))),
         }
     }
 
@@ -382,8 +387,8 @@ impl Value {
     /// Returns `None` for non-integer values.
     pub fn to_int(&self) -> Option<Int> {
         match self {
-            Value::Int(i) => Some(Int::Int64(*i)),
-            Value::Object(obj) => match obj.as_ref() {
+            Self::Int(i) => Some(Int::Int64(*i)),
+            Self::Object(obj) => match obj.as_ref() {
                 Object::BigInt(b) => Some(Int::BigInt(b.clone())),
                 _ => None,
             },
@@ -394,8 +399,8 @@ impl Value {
     /// Convert a `ndc_core::Int` to a VM value.
     pub fn from_int(i: Int) -> Self {
         match i {
-            Int::Int64(n) => Value::Int(n),
-            Int::BigInt(b) => Value::Object(Rc::new(Object::BigInt(b))),
+            Int::Int64(n) => Self::Int(n),
+            Int::BigInt(b) => Self::Object(Rc::new(Object::BigInt(b))),
         }
     }
 
@@ -404,9 +409,9 @@ impl Value {
     pub fn to_f64(&self) -> Option<f64> {
         use num::ToPrimitive;
         match self {
-            Value::Float(f) => Some(*f),
-            Value::Int(i) => Some(*i as f64),
-            Value::Object(obj) => match obj.as_ref() {
+            Self::Float(f) => Some(*f),
+            Self::Int(i) => i.to_f64(),
+            Self::Object(obj) => match obj.as_ref() {
                 Object::BigInt(b) => b.to_f64(),
                 Object::Rational(r) => r.to_f64(),
                 _ => None,
