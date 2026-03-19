@@ -101,6 +101,43 @@ impl Function {
             Self::Memoized { function, .. } => function.static_type(),
         }
     }
+
+    /// Returns true if this function accepts arguments of the given types,
+    /// without allocating any intermediate `StaticType` values.
+    pub fn matches_arg_types(&self, arg_types: &[StaticType]) -> bool {
+        let st = match self {
+            Self::Native(f) => &f.static_type,
+            Self::Compiled(f) => &f.static_type,
+            Self::Closure(c) => &c.prototype.static_type,
+            Self::Memoized { function, .. } => return function.matches_arg_types(arg_types),
+        };
+        let StaticType::Function { parameters, .. } = st else {
+            return false;
+        };
+        match parameters {
+            None => true, // variadic: always matches
+            Some(params) => {
+                params.len() == arg_types.len()
+                    && params
+                        .iter()
+                        .zip(arg_types.iter())
+                        .all(|(param, actual)| actual.is_subtype(param))
+            }
+        }
+    }
+
+    /// Returns true if this function requires upvalue materialization before
+    /// being called as a native.  Only `WithVm` natives need this — they
+    /// receive `&mut Vm` and can invoke closures passed as arguments, so any
+    /// open upvalues in those closures must be closed first.  `Simple` natives
+    /// never call back into the VM and can skip the materialization scan.
+    pub fn needs_arg_materialization(&self) -> bool {
+        match self {
+            Self::Native(f) => matches!(f.func, NativeFunc::WithVm(_)),
+            Self::Memoized { function, .. } => function.needs_arg_materialization(),
+            _ => false,
+        }
+    }
 }
 
 impl fmt::Debug for Function {
