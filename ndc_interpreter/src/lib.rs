@@ -11,8 +11,7 @@ pub mod value;
 pub mod vm_bridge;
 
 use crate::environment::{Environment, InterpreterOutput};
-use crate::evaluate::{EvaluationError, evaluate_expression};
-use crate::function::FunctionCarrier;
+use crate::evaluate::EvaluationError;
 use crate::semantic::{Analyser, ScopeTree};
 use crate::value::Value;
 use ndc_lexer::{Lexer, TokenLocation};
@@ -26,6 +25,10 @@ use std::rc::Rc;
 pub struct Interpreter {
     environment: Rc<RefCell<Environment>>,
     analyser: Analyser,
+    /// Persistent REPL VM and the compiler checkpoint from the last run.
+    /// `None` until the first `run_str` call; kept alive afterwards so that
+    /// variables declared on one line are visible on subsequent lines.
+    repl_state: Option<(Vm, Compiler)>,
 }
 
 impl Interpreter {
@@ -43,6 +46,7 @@ impl Interpreter {
         Self {
             environment: Rc::new(RefCell::new(environment)),
             analyser: Analyser::from_scope_tree(ScopeTree::from_global_scope(global_identifiers)),
+            repl_state: None,
         }
     }
 
@@ -105,57 +109,35 @@ impl Interpreter {
         #[cfg(not(feature = "vm-trace"))] _input: &str,
         expressions: impl Iterator<Item = ExpressionLocation>,
     ) -> Result<Value, InterpreterError> {
-        let code = Compiler::compile(expressions)?;
-
         let globals = vm_bridge::make_vm_globals(&self.environment);
-        let sink = vm_bridge::WriteSink(self.environment.borrow().output_rc());
-        let mut vm = Vm::new(code, globals).with_output(Box::new(sink));
 
-        #[cfg(feature = "vm-trace")]
-        {
-            vm = vm.with_source(input);
-        }
-
-        vm.run()?;
-
-        Ok(Value::unit())
-    }
-
-    fn interpret(
-        &mut self,
-        expressions: impl Iterator<Item = ExpressionLocation>,
-    ) -> Result<Value, InterpreterError> {
-        let mut value = Value::unit();
-        for expr in expressions {
-            match evaluate_expression(&expr, &self.environment) {
-                Ok(val) => value = val,
-                Err(FunctionCarrier::Return(_)) => {
-                    Err(EvaluationError::syntax_error(
-                        "unexpected return statement outside of function body".to_string(),
-                        expr.span,
-                    ))?;
+        match self.repl_state.take() {
+            None => {
+                let (code, checkpoint) = Compiler::compile_resumable(expressions)?;
+                let sink = vm_bridge::WriteSink(self.environment.borrow().output_rc());
+                let mut vm = Vm::new(code, globals).with_output(Box::new(sink));
+                #[cfg(feature = "vm-trace")]
+                {
+                    vm = vm.with_source(input);
                 }
-                Err(FunctionCarrier::Break(_)) => {
-                    Err(EvaluationError::syntax_error(
-                        "unexpected break statement outside of loop body".to_string(),
-                        expr.span,
-                    ))?;
+                vm.run()?;
+                self.repl_state = Some((vm, checkpoint));
+            }
+            Some((mut vm, checkpoint)) => {
+                let resume_ip = checkpoint.halt_ip();
+                let prev_num_locals = checkpoint.num_locals();
+                let (code, new_checkpoint) = checkpoint.resume(expressions)?;
+                vm.resume_from_halt(code, globals, resume_ip, prev_num_locals);
+                #[cfg(feature = "vm-trace")]
+                {
+                    vm.set_source(input);
                 }
-                Err(FunctionCarrier::Continue) => {
-                    Err(EvaluationError::syntax_error(
-                        "unexpected continue statement outside of loop body".to_string(),
-                        expr.span,
-                    ))?;
-                }
-                Err(FunctionCarrier::EvaluationError(e)) => return Err(InterpreterError::from(e)),
-                _ => {
-                    panic!(
-                        "internal error: unhandled function carrier variant returned from evaluate_expression"
-                    );
-                }
+                vm.run()?;
+                self.repl_state = Some((vm, new_checkpoint));
             }
         }
-        Ok(value)
+
+        Ok(Value::unit())
     }
 }
 

@@ -11,3 +11,7 @@ owo-colors.workspace = true
 [[test]]
 name = "ndc_tests"
 path = "src/programs.rs"
+
+[[test]]
+name = "repl"
+path = "src/repl.rs"

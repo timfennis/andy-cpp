@@ -107,6 +107,11 @@ impl Vm {
         self
     }
 
+    #[cfg(feature = "vm-trace")]
+    pub fn set_source(&mut self, source: impl Into<String>) {
+        self.source = Some(source.into());
+    }
+
     pub fn run(&mut self) -> Result<(), VmError> {
         self.run_to_depth(0)
     }
@@ -684,6 +689,40 @@ impl Vm {
     /// Expose the globals slice for use by the interpreter bridge.
     pub fn globals(&self) -> &[Value] {
         &self.globals
+    }
+
+    /// Resume execution with a new (extended) compiled function, starting at
+    /// `resume_ip` — the instruction index where the previous `Halt` was.
+    /// Used by the REPL to keep a single VM alive across lines.
+    ///
+    /// The stack is trimmed to `prev_num_locals` (discarding any leftover
+    /// expression result from the previous run) and then extended with
+    /// `Value::unit()` for any new local slots the new function introduces.
+    /// Upvalues for preserved locals remain open; any pointing above
+    /// `prev_num_locals` are closed before the truncation.
+    pub fn resume_from_halt(
+        &mut self,
+        function: CompiledFunction,
+        globals: Vec<Value>,
+        resume_ip: usize,
+        prev_num_locals: usize,
+    ) {
+        let new_num_locals = function.num_locals;
+        self.globals = globals;
+        self.close_upvalues(prev_num_locals);
+        self.stack.truncate(prev_num_locals);
+        for _ in prev_num_locals..new_num_locals {
+            self.stack.push(Value::unit());
+        }
+        self.frames = vec![CallFrame {
+            closure: ClosureFunction {
+                prototype: Rc::new(function),
+                upvalues: vec![],
+            },
+            ip: resume_ip,
+            frame_pointer: 0,
+            memo: None,
+        }];
     }
 
     /// Resolves the callee on the stack to a concrete `Function`. Returns `Ok(None)`
