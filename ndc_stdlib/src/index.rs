@@ -1,15 +1,16 @@
-use ndc_core::StaticType;
-use ndc_interpreter::environment::Environment;
-use ndc_interpreter::function::{FunctionBody, FunctionBuilder};
+use ndc_core::{FunctionRegistry, StaticType};
 use ndc_vm::error::VmError;
 use ndc_vm::value::{NativeFunc, NativeFunction, Object as VmObject, Value as VmValue};
 use std::rc::Rc;
 
-pub fn register(env: &mut Environment) {
+pub fn register(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     let get_native = Rc::new(NativeFunction {
         name: "[]".to_string(),
         documentation: None, // TODO figure out how to get the docs in here
-        static_type: StaticType::Any,
+        static_type: StaticType::Function {
+            parameters: None,
+            return_type: Box::new(StaticType::Any),
+        },
         func: NativeFunc::Simple(Box::new(|args: &[VmValue]| {
             let [container, index_value] = args else {
                 return Err(VmError::native(format!(
@@ -20,22 +21,15 @@ pub fn register(env: &mut Environment) {
             vm_get_at_index(container, index_value)
         })),
     });
-    env.declare_global_fn(
-        FunctionBuilder::default()
-            .name("[]".to_string())
-            .body(FunctionBody::Opaque {
-                data: Rc::new(()),
-                static_type: StaticType::Any,
-            })
-            .vm_native(get_native)
-            .build()
-            .expect("must succeed"),
-    );
+    env.declare_global_fn(get_native);
 
     let set_native = Rc::new(NativeFunction {
         name: "[]=".to_string(),
         documentation: None, // TODO figure out how to get the docs in here
-        static_type: StaticType::Tuple(vec![]),
+        static_type: StaticType::Function {
+            parameters: None,
+            return_type: Box::new(StaticType::Any),
+        },
         func: NativeFunc::Simple(Box::new(|args: &[VmValue]| {
             let [container, index_value, rhs] = args else {
                 return Err(VmError::native(format!(
@@ -47,17 +41,7 @@ pub fn register(env: &mut Environment) {
             Ok(VmValue::unit())
         })),
     });
-    env.declare_global_fn(
-        FunctionBuilder::default()
-            .name("[]=".to_string())
-            .body(FunctionBody::Opaque {
-                data: Rc::new(()),
-                static_type: StaticType::Tuple(vec![]),
-            })
-            .vm_native(set_native)
-            .build()
-            .expect("must succeed"),
-    );
+    env.declare_global_fn(set_native);
 }
 
 fn vm_sequence_length(v: &VmValue) -> Option<usize> {

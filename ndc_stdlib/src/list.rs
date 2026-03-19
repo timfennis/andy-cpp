@@ -201,21 +201,19 @@ mod inner {
 }
 
 pub mod ops {
-    use ndc_core::StaticType;
-    use ndc_interpreter::environment::Environment;
-    use ndc_interpreter::function::{FunctionBody, FunctionBuilder};
+    use ndc_core::{FunctionRegistry, StaticType};
     use ndc_vm::error::VmError;
     use ndc_vm::value::{
         NativeFunc, NativeFunction as VmNativeFunction, Object as VmObject, Value as VmValue,
     };
     use std::rc::Rc;
 
-    pub fn register(env: &mut Environment) {
+    pub fn register(env: &mut FunctionRegistry<Rc<VmNativeFunction>>) {
         register_list_concat(env);
         register_list_append(env);
     }
 
-    fn register_list_concat(env: &mut Environment) {
+    fn register_list_concat(env: &mut FunctionRegistry<Rc<VmNativeFunction>>) {
         let native = Rc::new(VmNativeFunction {
             name: "++".to_string(),
             documentation: None, // TODO figure out how to get the docs in here
@@ -274,20 +272,10 @@ pub mod ops {
                 }
             })),
         });
-        env.declare_global_fn(
-            FunctionBuilder::default()
-                .name("++".to_string())
-                .body(FunctionBody::Opaque {
-                    data: Rc::new(()),
-                    static_type: StaticType::List(Box::new(StaticType::Any)),
-                })
-                .vm_native(native)
-                .build()
-                .expect("must succeed"),
-        );
+        env.declare_global_fn(native);
     }
 
-    fn register_list_append(env: &mut Environment) {
+    fn register_list_append(env: &mut FunctionRegistry<Rc<VmNativeFunction>>) {
         let native = Rc::new(VmNativeFunction {
             name: "++=".to_string(),
             documentation: None, // TODO figure out how to get the docs in here
@@ -346,16 +334,6 @@ pub mod ops {
                 Ok(left.clone())
             })),
         });
-        env.declare_global_fn(
-            FunctionBuilder::default()
-                .name("++=".to_string())
-                .body(FunctionBody::Opaque {
-                    data: Rc::new(()),
-                    static_type: StaticType::Tuple(vec![]),
-                })
-                .vm_native(native)
-                .build()
-                .expect("must succeed"),
-        );
+        env.declare_global_fn(native);
     }
 }

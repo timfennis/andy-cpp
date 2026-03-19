@@ -309,8 +309,8 @@ fn wrap_single(
     identifier: &syn::Ident,
     register_as_function_name: &proc_macro2::Literal,
     input_arguments: Vec<Argument>,
-    return_type: &TokenStream,
-    docs: &str,
+    _return_type: &TokenStream,
+    _docs: &str,
 ) -> WrappedFunction {
     let inner_ident = format_ident!("{}_inner", identifier);
     let inner = {
@@ -382,7 +382,8 @@ fn wrap_single(
 
     // Try to generate vm_native tokens. When successful, the body becomes
     // `FunctionBody::VmNative` instead of `GenericFunction`.
-    let maybe_vm = try_generate_vm_native(&function, &inner_ident, register_as_function_name);
+    let vm = try_generate_vm_native(&function, &inner_ident, register_as_function_name)
+        .expect("always vm right?");
 
     // The inner helper is hoisted to module scope (not nested inside the wrapper)
     // so that both the tree-walk wrapper and the vm_native closure can call it.
@@ -417,49 +418,16 @@ fn wrap_single(
         }
     };
 
-    let function_registration = if let Some(vm) = maybe_vm {
-        let VmNativeTokens {
-            native_let,
-            param_types: vm_param_types,
-            param_names: vm_param_names,
-        } = vm;
-        quote! {
-            #native_let
-            let func = ndc_interpreter::function::FunctionBuilder::default()
-                .body(ndc_interpreter::function::FunctionBody::VmNative {
-                    native: std::rc::Rc::clone(&native),
-                    type_signature: ndc_core::TypeSignature::Exact(vec![
-                        #( ndc_core::Parameter::new(#vm_param_names, #vm_param_types,) ),*
-                    ]),
-                    return_type: #return_type,
-                })
-                .name(String::from(#register_as_function_name))
-                .documentation(String::from(#docs))
-                .vm_native(native)
-                .build()
-                .expect("expected function creation in proc macro to always succeed");
+    let VmNativeTokens {
+        native_let,
+        param_types: _vm_param_types,
+        param_names: _vm_param_names,
+    } = vm;
 
-            env.declare_global_fn(func);
-        }
-    } else {
-        quote! {
-            let func = ndc_interpreter::function::FunctionBuilder::default()
-                .body(ndc_interpreter::function::FunctionBody::GenericFunction {
-                    function: #identifier,
-                    type_signature: ndc_core::TypeSignature::Exact(vec![
-                        #( ndc_core::Parameter::new(#param_names, #param_types,) ),*
-                    ]),
-                    return_type: #return_type,
-                })
-                .name(String::from(#register_as_function_name))
-                .documentation(String::from(#docs))
-                .build()
-                .expect("expected function creation in proc macro to always succeed");
-
-            env.declare_global_fn(func);
-        }
+    let function_registration = quote! {
+        #native_let
+        env.declare_global_fn(native);
     };
-
     WrappedFunction {
         function_declaration,
         function_registration,

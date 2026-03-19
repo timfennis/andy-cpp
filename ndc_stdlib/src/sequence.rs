@@ -948,71 +948,51 @@ fn fold_iterator(
 }
 
 pub mod extra {
-    use anyhow::anyhow;
-    use itertools::izip;
+    use ndc_core::{FunctionRegistry, StaticType};
+    use ndc_vm::error::VmError;
+    use ndc_vm::value::{NativeFunc, NativeFunction, Object as VmObject, Value as VmValue};
+    use std::rc::Rc;
 
-    use ndc_core::StaticType;
-    use ndc_interpreter::function::FunctionBuilder;
-    use ndc_interpreter::{
-        environment::Environment, function::FunctionBody, iterator::mut_value_to_iterator,
-        value::Value,
-    };
-
-    pub fn register(env: &mut Environment) {
-        env.declare_global_fn(
-                FunctionBuilder::default()
-                    .name("zip".to_string())
-                    .documentation("Combines multiple sequences (or iterables) into a single sequence of tuples, where the ith tuple contains the ith element from each input sequence.\n\nIf the input sequences are of different lengths, the resulting sequence is truncated to the length of the shortest input.".to_string())
-                    .body(FunctionBody::generic(
-                        ndc_core::TypeSignature::Variadic,
-                        StaticType::List(Box::new(StaticType::Tuple(vec![StaticType::Any, StaticType::Any]))),
-                        |args, _env| match args {
-                            [_] => {
-                                Err(anyhow!("zip must be called with 2 or more arguments").into())
-                            }
-                            [a, b] => {
-                                let a = mut_value_to_iterator(a)?;
-                                let b = mut_value_to_iterator(b)?;
-                                let out = a
-                                    .zip(b)
-                                    .map(|(a, b)| Value::tuple(vec![a, b]))
-                                    .collect::<Vec<Value>>();
-                                Ok(Value::list(out))
-                            }
-                            [a, b, c] => {
-                                let a = mut_value_to_iterator(a)?;
-                                let b = mut_value_to_iterator(b)?;
-                                let c = mut_value_to_iterator(c)?;
-                                let mut out = Vec::new();
-                                for (a, b, c) in izip!(a, b, c) {
-                                    out.push(Value::tuple(vec![a, b, c]));
-                                }
-                                Ok(Value::list(out))
-                            }
-                            values => {
-                                // HOLY HEAP ALLOCATION BATMAN!
-                                // This branch can probably lose some heap allocations if I had 50 more IQ points
-                                let mut lists = Vec::with_capacity(values.len());
-                                for value in values.iter_mut() {
-                                    lists.push(mut_value_to_iterator(value)?.collect::<Vec<_>>());
-                                }
-                                let out_len = lists.iter().map(Vec::len).min().unwrap();
-                                let mut out = Vec::with_capacity(out_len);
-
-                                for idx in 0..out_len {
-                                    let mut tup = Vec::with_capacity(lists.len());
-                                    for (list_idx, _) in lists.iter().enumerate() {
-                                        tup.insert(list_idx, lists[list_idx][idx].clone());
-                                    }
-                                    out.insert(idx, Value::tuple(tup));
-                                }
-
-                                Ok(Value::list(out))
-                            }
+    pub fn register(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
+        env.declare_global_fn(Rc::new(NativeFunction {
+            name: "zip".to_string(),
+            documentation: None,
+            static_type: StaticType::Function {
+                parameters: None,
+                return_type: Box::new(StaticType::List(Box::new(StaticType::Tuple(vec![
+                    StaticType::Any,
+                    StaticType::Any,
+                ])))),
+            },
+            func: NativeFunc::Simple(Box::new(|args| {
+                if args.len() < 2 {
+                    return Err(VmError::native(
+                        "zip must be called with 2 or more arguments".to_string(),
+                    ));
+                }
+                let iters: Option<Vec<Vec<VmValue>>> = args
+                    .iter()
+                    .map(|arg| match arg {
+                        VmValue::Object(obj) => match obj.as_ref() {
+                            VmObject::List(l) => Some(l.borrow().clone()),
+                            VmObject::Tuple(t) => Some(t.to_vec()),
+                            _ => None,
                         },
-                    ))
-                    .build()
-                    .expect("function definitions must be valid"),
-        );
+                        _ => None,
+                    })
+                    .collect();
+                let iters =
+                    iters.ok_or_else(|| VmError::native("zip requires sequences".to_string()))?;
+                let min_len = iters.iter().map(|v| v.len()).min().unwrap_or(0);
+                let result: Vec<VmValue> = (0..min_len)
+                    .map(|i| {
+                        VmValue::Object(Rc::new(VmObject::Tuple(
+                            iters.iter().map(|v| v[i].clone()).collect(),
+                        )))
+                    })
+                    .collect();
+                Ok(VmValue::Object(Rc::new(VmObject::list(result))))
+            })),
+        }));
     }
 }

@@ -1,6 +1,4 @@
-use ndc_core::StaticType;
-use ndc_interpreter::environment::Environment;
-use ndc_interpreter::function::{FunctionBody, FunctionBuilder};
+use ndc_core::{FunctionRegistry, StaticType};
 use ndc_macros::export_module;
 use ndc_vm::error::VmError;
 use ndc_vm::value::{NativeFunc, NativeFunction, Value as VmValue};
@@ -19,11 +17,14 @@ mod inner {
     }
 }
 
-pub fn register_variadic(env: &mut Environment) {
+pub fn register_variadic(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     let print_native = Rc::new(NativeFunction {
         name: "print".to_string(),
         documentation: None, // TODO figure out how to get the docs in here
-        static_type: StaticType::unit(),
+        static_type: StaticType::Function {
+            parameters: None,
+            return_type: Box::new(StaticType::unit()),
+        },
         func: NativeFunc::WithVm(Box::new(|args, vm| {
             let mut buf = String::new();
             let mut iter = args.iter().peekable();
@@ -46,7 +47,10 @@ pub fn register_variadic(env: &mut Environment) {
     let dbg_native = Rc::new(NativeFunction {
         name: "dbg".to_string(),
         documentation: None, // TODO figure out how to get the docs in here
-        static_type: StaticType::unit(),
+        static_type: StaticType::Function {
+            parameters: None,
+            return_type: Box::new(StaticType::unit()),
+        },
         func: NativeFunc::WithVm(Box::new(|args, vm| {
             let mut buf = String::new();
             let mut iter = args.iter().peekable();
@@ -62,29 +66,6 @@ pub fn register_variadic(env: &mut Environment) {
         })),
     });
 
-    env.declare_global_fn(
-        FunctionBuilder::default()
-            .name("print".to_string())
-            .documentation("Print the value.".to_string())
-            .body(FunctionBody::Opaque {
-                data: Rc::new(()),
-                static_type: StaticType::unit(),
-            })
-            .vm_native(print_native)
-            .build()
-            .expect("function definition defined in code must be valid"),
-    );
-
-    env.declare_global_fn(
-        FunctionBuilder::default()
-            .name("dbg".to_string())
-            .documentation("Prints the values for quick and dirty debugging (using the value's debug representation).".to_string())
-            .body(FunctionBody::Opaque {
-                data: Rc::new(()),
-                static_type: StaticType::unit(),
-            })
-            .vm_native(dbg_native)
-            .build()
-            .expect("function definition defined in code must be valid"),
-    );
+    env.declare_global_fn(print_native);
+    env.declare_global_fn(dbg_native);
 }
