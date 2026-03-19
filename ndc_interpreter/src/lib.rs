@@ -77,20 +77,8 @@ impl Interpreter {
     }
 
     pub fn run_str(&mut self, input: &str) -> Result<String, InterpreterError> {
-        self.run_str_with_options(input, false)
-    }
-
-    pub fn run_str_with_options(
-        &mut self,
-        input: &str,
-        use_vm: bool,
-    ) -> Result<String, InterpreterError> {
         let expressions = self.parse_and_analyse(input)?;
-        let final_value = if use_vm {
-            self.interpret_vm(input, expressions.into_iter())?
-        } else {
-            self.interpret(expressions.into_iter())?
-        };
+        let final_value = self.interpret_vm(input, expressions.into_iter())?;
         Ok(format!("{final_value}"))
     }
 
