@@ -309,7 +309,7 @@ fn wrap_single(
     identifier: &syn::Ident,
     register_as_function_name: &proc_macro2::Literal,
     input_arguments: Vec<Argument>,
-    _return_type: &TokenStream,
+    return_type: &TokenStream,
     _docs: &str,
 ) -> WrappedFunction {
     let inner_ident = format_ident!("{}_inner", identifier);
@@ -382,8 +382,14 @@ fn wrap_single(
 
     // Try to generate vm_native tokens. When successful, the body becomes
     // `FunctionBody::VmNative` instead of `GenericFunction`.
-    let vm = try_generate_vm_native(&function, &inner_ident, register_as_function_name)
-        .expect("always vm right?");
+    let vm = try_generate_vm_native(
+        &function,
+        &inner_ident,
+        register_as_function_name,
+        _docs,
+        return_type,
+    )
+    .expect("always vm right?");
 
     // The inner helper is hoisted to module scope (not nested inside the wrapper)
     // so that both the tree-walk wrapper and the vm_native closure can call it.
@@ -452,6 +458,8 @@ fn try_generate_vm_native(
     function: &syn::ItemFn,
     inner_ident: &syn::Ident,
     fn_name: &proc_macro2::Literal,
+    docs: &str,
+    return_type_override: &TokenStream,
 ) -> Option<VmNativeTokens> {
     use crate::vm_convert::{try_vm_input, try_vm_return};
 
@@ -484,7 +492,8 @@ fn try_generate_vm_native(
         param_names.push(quote! { #name });
     }
 
-    let (return_code, return_static_type) = try_vm_return(&function.sig.output)?;
+    let (return_code, _) = try_vm_return(&function.sig.output)?;
+    let return_static_type = return_type_override;
     let n = function.sig.inputs.len();
 
     let func_variant = if has_vm_callable {
@@ -511,12 +520,16 @@ fn try_generate_vm_native(
         }
     };
 
-    // TODO: figure out how to get the documentation in
+    let documentation_tokens = if docs.is_empty() {
+        quote! { None }
+    } else {
+        quote! { Some(String::from(#docs)) }
+    };
     let native_let = quote! {
         let native: std::rc::Rc<ndc_vm::value::NativeFunction> =
             std::rc::Rc::new(ndc_vm::value::NativeFunction {
                 name: String::from(#fn_name),
-                documentation: None,
+                documentation: #documentation_tokens,
                 static_type: ndc_core::StaticType::Function {
                     parameters: Some(vec![#(#param_types.clone()),*]),
                     return_type: Box::new(#return_static_type),

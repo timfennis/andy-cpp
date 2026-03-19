@@ -30,6 +30,7 @@ mod inner {
     /// Returns a copy of the input sequence converted to a list with the elements shuffled in random order.
     ///
     /// Note: this currently does consume iterators
+    #[function(return_type = Vec<_>)]
     pub fn shuffled(list: ndc_vm::value::SeqValue) -> anyhow::Result<ndc_vm::value::Value> {
         Ok(ndc_vm::value::Value::list(
             list.try_into_iter()

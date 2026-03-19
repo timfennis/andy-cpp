@@ -272,6 +272,7 @@ mod inner {
     }
 
     /// Returns a sorted copy of the input sequence as a list.
+    #[function(return_type = Vec<_>)]
     pub fn sorted(seq: ndc_vm::value::SeqValue) -> anyhow::Result<ndc_vm::value::Value> {
         let mut list: Vec<VmValue> = seq
             .try_into_iter()

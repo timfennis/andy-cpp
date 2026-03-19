@@ -1266,7 +1266,6 @@ dependencies = [
  "owo-colors",
  "rustyline",
  "strsim",
- "tap",
  "termimad",
  "tokio",
 ]
