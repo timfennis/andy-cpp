@@ -33,6 +33,13 @@ cargo run --bin ndc -- disassemble script.ndc
 
 # Show documentation (optionally filtered by query)
 cargo run --bin ndc -- docs [query] [--no-color]
+
+# Profile with perf (requires release-with-debug profile in Cargo.toml)
+cargo build --profile release-with-debug
+hyperfine --warmup 3 './target/release-with-debug/ndc script.ndc'
+perf stat ./target/release-with-debug/ndc script.ndc
+perf record -g --call-graph=dwarf -o /tmp/out.perf ./target/release-with-debug/ndc script.ndc
+perf report -i /tmp/out.perf --stdio --no-children --percent-limit=1
 ```
 
 ## Architecture

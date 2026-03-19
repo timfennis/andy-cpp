@@ -843,14 +843,16 @@ impl Vm {
             return Ok(None);
         };
 
-        let results: Result<Vec<Value>, VmError> = pairs
-            .into_iter()
-            .map(|(l, r)| Vm::call_function(inner_fn.clone(), vec![l, r], self.globals.clone()))
-            .collect();
-        let results = results.map_err(|mut e| {
-            e.span.get_or_insert(span);
-            e
-        })?;
+        let mut results = Vec::with_capacity(pairs.len());
+        for (l, r) in pairs {
+            let v = self
+                .call_callback(inner_fn.clone(), vec![l, r])
+                .map_err(|mut e| {
+                    e.span.get_or_insert(span);
+                    e
+                })?;
+            results.push(v);
+        }
 
         // Replace callee + args on the stack with the result tuple.
         self.stack.truncate(callee_idx);
