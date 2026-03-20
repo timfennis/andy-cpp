@@ -355,7 +355,11 @@ impl Object {
         }
     }
 
-    // TODO: why are we returning stupid types
+    /// Returns the best static type descriptor for this runtime value.
+    ///
+    /// Container element types (List, Map, Iterator, …) are reported as `Any`
+    /// because the VM does not track element types at runtime.  Tuple is the
+    /// exception: its element types are known from the concrete values it holds.
     pub fn static_type(&self) -> StaticType {
         match self {
             Self::Some(inner) => StaticType::Option(Box::new(inner.static_type())),
@@ -363,16 +367,47 @@ impl Object {
             Self::Complex(_) => StaticType::Complex,
             Self::Rational(_) => StaticType::Rational,
             Self::String(_) => StaticType::String,
-            Self::List(_) => StaticType::List(Box::new(StaticType::Any)),
-            Self::Tuple(_) => StaticType::Tuple(Vec::new()),
-            Self::Map { .. } => StaticType::Map {
-                key: Box::new(StaticType::Any),
-                value: Box::new(StaticType::Any),
-            },
+            Self::List(elements) => {
+                let elements = elements.borrow();
+                let elem_type = elements
+                    .iter()
+                    .map(|e| e.static_type())
+                    .reduce(|a, b| a.lub(&b))
+                    .unwrap_or(StaticType::Any);
+                StaticType::List(Box::new(elem_type))
+            }
+            Self::Tuple(elements) => {
+                StaticType::Tuple(elements.iter().map(|e| e.static_type()).collect())
+            }
+            Self::Map { entries, .. } => {
+                let entries = entries.borrow();
+                let key_type = entries
+                    .keys()
+                    .map(|k| k.static_type())
+                    .reduce(|a, b| a.lub(&b))
+                    .unwrap_or(StaticType::Any);
+                let value_type = entries
+                    .values()
+                    .map(|v| v.static_type())
+                    .reduce(|a, b| a.lub(&b))
+                    .unwrap_or(StaticType::Any);
+                StaticType::Map {
+                    key: Box::new(key_type),
+                    value: Box::new(value_type),
+                }
+            }
             Self::Function(f) => f.static_type(),
             Self::OverloadSet(_) => StaticType::Any,
             Self::Iterator(_) => StaticType::Iterator(Box::new(StaticType::Any)),
-            Self::Deque(_) => StaticType::Deque(Box::new(StaticType::Any)),
+            Self::Deque(elements) => {
+                let elements = elements.borrow();
+                let elem_type = elements
+                    .iter()
+                    .map(|e| e.static_type())
+                    .reduce(|a, b| a.lub(&b))
+                    .unwrap_or(StaticType::Any);
+                StaticType::Deque(Box::new(elem_type))
+            }
             Self::MinHeap(_) => StaticType::MinHeap(Box::new(StaticType::Any)),
             Self::MaxHeap(_) => StaticType::MaxHeap(Box::new(StaticType::Any)),
         }
