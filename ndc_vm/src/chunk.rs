@@ -4,7 +4,9 @@ use ndc_parser::CaptureSource;
 use std::rc::Rc;
 
 /// A single bytecode instruction.
-// NOTE: For now we just derive Copy for OpCode since it makes our live easier and it probably won't cost THAT much performance. In the future we might want to do some proper byte packing and dive into unsafe land to optimize further.
+// NOTE: OpCode cannot be Copy because the Closure variant holds Rc<[CaptureSource]>.
+// The dispatch loop accesses opcodes by reference to avoid cloning the 32-byte enum on
+// every iteration; see Vm::run_to_depth.
 #[derive(Clone, PartialEq, Eq)]
 pub enum OpCode {
     /// Call the function with `usize` arguments
@@ -161,8 +163,8 @@ impl Chunk {
         self.code.is_empty()
     }
     #[inline(always)]
-    pub fn opcode(&self, idx: usize) -> OpCode {
-        self.code[idx].clone()
+    pub fn opcode(&self, idx: usize) -> &OpCode {
+        &self.code[idx]
     }
 
     pub fn opcodes(&self) -> &[OpCode] {
