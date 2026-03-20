@@ -19,6 +19,27 @@ let multiply = pure fn (x, y) { x * y };
 > **Note:** the interpreter does not perform any checks to see if the function is actually pure. It's your
 > responsibility to ensure that functions don't have side-effects.
 
+### Performance: keep memoization keys small
+
+The cache key is computed by hashing **all arguments**. For container types like maps and lists this
+is an O(n) operation proportional to the number of elements. Passing large containers as arguments
+to a `pure fn` therefore adds hashing overhead on every call — even on cache hits.
+
+If a container is large and doesn't change between recursive calls (e.g. a lookup table or graph),
+capture it as an **upvalue** instead of passing it as an argument. The upvalue is not part of the
+cache key, so the memoization cost is proportional only to the arguments that actually vary.
+
+```ndc
+// Slow: `graph` is hashed on every call
+pure fn count(graph, node, visited) { ... }
+
+// Fast: `graph` captured as upvalue, only (node, visited) are hashed
+let graph = build_graph();
+pure fn count(node, visited) {
+    // use graph here
+}
+```
+
 ### Example: Fibornacci Sequence
 
 ```ndc
