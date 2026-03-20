@@ -36,8 +36,6 @@ pub enum Object {
     BigInt(num::BigInt),
     Complex(num::Complex<f64>),
     Rational(num::BigRational),
-    // String keeps its inner Rc<RefCell<String>> so the vm_bridge can share the
-    // allocation directly with the interpreter side without a separate sync step.
     String(Rc<RefCell<String>>),
     List(RefCell<Vec<Value>>),
     Tuple(Vec<Value>),

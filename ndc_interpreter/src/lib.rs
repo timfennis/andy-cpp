@@ -133,7 +133,7 @@ impl Interpreter {
         #[cfg(feature = "vm-trace")] input: &str,
         #[cfg(not(feature = "vm-trace"))] _input: &str,
         expressions: impl Iterator<Item = ExpressionLocation>,
-    ) -> Result<ndc_vm::Value, InterpreterError> {
+    ) -> Result<Value, InterpreterError> {
         use ndc_vm::{Function as VmFunction, Object as VmObject, Value as VmValue};
 
         let globals: Vec<VmValue> = self
