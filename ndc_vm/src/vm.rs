@@ -138,13 +138,13 @@ impl Vm {
 
         loop {
             let frame = self.frames.last_mut().expect("must not be empty");
-
-            let op = frame.opcode();
+            let ip = frame.ip;
+            let span = frame.closure.prototype.body.span(ip);
+            let op = frame.closure.prototype.body.opcode(ip);
+            frame.ip += 1;
 
             #[cfg(feature = "vm-trace")]
             {
-                let ip = frame.ip;
-                let span = frame.closure.prototype.body.span(ip);
                 let excerpt = self
                     .source
                     .as_deref()
@@ -155,9 +155,6 @@ impl Vm {
                     None => eprintln!("[VM] {ip:04} {op_str}"),
                 }
             }
-
-            let span = frame.closure.prototype.body.span(frame.ip);
-            frame.ip += 1;
 
             match op {
                 OpCode::Halt => {
@@ -181,16 +178,20 @@ impl Vm {
                     }
                 }
                 OpCode::Constant(idx) => {
+                    let idx = *idx;
                     self.stack
                         .push(frame.closure.prototype.body.constant(idx).clone());
                 }
                 OpCode::GetLocal(slot) => {
+                    let slot = *slot;
                     self.stack.push(self.stack[frame.slot(slot)].clone());
                 }
                 OpCode::GetGlobal(slot) => {
+                    let slot = *slot;
                     self.stack.push(self.globals[slot].clone());
                 }
                 OpCode::SetLocal(slot) => {
+                    let slot = *slot;
                     let value = self.stack.pop().expect("stack underflow");
                     if frame.slot(slot) < self.stack.len() {
                         self.stack[frame.slot(slot)] = value;
@@ -199,6 +200,7 @@ impl Vm {
                     }
                 }
                 OpCode::JumpIfFalse(offset) => {
+                    let offset = *offset;
                     let top = self.stack.last().expect("stack underflow");
                     match top {
                         Value::Bool(false) => {
@@ -215,6 +217,7 @@ impl Vm {
                     }
                 }
                 OpCode::JumpIfTrue(offset) => {
+                    let offset = *offset;
                     let top = self.stack.last().expect("stack underflow");
                     match top {
                         Value::Bool(true) => {
@@ -231,12 +234,14 @@ impl Vm {
                     }
                 }
                 OpCode::Jump(offset) => {
+                    let offset = *offset;
                     frame.ip = frame.ip.wrapping_add_signed(offset);
                 }
                 OpCode::Pop => {
                     self.stack.pop();
                 }
                 OpCode::Call(args) => {
+                    let args = *args;
                     if let Some(func) = self
                         .resolve_callee(args)
                         .map_err(|msg| VmError::new(msg, span))?
@@ -275,14 +280,17 @@ impl Vm {
                     }
                 }
                 OpCode::MakeList(size) => {
+                    let size = *size;
                     let data = self.stack.split_off(self.stack.len() - size);
                     self.stack.push(Value::Object(Rc::new(Object::list(data))));
                 }
                 OpCode::MakeTuple(size) => {
+                    let size = *size;
                     let data = self.stack.split_off(self.stack.len() - size);
                     self.stack.push(Value::Object(Rc::new(Object::Tuple(data))));
                 }
                 OpCode::MakeMap { pairs, has_default } => {
+                    let (pairs, has_default) = (*pairs, *has_default);
                     let default = if has_default {
                         Some(self.stack.pop().expect("expected default value on stack"))
                     } else {
@@ -299,11 +307,15 @@ impl Vm {
                     self.stack
                         .push(Value::Object(Rc::new(Object::map(map, default))));
                 }
-                OpCode::GetUpvalue(slot) => match frame.closure.upvalues[slot].borrow().deref() {
-                    UpvalueCell::Open(slot) => self.stack.push(self.stack[*slot].clone()),
-                    UpvalueCell::Closed(value) => self.stack.push(value.clone()),
-                },
+                OpCode::GetUpvalue(slot) => {
+                    let slot = *slot;
+                    match frame.closure.upvalues[slot].borrow().deref() {
+                        UpvalueCell::Open(slot) => self.stack.push(self.stack[*slot].clone()),
+                        UpvalueCell::Closed(value) => self.stack.push(value.clone()),
+                    }
+                }
                 OpCode::SetUpvalue(slot) => {
+                    let slot = *slot;
                     let value = self.stack.last().expect("stack underflow").clone();
                     let mut cell = frame.closure.upvalues[slot].borrow_mut();
                     match &mut *cell {
@@ -360,6 +372,7 @@ impl Vm {
                     }
                 }
                 OpCode::IterNext(offset) => {
+                    let offset = *offset;
                     let top = self.stack.last().expect("stack underflow");
                     let Value::Object(obj) = top else {
                         panic!("IterNext expects an iterator on the stack")
@@ -378,6 +391,7 @@ impl Vm {
                     }
                 }
                 OpCode::ListPush(slot) => {
+                    let slot = *slot;
                     let value = self.stack.pop().expect("stack underflow");
                     let frame = self.frames.last().expect("no frame");
                     let list_val = &self.stack[frame.slot(slot)];
@@ -390,6 +404,7 @@ impl Vm {
                     rc.borrow_mut().push(value);
                 }
                 OpCode::MapInsert(slot) => {
+                    let slot = *slot;
                     let value = self.stack.pop().expect("stack underflow");
                     let key = self.stack.pop().expect("stack underflow");
                     let frame = self.frames.last().expect("no frame");
@@ -403,6 +418,7 @@ impl Vm {
                     entries.borrow_mut().insert(key, value);
                 }
                 OpCode::MakeRange { inclusive, bounded } => {
+                    let (inclusive, bounded) = (*inclusive, *bounded);
                     let end = if bounded {
                         let v = self.stack.pop().expect("stack underflow");
                         let Value::Int(n) = v else {
@@ -429,6 +445,11 @@ impl Vm {
                     constant_idx: idx,
                     values,
                 } => {
+                    // Clone the Rc<[CaptureSource]> (just a refcount bump) and copy the index
+                    // so that `op`'s borrow of `self.frames` ends before we re-borrow the frame
+                    // and before `capture_upvalue` needs `&mut self`.
+                    let idx = *idx;
+                    let values = Rc::clone(values);
                     let frame = self.frames.last().expect("no frame");
                     let Value::Object(obj) = frame.closure.prototype.body.constant(idx) else {
                         panic!("invalid type");
@@ -459,9 +480,11 @@ impl Vm {
                     self.stack.push(closure);
                 }
                 OpCode::Unpack(size) => {
+                    let size = *size;
                     self.exec_unpack(size, span)?;
                 }
                 OpCode::CloseUpvalue(slot) => {
+                    let slot = *slot;
                     let frame_pointer = self.frames.last().expect("no frame").frame_pointer;
                     self.close_upvalues(frame_pointer + slot);
                 }
@@ -1021,11 +1044,6 @@ fn vectorization_pairs(left: &Value, right: &Value) -> Option<Vec<(Value, Value)
 }
 
 impl CallFrame {
-    #[inline(always)]
-    fn opcode(&mut self) -> OpCode {
-        self.closure.prototype.body.opcode(self.ip)
-    }
-
     #[inline(always)]
     fn slot(&self, slot: usize) -> usize {
         self.frame_pointer + slot

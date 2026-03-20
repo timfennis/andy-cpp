@@ -7,7 +7,7 @@ fn quicksort(arr) {
   return quicksort(left) ++ mid ++ quicksort(right);
 }
 
-print(quicksort([
+let arr = [
   -2756468492,
   2102458917,
   -4135848830,
@@ -108,4 +108,10 @@ print(quicksort([
   -2983676698,
   -739198794,
   3809134210
-]));
+];
+
+let result = [];
+for _ in 0..200 {
+  result = quicksort(arr);
+};
+print(result);
