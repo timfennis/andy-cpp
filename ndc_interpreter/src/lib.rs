@@ -1,25 +1,19 @@
 pub use ndc_core::{Parameter, StaticType, TypeSignature, compare, hash_map, int, num};
 
-pub mod function;
-pub mod heap;
-pub mod iterator;
 pub mod semantic;
-pub mod sequence;
-pub mod value;
-pub mod vm_bridge;
 
-use crate::function::EvaluationError;
 use crate::semantic::{Analyser, ScopeTree};
 use ndc_core::FunctionRegistry;
 use ndc_lexer::{Lexer, TokenLocation};
 use ndc_parser::ExpressionLocation;
 use ndc_vm::compiler::Compiler;
 use ndc_vm::value::CompiledFunction;
-use ndc_vm::{Function as VmFunction, Object as VmObject, Value as VmValue};
 use ndc_vm::{NativeFunction, Vm};
 use std::cell::RefCell;
 use std::io::{Stdout, Write};
 use std::rc::Rc;
+
+pub use ndc_vm::Value;
 
 pub trait InterpreterOutput: Write {
     fn get_output(&self) -> Option<&Vec<u8>>;
@@ -34,6 +28,17 @@ impl InterpreterOutput for Vec<u8> {
 impl InterpreterOutput for Stdout {
     fn get_output(&self) -> Option<&Vec<u8>> {
         None
+    }
+}
+
+struct WriteSink(Rc<RefCell<Box<dyn InterpreterOutput>>>);
+
+impl Write for WriteSink {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.borrow_mut().write(buf)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0.borrow_mut().flush()
     }
 }
 
@@ -128,7 +133,9 @@ impl Interpreter {
         #[cfg(feature = "vm-trace")] input: &str,
         #[cfg(not(feature = "vm-trace"))] _input: &str,
         expressions: impl Iterator<Item = ExpressionLocation>,
-    ) -> Result<value::Value, InterpreterError> {
+    ) -> Result<ndc_vm::Value, InterpreterError> {
+        use ndc_vm::{Function as VmFunction, Object as VmObject, Value as VmValue};
+
         let globals: Vec<VmValue> = self
             .registry
             .iter()
@@ -142,14 +149,14 @@ impl Interpreter {
         let result = match self.repl_state.take() {
             None => {
                 let (code, checkpoint) = Compiler::compile_resumable(expressions)?;
-                let sink = vm_bridge::WriteSink(Rc::clone(&self.output));
+                let sink = WriteSink(Rc::clone(&self.output));
                 let mut vm = Vm::new(code, globals).with_output(Box::new(sink));
                 #[cfg(feature = "vm-trace")]
                 {
                     vm = vm.with_source(input);
                 }
                 vm.run()?;
-                let result = vm_bridge::vm_to_interp(&vm.last_value(checkpoint.num_locals()));
+                let result = vm.last_value(checkpoint.num_locals());
                 self.repl_state = Some((vm, checkpoint));
                 result
             }
@@ -163,7 +170,7 @@ impl Interpreter {
                     vm.set_source(input);
                 }
                 vm.run()?;
-                let result = vm_bridge::vm_to_interp(&vm.last_value(new_checkpoint.num_locals()));
+                let result = vm.last_value(new_checkpoint.num_locals());
                 self.repl_state = Some((vm, new_checkpoint));
                 result
             }
@@ -194,11 +201,6 @@ pub enum InterpreterError {
     Compiler {
         #[from]
         cause: ndc_vm::CompileError,
-    },
-    #[error("Error while executing code")]
-    Evaluation {
-        #[from]
-        cause: EvaluationError,
     },
     #[error("{0}")]
     Vm(#[from] ndc_vm::VmError),

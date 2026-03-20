@@ -43,13 +43,6 @@ pub fn is_ref_mut_of(ty: &syn::Type, f: fn(&syn::Type) -> bool) -> bool {
     }
 }
 
-pub fn is_ref_of_slice_of_value(ty: &syn::Type) -> bool {
-    is_ref_of(ty, |ty| match ty {
-        syn::Type::Slice(syn::TypeSlice { elem, .. }) => has_path_match(elem.as_ref(), "Value"),
-        _ => false,
-    })
-}
-
 pub fn is_ref_of_bigint(ty: &syn::Type) -> bool {
     is_ref_of(ty, |ty| has_path_match(ty, "BigInt"))
 }

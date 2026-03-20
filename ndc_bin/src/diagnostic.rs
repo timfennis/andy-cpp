@@ -63,12 +63,6 @@ impl From<InterpreterError> for NdcReport {
                 label: "related to this",
                 help: None,
             },
-            InterpreterError::Evaluation { cause } => Self {
-                message: format!("EvaluationError: {}", cause),
-                span: Some(span_to_source_span(cause.span())),
-                label: "related to this",
-                help: cause.help_text().map(str::to_owned),
-            },
             InterpreterError::Compiler { cause } => Self {
                 message: format!("CompilerError: {}", cause),
                 span: Some(span_to_source_span(cause.span())),
