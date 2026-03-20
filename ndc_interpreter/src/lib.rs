@@ -1,7 +1,5 @@
 pub use ndc_core::{Parameter, StaticType, TypeSignature, compare, hash_map, int, num};
 
-pub mod environment;
-pub mod evaluate;
 pub mod function;
 pub mod heap;
 pub mod iterator;
@@ -10,10 +8,8 @@ pub mod sequence;
 pub mod value;
 pub mod vm_bridge;
 
-use crate::environment::{Environment, InterpreterOutput};
-use crate::evaluate::EvaluationError;
+use crate::function::EvaluationError;
 use crate::semantic::{Analyser, ScopeTree};
-use crate::value::Value;
 use ndc_core::FunctionRegistry;
 use ndc_lexer::{Lexer, TokenLocation};
 use ndc_parser::ExpressionLocation;
@@ -22,11 +18,28 @@ use ndc_vm::value::CompiledFunction;
 use ndc_vm::{Function as VmFunction, Object as VmObject, Value as VmValue};
 use ndc_vm::{NativeFunction, Vm};
 use std::cell::RefCell;
+use std::io::{Stdout, Write};
 use std::rc::Rc;
+
+pub trait InterpreterOutput: Write {
+    fn get_output(&self) -> Option<&Vec<u8>>;
+}
+
+impl InterpreterOutput for Vec<u8> {
+    fn get_output(&self) -> Option<&Vec<u8>> {
+        Some(self)
+    }
+}
+
+impl InterpreterOutput for Stdout {
+    fn get_output(&self) -> Option<&Vec<u8>> {
+        None
+    }
+}
 
 pub struct Interpreter {
     registry: FunctionRegistry<Rc<NativeFunction>>,
-    environment: Rc<RefCell<Environment>>, // TODO: remove this
+    output: Rc<RefCell<Box<dyn InterpreterOutput>>>,
     analyser: Analyser,
     /// Persistent REPL VM and the compiler checkpoint from the last run.
     /// `None` until the first `run_str` call; kept alive afterwards so that
@@ -40,16 +53,10 @@ impl Interpreter {
     where
         T: InterpreterOutput + 'static,
     {
-        Self::from_env(Environment::new(Box::new(dest)))
-    }
-
-    #[must_use]
-    pub fn from_env(environment: Environment) -> Self {
-        let global_identifiers = environment.get_global_identifiers();
         Self {
             registry: FunctionRegistry::default(),
-            environment: Rc::new(RefCell::new(environment)),
-            analyser: Analyser::from_scope_tree(ScopeTree::from_global_scope(global_identifiers)),
+            output: Rc::new(RefCell::new(Box::new(dest))),
+            analyser: Analyser::from_scope_tree(ScopeTree::from_global_scope(vec![])),
             repl_state: None,
         }
     }
@@ -65,13 +72,12 @@ impl Interpreter {
         self.analyser = Analyser::from_scope_tree(ScopeTree::from_global_scope(functions));
     }
 
-    #[must_use]
-    pub fn environment(self) -> Rc<RefCell<Environment>> {
-        self.environment
-    }
-
     pub fn functions(&self) -> impl Iterator<Item = &Rc<NativeFunction>> {
         self.registry.iter()
+    }
+
+    pub fn get_output(&self) -> Option<Vec<u8>> {
+        self.output.borrow().get_output().cloned()
     }
 
     pub fn analyse_str(
@@ -116,12 +122,13 @@ impl Interpreter {
 
         Ok(expressions)
     }
+
     fn interpret_vm(
         &mut self,
         #[cfg(feature = "vm-trace")] input: &str,
         #[cfg(not(feature = "vm-trace"))] _input: &str,
         expressions: impl Iterator<Item = ExpressionLocation>,
-    ) -> Result<Value, InterpreterError> {
+    ) -> Result<value::Value, InterpreterError> {
         let globals: Vec<VmValue> = self
             .registry
             .iter()
@@ -135,7 +142,7 @@ impl Interpreter {
         let result = match self.repl_state.take() {
             None => {
                 let (code, checkpoint) = Compiler::compile_resumable(expressions)?;
-                let sink = vm_bridge::WriteSink(self.environment.borrow().output_rc());
+                let sink = vm_bridge::WriteSink(Rc::clone(&self.output));
                 let mut vm = Vm::new(code, globals).with_output(Box::new(sink));
                 #[cfg(feature = "vm-trace")]
                 {

@@ -1,18 +1,15 @@
-use crate::environment::Environment;
-use crate::evaluate::{ErrorConverter, EvaluationError, EvaluationResult, evaluate_expression};
 use crate::hash_map::{DefaultHasher, HashMap};
 use crate::num::{BinaryOperatorError, Number};
-use crate::sequence::Sequence;
 use crate::value::Value;
 use derive_builder::Builder;
 use ndc_core::{Parameter, StaticType, TypeSignature};
 use ndc_lexer::Span;
-use ndc_parser::{ExpressionLocation, ResolvedVar};
 use ndc_vm::value::NativeFunction as VmNativeFunction;
 use std::cell::{BorrowError, BorrowMutError, RefCell};
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
+
 /// Wraps a VM function value for round-tripping through interpreter values.
 /// `identity` is the raw pointer of the `Rc<CompiledFunction>` prototype,
 /// used to implement stable equality for VM-compiled functions.
@@ -22,19 +19,6 @@ pub(crate) struct VmFunctionWrapper {
     pub(crate) vm_value: ndc_vm::Value,
     pub(crate) identity: Option<usize>,
     pub(crate) call: Option<Rc<dyn Fn(&mut [Value]) -> EvaluationResult>>,
-}
-
-/// Callable is a wrapper around a `OverloadedFunction` pointer and the environment to make it
-/// easy to have an executable function as a method signature in the standard library
-pub struct Callable<'a> {
-    pub function: Rc<Function>,
-    pub environment: &'a Rc<RefCell<Environment>>,
-}
-
-impl Callable<'_> {
-    pub fn call(&self, args: &mut [Value]) -> EvaluationResult {
-        self.function.call(args, self.environment)
-    }
 }
 
 #[derive(Clone, Builder)]
@@ -81,15 +65,6 @@ impl Function {
             .unwrap_or_default()
     }
 
-    pub fn from_body(body: FunctionBody) -> Self {
-        Self {
-            name: None,
-            documentation: None,
-            body,
-            vm_native: None,
-        }
-    }
-
     /// Attaches or replaces the VmNative body on this function.
     pub fn set_vm_native(&mut self, native: Rc<VmNativeFunction>) {
         self.vm_native = Some(native);
@@ -122,81 +97,23 @@ impl Function {
         }
     }
 
-    pub fn call(&self, args: &mut [Value], env: &Rc<RefCell<Environment>>) -> EvaluationResult {
-        let result = self.body.call(args, env);
+    pub fn call(&self, args: &mut [Value]) -> EvaluationResult {
+        let result = self.body.call(args);
 
         match result {
             Err(FunctionCarrier::Return(value)) | Ok(value) => Ok(value),
             e => e,
         }
     }
-
-    pub fn call_checked(
-        &self,
-        args: &mut [Value],
-        env: &Rc<RefCell<Environment>>,
-    ) -> EvaluationResult {
-        let arg_types = args.iter().map(|arg| arg.static_type()).collect::<Vec<_>>();
-
-        if self.static_type().is_fn_and_matches(&arg_types) {
-            self.call(args, env)
-        } else {
-            Err(FunctionCarrier::FunctionTypeMismatch)
-        }
-    }
-
-    pub fn call_vectorized(
-        &self,
-        args: &mut [Value],
-        env: &Rc<RefCell<Environment>>,
-    ) -> EvaluationResult {
-        let [left, right] = args else {
-            panic!("incorrect argument count for vectorization should have been handled by caller");
-        };
-
-        let result = match (left, right) {
-            (
-                Value::Sequence(Sequence::Tuple(left_rc)),
-                Value::Sequence(Sequence::Tuple(right_rc)),
-            ) => left_rc
-                .iter()
-                .zip(right_rc.iter())
-                .map(|(l, r)| self.call(&mut [l.clone(), r.clone()], env))
-                .collect::<Result<Vec<_>, _>>()?,
-            (left @ Value::Number(_), Value::Sequence(Sequence::Tuple(right_rc))) => right_rc
-                .iter()
-                .map(|r| self.call(&mut [left.clone(), r.clone()], env))
-                .collect::<Result<Vec<_>, _>>()?,
-            (Value::Sequence(Sequence::Tuple(left_rc)), right @ Value::Number(_)) => left_rc
-                .iter()
-                .map(|l| self.call(&mut [l.clone(), right.clone()], env))
-                .collect::<Result<Vec<_>, _>>()?,
-            _ => panic!("caller should handle all checks before vectorizing"),
-        };
-
-        Ok(Value::Sequence(Sequence::Tuple(Rc::new(result))))
-    }
 }
 
 #[derive(Clone)]
 pub enum FunctionBody {
-    Closure {
-        type_signature: TypeSignature,
-        body: ExpressionLocation,
-        return_type: StaticType,
-        upvalue_cells: Vec<Rc<RefCell<Value>>>,
-        environment: Rc<RefCell<Environment>>,
-    },
     NumericUnaryOp {
         body: fn(number: Number) -> Number,
     },
     NumericBinaryOp {
         body: fn(left: Number, right: Number) -> Result<Number, BinaryOperatorError>,
-    },
-    GenericFunction {
-        type_signature: TypeSignature,
-        return_type: StaticType,
-        function: fn(&mut [Value], &Rc<RefCell<Environment>>) -> EvaluationResult,
     },
     Memoized {
         cache: RefCell<HashMap<u64, Value>>,
@@ -227,31 +144,16 @@ pub enum FunctionBody {
 impl FunctionBody {
     pub fn arity(&self) -> Option<usize> {
         match self {
-            Self::Closure { type_signature, .. } => type_signature.arity(),
             Self::NumericUnaryOp { .. } => Some(1),
             Self::NumericBinaryOp { .. } => Some(2),
-            Self::GenericFunction { type_signature, .. } => type_signature.arity(),
             Self::Memoized { function, .. } => function.arity(),
             Self::Opaque { .. } | Self::NativeClosure { .. } => None,
             Self::VmNative { type_signature, .. } => type_signature.arity(),
         }
     }
 
-    pub fn generic(
-        type_signature: TypeSignature,
-        return_type: StaticType,
-        function: fn(&mut [Value], &Rc<RefCell<Environment>>) -> EvaluationResult,
-    ) -> Self {
-        Self::GenericFunction {
-            type_signature,
-            return_type,
-            function,
-        }
-    }
-
     fn type_signature(&self) -> TypeSignature {
         match self {
-            Self::Closure { type_signature, .. } => type_signature.clone(),
             Self::Memoized { cache: _, function } => function.type_signature(),
             Self::NumericUnaryOp { .. } => {
                 TypeSignature::Exact(vec![Parameter::new("num", StaticType::Number)])
@@ -260,7 +162,6 @@ impl FunctionBody {
                 Parameter::new("left", StaticType::Number),
                 Parameter::new("right", StaticType::Number),
             ]),
-            Self::GenericFunction { type_signature, .. } => type_signature.clone(),
             Self::Opaque { .. } | Self::NativeClosure { .. } => TypeSignature::Variadic,
             Self::VmNative { type_signature, .. } => type_signature.clone(),
         }
@@ -268,9 +169,6 @@ impl FunctionBody {
 
     pub fn return_type(&self) -> &StaticType {
         match self {
-            Self::Closure { return_type, .. } | Self::GenericFunction { return_type, .. } => {
-                return_type
-            }
             Self::NumericUnaryOp { .. } | Self::NumericBinaryOp { .. } => &StaticType::Number,
             Self::Memoized { function, .. } => function.return_type(),
             Self::Opaque { static_type, .. } | Self::NativeClosure { static_type, .. } => {
@@ -279,27 +177,9 @@ impl FunctionBody {
             Self::VmNative { return_type, .. } => return_type,
         }
     }
-    pub fn call(&self, args: &mut [Value], env: &Rc<RefCell<Environment>>) -> EvaluationResult {
+
+    pub fn call(&self, args: &mut [Value]) -> EvaluationResult {
         match self {
-            Self::Closure {
-                body,
-                upvalue_cells,
-                environment,
-                ..
-            } => {
-                let mut local_scope =
-                    Environment::new_function_scope_with_cells(environment, upvalue_cells);
-
-                for (position, value) in args.iter().enumerate() {
-                    local_scope.set(ResolvedVar::Local { slot: position }, value.clone())
-                }
-
-                let local_scope = Rc::new(RefCell::new(local_scope));
-                match evaluate_expression(body, &local_scope) {
-                    Err(FunctionCarrier::Return(v)) => Ok(v),
-                    r => r,
-                }
-            }
             Self::NumericUnaryOp { body } => match args {
                 [Value::Number(num)] => Ok(Value::Number(body(num.clone()))),
                 [v] => Err(FunctionCallError::ArgumentTypeError {
@@ -334,7 +214,6 @@ impl FunctionBody {
                 }
                 .into()),
             },
-            Self::GenericFunction { function, .. } => function(args, env),
             Self::Opaque { data, .. } => {
                 if let Some(wrapper) = data.downcast_ref::<VmFunctionWrapper>() {
                     if let Some(call) = &wrapper.call {
@@ -383,7 +262,7 @@ impl FunctionBody {
                 let key = hasher.finish();
 
                 if !cache.borrow().contains_key(&key) {
-                    let result = function.call(args, env)?;
+                    let result = function.call(args)?;
                     cache.borrow_mut().insert(key, result);
                 }
 
@@ -467,8 +346,57 @@ impl From<BorrowError> for FunctionCarrier {
     }
 }
 
-impl From<crate::evaluate::index::IndexError> for FunctionCarrier {
-    fn from(value: crate::evaluate::index::IndexError) -> Self {
-        Self::IntoEvaluationError(Box::new(value))
+pub type EvaluationResult = Result<Value, FunctionCarrier>;
+
+#[derive(thiserror::Error, Debug)]
+#[error("{text}")]
+pub struct EvaluationError {
+    text: String,
+    span: Span,
+    help_text: Option<String>,
+}
+
+impl EvaluationError {
+    #[must_use]
+    pub fn with_help(text: String, span: Span, help_text: String) -> Self {
+        Self {
+            text,
+            span,
+            help_text: Some(help_text),
+        }
+    }
+
+    #[must_use]
+    pub fn new(message: String, span: Span) -> Self {
+        Self {
+            text: message,
+            span,
+            help_text: None,
+        }
+    }
+
+    pub fn span(&self) -> Span {
+        self.span
+    }
+
+    pub fn help_text(&self) -> Option<&str> {
+        self.help_text.as_deref()
+    }
+}
+
+pub trait ErrorConverter: fmt::Debug + fmt::Display {
+    fn as_evaluation_error(&self, span: Span) -> EvaluationError;
+}
+
+impl<E> ErrorConverter for E
+where
+    E: fmt::Debug + fmt::Display,
+{
+    fn as_evaluation_error(&self, span: Span) -> EvaluationError {
+        EvaluationError {
+            text: format!("{self}"),
+            span,
+            help_text: None,
+        }
     }
 }

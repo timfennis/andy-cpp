@@ -16,10 +16,10 @@ use ndc_vm::value::{
     Value as VmValue,
 };
 
-use crate::environment::{Environment, InterpreterOutput};
+use crate::InterpreterOutput;
 
 /// Wraps a shared interpreter output `Rc` as a plain `Write` for the VM.
-/// Writes go to the same buffer that `Environment::get_output()` reads from,
+/// Writes go to the same buffer that `Interpreter::get_output()` reads from,
 /// so output captured by VM-native built-ins (e.g. `print`) is visible after
 /// the VM finishes running.
 pub(crate) struct WriteSink(pub Rc<RefCell<Box<dyn InterpreterOutput>>>);
@@ -32,8 +32,9 @@ impl Write for WriteSink {
         self.0.borrow_mut().flush()
     }
 }
-use crate::evaluate::EvaluationResult;
-use crate::function::{FunctionBody, FunctionBuilder, FunctionCarrier, VmFunctionWrapper};
+use crate::function::{
+    EvaluationResult, FunctionBody, FunctionBuilder, FunctionCarrier, VmFunctionWrapper,
+};
 use crate::iterator::ValueIterator;
 use crate::sequence::Sequence;
 use crate::value::Value as InterpValue;
@@ -336,8 +337,7 @@ fn interp_to_vm_for_inverted_bridge(value: &InterpValue) -> VmValue {
             static_type,
             func: NativeFunc::Simple(Box::new(move |vm_args: &[VmValue]| {
                 let mut interp_args: Vec<InterpValue> = vm_args.iter().map(vm_to_interp).collect();
-                let dummy_env = Rc::new(RefCell::new(Environment::new(Box::new(Vec::<u8>::new()))));
-                f.call(&mut interp_args, &dummy_env)
+                f.call(&mut interp_args)
                     .map(|v| interp_to_vm(v))
                     .map_err(|e| VmError::native(e.to_string()))
             })),

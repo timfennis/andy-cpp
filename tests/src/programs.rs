@@ -45,9 +45,7 @@ fn run_ndc_test(path: PathBuf) -> Result<(), std::io::Error> {
     }
 
     if !expect_output.is_empty() {
-        let environment = interpreter.environment();
-        let environment = environment.borrow();
-        let output = environment
+        let output = interpreter
             .get_output()
             .expect("interpreter must have output in test context");
         let output = String::from_utf8(output).expect("test output must be valid UTF-8");
