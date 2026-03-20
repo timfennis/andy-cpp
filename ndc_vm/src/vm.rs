@@ -961,11 +961,17 @@ impl Vm {
         Ok(())
     }
 
-    fn resolve_var(&self, var: &ResolvedVar, frame_pointer: usize) -> &Value {
+    fn resolve_var(&self, var: &ResolvedVar, frame_pointer: usize) -> Value {
         match var {
-            ResolvedVar::Global { slot } => &self.globals[*slot],
-            ResolvedVar::Local { slot } => &self.stack[frame_pointer + slot],
-            ResolvedVar::Upvalue { .. } => todo!("upvalue resolution in overload sets"),
+            ResolvedVar::Global { slot } => self.globals[*slot].clone(),
+            ResolvedVar::Local { slot } => self.stack[frame_pointer + slot].clone(),
+            ResolvedVar::Upvalue { slot } => {
+                let frame = self.frames.last().expect("no frame");
+                match &*frame.closure.upvalues[*slot].borrow() {
+                    UpvalueCell::Open(stack_slot) => self.stack[*stack_slot].clone(),
+                    UpvalueCell::Closed(value) => value.clone(),
+                }
+            }
         }
     }
 }
