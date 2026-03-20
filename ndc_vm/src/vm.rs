@@ -72,22 +72,6 @@ impl Vm {
     }
 
     /// Create a minimal VM with no call frames, used as a `&mut Vm` context
-    /// when calling a native function from outside the VM (e.g. the inverted
-    /// interpreter bridge). The native function receives `&mut self` but in
-    /// these paths it is only used for `VmCallable` construction; `globals()`
-    /// returns an empty slice matching the previous `&[]` behaviour.
-    pub fn stub() -> Self {
-        Self {
-            stack: Vec::new(),
-            globals: Vec::new(),
-            frames: Vec::new(),
-            open_upvalues: Vec::new(),
-            output: Box::new(std::io::stdout()),
-            #[cfg(feature = "vm-trace")]
-            source: None,
-        }
-    }
-
     /// Replace the output sink used by I/O built-ins (e.g. `print`, `dbg`).
     /// Call this before `run()` to redirect output away from stdout.
     pub fn with_output(mut self, output: Box<dyn Write>) -> Self {

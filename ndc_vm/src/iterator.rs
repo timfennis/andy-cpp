@@ -20,22 +20,14 @@ pub trait VmIterator {
     }
 
     /// If this iterator represents a range, returns `(start, end, inclusive)`.
-    /// Used by the VM bridge to convert ranges back to interpreter range values.
-    /// TODO: remove once the VM bridge (vm_bridge.rs) is gone.
     fn range_bounds(&self) -> Option<(i64, i64, bool)> {
         None
     }
 
     /// If this iterator represents an unbounded range (`start..`), returns the start.
-    /// TODO: remove once the VM bridge (vm_bridge.rs) is gone.
     fn unbounded_range_start(&self) -> Option<i64> {
         None
     }
-
-    /// For downcasting — returns `self` as `&dyn Any`.
-    /// Used by the VM bridge to detect and round-trip interpreter iterators.
-    /// TODO: remove once the VM bridge (vm_bridge.rs) is gone.
-    fn as_any(&self) -> &dyn std::any::Any;
 
     /// Returns a new independent iterator with the same current state (for `deepcopy`).
     /// The default implementation returns `None`; override for clonable iterator types.
@@ -79,10 +71,6 @@ impl VmIterator for RangeIter {
 
     fn range_bounds(&self) -> Option<(i64, i64, bool)> {
         Some((self.current, self.end, false))
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
     }
 
     fn deep_copy(&self) -> Option<SharedIterator> {
@@ -136,10 +124,6 @@ impl VmIterator for RangeInclusiveIter {
         Some((self.current, self.end, true))
     }
 
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
     fn deep_copy(&self) -> Option<SharedIterator> {
         Some(Rc::new(RefCell::new(Self {
             current: self.current,
@@ -169,10 +153,6 @@ impl VmIterator for UnboundedRangeIter {
 
     fn unbounded_range_start(&self) -> Option<i64> {
         Some(self.current)
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
     }
 
     fn deep_copy(&self) -> Option<SharedIterator> {
@@ -238,10 +218,6 @@ impl VmIterator for SeqIter {
         (remaining, Some(remaining))
     }
 
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
     fn deep_copy(&self) -> Option<SharedIterator> {
         Some(Rc::new(RefCell::new(Self {
             obj: Rc::clone(&self.obj),
@@ -285,10 +261,6 @@ impl VmIterator for MapIter {
         let remaining = self.entries.len() - self.index;
         (remaining, Some(remaining))
     }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
 }
 
 /// Iterates over a min-heap, yielding elements in sorted (ascending) order.
@@ -321,10 +293,6 @@ impl VmIterator for MinHeapIter {
         let remaining = self.entries.len() - self.index;
         (remaining, Some(remaining))
     }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
 }
 
 /// Iterates over a max-heap, yielding elements in arbitrary (heap) order.
@@ -355,10 +323,6 @@ impl VmIterator for MaxHeapIter {
     fn size_hint(&self) -> (usize, Option<usize>) {
         let remaining = self.entries.len() - self.index;
         (remaining, Some(remaining))
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
     }
 }
 
@@ -411,10 +375,6 @@ impl VmIterator for RepeatIter {
         }
     }
 
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
     fn deep_copy(&self) -> Option<SharedIterator> {
         Some(Rc::new(RefCell::new(Self {
             value: self.value.clone(),
@@ -452,9 +412,5 @@ impl VmIterator for StringIter {
         let remaining = &s[self.byte_offset..];
         let len = remaining.chars().count();
         (len, Some(len))
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
     }
 }
