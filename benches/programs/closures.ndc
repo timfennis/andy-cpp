@@ -1,0 +1,3 @@
+let adders = [fn(x) => x + i for i in 0..10_000];
+let result = adders.map(fn(f) => f(0)).sum;
+print(result);
