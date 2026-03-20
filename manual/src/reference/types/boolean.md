@@ -15,7 +15,7 @@ Operators defined for booleans:
 | `!` | not |
 | `or` | lazy logical or |
 | `and` | lazy logical and |
-| `not` | logical not like `!` but lower presedence |
+| `not` | logical not like `!` but lower precedence |
 
 ## Lazy evaluation of `and` and `or`
 

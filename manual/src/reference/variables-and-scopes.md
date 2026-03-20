@@ -42,7 +42,7 @@ print(x); // 3
 
 ## Destructuring
 
-Destructuring is more similar to how it works in python and cares mostly about where comma's are and not so much about the delimiters (`[]`, `()`) used.
+Destructuring is more similar to how it works in python and cares mostly about where commas are and not so much about the delimiters (`[]`, `()`) used.
 
 The statements below are all equivalent:
 

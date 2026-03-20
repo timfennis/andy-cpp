@@ -21,7 +21,7 @@ list without creating an intermediary list first.
 
 Note: I stole this feature from [Noulith](https://github.com/betaveros/noulith).
 
-Augmented assignment is not limited to built in operators, you can also use built in function or user created functions to agument assignment. Consider the following example:
+Augmented assignment is not limited to built in operators, you can also use built in function or user created functions to augment assignment. Consider the following example:
 
 ```ndc
 let x = 3;

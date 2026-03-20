@@ -40,7 +40,7 @@ pure fn count(node, visited) {
 }
 ```
 
-### Example: Fibornacci Sequence
+### Example: Fibonacci Sequence
 
 ```ndc
 pure fn fib (n) {

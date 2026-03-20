@@ -20,7 +20,7 @@ for item in my_tuple {
 You can create a 1-length tuple by adding a usually optional trailing comma inside the expression:
 
 ```ndc
-assert-eq((1,).len(), 1);
+assert_eq((1,).len(), 1);
 ```
 
 ## Copy-on-write

@@ -24,7 +24,7 @@ let my_function = fn(a, b) => a + b;
 // Also works for named functions
 fn foo() => "whatever";
 
-// Note that comma's have a very low presedence in this example x is a tuple (function, 3)
+// Note that commas have a very low precedence in this example x is a tuple (function, 3)
 let x = fn(y) => y, 3;
 
 // If you want to return a tuple from a function written in this way you must use parentheses
