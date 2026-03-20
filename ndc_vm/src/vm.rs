@@ -530,17 +530,16 @@ impl Vm {
     /// starting at `frame_pointer`. Called just before a frame's stack window
     /// is reclaimed so that closures retaining those cells keep live copies.
     fn close_upvalues(&mut self, frame_pointer: usize) {
-        for cell in &self.open_upvalues {
+        self.open_upvalues.retain_mut(|cell| {
             let mut borrow = cell.borrow_mut();
             if let UpvalueCell::Open(slot) = *borrow
                 && slot >= frame_pointer
             {
                 *borrow = UpvalueCell::Closed(self.stack[slot].clone());
+                return false;
             }
-        }
-        // Remove the cells we just closed; outer-frame Open cells stay.
-        self.open_upvalues
-            .retain(|c| matches!(*c.borrow(), UpvalueCell::Open(_)));
+            true
+        });
     }
 
     fn dispatch_call(&mut self, func: Function, args: usize) -> Result<(), VmError> {
@@ -799,25 +798,42 @@ impl Vm {
         }
 
         let callee_idx = self.stack.len() - args - 1;
-        let candidates = match &self.stack[callee_idx] {
-            Value::Object(obj) => match obj.as_ref() {
-                Object::OverloadSet(candidates) => candidates.clone(),
-                _ => return Ok(None),
-            },
-            _ => return Ok(None),
-        };
 
-        let left = self.stack[self.stack.len() - 2].clone();
-        let right = self.stack[self.stack.len() - 1].clone();
+        // Use a block to scope all shared borrows of self.stack so they are
+        // dropped before the &mut self calls (call_callback, truncate) below.
+        let (inner_fn, left, right) = {
+            // P5: borrow candidates rather than cloning the Vec.
+            let candidates: &[ResolvedVar] = match &self.stack[callee_idx] {
+                Value::Object(obj) => match obj.as_ref() {
+                    Object::OverloadSet(candidates) => candidates,
+                    _ => return Ok(None),
+                },
+                _ => return Ok(None),
+            };
+
+            let left = &self.stack[self.stack.len() - 2];
+            let right = &self.stack[self.stack.len() - 1];
+
+            // P4: check shape and build a two-element probe for overload lookup
+            // before committing to a full Vec allocation.
+            let left_tup = as_numeric_tuple(left);
+            let right_tup = as_numeric_tuple(right);
+            let probe: [Value; 2] = match (left_tup, right_tup) {
+                (Some(ls), Some(rs)) if ls.len() == rs.len() => [ls[0].clone(), rs[0].clone()],
+                (None, Some(rs)) if left.is_number() => [left.clone(), rs[0].clone()],
+                (Some(ls), None) if right.is_number() => [ls[0].clone(), right.clone()],
+                _ => return Ok(None),
+            };
+
+            let Some(inner_fn) = self.find_overload(candidates, &probe) else {
+                return Ok(None);
+            };
+
+            (inner_fn, left.clone(), right.clone())
+        };
 
         let Some(pairs) = vectorization_pairs(&left, &right) else {
-            return Ok(None);
-        };
-
-        // Use the first pair's elements to find a matching inner function.
-        let first_elems = [pairs[0].0.clone(), pairs[0].1.clone()];
-        let Some(inner_fn) = self.find_overload(&candidates, &first_elems) else {
-            return Ok(None);
+            unreachable!("shape was already verified above")
         };
 
         let mut results = Vec::with_capacity(pairs.len());
