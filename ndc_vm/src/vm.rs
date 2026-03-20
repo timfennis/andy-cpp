@@ -986,7 +986,7 @@ fn as_numeric_tuple(value: &Value) -> Option<&Vec<Value>> {
     let Object::Tuple(elems) = obj.as_ref() else {
         return None;
     };
-    if !elems.is_empty() && elems.iter().all(|e| e.static_type().is_number()) {
+    if !elems.is_empty() && elems.iter().all(|e| e.is_number()) {
         Some(elems)
     } else {
         None
@@ -1003,8 +1003,8 @@ fn as_numeric_tuple(value: &Value) -> Option<&Vec<Value>> {
 fn vectorization_pairs(left: &Value, right: &Value) -> Option<Vec<(Value, Value)>> {
     let left_tuple = as_numeric_tuple(left);
     let right_tuple = as_numeric_tuple(right);
-    let left_is_scalar = left.static_type().is_number();
-    let right_is_scalar = right.static_type().is_number();
+    let left_is_scalar = left.is_number();
+    let right_is_scalar = right.is_number();
 
     match (left_tuple, right_tuple) {
         (Some(ls), Some(rs)) if ls.len() == rs.len() => {

@@ -203,6 +203,15 @@ impl Value {
         }
     }
 
+    /// Returns the static type of this value.
+    ///
+    /// # Performance
+    ///
+    /// **O(n) for `List`, `Map`, and `Deque`** — these variants iterate all
+    /// elements to compute the element type via `lub`.  Avoid calling this in
+    /// hot paths on container values.  Use the dedicated helpers instead:
+    ///
+    /// - [`Value::is_number`] — O(1) check for numeric types
     pub fn static_type(&self) -> StaticType {
         match self {
             Self::Int(_) => StaticType::Int,
@@ -210,6 +219,21 @@ impl Value {
             Self::Bool(_) => StaticType::Bool,
             Self::None => StaticType::Option(Box::new(StaticType::Any)),
             Self::Object(obj) => obj.static_type(),
+        }
+    }
+
+    /// Returns `true` if this value is a numeric type (Int, Float, Rational, or Complex).
+    ///
+    /// Prefer this over `self.static_type().is_number()` in hot paths — this is O(1)
+    /// and never allocates, whereas `static_type()` on containers is O(n).
+    pub fn is_number(&self) -> bool {
+        match self {
+            Self::Int(_) | Self::Float(_) => true,
+            Self::Object(obj) => matches!(
+                obj.as_ref(),
+                Object::BigInt(_) | Object::Rational(_) | Object::Complex(_)
+            ),
+            _ => false,
         }
     }
 
