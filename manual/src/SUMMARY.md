@@ -33,5 +33,4 @@
 - [Memoization](./features/memoization.md)
 
 # Troubleshooting
-- [Stackoverflow](./troubleshooting/stackoverflow.md)
 - [Overload dispatch with collections](./troubleshooting/overload-dispatch-collections.md)

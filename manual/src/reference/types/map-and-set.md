@@ -39,7 +39,7 @@ defaultdict[33] += 7; // adds 7 to 0 and associates it to key 33
 ## Default functions
 
 You may also specify the default value as a function, in this case the function is evaluated every time a new value is produced.
-This is usefull when you want the default value of the dictionary to be a new list instead of a pointer to the same list.
+This is useful when you want the default value of the dictionary to be a new list instead of a pointer to the same list.
 
 ```ndc
 let dd = %{:fn() => []};
@@ -60,7 +60,7 @@ print(dd["test"](5)); // 25
 
 ## Operators
 
-| Operator | Function | Support agumented assignment <sup>[[1]](../../features/augmented-assignment.md)</sup> | Augmentable with `not` |
+| Operator | Function | Support augmented assignment <sup>[[1]](../../features/augmented-assignment.md)</sup> | Augmentable with `not` |
 | :-: | --- | --- | --- |
 | `\|` | Union | `true` | `false` |
 | `&` | Intersection | `true` | `false` |
