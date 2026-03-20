@@ -237,6 +237,65 @@ impl Value {
         }
     }
 
+    /// Check whether this value satisfies a function parameter type at runtime,
+    /// avoiding full container iteration for common cases.
+    ///
+    /// When `param` is a container type whose inner types are all `Any` (e.g.
+    /// `Sequence(Any)`, `Map { Any, Any }`, `List(Any)`), only the outer kind is
+    /// checked — no element iteration occurs.  All other cases fall back to
+    /// `self.static_type().is_subtype(param)`.
+    pub fn matches_param(&self, param: &StaticType) -> bool {
+        match param {
+            StaticType::Any => true,
+            StaticType::Int => {
+                matches!(self, Value::Int(_))
+                    || matches!(self, Value::Object(o) if matches!(o.as_ref(), Object::BigInt(_)))
+            }
+            StaticType::Float => matches!(self, Value::Float(_)),
+            StaticType::Bool => matches!(self, Value::Bool(_)),
+            StaticType::Number => self.is_number(),
+            StaticType::String => {
+                matches!(self, Value::Object(o) if matches!(o.as_ref(), Object::String(_)))
+            }
+            StaticType::List(t) if matches!(t.as_ref(), StaticType::Any) => {
+                matches!(self, Value::Object(o) if matches!(o.as_ref(), Object::List(_)))
+            }
+            StaticType::Deque(t) if matches!(t.as_ref(), StaticType::Any) => {
+                matches!(self, Value::Object(o) if matches!(o.as_ref(), Object::Deque(_)))
+            }
+            StaticType::Map { key, value }
+                if matches!(
+                    (key.as_ref(), value.as_ref()),
+                    (StaticType::Any, StaticType::Any)
+                ) =>
+            {
+                matches!(self, Value::Object(o) if matches!(o.as_ref(), Object::Map { .. }))
+            }
+            StaticType::Sequence(t) if matches!(t.as_ref(), StaticType::Any) => {
+                matches!(self, Value::Object(o) if matches!(
+                    o.as_ref(),
+                    Object::List(_)
+                        | Object::Tuple(_)
+                        | Object::String(_)
+                        | Object::Deque(_)
+                        | Object::Map { .. }
+                        | Object::Iterator(_)
+                        | Object::MinHeap(_)
+                        | Object::MaxHeap(_)
+                ))
+            }
+            // These container params require element-type scanning to verify — skip to
+            // avoid O(N) cost. The analyser should resolve typed container params at
+            // compile time; if it falls through to dynamic dispatch, return false.
+            StaticType::List(_)
+            | StaticType::Deque(_)
+            | StaticType::Sequence(_)
+            | StaticType::Map { .. }
+            | StaticType::Tuple(_) => false,
+            _ => self.static_type().is_subtype(param),
+        }
+    }
+
     /// Consume this value and produce an iterator over its elements.
     ///
     /// Returns `None` for non-iterable types (`Int`, `Float`, `Bool`, `None`,

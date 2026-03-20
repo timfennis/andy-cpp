@@ -409,8 +409,9 @@ impl VmIterator for StringIter {
 
     fn size_hint(&self) -> (usize, Option<usize>) {
         let s = self.string.borrow();
-        let remaining = &s[self.byte_offset..];
-        let len = remaining.chars().count();
-        (len, Some(len))
+        let remaining_bytes = s.len() - self.byte_offset;
+        // Byte length is a valid upper bound (each char is 1–4 bytes).
+        // Exact char count would require an O(n) scan.
+        (0, Some(remaining_bytes))
     }
 }

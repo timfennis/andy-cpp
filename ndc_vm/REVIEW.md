@@ -112,7 +112,7 @@ the stack instead; all borrows drop before the `&mut self` calls below.
 
 ---
 
-### P6 — `StringIter::size_hint` is O(n)
+### ~~P6 — `StringIter::size_hint` is O(n)~~ ✅ Fixed
 **File:** `iterator.rs:411` | **Axes:** Performance
 
 `remaining.chars().count()` scans the entire remaining string on every `size_hint`
