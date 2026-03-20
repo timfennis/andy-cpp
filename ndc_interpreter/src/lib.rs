@@ -1,48 +1,39 @@
-pub use ndc_core::{Parameter, StaticType, TypeSignature, compare, hash_map, int, num};
-
 use ndc_analyser::{Analyser, ScopeTree};
 use ndc_core::FunctionRegistry;
 use ndc_lexer::{Lexer, TokenLocation};
 use ndc_parser::ExpressionLocation;
 use ndc_vm::compiler::Compiler;
 use ndc_vm::value::CompiledFunction;
-use ndc_vm::{NativeFunction, Vm};
+use ndc_vm::{NativeFunction, Value, Vm};
 use std::cell::RefCell;
-use std::io::{Stdout, Write};
+use std::io::Write;
 use std::rc::Rc;
 
-pub use ndc_vm::Value;
-
-pub trait InterpreterOutput: Write {
-    fn get_output(&self) -> Option<&Vec<u8>>;
+#[derive(Clone)]
+enum OutputSink {
+    Stdout,
+    Buffer(Rc<RefCell<Vec<u8>>>),
 }
 
-impl InterpreterOutput for Vec<u8> {
-    fn get_output(&self) -> Option<&Vec<u8>> {
-        Some(self)
-    }
-}
-
-impl InterpreterOutput for Stdout {
-    fn get_output(&self) -> Option<&Vec<u8>> {
-        None
-    }
-}
-
-struct WriteSink(Rc<RefCell<Box<dyn InterpreterOutput>>>);
-
-impl Write for WriteSink {
+impl Write for OutputSink {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0.borrow_mut().write(buf)
+        match self {
+            OutputSink::Stdout => std::io::stdout().write(buf),
+            OutputSink::Buffer(vec) => vec.borrow_mut().write(buf),
+        }
     }
+
     fn flush(&mut self) -> std::io::Result<()> {
-        self.0.borrow_mut().flush()
+        match self {
+            OutputSink::Stdout => std::io::stdout().flush(),
+            OutputSink::Buffer(vec) => vec.borrow_mut().flush(),
+        }
     }
 }
 
 pub struct Interpreter {
     registry: FunctionRegistry<Rc<NativeFunction>>,
-    output: Rc<RefCell<Box<dyn InterpreterOutput>>>,
+    output: OutputSink,
     analyser: Analyser,
     /// Persistent REPL VM and the compiler checkpoint from the last run.
     /// `None` until the first `run_str` call; kept alive afterwards so that
@@ -51,14 +42,23 @@ pub struct Interpreter {
 }
 
 impl Interpreter {
+    /// Create an interpreter that writes output to stdout.
     #[must_use]
-    pub fn new<T>(dest: T) -> Self
-    where
-        T: InterpreterOutput + 'static,
-    {
+    pub fn new() -> Self {
+        Self::from_sink(OutputSink::Stdout)
+    }
+
+    /// Create an interpreter that captures output into an internal buffer,
+    /// retrievable via [`get_output`].
+    #[must_use]
+    pub fn capturing() -> Self {
+        Self::from_sink(OutputSink::Buffer(Rc::new(RefCell::new(Vec::new()))))
+    }
+
+    fn from_sink(output: OutputSink) -> Self {
         Self {
             registry: FunctionRegistry::default(),
-            output: Rc::new(RefCell::new(Box::new(dest))),
+            output,
             analyser: Analyser::from_scope_tree(ScopeTree::from_global_scope(vec![])),
             repl_state: None,
         }
@@ -79,8 +79,12 @@ impl Interpreter {
         self.registry.iter()
     }
 
+    /// Returns the captured output, or `None` if this interpreter writes to stdout.
     pub fn get_output(&self) -> Option<Vec<u8>> {
-        self.output.borrow().get_output().cloned()
+        match &self.output {
+            OutputSink::Stdout => None,
+            OutputSink::Buffer(buf) => Some(buf.borrow().clone()),
+        }
     }
 
     pub fn analyse_str(
@@ -147,8 +151,7 @@ impl Interpreter {
         let result = match self.repl_state.take() {
             None => {
                 let (code, checkpoint) = Compiler::compile_resumable(expressions)?;
-                let sink = WriteSink(Rc::clone(&self.output));
-                let mut vm = Vm::new(code, globals).with_output(Box::new(sink));
+                let mut vm = Vm::new(code, globals).with_output(Box::new(self.output.clone()));
                 #[cfg(feature = "vm-trace")]
                 {
                     vm = vm.with_source(input);
@@ -175,6 +178,12 @@ impl Interpreter {
         };
 
         Ok(result)
+    }
+}
+
+impl Default for Interpreter {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

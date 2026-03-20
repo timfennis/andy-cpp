@@ -1,8 +1,11 @@
 use std::collections::HashMap;
 
-use ndc_interpreter::{Interpreter, StaticType};
+use ndc_core::{FunctionRegistry, StaticType};
+use ndc_interpreter::Interpreter;
 use ndc_lexer::{Lexer, Span, TokenLocation};
 use ndc_parser::{Expression, ExpressionLocation, ForBody, ForIteration, Lvalue};
+use ndc_vm::NativeFunction;
+use std::rc::Rc;
 use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::Result as JsonRPCResult;
 use tower_lsp::lsp_types::{
@@ -18,14 +21,22 @@ use tower_lsp::{Client, LanguageServer};
 pub struct Backend {
     pub client: Client,
     documents: Mutex<HashMap<Url, Vec<InlayHint>>>,
+    configure: fn(&mut FunctionRegistry<Rc<NativeFunction>>),
 }
 
 impl Backend {
-    pub fn new(client: Client) -> Self {
+    pub fn new(client: Client, configure: fn(&mut FunctionRegistry<Rc<NativeFunction>>)) -> Self {
         Self {
             client,
             documents: Mutex::new(HashMap::new()),
+            configure,
         }
+    }
+
+    fn make_interpreter(&self) -> Interpreter {
+        let mut interpreter = Interpreter::capturing();
+        interpreter.configure(self.configure);
+        interpreter
     }
 
     async fn validate(&self, uri: &Url, text: &str) {
@@ -80,8 +91,7 @@ impl Backend {
         // The interpreter uses Rc internally (non-Send), so it must be fully dropped
         // before the next await point.
         let hints = {
-            let mut interpreter = Interpreter::new(Vec::new());
-            interpreter.configure(ndc_stdlib::register);
+            let mut interpreter = self.make_interpreter();
             match interpreter.analyse_str(text) {
                 Ok(expressions) => {
                     let mut hints = Vec::new();
@@ -152,8 +162,7 @@ impl LanguageServer for Backend {
         &self,
         _params: CompletionParams,
     ) -> Result<Option<CompletionResponse>, tower_lsp::jsonrpc::Error> {
-        let mut interpreter = Interpreter::new(Vec::new());
-        interpreter.configure(ndc_stdlib::register);
+        let interpreter = self.make_interpreter();
 
         let items = interpreter.functions().filter_map(|fun| {
             if !is_normal_ident(&fun.name) {

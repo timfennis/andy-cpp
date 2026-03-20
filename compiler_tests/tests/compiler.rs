@@ -16,7 +16,7 @@ fn compile(input: &str) -> Vec<OpCode> {
 }
 
 fn compile_with_analysis(input: &str) -> Vec<OpCode> {
-    let mut interp = ndc_interpreter::Interpreter::new(Vec::new());
+    let mut interp = ndc_interpreter::Interpreter::capturing();
     interp
         .compile_str(input)
         .expect("compile failed")

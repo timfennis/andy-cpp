@@ -134,8 +134,7 @@ fn main() -> anyhow::Result<()> {
 
             let string = fs::read_to_string(path)?;
 
-            let stdout = std::io::stdout();
-            let mut interpreter = Interpreter::new(stdout);
+            let mut interpreter = Interpreter::new();
             interpreter.configure(ndc_stdlib::register);
             match into_miette_result(interpreter.run_str(&string)) {
                 // we can just ignore successful runs because we have print statements
@@ -152,8 +151,7 @@ fn main() -> anyhow::Result<()> {
         }
         Action::DisassembleFile(path) => {
             let string = fs::read_to_string(path)?;
-            let stdout = std::io::stdout();
-            let mut interpreter = Interpreter::new(stdout);
+            let mut interpreter = Interpreter::new();
             interpreter.configure(ndc_stdlib::register);
             match interpreter.disassemble_str(&string) {
                 Ok(output) => print!("{output}"),
@@ -194,7 +192,7 @@ fn start_lsp() {
             .enable_all()
             .build()
             .expect("Failed building the Runtime")
-            .block_on(async { ndc_lsp::start_lsp().await });
+            .block_on(async { ndc_lsp::start_lsp(ndc_stdlib::register).await });
     }
 }
 

@@ -4,7 +4,7 @@ use ndc_interpreter::Interpreter;
 /// collected stdout output after all lines have been executed.
 fn repl_output(lines: &[&str]) -> String {
     let mut interp = {
-        let mut i = Interpreter::new(Vec::<u8>::new());
+        let mut i = Interpreter::capturing();
         i.configure(ndc_stdlib::register);
         i
     };
@@ -19,7 +19,7 @@ fn repl_output(lines: &[&str]) -> String {
 /// containing the given substring.
 fn repl_error(lines: &[&str], expected_error: &str) {
     let mut interp = {
-        let mut i = Interpreter::new(Vec::<u8>::new());
+        let mut i = Interpreter::capturing();
         i.configure(ndc_stdlib::register);
         i
     };
@@ -85,7 +85,7 @@ fn error_on_undefined_variable() {
 #[test]
 fn expression_result_is_returned() {
     let mut interp = {
-        let mut i = Interpreter::new(Vec::<u8>::new());
+        let mut i = Interpreter::capturing();
         i.configure(ndc_stdlib::register);
         i
     };
@@ -96,7 +96,7 @@ fn expression_result_is_returned() {
 #[test]
 fn statement_returns_empty() {
     let mut interp = {
-        let mut i = Interpreter::new(Vec::<u8>::new());
+        let mut i = Interpreter::capturing();
         i.configure(ndc_stdlib::register);
         i
     };
@@ -107,7 +107,7 @@ fn statement_returns_empty() {
 #[test]
 fn unit_returns_empty() {
     let mut interp = {
-        let mut i = Interpreter::new(Vec::<u8>::new());
+        let mut i = Interpreter::capturing();
         i.configure(ndc_stdlib::register);
         i
     };
@@ -119,7 +119,7 @@ fn unit_returns_empty() {
 fn error_does_not_corrupt_state() {
     // After a failed line the previously-defined variable should still work.
     let mut interp = {
-        let mut i = Interpreter::new(Vec::<u8>::new());
+        let mut i = Interpreter::capturing();
         i.configure(ndc_stdlib::register);
         i
     };
