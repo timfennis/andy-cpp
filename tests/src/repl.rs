@@ -8,14 +8,8 @@ fn repl_output(lines: &[&str]) -> String {
     for line in lines {
         interp.run_str(line).expect("line should not error");
     }
-    let env = interp.environment();
-    let env = env.borrow();
-    String::from_utf8(
-        env.get_output()
-            .expect("interpreter must have output")
-            .to_vec(),
-    )
-    .expect("output must be valid UTF-8")
+    String::from_utf8(interp.get_output().expect("interpreter must have output"))
+        .expect("output must be valid UTF-8")
 }
 
 /// Run a sequence of REPL lines and expect the last one to produce an error
@@ -109,8 +103,6 @@ fn error_does_not_corrupt_state() {
     interp.run_str("let x = 99;").unwrap();
     let _ = interp.run_str("undefined_var"); // this should error, ignore it
     interp.run_str("print(x)").unwrap();
-    let env = interp.environment();
-    let env = env.borrow();
-    let out = String::from_utf8(env.get_output().unwrap().to_vec()).unwrap();
+    let out = String::from_utf8(interp.get_output().unwrap()).unwrap();
     assert_eq!(out.trim(), "99");
 }

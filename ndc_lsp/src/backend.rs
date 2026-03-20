@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use ndc_interpreter::Interpreter;
+use ndc_interpreter::{Interpreter, StaticType};
 use ndc_lexer::{Lexer, Span, TokenLocation};
 use ndc_parser::{Expression, ExpressionLocation, ForBody, ForIteration, Lvalue};
 use ndc_stdlib::WithStdlib;
@@ -153,25 +153,44 @@ impl LanguageServer for Backend {
         _params: CompletionParams,
     ) -> Result<Option<CompletionResponse>, tower_lsp::jsonrpc::Error> {
         let interpreter = Interpreter::new(Vec::new()).with_stdlib();
-        let env = interpreter.environment();
-        let functions = env.borrow().get_all_functions();
 
-        let items = functions.iter().filter_map(|fun| {
-            if !is_normal_ident(fun.name()) {
+        let items = interpreter.functions().filter_map(|fun| {
+            if !is_normal_ident(&fun.name) {
                 return None;
             }
 
+            let (param_detail, return_detail) = match &fun.static_type {
+                StaticType::Function {
+                    parameters: Some(params),
+                    return_type,
+                } => {
+                    let ps = params
+                        .iter()
+                        .map(|t: &StaticType| t.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    (format!("({ps})"), return_type.to_string())
+                }
+                StaticType::Function {
+                    parameters: None,
+                    return_type,
+                } => ("(...)".to_string(), return_type.to_string()),
+                other => (String::new(), other.to_string()),
+            };
+
             Some(CompletionItem {
-                label: fun.name().to_string(),
+                label: fun.name.clone(),
                 label_details: Some(CompletionItemLabelDetails {
-                    detail: Some(format!("({})", fun.type_signature())),
-                    description: Some(fun.return_type().to_string()),
+                    detail: Some(param_detail),
+                    description: Some(return_detail),
                 }),
                 kind: Some(CompletionItemKind::FUNCTION),
-                documentation: Some(Documentation::MarkupContent(MarkupContent {
-                    kind: MarkupKind::Markdown,
-                    value: fun.documentation().to_string(),
-                })),
+                documentation: fun.documentation.as_ref().map(|d| {
+                    Documentation::MarkupContent(MarkupContent {
+                        kind: MarkupKind::Markdown,
+                        value: d.clone(),
+                    })
+                }),
                 ..Default::default()
             })
         });
