@@ -1,5 +1,4 @@
 use ndc_core::FunctionRegistry;
-use ndc_interpreter::Interpreter;
 use ndc_vm::NativeFunction;
 use std::rc::Rc;
 
@@ -50,15 +49,4 @@ pub fn register(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     serde::register(env);
     string::register(env);
     value::register(env);
-}
-
-pub trait WithStdlib: Sized {
-    fn with_stdlib(self) -> Self;
-}
-
-impl WithStdlib for Interpreter {
-    fn with_stdlib(mut self) -> Self {
-        self.configure(register);
-        self
-    }
 }

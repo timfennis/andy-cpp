@@ -132,7 +132,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                     let num = #raw.to_number()
                         .ok_or_else(|| ndc_vm::error::VmError::native(format!("arg {}: expected int, got {}", #position, #raw.static_type())))?;
                     match num {
-                        ndc_interpreter::num::Number::Int(i) => i.to_bigint(),
+                        ndc_core::num::Number::Int(i) => i.to_bigint(),
                         _ => return Err(ndc_vm::error::VmError::native(format!("arg {}: expected int, got {}", #position, #raw.static_type()))),
                     }
                 };
@@ -150,7 +150,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                     let num = #raw.to_number()
                         .ok_or_else(|| ndc_vm::error::VmError::native(format!("arg {}: expected rational, got {}", #position, #raw.static_type())))?;
                     match num {
-                        ndc_interpreter::num::Number::Rational(r) => *r,
+                        ndc_core::num::Number::Rational(r) => *r,
                         _ => return Err(ndc_vm::error::VmError::native(format!("arg {}: expected rational, got {}", #position, #raw.static_type()))),
                     }
                 };
@@ -168,7 +168,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                     let num = #raw.to_number()
                         .ok_or_else(|| ndc_vm::error::VmError::native(format!("arg {}: expected complex, got {}", #position, #raw.static_type())))?;
                     match num {
-                        ndc_interpreter::num::Number::Complex(c) => c,
+                        ndc_core::num::Number::Complex(c) => c,
                         _ => return Err(ndc_vm::error::VmError::native(format!("arg {}: expected complex, got {}", #position, #raw.static_type()))),
                     }
                 };
@@ -572,8 +572,8 @@ fn try_vm_return_type(ty: &syn::Type) -> Option<(TokenStream, TokenStream)> {
         return Some((
             quote! {
                 Ok(ndc_vm::value::Value::from_number(
-                    ndc_interpreter::num::Number::Int(
-                        ndc_interpreter::int::Int::BigInt(result).simplified()
+                    ndc_core::num::Number::Int(
+                        ndc_core::int::Int::BigInt(result).simplified()
                     )
                 ))
             },
@@ -584,7 +584,7 @@ fn try_vm_return_type(ty: &syn::Type) -> Option<(TokenStream, TokenStream)> {
         return Some((
             quote! {
                 Ok(ndc_vm::value::Value::from_number(
-                    ndc_interpreter::num::Number::Rational(Box::new(result))
+                    ndc_core::num::Number::Rational(Box::new(result))
                 ))
             },
             quote! { ndc_core::StaticType::Rational },

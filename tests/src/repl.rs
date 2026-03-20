@@ -1,10 +1,13 @@
 use ndc_interpreter::Interpreter;
-use ndc_stdlib::WithStdlib;
 
 /// Run a sequence of REPL lines against a shared interpreter and return the
 /// collected stdout output after all lines have been executed.
 fn repl_output(lines: &[&str]) -> String {
-    let mut interp = Interpreter::new(Vec::<u8>::new()).with_stdlib();
+    let mut interp = {
+        let mut i = Interpreter::new(Vec::<u8>::new());
+        i.configure(ndc_stdlib::register);
+        i
+    };
     for line in lines {
         interp.run_str(line).expect("line should not error");
     }
@@ -15,7 +18,11 @@ fn repl_output(lines: &[&str]) -> String {
 /// Run a sequence of REPL lines and expect the last one to produce an error
 /// containing the given substring.
 fn repl_error(lines: &[&str], expected_error: &str) {
-    let mut interp = Interpreter::new(Vec::<u8>::new()).with_stdlib();
+    let mut interp = {
+        let mut i = Interpreter::new(Vec::<u8>::new());
+        i.configure(ndc_stdlib::register);
+        i
+    };
     let n = lines.len();
     for line in &lines[..n - 1] {
         interp.run_str(line).expect("line should not error");
@@ -77,21 +84,33 @@ fn error_on_undefined_variable() {
 
 #[test]
 fn expression_result_is_returned() {
-    let mut interp = Interpreter::new(Vec::<u8>::new()).with_stdlib();
+    let mut interp = {
+        let mut i = Interpreter::new(Vec::<u8>::new());
+        i.configure(ndc_stdlib::register);
+        i
+    };
     let result = interp.run_str("2 + 3").unwrap();
     assert_eq!(result, "5");
 }
 
 #[test]
 fn statement_returns_empty() {
-    let mut interp = Interpreter::new(Vec::<u8>::new()).with_stdlib();
+    let mut interp = {
+        let mut i = Interpreter::new(Vec::<u8>::new());
+        i.configure(ndc_stdlib::register);
+        i
+    };
     let result = interp.run_str("2 + 3;").unwrap();
     assert_eq!(result, "");
 }
 
 #[test]
 fn unit_returns_empty() {
-    let mut interp = Interpreter::new(Vec::<u8>::new()).with_stdlib();
+    let mut interp = {
+        let mut i = Interpreter::new(Vec::<u8>::new());
+        i.configure(ndc_stdlib::register);
+        i
+    };
     let result = interp.run_str("let x = 5;").unwrap();
     assert_eq!(result, "");
 }
@@ -99,7 +118,11 @@ fn unit_returns_empty() {
 #[test]
 fn error_does_not_corrupt_state() {
     // After a failed line the previously-defined variable should still work.
-    let mut interp = Interpreter::new(Vec::<u8>::new()).with_stdlib();
+    let mut interp = {
+        let mut i = Interpreter::new(Vec::<u8>::new());
+        i.configure(ndc_stdlib::register);
+        i
+    };
     interp.run_str("let x = 99;").unwrap();
     let _ = interp.run_str("undefined_var"); // this should error, ignore it
     interp.run_str("print(x)").unwrap();

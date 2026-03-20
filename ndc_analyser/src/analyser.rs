@@ -1,4 +1,4 @@
-use crate::semantic::ScopeTree;
+use crate::scope::ScopeTree;
 use itertools::Itertools;
 use ndc_core::{StaticType, TypeSignature};
 use ndc_lexer::Span;
