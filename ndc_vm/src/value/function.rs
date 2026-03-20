@@ -143,9 +143,10 @@ impl Function {
             None => true,
             Some(params) => {
                 params.len() == args.len()
-                    && params.iter().zip(args.iter()).all(|(param, arg)| {
-                        matches!(param, StaticType::Any) || arg.static_type().is_subtype(param)
-                    })
+                    && params
+                        .iter()
+                        .zip(args.iter())
+                        .all(|(param, arg)| arg.matches_param(param))
             }
         }
     }
