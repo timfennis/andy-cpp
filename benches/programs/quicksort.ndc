@@ -2,8 +2,9 @@ fn quicksort(arr) {
   if arr.len <= 1 { return arr };
   let pivot = arr[0];
   let left = arr.filter(fn(x) => x < pivot);
+  let mid = arr.filter(fn(x) => x == pivot);
   let right = arr.filter(fn(x) => x > pivot);
-  return quicksort(left) ++ [pivot] ++ quicksort(right);
+  return quicksort(left) ++ mid ++ quicksort(right);
 }
 
 print(quicksort([

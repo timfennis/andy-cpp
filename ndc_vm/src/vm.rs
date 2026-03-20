@@ -16,6 +16,28 @@ use std::io::Write;
 use std::ops::Deref;
 use std::rc::Rc;
 
+/// Output destination for the VM's I/O built-ins (`print`, `dbg`, etc.).
+pub enum OutputSink {
+    Stdout,
+    Buffer(Vec<u8>),
+}
+
+impl Write for OutputSink {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match self {
+            OutputSink::Stdout => std::io::stdout().write(buf),
+            OutputSink::Buffer(vec) => vec.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self {
+            OutputSink::Stdout => std::io::stdout().flush(),
+            OutputSink::Buffer(vec) => vec.flush(),
+        }
+    }
+}
+
 pub struct Vm {
     stack: Vec<Value>,
     globals: Vec<Value>,
@@ -27,9 +49,7 @@ pub struct Vm {
     /// Two closures capturing the same local share one cell via this list.
     open_upvalues: Vec<Rc<RefCell<UpvalueCell>>>,
     /// Output sink for `print`, `dbg`, and similar I/O built-ins.
-    /// Defaults to stdout; replaced by a shared sink when running inside the
-    /// interpreter so that output capture in tests works correctly.
-    output: Box<dyn Write>,
+    output: OutputSink,
     #[cfg(feature = "vm-trace")]
     source: Option<String>,
 }
@@ -61,7 +81,7 @@ impl Vm {
                 memo: None,
             }],
             open_upvalues: Vec::new(),
-            output: Box::new(std::io::stdout()),
+            output: OutputSink::Stdout,
             #[cfg(feature = "vm-trace")]
             source: None,
         };
@@ -71,12 +91,19 @@ impl Vm {
         vm
     }
 
-    /// Create a minimal VM with no call frames, used as a `&mut Vm` context
     /// Replace the output sink used by I/O built-ins (e.g. `print`, `dbg`).
     /// Call this before `run()` to redirect output away from stdout.
-    pub fn with_output(mut self, output: Box<dyn Write>) -> Self {
+    pub fn with_output(mut self, output: OutputSink) -> Self {
         self.output = output;
         self
+    }
+
+    /// Returns the captured output bytes, or `None` if this VM writes to stdout.
+    pub fn get_output(&self) -> Option<&[u8]> {
+        match &self.output {
+            OutputSink::Stdout => None,
+            OutputSink::Buffer(buf) => Some(buf),
+        }
     }
 
     /// Write a pre-formatted string to the VM's output sink.
@@ -643,7 +670,7 @@ impl Vm {
             globals,
             frames: Vec::new(),
             open_upvalues: Vec::new(),
-            output: Box::new(std::io::stdout()),
+            output: OutputSink::Stdout,
             #[cfg(feature = "vm-trace")]
             source: None,
         };

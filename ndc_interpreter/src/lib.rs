@@ -4,36 +4,12 @@ use ndc_lexer::{Lexer, TokenLocation};
 use ndc_parser::ExpressionLocation;
 use ndc_vm::compiler::Compiler;
 use ndc_vm::value::CompiledFunction;
-use ndc_vm::{NativeFunction, Value, Vm};
-use std::cell::RefCell;
-use std::io::Write;
+use ndc_vm::{NativeFunction, OutputSink, Value, Vm};
 use std::rc::Rc;
-
-#[derive(Clone)]
-enum OutputSink {
-    Stdout,
-    Buffer(Rc<RefCell<Vec<u8>>>),
-}
-
-impl Write for OutputSink {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        match self {
-            OutputSink::Stdout => std::io::stdout().write(buf),
-            OutputSink::Buffer(vec) => vec.borrow_mut().write(buf),
-        }
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        match self {
-            OutputSink::Stdout => std::io::stdout().flush(),
-            OutputSink::Buffer(vec) => vec.borrow_mut().flush(),
-        }
-    }
-}
 
 pub struct Interpreter {
     registry: FunctionRegistry<Rc<NativeFunction>>,
-    output: OutputSink,
+    capturing: bool,
     analyser: Analyser,
     /// Persistent REPL VM and the compiler checkpoint from the last run.
     /// `None` until the first `run_str` call; kept alive afterwards so that
@@ -45,20 +21,20 @@ impl Interpreter {
     /// Create an interpreter that writes output to stdout.
     #[must_use]
     pub fn new() -> Self {
-        Self::from_sink(OutputSink::Stdout)
+        Self::from_capturing(false)
     }
 
     /// Create an interpreter that captures output into an internal buffer,
     /// retrievable via [`get_output`].
     #[must_use]
     pub fn capturing() -> Self {
-        Self::from_sink(OutputSink::Buffer(Rc::new(RefCell::new(Vec::new()))))
+        Self::from_capturing(true)
     }
 
-    fn from_sink(output: OutputSink) -> Self {
+    fn from_capturing(capturing: bool) -> Self {
         Self {
             registry: FunctionRegistry::default(),
-            output,
+            capturing,
             analyser: Analyser::from_scope_tree(ScopeTree::from_global_scope(vec![])),
             repl_state: None,
         }
@@ -81,10 +57,9 @@ impl Interpreter {
 
     /// Returns the captured output, or `None` if this interpreter writes to stdout.
     pub fn get_output(&self) -> Option<Vec<u8>> {
-        match &self.output {
-            OutputSink::Stdout => None,
-            OutputSink::Buffer(buf) => Some(buf.borrow().clone()),
-        }
+        self.repl_state
+            .as_ref()
+            .and_then(|(vm, _)| vm.get_output().map(<[u8]>::to_vec))
     }
 
     pub fn analyse_str(
@@ -150,8 +125,13 @@ impl Interpreter {
 
         let result = match self.repl_state.take() {
             None => {
+                let output = if self.capturing {
+                    OutputSink::Buffer(Vec::new())
+                } else {
+                    OutputSink::Stdout
+                };
                 let (code, checkpoint) = Compiler::compile_resumable(expressions)?;
-                let mut vm = Vm::new(code, globals).with_output(Box::new(self.output.clone()));
+                let mut vm = Vm::new(code, globals).with_output(output);
                 #[cfg(feature = "vm-trace")]
                 {
                     vm = vm.with_source(input);

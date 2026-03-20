@@ -1,0 +1,5 @@
+let result = 1;
+for i in 2..=5000 {
+    result *= i;
+}
+print(result.string.len, "digits");

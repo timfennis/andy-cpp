@@ -15,3 +15,8 @@ rand_chacha.workspace = true
 name = "benchmark"
 path = "src/benchmark.rs"
 harness = false
+
+[[bench]]
+name = "output_sink"
+path = "src/output_sink.rs"
+harness = false
