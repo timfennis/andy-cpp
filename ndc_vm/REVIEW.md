@@ -155,7 +155,7 @@ opcode that the analyser failed to reject). Should return `VmError` instead.
 
 ---
 
-### B5 — `materialize_upvalues_in_args` can close a still-live upvalue cell
+### ~~B5 — `materialize_upvalues_in_args` can close a still-live upvalue cell~~ ✅ Fixed
 **File:** `vm.rs:533` | **Axes:** Bug
 
 Closes upvalue cells referenced by argument closures while the originating frame is

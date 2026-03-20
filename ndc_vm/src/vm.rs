@@ -248,13 +248,6 @@ impl Vm {
                         .resolve_callee(args)
                         .map_err(|msg| VmError::new(msg, span))?
                     {
-                        // Native functions bridge to the tree-walk interpreter, which may call
-                        // closures back via `Vm::call_function` in a fresh VM context. In that
-                        // context, Open upvalue cells (stack-slot references) are invalid.
-                        // Materialize them now while the current stack is still live.
-                        if func.needs_arg_materialization() {
-                            self.materialize_upvalues_in_args(args);
-                        }
                         if let Err(mut e) = self.dispatch_call(func, args) {
                             e.span.get_or_insert(span);
                             return Err(e);
@@ -546,49 +539,6 @@ impl Vm {
             }
         }
         // Remove the cells we just closed; outer-frame Open cells stay.
-        self.open_upvalues
-            .retain(|c| matches!(*c.borrow(), UpvalueCell::Open(_)));
-    }
-
-    /// Materializes (closes) any Open upvalues in the immediate arguments.
-    /// This is necessary when closures are about to be passed to functions
-    /// that may call them in a different VM context (e.g., stdlib HOFs
-    /// that bridge back to the tree-walk interpreter). We only materialize
-    /// direct function arguments, not nested closures.
-    fn materialize_upvalues_in_args(&mut self, arg_count: usize) {
-        let start = self.stack.len() - arg_count;
-
-        // Capture the stack state before any mutations
-        let current_stack_len = self.stack.len();
-        let mut materialized = Vec::new();
-
-        // Identify closures and their open upvalues that need materializing
-        for i in start..current_stack_len {
-            if let Value::Object(obj) = &self.stack[i] {
-                if let Object::Function(Function::Closure(closure)) = &**obj {
-                    for (j, cell) in closure.upvalues.iter().enumerate() {
-                        if let UpvalueCell::Open(slot) = *cell.borrow() {
-                            materialized.push((i, j, slot));
-                        }
-                    }
-                }
-            }
-        }
-
-        // Now materialize them
-        for (arg_idx, upvalue_idx, slot) in materialized {
-            if slot < self.stack.len() {
-                let value = self.stack[slot].clone();
-                if let Value::Object(obj) = &self.stack[arg_idx] {
-                    if let Object::Function(Function::Closure(closure)) = obj.as_ref() {
-                        let mut cell_borrow = closure.upvalues[upvalue_idx].borrow_mut();
-                        *cell_borrow = UpvalueCell::Closed(value);
-                    }
-                }
-            }
-        }
-
-        // Remove cells we just closed from open_upvalues; they're no longer open.
         self.open_upvalues
             .retain(|c| matches!(*c.borrow(), UpvalueCell::Open(_)));
     }
