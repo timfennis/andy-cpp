@@ -18,4 +18,4 @@ fn sieve(n) {
 }
 
 // Find lots of prime numbers
-sieve(10000);
+sieve(200_000);
