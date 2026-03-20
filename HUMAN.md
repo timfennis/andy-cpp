@@ -1,1 +1,0 @@
-- Check resume from halt function

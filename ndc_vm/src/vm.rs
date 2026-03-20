@@ -342,9 +342,9 @@ impl Vm {
                             Object::String(s) => Some(Value::iterator(Rc::new(RefCell::new(
                                 StringIter::new(Rc::clone(s)),
                             )))),
-                            Object::Map { entries, .. } => Some(Value::iterator(Rc::new(
-                                RefCell::new(MapIter::new(entries)),
-                            ))),
+                            Object::Map { .. } => Some(Value::iterator(Rc::new(RefCell::new(
+                                MapIter::new(Rc::clone(&rc)),
+                            )))),
                             Object::MinHeap(h) => {
                                 Some(Value::iterator(Rc::new(RefCell::new(MinHeapIter::new(h)))))
                             }

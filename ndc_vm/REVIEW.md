@@ -123,7 +123,7 @@ count cannot be O(1).
 
 ---
 
-### P7 — `MapIter` snapshots the full map at creation
+### ~~P7 — `MapIter` snapshots the full map at creation~~ ✅ Fixed
 **File:** `iterator.rs:239` | **Axes:** Performance
 
 Eagerly clones all entries into a `Vec` even when the caller only needs the first few.

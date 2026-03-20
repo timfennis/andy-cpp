@@ -42,6 +42,12 @@ perf record -g --call-graph=dwarf -o /tmp/out.perf ./target/release-with-debug/n
 perf report -i /tmp/out.perf --stdio --no-children --percent-limit=1
 ```
 
+## Manual
+
+User-facing language documentation lives in `manual/src/`. It is an mdBook project. The entry point is `manual/src/SUMMARY.md`.
+
+When making changes that affect language behaviour or runtime semantics, update the relevant manual page.
+
 ## Architecture
 
 This is a custom language interpreter ("Andy C++") with a bytecode VM backend:
