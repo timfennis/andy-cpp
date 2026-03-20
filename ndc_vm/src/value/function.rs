@@ -149,19 +149,6 @@ impl Function {
             }
         }
     }
-
-    /// Returns true if this function requires upvalue materialization before
-    /// being called as a native.  Only `WithVm` natives need this — they
-    /// receive `&mut Vm` and can invoke closures passed as arguments, so any
-    /// open upvalues in those closures must be closed first.  `Simple` natives
-    /// never call back into the VM and can skip the materialization scan.
-    pub fn needs_arg_materialization(&self) -> bool {
-        match self {
-            Self::Native(f) => matches!(f.func, NativeFunc::WithVm(_)),
-            Self::Memoized { function, .. } => function.needs_arg_materialization(),
-            _ => false,
-        }
-    }
 }
 
 impl fmt::Debug for Function {
