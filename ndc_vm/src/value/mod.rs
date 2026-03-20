@@ -740,7 +740,9 @@ impl PartialEq for Object {
                     _ => false,
                 }
             }
-            (Self::OverloadSet(a), Self::OverloadSet(b)) => a == b,
+            (Self::OverloadSet(_), Self::OverloadSet(_)) => {
+                panic!("OverloadSet cannot be used as a map key")
+            }
             (Self::Iterator(a), Self::Iterator(b)) => {
                 // Compare iterators by pointer identity
                 std::ptr::addr_eq(Rc::as_ptr(a), Rc::as_ptr(b))
@@ -836,9 +838,7 @@ impl Hash for Object {
                 }
             }
             Self::OverloadSet(_) => {
-                // OverloadSet hashing is skipped since ResolvedVar doesn't implement Hash
-                // Treat them as opaque value types, hash by pointer identity
-                state.write_u8(10);
+                panic!("OverloadSet cannot be used as a map key")
             }
             Self::Iterator(iter) => {
                 state.write_u8(11);
