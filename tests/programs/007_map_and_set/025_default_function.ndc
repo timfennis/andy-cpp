@@ -1,0 +1,8 @@
+let dd = %{:fn() => []};
+dd["foo"].push(3);
+dd["bar"].push(4);
+
+// expect-output: 1
+print(dd["foo"].len);
+// expect-output: 1
+print(dd["bar"].len);
