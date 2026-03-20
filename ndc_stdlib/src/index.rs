@@ -1,4 +1,5 @@
 use ndc_core::{FunctionRegistry, StaticType};
+use ndc_vm::Vm;
 use ndc_vm::error::VmError;
 use ndc_vm::value::{NativeFunc, NativeFunction, Object as VmObject, Value as VmValue};
 use std::rc::Rc;
@@ -11,14 +12,14 @@ pub fn register(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
             parameters: None,
             return_type: Box::new(StaticType::Any),
         },
-        func: NativeFunc::Simple(Box::new(|args: &[VmValue]| {
+        func: NativeFunc::WithVm(Box::new(|args: &[VmValue], vm: &mut Vm| {
             let [container, index_value] = args else {
                 return Err(VmError::native(format!(
                     "[] requires exactly 2 arguments, got {}",
                     args.len()
                 )));
             };
-            vm_get_at_index(container, index_value)
+            vm_get_at_index(container, index_value, vm)
         })),
     });
     env.declare_global_fn(get_native);
@@ -125,7 +126,11 @@ fn extract_vm_offset(index_value: &VmValue, size: usize) -> Result<VmOffset, VmE
     Ok(VmOffset::Element(to_forward_index(i, size, false)?))
 }
 
-fn vm_get_at_index(container: &VmValue, index_value: &VmValue) -> Result<VmValue, VmError> {
+fn vm_get_at_index(
+    container: &VmValue,
+    index_value: &VmValue,
+    vm: &mut Vm,
+) -> Result<VmValue, VmError> {
     let Some(size) = vm_sequence_length(container) else {
         return Err(VmError::native(format!(
             "cannot index into {}",
@@ -177,9 +182,12 @@ fn vm_get_at_index(container: &VmValue, index_value: &VmValue) -> Result<VmValue
                     None => Err(VmError::native(format!("Key not found in map: {key}"))),
                     Some(default_val) => match default_val {
                         VmValue::Object(o) if matches!(o.as_ref(), VmObject::Function(_)) => {
-                            todo!(
-                                "map default functions require an environment and cannot be called from vm_native"
-                            )
+                            let VmObject::Function(f) = o.as_ref() else {
+                                unreachable!()
+                            };
+                            let result = vm.call_callback(f.clone(), vec![])?;
+                            entries.borrow_mut().insert(key, result.clone());
+                            Ok(result)
                         }
                         non_fn => {
                             let v = non_fn.clone();
