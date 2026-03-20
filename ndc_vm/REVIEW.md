@@ -35,7 +35,7 @@ added complexity.
 
 ---
 
-### B1 — Integer overflow in `RangeInclusiveIter::size_hint`
+### ~~B1 — Integer overflow in `RangeInclusiveIter::size_hint`~~ ✅ Fixed
 **File:** `iterator.rs:119` | **Axes:** Bug
 
 ```rust
@@ -48,7 +48,7 @@ Overflows when `self.end == i64::MAX`. Panics in debug, wraps silently in releas
 
 ---
 
-### B2 — `frame_pointer - 1` underflows when `frame_pointer == 0`
+### ~~B2 — `frame_pointer - 1` underflows when `frame_pointer == 0`~~ ✅ Fixed
 **File:** `vm.rs:176` | **Axes:** Bug
 
 A `Return` from top-level code causes a `usize` underflow (panic in debug, wrap in
@@ -134,7 +134,7 @@ repeated `pop()` yields elements in sorted order with no extra sort pass.
 
 ---
 
-### B3 — User-reachable panics in `exec_unpack`
+### ~~B3 — User-reachable panics in `exec_unpack`~~ ✅ Fixed
 **File:** `vm.rs:875, 959` | **Axes:** Bug
 
 ```rust

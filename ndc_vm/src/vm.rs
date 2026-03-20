@@ -169,6 +169,9 @@ impl Vm {
                         cache.borrow_mut().insert(*key, ret.clone());
                     }
                     self.close_upvalues(frame_pointer);
+                    if frame_pointer == 0 {
+                        return Err(VmError::new("Return at top level", span));
+                    }
                     self.stack.truncate(frame_pointer - 1);
                     self.frames.pop().expect("no frame to pop");
                     self.stack.push(ret);
@@ -887,7 +890,10 @@ impl Vm {
     fn exec_unpack(&mut self, size: usize, span: Span) -> Result<(), VmError> {
         let top = self.stack.pop().expect("stack underflow");
         let Value::Object(obj) = top else {
-            panic!("expected a tuple or list to unpack");
+            return Err(VmError::new(
+                "cannot unpack: expected a list, tuple, or string",
+                span,
+            ));
         };
         match obj.as_ref() {
             Object::List(seq) => {
@@ -971,7 +977,12 @@ impl Vm {
                 chars.reverse();
                 self.stack.append(&mut chars);
             }
-            _ => panic!("expected a tuple or list to unpack"),
+            _ => {
+                return Err(VmError::new(
+                    "cannot unpack: expected a list, tuple, or string",
+                    span,
+                ));
+            }
         }
         Ok(())
     }

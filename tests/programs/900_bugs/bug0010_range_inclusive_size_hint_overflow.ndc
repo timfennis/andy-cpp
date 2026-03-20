@@ -1,0 +1,4 @@
+// B1: RangeInclusiveIter::size_hint overflowed when end == i64::MAX.
+// (end - current + 1) wrapped; fixed to (end - current).saturating_add(1).
+// expect-output: <iterator (len=9223372036854775807)>
+print(0..=9223372036854775807)

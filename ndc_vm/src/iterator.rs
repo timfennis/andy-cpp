@@ -116,7 +116,7 @@ impl VmIterator for RangeInclusiveIter {
         if self.done {
             return (0, Some(0));
         }
-        let remaining = (self.end - self.current + 1) as usize;
+        let remaining = (self.end - self.current).saturating_add(1) as usize;
         (remaining, Some(remaining))
     }
 
