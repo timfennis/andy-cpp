@@ -58,6 +58,21 @@ let dd = %{:fn() => fn(x) => x * x};
 print(dd["test"](5)); // 25
 ```
 
+## Iteration
+
+You can iterate over a map with a `for` loop. Each element is a `(key, value)` tuple:
+
+```ndc
+let m = %{"a": 1, "b": 2};
+for (k, v) in m {
+    print(k, v);
+}
+```
+
+**Iteration order is unspecified** — maps are hash-based, so keys may appear in any order.
+
+**Keys are snapshotted at the start of the loop.** Mutations to the map during iteration (adding or removing keys) are not reflected in the current loop — the set of keys visited is fixed when the `for` loop begins. Values read during iteration do reflect any changes made to existing keys.
+
 ## Operators
 
 | Operator | Function | Support augmented assignment <sup>[[1]](../../features/augmented-assignment.md)</sup> | Augmentable with `not` |

@@ -1,5 +1,4 @@
 use crate::{Object, OrdValue, Value};
-use ndc_core::hash_map::HashMap;
 use std::cell::RefCell;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
@@ -228,38 +227,53 @@ impl VmIterator for SeqIter {
 
 /// Iterates over a map, yielding `(key, value)` tuples.
 ///
-/// Note: entries are snapshotted at creation time, so mutations to the map
-/// during iteration are not reflected.
+/// Keys are collected at creation time for a stable iteration order; values are
+/// cloned from the map on demand so the full entry set is never duplicated.
 pub struct MapIter {
-    entries: Vec<(Value, Value)>,
+    obj: Rc<Object>,
+    keys: Vec<Value>,
     index: usize,
 }
 
 impl MapIter {
-    pub fn new(map: &RefCell<HashMap<Value, Value>>) -> Self {
-        let entries = map
-            .borrow()
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-        Self { entries, index: 0 }
+    pub fn new(obj: Rc<Object>) -> Self {
+        let keys = match obj.as_ref() {
+            Object::Map { entries, .. } => entries.borrow().keys().cloned().collect(),
+            _ => unreachable!("MapIter requires a Map object"),
+        };
+        Self {
+            obj,
+            keys,
+            index: 0,
+        }
     }
 }
 
 impl VmIterator for MapIter {
     fn next(&mut self) -> Option<Value> {
-        if self.index < self.entries.len() {
-            let (k, v) = self.entries[self.index].clone();
-            self.index += 1;
-            Some(Value::Object(Rc::new(Object::Tuple(vec![k, v]))))
-        } else {
-            None
+        if self.index >= self.keys.len() {
+            return None;
         }
+        let key = self.keys[self.index].clone();
+        let value = match self.obj.as_ref() {
+            Object::Map { entries, .. } => entries.borrow().get(&key).cloned()?,
+            _ => unreachable!("MapIter holds a non-Map object"),
+        };
+        self.index += 1;
+        Some(Value::Object(Rc::new(Object::Tuple(vec![key, value]))))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.entries.len() - self.index;
+        let remaining = self.keys.len() - self.index;
         (remaining, Some(remaining))
+    }
+
+    fn deep_copy(&self) -> Option<SharedIterator> {
+        Some(Rc::new(RefCell::new(Self {
+            obj: Rc::clone(&self.obj),
+            keys: self.keys.clone(),
+            index: self.index,
+        })))
     }
 }
 
