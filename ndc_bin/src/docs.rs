@@ -54,7 +54,7 @@ pub fn docs(query: Option<&str>, no_color: bool) -> anyhow::Result<()> {
         yansi::whenever(yansi::Condition::TTY_AND_COLOR);
     }
 
-    let mut interpreter = Interpreter::new(Vec::new());
+    let mut interpreter = Interpreter::capturing();
     interpreter.configure(ndc_stdlib::register);
 
     let mut functions: Vec<_> = interpreter

@@ -35,8 +35,7 @@ pub fn run() -> anyhow::Result<()> {
     rl.set_color_mode(ColorMode::Enabled);
     rl.set_helper(Some(h));
 
-    let stdout = std::io::stdout();
-    let mut interpreter = Interpreter::new(stdout);
+    let mut interpreter = Interpreter::new();
     interpreter.configure(ndc_stdlib::register);
     loop {
         match rl.readline("λ ") {

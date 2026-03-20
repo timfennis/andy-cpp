@@ -23,7 +23,7 @@ fn run_ndc_test(path: PathBuf) -> Result<(), std::io::Error> {
 
     print!("Running {path:?}...");
 
-    let mut interpreter = Interpreter::new(Vec::new());
+    let mut interpreter = Interpreter::capturing();
     interpreter.configure(ndc_stdlib::register);
     let interpreter_result = interpreter.run_str(&contents);
 

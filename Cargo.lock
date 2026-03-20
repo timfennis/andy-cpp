@@ -1258,10 +1258,11 @@ dependencies = [
 name = "ndc_lsp"
 version = "0.3.0"
 dependencies = [
+ "ndc_core",
  "ndc_interpreter",
  "ndc_lexer",
  "ndc_parser",
- "ndc_stdlib",
+ "ndc_vm",
  "tokio",
  "tower-lsp",
 ]
