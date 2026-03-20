@@ -126,6 +126,30 @@ impl Function {
         }
     }
 
+    /// Like [`matches_arg_types`] but takes runtime [`Value`]s directly,
+    /// avoiding any `StaticType` allocation for parameters typed `Any`
+    /// (the common case for stdlib functions).
+    pub fn matches_value_args(&self, args: &[Value]) -> bool {
+        let st = match self {
+            Self::Native(f) => &f.static_type,
+            Self::Compiled(f) => &f.static_type,
+            Self::Closure(c) => &c.prototype.static_type,
+            Self::Memoized { function, .. } => return function.matches_value_args(args),
+        };
+        let StaticType::Function { parameters, .. } = st else {
+            return false;
+        };
+        match parameters {
+            None => true,
+            Some(params) => {
+                params.len() == args.len()
+                    && params.iter().zip(args.iter()).all(|(param, arg)| {
+                        matches!(param, StaticType::Any) || arg.static_type().is_subtype(param)
+                    })
+            }
+        }
+    }
+
     /// Returns true if this function requires upvalue materialization before
     /// being called as a native.  Only `WithVm` natives need this — they
     /// receive `&mut Vm` and can invoke closures passed as arguments, so any

@@ -6,7 +6,6 @@ use crate::iterator::{
 };
 use crate::value::{CompiledFunction, Function, NativeFunc};
 use crate::{ClosureFunction, Object, UpvalueCell, Value};
-use ndc_core::StaticType;
 use ndc_core::hash_map::{DefaultHasher, HashMap};
 use ndc_lexer::Span;
 use ndc_parser::{CaptureSource, ResolvedVar};
@@ -780,11 +779,8 @@ impl Vm {
             Value::Object(obj) => match obj.as_ref() {
                 Object::Function(f) => Ok(Some(f.clone())),
                 Object::OverloadSet(candidates) => {
-                    let arg_types: Vec<_> = self.stack[self.stack.len() - args..]
-                        .iter()
-                        .map(Value::static_type)
-                        .collect();
-                    Ok(self.find_overload(candidates, &arg_types))
+                    let start = self.stack.len() - args;
+                    Ok(self.find_overload(candidates, &self.stack[start..]))
                 }
                 obj => panic!(
                     "callee is unexpected object type: {:?}",
@@ -824,11 +820,7 @@ impl Vm {
 
     /// Searches an overload set for the first candidate whose type signature
     /// accepts the given argument types.
-    fn find_overload(
-        &self,
-        candidates: &[ResolvedVar],
-        arg_types: &[StaticType],
-    ) -> Option<Function> {
+    fn find_overload(&self, candidates: &[ResolvedVar], args: &[Value]) -> Option<Function> {
         let frame_pointer = self.frames.last().expect("no frame").frame_pointer;
         candidates.iter().find_map(|var| {
             let value = self.resolve_var(var, frame_pointer);
@@ -838,7 +830,7 @@ impl Vm {
             let Object::Function(f) = obj.as_ref() else {
                 return None;
             };
-            f.matches_arg_types(arg_types).then(|| f.clone())
+            f.matches_value_args(args).then(|| f.clone())
         })
     }
 
@@ -869,9 +861,9 @@ impl Vm {
             return Ok(None);
         };
 
-        // Use the first pair's element types to find a matching inner function.
-        let first_elem_types = [pairs[0].0.static_type(), pairs[0].1.static_type()];
-        let Some(inner_fn) = self.find_overload(&candidates, &first_elem_types) else {
+        // Use the first pair's elements to find a matching inner function.
+        let first_elems = [pairs[0].0.clone(), pairs[0].1.clone()];
+        let Some(inner_fn) = self.find_overload(&candidates, &first_elems) else {
             return Ok(None);
         };
 
