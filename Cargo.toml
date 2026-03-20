@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["ndc_macros", "ndc_bin", "ndc_core", "ndc_interpreter", "ndc_vm", "ndc_lsp", "ndc_lexer", "ndc_parser", "ndc_stdlib", "benches", "tests", "compiler_tests"]
+members = ["ndc_macros", "ndc_bin", "ndc_core", "ndc_analyser", "ndc_interpreter", "ndc_vm", "ndc_lsp", "ndc_lexer", "ndc_parser", "ndc_stdlib", "benches", "tests", "compiler_tests"]
 
 [profile.release-with-debug]
 inherits = "release"
@@ -23,6 +23,7 @@ factorial = "0.4.0"
 itertools = "0.14.0"
 ndc_core = { path = "ndc_core" }
 ndc_lexer = { path = "ndc_lexer" }
+ndc_analyser = { path = "ndc_analyser" }
 ndc_interpreter = { path = "ndc_interpreter" }
 ndc_vm = { path = "ndc_vm" }
 ndc_parser = { path = "ndc_parser" }

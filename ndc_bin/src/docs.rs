@@ -1,6 +1,5 @@
 use ndc_core::{Parameter, StaticType, TypeSignature};
 use ndc_interpreter::Interpreter;
-use ndc_stdlib::WithStdlib;
 use std::cmp::Ordering;
 use std::fmt::Write;
 use strsim::normalized_damerau_levenshtein;
@@ -55,7 +54,8 @@ pub fn docs(query: Option<&str>, no_color: bool) -> anyhow::Result<()> {
         yansi::whenever(yansi::Condition::TTY_AND_COLOR);
     }
 
-    let interpreter = Interpreter::new(Vec::new()).with_stdlib();
+    let mut interpreter = Interpreter::new(Vec::new());
+    interpreter.configure(ndc_stdlib::register);
 
     let mut functions: Vec<_> = interpreter
         .functions()

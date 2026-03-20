@@ -8,7 +8,6 @@ anyhow.workspace = true
 factorial.workspace = true
 itertools.workspace = true
 ndc_core.workspace = true
-ndc_interpreter = { workspace = true }
 ndc_macros.workspace = true
 ndc_vm = { workspace = true }
 num.workspace = true

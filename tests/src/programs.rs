@@ -1,5 +1,4 @@
 use ndc_interpreter::Interpreter;
-use ndc_stdlib::WithStdlib;
 use std::fs;
 use std::path::PathBuf;
 use yansi::Paint;
@@ -24,7 +23,8 @@ fn run_ndc_test(path: PathBuf) -> Result<(), std::io::Error> {
 
     print!("Running {path:?}...");
 
-    let mut interpreter = Interpreter::new(Vec::new()).with_stdlib();
+    let mut interpreter = Interpreter::new(Vec::new());
+    interpreter.configure(ndc_stdlib::register);
     let interpreter_result = interpreter.run_str(&contents);
 
     let program_had_error = interpreter_result.is_err();

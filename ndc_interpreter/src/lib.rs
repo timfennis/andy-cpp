@@ -1,8 +1,6 @@
 pub use ndc_core::{Parameter, StaticType, TypeSignature, compare, hash_map, int, num};
 
-pub mod semantic;
-
-use crate::semantic::{Analyser, ScopeTree};
+use ndc_analyser::{Analyser, ScopeTree};
 use ndc_core::FunctionRegistry;
 use ndc_lexer::{Lexer, TokenLocation};
 use ndc_parser::ExpressionLocation;
@@ -195,7 +193,7 @@ pub enum InterpreterError {
     #[error("Error during static analysis")]
     Resolver {
         #[from]
-        cause: semantic::AnalysisError,
+        cause: ndc_analyser::AnalysisError,
     },
     #[error("Compilation error")]
     Compiler {

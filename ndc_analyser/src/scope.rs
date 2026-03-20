@@ -136,14 +136,14 @@ impl Scope {
 }
 
 #[derive(Clone)]
-pub(crate) struct ScopeTree {
+pub struct ScopeTree {
     current_scope_idx: usize,
     global_scope: Scope,
     scopes: Vec<Scope>,
 }
 
 impl ScopeTree {
-    pub(crate) fn from_global_scope(global_scope_map: Vec<(String, StaticType)>) -> Self {
+    pub fn from_global_scope(global_scope_map: Vec<(String, StaticType)>) -> Self {
         let mut global_scope = Scope::new_function_scope(None, 0);
         global_scope.identifiers = global_scope_map;
 

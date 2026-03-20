@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use ndc_interpreter::{Interpreter, StaticType};
 use ndc_lexer::{Lexer, Span, TokenLocation};
 use ndc_parser::{Expression, ExpressionLocation, ForBody, ForIteration, Lvalue};
-use ndc_stdlib::WithStdlib;
 use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::Result as JsonRPCResult;
 use tower_lsp::lsp_types::{
@@ -81,7 +80,8 @@ impl Backend {
         // The interpreter uses Rc internally (non-Send), so it must be fully dropped
         // before the next await point.
         let hints = {
-            let mut interpreter = Interpreter::new(Vec::new()).with_stdlib();
+            let mut interpreter = Interpreter::new(Vec::new());
+            interpreter.configure(ndc_stdlib::register);
             match interpreter.analyse_str(text) {
                 Ok(expressions) => {
                     let mut hints = Vec::new();
@@ -152,7 +152,8 @@ impl LanguageServer for Backend {
         &self,
         _params: CompletionParams,
     ) -> Result<Option<CompletionResponse>, tower_lsp::jsonrpc::Error> {
-        let interpreter = Interpreter::new(Vec::new()).with_stdlib();
+        let mut interpreter = Interpreter::new(Vec::new());
+        interpreter.configure(ndc_stdlib::register);
 
         let items = interpreter.functions().filter_map(|fun| {
             if !is_normal_ident(&fun.name) {
