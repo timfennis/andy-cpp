@@ -64,6 +64,7 @@ Source → [Lexer] → Tokens → [Parser] → AST → [Analyser] → Annotated 
 ### Git Workflow
 - Prefer short commit messages, only use multiple lines in case of unrelated changes
 - Pull request titles must start with an emoji
+- Branch names use category prefixes: `feature/`, `bugfix/`, `housekeeping/`, etc.
 
 ### Crate Layout
 

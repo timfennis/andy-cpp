@@ -1,6 +1,5 @@
 #![allow(clippy::print_stdout, clippy::print_stderr)]
 use itertools::Itertools;
-use miette::highlighters::HighlighterState;
 use ndc_interpreter::Interpreter;
 use rustyline::Helper;
 use rustyline::config::Configurer;
@@ -9,16 +8,14 @@ use rustyline::highlight::CmdKind;
 use rustyline::{ColorMode, Completer, Editor, Hinter, Validator};
 use std::borrow::Cow;
 
-use crate::highlighter::AndycppHighlighterState;
-use crate::into_miette_result;
+use crate::highlighter::AndycppHighlighter;
 
 #[derive(Helper, Completer, Hinter, Validator)]
-struct RustlylineHelper {}
+struct RustylineHelper {}
 
-impl rustyline::highlight::Highlighter for RustlylineHelper {
+impl rustyline::highlight::Highlighter for RustylineHelper {
     fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
-        let mut state = AndycppHighlighterState {};
-        let out = state.highlight_line(line);
+        let out = AndycppHighlighter::highlight_line(line);
 
         Cow::Owned(out.into_iter().join(""))
     }
@@ -29,7 +26,7 @@ impl rustyline::highlight::Highlighter for RustlylineHelper {
 }
 
 pub fn run() -> anyhow::Result<()> {
-    let h = RustlylineHelper {};
+    let h = RustylineHelper {};
 
     let mut rl = Editor::new()?;
     rl.set_color_mode(ColorMode::Enabled);
@@ -44,16 +41,15 @@ pub fn run() -> anyhow::Result<()> {
                 let _ = rl.add_history_entry(line.as_str());
 
                 // Run the line we just read through the interpreter
-                match into_miette_result(interpreter.eval(line.as_str())) {
+                match interpreter.eval(line.as_str()) {
                     Ok(value) => {
                         let output = value.to_string();
                         if !output.is_empty() {
                             println!("{output}")
                         }
                     }
-                    Err(report) => {
-                        let report = report.with_source_code(line.clone());
-                        eprintln!("{report:?}")
+                    Err(err) => {
+                        crate::diagnostic::emit_error("<repl>", &line, err);
                     }
                 }
             }
