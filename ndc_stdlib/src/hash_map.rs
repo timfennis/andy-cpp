@@ -71,6 +71,7 @@ mod inner {
         map.is_empty()
     }
 
+    /// Intersection-assign: retains only elements present in both maps or sets.
     #[function(name = "&=")]
     pub fn intersect_assign(
         lhs: ndc_vm::value::MapValue,
@@ -88,6 +89,7 @@ mod inner {
         Ok(lhs)
     }
 
+    /// Union-assign: adds all elements from the right map or set into the left.
     #[function(name = "|=")]
     pub fn union_assign(
         lhs: ndc_vm::value::MapValue,
@@ -108,6 +110,7 @@ mod inner {
         Ok(lhs)
     }
 
+    /// Difference-assign: removes all elements from the left map or set that are present in the right.
     #[function(name = "-=")]
     pub fn difference_assign(
         lhs: ndc_vm::value::MapValue,
@@ -125,6 +128,7 @@ mod inner {
         Ok(lhs)
     }
 
+    /// Symmetric-difference-assign: retains only elements present in exactly one of the two maps or sets.
     #[function(name = "~=")]
     pub fn symmetric_difference_assign(
         lhs: ndc_vm::value::MapValue,
@@ -145,7 +149,7 @@ mod inner {
 
     /// Returns the union (elements that are in either `left` or `right`) of two maps or sets.
     ///
-    /// This is the same as evaluating the expression `left | right`
+    /// This is the same as evaluating the expression `left | right`.
     #[function(alias = "|")]
     pub fn union(
         left: ndc_vm::value::MapValue,

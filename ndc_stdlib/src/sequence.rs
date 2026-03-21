@@ -62,6 +62,7 @@ mod inner {
     use std::cmp::Ordering;
     use std::rc::Rc;
 
+    /// Returns `true` if the element is contained in the sequence.
     #[function(name = "in")]
     pub fn op_contains(elem: ndc_vm::value::Value, seq: ndc_vm::value::SeqValue) -> bool {
         match &seq {
@@ -878,6 +879,7 @@ mod inner {
         ))
     }
 
+    /// Returns an infinite iterator that repeats the given value.
     #[function(return_type = Iterator<Value>)]
     pub fn repeat(value: ndc_vm::value::Value) -> ndc_vm::value::Value {
         ndc_vm::value::Value::iterator(Rc::new(std::cell::RefCell::new(ndc_vm::RepeatIter::new(
@@ -885,6 +887,7 @@ mod inner {
         ))))
     }
 
+    /// Returns an iterator that repeats the given value `times` times.
     #[function(name = "repeat", return_type = Iterator<Value>)]
     pub fn repeat_times(value: ndc_vm::value::Value, times: usize) -> ndc_vm::value::Value {
         ndc_vm::value::Value::iterator(Rc::new(std::cell::RefCell::new(

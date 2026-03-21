@@ -5,34 +5,24 @@ mod inner {
     use ndc_vm::value::{Object as VmObject, Value as VmValue};
     use std::rc::Rc;
 
-    /// Returns the documentation as a string for a given function in Andy C++.
-    ///
-    /// This function takes a function as its argument and returns a string containing its documentation.
-    // TODO: @Claude let's fix this later
-    // pub fn docs(func: &Callable<'_>) -> anyhow::Result<String> {
-    //     let mut buf = String::new();
-    //
-    //     let sig = func.function.type_signature();
-    //     let fun = &func.function;
-    //
-    //     if fun.name().is_empty() {
-    //         write!(buf, "fn({sig})")?;
-    //     } else {
-    //         write!(buf, "fn {}({sig})", fun.name())?;
-    //     }
-    //
-    //     if !fun.short_documentation().is_empty() {
-    //         writeln!(buf, " -> {}", fun.short_documentation())?;
-    //     } else {
-    //         writeln!(buf)?;
-    //     }
-    //
-    //     buf.pop(); // Remove last newline
-    //
-    //     Ok(buf)
-    // }
+    /// Returns the documentation string for a function, or an empty string if none is available.
+    pub fn docs(value: ndc_vm::value::Value) -> anyhow::Result<String> {
+        match &value {
+            VmValue::Object(obj) => match obj.as_ref() {
+                VmObject::Function(f) => Ok(f.documentation().unwrap_or("").to_string()),
+                _ => Err(anyhow::anyhow!(
+                    "docs requires a function, got {}",
+                    value.static_type()
+                )),
+            },
+            _ => Err(anyhow::anyhow!(
+                "docs requires a function, got {}",
+                value.static_type()
+            )),
+        }
+    }
 
-    /// Returns the reference count for the value, if the value is not reference counted it will return 0
+    /// Returns the reference count for the value, if the value is not reference counted it will return 0.
     ///
     /// Note: this function does increase the ref count by 1
     pub fn ref_count(value: ndc_vm::value::Value) -> usize {
@@ -54,7 +44,7 @@ mod inner {
         VmValue::None
     }
 
-    /// Returns true if the argument is Some<T>
+    /// Returns true if the argument is `Some`.
     pub fn is_some(value: ndc_vm::value::Value) -> bool {
         matches!(
             value,
@@ -63,7 +53,7 @@ mod inner {
         )
     }
 
-    /// Returns true if the argument is None
+    /// Returns true if the argument is `None`.
     pub fn is_none(value: ndc_vm::value::Value) -> bool {
         matches!(value, ndc_vm::value::Value::None)
     }

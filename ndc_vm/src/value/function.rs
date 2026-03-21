@@ -84,6 +84,14 @@ impl Function {
         }
     }
 
+    pub fn documentation(&self) -> Option<&str> {
+        match self {
+            Self::Native(f) => f.documentation.as_deref(),
+            Self::Memoized { function, .. } => function.documentation(),
+            _ => None,
+        }
+    }
+
     pub fn name(&self) -> Option<&str> {
         match self {
             Self::Compiled(f) => f.name.as_deref(),

@@ -28,12 +28,13 @@ pub fn join_to_string(list: ndc_vm::value::SeqValue, sep: &str) -> anyhow::Resul
 #[export_module]
 mod inner {
 
-    /// The string concat operator
+    /// Concatenates two values into a string.
     #[function(name = "<>")]
     pub fn op_string_concat(left: ndc_vm::value::Value, right: ndc_vm::value::Value) -> String {
         format!("{left}{right}")
     }
 
+    /// Appends the right string to the left string in place.
     #[function(name = "++=")]
     pub fn op_list_concat(left: &mut StringRepr, right: &mut StringRepr) -> ndc_vm::value::Value {
         if Rc::ptr_eq(left, right) {
@@ -103,7 +104,7 @@ mod inner {
         string.push_str(value);
     }
 
-    // TODO: should we optimize something here?
+    /// Concatenates two strings into a new string.
     #[function(name = "++")]
     pub fn concat(left: &str, right: &str) -> String {
         format!("{left}{right}")

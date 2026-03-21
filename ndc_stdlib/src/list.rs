@@ -15,10 +15,12 @@ mod inner {
         ))
     }
 
+    /// Returns `true` if the list contains the given element.
     pub fn contains(list: &[ndc_vm::value::Value], elem: ndc_vm::value::Value) -> bool {
         list.contains(&elem)
     }
 
+    /// Returns `true` if the list contains the given subsequence.
     pub fn contains_subsequence(
         list: &[ndc_vm::value::Value],
         subsequence: &[ndc_vm::value::Value],
@@ -26,6 +28,7 @@ mod inner {
         list.windows(subsequence.len()).contains(&subsequence)
     }
 
+    /// Returns the starting index of the first occurrence of `subsequence` in `list`, or unit if not found.
     pub fn find_subsequence(
         list: &[ndc_vm::value::Value],
         subsequence: &[ndc_vm::value::Value],
@@ -42,6 +45,7 @@ mod inner {
         }
     }
 
+    /// Inserts an element at the given index, shifting all elements after it to the right.
     pub fn insert(
         list: &mut Vec<ndc_vm::value::Value>,
         index: usize,
@@ -76,17 +80,17 @@ mod inner {
         list.push(elem);
     }
 
-    /// Moves elements from `other` to `list` leaving `other` empty
+    /// Moves elements from `other` to `list`, leaving `other` empty.
     pub fn append(list: &mut Vec<ndc_vm::value::Value>, other: &mut Vec<ndc_vm::value::Value>) {
         list.append(other);
     }
 
-    /// Copies elements from `other` to `list` not touching `other`.
+    /// Copies elements from `other` to `list`, not touching `other`.
     pub fn extend(list: &mut Vec<ndc_vm::value::Value>, other: &[ndc_vm::value::Value]) {
         list.extend_from_slice(other);
     }
 
-    /// Removes the last element from a list and returns it, or `Unit` if it is empty
+    /// Removes and returns the last element from the list, or `None` if empty.
     #[function(name = "pop?", return_type = Option<_>)]
     pub fn maybe_pop(list: &mut Vec<ndc_vm::value::Value>) -> ndc_vm::value::Value {
         match list.pop() {
@@ -95,10 +99,12 @@ mod inner {
         }
     }
 
+    /// Removes and returns the last element from the list, or unit if empty.
     pub fn pop(list: &mut Vec<ndc_vm::value::Value>) -> ndc_vm::value::Value {
         list.pop().unwrap_or_else(ndc_vm::value::Value::unit)
     }
 
+    /// Removes and returns the first element from the list, or `None` if empty.
     #[function(name = "pop_left?", return_type = Option<_>)]
     pub fn maybe_pop_left(list: &mut Vec<ndc_vm::value::Value>) -> ndc_vm::value::Value {
         if list.is_empty() {
@@ -107,6 +113,7 @@ mod inner {
         ndc_vm::value::Value::Object(Rc::new(ndc_vm::value::Object::Some(list.remove(0))))
     }
 
+    /// Removes and returns the first element from the list, or unit if empty.
     pub fn pop_left(list: &mut Vec<ndc_vm::value::Value>) -> ndc_vm::value::Value {
         if list.is_empty() {
             return ndc_vm::value::Value::unit();
@@ -157,7 +164,7 @@ mod inner {
             .ok_or_else(|| anyhow!("collection is empty"))
     }
 
-    /// Returns a copy of the first element or `unit` if the list is empty.
+    /// Returns a copy of the first element, or `None` if the list is empty.
     #[function(name = "first?", return_type = Option<_>)]
     pub fn maybe_first(list: &[ndc_vm::value::Value]) -> ndc_vm::value::Value {
         match list.first() {
@@ -175,7 +182,7 @@ mod inner {
             .ok_or_else(|| anyhow!("the list is empty"))
     }
 
-    /// Returns a copy of the last element or `unit` if the list is empty.
+    /// Returns a copy of the last element, or `None` if the list is empty.
     #[function(name = "last?", return_type = Option<_>)]
     pub fn maybe_last(list: &[ndc_vm::value::Value]) -> ndc_vm::value::Value {
         match list.last() {
@@ -186,6 +193,7 @@ mod inner {
         }
     }
 
+    /// Returns the Cartesian product of two lists as a list of tuples.
     #[function(return_type = Vec<_>)]
     pub fn cartesian_product(
         list_a: &[ndc_vm::value::Value],
@@ -279,7 +287,9 @@ pub mod ops {
     fn register_list_append(env: &mut FunctionRegistry<Rc<VmNativeFunction>>) {
         let native = Rc::new(VmNativeFunction {
             name: "++=".to_string(),
-            documentation: Some("Appends all elements from the right list to the left list in place.".to_string()),
+            documentation: Some(
+                "Appends all elements from the right list to the left list in place.".to_string(),
+            ),
             static_type: StaticType::Function {
                 parameters: Some(vec![
                     StaticType::List(Box::new(StaticType::Any)),

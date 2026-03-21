@@ -11,6 +11,7 @@ mod inner {
     use anyhow::Context;
     use std::path::PathBuf;
 
+    /// Reads the entire contents of a file into a string.
     pub fn read_file(file_path: &str) -> anyhow::Result<String> {
         read_to_string(file_path.parse::<PathBuf>().context("invalid file path")?)
             .context("failed to read file")
@@ -20,7 +21,10 @@ mod inner {
 pub fn register_variadic(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     let print_native = Rc::new(NativeFunction {
         name: "print".to_string(),
-        documentation: Some("Prints its arguments to standard output, separated by spaces, followed by a newline.".to_string()),
+        documentation: Some(
+            "Prints its arguments to standard output, separated by spaces, followed by a newline."
+                .to_string(),
+        ),
         static_type: StaticType::Function {
             parameters: None,
             return_type: Box::new(StaticType::unit()),

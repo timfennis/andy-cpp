@@ -41,6 +41,7 @@ mod inner {
         r.denom().clone()
     }
 
+    /// Returns the sum of all elements in a sequence.
     pub fn sum(seq: ndc_vm::value::SeqValue) -> anyhow::Result<Number> {
         if matches!(&seq, ndc_vm::value::Value::Object(o) if matches!(o.as_ref(), ndc_vm::value::Object::String(_)))
         {
@@ -56,6 +57,7 @@ mod inner {
             })
     }
 
+    /// Returns the product of all elements in a sequence.
     pub fn product(seq: ndc_vm::value::SeqValue) -> anyhow::Result<Number> {
         if matches!(&seq, ndc_vm::value::Value::Object(o) if matches!(o.as_ref(), ndc_vm::value::Object::String(_)))
         {
@@ -71,6 +73,7 @@ mod inner {
             })
     }
 
+    /// Returns the factorial of a non-negative integer.
     pub fn factorial(a: &BigInt) -> anyhow::Result<BigInt> {
         let num =
             BigUint::try_from(a).context("cannot compute the factorial of a negative number")?;
@@ -78,34 +81,42 @@ mod inner {
         Ok(num.factorial().into())
     }
 
+    /// Returns the greatest common divisor of two integers.
     pub fn gcd(a: &BigInt, b: &BigInt) -> BigInt {
         a.gcd(b)
     }
 
+    /// Returns the least common multiple of two integers.
     pub fn lcm(a: &BigInt, b: &BigInt) -> BigInt {
         a.lcm(b)
     }
 
+    /// Returns the smallest integer greater than or equal to the number.
     pub fn ceil(number: &Number) -> Number {
         number.ceil()
     }
 
+    /// Rounds the number to the nearest integer, with ties rounding away from zero.
     pub fn round(number: &Number) -> Number {
         number.round()
     }
 
+    /// Returns the largest integer less than or equal to the number.
     pub fn floor(number: &Number) -> Number {
         number.floor()
     }
 
+    /// Returns the absolute value of a number.
     pub fn abs(number: &Number) -> Number {
         number.abs()
     }
 
+    /// Returns the absolute difference between two numbers.
     pub fn abs_diff(left: &Number, right: &Number) -> Result<Number, BinaryOperatorError> {
         Ok(left.sub(right)?.abs())
     }
 
+    /// Converts a value to a floating-point number.
     pub fn float(value: ndc_vm::value::Value) -> anyhow::Result<f64> {
         match &value {
             ndc_vm::value::Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
@@ -121,6 +132,7 @@ mod inner {
         }
     }
 
+    /// Computes the four-quadrant arctangent of `y` and `x` in radians.
     pub fn atan2(y: f64, x: f64) -> f64 {
         y.atan2(x)
     }
@@ -209,10 +221,26 @@ pub mod f64 {
         implement_binary_operator_on_num!("+", std::ops::Add::add, "Adds two numbers.");
         implement_binary_operator_on_num!("*", std::ops::Mul::mul, "Multiplies two numbers.");
         implement_binary_operator_on_num!("/", std::ops::Div::div, "Divides two numbers.");
-        implement_binary_operator_on_num!("\\", Number::floor_div, "Integer (floor) division of two numbers.");
-        implement_binary_operator_on_num!("^", Number::pow, "Raises the first number to the power of the second.");
-        implement_binary_operator_on_num!("%", std::ops::Rem::rem, "Returns the remainder of dividing two numbers.");
-        implement_binary_operator_on_num!("%%", Number::checked_rem_euclid, "Returns the Euclidean remainder of dividing two numbers. The result is always non-negative.");
+        implement_binary_operator_on_num!(
+            "\\",
+            Number::floor_div,
+            "Integer (floor) division of two numbers."
+        );
+        implement_binary_operator_on_num!(
+            "^",
+            Number::pow,
+            "Raises the first number to the power of the second."
+        );
+        implement_binary_operator_on_num!(
+            "%",
+            std::ops::Rem::rem,
+            "Returns the remainder of dividing two numbers."
+        );
+        implement_binary_operator_on_num!(
+            "%%",
+            Number::checked_rem_euclid,
+            "Returns the Euclidean remainder of dividing two numbers. The result is always non-negative."
+        );
 
         env.declare_global_fn(Rc::new(VmNativeFunction {
             name: "-".to_string(),
@@ -264,10 +292,26 @@ pub mod f64 {
             };
         }
 
-        impl_cmp!(">", Ordering::Greater, "Returns true if the left value is greater than the right.");
-        impl_cmp!(">=", Ordering::Greater | Ordering::Equal, "Returns true if the left value is greater than or equal to the right.");
-        impl_cmp!("<", Ordering::Less, "Returns true if the left value is less than the right.");
-        impl_cmp!("<=", Ordering::Less | Ordering::Equal, "Returns true if the left value is less than or equal to the right.");
+        impl_cmp!(
+            ">",
+            Ordering::Greater,
+            "Returns true if the left value is greater than the right."
+        );
+        impl_cmp!(
+            ">=",
+            Ordering::Greater | Ordering::Equal,
+            "Returns true if the left value is greater than or equal to the right."
+        );
+        impl_cmp!(
+            "<",
+            Ordering::Less,
+            "Returns true if the left value is less than the right."
+        );
+        impl_cmp!(
+            "<=",
+            Ordering::Less | Ordering::Equal,
+            "Returns true if the left value is less than or equal to the right."
+        );
 
         env.declare_global_fn(Rc::new(VmNativeFunction {
             name: "==".to_string(),
@@ -399,9 +443,24 @@ pub mod f64 {
             };
         }
 
-        impl_bitop!("&", std::ops::BitAnd::bitand, "Logical AND of two booleans.", "Bitwise AND of two integers.");
-        impl_bitop!("|", std::ops::BitOr::bitor, "Logical OR of two booleans.", "Bitwise OR of two integers.");
-        impl_bitop!("~", std::ops::BitXor::bitxor, "Logical XOR of two booleans.", "Bitwise XOR of two integers.");
+        impl_bitop!(
+            "&",
+            std::ops::BitAnd::bitand,
+            "Logical AND of two booleans.",
+            "Bitwise AND of two integers."
+        );
+        impl_bitop!(
+            "|",
+            std::ops::BitOr::bitor,
+            "Logical OR of two booleans.",
+            "Bitwise OR of two integers."
+        );
+        impl_bitop!(
+            "~",
+            std::ops::BitXor::bitxor,
+            "Logical XOR of two booleans.",
+            "Bitwise XOR of two integers."
+        );
 
         env.declare_global_fn(Rc::new(VmNativeFunction {
             name: "~".to_string(),
@@ -428,7 +487,9 @@ pub mod f64 {
         for ident in ["!", "not"] {
             env.declare_global_fn(Rc::new(VmNativeFunction {
                 name: ident.to_string(),
-                documentation: Some("Logical negation. Returns the opposite boolean value.".to_string()),
+                documentation: Some(
+                    "Logical negation. Returns the opposite boolean value.".to_string(),
+                ),
                 static_type: StaticType::Function {
                     parameters: Some(vec![StaticType::Bool]),
                     return_type: Box::new(StaticType::Bool),
@@ -540,7 +601,7 @@ pub mod f64 {
         delegate_to_f64!(asinh, "Inverse hyperbolic sine function.");
         delegate_to_f64!(
             atan,
-            "Computes the arctangent of a number. Return value is in radians in the range [-pi/2, pi/2];"
+            "Computes the arctangent of a number. Return value is in radians in the range [-pi/2, pi/2]."
         );
         delegate_to_f64!(atanh, "Inverse hyperbolic tangent function.");
         delegate_to_f64!(cbrt, "Returns the cube root of a number.");
