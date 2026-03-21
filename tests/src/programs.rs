@@ -25,10 +25,12 @@ fn run_ndc_test(path: PathBuf) -> Result<(), std::io::Error> {
 
     let mut interpreter = Interpreter::capturing();
     interpreter.configure(ndc_stdlib::register);
-    let interpreter_result = interpreter.run_str(&contents);
+    let interpreter_result = interpreter.eval(&contents);
 
     let program_had_error = interpreter_result.is_err();
-    let actual_error = interpreter_result.unwrap_or_else(|err| format!("{err:?}"));
+    let actual_error = interpreter_result
+        .map(|v| v.to_string())
+        .unwrap_or_else(|err| format!("{err:?}"));
 
     assert!(
         !expect_error.is_empty() || !program_had_error,

@@ -44,8 +44,9 @@ pub fn run() -> anyhow::Result<()> {
                 let _ = rl.add_history_entry(line.as_str());
 
                 // Run the line we just read through the interpreter
-                match into_miette_result(interpreter.run_str(line.as_str())) {
-                    Ok(output) => {
+                match into_miette_result(interpreter.eval(line.as_str())) {
+                    Ok(value) => {
+                        let output = value.to_string();
                         if !output.is_empty() {
                             println!("{output}")
                         }

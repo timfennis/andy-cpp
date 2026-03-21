@@ -10,7 +10,9 @@ use std::time::Duration;
 fn run_string(input: &str) -> Result<String, InterpreterError> {
     let mut interpreter = Interpreter::capturing();
     interpreter.configure(ndc_stdlib::register);
-    interpreter.run_str(std::hint::black_box(input))
+    interpreter
+        .eval(std::hint::black_box(input))
+        .map(|v| v.to_string())
 }
 
 #[allow(unused)]

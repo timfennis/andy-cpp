@@ -119,6 +119,10 @@ impl Value {
         Self::Object(Rc::new(Object::Tuple(vec![])))
     }
 
+    pub fn is_unit(&self) -> bool {
+        matches!(self, Self::Object(obj) if matches!(&**obj, Object::Tuple(v) if v.is_empty()))
+    }
+
     pub fn function(function: Function) -> Self {
         Self::Object(Rc::new(Object::Function(function)))
     }
