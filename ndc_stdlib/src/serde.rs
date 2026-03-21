@@ -1,35 +1,35 @@
 use anyhow::Context;
 use ndc_core::hash_map::HashMap;
 use ndc_macros::export_module;
-use ndc_vm::value::{Object as VmObject, Value as VmValue};
+use ndc_vm::value::{Object, Value};
 use num::ToPrimitive;
 use serde_json::{Map, Number, Value as JsonValue, json};
 use std::rc::Rc;
 
-fn value_to_json(value: VmValue) -> Result<JsonValue, anyhow::Error> {
+fn value_to_json(value: Value) -> Result<JsonValue, anyhow::Error> {
     match value {
-        VmValue::None => Ok(JsonValue::Null),
-        VmValue::Bool(b) => Ok(json!(b)),
-        VmValue::Int(i) => Ok(json!(i)),
-        VmValue::Float(f) => Ok(json!(f)),
-        VmValue::Object(obj) => match obj.as_ref() {
-            VmObject::Some(inner) => value_to_json(inner.clone()),
-            VmObject::BigInt(big_int) => {
+        Value::None => Ok(JsonValue::Null),
+        Value::Bool(b) => Ok(json!(b)),
+        Value::Int(i) => Ok(json!(i)),
+        Value::Float(f) => Ok(json!(f)),
+        Value::Object(obj) => match obj.as_ref() {
+            Object::Some(inner) => value_to_json(inner.clone()),
+            Object::BigInt(big_int) => {
                 use std::str::FromStr;
                 Number::from_str(&big_int.to_string())
                     .map(JsonValue::Number)
                     .context("Cannot convert bigint to JSON number")
             }
-            VmObject::Rational(ratio) => Ok(json!(ratio.to_f64())),
-            VmObject::Complex(complex) => Ok(json!(format!("{complex}"))),
-            VmObject::String(s) => Ok(json!(&*s.borrow())),
-            VmObject::List(v) => Ok(JsonValue::Array(
+            Object::Rational(ratio) => Ok(json!(ratio.to_f64())),
+            Object::Complex(complex) => Ok(json!(format!("{complex}"))),
+            Object::String(s) => Ok(json!(&*s.borrow())),
+            Object::List(v) => Ok(JsonValue::Array(
                 v.borrow()
                     .iter()
                     .map(|v| value_to_json(v.clone()))
                     .collect::<Result<Vec<_>, _>>()?,
             )),
-            VmObject::Tuple(v) => match v.len() {
+            Object::Tuple(v) => match v.len() {
                 0 => Ok(JsonValue::Null),
                 _ => Ok(JsonValue::Array(
                     v.iter()
@@ -37,7 +37,7 @@ fn value_to_json(value: VmValue) -> Result<JsonValue, anyhow::Error> {
                         .collect::<Result<Vec<_>, _>>()?,
                 )),
             },
-            VmObject::Map { entries, .. } => Ok(JsonValue::Object(
+            Object::Map { entries, .. } => Ok(JsonValue::Object(
                 entries
                     .borrow()
                     .iter()
@@ -46,7 +46,7 @@ fn value_to_json(value: VmValue) -> Result<JsonValue, anyhow::Error> {
                     })
                     .collect::<Result<Map<String, JsonValue>, _>>()?,
             )),
-            VmObject::Iterator(i) => {
+            Object::Iterator(i) => {
                 let mut out = Vec::new();
                 let mut iter = i.borrow_mut();
                 while let Some(v) = iter.next() {
@@ -54,54 +54,54 @@ fn value_to_json(value: VmValue) -> Result<JsonValue, anyhow::Error> {
                 }
                 Ok(JsonValue::Array(out))
             }
-            VmObject::MaxHeap(h) => Ok(JsonValue::Array(
+            Object::MaxHeap(h) => Ok(JsonValue::Array(
                 h.borrow()
                     .iter()
                     .map(|v| value_to_json(v.0.clone()))
                     .collect::<Result<Vec<_>, _>>()?,
             )),
-            VmObject::MinHeap(h) => Ok(JsonValue::Array(
+            Object::MinHeap(h) => Ok(JsonValue::Array(
                 h.borrow()
                     .iter()
                     .map(|v| value_to_json(v.0.0.clone()))
                     .collect::<Result<Vec<_>, _>>()?,
             )),
-            VmObject::Deque(d) => Ok(JsonValue::Array(
+            Object::Deque(d) => Ok(JsonValue::Array(
                 d.borrow()
                     .iter()
                     .map(|v| value_to_json(v.clone()))
                     .collect::<Result<Vec<_>, _>>()?,
             )),
-            VmObject::Function(_) | VmObject::OverloadSet(_) => {
+            Object::Function(_) | Object::OverloadSet(_) => {
                 Err(anyhow::anyhow!("Unable to serialize function"))
             }
         },
     }
 }
 
-fn json_to_value(value: JsonValue) -> Result<VmValue, anyhow::Error> {
+fn json_to_value(value: JsonValue) -> Result<Value, anyhow::Error> {
     Ok(match value {
-        JsonValue::Null => VmValue::unit(),
-        JsonValue::Bool(b) => VmValue::Bool(b),
+        JsonValue::Null => Value::unit(),
+        JsonValue::Bool(b) => Value::Bool(b),
         JsonValue::Number(n) => {
             if let Some(i) = n.as_i64() {
-                VmValue::Int(i)
+                Value::Int(i)
             } else if let Some(f) = n.as_f64() {
-                VmValue::Float(f)
+                Value::Float(f)
             } else {
                 return Err(anyhow::anyhow!("Cannot parse JSON number"));
             }
         }
-        JsonValue::String(s) => VmValue::string(s),
-        JsonValue::Array(a) => VmValue::list(
+        JsonValue::String(s) => Value::string(s),
+        JsonValue::Array(a) => Value::list(
             a.into_iter()
                 .map(json_to_value)
                 .collect::<Result<Vec<_>, _>>()?,
         ),
-        JsonValue::Object(o) => VmValue::Object(Rc::new(VmObject::map(
+        JsonValue::Object(o) => Value::Object(Rc::new(Object::map(
             o.into_iter()
-                .map(|(key, value)| json_to_value(value).map(|value| (VmValue::string(key), value)))
-                .collect::<Result<HashMap<VmValue, VmValue>, _>>()?,
+                .map(|(key, value)| json_to_value(value).map(|value| (Value::string(key), value)))
+                .collect::<Result<HashMap<Value, Value>, _>>()?,
             None,
         ))),
     })
@@ -110,13 +110,13 @@ fn json_to_value(value: JsonValue) -> Result<VmValue, anyhow::Error> {
 #[export_module]
 mod inner {
     /// Converts a JSON string to a value
-    pub fn json_decode(input: &str) -> anyhow::Result<ndc_vm::value::Value> {
+    pub fn json_decode(input: &str) -> anyhow::Result<Value> {
         let json: JsonValue = serde_json::from_str(input)?;
         json_to_value(json)
     }
 
     /// Converts the input value to JSON
-    pub fn json_encode(input: ndc_vm::value::Value) -> anyhow::Result<String> {
+    pub fn json_encode(input: Value) -> anyhow::Result<String> {
         let v = value_to_json(input)?;
         Ok(v.to_string())
     }

@@ -1,4 +1,5 @@
 use ndc_core::hash_map::{self, HashMapExt};
+use ndc_vm::value::{MapValue, Object, SeqValue, Value};
 use std::rc::Rc;
 
 #[ndc_macros::export_module]
@@ -8,10 +9,8 @@ mod inner {
     ///
     /// Note that for a set this will return the values in the set.
     #[function(return_type = Vec<_>)]
-    pub fn keys(
-        map: &mut hash_map::HashMap<ndc_vm::value::Value, ndc_vm::value::Value>,
-    ) -> ndc_vm::value::Value {
-        ndc_vm::value::Value::Object(Rc::new(ndc_vm::value::Object::list(
+    pub fn keys(map: &mut hash_map::HashMap<Value, Value>) -> Value {
+        Value::Object(Rc::new(Object::list(
             map.keys().cloned().collect::<Vec<_>>(),
         )))
     }
@@ -20,27 +19,22 @@ mod inner {
     ///
     /// Note that for sets this will return a list of unit types, you should use keys if you want the values in the set.
     #[function(return_type = Vec<_>)]
-    pub fn values(
-        map: &mut hash_map::HashMap<ndc_vm::value::Value, ndc_vm::value::Value>,
-    ) -> ndc_vm::value::Value {
-        ndc_vm::value::Value::Object(Rc::new(ndc_vm::value::Object::list(
+    pub fn values(map: &mut hash_map::HashMap<Value, Value>) -> Value {
+        Value::Object(Rc::new(Object::list(
             map.values().cloned().collect::<Vec<_>>(),
         )))
     }
 
     /// Removes a key from the map or a value from a set.
-    pub fn remove(
-        map: &mut hash_map::HashMap<ndc_vm::value::Value, ndc_vm::value::Value>,
-        key: ndc_vm::value::Value,
-    ) {
+    pub fn remove(map: &mut hash_map::HashMap<Value, Value>, key: Value) {
         map.remove(&key);
     }
 
     /// Removes all keys from the `left` map/set that are present in the `right` map/set.
     #[function(name = "remove")]
     pub fn remove_map(
-        left: &mut hash_map::HashMap<ndc_vm::value::Value, ndc_vm::value::Value>,
-        right: &hash_map::HashMap<ndc_vm::value::Value, ndc_vm::value::Value>,
+        left: &mut hash_map::HashMap<Value, Value>,
+        right: &hash_map::HashMap<Value, Value>,
     ) {
         for (key, _) in right {
             left.remove(key);
@@ -49,39 +43,32 @@ mod inner {
 
     /// Insert a value into a map.
     #[function(name = "insert")]
-    pub fn insert_map(
-        map: &mut hash_map::HashMap<ndc_vm::value::Value, ndc_vm::value::Value>,
-        key: ndc_vm::value::Value,
-        value: ndc_vm::value::Value,
-    ) {
+    pub fn insert_map(map: &mut hash_map::HashMap<Value, Value>, key: Value, value: Value) {
         map.insert(key, value);
     }
 
     /// Inserts a value into a set.
     #[function(name = "insert")]
-    pub fn insert_set(
-        map: &mut hash_map::HashMap<ndc_vm::value::Value, ndc_vm::value::Value>,
-        key: ndc_vm::value::Value,
-    ) {
-        map.insert(key, ndc_vm::value::Value::unit());
+    pub fn insert_set(map: &mut hash_map::HashMap<Value, Value>, key: Value) {
+        map.insert(key, Value::unit());
     }
 
     /// Returns true if the map or set contains no elements.
-    pub fn is_empty(map: &hash_map::HashMap<ndc_vm::value::Value, ndc_vm::value::Value>) -> bool {
+    pub fn is_empty(map: &hash_map::HashMap<Value, Value>) -> bool {
         map.is_empty()
     }
 
     /// Intersection-assign: retains only elements present in both maps or sets.
     #[function(name = "&=")]
     pub fn intersect_assign(
-        lhs: ndc_vm::value::MapValue,
-        rhs: &hash_map::HashMap<ndc_vm::value::Value, ndc_vm::value::Value>,
-    ) -> anyhow::Result<ndc_vm::value::MapValue> {
+        lhs: MapValue,
+        rhs: &hash_map::HashMap<Value, Value>,
+    ) -> anyhow::Result<MapValue> {
         {
-            let ndc_vm::value::Value::Object(ref obj) = lhs else {
+            let Value::Object(ref obj) = lhs else {
                 anyhow::bail!("&= requires a map on the left side");
             };
-            let ndc_vm::value::Object::Map { ref entries, .. } = *obj.as_ref() else {
+            let Object::Map { ref entries, .. } = *obj.as_ref() else {
                 anyhow::bail!("&= requires a map on the left side");
             };
             entries.borrow_mut().intersection(rhs);
@@ -92,14 +79,14 @@ mod inner {
     /// Union-assign: adds all elements from the right map or set into the left.
     #[function(name = "|=")]
     pub fn union_assign(
-        lhs: ndc_vm::value::MapValue,
-        rhs: &hash_map::HashMap<ndc_vm::value::Value, ndc_vm::value::Value>,
-    ) -> anyhow::Result<ndc_vm::value::MapValue> {
+        lhs: MapValue,
+        rhs: &hash_map::HashMap<Value, Value>,
+    ) -> anyhow::Result<MapValue> {
         {
-            let ndc_vm::value::Value::Object(ref obj) = lhs else {
+            let Value::Object(ref obj) = lhs else {
                 anyhow::bail!("|= requires a map on the left side");
             };
-            let ndc_vm::value::Object::Map { ref entries, .. } = *obj.as_ref() else {
+            let Object::Map { ref entries, .. } = *obj.as_ref() else {
                 anyhow::bail!("|= requires a map on the left side");
             };
             let mut m = entries.borrow_mut();
@@ -113,14 +100,14 @@ mod inner {
     /// Difference-assign: removes all elements from the left map or set that are present in the right.
     #[function(name = "-=")]
     pub fn difference_assign(
-        lhs: ndc_vm::value::MapValue,
-        rhs: &hash_map::HashMap<ndc_vm::value::Value, ndc_vm::value::Value>,
-    ) -> anyhow::Result<ndc_vm::value::MapValue> {
+        lhs: MapValue,
+        rhs: &hash_map::HashMap<Value, Value>,
+    ) -> anyhow::Result<MapValue> {
         {
-            let ndc_vm::value::Value::Object(ref obj) = lhs else {
+            let Value::Object(ref obj) = lhs else {
                 anyhow::bail!("-= requires a map on the left side");
             };
-            let ndc_vm::value::Object::Map { ref entries, .. } = *obj.as_ref() else {
+            let Object::Map { ref entries, .. } = *obj.as_ref() else {
                 anyhow::bail!("-= requires a map on the left side");
             };
             entries.borrow_mut().difference(rhs);
@@ -131,14 +118,14 @@ mod inner {
     /// Symmetric-difference-assign: retains only elements present in exactly one of the two maps or sets.
     #[function(name = "~=")]
     pub fn symmetric_difference_assign(
-        lhs: ndc_vm::value::MapValue,
-        rhs: &hash_map::HashMap<ndc_vm::value::Value, ndc_vm::value::Value>,
-    ) -> anyhow::Result<ndc_vm::value::MapValue> {
+        lhs: MapValue,
+        rhs: &hash_map::HashMap<Value, Value>,
+    ) -> anyhow::Result<MapValue> {
         {
-            let ndc_vm::value::Value::Object(ref obj) = lhs else {
+            let Value::Object(ref obj) = lhs else {
                 anyhow::bail!("~= requires a map on the left side");
             };
-            let ndc_vm::value::Object::Map { ref entries, .. } = *obj.as_ref() else {
+            let Object::Map { ref entries, .. } = *obj.as_ref() else {
                 anyhow::bail!("~= requires a map on the left side");
             };
             let diff = hash_map::symmetric_difference(&*entries.borrow(), rhs);
@@ -152,13 +139,13 @@ mod inner {
     /// This is the same as evaluating the expression `left | right`.
     #[function(alias = "|")]
     pub fn union(
-        left: ndc_vm::value::MapValue,
-        right: &hash_map::HashMap<ndc_vm::value::Value, ndc_vm::value::Value>,
-    ) -> anyhow::Result<ndc_vm::value::MapValue> {
-        let ndc_vm::value::Value::Object(ref obj) = left else {
+        left: MapValue,
+        right: &hash_map::HashMap<Value, Value>,
+    ) -> anyhow::Result<MapValue> {
+        let Value::Object(ref obj) = left else {
             anyhow::bail!("| requires a map on the left side");
         };
-        let ndc_vm::value::Object::Map {
+        let Object::Map {
             ref entries,
             ref default,
         } = *obj.as_ref()
@@ -166,9 +153,10 @@ mod inner {
             anyhow::bail!("| requires a map on the left side");
         };
         let new_entries = hash_map::union(&*entries.borrow(), right);
-        Ok(ndc_vm::value::Value::Object(Rc::new(
-            ndc_vm::value::Object::map(new_entries, default.clone()),
-        )))
+        Ok(Value::Object(Rc::new(Object::map(
+            new_entries,
+            default.clone(),
+        ))))
     }
 
     /// Returns the intersection (elements that are in both `left` and `right`) of two maps or sets.
@@ -176,13 +164,13 @@ mod inner {
     /// This is the same as evaluating the expression `left & right`.
     #[function(alias = "&")]
     pub fn intersection(
-        left: ndc_vm::value::MapValue,
-        right: &hash_map::HashMap<ndc_vm::value::Value, ndc_vm::value::Value>,
-    ) -> anyhow::Result<ndc_vm::value::MapValue> {
-        let ndc_vm::value::Value::Object(ref obj) = left else {
+        left: MapValue,
+        right: &hash_map::HashMap<Value, Value>,
+    ) -> anyhow::Result<MapValue> {
+        let Value::Object(ref obj) = left else {
             anyhow::bail!("& requires a map on the left side");
         };
-        let ndc_vm::value::Object::Map {
+        let Object::Map {
             ref entries,
             ref default,
         } = *obj.as_ref()
@@ -190,9 +178,10 @@ mod inner {
             anyhow::bail!("& requires a map on the left side");
         };
         let new_entries = hash_map::intersection(&*entries.borrow(), right);
-        Ok(ndc_vm::value::Value::Object(Rc::new(
-            ndc_vm::value::Object::map(new_entries, default.clone()),
-        )))
+        Ok(Value::Object(Rc::new(Object::map(
+            new_entries,
+            default.clone(),
+        ))))
     }
 
     /// Returns the symmetric difference (elements that are either in `left` or `right` but not both) of two maps or sets.
@@ -200,13 +189,13 @@ mod inner {
     /// This is the same as evaluating the expression `left ~ right`.
     #[function(alias = "~")]
     pub fn symmetric_difference(
-        left: ndc_vm::value::MapValue,
-        right: &hash_map::HashMap<ndc_vm::value::Value, ndc_vm::value::Value>,
-    ) -> anyhow::Result<ndc_vm::value::MapValue> {
-        let ndc_vm::value::Value::Object(ref obj) = left else {
+        left: MapValue,
+        right: &hash_map::HashMap<Value, Value>,
+    ) -> anyhow::Result<MapValue> {
+        let Value::Object(ref obj) = left else {
             anyhow::bail!("~ requires a map on the left side");
         };
-        let ndc_vm::value::Object::Map {
+        let Object::Map {
             ref entries,
             ref default,
         } = *obj.as_ref()
@@ -214,16 +203,16 @@ mod inner {
             anyhow::bail!("~ requires a map on the left side");
         };
         let new_entries = hash_map::symmetric_difference(&*entries.borrow(), right);
-        Ok(ndc_vm::value::Value::Object(Rc::new(
-            ndc_vm::value::Object::map(new_entries, default.clone()),
-        )))
+        Ok(Value::Object(Rc::new(Object::map(
+            new_entries,
+            default.clone(),
+        ))))
     }
 
     /// Converts the given sequence to set.
     #[function(return_type = Map<_, ()>)]
-    pub fn set(seq: ndc_vm::value::SeqValue) -> anyhow::Result<ndc_vm::value::Value> {
+    pub fn set(seq: SeqValue) -> anyhow::Result<Value> {
         use ndc_core::hash_map::HashMap;
-        use ndc_vm::value::{Object, Value};
 
         let entries: HashMap<Value, Value> = seq
             .try_into_iter()

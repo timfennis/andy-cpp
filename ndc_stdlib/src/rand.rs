@@ -6,6 +6,8 @@ use rand::distr::uniform::SampleUniform;
 use rand::seq::SliceRandom;
 use tap::Tap;
 
+use ndc_vm::value::{SeqValue, Value};
+
 pub fn random_n<N: SampleUniform + std::fmt::Display + Copy>(
     lower: N,
     upper: N,
@@ -23,7 +25,7 @@ mod inner {
     use ndc_core::num::Number;
 
     /// Randomly shuffles the elements of the list in place.
-    pub fn shuffle(list: &mut Vec<ndc_vm::value::Value>) {
+    pub fn shuffle(list: &mut Vec<Value>) {
         list.shuffle(&mut rand::rng());
     }
 
@@ -31,8 +33,8 @@ mod inner {
     ///
     /// Note: this currently does consume iterators
     #[function(return_type = Vec<_>)]
-    pub fn shuffled(list: ndc_vm::value::SeqValue) -> anyhow::Result<ndc_vm::value::Value> {
-        Ok(ndc_vm::value::Value::list(
+    pub fn shuffled(list: SeqValue) -> anyhow::Result<Value> {
+        Ok(Value::list(
             list.try_into_iter()
                 .ok_or_else(|| anyhow::anyhow!("shuffled requires a sequence"))?
                 .collect_vec()

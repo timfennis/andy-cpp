@@ -4,13 +4,13 @@ use anyhow::anyhow;
 use ndc_core::compare::FallibleOrd;
 use ndc_macros::export_module;
 use ndc_vm::VmCallable;
-use ndc_vm::value::Value as VmValue;
+use ndc_vm::value::{Object, SeqValue, Value};
 use ndc_vm::{CombinationsIter, TakeIter};
 use std::cmp::Ordering;
 
 fn try_sort_by<E>(
-    v: &mut [VmValue],
-    cmp: impl Fn(&VmValue, &VmValue) -> Result<Ordering, E>,
+    v: &mut [Value],
+    cmp: impl Fn(&Value, &Value) -> Result<Ordering, E>,
 ) -> Result<(), E> {
     let mut ret = Ok(());
     v.sort_by(|left, right| {
@@ -30,26 +30,26 @@ fn try_sort_by<E>(
     Ok(())
 }
 
-fn vm_try_max(mut iter: impl Iterator<Item = VmValue>) -> anyhow::Result<VmValue> {
-    iter.try_fold(None::<VmValue>, |acc, b| match acc {
+fn vm_try_max(mut iter: impl Iterator<Item = Value>) -> anyhow::Result<Value> {
+    iter.try_fold(None::<Value>, |acc, b| match acc {
         None => Ok(Some(b)),
         Some(a) => a
             .try_cmp(&b)
             .map_err(|e: String| anyhow!(e))
             .map(|o| Some(if o == Ordering::Less { b } else { a })),
     })
-    .and_then(|x: Option<VmValue>| x.ok_or_else(|| anyhow!("empty input to max")))
+    .and_then(|x: Option<Value>| x.ok_or_else(|| anyhow!("empty input to max")))
 }
 
-fn vm_try_min(mut iter: impl Iterator<Item = VmValue>) -> anyhow::Result<VmValue> {
-    iter.try_fold(None::<VmValue>, |acc, b| match acc {
+fn vm_try_min(mut iter: impl Iterator<Item = Value>) -> anyhow::Result<Value> {
+    iter.try_fold(None::<Value>, |acc, b| match acc {
         None => Ok(Some(b)),
         Some(a) => a
             .try_cmp(&b)
             .map_err(|e: String| anyhow!(e))
             .map(|o| Some(if o == Ordering::Greater { b } else { a })),
     })
-    .and_then(|x: Option<VmValue>| x.ok_or_else(|| anyhow!("empty input to min")))
+    .and_then(|x: Option<Value>| x.ok_or_else(|| anyhow!("empty input to min")))
 }
 
 #[export_module]
@@ -58,17 +58,16 @@ mod inner {
     use itertools::Itertools;
     use ndc_core::compare::FallibleOrd;
     use ndc_vm::VmCallable;
-    use ndc_vm::value::{Object, Value as VmValue};
     use std::cmp::Ordering;
     use std::rc::Rc;
 
     /// Returns `true` if the element is contained in the sequence.
     #[function(name = "in")]
-    pub fn op_contains(elem: ndc_vm::value::Value, seq: ndc_vm::value::SeqValue) -> bool {
+    pub fn op_contains(elem: Value, seq: SeqValue) -> bool {
         match &seq {
-            VmValue::Object(obj) => match obj.as_ref() {
+            Value::Object(obj) => match obj.as_ref() {
                 Object::String(s) => match &elem {
-                    VmValue::Object(e) => match e.as_ref() {
+                    Value::Object(e) => match e.as_ref() {
                         Object::String(needle) => {
                             if Rc::ptr_eq(s, needle) {
                                 return true;
@@ -89,7 +88,7 @@ mod inner {
                     {
                         let iter = i.borrow();
                         if let Some((start, end, inclusive)) = iter.range_bounds() {
-                            let VmValue::Int(n) = elem else { return false };
+                            let Value::Int(n) = elem else { return false };
                             return if inclusive {
                                 n >= start && n <= end
                             } else {
@@ -97,7 +96,7 @@ mod inner {
                             };
                         }
                         if let Some(start) = iter.unbounded_range_start() {
-                            let VmValue::Int(n) = elem else { return false };
+                            let Value::Int(n) = elem else { return false };
                             return n >= start;
                         }
                     }
@@ -117,14 +116,14 @@ mod inner {
     }
 
     /// Returns the highest element in the sequence.
-    pub fn max(seq: ndc_vm::value::SeqValue) -> anyhow::Result<ndc_vm::value::Value> {
+    pub fn max(seq: SeqValue) -> anyhow::Result<Value> {
         match seq {
-            VmValue::Object(obj) => match Rc::unwrap_or_clone(obj) {
+            Value::Object(obj) => match Rc::unwrap_or_clone(obj) {
                 Object::String(s) => {
-                    let chars: Vec<VmValue> = s
+                    let chars: Vec<Value> = s
                         .borrow()
                         .chars()
-                        .map(|c| VmValue::string(c.to_string()))
+                        .map(|c| Value::string(c.to_string()))
                         .collect();
                     vm_try_max(chars.into_iter())
                 }
@@ -136,7 +135,7 @@ mod inner {
                     .ok_or_else(|| anyhow!("empty input to max")),
                 Object::MinHeap(_) => Err(anyhow!("max is not supported for MinHeap")),
                 obj => vm_try_max(
-                    VmValue::Object(Rc::new(obj))
+                    Value::Object(Rc::new(obj))
                         .try_into_iter()
                         .ok_or_else(|| anyhow!("cannot find max of non-sequence"))?,
                 ),
@@ -146,18 +145,12 @@ mod inner {
     }
 
     /// Returns the element for which the key function returns the highest value.
-    pub fn max_by_key(
-        seq: ndc_vm::value::SeqValue,
-        func: &mut VmCallable<'_>,
-    ) -> anyhow::Result<ndc_vm::value::Value> {
+    pub fn max_by_key(seq: SeqValue, func: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         by_key(seq, func, Ordering::Greater)
     }
 
     /// Returns the element for which the key function returns the lowest value.
-    pub fn min_by_key(
-        seq: ndc_vm::value::SeqValue,
-        func: &mut VmCallable<'_>,
-    ) -> anyhow::Result<ndc_vm::value::Value> {
+    pub fn min_by_key(seq: SeqValue, func: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         by_key(seq, func, Ordering::Less)
     }
 
@@ -166,10 +159,7 @@ mod inner {
     /// The comparator function takes two elements and returns a number. A positive result means the
     /// first argument is greater than the second, a negative result means the first argument is
     /// less than the second, and zero means they are equal.
-    pub fn max_by(
-        seq: ndc_vm::value::SeqValue,
-        comp: &mut VmCallable<'_>,
-    ) -> anyhow::Result<ndc_vm::value::Value> {
+    pub fn max_by(seq: SeqValue, comp: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         by_comp(seq, comp, Ordering::Greater)
     }
 
@@ -178,22 +168,19 @@ mod inner {
     /// The comparator function takes two elements and returns a number. A positive result means the
     /// first argument is greater than the second, a negative result means the first argument is
     /// less than the second, and zero means they are equal.
-    pub fn min_by(
-        seq: ndc_vm::value::SeqValue,
-        comp: &mut VmCallable<'_>,
-    ) -> anyhow::Result<ndc_vm::value::Value> {
+    pub fn min_by(seq: SeqValue, comp: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         by_comp(seq, comp, Ordering::Less)
     }
 
     /// Returns the lowest element in the sequence.
-    pub fn min(seq: ndc_vm::value::SeqValue) -> anyhow::Result<ndc_vm::value::Value> {
+    pub fn min(seq: SeqValue) -> anyhow::Result<Value> {
         match seq {
-            VmValue::Object(obj) => match Rc::unwrap_or_clone(obj) {
+            Value::Object(obj) => match Rc::unwrap_or_clone(obj) {
                 Object::String(s) => {
-                    let chars: Vec<VmValue> = s
+                    let chars: Vec<Value> = s
                         .borrow()
                         .chars()
-                        .map(|c| VmValue::string(c.to_string()))
+                        .map(|c| Value::string(c.to_string()))
                         .collect();
                     vm_try_min(chars.into_iter())
                 }
@@ -205,7 +192,7 @@ mod inner {
                     .ok_or_else(|| anyhow!("empty input to min")),
                 Object::MaxHeap(_) => Err(anyhow!("min is not supported for MaxHeap")),
                 obj => vm_try_min(
-                    VmValue::Object(Rc::new(obj))
+                    Value::Object(Rc::new(obj))
                         .try_into_iter()
                         .ok_or_else(|| anyhow!("cannot find min of non-sequence"))?,
                 ),
@@ -216,7 +203,7 @@ mod inner {
 
     /// Sorts the list in place.
     #[function(return_type = ())]
-    pub fn sort(list: &mut Vec<ndc_vm::value::Value>) -> anyhow::Result<()> {
+    pub fn sort(list: &mut Vec<Value>) -> anyhow::Result<()> {
         let mut err: Option<String> = None;
         list.sort_by(|a, b| match a.partial_cmp(b) {
             Some(ord) => ord,
@@ -244,10 +231,7 @@ mod inner {
     ///
     /// This function only works for strings and lists and will throw errors otherwise.
     #[function(return_type = ())]
-    pub fn sort_by(
-        list: &mut Vec<ndc_vm::value::Value>,
-        comp: &mut VmCallable<'_>,
-    ) -> anyhow::Result<()> {
+    pub fn sort_by(list: &mut Vec<Value>, comp: &mut VmCallable<'_>) -> anyhow::Result<()> {
         let mut err: Option<String> = None;
         list.sort_by(|left, right| {
             if err.is_some() {
@@ -275,15 +259,15 @@ mod inner {
 
     /// Returns a sorted copy of the input sequence as a list.
     #[function(return_type = Vec<_>)]
-    pub fn sorted(seq: ndc_vm::value::SeqValue) -> anyhow::Result<ndc_vm::value::Value> {
-        let mut list: Vec<VmValue> = seq
+    pub fn sorted(seq: SeqValue) -> anyhow::Result<Value> {
+        let mut list: Vec<Value> = seq
             .try_into_iter()
             .ok_or_else(|| anyhow!("sorted requires a sequence"))?
             .collect();
         try_sort_by(&mut list, |a, b| {
             a.try_cmp(b).map_err(|e: String| anyhow!(e))
         })?;
-        Ok(VmValue::list(list))
+        Ok(Value::list(list))
     }
 
     /// Sorts the given sequence using a comparing function, returning a new list with the elements in the sorted order.
@@ -292,11 +276,8 @@ mod inner {
     /// - for values lower than `0` the first argument is smaller than the second argument
     /// - for values higher than `0` the first argument is greater than the second argument
     /// - for values equal to `0` the first argument is equal to the second argument
-    pub fn sorted_by(
-        seq: ndc_vm::value::SeqValue,
-        comp: &mut VmCallable<'_>,
-    ) -> anyhow::Result<ndc_vm::value::Value> {
-        let mut list: Vec<VmValue> = seq
+    pub fn sorted_by(seq: SeqValue, comp: &mut VmCallable<'_>) -> anyhow::Result<Value> {
+        let mut list: Vec<Value> = seq
             .try_into_iter()
             .ok_or_else(|| anyhow!("sorted_by requires a sequence"))?
             .collect();
@@ -322,7 +303,7 @@ mod inner {
         if let Some(e) = err {
             return Err(anyhow::anyhow!(e));
         }
-        Ok(VmValue::list(list))
+        Ok(Value::list(list))
     }
 
     /// Returns the length of a string in bytes.
@@ -331,9 +312,9 @@ mod inner {
     }
 
     /// Returns the length of the sequence, for strings this returns the number of UTF-8 characters.
-    pub fn len(seq: ndc_vm::value::SeqValue) -> anyhow::Result<i64> {
+    pub fn len(seq: SeqValue) -> anyhow::Result<i64> {
         match &seq {
-            VmValue::Object(obj) => match obj.as_ref() {
+            Value::Object(obj) => match obj.as_ref() {
                 Object::List(l) => Ok(l.borrow().len() as i64),
                 Object::Tuple(t) => Ok(t.len() as i64),
                 Object::Deque(d) => Ok(d.borrow().len() as i64),
@@ -352,22 +333,22 @@ mod inner {
     }
 
     /// Enumerates the given sequence returning a list of tuples where the first element of the tuple is the index of the element in the input sequence.
-    pub fn enumerate(seq: ndc_vm::value::SeqValue) -> anyhow::Result<ndc_vm::value::Value> {
-        Ok(VmValue::list(
+    pub fn enumerate(seq: SeqValue) -> anyhow::Result<Value> {
+        Ok(Value::list(
             seq.try_into_iter()
                 .ok_or_else(|| anyhow!("enumerate requires a sequence"))?
                 .enumerate()
-                .map(|(i, v)| VmValue::tuple(vec![VmValue::Int(i as i64), v]))
+                .map(|(i, v)| Value::tuple(vec![Value::Int(i as i64), v]))
                 .collect(),
         ))
     }
 
     /// Reduces/folds the given sequence using the given combining function and a custom initial value.
     pub fn fold(
-        seq: ndc_vm::value::SeqValue,
-        initial: ndc_vm::value::Value,
+        seq: SeqValue,
+        initial: Value,
         function: &mut VmCallable<'_>,
-    ) -> anyhow::Result<ndc_vm::value::Value> {
+    ) -> anyhow::Result<Value> {
         fold_iterator(
             seq.try_into_iter()
                 .ok_or_else(|| anyhow!("fold requires a sequence"))?,
@@ -377,10 +358,7 @@ mod inner {
     }
 
     /// Reduces/folds the given sequence using the given combining function.
-    pub fn reduce(
-        seq: ndc_vm::value::SeqValue,
-        function: &mut VmCallable<'_>,
-    ) -> anyhow::Result<ndc_vm::value::Value> {
+    pub fn reduce(seq: SeqValue, function: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         let mut iterator = seq
             .try_into_iter()
             .ok_or_else(|| anyhow!("reduce requires a sequence"))?;
@@ -391,10 +369,7 @@ mod inner {
     }
 
     /// Filters the given sequence using the `predicate`.
-    pub fn filter(
-        seq: ndc_vm::value::SeqValue,
-        predicate: &mut VmCallable<'_>,
-    ) -> anyhow::Result<ndc_vm::value::Value> {
+    pub fn filter(seq: SeqValue, predicate: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         let mut out = Vec::new();
         for element in seq
             .try_into_iter()
@@ -404,38 +379,32 @@ mod inner {
                 .call(vec![element.clone()])
                 .map_err(|e| anyhow!(e))?
             {
-                VmValue::Bool(true) => out.push(element),
-                VmValue::Bool(false) => {}
+                Value::Bool(true) => out.push(element),
+                Value::Bool(false) => {}
                 _ => return Err(anyhow!("return value of predicate must be a boolean")),
             }
         }
-        Ok(VmValue::list(out))
+        Ok(Value::list(out))
     }
 
     /// Returns the number of elements in the input sequence for which the given `predicate` returns `true`.
-    pub fn count(
-        seq: ndc_vm::value::SeqValue,
-        predicate: &mut VmCallable<'_>,
-    ) -> anyhow::Result<ndc_vm::value::Value> {
+    pub fn count(seq: SeqValue, predicate: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         let mut out = 0i64;
         for element in seq
             .try_into_iter()
             .ok_or_else(|| anyhow!("count requires a sequence"))?
         {
             match predicate.call(vec![element]).map_err(|e| anyhow!(e))? {
-                VmValue::Bool(true) => out += 1,
-                VmValue::Bool(false) => {}
+                Value::Bool(true) => out += 1,
+                Value::Bool(false) => {}
                 _ => return Err(anyhow!("return value of predicate must be a boolean")),
             }
         }
-        Ok(VmValue::Int(out))
+        Ok(Value::Int(out))
     }
 
     /// Returns the value of the first element for which the `predicate` is true for the given input sequence.
-    pub fn find(
-        seq: ndc_vm::value::SeqValue,
-        predicate: &mut VmCallable<'_>,
-    ) -> anyhow::Result<ndc_vm::value::Value> {
+    pub fn find(seq: SeqValue, predicate: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         for element in seq
             .try_into_iter()
             .ok_or_else(|| anyhow!("find requires a sequence"))?
@@ -444,8 +413,8 @@ mod inner {
                 .call(vec![element.clone()])
                 .map_err(|e| anyhow!(e))?
             {
-                VmValue::Bool(true) => return Ok(element),
-                VmValue::Bool(false) => {}
+                Value::Bool(true) => return Ok(element),
+                Value::Bool(false) => {}
                 _ => return Err(anyhow!("return value of predicate must be a boolean")),
             }
         }
@@ -453,18 +422,15 @@ mod inner {
     }
 
     /// Returns the first index of the element for which the `predicate` is true in the input sequence.
-    pub fn locate(
-        seq: ndc_vm::value::SeqValue,
-        predicate: &mut VmCallable<'_>,
-    ) -> anyhow::Result<ndc_vm::value::Value> {
+    pub fn locate(seq: SeqValue, predicate: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         for (idx, element) in seq
             .try_into_iter()
             .ok_or_else(|| anyhow!("locate requires a sequence"))?
             .enumerate()
         {
             match predicate.call(vec![element]).map_err(|e| anyhow!(e))? {
-                VmValue::Bool(true) => return Ok(VmValue::Int(idx as i64)),
-                VmValue::Bool(false) => {}
+                Value::Bool(true) => return Ok(Value::Int(idx as i64)),
+                Value::Bool(false) => {}
                 _ => return Err(anyhow!("return value of predicate must be a boolean")),
             }
         }
@@ -473,34 +439,28 @@ mod inner {
 
     /// Returns the first index of the element or produces an error
     #[function(name = "locate")]
-    pub fn locate_element(
-        seq: ndc_vm::value::SeqValue,
-        element: ndc_vm::value::Value,
-    ) -> anyhow::Result<ndc_vm::value::Value> {
+    pub fn locate_element(seq: SeqValue, element: Value) -> anyhow::Result<Value> {
         for (idx, el) in seq
             .try_into_iter()
             .ok_or_else(|| anyhow!("locate requires a sequence"))?
             .enumerate()
         {
             if el == element {
-                return Ok(VmValue::Int(idx as i64));
+                return Ok(Value::Int(idx as i64));
             }
         }
         Err(anyhow!("locate did not find anything"))
     }
 
     /// Returns `true` if the `predicate` is true for none of the elements in `seq`.
-    pub fn none(
-        seq: ndc_vm::value::SeqValue,
-        function: &mut VmCallable<'_>,
-    ) -> anyhow::Result<ndc_vm::value::Value> {
+    pub fn none(seq: SeqValue, function: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         for item in seq
             .try_into_iter()
             .ok_or_else(|| anyhow!("none requires a sequence"))?
         {
             match function.call(vec![item]).map_err(|e| anyhow!(e))? {
-                VmValue::Bool(true) => return Ok(VmValue::Bool(false)),
-                VmValue::Bool(false) => {}
+                Value::Bool(true) => return Ok(Value::Bool(false)),
+                Value::Bool(false) => {}
                 v => {
                     return Err(anyhow!(
                         "invalid return type, predicate returned {}",
@@ -509,21 +469,18 @@ mod inner {
                 }
             }
         }
-        Ok(VmValue::Bool(true))
+        Ok(Value::Bool(true))
     }
 
     /// Returns `true` if the `predicate` is true for all the elements in `seq`.
-    pub fn all(
-        seq: ndc_vm::value::SeqValue,
-        function: &mut VmCallable<'_>,
-    ) -> anyhow::Result<ndc_vm::value::Value> {
+    pub fn all(seq: SeqValue, function: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         for item in seq
             .try_into_iter()
             .ok_or_else(|| anyhow!("all requires a sequence"))?
         {
             match function.call(vec![item]).map_err(|e| anyhow!(e))? {
-                VmValue::Bool(true) => {}
-                VmValue::Bool(false) => return Ok(VmValue::Bool(false)),
+                Value::Bool(true) => {}
+                Value::Bool(false) => return Ok(Value::Bool(false)),
                 v => {
                     return Err(anyhow!(
                         "invalid return type, predicate returned {}",
@@ -532,21 +489,18 @@ mod inner {
                 }
             }
         }
-        Ok(VmValue::Bool(true))
+        Ok(Value::Bool(true))
     }
 
     /// Returns `true` if the `predicate` is true for any of the elements in `seq`.
-    pub fn any(
-        seq: ndc_vm::value::SeqValue,
-        predicate: &mut VmCallable<'_>,
-    ) -> anyhow::Result<ndc_vm::value::Value> {
+    pub fn any(seq: SeqValue, predicate: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         for item in seq
             .try_into_iter()
             .ok_or_else(|| anyhow!("any requires a sequence"))?
         {
             match predicate.call(vec![item]).map_err(|e| anyhow!(e))? {
-                VmValue::Bool(true) => return Ok(VmValue::Bool(true)),
-                VmValue::Bool(false) => {}
+                Value::Bool(true) => return Ok(Value::Bool(true)),
+                Value::Bool(false) => {}
                 v => {
                     return Err(anyhow!(
                         "invalid return type, predicate returned {}",
@@ -555,14 +509,11 @@ mod inner {
                 }
             }
         }
-        Ok(VmValue::Bool(false))
+        Ok(Value::Bool(false))
     }
 
     /// Applies the function to each element in a sequence returning the result as a list.
-    pub fn map(
-        seq: ndc_vm::value::SeqValue,
-        function: &mut VmCallable<'_>,
-    ) -> anyhow::Result<ndc_vm::value::Value> {
+    pub fn map(seq: SeqValue, function: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         let mut out = Vec::new();
         for item in seq
             .try_into_iter()
@@ -570,14 +521,11 @@ mod inner {
         {
             out.push(function.call(vec![item]).map_err(|e| anyhow!(e))?);
         }
-        Ok(VmValue::list(out))
+        Ok(Value::list(out))
     }
 
     /// Applies a function to each item in a sequence, flattens the resulting sequences, and returns a single combined sequence.
-    pub fn flat_map(
-        seq: ndc_vm::value::SeqValue,
-        function: &mut VmCallable<'_>,
-    ) -> anyhow::Result<ndc_vm::value::Value> {
+    pub fn flat_map(seq: SeqValue, function: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         let mut out = Vec::new();
         for item in seq
             .try_into_iter()
@@ -589,24 +537,18 @@ mod inner {
                 .ok_or_else(|| anyhow!("callable argument to flat_map must return a sequence"))?;
             out.extend(inner);
         }
-        Ok(VmValue::list(out))
+        Ok(Value::list(out))
     }
 
     /// Returns the first element of the sequence or the `default` value otherwise.
-    pub fn first_or(
-        seq: ndc_vm::value::SeqValue,
-        default: ndc_vm::value::Value,
-    ) -> ndc_vm::value::Value {
+    pub fn first_or(seq: SeqValue, default: Value) -> Value {
         seq.try_into_iter()
             .and_then(|mut i| i.next())
             .unwrap_or(default)
     }
 
     /// Returns the first element of the sequence or the return value of the given function.
-    pub fn first_or_else(
-        seq: ndc_vm::value::SeqValue,
-        default: &mut VmCallable<'_>,
-    ) -> anyhow::Result<ndc_vm::value::Value> {
+    pub fn first_or_else(seq: SeqValue, default: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         if let Some(item) = seq.try_into_iter().and_then(|mut i| i.next()) {
             return Ok(item);
         }
@@ -614,97 +556,91 @@ mod inner {
     }
 
     /// Returns the `k` sized combinations of the given sequence `seq` as a lazy iterator of tuples.
-    pub fn combinations(
-        seq: ndc_vm::value::SeqValue,
-        k: i64,
-    ) -> anyhow::Result<ndc_vm::value::Value> {
+    pub fn combinations(seq: SeqValue, k: i64) -> anyhow::Result<Value> {
         let k = k as usize;
         let iter = CombinationsIter::new(seq, k)
             .ok_or_else(|| anyhow!("combinations requires a sequence"))?;
-        Ok(VmValue::iterator(iter.into_shared()))
+        Ok(Value::iterator(iter.into_shared()))
     }
 
     /// Returns a lazy iterator yielding the first `n` elements of `seq`.
     #[function(return_type = Iterator<Value>)]
-    pub fn take(seq: ndc_vm::value::SeqValue, n: usize) -> anyhow::Result<ndc_vm::value::Value> {
+    pub fn take(seq: SeqValue, n: usize) -> anyhow::Result<Value> {
         let iter = TakeIter::new(seq, n).ok_or_else(|| anyhow!("take requires a sequence"))?;
-        Ok(VmValue::iterator(iter.into_shared()))
+        Ok(Value::iterator(iter.into_shared()))
     }
 
     /// Returns the `k` sized permutations of the given sequence `seq` as a list of tuples.
-    pub fn permutations(
-        seq: ndc_vm::value::SeqValue,
-        k: i64,
-    ) -> anyhow::Result<ndc_vm::value::Value> {
+    pub fn permutations(seq: SeqValue, k: i64) -> anyhow::Result<Value> {
         let k = k as usize;
-        Ok(VmValue::list(
+        Ok(Value::list(
             seq.try_into_iter()
                 .ok_or_else(|| anyhow!("permutations requires a sequence"))?
                 .permutations(k)
-                .map(VmValue::tuple)
-                .collect::<Vec<VmValue>>(),
+                .map(Value::tuple)
+                .collect::<Vec<Value>>(),
         ))
     }
 
     /// Returns all prefixes of a sequence, each as a list.
-    pub fn prefixes(seq: ndc_vm::value::SeqValue) -> anyhow::Result<ndc_vm::value::Value> {
+    pub fn prefixes(seq: SeqValue) -> anyhow::Result<Value> {
         // Special case for String — produce string prefixes instead of lists of chars.
-        if let VmValue::Object(ref obj) = seq {
+        if let Value::Object(ref obj) = seq {
             if let Object::String(s) = obj.as_ref() {
-                return Ok(VmValue::list(
+                return Ok(Value::list(
                     s.borrow()
                         .chars()
                         .scan(String::new(), |acc, c| {
                             acc.push(c);
-                            Some(VmValue::string(acc.clone()))
+                            Some(Value::string(acc.clone()))
                         })
                         .collect(),
                 ));
             }
         }
-        Ok(VmValue::list(
+        Ok(Value::list(
             seq.try_into_iter()
                 .ok_or_else(|| anyhow!("prefixes requires a sequence"))?
                 .scan(Vec::new(), |acc, item| {
                     acc.push(item);
-                    Some(VmValue::list(acc.clone()))
+                    Some(Value::list(acc.clone()))
                 })
                 .collect(),
         ))
     }
 
     /// Returns all suffixes of a sequence, each as a list; for strings, returns all trailing substrings.
-    pub fn suffixes(seq: ndc_vm::value::SeqValue) -> anyhow::Result<ndc_vm::value::Value> {
+    pub fn suffixes(seq: SeqValue) -> anyhow::Result<Value> {
         // Special case for String — produce string suffixes instead of lists of chars.
-        if let VmValue::Object(ref obj) = seq {
+        if let Value::Object(ref obj) = seq {
             if let Object::String(s) = obj.as_ref() {
                 let borrowed = s.borrow();
-                return Ok(VmValue::list(
+                return Ok(Value::list(
                     borrowed
                         .char_indices()
-                        .map(|(i, _)| VmValue::string(borrowed[i..].to_string()))
+                        .map(|(i, _)| Value::string(borrowed[i..].to_string()))
                         .collect(),
                 ));
             }
         }
-        let out: Vec<VmValue> = seq
+        let out: Vec<Value> = seq
             .try_into_iter()
             .ok_or_else(|| anyhow!("suffixes requires a sequence"))?
             .collect();
-        Ok(VmValue::list(
+        Ok(Value::list(
             (0..out.len())
-                .map(|i| VmValue::list(out[i..].to_vec()))
+                .map(|i| Value::list(out[i..].to_vec()))
                 .collect(),
         ))
     }
 
     /// Transposes a sequence of sequences, turning rows into columns, and returns the result as a list of lists.
-    pub fn transposed(seq: ndc_vm::value::SeqValue) -> anyhow::Result<ndc_vm::value::Value> {
-        let main: Vec<VmValue> = seq
+    pub fn transposed(seq: SeqValue) -> anyhow::Result<Value> {
+        let main: Vec<Value> = seq
             .try_into_iter()
             .ok_or_else(|| anyhow!("transposed requires a sequence"))?
             .collect();
-        let mut iterators: Vec<Box<dyn Iterator<Item = VmValue>>> = Vec::new();
+        let mut iterators: Vec<Box<dyn Iterator<Item = Value>>> = Vec::new();
         for elem in main {
             iterators.push(Box::new(elem.try_into_iter().ok_or_else(|| {
                 anyhow!("elements of transposed sequence must be iterable")
@@ -712,48 +648,43 @@ mod inner {
         }
         let mut out = Vec::new();
         loop {
-            let row: Vec<VmValue> = iterators.iter_mut().filter_map(|i| i.next()).collect();
+            let row: Vec<Value> = iterators.iter_mut().filter_map(|i| i.next()).collect();
             if row.is_empty() {
-                return Ok(VmValue::list(out));
+                return Ok(Value::list(out));
             }
-            out.push(VmValue::list(row));
+            out.push(Value::list(row));
         }
     }
 
     /// Return a list of all windows, wrapping back to the first elements when the window would otherwise exceed the length of source list, producing tuples of size 2.
-    pub fn circular_tuple_windows(
-        seq: ndc_vm::value::SeqValue,
-    ) -> anyhow::Result<ndc_vm::value::Value> {
-        Ok(VmValue::list(
+    pub fn circular_tuple_windows(seq: SeqValue) -> anyhow::Result<Value> {
+        Ok(Value::list(
             seq.try_into_iter()
                 .ok_or_else(|| anyhow!("circular_tuple_windows requires a sequence"))?
                 .collect::<Vec<_>>()
                 .iter()
                 .circular_tuple_windows::<(_, _)>()
-                .map(|(a, b)| VmValue::tuple(vec![a.clone(), b.clone()]))
+                .map(|(a, b)| Value::tuple(vec![a.clone(), b.clone()]))
                 .collect::<Vec<_>>(),
         ))
     }
 
     /// Returns a list of all size-2 windows in `seq`.
-    pub fn pairwise(seq: ndc_vm::value::SeqValue) -> anyhow::Result<ndc_vm::value::Value> {
-        Ok(VmValue::list(
+    pub fn pairwise(seq: SeqValue) -> anyhow::Result<Value> {
+        Ok(Value::list(
             seq.try_into_iter()
                 .ok_or_else(|| anyhow!("pairwise requires a sequence"))?
                 .collect::<Vec<_>>()
                 .windows(2)
-                .map(|w| VmValue::list(w.to_vec()))
+                .map(|w| Value::list(w.to_vec()))
                 .collect::<Vec<_>>(),
         ))
     }
 
     /// Applies a function to each pair of consecutive elements in a sequence and returns the results as a list.
     #[function(name = "pairwise")]
-    pub fn pairwise_map(
-        seq: ndc_vm::value::SeqValue,
-        function: &mut VmCallable<'_>,
-    ) -> anyhow::Result<ndc_vm::value::Value> {
-        let main: Vec<VmValue> = seq
+    pub fn pairwise_map(seq: SeqValue, function: &mut VmCallable<'_>) -> anyhow::Result<Value> {
+        let main: Vec<Value> = seq
             .try_into_iter()
             .ok_or_else(|| anyhow!("pairwise requires a sequence"))?
             .collect();
@@ -761,22 +692,19 @@ mod inner {
         for (a, b) in main.into_iter().tuple_windows() {
             out.push(function.call(vec![a, b]).map_err(|e| anyhow!(e))?);
         }
-        Ok(VmValue::list(out))
+        Ok(Value::list(out))
     }
 
     /// Returns a list of all contiguous windows of `length` size. The windows overlap. If the `seq` is shorter than size, the iterator returns no values.
-    pub fn windows(
-        seq: ndc_vm::value::SeqValue,
-        length: i64,
-    ) -> anyhow::Result<ndc_vm::value::Value> {
+    pub fn windows(seq: SeqValue, length: i64) -> anyhow::Result<Value> {
         let length = length as usize;
-        Ok(VmValue::list(
+        Ok(Value::list(
             seq.try_into_iter()
                 .ok_or_else(|| anyhow!("windows requires a sequence"))?
-                .collect::<Vec<VmValue>>()
+                .collect::<Vec<Value>>()
                 .windows(length)
-                .map(|w| VmValue::list(w.to_vec()))
-                .collect::<Vec<VmValue>>(),
+                .map(|w| Value::list(w.to_vec()))
+                .collect::<Vec<Value>>(),
         ))
     }
 
@@ -784,30 +712,27 @@ mod inner {
     ///
     /// The powerset of a set contains all subsets including the empty set and the full input set. A powerset has length `2^n` where `n` is the length of the input set.
     /// Each list produced by this function represents a subset of the elements in the source sequence.
-    pub fn subsequences(seq: ndc_vm::value::SeqValue) -> anyhow::Result<ndc_vm::value::Value> {
-        Ok(VmValue::list(
+    pub fn subsequences(seq: SeqValue) -> anyhow::Result<Value> {
+        Ok(Value::list(
             seq.try_into_iter()
                 .ok_or_else(|| anyhow!("subsequences requires a sequence"))?
                 .powerset()
-                .map(VmValue::list)
-                .collect::<Vec<VmValue>>(),
+                .map(Value::list)
+                .collect::<Vec<Value>>(),
         ))
     }
 
     /// Return a list that represents the powerset of the elements of `seq` that are exactly `length` long.
     #[function(name = "subsequences")]
-    pub fn subsequences_len(
-        seq: ndc_vm::value::SeqValue,
-        length: i64,
-    ) -> anyhow::Result<ndc_vm::value::Value> {
+    pub fn subsequences_len(seq: SeqValue, length: i64) -> anyhow::Result<Value> {
         let length = length as usize;
-        Ok(VmValue::list(
+        Ok(Value::list(
             seq.try_into_iter()
                 .ok_or_else(|| anyhow!("subsequences requires a sequence"))?
                 .powerset()
                 .filter(|x| x.len() == length)
-                .map(VmValue::list)
-                .collect::<Vec<VmValue>>(),
+                .map(Value::list)
+                .collect::<Vec<Value>>(),
         ))
     }
 
@@ -837,68 +762,63 @@ mod inner {
     ///   [3,"c",false]
     /// ]
     /// ```
-    pub fn multi_cartesian_product(
-        seq: ndc_vm::value::SeqValue,
-    ) -> anyhow::Result<ndc_vm::value::Value> {
+    pub fn multi_cartesian_product(seq: SeqValue) -> anyhow::Result<Value> {
         let mut iterators = Vec::new();
         for elem in seq
             .try_into_iter()
             .ok_or_else(|| anyhow!("multi_cartesian_product requires a sequence"))?
         {
-            let inner: Vec<VmValue> = elem
+            let inner: Vec<Value> = elem
                 .try_into_iter()
                 .ok_or_else(|| anyhow!("elements of sequence must be iterable"))?
                 .collect_vec();
             iterators.push(inner.into_iter());
         }
-        Ok(VmValue::list(
+        Ok(Value::list(
             iterators
                 .into_iter()
                 .multi_cartesian_product()
-                .map(VmValue::list)
+                .map(Value::list)
                 .collect_vec(),
         ))
     }
 
     /// Split the input sequence into evenly sized chunks. If the input length of the sequence
     /// is not dividable by the chunk_size the last chunk will contain fewer elements.
-    pub fn chunks(
-        seq: ndc_vm::value::SeqValue,
-        chunk_size: usize,
-    ) -> anyhow::Result<ndc_vm::value::Value> {
+    pub fn chunks(seq: SeqValue, chunk_size: usize) -> anyhow::Result<Value> {
         if chunk_size == 0 {
             return Err(anyhow!("chunk size must be non-zero"));
         }
-        Ok(VmValue::list(
+        Ok(Value::list(
             seq.try_into_iter()
                 .ok_or_else(|| anyhow!("chunks requires a sequence"))?
                 .chunks(chunk_size)
                 .into_iter()
-                .map(|chunk| VmValue::list(chunk.collect_vec()))
+                .map(|chunk| Value::list(chunk.collect_vec()))
                 .collect_vec(),
         ))
     }
 
     /// Returns an infinite iterator that repeats the given value.
     #[function(return_type = Iterator<Value>)]
-    pub fn repeat(value: ndc_vm::value::Value) -> ndc_vm::value::Value {
-        ndc_vm::value::Value::iterator(Rc::new(std::cell::RefCell::new(ndc_vm::RepeatIter::new(
+    pub fn repeat(value: Value) -> Value {
+        Value::iterator(Rc::new(std::cell::RefCell::new(ndc_vm::RepeatIter::new(
             value,
         ))))
     }
 
     /// Returns an iterator that repeats the given value `times` times.
     #[function(name = "repeat", return_type = Iterator<Value>)]
-    pub fn repeat_times(value: ndc_vm::value::Value, times: usize) -> ndc_vm::value::Value {
-        ndc_vm::value::Value::iterator(Rc::new(std::cell::RefCell::new(
+    pub fn repeat_times(value: Value, times: usize) -> Value {
+        Value::iterator(Rc::new(std::cell::RefCell::new(
             ndc_vm::RepeatIter::new_limited(value, times),
         )))
     }
 }
 
-fn by_key(seq: VmValue, func: &mut VmCallable<'_>, better: Ordering) -> anyhow::Result<VmValue> {
-    let mut best_value: Option<VmValue> = None;
-    let mut best_key: Option<VmValue> = None;
+fn by_key(seq: Value, func: &mut VmCallable<'_>, better: Ordering) -> anyhow::Result<Value> {
+    let mut best_value: Option<Value> = None;
+    let mut best_key: Option<Value> = None;
     for value in seq
         .try_into_iter()
         .ok_or_else(|| anyhow!("sequence is required"))?
@@ -921,8 +841,8 @@ fn by_key(seq: VmValue, func: &mut VmCallable<'_>, better: Ordering) -> anyhow::
     best_value.ok_or_else(|| anyhow!("sequence was empty"))
 }
 
-fn by_comp(seq: VmValue, comp: &mut VmCallable<'_>, better: Ordering) -> anyhow::Result<VmValue> {
-    let mut best: Option<VmValue> = None;
+fn by_comp(seq: Value, comp: &mut VmCallable<'_>, better: Ordering) -> anyhow::Result<Value> {
+    let mut best: Option<Value> = None;
     for value in seq
         .try_into_iter()
         .ok_or_else(|| anyhow!("sequence is required"))?
@@ -944,10 +864,10 @@ fn by_comp(seq: VmValue, comp: &mut VmCallable<'_>, better: Ordering) -> anyhow:
 }
 
 fn fold_iterator(
-    iter: impl Iterator<Item = VmValue>,
-    initial: VmValue,
+    iter: impl Iterator<Item = Value>,
+    initial: Value,
     function: &mut VmCallable<'_>,
-) -> anyhow::Result<VmValue> {
+) -> anyhow::Result<Value> {
     let mut acc = initial;
     for item in iter {
         acc = function.call(vec![acc, item]).map_err(|e| anyhow!(e))?;
@@ -958,7 +878,7 @@ fn fold_iterator(
 pub mod extra {
     use ndc_core::{FunctionRegistry, StaticType};
     use ndc_vm::error::VmError;
-    use ndc_vm::value::{NativeFunc, NativeFunction, Object as VmObject, Value as VmValue};
+    use ndc_vm::value::{NativeFunc, NativeFunction, Object, Value};
     use std::rc::Rc;
 
     pub fn register(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
@@ -978,12 +898,12 @@ pub mod extra {
                         "zip must be called with 2 or more arguments".to_string(),
                     ));
                 }
-                let iters: Option<Vec<Vec<VmValue>>> = args
+                let iters: Option<Vec<Vec<Value>>> = args
                     .iter()
                     .map(|arg| match arg {
-                        VmValue::Object(obj) => match obj.as_ref() {
-                            VmObject::List(l) => Some(l.borrow().clone()),
-                            VmObject::Tuple(t) => Some(t.to_vec()),
+                        Value::Object(obj) => match obj.as_ref() {
+                            Object::List(l) => Some(l.borrow().clone()),
+                            Object::Tuple(t) => Some(t.to_vec()),
                             _ => None,
                         },
                         _ => None,
@@ -992,14 +912,14 @@ pub mod extra {
                 let iters =
                     iters.ok_or_else(|| VmError::native("zip requires sequences".to_string()))?;
                 let min_len = iters.iter().map(|v| v.len()).min().unwrap_or(0);
-                let result: Vec<VmValue> = (0..min_len)
+                let result: Vec<Value> = (0..min_len)
                     .map(|i| {
-                        VmValue::Object(Rc::new(VmObject::Tuple(
+                        Value::Object(Rc::new(Object::Tuple(
                             iters.iter().map(|v| v[i].clone()).collect(),
                         )))
                     })
                     .collect();
-                Ok(VmValue::Object(Rc::new(VmObject::list(result))))
+                Ok(Value::Object(Rc::new(Object::list(result))))
             })),
         }));
     }

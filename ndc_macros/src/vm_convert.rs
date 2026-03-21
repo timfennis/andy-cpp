@@ -1,16 +1,10 @@
-//! Helpers for generating `vm_native` closures from Rust function signatures.
+//! Code generation for VM-native function parameter extraction and return conversion.
 //!
 //! Each `try_vm_*` function returns `None` when the type cannot be represented
 //! without the interpreter bridge, causing `export_module` to silently skip
 //! vm_native generation for that function.
 
-use crate::r#match::{
-    is_ndc_vm_map_value, is_ndc_vm_seq_value, is_ndc_vm_value, is_ref, is_ref_mut,
-    is_ref_mut_of_hashmap_of_ndc_vm_value, is_ref_mut_of_max_heap, is_ref_mut_of_min_heap,
-    is_ref_mut_of_vec_of_ndc_vm_value, is_ref_mut_of_vecdeque_of_ndc_vm_value, is_ref_of_bigint,
-    is_ref_of_hashmap_of_ndc_vm_value, is_ref_of_slice_of_ndc_vm_value,
-    is_ref_of_vecdeque_of_ndc_vm_value, is_str_ref, is_string, path_ends_with,
-};
+use crate::types::{NdcType, classify, unwrap_result};
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
@@ -24,396 +18,353 @@ pub struct VmInputArg {
     pub static_type: TokenStream,
 }
 
+/// Build the `VmError::native(format!("arg {pos}: expected {expected}, got {actual}"))` expression.
+fn arg_error(position: usize, expected: &str) -> TokenStream {
+    let raw = format_ident!("vm_raw{position}");
+    quote! {
+        ndc_vm::error::VmError::native(format!(
+            "arg {}: expected {}, got {}",
+            #position, #expected, #raw.static_type()
+        ))
+    }
+}
+
+/// Generate extraction code for a RefCell-based collection parameter.
+///
+/// Covers List, Deque, MinHeap, MaxHeap (but not Map, which has different destructuring).
+fn refcell_collection_arg(
+    position: usize,
+    expected: &str,
+    variant: &str,
+    mutable: bool,
+    static_type: TokenStream,
+) -> VmInputArg {
+    let raw = format_ident!("vm_raw{position}");
+    let temp = format_ident!("vm_temp{position}");
+    let err = arg_error(position, expected);
+    let rc = format_ident!("{temp}_rc");
+    let guard = format_ident!("{temp}_guard");
+    let variant_ident = format_ident!("{variant}");
+
+    let (borrow, pass) = if mutable {
+        (
+            quote! { let mut #guard = #rc.borrow_mut(); },
+            quote! { &mut *#guard },
+        )
+    } else {
+        (quote! { let #guard = #rc.borrow(); }, quote! { &*#guard })
+    };
+
+    VmInputArg {
+        extract: quote! {
+            let ndc_vm::value::Value::Object(ref #rc) = *#raw else {
+                return Err(#err);
+            };
+            let ndc_vm::value::Object::#variant_ident(ref #rc) = *#rc.as_ref() else {
+                return Err(#err);
+            };
+            #borrow
+        },
+        pass,
+        static_type,
+    }
+}
+
 /// Try to generate extraction code for a single parameter type.
 ///
-/// Supported: `Number`, `&Number`, `f64`, `bool`, `&str`, `String`, `i64`,
-/// `&Value`, `&mut String`, `StringRepr`, `&mut StringRepr`, `&mut Sequence`.
-/// Returns `None` for everything else (BigInt, owned Sequence, …).
+/// Returns `None` for types that cannot be expressed in VM-native terms.
 pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
+    let ndc_type = classify(ty)?;
     let raw = format_ident!("vm_raw{position}");
     let temp = format_ident!("vm_temp{position}");
 
-    if path_ends_with(ty, "Number") {
-        let pass = if is_ref(ty) {
-            quote! { &#temp }
-        } else {
-            quote! { #temp }
-        };
-        return Some(VmInputArg {
-            extract: quote! {
-                let #temp = #raw
-                    .to_number()
-                    .ok_or_else(|| ndc_vm::error::VmError::native(format!("arg {}: expected number, got {}", #position, #raw.static_type())))?;
-            },
-            pass,
-            static_type: quote! { ndc_core::StaticType::Number },
-        });
-    }
+    let result = match ndc_type {
+        NdcType::Number | NdcType::NumberRef => {
+            let err = arg_error(position, "number");
+            let pass = if ndc_type == NdcType::NumberRef {
+                quote! { &#temp }
+            } else {
+                quote! { #temp }
+            };
+            VmInputArg {
+                extract: quote! {
+                    let #temp = #raw.to_number().ok_or_else(|| #err)?;
+                },
+                pass,
+                static_type: quote! { ndc_core::StaticType::Number },
+            }
+        }
 
-    if path_ends_with(ty, "f64") {
-        return Some(VmInputArg {
-            extract: quote! {
-                let #temp = #raw
-                    .to_f64()
-                    .ok_or_else(|| ndc_vm::error::VmError::native(format!("arg {}: expected float, got {}", #position, #raw.static_type())))?;
-            },
-            pass: quote! { #temp },
-            static_type: quote! { ndc_core::StaticType::Float },
-        });
-    }
+        NdcType::F64 => {
+            let err = arg_error(position, "float");
+            VmInputArg {
+                extract: quote! {
+                    let #temp = #raw.to_f64().ok_or_else(|| #err)?;
+                },
+                pass: quote! { #temp },
+                static_type: quote! { ndc_core::StaticType::Float },
+            }
+        }
 
-    if path_ends_with(ty, "bool") {
-        return Some(VmInputArg {
-            extract: quote! {
-                let ndc_vm::value::Value::Bool(#temp) = #raw else {
-                    return Err(ndc_vm::error::VmError::native(format!("arg {}: expected bool, got {}", #position, #raw.static_type())));
-                };
-                let #temp = *#temp;
-            },
-            pass: quote! { #temp },
-            static_type: quote! { ndc_core::StaticType::Bool },
-        });
-    }
+        NdcType::Bool => {
+            let err = arg_error(position, "bool");
+            VmInputArg {
+                extract: quote! {
+                    let ndc_vm::value::Value::Bool(#temp) = #raw else {
+                        return Err(#err);
+                    };
+                    let #temp = *#temp;
+                },
+                pass: quote! { #temp },
+                static_type: quote! { ndc_core::StaticType::Bool },
+            }
+        }
 
-    // &str or owned String — both extracted as an owned String, then passed as &str or String.
-    // Skip &mut String — mutation syncing is not supported.
-    if (is_str_ref(ty) || path_ends_with(ty, "String")) && !is_ref_mut(ty) {
-        let pass = if is_str_ref(ty) {
-            quote! { &#temp }
-        } else {
-            quote! { #temp }
-        };
-        return Some(VmInputArg {
-            extract: quote! {
-                let #temp = match #raw {
-                    ndc_vm::value::Value::Object(obj) => match obj.as_ref() {
-                        ndc_vm::value::Object::String(s) => s.borrow().clone(),
-                        _ => return Err(ndc_vm::error::VmError::native(format!("arg {}: expected string, got {}", #position, #raw.static_type()))),
-                    },
-                    _ => return Err(ndc_vm::error::VmError::native(format!("arg {}: expected string, got {}", #position, #raw.static_type()))),
-                };
-            },
-            pass,
-            static_type: quote! { ndc_core::StaticType::String },
-        });
-    }
+        NdcType::String | NdcType::StrRef => {
+            let err = arg_error(position, "string");
+            let pass = if ndc_type == NdcType::StrRef {
+                quote! { &#temp }
+            } else {
+                quote! { #temp }
+            };
+            VmInputArg {
+                extract: quote! {
+                    let #temp = match #raw {
+                        ndc_vm::value::Value::Object(obj) => match obj.as_ref() {
+                            ndc_vm::value::Object::String(s) => s.borrow().clone(),
+                            _ => return Err(#err),
+                        },
+                        _ => return Err(#err),
+                    };
+                },
+                pass,
+                static_type: quote! { ndc_core::StaticType::String },
+            }
+        }
 
-    if path_ends_with(ty, "i64") {
-        return Some(VmInputArg {
-            extract: quote! {
-                let #temp = match #raw {
-                    ndc_vm::value::Value::Int(i) => *i,
-                    _ => return Err(ndc_vm::error::VmError::native(format!("arg {}: expected int, got {}", #position, #raw.static_type()))),
-                };
-            },
-            pass: quote! { #temp },
-            static_type: quote! { ndc_core::StaticType::Int },
-        });
-    }
+        NdcType::I64 => {
+            let err = arg_error(position, "int");
+            VmInputArg {
+                extract: quote! {
+                    let #temp = match #raw {
+                        ndc_vm::value::Value::Int(i) => *i,
+                        _ => return Err(#err),
+                    };
+                },
+                pass: quote! { #temp },
+                static_type: quote! { ndc_core::StaticType::Int },
+            }
+        }
 
-    if path_ends_with(ty, "usize") {
-        return Some(VmInputArg {
-            extract: quote! {
-                let #temp = match #raw {
-                    ndc_vm::value::Value::Int(i) => *i as usize,
-                    _ => return Err(ndc_vm::error::VmError::native(format!("arg {}: expected int, got {}", #position, #raw.static_type()))),
-                };
-            },
-            pass: quote! { #temp },
-            static_type: quote! { ndc_core::StaticType::Int },
-        });
-    }
+        NdcType::Usize => {
+            let err = arg_error(position, "int");
+            VmInputArg {
+                extract: quote! {
+                    let #temp = match #raw {
+                        ndc_vm::value::Value::Int(i) => *i as usize,
+                        _ => return Err(#err),
+                    };
+                },
+                pass: quote! { #temp },
+                static_type: quote! { ndc_core::StaticType::Int },
+            }
+        }
 
-    // &BigInt — extract from Number::Int, converting Int64 to BigInt as needed.
-    if is_ref_of_bigint(ty) {
-        return Some(VmInputArg {
-            extract: quote! {
-                let #temp = {
-                    let num = #raw.to_number()
-                        .ok_or_else(|| ndc_vm::error::VmError::native(format!("arg {}: expected int, got {}", #position, #raw.static_type())))?;
-                    match num {
-                        ndc_core::num::Number::Int(i) => i.to_bigint(),
-                        _ => return Err(ndc_vm::error::VmError::native(format!("arg {}: expected int, got {}", #position, #raw.static_type()))),
+        NdcType::BigIntRef => {
+            let err = arg_error(position, "int");
+            VmInputArg {
+                extract: quote! {
+                    let #temp = {
+                        let num = #raw.to_number().ok_or_else(|| #err)?;
+                        match num {
+                            ndc_core::num::Number::Int(i) => i.to_bigint(),
+                            _ => return Err(#err),
+                        }
+                    };
+                },
+                pass: quote! { &#temp },
+                static_type: quote! { ndc_core::StaticType::Int },
+            }
+        }
+
+        NdcType::BigRationalRef => {
+            let err = arg_error(position, "rational");
+            VmInputArg {
+                extract: quote! {
+                    let #temp = {
+                        let num = #raw.to_number().ok_or_else(|| #err)?;
+                        match num {
+                            ndc_core::num::Number::Rational(r) => *r,
+                            _ => return Err(#err),
+                        }
+                    };
+                },
+                pass: quote! { &#temp },
+                static_type: quote! { ndc_core::StaticType::Rational },
+            }
+        }
+
+        NdcType::Complex64 => {
+            let err = arg_error(position, "complex");
+            VmInputArg {
+                extract: quote! {
+                    let #temp = {
+                        let num = #raw.to_number().ok_or_else(|| #err)?;
+                        match num {
+                            ndc_core::num::Number::Complex(c) => c,
+                            _ => return Err(#err),
+                        }
+                    };
+                },
+                pass: quote! { #temp },
+                static_type: quote! { ndc_core::StaticType::Complex },
+            }
+        }
+
+        NdcType::MutString => {
+            let err = arg_error(position, "string");
+            let rc = format_ident!("{temp}_rc");
+            let guard = format_ident!("{temp}_guard");
+            VmInputArg {
+                extract: quote! {
+                    let ndc_vm::value::Value::Object(ref #rc) = *#raw else {
+                        return Err(#err);
+                    };
+                    let ndc_vm::value::Object::String(ref #rc) = *#rc.as_ref() else {
+                        return Err(#err);
+                    };
+                    let mut #guard = #rc.borrow_mut();
+                },
+                pass: quote! { &mut *#guard },
+                static_type: quote! { ndc_core::StaticType::String },
+            }
+        }
+
+        NdcType::StringRepr | NdcType::MutStringRepr => {
+            let err = arg_error(position, "string");
+            let obj = format_ident!("{temp}_obj");
+            let inner = format_ident!("{temp}_inner");
+            let pass = if ndc_type == NdcType::MutStringRepr {
+                quote! { &mut #temp }
+            } else {
+                quote! { &#temp }
+            };
+            VmInputArg {
+                extract: quote! {
+                    let ndc_vm::value::Value::Object(ref #obj) = *#raw else {
+                        return Err(#err);
+                    };
+                    let ndc_vm::value::Object::String(ref #inner) = *#obj.as_ref() else {
+                        return Err(#err);
+                    };
+                    let mut #temp = #inner.clone();
+                },
+                pass,
+                static_type: quote! { ndc_core::StaticType::String },
+            }
+        }
+
+        NdcType::MutVecOfValue => refcell_collection_arg(
+            position,
+            "list",
+            "List",
+            true,
+            quote! { ndc_core::StaticType::List(Box::new(ndc_core::StaticType::Any)) },
+        ),
+
+        NdcType::MutHashMap => {
+            let err = arg_error(position, "map");
+            let rc = format_ident!("{temp}_rc");
+            let guard = format_ident!("{temp}_guard");
+            VmInputArg {
+                extract: quote! {
+                    let ndc_vm::value::Value::Object(ref #rc) = *#raw else {
+                        return Err(#err);
+                    };
+                    let ndc_vm::value::Object::Map { entries: ref #rc, .. } = *#rc.as_ref() else {
+                        return Err(#err);
+                    };
+                    let mut #guard = #rc.borrow_mut();
+                },
+                pass: quote! { &mut *#guard },
+                static_type: quote! {
+                    ndc_core::StaticType::Map {
+                        key: Box::new(ndc_core::StaticType::Any),
+                        value: Box::new(ndc_core::StaticType::Any),
                     }
-                };
-            },
-            pass: quote! { &#temp },
-            static_type: quote! { ndc_core::StaticType::Int },
-        });
-    }
+                },
+            }
+        }
 
-    // &BigRational — extract from Number::Rational.
-    if path_ends_with(ty, "BigRational") && is_ref(ty) {
-        return Some(VmInputArg {
-            extract: quote! {
-                let #temp = {
-                    let num = #raw.to_number()
-                        .ok_or_else(|| ndc_vm::error::VmError::native(format!("arg {}: expected rational, got {}", #position, #raw.static_type())))?;
-                    match num {
-                        ndc_core::num::Number::Rational(r) => *r,
-                        _ => return Err(ndc_vm::error::VmError::native(format!("arg {}: expected rational, got {}", #position, #raw.static_type()))),
+        NdcType::RefHashMap => {
+            let err = arg_error(position, "map");
+            let rc = format_ident!("{temp}_rc");
+            let guard = format_ident!("{temp}_guard");
+            VmInputArg {
+                extract: quote! {
+                    let ndc_vm::value::Value::Object(ref #rc) = *#raw else {
+                        return Err(#err);
+                    };
+                    let ndc_vm::value::Object::Map { entries: ref #rc, .. } = *#rc.as_ref() else {
+                        return Err(#err);
+                    };
+                    let #guard = #rc.borrow();
+                },
+                pass: quote! { &*#guard },
+                static_type: quote! {
+                    ndc_core::StaticType::Map {
+                        key: Box::new(ndc_core::StaticType::Any),
+                        value: Box::new(ndc_core::StaticType::Any),
                     }
-                };
-            },
-            pass: quote! { &#temp },
-            static_type: quote! { ndc_core::StaticType::Rational },
-        });
-    }
+                },
+            }
+        }
 
-    // Complex64 (owned) — extract from Number::Complex.
-    if path_ends_with(ty, "Complex64") && !is_ref(ty) && !is_ref_mut(ty) {
-        return Some(VmInputArg {
-            extract: quote! {
-                let #temp = {
-                    let num = #raw.to_number()
-                        .ok_or_else(|| ndc_vm::error::VmError::native(format!("arg {}: expected complex, got {}", #position, #raw.static_type())))?;
-                    match num {
-                        ndc_core::num::Number::Complex(c) => c,
-                        _ => return Err(ndc_vm::error::VmError::native(format!("arg {}: expected complex, got {}", #position, #raw.static_type()))),
-                    }
-                };
-            },
-            pass: quote! { #temp },
-            static_type: quote! { ndc_core::StaticType::Complex },
-        });
-    }
+        NdcType::MutMinHeap => refcell_collection_arg(
+            position,
+            "min heap",
+            "MinHeap",
+            true,
+            quote! { ndc_core::StaticType::MinHeap(Box::new(ndc_core::StaticType::Any)) },
+        ),
 
-    // &mut String — mutate the inner String through the Rc<RefCell<String>> stored in
-    // Object::String. Interior mutability means the original VmValue sees the change.
-    if is_ref_mut(ty) && is_string(ty) {
-        let rc_ident = format_ident!("{temp}_rc");
-        let guard_ident = format_ident!("{temp}_guard");
-        return Some(VmInputArg {
-            extract: quote! {
-                let ndc_vm::value::Value::Object(ref #rc_ident) = *#raw else {
-                    return Err(ndc_vm::error::VmError::native(format!("arg {}: expected string, got {}", #position, #raw.static_type())));
-                };
-                let ndc_vm::value::Object::String(ref #rc_ident) = *#rc_ident.as_ref() else {
-                    return Err(ndc_vm::error::VmError::native(format!("arg {}: expected string, got {}", #position, #raw.static_type())));
-                };
-                let mut #guard_ident = #rc_ident.borrow_mut();
-            },
-            pass: quote! { &mut *#guard_ident },
-            static_type: quote! { ndc_core::StaticType::String },
-        });
-    }
+        NdcType::MutMaxHeap => refcell_collection_arg(
+            position,
+            "max heap",
+            "MaxHeap",
+            true,
+            quote! { ndc_core::StaticType::MaxHeap(Box::new(ndc_core::StaticType::Any)) },
+        ),
 
-    // StringRepr (&Rc<RefCell<String>>) / &mut StringRepr — clone the Rc so both
-    // the VM value and the Rc local point at the same allocation. Any interior
-    // mutation (via borrow_mut) is immediately visible through the original VmValue.
-    if path_ends_with(ty, "StringRepr") {
-        let obj_ident = format_ident!("{temp}_obj");
-        let inner_ident = format_ident!("{temp}_inner");
-        let pass = if is_ref_mut(ty) {
-            quote! { &mut #temp }
-        } else {
-            quote! { &#temp }
-        };
-        return Some(VmInputArg {
-            extract: quote! {
-                let ndc_vm::value::Value::Object(ref #obj_ident) = *#raw else {
-                    return Err(ndc_vm::error::VmError::native(format!("arg {}: expected string, got {}", #position, #raw.static_type())));
-                };
-                let ndc_vm::value::Object::String(ref #inner_ident) = *#obj_ident.as_ref() else {
-                    return Err(ndc_vm::error::VmError::native(format!("arg {}: expected string, got {}", #position, #raw.static_type())));
-                };
-                let mut #temp = #inner_ident.clone();
-            },
-            pass,
-            static_type: quote! { ndc_core::StaticType::String },
-        });
-    }
+        NdcType::MutVecDeque => refcell_collection_arg(
+            position,
+            "deque",
+            "Deque",
+            true,
+            quote! { ndc_core::StaticType::Deque(Box::new(ndc_core::StaticType::Any)) },
+        ),
 
-    // &mut Vec<ndc_vm::value::Value> — mutate the inner list via Rc<RefCell<Vec<VmValue>>>.
-    // Interior mutability means the original VmValue sees changes immediately; no external
-    // sync step is needed on the VM path.
-    if is_ref_mut_of_vec_of_ndc_vm_value(ty) {
-        let rc_ident = format_ident!("{temp}_rc");
-        let guard_ident = format_ident!("{temp}_guard");
-        return Some(VmInputArg {
-            extract: quote! {
-                let ndc_vm::value::Value::Object(ref #rc_ident) = *#raw else {
-                    return Err(ndc_vm::error::VmError::native(format!("arg {}: expected list, got {}", #position, #raw.static_type())));
-                };
-                let ndc_vm::value::Object::List(ref #rc_ident) = *#rc_ident.as_ref() else {
-                    return Err(ndc_vm::error::VmError::native(format!("arg {}: expected list, got {}", #position, #raw.static_type())));
-                };
-                let mut #guard_ident = #rc_ident.borrow_mut();
-            },
-            pass: quote! { &mut *#guard_ident },
-            static_type: quote! {
-                ndc_core::StaticType::List(Box::new(
-                    ndc_core::StaticType::Any
-                ))
-            },
-        });
-    }
+        NdcType::RefVecDeque => refcell_collection_arg(
+            position,
+            "deque",
+            "Deque",
+            false,
+            quote! { ndc_core::StaticType::Deque(Box::new(ndc_core::StaticType::Any)) },
+        ),
 
-    // &mut HashMap<ndc_vm::value::Value, ndc_vm::value::Value> — mutate map entries via RefCell.
-    if is_ref_mut_of_hashmap_of_ndc_vm_value(ty) {
-        let rc_ident = format_ident!("{temp}_rc");
-        let guard_ident = format_ident!("{temp}_guard");
-        return Some(VmInputArg {
-            extract: quote! {
-                let ndc_vm::value::Value::Object(ref #rc_ident) = *#raw else {
-                    return Err(ndc_vm::error::VmError::native(format!("arg {}: expected map, got {}", #position, #raw.static_type())));
-                };
-                let ndc_vm::value::Object::Map { entries: ref #rc_ident, .. } = *#rc_ident.as_ref() else {
-                    return Err(ndc_vm::error::VmError::native(format!("arg {}: expected map, got {}", #position, #raw.static_type())));
-                };
-                let mut #guard_ident = #rc_ident.borrow_mut();
-            },
-            pass: quote! { &mut *#guard_ident },
-            static_type: quote! {
-                ndc_core::StaticType::Map {
-                    key: Box::new(ndc_core::StaticType::Any),
-                    value: Box::new(ndc_core::StaticType::Any),
-                }
-            },
-        });
-    }
-
-    // &HashMap<ndc_vm::value::Value, ndc_vm::value::Value> — immutable borrow of map entries.
-    if is_ref_of_hashmap_of_ndc_vm_value(ty) {
-        let rc_ident = format_ident!("{temp}_rc");
-        let guard_ident = format_ident!("{temp}_guard");
-        return Some(VmInputArg {
-            extract: quote! {
-                let ndc_vm::value::Value::Object(ref #rc_ident) = *#raw else {
-                    return Err(ndc_vm::error::VmError::native(format!("arg {}: expected map, got {}", #position, #raw.static_type())));
-                };
-                let ndc_vm::value::Object::Map { entries: ref #rc_ident, .. } = *#rc_ident.as_ref() else {
-                    return Err(ndc_vm::error::VmError::native(format!("arg {}: expected map, got {}", #position, #raw.static_type())));
-                };
-                let #guard_ident = #rc_ident.borrow();
-            },
-            pass: quote! { &*#guard_ident },
-            static_type: quote! {
-                ndc_core::StaticType::Map {
-                    key: Box::new(ndc_core::StaticType::Any),
-                    value: Box::new(ndc_core::StaticType::Any),
-                }
-            },
-        });
-    }
-
-    // &mut BinaryHeap<Reverse<OrdValue>> — min-heap (uses Reverse<OrdValue> for ordering).
-    if is_ref_mut_of_min_heap(ty) {
-        let rc_ident = format_ident!("{temp}_rc");
-        let guard_ident = format_ident!("{temp}_guard");
-        return Some(VmInputArg {
-            extract: quote! {
-                let ndc_vm::value::Value::Object(ref #rc_ident) = *#raw else {
-                    return Err(ndc_vm::error::VmError::native(format!("arg {}: expected min heap, got {}", #position, #raw.static_type())));
-                };
-                let ndc_vm::value::Object::MinHeap(ref #rc_ident) = *#rc_ident.as_ref() else {
-                    return Err(ndc_vm::error::VmError::native(format!("arg {}: expected min heap, got {}", #position, #raw.static_type())));
-                };
-                let mut #guard_ident = #rc_ident.borrow_mut();
-            },
-            pass: quote! { &mut *#guard_ident },
-            static_type: quote! {
-                ndc_core::StaticType::MinHeap(Box::new(
-                    ndc_core::StaticType::Any
-                ))
-            },
-        });
-    }
-
-    // &mut BinaryHeap<OrdValue> — max-heap.
-    if is_ref_mut_of_max_heap(ty) {
-        let rc_ident = format_ident!("{temp}_rc");
-        let guard_ident = format_ident!("{temp}_guard");
-        return Some(VmInputArg {
-            extract: quote! {
-                let ndc_vm::value::Value::Object(ref #rc_ident) = *#raw else {
-                    return Err(ndc_vm::error::VmError::native(format!("arg {}: expected max heap, got {}", #position, #raw.static_type())));
-                };
-                let ndc_vm::value::Object::MaxHeap(ref #rc_ident) = *#rc_ident.as_ref() else {
-                    return Err(ndc_vm::error::VmError::native(format!("arg {}: expected max heap, got {}", #position, #raw.static_type())));
-                };
-                let mut #guard_ident = #rc_ident.borrow_mut();
-            },
-            pass: quote! { &mut *#guard_ident },
-            static_type: quote! {
-                ndc_core::StaticType::MaxHeap(Box::new(
-                    ndc_core::StaticType::Any
-                ))
-            },
-        });
-    }
-
-    // &mut VecDeque<ndc_vm::value::Value> — mutate via RefCell inside VmObject::Deque.
-    if is_ref_mut_of_vecdeque_of_ndc_vm_value(ty) {
-        let rc_ident = format_ident!("{temp}_rc");
-        let guard_ident = format_ident!("{temp}_guard");
-        return Some(VmInputArg {
-            extract: quote! {
-                let ndc_vm::value::Value::Object(ref #rc_ident) = *#raw else {
-                    return Err(ndc_vm::error::VmError::native(format!("arg {}: expected deque, got {}", #position, #raw.static_type())));
-                };
-                let ndc_vm::value::Object::Deque(ref #rc_ident) = *#rc_ident.as_ref() else {
-                    return Err(ndc_vm::error::VmError::native(format!("arg {}: expected deque, got {}", #position, #raw.static_type())));
-                };
-                let mut #guard_ident = #rc_ident.borrow_mut();
-            },
-            pass: quote! { &mut *#guard_ident },
-            static_type: quote! {
-                ndc_core::StaticType::Deque(Box::new(
-                    ndc_core::StaticType::Any
-                ))
-            },
-        });
-    }
-
-    // &VecDeque<ndc_vm::value::Value> — immutable borrow via RefCell inside VmObject::Deque.
-    if is_ref_of_vecdeque_of_ndc_vm_value(ty) {
-        let rc_ident = format_ident!("{temp}_rc");
-        let guard_ident = format_ident!("{temp}_guard");
-        return Some(VmInputArg {
-            extract: quote! {
-                let ndc_vm::value::Value::Object(ref #rc_ident) = *#raw else {
-                    return Err(ndc_vm::error::VmError::native(format!("arg {}: expected deque, got {}", #position, #raw.static_type())));
-                };
-                let ndc_vm::value::Object::Deque(ref #rc_ident) = *#rc_ident.as_ref() else {
-                    return Err(ndc_vm::error::VmError::native(format!("arg {}: expected deque, got {}", #position, #raw.static_type())));
-                };
-                let #guard_ident = #rc_ident.borrow();
-            },
-            pass: quote! { &*#guard_ident },
-            static_type: quote! {
-                ndc_core::StaticType::Deque(Box::new(
-                    ndc_core::StaticType::Any
-                ))
-            },
-        });
-    }
-
-    // ndc_vm::value::Value — pass through directly (zero conversion on the VM path).
-    // The interpreter path uses call_vm_native which handles the interp→vm conversion.
-    // Only matches the fully-qualified path ndc_vm::value::Value.
-    if is_ndc_vm_value(ty) {
-        return Some(VmInputArg {
+        NdcType::VmValue => VmInputArg {
             extract: quote! {},
             pass: quote! { #raw.clone() },
             static_type: quote! { ndc_core::StaticType::Any },
-        });
-    }
+        },
 
-    // ndc_vm::value::SeqValue — identical extraction to Value, but emits
-    // StaticType::Sequence so the type checker and dispatch see the correct type.
-    if is_ndc_vm_seq_value(ty) {
-        return Some(VmInputArg {
+        NdcType::SeqValue => VmInputArg {
             extract: quote! {},
             pass: quote! { #raw.clone() },
             static_type: quote! { ndc_core::StaticType::Sequence(Box::new(ndc_core::StaticType::Any)) },
-        });
-    }
+        },
 
-    // ndc_vm::value::MapValue — identical extraction to Value, but emits
-    // StaticType::Map so the type checker and dispatch see the correct type.
-    if is_ndc_vm_map_value(ty) {
-        return Some(VmInputArg {
+        NdcType::MapValue => VmInputArg {
             extract: quote! {},
             pass: quote! { #raw.clone() },
             static_type: quote! {
@@ -422,79 +373,64 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                     value: Box::new(ndc_core::StaticType::Any),
                 }
             },
-        });
-    }
+        },
 
-    // &[ndc_vm::value::Value] — pass a borrow of the inner Vec directly, zero conversion.
-    // Must come before the &[Value] check because is_ref_of_slice_of_value also matches this type.
-    if is_ref_of_slice_of_ndc_vm_value(ty) {
-        let vec_ident = format_ident!("{temp}_vec");
-        return Some(VmInputArg {
-            extract: quote! {
-                let #vec_ident: Vec<ndc_vm::value::Value> = match #raw {
-                    ndc_vm::value::Value::Object(obj) => match obj.as_ref() {
-                        ndc_vm::value::Object::List(list) => list.borrow().clone(),
-                        ndc_vm::value::Object::Tuple(tuple) => tuple.clone(),
-                        _ => return Err(ndc_vm::error::VmError::native(format!(
-                            "arg {}: expected list, got {}",
-                            #position, #raw.static_type()
-                        ))),
-                    },
-                    _ => return Err(ndc_vm::error::VmError::native(format!(
-                        "arg {}: expected list, got {}",
-                        #position, #raw.static_type()
-                    ))),
-                };
-            },
-            pass: quote! { &#vec_ident },
-            static_type: quote! {
-                ndc_core::StaticType::List(Box::new(
-                    ndc_core::StaticType::Any
-                ))
-            },
-        });
-    }
-
-    // &mut VmCallable — extract a VM function and wrap it with the current VM for HOF dispatch.
-    // `_vm` is the second parameter of the generated `|args, _vm|` closure and is in scope.
-    if path_ends_with(ty, "VmCallable") && is_ref_mut(ty) {
-        return Some(VmInputArg {
-            extract: quote! {
-                let mut #temp = match #raw {
-                    ndc_vm::value::Value::Object(_obj) => match _obj.as_ref() {
-                        ndc_vm::value::Object::Function(f) => ndc_vm::VmCallable {
-                            function: f.clone(),
-                            vm: _vm,
+        NdcType::SliceOfValue => {
+            let vec = format_ident!("{temp}_vec");
+            let err = arg_error(position, "list");
+            VmInputArg {
+                extract: quote! {
+                    let #vec: Vec<ndc_vm::value::Value> = match #raw {
+                        ndc_vm::value::Value::Object(obj) => match obj.as_ref() {
+                            ndc_vm::value::Object::List(list) => list.borrow().clone(),
+                            ndc_vm::value::Object::Tuple(tuple) => tuple.clone(),
+                            _ => return Err(#err),
                         },
-                        _ => return Err(ndc_vm::error::VmError::native(format!(
-                            "arg {}: expected function, got {}",
-                            #position, #raw.static_type()
-                        ))),
-                    },
-                    _ => return Err(ndc_vm::error::VmError::native(format!(
-                        "arg {}: expected function, got {}",
-                        #position, #raw.static_type()
-                    ))),
-                };
-            },
-            pass: quote! { &mut #temp },
-            static_type: quote! {
-                ndc_core::StaticType::Function {
-                    parameters: None,
-                    return_type: Box::new(ndc_core::StaticType::Any),
-                }
-            },
-        });
-    }
+                        _ => return Err(#err),
+                    };
+                },
+                pass: quote! { &#vec },
+                static_type: quote! {
+                    ndc_core::StaticType::List(Box::new(ndc_core::StaticType::Any))
+                },
+            }
+        }
 
-    None
+        NdcType::MutVmCallable => {
+            let err = arg_error(position, "function");
+            VmInputArg {
+                extract: quote! {
+                    let mut #temp = match #raw {
+                        ndc_vm::value::Value::Object(_obj) => match _obj.as_ref() {
+                            ndc_vm::value::Object::Function(f) => ndc_vm::VmCallable {
+                                function: f.clone(),
+                                vm: _vm,
+                            },
+                            _ => return Err(#err),
+                        },
+                        _ => return Err(#err),
+                    };
+                },
+                pass: quote! { &mut #temp },
+                static_type: quote! {
+                    ndc_core::StaticType::Function {
+                        parameters: None,
+                        return_type: Box::new(ndc_core::StaticType::Any),
+                    }
+                },
+            }
+        }
+
+        // Return-only types — not valid as function parameters
+        NdcType::BigInt | NdcType::BigRational => return None,
+    };
+
+    Some(result)
 }
 
-/// Try to generate the return expression (producing `Result<VmValue, String>`)
+/// Try to generate the return expression (producing `Result<VmValue, VmError>`)
 /// and the `StaticType` token for the return type.
 ///
-/// Supported: `Number`, `f64`, `bool`, `String`, `&str`, `i64`, `()` / `Default`,
-/// `Result<T>` wrapping any of those.
 /// Returns `None` for unsupported types.
 pub fn try_vm_return(output: &syn::ReturnType) -> Option<(TokenStream, TokenStream)> {
     match output {
@@ -507,111 +443,19 @@ pub fn try_vm_return(output: &syn::ReturnType) -> Option<(TokenStream, TokenStre
 }
 
 fn try_vm_return_type(ty: &syn::Type) -> Option<(TokenStream, TokenStream)> {
-    // ndc_vm::value::Value — already a VmValue, return as-is.
-    if is_ndc_vm_value(ty) || is_ndc_vm_seq_value(ty) {
-        return Some((quote! { Ok(result) }, quote! { ndc_core::StaticType::Any }));
-    }
-
-    // ndc_vm::value::MapValue — already a VmValue, return as-is, but emit StaticType::Map.
-    if is_ndc_vm_map_value(ty) {
-        return Some((
-            quote! { Ok(result) },
-            quote! {
-                ndc_core::StaticType::Map {
-                    key: Box::new(ndc_core::StaticType::Any),
-                    value: Box::new(ndc_core::StaticType::Any),
-                }
-            },
-        ));
-    }
-
-    if path_ends_with(ty, "Number") {
-        return Some((
-            quote! { Ok(ndc_vm::value::Value::from_number(result)) },
-            quote! { ndc_core::StaticType::Number },
-        ));
-    }
-    if path_ends_with(ty, "f64") {
-        return Some((
-            quote! { Ok(ndc_vm::value::Value::Float(result)) },
-            quote! { ndc_core::StaticType::Float },
-        ));
-    }
-    if path_ends_with(ty, "bool") {
-        return Some((
-            quote! { Ok(ndc_vm::value::Value::Bool(result)) },
-            quote! { ndc_core::StaticType::Bool },
-        ));
-    }
-    // &str return — borrow tied to input, must convert to owned before returning
-    if is_str_ref(ty) {
-        return Some((
-            quote! { Ok(ndc_vm::value::Value::string(result.to_owned())) },
-            quote! { ndc_core::StaticType::String },
-        ));
-    }
-    if path_ends_with(ty, "String") {
-        return Some((
-            quote! { Ok(ndc_vm::value::Value::string(result)) },
-            quote! { ndc_core::StaticType::String },
-        ));
-    }
-    if path_ends_with(ty, "i64") {
-        return Some((
-            quote! { Ok(ndc_vm::value::Value::Int(result)) },
-            quote! { ndc_core::StaticType::Int },
-        ));
-    }
-    if path_ends_with(ty, "usize") {
-        return Some((
-            quote! { Ok(ndc_vm::value::Value::Int(result as i64)) },
-            quote! { ndc_core::StaticType::Int },
-        ));
-    }
-    if path_ends_with(ty, "BigInt") {
+    // Handle Result<T> wrapper — unwrap and recurse into the inner type
+    if let Some(inner) = unwrap_result(ty) {
+        let (inner_code, inner_type) = try_vm_return_inner(inner)?;
         return Some((
             quote! {
-                Ok(ndc_vm::value::Value::from_number(
-                    ndc_core::num::Number::Int(
-                        ndc_core::int::Int::BigInt(result).simplified()
-                    )
-                ))
+                let result = result.map_err(|e| ndc_vm::error::VmError::native(e.to_string()))?;
+                #inner_code
             },
-            quote! { ndc_core::StaticType::Int },
-        ));
-    }
-    if path_ends_with(ty, "BigRational") {
-        return Some((
-            quote! {
-                Ok(ndc_vm::value::Value::from_number(
-                    ndc_core::num::Number::Rational(Box::new(result))
-                ))
-            },
-            quote! { ndc_core::StaticType::Rational },
+            inner_type,
         ));
     }
 
-    // Result<T, _> or anyhow::Result<T> — unwrap the Ok type and recurse
-    if path_ends_with(ty, "Result") {
-        if let syn::Type::Path(p) = ty {
-            if let Some(last) = p.path.segments.last() {
-                if let syn::PathArguments::AngleBracketed(args) = &last.arguments {
-                    if let Some(syn::GenericArgument::Type(inner)) = args.args.first() {
-                        let (inner_code, inner_type) = try_vm_return_inner(inner)?;
-                        return Some((
-                            quote! {
-                                let result = result.map_err(|e| ndc_vm::error::VmError::native(e.to_string()))?;
-                                #inner_code
-                            },
-                            inner_type,
-                        ));
-                    }
-                }
-            }
-        }
-    }
-
-    None
+    vm_return_for_classified(ty)
 }
 
 /// Like `try_vm_return_type` but also handles `()` (unit), which only makes
@@ -625,13 +469,16 @@ fn try_vm_return_inner(ty: &syn::Type) -> Option<(TokenStream, TokenStream)> {
             ));
         }
     }
-    // ndc_vm::value::Value / SeqValue inside Result<...> — pass through.
-    if is_ndc_vm_value(ty) || is_ndc_vm_seq_value(ty) {
-        return Some((quote! { Ok(result) }, quote! { ndc_core::StaticType::Any }));
-    }
-    // ndc_vm::value::MapValue inside Result<...> — pass through with StaticType::Map.
-    if is_ndc_vm_map_value(ty) {
-        return Some((
+    vm_return_for_classified(ty)
+}
+
+fn vm_return_for_classified(ty: &syn::Type) -> Option<(TokenStream, TokenStream)> {
+    let ndc_type = classify(ty)?;
+    match ndc_type {
+        NdcType::VmValue | NdcType::SeqValue => {
+            Some((quote! { Ok(result) }, quote! { ndc_core::StaticType::Any }))
+        }
+        NdcType::MapValue => Some((
             quote! { Ok(result) },
             quote! {
                 ndc_core::StaticType::Map {
@@ -639,7 +486,54 @@ fn try_vm_return_inner(ty: &syn::Type) -> Option<(TokenStream, TokenStream)> {
                     value: Box::new(ndc_core::StaticType::Any),
                 }
             },
-        ));
+        )),
+        NdcType::Number | NdcType::NumberRef => Some((
+            quote! { Ok(ndc_vm::value::Value::from_number(result)) },
+            quote! { ndc_core::StaticType::Number },
+        )),
+        NdcType::F64 => Some((
+            quote! { Ok(ndc_vm::value::Value::Float(result)) },
+            quote! { ndc_core::StaticType::Float },
+        )),
+        NdcType::Bool => Some((
+            quote! { Ok(ndc_vm::value::Value::Bool(result)) },
+            quote! { ndc_core::StaticType::Bool },
+        )),
+        NdcType::StrRef => Some((
+            quote! { Ok(ndc_vm::value::Value::string(result.to_owned())) },
+            quote! { ndc_core::StaticType::String },
+        )),
+        NdcType::String => Some((
+            quote! { Ok(ndc_vm::value::Value::string(result)) },
+            quote! { ndc_core::StaticType::String },
+        )),
+        NdcType::I64 => Some((
+            quote! { Ok(ndc_vm::value::Value::Int(result)) },
+            quote! { ndc_core::StaticType::Int },
+        )),
+        NdcType::Usize => Some((
+            quote! { Ok(ndc_vm::value::Value::Int(result as i64)) },
+            quote! { ndc_core::StaticType::Int },
+        )),
+        NdcType::BigInt => Some((
+            quote! {
+                Ok(ndc_vm::value::Value::from_number(
+                    ndc_core::num::Number::Int(
+                        ndc_core::int::Int::BigInt(result).simplified()
+                    )
+                ))
+            },
+            quote! { ndc_core::StaticType::Int },
+        )),
+        NdcType::BigRational => Some((
+            quote! {
+                Ok(ndc_vm::value::Value::from_number(
+                    ndc_core::num::Number::Rational(Box::new(result))
+                ))
+            },
+            quote! { ndc_core::StaticType::Rational },
+        )),
+        // Input-only types — not valid as return types
+        _ => None,
     }
-    try_vm_return_type(ty)
 }

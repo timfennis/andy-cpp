@@ -1,6 +1,7 @@
 use factorial::Factorial;
 use ndc_core::num::{BinaryOperatorError, Number};
 use ndc_macros::export_module;
+use ndc_vm::value::{Object, SeqValue, Value};
 use num::ToPrimitive;
 use std::ops::{Add, Mul};
 
@@ -42,9 +43,8 @@ mod inner {
     }
 
     /// Returns the sum of all elements in a sequence.
-    pub fn sum(seq: ndc_vm::value::SeqValue) -> anyhow::Result<Number> {
-        if matches!(&seq, ndc_vm::value::Value::Object(o) if matches!(o.as_ref(), ndc_vm::value::Object::String(_)))
-        {
+    pub fn sum(seq: SeqValue) -> anyhow::Result<Number> {
+        if matches!(&seq, Value::Object(o) if matches!(o.as_ref(), Object::String(_))) {
             anyhow::bail!("string cannot be summed");
         }
         seq.try_into_iter()
@@ -58,9 +58,8 @@ mod inner {
     }
 
     /// Returns the product of all elements in a sequence.
-    pub fn product(seq: ndc_vm::value::SeqValue) -> anyhow::Result<Number> {
-        if matches!(&seq, ndc_vm::value::Value::Object(o) if matches!(o.as_ref(), ndc_vm::value::Object::String(_)))
-        {
+    pub fn product(seq: SeqValue) -> anyhow::Result<Number> {
+        if matches!(&seq, Value::Object(o) if matches!(o.as_ref(), Object::String(_))) {
             anyhow::bail!("string cannot be multiplied");
         }
         seq.try_into_iter()
@@ -117,11 +116,11 @@ mod inner {
     }
 
     /// Converts a value to a floating-point number.
-    pub fn float(value: ndc_vm::value::Value) -> anyhow::Result<f64> {
+    pub fn float(value: Value) -> anyhow::Result<f64> {
         match &value {
-            ndc_vm::value::Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-            ndc_vm::value::Value::Object(obj) => match obj.as_ref() {
-                ndc_vm::value::Object::String(s) => Ok(s.borrow().parse::<f64>()?),
+            Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
+            Value::Object(obj) => match obj.as_ref() {
+                Object::String(s) => Ok(s.borrow().parse::<f64>()?),
                 _ => value.to_f64().ok_or_else(|| {
                     anyhow::anyhow!("cannot convert {} to float", value.static_type())
                 }),
@@ -145,11 +144,11 @@ mod inner {
     /// - Rational numbers are rounded down
     /// - `true` is converted to `1`, and `false` to `0`
     /// - Strings are parsed as decimal integers; other representations result in an error
-    pub fn int(value: ndc_vm::value::Value) -> anyhow::Result<Number> {
+    pub fn int(value: Value) -> anyhow::Result<Number> {
         match &value {
-            ndc_vm::value::Value::Bool(b) => Ok(Number::from(if *b { 1i32 } else { 0i32 })),
-            ndc_vm::value::Value::Object(obj) => match obj.as_ref() {
-                ndc_vm::value::Object::String(s) => {
+            Value::Bool(b) => Ok(Number::from(if *b { 1i32 } else { 0i32 })),
+            Value::Object(obj) => match obj.as_ref() {
+                Object::String(s) => {
                     let bi = s.borrow().parse::<BigInt>()?;
                     Ok(Number::Int(Int::BigInt(bi).simplified()))
                 }
@@ -175,15 +174,15 @@ pub mod f64 {
     use ndc_core::StaticType;
     use ndc_core::num::BinaryOperatorError;
     use ndc_vm::error::VmError;
-    use ndc_vm::value::{NativeFunc, NativeFunction as VmNativeFunction, Value as VmValue};
+    use ndc_vm::value::{NativeFunc, NativeFunction, Value};
     use std::cmp::Ordering;
     use std::ops::Not;
     use std::rc::Rc;
 
-    pub fn register(env: &mut ndc_core::FunctionRegistry<Rc<VmNativeFunction>>) {
+    pub fn register(env: &mut ndc_core::FunctionRegistry<Rc<NativeFunction>>) {
         macro_rules! implement_binary_operator_on_num {
             ($operator:literal,$method:expr,$docs:literal) => {
-                env.declare_global_fn(Rc::new(VmNativeFunction {
+                env.declare_global_fn(Rc::new(NativeFunction {
                     name: $operator.to_string(),
                     documentation: Some($docs.to_string()),
                     static_type: StaticType::Function {
@@ -205,7 +204,7 @@ pub mod f64 {
                                 ))
                             })?;
                             $method(l, r)
-                                .map(VmValue::from_number)
+                                .map(Value::from_number)
                                 .map_err(|e: BinaryOperatorError| VmError::native(e.to_string()))
                         }
                         _ => Err(VmError::native(format!(
@@ -242,7 +241,7 @@ pub mod f64 {
             "Returns the Euclidean remainder of dividing two numbers. The result is always non-negative."
         );
 
-        env.declare_global_fn(Rc::new(VmNativeFunction {
+        env.declare_global_fn(Rc::new(NativeFunction {
             name: "-".to_string(),
             documentation: Some("Negates a number.".to_string()),
             static_type: StaticType::Function {
@@ -253,7 +252,7 @@ pub mod f64 {
                 [v] => v
                     .to_number()
                     .map(std::ops::Neg::neg)
-                    .map(VmValue::from_number)
+                    .map(Value::from_number)
                     .ok_or_else(|| {
                         VmError::native(format!("expected number, got {}", v.static_type()))
                     }),
@@ -266,7 +265,7 @@ pub mod f64 {
 
         macro_rules! impl_cmp {
             ($operator:literal,$expected:pat,$docs:literal) => {
-                env.declare_global_fn(Rc::new(VmNativeFunction {
+                env.declare_global_fn(Rc::new(NativeFunction {
                     name: $operator.to_string(),
                     documentation: Some($docs.to_string()),
                     static_type: StaticType::Function {
@@ -275,8 +274,8 @@ pub mod f64 {
                     },
                     func: NativeFunc::Simple(Box::new(|args| match args {
                         [left, right] => match left.partial_cmp(right) {
-                            Some($expected) => Ok(VmValue::Bool(true)),
-                            Some(_) => Ok(VmValue::Bool(false)),
+                            Some($expected) => Ok(Value::Bool(true)),
+                            Some(_) => Ok(Value::Bool(false)),
                             None => Err(VmError::native(format!(
                                 "cannot compare {} and {}",
                                 left.static_type(),
@@ -313,7 +312,7 @@ pub mod f64 {
             "Returns true if the left value is less than or equal to the right."
         );
 
-        env.declare_global_fn(Rc::new(VmNativeFunction {
+        env.declare_global_fn(Rc::new(NativeFunction {
             name: "==".to_string(),
             documentation: Some("Returns true if two values are equal.".to_string()),
             static_type: StaticType::Function {
@@ -321,7 +320,7 @@ pub mod f64 {
                 return_type: Box::new(StaticType::Bool),
             },
             func: NativeFunc::Simple(Box::new(|args| match args {
-                [left, right] => Ok(VmValue::Bool(left == right)),
+                [left, right] => Ok(Value::Bool(left == right)),
                 _ => Err(VmError::native(format!(
                     "expected 2 arguments, got {}",
                     args.len()
@@ -329,7 +328,7 @@ pub mod f64 {
             })),
         }));
 
-        env.declare_global_fn(Rc::new(VmNativeFunction {
+        env.declare_global_fn(Rc::new(NativeFunction {
             name: "!=".to_string(),
             documentation: Some("Returns true if two values are not equal.".to_string()),
             static_type: StaticType::Function {
@@ -337,7 +336,7 @@ pub mod f64 {
                 return_type: Box::new(StaticType::Bool),
             },
             func: NativeFunc::Simple(Box::new(|args| match args {
-                [left, right] => Ok(VmValue::Bool(left != right)),
+                [left, right] => Ok(Value::Bool(left != right)),
                 _ => Err(VmError::native(format!(
                     "expected 2 arguments, got {}",
                     args.len()
@@ -345,7 +344,7 @@ pub mod f64 {
             })),
         }));
 
-        env.declare_global_fn(Rc::new(VmNativeFunction {
+        env.declare_global_fn(Rc::new(NativeFunction {
             name: "<=>".to_string(),
             documentation: Some("Three-way comparison (spaceship operator). Returns -1 if left < right, 0 if equal, 1 if left > right.".to_string()),
             static_type: StaticType::Function {
@@ -354,9 +353,9 @@ pub mod f64 {
             },
             func: NativeFunc::Simple(Box::new(|args| match args {
                 [left, right] => match left.partial_cmp(right) {
-                    Some(Ordering::Equal) => Ok(VmValue::Int(0)),
-                    Some(Ordering::Less) => Ok(VmValue::Int(-1)),
-                    Some(Ordering::Greater) => Ok(VmValue::Int(1)),
+                    Some(Ordering::Equal) => Ok(Value::Int(0)),
+                    Some(Ordering::Less) => Ok(Value::Int(-1)),
+                    Some(Ordering::Greater) => Ok(Value::Int(1)),
                     None => Err(VmError::native(format!(
                         "cannot compare {} and {}",
                         left.static_type(),
@@ -370,7 +369,7 @@ pub mod f64 {
             })),
         }));
 
-        env.declare_global_fn(Rc::new(VmNativeFunction {
+        env.declare_global_fn(Rc::new(NativeFunction {
             name: ">=<".to_string(),
             documentation: Some("Reverse three-way comparison. Returns 1 if left < right, 0 if equal, -1 if left > right.".to_string()),
             static_type: StaticType::Function {
@@ -379,9 +378,9 @@ pub mod f64 {
             },
             func: NativeFunc::Simple(Box::new(|args| match args {
                 [left, right] => match left.partial_cmp(right) {
-                    Some(Ordering::Equal) => Ok(VmValue::Int(0)),
-                    Some(Ordering::Less) => Ok(VmValue::Int(1)),
-                    Some(Ordering::Greater) => Ok(VmValue::Int(-1)),
+                    Some(Ordering::Equal) => Ok(Value::Int(0)),
+                    Some(Ordering::Less) => Ok(Value::Int(1)),
+                    Some(Ordering::Greater) => Ok(Value::Int(-1)),
                     None => Err(VmError::native(format!(
                         "cannot compare {} and {}",
                         left.static_type(),
@@ -397,7 +396,7 @@ pub mod f64 {
 
         macro_rules! impl_bitop {
             ($operator:literal,$operation:expr,$docs_bool:literal,$docs_int:literal) => {
-                env.declare_global_fn(Rc::new(VmNativeFunction {
+                env.declare_global_fn(Rc::new(NativeFunction {
                     name: $operator.to_string(),
                     documentation: Some($docs_bool.to_string()),
                     static_type: StaticType::Function {
@@ -405,16 +404,14 @@ pub mod f64 {
                         return_type: Box::new(StaticType::Bool),
                     },
                     func: NativeFunc::Simple(Box::new(|args| match args {
-                        [VmValue::Bool(l), VmValue::Bool(r)] => {
-                            Ok(VmValue::Bool($operation(*l, *r)))
-                        }
+                        [Value::Bool(l), Value::Bool(r)] => Ok(Value::Bool($operation(*l, *r))),
                         _ => Err(VmError::native(format!(
                             "expected 2 bool arguments, got {}",
                             args.len()
                         ))),
                     })),
                 }));
-                env.declare_global_fn(Rc::new(VmNativeFunction {
+                env.declare_global_fn(Rc::new(NativeFunction {
                     name: $operator.to_string(),
                     documentation: Some($docs_int.to_string()),
                     static_type: StaticType::Function {
@@ -432,7 +429,7 @@ pub mod f64 {
                                     right.static_type()
                                 ))
                             })?;
-                            Ok(VmValue::from_int($operation(l, r)))
+                            Ok(Value::from_int($operation(l, r)))
                         }
                         _ => Err(VmError::native(format!(
                             "expected 2 arguments, got {}",
@@ -462,7 +459,7 @@ pub mod f64 {
             "Bitwise XOR of two integers."
         );
 
-        env.declare_global_fn(Rc::new(VmNativeFunction {
+        env.declare_global_fn(Rc::new(NativeFunction {
             name: "~".to_string(),
             documentation: Some("Bitwise NOT of a number.".to_string()),
             static_type: StaticType::Function {
@@ -473,7 +470,7 @@ pub mod f64 {
                 [v] => v
                     .to_number()
                     .map(Not::not)
-                    .map(VmValue::from_number)
+                    .map(Value::from_number)
                     .ok_or_else(|| {
                         VmError::native(format!("expected number, got {}", v.static_type()))
                     }),
@@ -485,7 +482,7 @@ pub mod f64 {
         }));
 
         for ident in ["!", "not"] {
-            env.declare_global_fn(Rc::new(VmNativeFunction {
+            env.declare_global_fn(Rc::new(NativeFunction {
                 name: ident.to_string(),
                 documentation: Some(
                     "Logical negation. Returns the opposite boolean value.".to_string(),
@@ -495,7 +492,7 @@ pub mod f64 {
                     return_type: Box::new(StaticType::Bool),
                 },
                 func: NativeFunc::Simple(Box::new(|args| match args {
-                    [VmValue::Bool(b)] => Ok(VmValue::Bool(b.not())),
+                    [Value::Bool(b)] => Ok(Value::Bool(b.not())),
                     _ => Err(VmError::native(format!(
                         "expected 1 bool argument, got {}",
                         args.len()
@@ -504,7 +501,7 @@ pub mod f64 {
             }));
         }
 
-        env.declare_global_fn(Rc::new(VmNativeFunction {
+        env.declare_global_fn(Rc::new(NativeFunction {
             name: ">>".to_string(),
             documentation: Some("Right bit shift.".to_string()),
             static_type: StaticType::Function {
@@ -519,7 +516,7 @@ pub mod f64 {
                     let r = right.to_int().ok_or_else(|| {
                         VmError::native(format!("expected int, got {}", right.static_type()))
                     })?;
-                    l.checked_shr(r).map(VmValue::from_int).ok_or_else(|| {
+                    l.checked_shr(r).map(Value::from_int).ok_or_else(|| {
                         VmError::native("cannot apply >> operator to operands".to_string())
                     })
                 }
@@ -530,7 +527,7 @@ pub mod f64 {
             })),
         }));
 
-        env.declare_global_fn(Rc::new(VmNativeFunction {
+        env.declare_global_fn(Rc::new(NativeFunction {
             name: "<<".to_string(),
             documentation: Some("Left bit shift.".to_string()),
             static_type: StaticType::Function {
@@ -545,7 +542,7 @@ pub mod f64 {
                     let r = right.to_int().ok_or_else(|| {
                         VmError::native(format!("expected int, got {}", right.static_type()))
                     })?;
-                    l.checked_shl(r).map(VmValue::from_int).ok_or_else(|| {
+                    l.checked_shl(r).map(Value::from_int).ok_or_else(|| {
                         VmError::native("cannot apply << operator to operands".to_string())
                     })
                 }
@@ -558,7 +555,7 @@ pub mod f64 {
 
         macro_rules! delegate_to_f64 {
             ($method:ident,$docs:literal) => {
-                env.declare_global_fn(Rc::new(VmNativeFunction {
+                env.declare_global_fn(Rc::new(NativeFunction {
                     name: stringify!($method).to_string(),
                     documentation: Some($docs.to_string()),
                     static_type: StaticType::Function {
@@ -576,7 +573,7 @@ pub mod f64 {
                                 }
                                 Number::Complex(c) => Number::Complex(c.$method()),
                             })
-                            .map(VmValue::from_number)
+                            .map(Value::from_number)
                             .ok_or_else(|| {
                                 VmError::native(format!("expected number, got {}", v.static_type()))
                             }),

@@ -1,3 +1,5 @@
+use ndc_vm::value::{Object, SeqValue, Value};
+
 #[ndc_macros::export_module]
 mod inner {
     use itertools::Itertools;
@@ -7,8 +9,8 @@ mod inner {
 
     /// Converts any sequence into a list
     #[function(return_type = Vec<_>)]
-    pub fn list(seq: ndc_vm::value::SeqValue) -> anyhow::Result<ndc_vm::value::Value> {
-        Ok(ndc_vm::value::Value::list(
+    pub fn list(seq: SeqValue) -> anyhow::Result<Value> {
+        Ok(Value::list(
             seq.try_into_iter()
                 .ok_or_else(|| anyhow!("list requires a sequence"))?
                 .collect::<Vec<_>>(),
@@ -16,41 +18,31 @@ mod inner {
     }
 
     /// Returns `true` if the list contains the given element.
-    pub fn contains(list: &[ndc_vm::value::Value], elem: ndc_vm::value::Value) -> bool {
+    pub fn contains(list: &[Value], elem: Value) -> bool {
         list.contains(&elem)
     }
 
     /// Returns `true` if the list contains the given subsequence.
-    pub fn contains_subsequence(
-        list: &[ndc_vm::value::Value],
-        subsequence: &[ndc_vm::value::Value],
-    ) -> bool {
+    pub fn contains_subsequence(list: &[Value], subsequence: &[Value]) -> bool {
         list.windows(subsequence.len()).contains(&subsequence)
     }
 
     /// Returns the starting index of the first occurrence of `subsequence` in `list`, or unit if not found.
-    pub fn find_subsequence(
-        list: &[ndc_vm::value::Value],
-        subsequence: &[ndc_vm::value::Value],
-    ) -> ndc_vm::value::Value {
+    pub fn find_subsequence(list: &[Value], subsequence: &[Value]) -> Value {
         let result = list
             .windows(subsequence.len())
             .enumerate()
             .find(|(_, seq)| *seq == subsequence)
             .map(|(idx, _)| idx);
         if let Some(result) = result {
-            ndc_vm::value::Value::Int(result as i64)
+            Value::Int(result as i64)
         } else {
-            ndc_vm::value::Value::unit()
+            Value::unit()
         }
     }
 
     /// Inserts an element at the given index, shifting all elements after it to the right.
-    pub fn insert(
-        list: &mut Vec<ndc_vm::value::Value>,
-        index: usize,
-        elem: ndc_vm::value::Value,
-    ) -> anyhow::Result<()> {
+    pub fn insert(list: &mut Vec<Value>, index: usize, elem: Value) -> anyhow::Result<()> {
         if index > list.len() {
             return Err(anyhow!("index {index} is out of bounds"));
         }
@@ -59,10 +51,7 @@ mod inner {
     }
 
     /// Removes and returns the element at position `index` within the list, shifting all elements after it to the left.
-    pub fn remove(
-        list: &mut Vec<ndc_vm::value::Value>,
-        index: usize,
-    ) -> anyhow::Result<ndc_vm::value::Value> {
+    pub fn remove(list: &mut Vec<Value>, index: usize) -> anyhow::Result<Value> {
         if index > list.len() {
             return Err(anyhow!("index {index} is out of bounds"));
         }
@@ -71,94 +60,89 @@ mod inner {
     }
 
     /// Removes all instances of `element` from `list`
-    pub fn remove_element(list: &mut Vec<ndc_vm::value::Value>, element: ndc_vm::value::Value) {
+    pub fn remove_element(list: &mut Vec<Value>, element: Value) {
         list.retain(|cur| cur != &element);
     }
 
     /// Appends `elem` to the back of `list`
-    pub fn push(list: &mut Vec<ndc_vm::value::Value>, elem: ndc_vm::value::Value) {
+    pub fn push(list: &mut Vec<Value>, elem: Value) {
         list.push(elem);
     }
 
     /// Moves elements from `other` to `list`, leaving `other` empty.
-    pub fn append(list: &mut Vec<ndc_vm::value::Value>, other: &mut Vec<ndc_vm::value::Value>) {
+    pub fn append(list: &mut Vec<Value>, other: &mut Vec<Value>) {
         list.append(other);
     }
 
     /// Copies elements from `other` to `list`, not touching `other`.
-    pub fn extend(list: &mut Vec<ndc_vm::value::Value>, other: &[ndc_vm::value::Value]) {
+    pub fn extend(list: &mut Vec<Value>, other: &[Value]) {
         list.extend_from_slice(other);
     }
 
     /// Removes and returns the last element from the list, or `None` if empty.
     #[function(name = "pop?", return_type = Option<_>)]
-    pub fn maybe_pop(list: &mut Vec<ndc_vm::value::Value>) -> ndc_vm::value::Value {
+    pub fn maybe_pop(list: &mut Vec<Value>) -> Value {
         match list.pop() {
-            None => ndc_vm::value::Value::None,
-            Some(val) => ndc_vm::value::Value::Object(Rc::new(ndc_vm::value::Object::Some(val))),
+            None => Value::None,
+            Some(val) => Value::Object(Rc::new(Object::Some(val))),
         }
     }
 
     /// Removes and returns the last element from the list, or unit if empty.
-    pub fn pop(list: &mut Vec<ndc_vm::value::Value>) -> ndc_vm::value::Value {
-        list.pop().unwrap_or_else(ndc_vm::value::Value::unit)
+    pub fn pop(list: &mut Vec<Value>) -> Value {
+        list.pop().unwrap_or_else(Value::unit)
     }
 
     /// Removes and returns the first element from the list, or `None` if empty.
     #[function(name = "pop_left?", return_type = Option<_>)]
-    pub fn maybe_pop_left(list: &mut Vec<ndc_vm::value::Value>) -> ndc_vm::value::Value {
+    pub fn maybe_pop_left(list: &mut Vec<Value>) -> Value {
         if list.is_empty() {
-            return ndc_vm::value::Value::None;
+            return Value::None;
         }
-        ndc_vm::value::Value::Object(Rc::new(ndc_vm::value::Object::Some(list.remove(0))))
+        Value::Object(Rc::new(Object::Some(list.remove(0))))
     }
 
     /// Removes and returns the first element from the list, or unit if empty.
-    pub fn pop_left(list: &mut Vec<ndc_vm::value::Value>) -> ndc_vm::value::Value {
+    pub fn pop_left(list: &mut Vec<Value>) -> Value {
         if list.is_empty() {
-            return ndc_vm::value::Value::unit();
+            return Value::unit();
         }
         list.remove(0)
     }
 
     /// Creates a copy of the list with its elements in reverse order
     #[function(return_type = Vec<_>)]
-    pub fn reversed(list: &[ndc_vm::value::Value]) -> ndc_vm::value::Value {
-        ndc_vm::value::Value::list(list.iter().rev().cloned().collect())
+    pub fn reversed(list: &[Value]) -> Value {
+        Value::list(list.iter().rev().cloned().collect())
     }
 
     /// Removes all values from the list
-    pub fn clear(list: &mut Vec<ndc_vm::value::Value>) {
+    pub fn clear(list: &mut Vec<Value>) {
         list.clear();
     }
 
     /// Returns `true` if the list contains no elements
-    pub fn is_empty(list: &[ndc_vm::value::Value]) -> bool {
+    pub fn is_empty(list: &[Value]) -> bool {
         list.is_empty()
     }
 
     /// Splits the collection into two at the given index.
-    pub fn split_off(
-        list: &mut Vec<ndc_vm::value::Value>,
-        index: usize,
-    ) -> anyhow::Result<ndc_vm::value::Value> {
+    pub fn split_off(list: &mut Vec<Value>, index: usize) -> anyhow::Result<Value> {
         if index > list.len() {
             return Err(anyhow!("index {index} is out of bounds"));
         }
 
-        Ok(ndc_vm::value::Value::Object(Rc::new(
-            ndc_vm::value::Object::list(list.split_off(index)),
-        )))
+        Ok(Value::Object(Rc::new(Object::list(list.split_off(index)))))
     }
 
     /// Shortens the list, keeping the first `len` elements and dropping the rest.
     /// If `len` is greater or equal to the length of the list, nothing happens.
-    pub fn truncate(list: &mut Vec<ndc_vm::value::Value>, len: usize) {
+    pub fn truncate(list: &mut Vec<Value>, len: usize) {
         list.truncate(len);
     }
 
     /// Returns a copy of the first element of the list or results in an error if the list is empty.
-    pub fn first(list: &[ndc_vm::value::Value]) -> anyhow::Result<ndc_vm::value::Value> {
+    pub fn first(list: &[Value]) -> anyhow::Result<Value> {
         list.first()
             .cloned()
             .ok_or_else(|| anyhow!("collection is empty"))
@@ -166,17 +150,15 @@ mod inner {
 
     /// Returns a copy of the first element, or `None` if the list is empty.
     #[function(name = "first?", return_type = Option<_>)]
-    pub fn maybe_first(list: &[ndc_vm::value::Value]) -> ndc_vm::value::Value {
+    pub fn maybe_first(list: &[Value]) -> Value {
         match list.first() {
-            None => ndc_vm::value::Value::None,
-            Some(v) => {
-                ndc_vm::value::Value::Object(Rc::new(ndc_vm::value::Object::Some(v.clone())))
-            }
+            None => Value::None,
+            Some(v) => Value::Object(Rc::new(Object::Some(v.clone()))),
         }
     }
 
     /// Returns a copy of the last element of the list or results in an error if the list is empty.
-    pub fn last(list: &[ndc_vm::value::Value]) -> anyhow::Result<ndc_vm::value::Value> {
+    pub fn last(list: &[Value]) -> anyhow::Result<Value> {
         list.last()
             .cloned()
             .ok_or_else(|| anyhow!("the list is empty"))
@@ -184,26 +166,21 @@ mod inner {
 
     /// Returns a copy of the last element, or `None` if the list is empty.
     #[function(name = "last?", return_type = Option<_>)]
-    pub fn maybe_last(list: &[ndc_vm::value::Value]) -> ndc_vm::value::Value {
+    pub fn maybe_last(list: &[Value]) -> Value {
         match list.last() {
-            None => ndc_vm::value::Value::None,
-            Some(v) => {
-                ndc_vm::value::Value::Object(Rc::new(ndc_vm::value::Object::Some(v.clone())))
-            }
+            None => Value::None,
+            Some(v) => Value::Object(Rc::new(Object::Some(v.clone()))),
         }
     }
 
     /// Returns the Cartesian product of two lists as a list of tuples.
     #[function(return_type = Vec<_>)]
-    pub fn cartesian_product(
-        list_a: &[ndc_vm::value::Value],
-        list_b: &[ndc_vm::value::Value],
-    ) -> ndc_vm::value::Value {
-        ndc_vm::value::Value::list(
+    pub fn cartesian_product(list_a: &[Value], list_b: &[Value]) -> Value {
+        Value::list(
             list_a
                 .iter()
                 .cartesian_product(list_b)
-                .map(|(a, b)| ndc_vm::value::Value::tuple(vec![a.clone(), b.clone()]))
+                .map(|(a, b)| Value::tuple(vec![a.clone(), b.clone()]))
                 .collect_vec(),
         )
     }
@@ -212,18 +189,16 @@ mod inner {
 pub mod ops {
     use ndc_core::{FunctionRegistry, StaticType};
     use ndc_vm::error::VmError;
-    use ndc_vm::value::{
-        NativeFunc, NativeFunction as VmNativeFunction, Object as VmObject, Value as VmValue,
-    };
+    use ndc_vm::value::{NativeFunc, NativeFunction, Object, Value};
     use std::rc::Rc;
 
-    pub fn register(env: &mut FunctionRegistry<Rc<VmNativeFunction>>) {
+    pub fn register(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
         register_list_concat(env);
         register_list_append(env);
     }
 
-    fn register_list_concat(env: &mut FunctionRegistry<Rc<VmNativeFunction>>) {
-        let native = Rc::new(VmNativeFunction {
+    fn register_list_concat(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
+        let native = Rc::new(NativeFunction {
             name: "++".to_string(),
             documentation: Some("Concatenates two lists into a new list.".to_string()),
             static_type: StaticType::Function {
@@ -240,25 +215,25 @@ pub mod ops {
                         args.len()
                     )));
                 };
-                let VmValue::Object(left_obj) = left else {
+                let Value::Object(left_obj) = left else {
                     return Err(VmError::native(format!(
                         "++ left requires a list, got {}",
                         left.static_type()
                     )));
                 };
-                let VmValue::Object(right_obj) = right else {
+                let Value::Object(right_obj) = right else {
                     return Err(VmError::native(format!(
                         "++ right requires a list, got {}",
                         right.static_type()
                     )));
                 };
-                let VmObject::List(left_cell) = left_obj.as_ref() else {
+                let Object::List(left_cell) = left_obj.as_ref() else {
                     return Err(VmError::native(format!(
                         "++ left requires a list, got {}",
                         left.static_type()
                     )));
                 };
-                let VmObject::List(right_cell) = right_obj.as_ref() else {
+                let Object::List(right_cell) = right_obj.as_ref() else {
                     return Err(VmError::native(format!(
                         "++ right requires a list, got {}",
                         right.static_type()
@@ -269,23 +244,23 @@ pub mod ops {
                     left_cell
                         .borrow_mut()
                         .extend_from_slice(&right_cell.borrow());
-                    Ok(VmValue::Object(left_obj.clone()))
+                    Ok(Value::Object(left_obj.clone()))
                 } else {
-                    let new_list: Vec<VmValue> = left_cell
+                    let new_list: Vec<Value> = left_cell
                         .borrow()
                         .iter()
                         .chain(right_cell.borrow().iter())
                         .cloned()
                         .collect();
-                    Ok(VmValue::Object(Rc::new(VmObject::list(new_list))))
+                    Ok(Value::Object(Rc::new(Object::list(new_list))))
                 }
             })),
         });
         env.declare_global_fn(native);
     }
 
-    fn register_list_append(env: &mut FunctionRegistry<Rc<VmNativeFunction>>) {
-        let native = Rc::new(VmNativeFunction {
+    fn register_list_append(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
+        let native = Rc::new(NativeFunction {
             name: "++=".to_string(),
             documentation: Some(
                 "Appends all elements from the right list to the left list in place.".to_string(),
@@ -304,25 +279,25 @@ pub mod ops {
                         args.len()
                     )));
                 };
-                let VmValue::Object(left_obj) = left else {
+                let Value::Object(left_obj) = left else {
                     return Err(VmError::native(format!(
                         "++= left requires a list, got {}",
                         left.static_type()
                     )));
                 };
-                let VmValue::Object(right_obj) = right else {
+                let Value::Object(right_obj) = right else {
                     return Err(VmError::native(format!(
                         "++= right requires a list, got {}",
                         right.static_type()
                     )));
                 };
-                let VmObject::List(left_cell) = left_obj.as_ref() else {
+                let Object::List(left_cell) = left_obj.as_ref() else {
                     return Err(VmError::native(format!(
                         "++= left requires a list, got {}",
                         left.static_type()
                     )));
                 };
-                let VmObject::List(right_cell) = right_obj.as_ref() else {
+                let Object::List(right_cell) = right_obj.as_ref() else {
                     return Err(VmError::native(format!(
                         "++= right requires a list, got {}",
                         right.static_type()

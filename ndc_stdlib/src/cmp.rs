@@ -1,4 +1,7 @@
-#[ndc_macros::export_module]
+use ndc_macros::export_module;
+use ndc_vm::value::Value;
+
+#[export_module]
 mod inner {
     use anyhow::anyhow;
 
@@ -14,10 +17,7 @@ mod inner {
     }
 
     /// Produces an error if the arguments aren't equal to each other.
-    pub fn assert_eq(
-        left: ndc_vm::value::Value,
-        right: ndc_vm::value::Value,
-    ) -> anyhow::Result<()> {
+    pub fn assert_eq(left: Value, right: Value) -> anyhow::Result<()> {
         if left == right {
             Ok(())
         } else {
@@ -28,10 +28,7 @@ mod inner {
     }
 
     /// Produces an error if the arguments are equal to each other.
-    pub fn assert_ne(
-        left: ndc_vm::value::Value,
-        right: ndc_vm::value::Value,
-    ) -> anyhow::Result<()> {
+    pub fn assert_ne(left: Value, right: Value) -> anyhow::Result<()> {
         if left == right {
             Err(anyhow!(format!(
                 "failed asserting that {left} does not equal {right}"
@@ -52,10 +49,7 @@ mod inner {
     }
 
     /// Returns the larger of `left` and `right`, preferring `left` if they are equal.
-    pub fn max(
-        left: ndc_vm::value::Value,
-        right: ndc_vm::value::Value,
-    ) -> anyhow::Result<ndc_vm::value::Value> {
+    pub fn max(left: Value, right: Value) -> anyhow::Result<Value> {
         match left.partial_cmp(&right) {
             Some(Ordering::Equal) | Some(Ordering::Greater) => Ok(left),
             Some(Ordering::Less) => Ok(right),
@@ -68,10 +62,7 @@ mod inner {
     }
 
     /// Returns the smaller of `left` and `right`, preferring `left` if they are equal.
-    pub fn min(
-        left: ndc_vm::value::Value,
-        right: ndc_vm::value::Value,
-    ) -> anyhow::Result<ndc_vm::value::Value> {
+    pub fn min(left: Value, right: Value) -> anyhow::Result<Value> {
         match left.partial_cmp(&right) {
             Some(Ordering::Equal) | Some(Ordering::Less) => Ok(left),
             Some(Ordering::Greater) => Ok(right),

@@ -1,14 +1,14 @@
 use ndc_macros::export_module;
+use ndc_vm::value::{Object, SeqValue, Value};
 
 #[export_module]
 mod inner {
     use ndc_core::hash_map::HashMap;
-    use ndc_vm::value::Object;
     use std::rc::Rc;
 
     /// Counts the occurrences of each item in a sequence and returns a map with the frequencies.
-    pub fn frequencies(seq: ndc_vm::value::SeqValue) -> anyhow::Result<ndc_vm::value::Value> {
-        let mut counts: HashMap<ndc_vm::value::Value, i64> = HashMap::new();
+    pub fn frequencies(seq: SeqValue) -> anyhow::Result<Value> {
+        let mut counts: HashMap<Value, i64> = HashMap::new();
 
         for item in seq
             .try_into_iter()
@@ -17,14 +17,14 @@ mod inner {
             *counts.entry(item).or_insert(0i64) += 1;
         }
 
-        let entries: HashMap<ndc_vm::value::Value, ndc_vm::value::Value> = counts
+        let entries: HashMap<Value, Value> = counts
             .into_iter()
-            .map(|(k, v)| (k, ndc_vm::value::Value::Int(v)))
+            .map(|(k, v)| (k, Value::Int(v)))
             .collect();
 
-        Ok(ndc_vm::value::Value::Object(Rc::new(Object::map(
+        Ok(Value::Object(Rc::new(Object::map(
             entries,
-            Some(ndc_vm::value::Value::Int(0)),
+            Some(Value::Int(0)),
         ))))
     }
 }

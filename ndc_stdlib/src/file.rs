@@ -1,7 +1,7 @@
 use ndc_core::{FunctionRegistry, StaticType};
 use ndc_macros::export_module;
 use ndc_vm::error::VmError;
-use ndc_vm::value::{NativeFunc, NativeFunction, Value as VmValue};
+use ndc_vm::value::{NativeFunc, NativeFunction, Value};
 use std::fmt::Write as FmtWrite;
 use std::fs::read_to_string;
 use std::rc::Rc;
@@ -44,7 +44,7 @@ pub fn register_variadic(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
                 }
             }
             vm.write_output(&buf)?;
-            Ok(VmValue::unit())
+            Ok(Value::unit())
         })),
     });
 
@@ -66,7 +66,7 @@ pub fn register_variadic(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
                 }
             }
             vm.write_output(&buf)?;
-            Ok(VmValue::unit())
+            Ok(Value::unit())
         })),
     });
 

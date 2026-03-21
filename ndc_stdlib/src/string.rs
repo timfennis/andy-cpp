@@ -1,4 +1,5 @@
 use ndc_macros::export_module;
+use ndc_vm::value::{SeqValue, Value};
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -7,7 +8,7 @@ type StringRepr = Rc<RefCell<String>>;
 
 use anyhow::{Context, anyhow};
 
-pub fn join_to_string(list: ndc_vm::value::SeqValue, sep: &str) -> anyhow::Result<String> {
+pub fn join_to_string(list: SeqValue, sep: &str) -> anyhow::Result<String> {
     use std::fmt::Write;
     let mut iter = list
         .try_into_iter()
@@ -30,24 +31,24 @@ mod inner {
 
     /// Concatenates two values into a string.
     #[function(name = "<>")]
-    pub fn op_string_concat(left: ndc_vm::value::Value, right: ndc_vm::value::Value) -> String {
+    pub fn op_string_concat(left: Value, right: Value) -> String {
         format!("{left}{right}")
     }
 
     /// Appends the right string to the left string in place.
     #[function(name = "++=")]
-    pub fn op_list_concat(left: &mut StringRepr, right: &mut StringRepr) -> ndc_vm::value::Value {
+    pub fn op_list_concat(left: &mut StringRepr, right: &mut StringRepr) -> Value {
         if Rc::ptr_eq(left, right) {
             let new = right.borrow().repeat(2).clone();
             *left.borrow_mut() = new;
         } else {
             left.borrow_mut().push_str(&right.borrow())
         }
-        ndc_vm::value::Value::from_string_rc(Rc::clone(left))
+        Value::from_string_rc(Rc::clone(left))
     }
 
     /// Returns the provided value as a string
-    pub fn string(value: ndc_vm::value::Value) -> String {
+    pub fn string(value: Value) -> String {
         format!("{value}")
     }
 
@@ -111,62 +112,47 @@ mod inner {
     }
 
     /// Joins elements of the sequence into a single string using `sep` as the separator.
-    pub fn join(list: ndc_vm::value::SeqValue, sep: &str) -> anyhow::Result<String> {
+    pub fn join(list: SeqValue, sep: &str) -> anyhow::Result<String> {
         join_to_string(list, sep)
     }
 
     /// Splits the string into paragraphs, using blank lines as separators.
     #[function(return_type = Vec<String>)]
-    pub fn paragraphs(string: &str) -> ndc_vm::value::Value {
-        ndc_vm::value::Value::list(
-            string
-                .split("\n\n")
-                .map(ndc_vm::value::Value::string)
-                .collect(),
-        )
+    pub fn paragraphs(string: &str) -> Value {
+        Value::list(string.split("\n\n").map(Value::string).collect())
     }
 
     /// Joins paragraphs into a single string, inserting blank lines between them.
-    pub fn unparagraphs(list: ndc_vm::value::SeqValue) -> anyhow::Result<String> {
+    pub fn unparagraphs(list: SeqValue) -> anyhow::Result<String> {
         join_to_string(list, "\n\n")
     }
 
     /// Splits the string into lines, using newline characters as separators.
     #[function(return_type = Vec<String>)]
-    pub fn lines(string: &str) -> ndc_vm::value::Value {
-        ndc_vm::value::Value::list(string.lines().map(ndc_vm::value::Value::string).collect())
+    pub fn lines(string: &str) -> Value {
+        Value::list(string.lines().map(Value::string).collect())
     }
 
     /// Joins lines into a single string, inserting newline characters between them.
-    pub fn unlines(list: ndc_vm::value::SeqValue) -> anyhow::Result<String> {
+    pub fn unlines(list: SeqValue) -> anyhow::Result<String> {
         join_to_string(list, "\n")
     }
 
     /// Splits the string into words, using whitespace as the separator.
     #[function(return_type = Vec<String>)]
-    pub fn words(string: &str) -> ndc_vm::value::Value {
-        ndc_vm::value::Value::list(
-            string
-                .split_whitespace()
-                .map(ndc_vm::value::Value::string)
-                .collect(),
-        )
+    pub fn words(string: &str) -> Value {
+        Value::list(string.split_whitespace().map(Value::string).collect())
     }
 
     /// Joins words into a single string, separating them with spaces.
-    pub fn unwords(list: ndc_vm::value::SeqValue) -> anyhow::Result<String> {
+    pub fn unwords(list: SeqValue) -> anyhow::Result<String> {
         join_to_string(list, " ")
     }
 
     /// Splits the string by whitespace into a list of substrings.
     #[function(return_type = Vec<String>)]
-    pub fn split(string: &str) -> ndc_vm::value::Value {
-        ndc_vm::value::Value::list(
-            string
-                .split_whitespace()
-                .map(ndc_vm::value::Value::string)
-                .collect(),
-        )
+    pub fn split(string: &str) -> Value {
+        Value::list(string.split_whitespace().map(Value::string).collect())
     }
 
     /// Returns `true` if `haystack` starts with `pat`.
@@ -181,24 +167,16 @@ mod inner {
 
     /// Splits the string using a given pattern as the delimiter.
     #[function(name = "split", return_type = Vec<String>)]
-    pub fn split_with_pattern(string: &str, pattern: &str) -> ndc_vm::value::Value {
-        ndc_vm::value::Value::list(
-            string
-                .split(pattern)
-                .map(ndc_vm::value::Value::string)
-                .collect(),
-        )
+    pub fn split_with_pattern(string: &str, pattern: &str) -> Value {
+        Value::list(string.split(pattern).map(Value::string).collect())
     }
 
     /// Splits the string at the first occurrence of `pattern`, returning a tuple-like value.
     #[function(return_type = (String, String))]
-    pub fn split_once(string: &str, pattern: &str) -> ndc_vm::value::Value {
+    pub fn split_once(string: &str, pattern: &str) -> Value {
         match string.split_once(pattern) {
-            Some((fst, snd)) => ndc_vm::value::Value::tuple(vec![
-                ndc_vm::value::Value::string(fst),
-                ndc_vm::value::Value::string(snd),
-            ]),
-            None => ndc_vm::value::Value::unit(),
+            Some((fst, snd)) => Value::tuple(vec![Value::string(fst), Value::string(snd)]),
+            None => Value::unit(),
         }
     }
 
