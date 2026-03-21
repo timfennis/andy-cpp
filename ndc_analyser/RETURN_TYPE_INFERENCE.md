@@ -30,12 +30,35 @@ Previously this was masked because the function resolution fallback (`find_all_s
 
 When we changed function resolution to skip known non-callable types (so that `let foo = 300; foo(42)` produces a compile error instead of a confusing runtime error), the mis-typed `unit` bindings got filtered out, breaking legitimate code.
 
-## The solution: `return_type_stack`
+## The solution: `Never` bottom type + `return_type_stack`
+
+Two complementary changes:
+
+### 1. `StaticType::Never` — bottom type for diverging expressions
+
+`return`, `break`, and `continue` now produce `StaticType::Never` instead of the value's type or unit. `Never` is a subtype of every type, so `lub(T, Never) = T`. The `Statement` handler propagates `Never` instead of converting it to unit:
+
+```rust
+Expression::Statement(inner) => {
+    let typ = self.analyse(inner)?;
+    if typ == StaticType::Never {
+        Ok(StaticType::Never)  // diverging — don't convert to unit
+    } else {
+        Ok(StaticType::unit())
+    }
+}
+```
+
+This means `return 1;` (a `Statement(Return)`) has type `Never`, not unit. When the block computes its implicit return type, `lub(previous_type, Never) = previous_type` — the dead code after a return doesn't pollute the type.
+
+Without this, `return 1;` would contribute both `Int` (via the return stack) and `unit` (via the block's implicit type), and `lub(Int, unit) = Any` — making every function with explicit returns infer `Any`.
+
+### 2. `return_type_stack` — tracking explicit return types
 
 Added a `return_type_stack: Vec<Option<StaticType>>` to the `Analyser` struct. It tracks explicit `return` types for each nested function scope:
 
 1. **On function entry**: push `None` onto the stack
-2. **On `return expr`**: analyse `expr`, then `fold_lub` its type into the top of the stack
+2. **On `return expr`**: analyse `expr`, `fold_lub` its type into the top of the stack, return `Never`
 3. **On function exit**: pop the stack, combine with the block's implicit return type:
 
 ```rust
@@ -48,21 +71,28 @@ let return_type = match explicit_return {
 };
 ```
 
-This correctly handles:
-- Functions with only implicit returns (no `return` keyword) → `explicit_return` is `None`, uses block type
-- Functions with only explicit returns → combines explicit type with block's unit type via `lub`
-- Functions with both early returns and an implicit final value → `lub` of all paths
-- Nested functions → stack isolates each function's return types
+### How they work together
 
-## Alternatives considered
+For `fn foo() { return 1; }`:
+- `return 1` → pushes `Int` to stack, returns `Never`
+- `Statement(Return)` → propagates `Never`
+- Block implicit type: `Never`
+- Stack: `Some(Int)`
+- Combined: `lub(Int, Never) = Int` ✓
 
-1. **Change `Statement(Return)` to preserve type**: Could special-case returns in the Statement handler, but this breaks the semantic of semicolons (which always discard) and doesn't handle early returns before the last statement.
+For `fn foo(x) { if x > 0 { return x; } "default" }`:
+- `return x` → pushes `Int` to stack, returns `Never`
+- `Statement(Return)` → `Never`
+- If-true branch: `Never`, if-false (implicit): unit
+- `lub(Never, unit) = unit` → if expression type is unit
+- Statement wrapping if → unit
+- `"default"` → `String`
+- Block implicit type: `String`
+- Stack: `Some(Int)`
+- Combined: `lub(Int, String) = Any` ✓
 
-2. **Use a `Never`/`NoReturn` type for return statements**: The `return` expression could return a bottom type, and the block would then use `lub(Never, unit) = unit` for the block type, with the actual return type tracked separately. This would be more principled but requires introducing a bottom type throughout the type system.
-
-3. **Track returns at the Block level**: Instead of a stack, each block could propagate return types upward. More complex and doesn't clearly improve on the stack approach.
-
-## Limitations
-
-- `break` and `continue` have a similar issue (they discard the block's implicit type) but are less impactful since they don't produce callable values
-- The `lub` combination means `fn foo() { if cond { return 42; } "hello" }` has return type `Any` (lub of Int and String), which is correct but imprecise — a union type would be more accurate
+For `fn foo() { 1 }`:
+- No explicit return
+- Block implicit type: `Int`
+- Stack: `None`
+- Combined: `Int` ✓

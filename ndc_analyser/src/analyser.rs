@@ -40,7 +40,7 @@ impl Analyser {
             Expression::Int64Literal(_) | Expression::BigIntLiteral(_) => Ok(StaticType::Int),
             Expression::Float64Literal(_) => Ok(StaticType::Float),
             Expression::ComplexLiteral(_) => Ok(StaticType::Complex),
-            Expression::Continue | Expression::Break => Ok(StaticType::unit()),
+            Expression::Continue | Expression::Break => Ok(StaticType::Never),
             Expression::Identifier {
                 name: ident,
                 resolved,
@@ -57,8 +57,14 @@ impl Analyser {
                 Ok(self.scope_tree.get_type(binding).clone())
             }
             Expression::Statement(inner) => {
-                self.analyse(inner)?;
-                Ok(StaticType::unit())
+                let typ = self.analyse(inner)?;
+                // Diverging statements (return/break/continue) propagate Never
+                // so that blocks can see that control doesn't fall through.
+                if typ == StaticType::Never {
+                    Ok(StaticType::Never)
+                } else {
+                    Ok(StaticType::unit())
+                }
             }
             Expression::Logical { left, right, .. } => {
                 self.analyse(left)?;
@@ -259,9 +265,9 @@ impl Analyser {
             Expression::Return { value } => {
                 let typ = self.analyse(value)?;
                 if let Some(slot) = self.return_type_stack.last_mut() {
-                    Self::fold_lub(slot, typ.clone());
+                    Self::fold_lub(slot, typ);
                 }
-                Ok(typ)
+                Ok(StaticType::Never)
             }
             Expression::RangeInclusive { start, end }
             | Expression::RangeExclusive { start, end } => {

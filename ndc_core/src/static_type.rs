@@ -76,6 +76,9 @@ impl Parameter {
 pub enum StaticType {
     #[default]
     Any,
+    /// Bottom type for diverging expressions (`return`, `break`, `continue`).
+    /// `Never` is a subtype of every type: `lub(T, Never) = T`.
+    Never,
     Bool,
     Function {
         parameters: Option<Vec<Self>>,
@@ -120,6 +123,11 @@ impl StaticType {
     ///
     /// Note: this function probably doesn't handle variadic functions correctly
     pub fn is_subtype(&self, other: &Self) -> bool {
+        // Never is the bottom type: subtype of everything
+        if matches!(self, Self::Never) {
+            return true;
+        }
+
         // Any is the universal supertype
         if matches!(other, Self::Any) {
             return true;
@@ -230,6 +238,14 @@ impl StaticType {
     /// - `lub(List<Int>, Iterator<Int>) = Sequence<Int>`
     /// - `lub(Int, String) = Any`
     pub fn lub(&self, other: &Self) -> Self {
+        // Never is the bottom type: lub(T, Never) = T
+        if matches!(self, Self::Never) {
+            return other.clone();
+        }
+        if matches!(other, Self::Never) {
+            return self.clone();
+        }
+
         // Any is the top type
         if matches!(self, Self::Any) || matches!(other, Self::Any) {
             return Self::Any;
@@ -506,7 +522,8 @@ impl StaticType {
             | Self::Int
             | Self::Rational
             | Self::Complex
-            | Self::Map { .. } => None,
+            | Self::Map { .. }
+            | Self::Never => None,
         }
     }
 }
@@ -515,6 +532,7 @@ impl fmt::Display for StaticType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Any => write!(f, "Any"),
+            Self::Never => write!(f, "Never"),
             Self::Bool => write!(f, "Bool"),
             Self::Function {
                 parameters,
