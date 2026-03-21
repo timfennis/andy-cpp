@@ -447,10 +447,12 @@ impl Vm {
                     let values = Rc::clone(values);
                     let frame = self.frames.last().expect("no frame");
                     let Value::Object(obj) = frame.closure.prototype.body.constant(idx) else {
-                        panic!("invalid type");
+                        panic!("Closure opcode: constant at index {idx} is not an Object");
                     };
                     let Object::Function(Function::Compiled(compiled)) = &**obj else {
-                        panic!("invalid type 2");
+                        panic!(
+                            "Closure opcode: constant at index {idx} is not a Compiled function"
+                        );
                     };
                     let compiled = Rc::clone(compiled);
                     let frame_pointer = frame.frame_pointer;
@@ -547,7 +549,7 @@ impl Vm {
         // without pushing a new frame.  On a miss we dispatch the inner
         // function normally and tag the new frame so `Return` will populate
         // the cache once the call finishes.
-        let memo = if let Function::Memoized { cache, function } = func {
+        if let Function::Memoized { cache, function } = func {
             let start = self.stack.len() - args;
             let mut hasher = DefaultHasher::default();
             for arg in &self.stack[start..] {
@@ -564,12 +566,10 @@ impl Vm {
 
             // Cache miss: dispatch the inner function and remember to store
             // the result in the cache when this frame returns.
-            return self.dispatch_call_with_memo(*function, args, Some((cache, key)));
+            self.dispatch_call_with_memo(*function, args, Some((cache, key)))
         } else {
-            None
-        };
-
-        self.dispatch_call_with_memo(func, args, memo)
+            self.dispatch_call_with_memo(func, args, None)
+        }
     }
 
     /// Inner helper that pushes a new call frame.  `memo` is `Some` when the

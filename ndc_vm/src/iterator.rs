@@ -29,10 +29,8 @@ pub trait VmIterator {
     }
 
     /// Returns a new independent iterator with the same current state (for `deepcopy`).
-    /// The default implementation returns `None`; override for clonable iterator types.
-    fn deep_copy(&self) -> Option<SharedIterator> {
-        None
-    }
+    /// Must be implemented for all iterator types so that `deepcopy` works correctly.
+    fn deep_copy(&self) -> Option<SharedIterator>;
 }
 
 pub type SharedIterator = Rc<RefCell<dyn VmIterator>>;
@@ -309,6 +307,13 @@ impl VmIterator for MinHeapIter {
         let remaining = self.entries.len() - self.index;
         (remaining, Some(remaining))
     }
+
+    fn deep_copy(&self) -> Option<SharedIterator> {
+        Some(Rc::new(RefCell::new(MinHeapIter {
+            entries: self.entries.clone(),
+            index: self.index,
+        })))
+    }
 }
 
 /// Iterates over a max-heap, yielding elements in arbitrary (heap) order.
@@ -339,6 +344,13 @@ impl VmIterator for MaxHeapIter {
     fn size_hint(&self) -> (usize, Option<usize>) {
         let remaining = self.entries.len() - self.index;
         (remaining, Some(remaining))
+    }
+
+    fn deep_copy(&self) -> Option<SharedIterator> {
+        Some(Rc::new(RefCell::new(MaxHeapIter {
+            entries: self.entries.clone(),
+            index: self.index,
+        })))
     }
 }
 
@@ -620,5 +632,13 @@ impl VmIterator for StringIter {
         // Byte length is a valid upper bound (each char is 1–4 bytes).
         // Exact char count would require an O(n) scan.
         (0, Some(remaining_bytes))
+    }
+
+    fn deep_copy(&self) -> Option<SharedIterator> {
+        let s = self.string.borrow().clone();
+        Some(Rc::new(RefCell::new(StringIter {
+            string: Rc::new(RefCell::new(s)),
+            byte_offset: self.byte_offset,
+        })))
     }
 }

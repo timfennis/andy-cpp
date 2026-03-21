@@ -12,7 +12,7 @@ use std::rc::Rc;
 #[derive(Default, Clone)]
 pub struct Compiler {
     chunk: Chunk,
-    max_local: usize,
+    num_locals: usize,
     loop_stack: Vec<LoopContext>,
     allow_return: bool,
 }
@@ -64,7 +64,7 @@ impl Compiler {
 
     /// Number of top-level local slots used so far.
     pub fn num_locals(&self) -> usize {
-        self.max_local
+        self.num_locals
     }
 
     /// Internal: clone a checkpoint (pre-Halt), write Halt, return both.
@@ -78,7 +78,7 @@ impl Compiler {
                 return_type: Box::new(StaticType::Any),
             },
             body: self.chunk,
-            num_locals: self.max_local,
+            num_locals: self.num_locals,
         };
         Ok((function, checkpoint))
     }
@@ -254,9 +254,9 @@ impl Compiler {
                         let container_span = value.span;
                         let index_span = index.span;
 
-                        let tmp_container = self.max_local;
-                        let tmp_index = self.max_local + 1;
-                        self.max_local += 2;
+                        let tmp_container = self.num_locals;
+                        let tmp_index = self.num_locals + 1;
+                        self.num_locals += 2;
 
                         self.compile_expr(*value)?;
                         self.chunk
@@ -463,8 +463,8 @@ impl Compiler {
                 // 4. Call []= function
                 // 5. Pop the return value
 
-                let tmp_value = self.max_local;
-                self.max_local += 1;
+                let tmp_value = self.num_locals;
+                self.num_locals += 1;
                 self.chunk.write(OpCode::SetLocal(tmp_value), span);
 
                 self.compile_binding(resolved_set.expect("[]= must be resolved"), span)?;
@@ -493,7 +493,7 @@ impl Compiler {
                     _ => unreachable!("declaration lvalue must be a local"),
                 };
                 self.chunk.write(OpCode::SetLocal(slot), span);
-                self.max_local = self.max_local.max(slot + 1);
+                self.num_locals = self.num_locals.max(slot + 1);
             }
             Lvalue::Index { .. } => unreachable!("cannot declare into index"),
             Lvalue::Sequence(seq) => {
@@ -580,6 +580,7 @@ impl Compiler {
             self.compile_expr(on_false)?;
             self.chunk.patch_jump(jump_to_end);
         } else {
+            // No else branch — push unit so the if-expression always produces a value.
             let jump_to_end = self.chunk.write(OpCode::Jump(0), Span::new(0, 0));
             self.chunk.patch_jump(conditional_jump_idx);
             self.chunk.write(OpCode::Pop, Span::new(0, 0));
@@ -643,7 +644,7 @@ impl Compiler {
             return_type: Box::new(return_type.clone()),
         };
         let mut fn_compiler = Self {
-            max_local: num_params,
+            num_locals: num_params,
             allow_return: true,
             ..Default::default()
         };
@@ -654,7 +655,7 @@ impl Compiler {
             name,
             static_type,
             body: fn_compiler.chunk,
-            num_locals: fn_compiler.max_local,
+            num_locals: fn_compiler.num_locals,
         };
         let idx = self
             .chunk
@@ -682,7 +683,7 @@ impl Compiler {
         match resolved_name {
             Some(ResolvedVar::Local { slot }) => {
                 self.chunk.write(OpCode::SetLocal(slot), span);
-                self.max_local = self.max_local.max(slot + 1);
+                self.num_locals = self.num_locals.max(slot + 1);
             }
             Some(ResolvedVar::Upvalue { .. } | ResolvedVar::Global { .. }) => {
                 unreachable!("the analyser never assigns a declaration to a non-local binding")
@@ -701,7 +702,13 @@ impl Compiler {
     ) -> Result<(), CompileError> {
         match body {
             ForBody::Block(block) => {
-                self.compile_for_block(&iterations, block, span)?;
+                self.compile_for_iterations(&iterations, span, &mut |this| {
+                    // The body is always a block, which always pushes exactly one value.
+                    // Discard it — the loop itself produces no value.
+                    this.compile_expr(block.clone())?;
+                    this.chunk.write(OpCode::Pop, span);
+                    Ok(())
+                })?;
                 Ok(())
             }
             ForBody::List {
@@ -710,10 +717,14 @@ impl Compiler {
             } => {
                 let tmp_list = accumulator_slot
                     .expect("list accumulator slot must be assigned by the analyser");
-                self.max_local = self.max_local.max(tmp_list + 1);
+                self.num_locals = self.num_locals.max(tmp_list + 1);
                 self.chunk.write(OpCode::MakeList(0), span);
                 self.chunk.write(OpCode::SetLocal(tmp_list), span);
-                self.compile_for_list(&iterations, expr, tmp_list, span)?;
+                self.compile_for_iterations(&iterations, span, &mut |this| {
+                    this.compile_expr(expr.clone())?;
+                    this.chunk.write(OpCode::ListPush(tmp_list), span);
+                    Ok(())
+                })?;
                 self.chunk.write(OpCode::GetLocal(tmp_list), span);
                 Ok(())
             }
@@ -725,7 +736,7 @@ impl Compiler {
             } => {
                 let tmp_map = accumulator_slot
                     .expect("map accumulator slot must be assigned by the analyser");
-                self.max_local = self.max_local.max(tmp_map + 1);
+                self.num_locals = self.num_locals.max(tmp_map + 1);
                 let has_default = default.is_some();
                 if let Some(default) = default {
                     self.compile_expr(*default)?;
@@ -738,25 +749,34 @@ impl Compiler {
                     span,
                 );
                 self.chunk.write(OpCode::SetLocal(tmp_map), span);
-                self.compile_for_map(&iterations, key, value, tmp_map, span)?;
+                self.compile_for_iterations(&iterations, span, &mut |this| {
+                    this.compile_expr(key.clone())?;
+                    if let Some(value) = value.clone() {
+                        this.compile_expr(value)?;
+                    } else {
+                        let idx = this.chunk.add_constant(Value::unit());
+                        this.chunk.write(OpCode::Constant(idx), Span::new(0, 0));
+                    }
+                    this.chunk.write(OpCode::MapInsert(tmp_map), span);
+                    Ok(())
+                })?;
                 self.chunk.write(OpCode::GetLocal(tmp_map), span);
                 Ok(())
             }
         }
     }
 
-    fn compile_for_block(
+    /// Shared loop scaffolding for `compile_for_block`, `compile_for_list`, and
+    /// `compile_for_map`. Handles iteration and guard clauses; calls `compile_leaf`
+    /// for the innermost body once all iterations are peeled off.
+    fn compile_for_iterations(
         &mut self,
         iterations: &[ForIteration],
-        body: ExpressionLocation,
         span: Span,
+        compile_leaf: &mut dyn FnMut(&mut Self) -> Result<(), CompileError>,
     ) -> Result<(), CompileError> {
         let Some((first, rest)) = iterations.split_first() else {
-            // The body is always a block, which always pushes exactly one value.
-            // Discard it — the loop itself produces no value.
-            self.compile_expr(body)?;
-            self.chunk.write(OpCode::Pop, span);
-            return Ok(());
+            return compile_leaf(self);
         };
 
         match first {
@@ -768,7 +788,7 @@ impl Compiler {
                 let iter_next = self.chunk.write(OpCode::IterNext(0), span);
                 self.compile_declare_lvalue(l_value.clone(), span)?;
 
-                self.compile_for_block(rest, body, span)?;
+                self.compile_for_iterations(rest, span, compile_leaf)?;
 
                 // Close upvalues for the loop variable so each iteration's closures
                 // get their own frozen copy rather than sharing a mutable slot.
@@ -795,130 +815,7 @@ impl Compiler {
                 self.compile_expr(condition.clone())?;
                 let skip_jump = self.chunk.write(OpCode::JumpIfFalse(0), span);
                 self.chunk.write(OpCode::Pop, Span::new(0, 0));
-                self.compile_for_block(rest, body, span)?;
-                let end_jump = self.chunk.write(OpCode::Jump(0), span);
-                self.chunk.patch_jump(skip_jump);
-                self.chunk.write(OpCode::Pop, Span::new(0, 0));
-                self.chunk.patch_jump(end_jump);
-            }
-        }
-
-        Ok(())
-    }
-
-    fn compile_for_list(
-        &mut self,
-        iterations: &[ForIteration],
-        expr: ExpressionLocation,
-        tmp_list: usize,
-        span: Span,
-    ) -> Result<(), CompileError> {
-        let Some((first, rest)) = iterations.split_first() else {
-            self.compile_expr(expr)?;
-            self.chunk.write(OpCode::ListPush(tmp_list), span);
-            return Ok(());
-        };
-
-        match first {
-            ForIteration::Iteration { l_value, sequence } => {
-                self.compile_expr(sequence.clone())?;
-                self.chunk.write(OpCode::GetIterator, sequence.span);
-
-                let loop_start = self.new_loop_context();
-                let iter_next = self.chunk.write(OpCode::IterNext(0), span);
-                self.compile_declare_lvalue(l_value.clone(), span)?;
-
-                self.compile_for_list(rest, expr, tmp_list, span)?;
-
-                // Close upvalues for the loop variable so each iteration's closures
-                // get their own frozen copy rather than sharing a mutable slot.
-                if let Some(slot) = min_lvalue_slot(l_value) {
-                    self.chunk.write(OpCode::CloseUpvalue(slot), span);
-                }
-
-                self.chunk.write_jump_back(loop_start, span);
-
-                // Both IterNext-done and break jump to the iterator Pop
-                self.chunk.patch_jump(iter_next);
-                let break_instructions = std::mem::take(
-                    &mut self.current_loop_context_mut().unwrap().break_instructions,
-                );
-                for instruction in break_instructions {
-                    self.chunk.patch_jump(instruction);
-                }
-                self.end_loop_context();
-
-                // Pop the iterator
-                self.chunk.write(OpCode::Pop, Span::new(0, 0));
-            }
-            ForIteration::Guard(condition) => {
-                self.compile_expr(condition.clone())?;
-                let skip_jump = self.chunk.write(OpCode::JumpIfFalse(0), span);
-                self.chunk.write(OpCode::Pop, Span::new(0, 0));
-                self.compile_for_list(rest, expr, tmp_list, span)?;
-                let end_jump = self.chunk.write(OpCode::Jump(0), span);
-                self.chunk.patch_jump(skip_jump);
-                self.chunk.write(OpCode::Pop, Span::new(0, 0));
-                self.chunk.patch_jump(end_jump);
-            }
-        }
-
-        Ok(())
-    }
-
-    fn compile_for_map(
-        &mut self,
-        iterations: &[ForIteration],
-        key: ExpressionLocation,
-        value: Option<ExpressionLocation>,
-        tmp_map: usize,
-        span: Span,
-    ) -> Result<(), CompileError> {
-        let Some((first, rest)) = iterations.split_first() else {
-            self.compile_expr(key)?;
-            if let Some(value) = value {
-                self.compile_expr(value)?;
-            } else {
-                let idx = self.chunk.add_constant(Value::unit());
-                self.chunk.write(OpCode::Constant(idx), Span::new(0, 0));
-            }
-            self.chunk.write(OpCode::MapInsert(tmp_map), span);
-            return Ok(());
-        };
-
-        match first {
-            ForIteration::Iteration { l_value, sequence } => {
-                self.compile_expr(sequence.clone())?;
-                self.chunk.write(OpCode::GetIterator, sequence.span);
-
-                let loop_start = self.new_loop_context();
-                let iter_next = self.chunk.write(OpCode::IterNext(0), span);
-                self.compile_declare_lvalue(l_value.clone(), span)?;
-
-                self.compile_for_map(rest, key, value, tmp_map, span)?;
-
-                if let Some(slot) = min_lvalue_slot(l_value) {
-                    self.chunk.write(OpCode::CloseUpvalue(slot), span);
-                }
-
-                self.chunk.write_jump_back(loop_start, span);
-
-                self.chunk.patch_jump(iter_next);
-                let break_instructions = std::mem::take(
-                    &mut self.current_loop_context_mut().unwrap().break_instructions,
-                );
-                for instruction in break_instructions {
-                    self.chunk.patch_jump(instruction);
-                }
-                self.end_loop_context();
-
-                self.chunk.write(OpCode::Pop, Span::new(0, 0));
-            }
-            ForIteration::Guard(condition) => {
-                self.compile_expr(condition.clone())?;
-                let skip_jump = self.chunk.write(OpCode::JumpIfFalse(0), span);
-                self.chunk.write(OpCode::Pop, Span::new(0, 0));
-                self.compile_for_map(rest, key, value, tmp_map, span)?;
+                self.compile_for_iterations(rest, span, compile_leaf)?;
                 let end_jump = self.chunk.write(OpCode::Jump(0), span);
                 self.chunk.patch_jump(skip_jump);
                 self.chunk.write(OpCode::Pop, Span::new(0, 0));

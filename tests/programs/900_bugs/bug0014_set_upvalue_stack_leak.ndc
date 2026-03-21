@@ -1,0 +1,23 @@
+// R1: SetUpvalue previously peeked (cloned) the top of stack instead of popping,
+// leaking one value per upvalue assignment. In a loop this caused unbounded stack
+// growth within the frame. Return's truncation masked the leak in simple cases,
+// but a tight loop reassigning a captured variable would accumulate phantom values.
+//
+// This test reassigns a captured variable in a loop. Before the fix the stack grew
+// by one per iteration; after the fix the stack stays flat.
+//
+// expect-output: 10000
+
+fn counter() {
+    let n = 0;
+    fn bump() {
+        for _ in 0..10000 {
+            n = n + 1;
+        }
+        n
+    }
+    bump
+}
+
+let c = counter();
+print(c());

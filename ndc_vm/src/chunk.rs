@@ -4,65 +4,100 @@ use ndc_parser::CaptureSource;
 use std::rc::Rc;
 
 /// A single bytecode instruction.
+///
+/// ## Stack effects
+///
+/// Each instruction documents its net stack effect as `[before → after]`.
+/// Variable-size operands use `n` for the instruction's argument.
+///
+/// | Instruction   | Stack effect                            | Notes                                      |
+/// |---------------|-----------------------------------------|--------------------------------------------|
+/// | `Constant`    | `[… → … value]`                        | +1                                         |
+/// | `Pop`         | `[… value → …]`                        | −1                                         |
+/// | `GetLocal`    | `[… → … value]`                        | +1 (copies from slot)                      |
+/// | `GetUpvalue`  | `[… → … value]`                        | +1 (reads upvalue cell)                    |
+/// | `GetGlobal`   | `[… → … value]`                        | +1 (copies from globals)                   |
+/// | `SetLocal`    | `[… value → …]`                        | −1 (pops, writes to slot†)                 |
+/// | `SetUpvalue`  | `[… value → …]`                        | −1 (pops, writes to upvalue cell)          |
+/// | `Call`        | `[… callee a1…an → … result]`          | −n (pops callee + args, pushes result)     |
+/// | `Return`      | `[… retval → …]`                       | pops retval, truncates frame, pushes retval|
+/// | `Halt`        | `[…]`                                   | terminates execution                       |
+/// | `Jump`        | `[…]`                                   | 0 (unconditional jump)                     |
+/// | `JumpIfTrue`  | `[… bool → … bool]`                    | 0 (peeks, jumps if true)                   |
+/// | `JumpIfFalse` | `[… bool → … bool]`                    | 0 (peeks, jumps if false)                  |
+/// | `MakeList`    | `[… v1…vn → … list]`                   | −(n−1)                                     |
+/// | `MakeTuple`   | `[… v1…vn → … tuple]`                  | −(n−1)                                     |
+/// | `MakeMap`     | `[… k1 v1…kn vn (default?) → … map]`   | −(2n−1) or −2n if has_default              |
+/// | `MakeRange`   | `[… start (end?) → … iter]`            | −1 if bounded, 0 if unbounded              |
+/// | `Closure`     | `[… → … closure]`                      | +1                                         |
+/// | `GetIterator` | `[… value → … iter]`                   | 0 (pops value, pushes iterator)            |
+/// | `IterNext`    | `[… iter → … iter value]` or jump      | +1 if has next, 0 + jump if exhausted      |
+/// | `ListPush`    | `[… value → …]`                        | −1 (pops value, mutates list in slot)      |
+/// | `MapInsert`   | `[… key value → …]`                    | −2 (pops both, mutates map in slot)        |
+/// | `Unpack`      | `[… compound → … v1…vn]`               | +(n−1) (pops 1, pushes n)                  |
+/// | `CloseUpvalue`| `[…]`                                   | 0 (closes upvalue cells, no stack change)  |
+/// | `Memoize`     | `[… fn → … memoized_fn]`               | 0 (pops and pushes)                        |
+///
+/// † `SetLocal` for a **declaration** (slot == stack top) is effectively a no-op on the
+///   stack: it pops then immediately pushes to extend. For a **reassignment** (slot < top)
+///   it truly shrinks the stack by 1.
 // NOTE: OpCode cannot be Copy because the Closure variant holds Rc<[CaptureSource]>.
 // The dispatch loop accesses opcodes by reference to avoid cloning the 32-byte enum on
 // every iteration; see Vm::run_to_depth.
 #[derive(Clone, PartialEq, Eq)]
 pub enum OpCode {
-    /// Call the function with `usize` arguments
+    /// Pops callee and `n` arguments, pushes result. `[… callee a1…an → … result]`
     Call(usize),
-    /// Removes the top of the stack
+    /// Pops top of stack. `[… value → …]`
     Pop,
-    /// Always jumps
+    /// Unconditional jump. `[…] → […]`
     Jump(isize),
-    /// Conditionally jumps if the top of the stack is true
+    /// Peeks top; jumps if true. `[… bool → … bool]`
     JumpIfTrue(isize),
-    /// Conditionally jumps if the top of the stack is false
+    /// Peeks top; jumps if false. `[… bool → … bool]`
     JumpIfFalse(isize),
-    /// Pushes a constant value on the stack
+    /// Pushes a constant. `[… → … value]`
     Constant(usize),
-    /// Reads local variable at the given slot and pushes it on the stack
+    /// Copies local slot onto stack. `[… → … value]`
     GetLocal(usize),
-    /// Read a value from a parent scope
+    /// Reads upvalue cell onto stack. `[… → … value]`
     GetUpvalue(usize),
-    /// Pops the top of the stack and stores it in the given local slot
+    /// Pops top and writes to local slot. `[… value → …]`
     SetLocal(usize),
-    /// Pops the top of the stack and stores it in the given upvalue slot
+    /// Pops top and writes to upvalue cell. `[… value → …]`
     SetUpvalue(usize),
-    /// Reads global variable at the given slot and pushes it on the stack
+    /// Copies global slot onto stack. `[… → … value]`
     GetGlobal(usize),
-    /// Create a list using n arguments on the stack
+    /// Pops `n` values, pushes a list. `[… v1…vn → … list]`
     MakeList(usize),
-    /// Create a tuple using n arguments on the stack
+    /// Pops `n` values, pushes a tuple. `[… v1…vn → … tuple]`
     MakeTuple(usize),
-    /// Create a map from n key-value pairs on the stack. If has_default is true, an extra default value is on top of the pairs.
+    /// Pops `2n` values (+ optional default), pushes a map.
     MakeMap { pairs: usize, has_default: bool },
-    /// Create a closure by capturing some values
+    /// Pushes a closure, capturing values from locals/upvalues. `[… → … closure]`
     Closure {
         constant_idx: usize,
         values: Rc<[CaptureSource]>,
     },
-    /// Convert top-of-stack to an iterator. No-op if already an iterator.
+    /// Pops value, pushes iterator. No-op if already an iterator. `[… value → … iter]`
     GetIterator,
-    /// Peek at iterator on stack (don't pop). If value: push it. If done: jump by offset.
+    /// Peeks iterator; pushes next value or jumps if exhausted. `[… iter → … iter value]`
     IterNext(isize),
-    /// Pop top-of-stack, append to list at local slot.
+    /// Pops value, appends to list at local slot. `[… value → …]`
     ListPush(usize),
-    /// Pop value then key from stack, insert into map at local slot.
+    /// Pops value then key, inserts into map at local slot. `[… key value → …]`
     MapInsert(usize),
-    /// Build a range iterator. Pops start (always) and end (if `bounded`).
-    /// `inclusive` controls whether the end bound is inclusive.
+    /// Pops start (and end if bounded), pushes range iterator.
     MakeRange { inclusive: bool, bounded: bool },
-    /// Pop a tuple/list of exactly `usize` elements, push them in reverse order (first on top)
+    /// Pops a compound value, pushes `n` elements. `[… compound → … v1…vn]`
     Unpack(usize),
-    /// Stop execution
+    /// Terminates execution.
     Halt,
-    /// Return from function call
+    /// Returns from function call. Pops return value, truncates frame, pushes return value.
     Return,
-    /// Close all open upvalues whose absolute stack slot is >= frame_pointer + slot.
-    /// Used at the end of each loop iteration to give each iteration's closures their own copy.
+    /// Closes open upvalues at or above `frame_pointer + slot`. No stack change.
     CloseUpvalue(usize),
-    /// Wrap the function on top of the stack in a memoization cache.
+    /// Pops function, pushes memoized wrapper. `[… fn → … memoized_fn]`
     Memoize,
 }
 
