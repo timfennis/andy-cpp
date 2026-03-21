@@ -8,7 +8,7 @@ fn monte_carlo_pi(num_samples) {
         }
     }
 
-    return (inside_circle / num_samples) * 4;
+    return (inside_circle.float / num_samples) * 4;
 }
 
-print(monte_carlo_pi(50_000).float)
+print(monte_carlo_pi(50_000))

@@ -6,7 +6,6 @@ use clap::{Parser, Subcommand};
 use highlighter::{AndycppHighlighter, AndycppHighlighterState};
 use miette::{NamedSource, highlighters::HighlighterState};
 use ndc_interpreter::{Interpreter, InterpreterError};
-use ndc_stdlib::WithStdlib;
 use std::path::PathBuf;
 use std::process;
 use std::{fs, io::Write};
@@ -20,7 +19,7 @@ mod highlighter;
 #[derive(Parser)]
 #[command(name = "Andy C++")]
 #[command(author = "Tim Fennis <fennis.tim@gmail.com>")]
-#[command(version)]
+#[command(version, long_version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("GIT_HASH"), ")"))]
 #[command(about = "An interpreter for the Andy C++ language")]
 struct Cli {
     #[arg(short = 'C', long, default_value_t = 1)]
@@ -43,8 +42,16 @@ enum Command {
         stdio: bool,
     },
 
+    /// Print the disassembled bytecode for an .ndc file
+    Disassemble { file: PathBuf },
+
     /// Output the documentation optionally searched using a query string
-    Docs { query: Option<String> },
+    Docs {
+        query: Option<String>,
+        /// Disable color output
+        #[arg(long)]
+        no_color: bool,
+    },
 
     // This is a fallback case
     #[command(external_subcommand)]
@@ -59,10 +66,16 @@ impl Default for Command {
 
 enum Action {
     RunLsp,
-    RunFile(PathBuf),
+    RunFile {
+        path: PathBuf,
+    },
+    DisassembleFile(PathBuf),
     HighlightFile(PathBuf),
     StartRepl,
-    Docs(Option<String>),
+    Docs {
+        query: Option<String>,
+        no_color: bool,
+    },
 }
 
 impl TryFrom<Command> for Action {
@@ -70,18 +83,21 @@ impl TryFrom<Command> for Action {
 
     fn try_from(value: Command) -> Result<Self, Self::Error> {
         let action = match value {
-            Command::Run { file: Some(file) } => Self::RunFile(file),
+            Command::Run { file: Some(file) } => Self::RunFile { path: file },
             Command::Run { file: None } => Self::StartRepl,
             Command::Lsp { stdio: _ } => Self::RunLsp,
+            Command::Disassemble { file } => Self::DisassembleFile(file),
             Command::Highlight { file } => Self::HighlightFile(file),
-            Command::Docs { query } => Self::Docs(query),
+            Command::Docs { query, no_color } => Self::Docs { query, no_color },
             Command::Unknown(args) => {
                 match args.len() {
                     0 => {
                         // This case should have defaulted to `Command::Run { file: None }`
                         unreachable!("fallback case reached with 0 arguments (should never happen)")
                     }
-                    1 => Self::RunFile(args[0].parse::<PathBuf>().context("invalid path")?),
+                    1 => Self::RunFile {
+                        path: args[0].parse::<PathBuf>().context("invalid path")?,
+                    },
                     n => return Err(anyhow!("invalid number of arguments: {n}")),
                 }
             }
@@ -110,7 +126,7 @@ fn main() -> anyhow::Result<()> {
     let action: Action = cli.command.unwrap_or_default().try_into()?;
 
     match action {
-        Action::RunFile(path) => {
+        Action::RunFile { path } => {
             let filename = path
                 .file_name()
                 .and_then(|name| name.to_str())
@@ -118,9 +134,9 @@ fn main() -> anyhow::Result<()> {
 
             let string = fs::read_to_string(path)?;
 
-            let stdout = std::io::stdout();
-            let mut interpreter = Interpreter::new(stdout).with_stdlib();
-            match into_miette_result(interpreter.run_str(&string)) {
+            let mut interpreter = Interpreter::new();
+            interpreter.configure(ndc_stdlib::register);
+            match into_miette_result(interpreter.eval(&string)) {
                 // we can just ignore successful runs because we have print statements
                 Ok(_final_value) => {}
                 Err(report) => {
@@ -129,6 +145,18 @@ fn main() -> anyhow::Result<()> {
                     let report = report.with_source_code(source);
                     eprintln!("{:?}", report);
 
+                    process::exit(1);
+                }
+            }
+        }
+        Action::DisassembleFile(path) => {
+            let string = fs::read_to_string(path)?;
+            let mut interpreter = Interpreter::new();
+            interpreter.configure(ndc_stdlib::register);
+            match interpreter.disassemble_str(&string) {
+                Ok(output) => print!("{output}"),
+                Err(e) => {
+                    eprintln!("{:?}", miette::Report::new(diagnostic::NdcReport::from(e)));
                     process::exit(1);
                 }
             }
@@ -143,7 +171,7 @@ fn main() -> anyhow::Result<()> {
             }
             std::io::stdout().flush()?;
         }
-        Action::Docs(query) => return docs(query.as_deref()),
+        Action::Docs { query, no_color } => return docs(query.as_deref(), no_color),
         Action::StartRepl => {
             repl::run()?;
         }
@@ -164,7 +192,7 @@ fn start_lsp() {
             .enable_all()
             .build()
             .expect("Failed building the Runtime")
-            .block_on(async { ndc_lsp::start_lsp().await });
+            .block_on(async { ndc_lsp::start_lsp(ndc_stdlib::register).await });
     }
 }
 

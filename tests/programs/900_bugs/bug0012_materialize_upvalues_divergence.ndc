@@ -1,0 +1,20 @@
+// B5: materialize_upvalues_in_args closes upvalue cells belonging to HOF arguments
+// while the originating frame is still live. When two closures (inc, get) capture
+// the same variable x, they share one Rc<RefCell<UpvalueCell>>. Passing inc to
+// map closes that shared cell; subsequent SetUpvalue calls in inc write to the
+// closed copy, but GetLocal in make_counter still reads the original stack slot.
+// After the fix, both get() and x should agree.
+//
+// expect-output: 3
+// expect-output: 3
+fn make_counter() {
+    let x = 0;
+    let inc = fn(v) { x = x + 1 };
+    let get = fn() { x };
+
+    [1, 2, 3].map(inc);
+
+    print(get())  // reads via closed upvalue cell -> 3
+    print(x)      // reads via GetLocal (stack slot) -> 0 with bug, 3 after fix
+}
+make_counter()

@@ -4,7 +4,7 @@ In Andy C++ a String is a mutable list of characters. Characters don't have thei
 iterate over a string you get strings of length 1. Just like in Rust strings are guaranteed (and required) to be valid
 UTF-8. This means that you can't store arbitrary binary data in a String.
 
-Indexing into a String is done using the characters in the string and not using byte offsets (this was probably a mistake).
+Indexing into a String is done by UTF-8 codepoint (equivalent to Rust's `char`) rather than by byte offset.
 This means that indexing into a string is `O(n)` instead of `O(1)`.
 
 ```ndc

@@ -1,0 +1,2 @@
+// expect-error: cannot unpack
+let a, b = "foo";

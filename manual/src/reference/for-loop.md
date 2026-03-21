@@ -1,6 +1,6 @@
 # For loop
 
-For loops is where Andy C++ get's a little spicier. First lets look at some basic examples:
+For loops are where Andy C++ gets a little spicier. First let's look at some basic examples:
 
 ```ndc
 for n in 1..=100 {

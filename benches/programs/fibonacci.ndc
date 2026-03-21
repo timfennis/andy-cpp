@@ -2,5 +2,4 @@ fn fib(n) {
     if n <= 1 { 1 } else { fib(n - 2) + fib(n - 1) }
 }
 
-fib(10);
-fib(20);
+fib(26);

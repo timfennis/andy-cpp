@@ -39,7 +39,7 @@ defaultdict[33] += 7; // adds 7 to 0 and associates it to key 33
 ## Default functions
 
 You may also specify the default value as a function, in this case the function is evaluated every time a new value is produced.
-This is usefull when you want the default value of the dictionary to be a new list instead of a pointer to the same list.
+This is useful when you want the default value of the dictionary to be a new list instead of a pointer to the same list.
 
 ```ndc
 let dd = %{:fn() => []};
@@ -58,9 +58,24 @@ let dd = %{:fn() => fn(x) => x * x};
 print(dd["test"](5)); // 25
 ```
 
+## Iteration
+
+You can iterate over a map with a `for` loop. Each element is a `(key, value)` tuple:
+
+```ndc
+let m = %{"a": 1, "b": 2};
+for (k, v) in m {
+    print(k, v);
+}
+```
+
+**Iteration order is unspecified** — maps are hash-based, so keys may appear in any order.
+
+**Keys are snapshotted at the start of the loop.** Mutations to the map during iteration (adding or removing keys) are not reflected in the current loop — the set of keys visited is fixed when the `for` loop begins. Values read during iteration do reflect any changes made to existing keys.
+
 ## Operators
 
-| Operator | Function | Support agumented assignment <sup>[[1]](../../features/augmented-assignment.md)</sup> | Augmentable with `not` |
+| Operator | Function | Support augmented assignment <sup>[[1]](../../features/augmented-assignment.md)</sup> | Augmentable with `not` |
 | :-: | --- | --- | --- |
 | `\|` | Union | `true` | `false` |
 | `&` | Intersection | `true` | `false` |

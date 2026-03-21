@@ -1,0 +1,7 @@
+// B3: exec_unpack panicked on non-sequence values instead of returning VmError.
+// expect-error: cannot unpack
+fn foo(n) {
+  let a, b = n;
+}
+
+foo(3)

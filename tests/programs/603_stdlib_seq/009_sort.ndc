@@ -1,0 +1,5 @@
+// Regression test: sort() must mutate the list in place
+let list = [(3, 0, 1), (1, 2, 3), (2, 1, 0)];
+list.sort();
+print(list);
+// expect-output: [(1,2,3),(2,1,0),(3,0,1)]

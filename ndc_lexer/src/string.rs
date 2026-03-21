@@ -69,8 +69,6 @@ impl StringLexer for Lexer<'_> {
         // This was guaranteed by the caller, but we could make a nice error?
         assert_eq!(self.source.next(), Some('"'));
 
-        // TODO: support \u8080 type escape sequences
-        // TODO: should we handle bytes like \xFF? Probably not for strings because they aren't valid UTF-8
         let mut buf = String::new();
         #[allow(clippy::while_let_on_iterator)]
         while let Some(next_ch) = self.source.next() {

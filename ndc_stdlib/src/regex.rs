@@ -1,19 +1,24 @@
-use ndc_interpreter::value::Value;
 use once_cell::sync::Lazy;
 use regex::Regex;
 
-#[ndc_macros::export_module]
-mod inner {
+use ndc_macros::export_module;
+use ndc_vm::value::Value;
 
+#[export_module]
+mod inner {
     /// Extracts all signed integers from the given string.
     #[function(return_type = Vec<i64>)]
     pub fn nums(haystack: &str) -> Value {
         static RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"-?\d+").unwrap());
 
-        Value::collect_list(RE.captures_iter(haystack).filter_map(|cap| {
-            let (full, []) = cap.extract();
-            full.parse::<i64>().ok()
-        }))
+        Value::list(
+            RE.captures_iter(haystack)
+                .filter_map(|cap| {
+                    let (full, []) = cap.extract();
+                    full.parse::<i64>().ok().map(Value::Int)
+                })
+                .collect(),
+        )
     }
 
     /// Extracts all unsigned integers from the given string.
@@ -21,10 +26,14 @@ mod inner {
     pub fn unsigned_nums(haystack: &str) -> Value {
         static RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\d+").unwrap());
 
-        Value::collect_list(RE.captures_iter(haystack).filter_map(|cap| {
-            let (full, []) = cap.extract();
-            full.parse::<i64>().ok()
-        }))
+        Value::list(
+            RE.captures_iter(haystack)
+                .filter_map(|cap| {
+                    let (full, []) = cap.extract();
+                    full.parse::<i64>().ok().map(Value::Int)
+                })
+                .collect(),
+        )
     }
 
     /// Returns `true` if the string matches the given regular expression.
@@ -44,7 +53,7 @@ mod inner {
                 Value::list(
                     captures
                         .iter()
-                        .filter_map(|x| x.map(|x| Value::from(x.as_str())))
+                        .filter_map(|x| x.map(|x| Value::string(x.as_str())))
                         .collect::<Vec<_>>(),
                 )
             })
@@ -59,12 +68,12 @@ mod inner {
         let r = Regex::new(regex)?;
 
         let Some(captures) = r.captures(haystack) else {
-            return Ok(Value::empty_list());
+            return Ok(Value::list(vec![]));
         };
 
         let list = captures
             .iter()
-            .filter_map(|x| x.map(|x| Value::from(x.as_str())))
+            .filter_map(|x| x.map(|x| Value::string(x.as_str())))
             .collect::<Vec<_>>();
 
         Ok(Value::list(list))

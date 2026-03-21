@@ -1,7 +1,6 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use ndc_interpreter::Interpreter;
 use ndc_interpreter::InterpreterError;
-use ndc_stdlib::WithStdlib;
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use std::fs;
@@ -9,9 +8,11 @@ use std::path::Path;
 use std::time::Duration;
 
 fn run_string(input: &str) -> Result<String, InterpreterError> {
-    let buf: Vec<u8> = vec![];
-    let mut interpreter = Interpreter::new(buf).with_stdlib();
-    interpreter.run_str(std::hint::black_box(input))
+    let mut interpreter = Interpreter::capturing();
+    interpreter.configure(ndc_stdlib::register);
+    interpreter
+        .eval(std::hint::black_box(input))
+        .map(|v| v.to_string())
 }
 
 #[allow(unused)]

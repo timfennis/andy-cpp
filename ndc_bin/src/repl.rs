@@ -2,7 +2,6 @@
 use itertools::Itertools;
 use miette::highlighters::HighlighterState;
 use ndc_interpreter::Interpreter;
-use ndc_stdlib::WithStdlib;
 use rustyline::Helper;
 use rustyline::config::Configurer;
 use rustyline::error::ReadlineError;
@@ -36,8 +35,8 @@ pub fn run() -> anyhow::Result<()> {
     rl.set_color_mode(ColorMode::Enabled);
     rl.set_helper(Some(h));
 
-    let stdout = std::io::stdout();
-    let mut interpreter = Interpreter::new(stdout).with_stdlib();
+    let mut interpreter = Interpreter::new();
+    interpreter.configure(ndc_stdlib::register);
     loop {
         match rl.readline("λ ") {
             Ok(line) => {
@@ -45,8 +44,9 @@ pub fn run() -> anyhow::Result<()> {
                 let _ = rl.add_history_entry(line.as_str());
 
                 // Run the line we just read through the interpreter
-                match into_miette_result(interpreter.run_str(line.as_str())) {
-                    Ok(output) => {
+                match into_miette_result(interpreter.eval(line.as_str())) {
+                    Ok(value) => {
+                        let output = value.to_string();
                         if !output.is_empty() {
                             println!("{output}")
                         }

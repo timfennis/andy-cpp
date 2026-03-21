@@ -1,57 +1,75 @@
-pub use ndc_core::{compare, hash_map, int, num};
-
-pub mod environment;
-pub mod evaluate;
-pub mod function;
-pub mod heap;
-pub mod iterator;
-pub mod semantic;
-pub mod sequence;
-pub mod value;
-
-use std::cell::RefCell;
-use std::rc::Rc;
-
-use crate::environment::{Environment, InterpreterOutput};
-use crate::evaluate::{EvaluationError, evaluate_expression};
-use crate::function::FunctionCarrier;
-use crate::semantic::analyser::{Analyser, ScopeTree};
-use crate::value::Value;
+use ndc_analyser::{Analyser, ScopeTree};
+use ndc_core::FunctionRegistry;
 use ndc_lexer::{Lexer, TokenLocation};
 use ndc_parser::ExpressionLocation;
+use ndc_vm::compiler::Compiler;
+use ndc_vm::value::CompiledFunction;
+use ndc_vm::{OutputSink, Vm};
+use std::rc::Rc;
+
+pub use ndc_vm::{NativeFunction, Value};
 
 pub struct Interpreter {
-    environment: Rc<RefCell<Environment>>,
+    registry: FunctionRegistry<Rc<NativeFunction>>,
+    capturing: bool,
     analyser: Analyser,
+    /// Persistent REPL VM and the compiler checkpoint from the last run.
+    /// `None` until the first `eval` call; kept alive afterwards so that
+    /// variables declared on one line are visible on subsequent lines.
+    repl_state: Option<(Vm, Compiler)>,
 }
 
 impl Interpreter {
+    /// Create an interpreter that writes output to stdout.
     #[must_use]
-    pub fn new<T>(dest: T) -> Self
-    where
-        T: InterpreterOutput + 'static,
-    {
-        Self::from_env(Environment::new(Box::new(dest)))
+    pub fn new() -> Self {
+        Self::from_capturing(false)
     }
 
+    /// Create an interpreter that captures output into an internal buffer,
+    /// retrievable via [`get_output`].
     #[must_use]
-    pub fn from_env(environment: Environment) -> Self {
-        let global_identifiers = environment.get_global_identifiers();
+    pub fn capturing() -> Self {
+        Self::from_capturing(true)
+    }
+
+    fn from_capturing(capturing: bool) -> Self {
         Self {
-            environment: Rc::new(RefCell::new(environment)),
-            analyser: Analyser::from_scope_tree(ScopeTree::from_global_scope(global_identifiers)),
+            registry: FunctionRegistry::default(),
+            capturing,
+            analyser: Analyser::from_scope_tree(ScopeTree::from_global_scope(vec![])),
+            repl_state: None,
         }
     }
 
-    pub fn configure<F: FnOnce(&mut Environment)>(&mut self, f: F) {
-        f(&mut self.environment.borrow_mut());
-        let global_identifiers = self.environment.borrow().get_global_identifiers();
-        self.analyser = Analyser::from_scope_tree(ScopeTree::from_global_scope(global_identifiers));
+    pub fn configure<F: FnOnce(&mut FunctionRegistry<Rc<NativeFunction>>)>(&mut self, f: F) {
+        f(&mut self.registry);
+        let functions = self
+            .registry
+            .iter()
+            .map(|fun| (fun.name.clone(), fun.static_type.clone()))
+            .collect();
+
+        self.analyser = Analyser::from_scope_tree(ScopeTree::from_global_scope(functions));
     }
 
-    #[must_use]
-    pub fn environment(self) -> Rc<RefCell<Environment>> {
-        self.environment
+    pub fn functions(&self) -> impl Iterator<Item = &Rc<NativeFunction>> {
+        self.registry.iter()
+    }
+
+    /// Returns the captured output, or `None` if this interpreter writes to stdout.
+    /// Returns `Some(vec![])` for a capturing interpreter that hasn't run yet.
+    pub fn get_output(&self) -> Option<Vec<u8>> {
+        if self.capturing {
+            Some(
+                self.repl_state
+                    .as_ref()
+                    .and_then(|(vm, _)| vm.get_output().map(<[u8]>::to_vec))
+                    .unwrap_or_default(),
+            )
+        } else {
+            None
+        }
     }
 
     pub fn analyse_str(
@@ -61,10 +79,24 @@ impl Interpreter {
         self.parse_and_analyse(input)
     }
 
-    pub fn run_str(&mut self, input: &str) -> Result<String, InterpreterError> {
+    pub fn compile_str(&mut self, input: &str) -> Result<CompiledFunction, InterpreterError> {
         let expressions = self.parse_and_analyse(input)?;
-        let final_value = self.interpret(expressions.into_iter())?;
-        Ok(format!("{final_value}"))
+        Ok(Compiler::compile(expressions.into_iter())?)
+    }
+
+    pub fn disassemble_str(&mut self, input: &str) -> Result<String, InterpreterError> {
+        let compiled = self.compile_str(input)?;
+        let mut out = String::new();
+        out.push_str(&ndc_vm::disassemble::disassemble(&compiled, Some(input)));
+        Ok(out)
+    }
+
+    /// Execute source code and return the resulting [`Value`].
+    ///
+    /// Statements (semicolon-terminated) produce [`Value::unit()`].
+    pub fn eval(&mut self, input: &str) -> Result<Value, InterpreterError> {
+        let expressions = self.parse_and_analyse(input)?;
+        self.interpret_vm(input, expressions.into_iter())
     }
 
     fn parse_and_analyse(
@@ -85,41 +117,65 @@ impl Interpreter {
         Ok(expressions)
     }
 
-    fn interpret(
+    fn interpret_vm(
         &mut self,
+        #[cfg(feature = "vm-trace")] input: &str,
+        #[cfg(not(feature = "vm-trace"))] _input: &str,
         expressions: impl Iterator<Item = ExpressionLocation>,
     ) -> Result<Value, InterpreterError> {
-        let mut value = Value::unit();
-        for expr in expressions {
-            match evaluate_expression(&expr, &self.environment) {
-                Ok(val) => value = val,
-                Err(FunctionCarrier::Return(_)) => {
-                    Err(EvaluationError::syntax_error(
-                        "unexpected return statement outside of function body".to_string(),
-                        expr.span,
-                    ))?;
+        use ndc_vm::{Function as VmFunction, Object as VmObject, Value as VmValue};
+
+        let globals: Vec<VmValue> = self
+            .registry
+            .iter()
+            .map(|native| {
+                VmValue::Object(Rc::new(VmObject::Function(VmFunction::Native(Rc::clone(
+                    native,
+                )))))
+            })
+            .collect();
+
+        let result = match self.repl_state.take() {
+            None => {
+                let output = if self.capturing {
+                    OutputSink::Buffer(Vec::new())
+                } else {
+                    OutputSink::Stdout
+                };
+                let (code, checkpoint) = Compiler::compile_resumable(expressions)?;
+                let mut vm = Vm::new(code, globals).with_output(output);
+                #[cfg(feature = "vm-trace")]
+                {
+                    vm = vm.with_source(input);
                 }
-                Err(FunctionCarrier::Break(_)) => {
-                    Err(EvaluationError::syntax_error(
-                        "unexpected break statement outside of loop body".to_string(),
-                        expr.span,
-                    ))?;
-                }
-                Err(FunctionCarrier::Continue) => {
-                    Err(EvaluationError::syntax_error(
-                        "unexpected continue statement outside of loop body".to_string(),
-                        expr.span,
-                    ))?;
-                }
-                Err(FunctionCarrier::EvaluationError(e)) => return Err(InterpreterError::from(e)),
-                _ => {
-                    panic!(
-                        "internal error: unhandled function carrier variant returned from evaluate_expression"
-                    );
-                }
+                vm.run()?;
+                let result = vm.last_value(checkpoint.num_locals());
+                self.repl_state = Some((vm, checkpoint));
+                result
             }
-        }
-        Ok(value)
+            Some((mut vm, checkpoint)) => {
+                let resume_ip = checkpoint.halt_ip();
+                let prev_num_locals = checkpoint.num_locals();
+                let (code, new_checkpoint) = checkpoint.resume(expressions)?;
+                vm.resume_from_halt(code, globals, resume_ip, prev_num_locals);
+                #[cfg(feature = "vm-trace")]
+                {
+                    vm.set_source(input);
+                }
+                vm.run()?;
+                let result = vm.last_value(new_checkpoint.num_locals());
+                self.repl_state = Some((vm, new_checkpoint));
+                result
+            }
+        };
+
+        Ok(result)
+    }
+}
+
+impl Default for Interpreter {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -138,8 +194,13 @@ pub enum InterpreterError {
     #[error("Error during static analysis")]
     Resolver {
         #[from]
-        cause: semantic::analyser::AnalysisError,
+        cause: ndc_analyser::AnalysisError,
     },
-    #[error("Error while executing code")]
-    Evaluation(#[from] EvaluationError),
+    #[error("Compilation error")]
+    Compiler {
+        #[from]
+        cause: ndc_vm::CompileError,
+    },
+    #[error("{0}")]
+    Vm(#[from] ndc_vm::VmError),
 }

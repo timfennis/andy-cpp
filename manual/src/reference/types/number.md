@@ -9,13 +9,14 @@ Andy C++ has four number types that you should keep in mind when programming.
 
 ## Operators
 
-| Operator | Function | Support agumented assignment <sup>[[1]](../../features/augmented-assignment.md)</sup> | Augmentable with `not` |
+| Operator | Function | Support augmented assignment <sup>[[1]](../../features/augmented-assignment.md)</sup> | Augmentable with `not` |
 | :-: | --- | --- | --- |
 | `+` | Addition | `true` | `false` |
 | `-` | Subtraction | `true` | `false` |
 | unary `-` | Negation | `true` | `false` |
 | `*` | Multiplication | `true` | `false` |
-| `/` | Division | `true` | `false` |
+| `/` | Division (returns rational for integers) | `true` | `false` |
+| `\` | Floor division (integer result, rounds toward negative infinity) | `true` | `false` |
 | `^` | Exponentiation | `true` | `false` |
 | `%` | C-style modulo (can be negative) | `true` | `false` |
 | `%%` | Remainder of [euclidean division](https://en.wikipedia.org/wiki/Euclidean_division) | `true` | `false` |
@@ -31,7 +32,7 @@ Andy C++ has four number types that you should keep in mind when programming.
 
 Additionally for **integers** the following operations are available:
 
-| Operator | Function | Support agumented assignment <sup>[[1]](../../features/augmented-assignment.md)</sup> | Augmentable with `not` |
+| Operator | Function | Support augmented assignment <sup>[[1]](../../features/augmented-assignment.md)</sup> | Augmentable with `not` |
 | :-: | --- | --- | --- |
 | `\|` | Bitwise OR | `true` | `false` |
 | `&` | Bitwise AND | `true` | `false` |

@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 
-use ndc_lexer::{Lexer, Span, TokenLocation};
+use ndc_core::{FunctionRegistry, StaticType};
 use ndc_interpreter::Interpreter;
+use ndc_interpreter::NativeFunction;
+use ndc_lexer::{Lexer, Span, TokenLocation};
 use ndc_parser::{Expression, ExpressionLocation, ForBody, ForIteration, Lvalue};
-use ndc_stdlib::WithStdlib;
+use std::rc::Rc;
 use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::Result as JsonRPCResult;
 use tower_lsp::lsp_types::{
@@ -19,14 +21,22 @@ use tower_lsp::{Client, LanguageServer};
 pub struct Backend {
     pub client: Client,
     documents: Mutex<HashMap<Url, Vec<InlayHint>>>,
+    configure: fn(&mut FunctionRegistry<Rc<NativeFunction>>),
 }
 
 impl Backend {
-    pub fn new(client: Client) -> Self {
+    pub fn new(client: Client, configure: fn(&mut FunctionRegistry<Rc<NativeFunction>>)) -> Self {
         Self {
             client,
             documents: Mutex::new(HashMap::new()),
+            configure,
         }
+    }
+
+    fn make_interpreter(&self) -> Interpreter {
+        let mut interpreter = Interpreter::capturing();
+        interpreter.configure(self.configure);
+        interpreter
     }
 
     async fn validate(&self, uri: &Url, text: &str) {
@@ -81,7 +91,7 @@ impl Backend {
         // The interpreter uses Rc internally (non-Send), so it must be fully dropped
         // before the next await point.
         let hints = {
-            let mut interpreter = Interpreter::new(Vec::new()).with_stdlib();
+            let mut interpreter = self.make_interpreter();
             match interpreter.analyse_str(text) {
                 Ok(expressions) => {
                     let mut hints = Vec::new();
@@ -152,26 +162,45 @@ impl LanguageServer for Backend {
         &self,
         _params: CompletionParams,
     ) -> Result<Option<CompletionResponse>, tower_lsp::jsonrpc::Error> {
-        let interpreter = Interpreter::new(Vec::new()).with_stdlib();
-        let env = interpreter.environment();
-        let functions = env.borrow().get_all_functions();
+        let interpreter = self.make_interpreter();
 
-        let items = functions.iter().filter_map(|fun| {
-            if !is_normal_ident(fun.name()) {
+        let items = interpreter.functions().filter_map(|fun| {
+            if !is_normal_ident(&fun.name) {
                 return None;
             }
 
+            let (param_detail, return_detail) = match &fun.static_type {
+                StaticType::Function {
+                    parameters: Some(params),
+                    return_type,
+                } => {
+                    let ps = params
+                        .iter()
+                        .map(|t: &StaticType| t.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    (format!("({ps})"), return_type.to_string())
+                }
+                StaticType::Function {
+                    parameters: None,
+                    return_type,
+                } => ("(...)".to_string(), return_type.to_string()),
+                other => (String::new(), other.to_string()),
+            };
+
             Some(CompletionItem {
-                label: fun.name().to_string(),
+                label: fun.name.clone(),
                 label_details: Some(CompletionItemLabelDetails {
-                    detail: Some(format!("({})", fun.type_signature())),
-                    description: Some(fun.return_type().to_string()),
+                    detail: Some(param_detail),
+                    description: Some(return_detail),
                 }),
                 kind: Some(CompletionItemKind::FUNCTION),
-                documentation: Some(Documentation::MarkupContent(MarkupContent {
-                    kind: MarkupKind::Markdown,
-                    value: fun.documentation().to_string(),
-                })),
+                documentation: fun.documentation.as_ref().map(|d| {
+                    Documentation::MarkupContent(MarkupContent {
+                        kind: MarkupKind::Markdown,
+                        value: d.clone(),
+                    })
+                }),
                 ..Default::default()
             })
         });
@@ -211,13 +240,13 @@ fn collect_hints(expr: &ExpressionLocation, text: &str, hints: &mut Vec<InlayHin
         }
         Expression::FunctionDeclaration {
             return_type,
-            parameters,
+            parameters_span,
             body,
             ..
         } => {
             if let Some(rt) = return_type {
                 hints.push(InlayHint {
-                    position: position_from_offset(text, parameters.span.end()),
+                    position: position_from_offset(text, parameters_span.end()),
                     label: InlayHintLabel::String(format!(" -> {rt}")),
                     kind: Some(InlayHintKind::TYPE),
                     text_edits: None,
@@ -229,8 +258,9 @@ fn collect_hints(expr: &ExpressionLocation, text: &str, hints: &mut Vec<InlayHin
             }
             collect_hints(body, text, hints);
         }
-        Expression::Statement(inner) => collect_hints(inner, text, hints),
-        Expression::Grouping(inner) => collect_hints(inner, text, hints),
+        Expression::Statement(inner) | Expression::Grouping(inner) => {
+            collect_hints(inner, text, hints);
+        }
         Expression::Block { statements } => {
             for s in statements {
                 collect_hints(s, text, hints);
@@ -265,11 +295,14 @@ fn collect_hints(expr: &ExpressionLocation, text: &str, hints: &mut Vec<InlayHin
                 }
             }
             match body.as_ref() {
-                ForBody::Block(e) | ForBody::List(e) => collect_hints(e, text, hints),
+                ForBody::Block(e) | ForBody::List { expr: e, .. } => {
+                    collect_hints(e, text, hints);
+                }
                 ForBody::Map {
                     key,
                     value,
                     default,
+                    ..
                 } => {
                     collect_hints(key, text, hints);
                     if let Some(v) = value {

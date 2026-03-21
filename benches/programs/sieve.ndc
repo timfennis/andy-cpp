@@ -17,5 +17,5 @@ fn sieve(n) {
   return primes;
 }
 
-// Find lots of prime numbers
-sieve(10000);
+// Compute primality for all numbers up to n
+sieve(200_000);

@@ -1,0 +1,9 @@
+fn mat_mul(a, b, n) {
+    [[fold(0..n, 0, fn(acc, k) => acc + a[r][k] * b[k][c]) for c in 0..n] for r in 0..n]
+}
+
+let n = 50;
+let a = [[(r + c) % 7 for c in 0..n] for r in 0..n];
+let b = [[(r * c + 1) % 5 for c in 0..n] for r in 0..n];
+let result = mat_mul(a, b, n);
+print(result[0][0]);

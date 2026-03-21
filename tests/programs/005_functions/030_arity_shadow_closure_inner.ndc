@@ -1,0 +1,12 @@
+// Inside a nested function, a local fn shadows only the same arity;
+// the other arity is still reachable from the outer scope via upvalue.
+fn foo(a) { "outer-one:" ++ a }
+fn foo(a, b) { "outer-two:" ++ a ++ "," ++ b }
+
+fn test() {
+    fn foo(a) { "inner-one:" ++ a }
+    assert_eq(foo("x"), "inner-one:x");
+    assert_eq(foo("x", "y"), "outer-two:x,y");
+}
+
+test();

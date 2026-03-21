@@ -1,0 +1,4 @@
+// UnboundedRangeIter stops cleanly at i64::MAX instead of wrapping.
+let near_max = 9223372036854775807 - 2;
+let results = (near_max..).take(4).list();
+assert_eq(results, [9223372036854775805, 9223372036854775806, 9223372036854775807]);

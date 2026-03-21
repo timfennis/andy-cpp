@@ -1,0 +1,11 @@
+let m = %{};
+for i in 1..=50_000 {
+    let key = (i * i) % 997;
+    if key in m {
+        m[key] += 1;
+    } else {
+        m[key] = 1;
+    }
+}
+let most_common = m.keys.max_by_key(fn(k) => m[k]);
+print("Unique keys:", m.keys.len, "Most common:", most_common, "count:", m[most_common]);

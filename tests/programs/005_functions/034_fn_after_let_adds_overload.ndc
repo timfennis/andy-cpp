@@ -1,0 +1,7 @@
+// A fn declaration after a let binding should add to the scope as a new
+// overload entry (different arity), not replace the let binding.
+let foo = fn(a) => "let:" ++ a;
+fn foo(a, b) { "fn:" ++ a ++ "," ++ b }
+
+assert_eq(foo("x"), "let:x");
+assert_eq(foo("x", "y"), "fn:x,y");

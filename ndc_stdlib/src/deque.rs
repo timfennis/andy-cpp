@@ -1,19 +1,18 @@
 use ndc_macros::export_module;
+use ndc_vm::value::{Object, Value};
 
 #[export_module]
 mod inner {
-    use ndc_interpreter::sequence::Sequence;
-    use ndc_interpreter::value::Value;
-    use std::cell::RefCell;
     use std::collections::VecDeque;
-    use std::rc::Rc;
 
     /// Creates a new `Deque` type.
     ///
     /// The `Deque` type allows the user to quickly append and remove elements from both the start and the end of the list.
     #[function(name = "Deque", return_type = VecDeque)]
     pub fn create_deque() -> Value {
-        Value::Sequence(Sequence::Deque(Rc::new(RefCell::new(VecDeque::new()))))
+        Value::Object(std::rc::Rc::new(Object::Deque(std::cell::RefCell::new(
+            VecDeque::new(),
+        ))))
     }
 
     /// Pushes the `value` to the front of the `deque`.
@@ -36,7 +35,10 @@ mod inner {
     /// Removes and returns the first element of the `deque` as an `Option` returning `None` if the queue is empty.
     #[function(name = "pop_front?", return_type = Option<Value>)]
     pub fn maybe_pop_front(deque: &mut VecDeque<Value>) -> Value {
-        deque.pop_front().map_or_else(Value::none, Value::some)
+        match deque.pop_front() {
+            None => Value::None,
+            Some(val) => Value::Object(std::rc::Rc::new(Object::Some(val))),
+        }
     }
 
     /// Removes and returns the last element of the `deque`.
@@ -49,7 +51,10 @@ mod inner {
     /// Removes and returns the last element of the `deque` as an `Option` returning `None` if the queue is empty.
     #[function(name = "pop_back?", return_type = Option<Value>)]
     pub fn maybe_pop_back(deque: &mut VecDeque<Value>) -> Value {
-        deque.pop_back().map_or_else(Value::none, Value::some)
+        match deque.pop_back() {
+            None => Value::None,
+            Some(val) => Value::Object(std::rc::Rc::new(Object::Some(val))),
+        }
     }
 
     /// Returns (but does not remove) the first element of the `deque`.
@@ -63,7 +68,10 @@ mod inner {
     /// Returns (but does not remove) the first element of the `deque` as an `Option` returning `None` if the queue is empty.
     #[function(name = "front?", return_type = Option<Value>)]
     pub fn maybe_front(deque: &VecDeque<Value>) -> Value {
-        deque.front().cloned().map_or_else(Value::none, Value::some)
+        match deque.front().cloned() {
+            None => Value::None,
+            Some(val) => Value::Object(std::rc::Rc::new(Object::Some(val))),
+        }
     }
 
     /// Returns (but does not remove) the last element of the `deque`.
@@ -77,12 +85,15 @@ mod inner {
     /// Returns (but does not remove) the last element of the `deque` as an `Option` returning `None` if the queue is empty.
     #[function(name = "back?", return_type = Option<Value>)]
     pub fn maybe_back(deque: &VecDeque<Value>) -> Value {
-        deque.back().cloned().map_or_else(Value::none, Value::some)
+        match deque.back().cloned() {
+            None => Value::None,
+            Some(val) => Value::Object(std::rc::Rc::new(Object::Some(val))),
+        }
     }
 
     /// Returns `true` if the `deque` contains the `value` or `false` otherwise.
-    pub fn contains(deque: &VecDeque<Value>, value: &Value) -> bool {
-        deque.contains(value)
+    pub fn contains(deque: &VecDeque<Value>, value: Value) -> bool {
+        deque.contains(&value)
     }
 
     /// Returns `true` if the `deque` is empty and `false` otherwise.

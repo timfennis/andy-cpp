@@ -1,8 +1,7 @@
 use ndc_interpreter::Interpreter;
-use ndc_stdlib::WithStdlib;
-use owo_colors::OwoColorize;
 use std::fs;
 use std::path::PathBuf;
+use yansi::Paint;
 
 include!(concat!(env!("OUT_DIR"), "/generated_tests.rs"));
 
@@ -24,11 +23,14 @@ fn run_ndc_test(path: PathBuf) -> Result<(), std::io::Error> {
 
     print!("Running {path:?}...");
 
-    let mut interpreter = Interpreter::new(Vec::new()).with_stdlib();
-    let interpreter_result = interpreter.run_str(&contents);
+    let mut interpreter = Interpreter::capturing();
+    interpreter.configure(ndc_stdlib::register);
+    let interpreter_result = interpreter.eval(&contents);
 
     let program_had_error = interpreter_result.is_err();
-    let actual_error = interpreter_result.unwrap_or_else(|err| format!("{err:?}"));
+    let actual_error = interpreter_result
+        .map(|v| v.to_string())
+        .unwrap_or_else(|err| format!("{err:?}"));
 
     assert!(
         !expect_error.is_empty() || !program_had_error,
@@ -45,9 +47,7 @@ fn run_ndc_test(path: PathBuf) -> Result<(), std::io::Error> {
     }
 
     if !expect_output.is_empty() {
-        let environment = interpreter.environment();
-        let environment = environment.borrow();
-        let output = environment
+        let output = interpreter
             .get_output()
             .expect("interpreter must have output in test context");
         let output = String::from_utf8(output).expect("test output must be valid UTF-8");

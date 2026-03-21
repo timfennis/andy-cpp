@@ -4,8 +4,8 @@ use std::hash::{Hash, Hasher};
 use std::num::TryFromIntError;
 use std::ops::{Add, Div, Mul, Neg, Not, Rem, Sub};
 
+use crate::StaticType;
 use crate::int::Int;
-use ndc_parser::{BinaryOperator, StaticType};
 use num::bigint::TryFromBigIntError;
 use num::complex::{Complex64, ComplexFloat};
 use num::{BigInt, BigRational, Complex, FromPrimitive, Signed, ToPrimitive, Zero};
@@ -178,7 +178,6 @@ impl Not for Number {
     fn not(self) -> Self::Output {
         match self {
             Self::Int(int) => int.not().into(),
-            // TODO: bitwise negation of all non integer numbers in Noulith result in NAN, is that what we want for our language too?
             _ => f64::NAN.into(),
         }
     }
@@ -219,11 +218,7 @@ impl BinaryOperatorError {
         Self(message)
     }
 
-    pub fn undefined_operation(
-        operator: BinaryOperator,
-        left: &StaticType,
-        right: &StaticType,
-    ) -> Self {
+    pub fn undefined_operation(operator: &str, left: &StaticType, right: &StaticType) -> Self {
         Self(format!(
             "operator {operator} is not defined for {left} and {right}"
         ))
@@ -324,7 +319,6 @@ impl_binary_operator_all!(Rem, rem, Rem::rem, Rem::rem, Rem::rem, Rem::rem);
 impl Div<&Number> for &Number {
     type Output = Number;
 
-    /// TODO: always converting operands to rational numbers is needlessly slow in some cases
     fn div(self, rhs: &Number) -> Self::Output {
         match (self.to_rational(), rhs.to_rational()) {
             (Some(left), Some(right)) if !right.is_zero() => Number::rational(left / right),
@@ -392,7 +386,7 @@ impl Number {
 
             (Self::Float(p1), Self::Float(p2)) => Ok(Self::Float(p1.rem_euclid(p2))),
             (left, right) => Err(BinaryOperatorError::undefined_operation(
-                BinaryOperator::EuclideanModulo,
+                "%%",
                 &left.static_type(),
                 &right.static_type(),
             )),
@@ -479,9 +473,7 @@ impl Number {
                 if let Some(bi) = BigInt::from_f64(*f) {
                     Self::Int(Int::BigInt(bi).simplified())
                 } else {
-                    return Err(NumberConversionError(format!(
-                        "cannot convert {f} to int"
-                    )));
+                    return Err(NumberConversionError(format!("cannot convert {f} to int")));
                 }
             }
             Self::Rational(r) => Self::Int(Int::BigInt(r.to_integer()).simplified()),
@@ -587,7 +579,6 @@ macro_rules! implement_rounding {
                             Number::Float(f)
                         }
                     }
-                    // TODO: fix bigint -> int
                     Number::Rational(r) => Number::Int(Int::BigInt(r.$method().to_integer())),
                     Number::Complex(c) => Complex::new(c.re.$method(), c.im.$method()).into(),
                 }

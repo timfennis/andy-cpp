@@ -1,0 +1,19 @@
+// BUG#0007: exec_unpack used std::mem::take to steal the Vec out of an
+// Rc<RefCell<Vec>>, emptying the list in-place.  Any other binding that
+// still referenced the same Rc (e.g. the caller's variable) would
+// subsequently see an empty list.
+
+fn unpack_pair(pair) {
+    let [a, b] = pair;
+    a
+}
+
+// Pass a list variable directly (not via indexing), so the same Rc is live
+// in both the caller and the function.
+let row = [10, 20];
+let first = unpack_pair(row);
+assert_eq(first, 10);
+assert_eq(row, [10, 20]);  // was corrupted to [] before the fix
+
+print("ok");
+// expect-output: ok

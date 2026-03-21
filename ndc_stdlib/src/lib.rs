@@ -1,5 +1,6 @@
-use ndc_interpreter::Interpreter;
-use ndc_interpreter::environment::Environment;
+use ndc_core::FunctionRegistry;
+use ndc_vm::NativeFunction;
+use std::rc::Rc;
 
 pub mod aoc;
 pub mod cmp;
@@ -7,6 +8,7 @@ pub mod deque;
 pub mod file;
 pub mod hash_map;
 pub mod heap;
+pub mod index;
 pub mod list;
 pub mod math;
 pub mod sequence;
@@ -22,7 +24,7 @@ pub mod regex;
 #[cfg(feature = "serde")]
 pub mod serde;
 
-pub fn register(env: &mut Environment) {
+pub fn register(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     aoc::register(env);
     cmp::register(env);
     #[cfg(feature = "crypto")]
@@ -32,6 +34,8 @@ pub fn register(env: &mut Environment) {
     file::register_variadic(env);
     hash_map::register(env);
     heap::register(env);
+    index::register(env);
+    list::ops::register(env);
     list::register(env);
     math::f64::register(env);
     math::register(env);
@@ -45,15 +49,4 @@ pub fn register(env: &mut Environment) {
     serde::register(env);
     string::register(env);
     value::register(env);
-}
-
-pub trait WithStdlib: Sized {
-    fn with_stdlib(self) -> Self;
-}
-
-impl WithStdlib for Interpreter {
-    fn with_stdlib(mut self) -> Self {
-        self.configure(register);
-        self
-    }
 }

@@ -1,9 +1,5 @@
-use ndc_interpreter::hash_map;
-use ndc_interpreter::hash_map::HashMap;
-use ndc_interpreter::hash_map::HashMapExt;
-use ndc_interpreter::sequence::{DefaultMap, MapRepr, Sequence};
-use ndc_interpreter::value::Value;
-use std::cell::RefCell;
+use ndc_core::hash_map::{self, HashMapExt};
+use ndc_vm::value::{MapValue, Object, SeqValue, Value};
 use std::rc::Rc;
 
 #[ndc_macros::export_module]
@@ -13,26 +9,33 @@ mod inner {
     ///
     /// Note that for a set this will return the values in the set.
     #[function(return_type = Vec<_>)]
-    pub fn keys(map: &mut HashMap<Value, Value>) -> Value {
-        Value::list(map.keys().cloned().collect::<Vec<_>>())
+    pub fn keys(map: &mut hash_map::HashMap<Value, Value>) -> Value {
+        Value::Object(Rc::new(Object::list(
+            map.keys().cloned().collect::<Vec<_>>(),
+        )))
     }
 
     /// Returns a list of all the values in the map.
     ///
     /// Note that for sets this will return a list of unit types, you should use keys if you want the values in the set.
     #[function(return_type = Vec<_>)]
-    pub fn values(map: &mut HashMap<Value, Value>) -> Value {
-        Value::list(map.values().cloned().collect::<Vec<_>>())
+    pub fn values(map: &mut hash_map::HashMap<Value, Value>) -> Value {
+        Value::Object(Rc::new(Object::list(
+            map.values().cloned().collect::<Vec<_>>(),
+        )))
     }
 
     /// Removes a key from the map or a value from a set.
-    pub fn remove(map: &mut HashMap<Value, Value>, key: &Value) {
-        map.remove(key);
+    pub fn remove(map: &mut hash_map::HashMap<Value, Value>, key: Value) {
+        map.remove(&key);
     }
 
     /// Removes all keys from the `left` map/set that are present in the `right` map/set.
     #[function(name = "remove")]
-    pub fn remove_map(left: &mut HashMap<Value, Value>, right: &HashMap<Value, Value>) {
+    pub fn remove_map(
+        left: &mut hash_map::HashMap<Value, Value>,
+        right: &hash_map::HashMap<Value, Value>,
+    ) {
         for (key, _) in right {
             left.remove(key);
         }
@@ -40,149 +43,183 @@ mod inner {
 
     /// Insert a value into a map.
     #[function(name = "insert")]
-    pub fn insert_map(map: &mut HashMap<Value, Value>, key: Value, value: Value) {
+    pub fn insert_map(map: &mut hash_map::HashMap<Value, Value>, key: Value, value: Value) {
         map.insert(key, value);
     }
 
     /// Inserts a value into a set.
     #[function(name = "insert")]
-    pub fn insert_set(map: &mut HashMap<Value, Value>, key: Value) {
+    pub fn insert_set(map: &mut hash_map::HashMap<Value, Value>, key: Value) {
         map.insert(key, Value::unit());
     }
 
     /// Returns true if the map or set contains no elements.
-    pub fn is_empty(map: &HashMap<Value, Value>) -> bool {
+    pub fn is_empty(map: &hash_map::HashMap<Value, Value>) -> bool {
         map.is_empty()
     }
 
+    /// Intersection-assign: retains only elements present in both maps or sets.
     #[function(name = "&=")]
-    pub fn intersect_assign(lhs: &mut MapRepr, rhs: &mut MapRepr) {
-        let left_map: &mut HashMap<Value, Value> = &mut lhs
-            .try_borrow_mut()
-            .expect("Failed to mutably borrow the lhs of &= operator");
-
-        left_map.intersection(
-            &*rhs
-                .try_borrow()
-                .expect("Failed borrow the rhs of &= operator"),
-        );
+    pub fn intersect_assign(
+        lhs: MapValue,
+        rhs: &hash_map::HashMap<Value, Value>,
+    ) -> anyhow::Result<MapValue> {
+        {
+            let Value::Object(ref obj) = lhs else {
+                anyhow::bail!("&= requires a map on the left side");
+            };
+            let Object::Map { ref entries, .. } = *obj.as_ref() else {
+                anyhow::bail!("&= requires a map on the left side");
+            };
+            entries.borrow_mut().intersection(rhs);
+        }
+        Ok(lhs)
     }
 
+    /// Union-assign: adds all elements from the right map or set into the left.
     #[function(name = "|=")]
-    pub fn union_assign(lhs: &mut MapRepr, rhs: &mut MapRepr) {
-        let left_map: &mut HashMap<Value, Value> = &mut lhs.borrow_mut();
-
-        if Rc::strong_count(rhs) == 1 {
-            // Take ownership
-            let rhs = std::mem::take(&mut *rhs.borrow_mut());
-            left_map.union(rhs);
-        } else {
-            let right = rhs.borrow();
-            for (key, value) in right.iter() {
-                left_map.insert(key.clone(), value.clone());
+    pub fn union_assign(
+        lhs: MapValue,
+        rhs: &hash_map::HashMap<Value, Value>,
+    ) -> anyhow::Result<MapValue> {
+        {
+            let Value::Object(ref obj) = lhs else {
+                anyhow::bail!("|= requires a map on the left side");
+            };
+            let Object::Map { ref entries, .. } = *obj.as_ref() else {
+                anyhow::bail!("|= requires a map on the left side");
+            };
+            let mut m = entries.borrow_mut();
+            for (key, value) in rhs {
+                m.insert(key.clone(), value.clone());
             }
         }
+        Ok(lhs)
     }
 
+    /// Difference-assign: removes all elements from the left map or set that are present in the right.
     #[function(name = "-=")]
-    pub fn difference_assign(lhs: &mut MapRepr, rhs: &mut MapRepr) {
-        let left_map: &mut HashMap<Value, Value> = &mut lhs.borrow_mut();
-
-        left_map.difference(&*rhs.borrow());
+    pub fn difference_assign(
+        lhs: MapValue,
+        rhs: &hash_map::HashMap<Value, Value>,
+    ) -> anyhow::Result<MapValue> {
+        {
+            let Value::Object(ref obj) = lhs else {
+                anyhow::bail!("-= requires a map on the left side");
+            };
+            let Object::Map { ref entries, .. } = *obj.as_ref() else {
+                anyhow::bail!("-= requires a map on the left side");
+            };
+            entries.borrow_mut().difference(rhs);
+        }
+        Ok(lhs)
     }
 
+    /// Symmetric-difference-assign: retains only elements present in exactly one of the two maps or sets.
     #[function(name = "~=")]
-    pub fn symmetric_difference_assign(lhs: &mut MapRepr, rhs: &mut MapRepr) {
-        let diff = hash_map::symmetric_difference(
-            &*lhs
-                .try_borrow()
-                .expect("Failed to borrow the lhs of ~= operator"),
-            &*rhs
-                .try_borrow()
-                .expect("Failed borrow the rhs of ~= operator"),
-        );
-
-        *lhs.borrow_mut() = diff;
+    pub fn symmetric_difference_assign(
+        lhs: MapValue,
+        rhs: &hash_map::HashMap<Value, Value>,
+    ) -> anyhow::Result<MapValue> {
+        {
+            let Value::Object(ref obj) = lhs else {
+                anyhow::bail!("~= requires a map on the left side");
+            };
+            let Object::Map { ref entries, .. } = *obj.as_ref() else {
+                anyhow::bail!("~= requires a map on the left side");
+            };
+            let diff = hash_map::symmetric_difference(&*entries.borrow(), rhs);
+            *entries.borrow_mut() = diff;
+        }
+        Ok(lhs)
     }
 
     /// Returns the union (elements that are in either `left` or `right`) of two maps or sets.
     ///
-    /// This is the same as evaluating the expression `left | right`
-    #[function(alias = "|", return_type = DefaultMap<'_>)]
-    pub fn union(left: DefaultMap<'_>, right: &HashMap<Value, Value>) -> Value {
-        Value::Sequence(Sequence::Map(
-            Rc::new(RefCell::new(hash_map::union(left.0, right))),
-            left.1,
-        ))
+    /// This is the same as evaluating the expression `left | right`.
+    #[function(alias = "|")]
+    pub fn union(
+        left: MapValue,
+        right: &hash_map::HashMap<Value, Value>,
+    ) -> anyhow::Result<MapValue> {
+        let Value::Object(ref obj) = left else {
+            anyhow::bail!("| requires a map on the left side");
+        };
+        let Object::Map {
+            ref entries,
+            ref default,
+        } = *obj.as_ref()
+        else {
+            anyhow::bail!("| requires a map on the left side");
+        };
+        let new_entries = hash_map::union(&*entries.borrow(), right);
+        Ok(Value::Object(Rc::new(Object::map(
+            new_entries,
+            default.clone(),
+        ))))
     }
 
-    /// Returns the intersection (elements that are in both `left and `right`) of two maps or sets.
+    /// Returns the intersection (elements that are in both `left` and `right`) of two maps or sets.
     ///
     /// This is the same as evaluating the expression `left & right`.
-    #[function(alias = "&", return_type = DefaultMap<'_>)]
-    pub fn intersection(left: DefaultMap<'_>, right: &HashMap<Value, Value>) -> Value {
-        Value::Sequence(Sequence::Map(
-            Rc::new(RefCell::new(hash_map::intersection(left.0, right))),
-            left.1,
-        ))
+    #[function(alias = "&")]
+    pub fn intersection(
+        left: MapValue,
+        right: &hash_map::HashMap<Value, Value>,
+    ) -> anyhow::Result<MapValue> {
+        let Value::Object(ref obj) = left else {
+            anyhow::bail!("& requires a map on the left side");
+        };
+        let Object::Map {
+            ref entries,
+            ref default,
+        } = *obj.as_ref()
+        else {
+            anyhow::bail!("& requires a map on the left side");
+        };
+        let new_entries = hash_map::intersection(&*entries.borrow(), right);
+        Ok(Value::Object(Rc::new(Object::map(
+            new_entries,
+            default.clone(),
+        ))))
     }
 
     /// Returns the symmetric difference (elements that are either in `left` or `right` but not both) of two maps or sets.
     ///
     /// This is the same as evaluating the expression `left ~ right`.
-    #[function(alias = "~", return_type = DefaultMap<'_>)]
-    pub fn symmetric_difference(left: DefaultMap<'_>, right: &HashMap<Value, Value>) -> Value {
-        Value::Sequence(Sequence::Map(
-            Rc::new(RefCell::new(hash_map::symmetric_difference(left.0, right))),
-            left.1,
-        ))
+    #[function(alias = "~")]
+    pub fn symmetric_difference(
+        left: MapValue,
+        right: &hash_map::HashMap<Value, Value>,
+    ) -> anyhow::Result<MapValue> {
+        let Value::Object(ref obj) = left else {
+            anyhow::bail!("~ requires a map on the left side");
+        };
+        let Object::Map {
+            ref entries,
+            ref default,
+        } = *obj.as_ref()
+        else {
+            anyhow::bail!("~ requires a map on the left side");
+        };
+        let new_entries = hash_map::symmetric_difference(&*entries.borrow(), right);
+        Ok(Value::Object(Rc::new(Object::map(
+            new_entries,
+            default.clone(),
+        ))))
     }
 
     /// Converts the given sequence to set.
-    #[function(return_type = DefaultMap<'_>)]
-    pub fn set(seq: &mut Sequence) -> Value {
-        let out: HashMap<Value, Value> = match seq {
-            Sequence::String(rc) => rc
-                .borrow()
-                .chars()
-                .map(|c| (c.into(), Value::unit()))
-                .collect(),
-            Sequence::List(rc) => rc
-                .borrow()
-                .iter()
-                .map(|v| (v.to_owned(), Value::unit()))
-                .collect(),
-            Sequence::Tuple(rc) => rc.iter().map(|v| (v.to_owned(), Value::unit())).collect(),
-            Sequence::Map(rc, _) => rc
-                .borrow()
-                .keys()
-                .map(|key| (key.to_owned(), Value::unit()))
-                .collect(),
-            Sequence::Iterator(rc) => {
-                let mut iter = rc.borrow_mut();
-                let mut out = HashMap::new();
-                for item in iter.by_ref() {
-                    out.insert(item, Value::unit());
-                }
-                out
-            }
-            Sequence::MaxHeap(h) => h
-                .borrow()
-                .iter()
-                .map(|value| (value.0.clone(), Value::unit()))
-                .collect(),
-            Sequence::MinHeap(h) => h
-                .borrow()
-                .iter()
-                .map(|value| (value.0.0.clone(), Value::unit()))
-                .collect(),
-            Sequence::Deque(rc) => rc
-                .borrow()
-                .iter()
-                .map(|v| (v.to_owned(), Value::unit()))
-                .collect(),
-        };
+    #[function(return_type = Map<_, ()>)]
+    pub fn set(seq: SeqValue) -> anyhow::Result<Value> {
+        use ndc_core::hash_map::HashMap;
 
-        Value::Sequence(Sequence::Map(Rc::new(RefCell::new(out)), None))
+        let entries: HashMap<Value, Value> = seq
+            .try_into_iter()
+            .ok_or_else(|| anyhow::anyhow!("set requires a sequence"))?
+            .map(|v| (v, Value::unit()))
+            .collect();
+
+        Ok(Value::Object(Rc::new(Object::map(entries, None))))
     }
 }

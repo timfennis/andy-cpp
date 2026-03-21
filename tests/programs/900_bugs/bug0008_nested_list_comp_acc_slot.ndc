@@ -1,0 +1,20 @@
+// BUG#0008: The VM accumulator slot for an outer list comprehension was
+// computed post-analysis as max_outer_loop_var_slot + 1.  Nested loop
+// variables were assigned slots from the same scope offset, so they
+// received the *same* number (e.g. outer acc = slot 3, inner _ = slot 3).
+// At runtime the inner SetLocal overwrote the outer list, causing a panic
+// "ListPush expects a list".
+
+let height = 3;
+let width = 3;
+let grid = [[ 0 for _ in 0..width] for _ in 0..height];
+
+assert_eq(grid, [[0,0,0],[0,0,0],[0,0,0]]);
+
+// Also verify that a flat list comprehension with a guard (two iterations
+// plus a filter) isn't broken by the same class of slot collision.
+let found = [(y, x) for y in 0..height, x in 0..width, if y == x];
+assert_eq(found, [(0,0),(1,1),(2,2)]);
+
+print("ok");
+// expect-output: ok

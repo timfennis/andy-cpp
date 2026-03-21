@@ -1,0 +1,4 @@
+// Redefining a named function with the same arity in the same scope is an error.
+// expect-error: redefinition
+fn foo(a) { a + 1 }
+fn foo(a) { a + 2 }

@@ -1,0 +1,17 @@
+// Test -= operator when types are not known at compile time (dynamic dispatch)
+
+fn remove_keys(a, b) {
+    a -= b;
+    a
+}
+
+let set = %{1, 2, 3, 4};
+let result = remove_keys(set, %{2, 3});
+assert_eq(result.len(), 2);
+assert(result[1] == ());
+assert(result[4] == ());
+
+let map = %{"a": 1, "b": 2, "c": 3};
+let result2 = remove_keys(map, %{"a": 0, "c": 0});
+assert_eq(result2.len(), 1);
+assert_eq(result2["b"], 2);

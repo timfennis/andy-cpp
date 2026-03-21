@@ -1,0 +1,39 @@
+// Tests heap ordering with floats and mixed int/float values,
+// which exercises the VM's OrdValue comparator path.
+
+// MinHeap with floats
+let h = MinHeap();
+h.push(3.5);
+h.push(1.0);
+h.push(2.2);
+assert_eq(h.pop, 1.0);
+assert_eq(h.pop, 2.2);
+assert_eq(h.pop, 3.5);
+
+// MaxHeap with floats
+let h = MaxHeap();
+h.push(3.5);
+h.push(1.0);
+h.push(2.2);
+assert_eq(h.pop, 3.5);
+assert_eq(h.pop, 2.2);
+assert_eq(h.pop, 1.0);
+
+// MinHeap: int vs float with fractional tiebreaker (5 < 5.3, 4.9 < 5)
+let h = MinHeap();
+h.push(5);
+h.push(5.3);
+h.push(4.9);
+assert_eq(h.pop, 4.9);
+assert_eq(h.pop, 5);
+assert_eq(h.pop, 5.3);
+
+// int equal to float (5 == 5.0) in a MaxHeap
+let h = MaxHeap();
+h.push(5);
+h.push(5.0);
+h.push(6);
+assert_eq(h.pop, 6);
+// 5 and 5.0 compare equal, so either may come out first
+let remaining = [h.pop, h.pop].sorted;
+assert_eq(remaining, [5, 5.0]);

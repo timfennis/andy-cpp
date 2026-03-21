@@ -21,7 +21,7 @@ let fst = empty.first(); // ERROR: list is empty
 let fst = empty.first?(); // None
 
 let my_list = [1,2,3];
-let fst = empty.first?; // Some(1)
+let fst = my_list.first?; // Some(1)
 ```
 
 > **Note:** unfortunately the language doesn't support pattern matching on options

@@ -6,24 +6,23 @@ use rand::distr::uniform::SampleUniform;
 use rand::seq::SliceRandom;
 use tap::Tap;
 
+use ndc_vm::value::{SeqValue, Value};
+
 pub fn random_n<N: SampleUniform + std::fmt::Display + Copy>(
     lower: N,
     upper: N,
 ) -> anyhow::Result<N> {
     let mut rng = rand::rng();
-    let side: Uniform<N> = Uniform::new(lower, upper).context(format!(
-        "Lower bound ({lower}) cannot be greater than upper bound ({upper})."
-    ))?;
+    let side: Uniform<N> = Uniform::new(lower, upper).with_context(|| {
+        format!("Lower bound ({lower}) cannot be greater than upper bound ({upper}).")
+    })?;
     Ok(rng.sample(side))
 }
 
 #[export_module]
 mod inner {
     use itertools::Itertools;
-    use ndc_interpreter::iterator::mut_seq_to_iterator;
-    use ndc_interpreter::num::Number;
-    use ndc_interpreter::sequence::Sequence;
-    use ndc_interpreter::value::Value;
+    use ndc_core::num::Number;
 
     /// Randomly shuffles the elements of the list in place.
     pub fn shuffle(list: &mut [Value]) {
@@ -33,13 +32,14 @@ mod inner {
     /// Returns a copy of the input sequence converted to a list with the elements shuffled in random order.
     ///
     /// Note: this currently does consume iterators
-    #[function(return_type = Vec<Value>)]
-    pub fn shuffled(list: &mut Sequence) -> Value {
-        Value::list(
-            mut_seq_to_iterator(list)
+    #[function(return_type = Vec<_>)]
+    pub fn shuffled(list: SeqValue) -> anyhow::Result<Value> {
+        Ok(Value::list(
+            list.try_into_iter()
+                .ok_or_else(|| anyhow::anyhow!("shuffled requires a sequence"))?
                 .collect_vec()
                 .tap_mut(|v| v.shuffle(&mut rand::rng())),
-        )
+        ))
     }
 
     #[function(name = "randf")]

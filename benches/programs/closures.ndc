@@ -1,0 +1,6 @@
+let total = 0;
+for _ in 0..20 {
+  let adders = [fn(x) => x + i for i in 0..10_000];
+  total = total + adders.map(fn(f) => f(0)).sum;
+};
+print(total);

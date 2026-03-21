@@ -45,8 +45,6 @@ impl NumberLexer for Lexer<'_> {
 
             self.lex_to_buffer(&mut buf, |c| c == '1' || c == '0');
 
-            // TODO do these common error interceptions even make sense considering we don't really have any suffixes we support
-            // maybe we can pull these checks outside of lex number and see if the next token after lexing a number is ascii alpha?
             match self.source.peek() {
                 Some(c) if c.is_ascii_digit() => {
                     self.source.next();
@@ -82,8 +80,6 @@ impl NumberLexer for Lexer<'_> {
 
             self.lex_to_buffer(&mut buf, |c| c.is_ascii_hexdigit());
 
-            // TODO: also intercept common errors here?
-
             return match buf_to_token_with_radix(&buf, 16) {
                 Some(token) => Ok(TokenLocation {
                     token,
@@ -100,8 +96,6 @@ impl NumberLexer for Lexer<'_> {
             self.source.next();
 
             self.lex_to_buffer(&mut buf, |c| matches!(c, '0'..='7'));
-
-            // TODO: also intercept common errors here?
 
             return match buf_to_token_with_radix(&buf, 8) {
                 Some(token) => Ok(TokenLocation {
@@ -127,7 +121,6 @@ impl NumberLexer for Lexer<'_> {
                 }
                 // A `_` inside a number is ignored unless it's after a `.`
                 '_' => {
-                    // TODO: Maybe disallow `_` after `.`
                     self.source.next();
                     // ignore underscore for nice number formatting
                 }
@@ -228,7 +221,6 @@ fn buf_to_token_with_radix(buf: &str, radix: u32) -> Option<Token> {
     }
 }
 
-// TODO: maybe this implementation is a lot slower than it needs to be?
 fn validator_for_radix(radix: usize) -> impl Fn(char) -> bool {
     move |c| "0123456789abcdefghijlkmnopqrstuvwxyz"[0..radix].contains(c.to_ascii_lowercase())
 }

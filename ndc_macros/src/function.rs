@@ -1,9 +1,9 @@
-use crate::convert::{Argument, TypeConverter, build};
-use crate::r#match::{
-    is_ref, is_ref_mut, is_ref_mut_of_slice_of_value, is_ref_of_bigint, is_ref_of_slice_of_value,
-    is_str_ref, path_ends_with,
-};
-use itertools::Itertools;
+//! Function wrapping logic for `#[export_module]`.
+//!
+//! Takes a `syn::ItemFn` and produces a `WrappedFunction` containing
+//! the inner implementation and its `FunctionRegistry` registration code.
+
+use crate::types::{NdcType, classify};
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use std::fmt::Write;
@@ -13,7 +13,7 @@ pub struct WrappedFunction {
     pub function_registration: TokenStream,
 }
 
-pub fn wrap_function(function: &syn::ItemFn) -> Vec<WrappedFunction> {
+pub fn wrap_function(function: &syn::ItemFn) -> syn::Result<Vec<WrappedFunction>> {
     let original_identifier = function.sig.ident.clone();
 
     let mut function_names = vec![proc_macro2::Literal::string(
@@ -29,20 +29,18 @@ pub fn wrap_function(function: &syn::ItemFn) -> Vec<WrappedFunction> {
                 // #[function(name = "...")]
                 if meta.path.is_ident("name") {
                     function_names = vec![meta.value()?.parse()?];
-                    // register_as_function_name = meta.value()?.parse()?;
                     Ok(())
                 } else if meta.path.is_ident("alias") {
                     function_names.push(meta.value()?.parse()?);
                     Ok(())
                 } else if meta.path.is_ident("return_type") {
                     let value: syn::Type = meta.value()?.parse()?;
-                    return_type = Some(map_type(&value));
+                    return_type = Some(map_type(&value)?);
                     Ok(())
                 } else {
                     Err(meta.error("unsupported property on function"))
                 }
-            })
-            .expect("invalid function attribute");
+            })?;
         } else if attr.path().is_ident("doc")
             && let syn::Meta::NameValue(meta) = &attr.meta
             && let syn::Expr::Lit(expr) = &meta.value
@@ -53,836 +51,386 @@ pub fn wrap_function(function: &syn::ItemFn) -> Vec<WrappedFunction> {
         }
     }
 
-    let return_type = return_type.unwrap_or_else(|| map_return_type(&function.sig.output));
+    let return_type = match return_type {
+        Some(t) => t,
+        None => map_return_type(&function.sig.output)?,
+    };
 
-    match &function.vis {
-        syn::Visibility::Public(_) => {}
-        syn::Visibility::Restricted(_) | syn::Visibility::Inherited => {
-            panic!("only public functions can be wrapped for now")
-        }
+    if !matches!(function.vis, syn::Visibility::Public(_)) {
+        return Err(syn::Error::new_spanned(
+            &function.sig.ident,
+            "only public functions can be exported",
+        ));
     }
 
-    // If the function has no argument then the cartesian product stuff below doesn't work
-    if function.sig.inputs.is_empty() {
-        return function_names
-            .iter()
-            .map(|function_name| {
-                wrap_single(
-                    function.clone(),
-                    &original_identifier,
-                    function_name,
-                    vec![],
-                    &return_type,
-                    &documentation_buffer,
-                )
-            })
-            .collect();
-    }
-
-    // When we call create_temp_variable we can get multiple definitions for a variable
-    // For instance when a rust function is `fn foo(list: &[Value])` we can define two internal functions for both Tuple and List
-    let mut variation_id = 0usize;
     function_names
         .iter()
-        .flat_map(|function_name| {
-            function
-                .sig
-                .inputs
-                .iter()
-                .enumerate()
-                .map(|(position, fn_arg)| {
-                    let name = match fn_arg {
-                        syn::FnArg::Receiver(_) => "self".to_string(),
-                        syn::FnArg::Typed(syn::PatType { pat, .. }) => match &**pat {
-                            syn::Pat::Ident(syn::PatIdent { ident, .. }) => ident.to_string(),
-                            _ => panic!("don't know how to process this"),
-                        },
-                    };
-                    create_temp_variable(position, fn_arg, &original_identifier, &name)
-                })
-                .multi_cartesian_product()
-                .map(|args| {
-                    let wrapped = wrap_single(
-                        function.clone(),
-                        &format_ident!("{original_identifier}_{variation_id}"),
-                        function_name,
-                        args,
-                        &return_type,
-                        &documentation_buffer,
-                    );
-                    variation_id += 1;
-                    wrapped
-                })
-                .collect::<Vec<_>>()
+        .enumerate()
+        .map(|(i, function_name)| {
+            let ident = format_ident!("{original_identifier}_{i}");
+            wrap_single(
+                function,
+                &ident,
+                function_name,
+                &return_type,
+                &documentation_buffer,
+            )
         })
         .collect()
 }
 
-fn map_return_type(output: &syn::ReturnType) -> TokenStream {
+fn map_return_type(output: &syn::ReturnType) -> syn::Result<TokenStream> {
     match output {
-        syn::ReturnType::Default => {
-            // in case return type is not specified (for closures rust defaults to type inference which doesn't help us here)
-            quote! { ndc_interpreter::function::StaticType::Tuple(vec![]) }
-        }
+        syn::ReturnType::Default => Ok(quote! { ndc_core::StaticType::Tuple(vec![]) }),
         syn::ReturnType::Type(_, ty) => map_type(ty),
     }
 }
 
-fn map_type(ty: &syn::Type) -> TokenStream {
+fn map_type(ty: &syn::Type) -> syn::Result<TokenStream> {
     match ty {
         syn::Type::Path(p) => map_type_path(p),
         syn::Type::Reference(r) => map_type(r.elem.as_ref()),
         syn::Type::Tuple(t) => {
-            let inner = t.elems.iter().map(map_type);
-            quote::quote! {
-                ndc_interpreter::function::StaticType::Tuple(vec![
+            let inner = t
+                .elems
+                .iter()
+                .map(map_type)
+                .collect::<syn::Result<Vec<_>>>()?;
+            Ok(quote! {
+                ndc_core::StaticType::Tuple(vec![
                     #(#inner),*
                 ])
-            }
+            })
         }
-        syn::Type::Infer(_) => {
-            quote::quote! { ndc_interpreter::function::StaticType::Any }
-        }
-        _ => {
-            panic!("unmapped type: {ty:?}");
-        }
+        syn::Type::Infer(_) => Ok(quote! { ndc_core::StaticType::Any }),
+        _ => Err(syn::Error::new_spanned(
+            ty,
+            "cannot map type to StaticType".to_string(),
+        )),
     }
 }
 
 #[allow(clippy::single_match_else)]
-fn map_type_path(p: &syn::TypePath) -> TokenStream {
-    let segment = p.path.segments.last().unwrap();
+fn map_type_path(p: &syn::TypePath) -> syn::Result<TokenStream> {
+    let segment = p
+        .path
+        .segments
+        .last()
+        .ok_or_else(|| syn::Error::new_spanned(p, "empty type path"))?;
 
     match segment.ident.to_string().as_str() {
         "i32" | "i64" | "isize" | "u32" | "u64" | "usize" | "BigInt" => {
-            quote::quote! { ndc_interpreter::function::StaticType::Int }
+            Ok(quote! { ndc_core::StaticType::Int })
         }
-        "f32" | "f64" => {
-            quote::quote! { ndc_interpreter::function::StaticType::Float }
-        }
-        "bool" => {
-            quote::quote! { ndc_interpreter::function::StaticType::Bool }
-        }
-        "String" | "str" => {
-            quote::quote! { ndc_interpreter::function::StaticType::String }
-        }
+        "f32" | "f64" => Ok(quote! { ndc_core::StaticType::Float }),
+        "bool" => Ok(quote! { ndc_core::StaticType::Bool }),
+        "String" | "str" => Ok(quote! { ndc_core::StaticType::String }),
         "Vec" | "List" => match &segment.arguments {
             syn::PathArguments::AngleBracketed(args) => {
-                let inner = args.args.first().expect("Vec<> requires inner type");
+                let inner = args
+                    .args
+                    .first()
+                    .ok_or_else(|| syn::Error::new_spanned(segment, "Vec<> requires inner type"))?;
                 if let syn::GenericArgument::Type(inner_ty) = inner {
-                    let mapped = map_type(inner_ty);
-                    quote::quote! { ndc_interpreter::function::StaticType::List(Box::new(#mapped)) }
+                    let mapped = map_type(inner_ty)?;
+                    Ok(quote! { ndc_core::StaticType::List(Box::new(#mapped)) })
                 } else {
-                    panic!("Vec inner not a type");
+                    Err(syn::Error::new_spanned(inner, "Vec inner not a type"))
                 }
             }
-            _ => {
-                quote::quote! { ndc_interpreter::function::StaticType::List(Box::new(ndc_interpreter::function::StaticType::Any)) }
-            }
+            _ => Ok(quote! { ndc_core::StaticType::List(Box::new(ndc_core::StaticType::Any)) }),
         },
         "VecDeque" | "Deque" => match &segment.arguments {
             syn::PathArguments::AngleBracketed(args) => {
-                let inner = args.args.first().expect("VecDeque<> requires inner type");
+                let inner = args.args.first().ok_or_else(|| {
+                    syn::Error::new_spanned(segment, "VecDeque<> requires inner type")
+                })?;
                 if let syn::GenericArgument::Type(inner_ty) = inner {
-                    let mapped = map_type(inner_ty);
-                    quote::quote! { ndc_interpreter::function::StaticType::Deque(Box::new(#mapped)) }
+                    let mapped = map_type(inner_ty)?;
+                    Ok(quote! { ndc_core::StaticType::Deque(Box::new(#mapped)) })
                 } else {
-                    panic!("VecDeque inner not a type");
+                    Err(syn::Error::new_spanned(inner, "VecDeque inner not a type"))
                 }
             }
-            _ => quote::quote! {
-                ndc_interpreter::function::StaticType::Deque(Box::new(
-                    ndc_interpreter::function::StaticType::Any
+            _ => Ok(quote! {
+                ndc_core::StaticType::Deque(Box::new(
+                    ndc_core::StaticType::Any
                 ))
-            },
+            }),
         },
         "DefaultMap" | "HashMap" | "Map" => match &segment.arguments {
             syn::PathArguments::AngleBracketed(args) => {
                 let mut iter = args.args.iter();
-                let Some(key) = iter.next() else {
-                    return temp_create_map_any();
+                let Some(syn::GenericArgument::Type(key_ty)) = iter.next() else {
+                    return Ok(
+                        quote! { ndc_core::StaticType::Map { key: Box::new(ndc_core::StaticType::Any), value: Box::new(ndc_core::StaticType::Any) } },
+                    );
                 };
-                let Some(val) = iter.next() else {
-                    return temp_create_map_any();
+                let Some(syn::GenericArgument::Type(val_ty)) = iter.next() else {
+                    return Ok(
+                        quote! { ndc_core::StaticType::Map { key: Box::new(ndc_core::StaticType::Any), value: Box::new(ndc_core::StaticType::Any) } },
+                    );
                 };
-                let key_ty = match key {
-                    syn::GenericArgument::Type(t) => t,
-                    _ => panic!("Invalid map key"),
-                };
-                let val_ty = match val {
-                    syn::GenericArgument::Type(t) => t,
-                    _ => panic!("Invalid map value"),
-                };
-                let key_mapped = map_type(key_ty);
-                let val_mapped = map_type(val_ty);
-                quote::quote! { ndc_interpreter::function::StaticType::Map { key: Box::new(#key_mapped), value: Box::new(#val_mapped) } }
+                let key_mapped = map_type(key_ty)?;
+                let val_mapped = map_type(val_ty)?;
+                Ok(
+                    quote! { ndc_core::StaticType::Map { key: Box::new(#key_mapped), value: Box::new(#val_mapped) } },
+                )
             }
-            _ => temp_create_map_any(),
+            _ => Ok(
+                quote! { ndc_core::StaticType::Map { key: Box::new(ndc_core::StaticType::Any), value: Box::new(ndc_core::StaticType::Any) } },
+            ),
         },
         "MinHeap" => match &segment.arguments {
             syn::PathArguments::AngleBracketed(args) => {
-                let inner = args.args.first().expect("MinHeap requires inner");
+                let inner = args.args.first().ok_or_else(|| {
+                    syn::Error::new_spanned(segment, "MinHeap requires inner type")
+                })?;
                 if let syn::GenericArgument::Type(inner_ty) = inner {
-                    let mapped = map_type(inner_ty);
-                    quote::quote! { ndc_interpreter::function::StaticType::MinHeap(Box::new(#mapped)) }
+                    let mapped = map_type(inner_ty)?;
+                    Ok(quote! { ndc_core::StaticType::MinHeap(Box::new(#mapped)) })
                 } else {
-                    panic!("MinHeap inner invalid");
+                    Err(syn::Error::new_spanned(inner, "MinHeap inner not a type"))
                 }
             }
-            _ => quote::quote! {
-                ndc_interpreter::function::StaticType::MinHeap(Box::new(
-                    ndc_interpreter::function::StaticType::Any
+            _ => Ok(quote! {
+                ndc_core::StaticType::MinHeap(Box::new(
+                    ndc_core::StaticType::Any
                 ))
-            },
+            }),
         },
         "MaxHeap" => match &segment.arguments {
             syn::PathArguments::AngleBracketed(args) => {
-                let inner = args.args.first().expect("MaxHeap requires inner");
+                let inner = args.args.first().ok_or_else(|| {
+                    syn::Error::new_spanned(segment, "MaxHeap requires inner type")
+                })?;
                 if let syn::GenericArgument::Type(inner_ty) = inner {
-                    let mapped = map_type(inner_ty);
-                    quote::quote! { ndc_interpreter::function::StaticType::MaxHeap(Box::new(#mapped)) }
+                    let mapped = map_type(inner_ty)?;
+                    Ok(quote! { ndc_core::StaticType::MaxHeap(Box::new(#mapped)) })
                 } else {
-                    panic!("MaxHeap inner invalid");
+                    Err(syn::Error::new_spanned(inner, "MaxHeap inner not a type"))
                 }
             }
-            _ => panic!("MaxHeap without generics"),
+            _ => Err(syn::Error::new_spanned(
+                segment,
+                "MaxHeap requires generic arguments",
+            )),
         },
         "Iterator" => match &segment.arguments {
             syn::PathArguments::AngleBracketed(args) => {
-                let inner = args.args.first().expect("Iterator requires inner");
+                let inner = args.args.first().ok_or_else(|| {
+                    syn::Error::new_spanned(segment, "Iterator requires inner type")
+                })?;
                 if let syn::GenericArgument::Type(inner_ty) = inner {
-                    let mapped = map_type(inner_ty);
-                    quote::quote! { ndc_interpreter::function::StaticType::Iterator(Box::new(#mapped)) }
+                    let mapped = map_type(inner_ty)?;
+                    Ok(quote! { ndc_core::StaticType::Iterator(Box::new(#mapped)) })
                 } else {
-                    panic!("Iterator inner invalid");
+                    Err(syn::Error::new_spanned(inner, "Iterator inner not a type"))
                 }
             }
-            _ => {
-                quote::quote! { ndc_interpreter::function::StaticType::Iterator(Box::new(ndc_interpreter::function::StaticType::Any)) }
-            }
+            _ => Ok(quote! { ndc_core::StaticType::Iterator(Box::new(ndc_core::StaticType::Any)) }),
         },
         "Option" => match &segment.arguments {
             syn::PathArguments::AngleBracketed(args) => {
-                let inner = args.args.first().expect("Option requires inner type");
+                let inner = args.args.first().ok_or_else(|| {
+                    syn::Error::new_spanned(segment, "Option requires inner type")
+                })?;
                 if let syn::GenericArgument::Type(inner_ty) = inner {
-                    let mapped = map_type(inner_ty);
-                    quote::quote! { ndc_interpreter::function::StaticType::Option(Box::new(#mapped)) }
+                    let mapped = map_type(inner_ty)?;
+                    Ok(quote! { ndc_core::StaticType::Option(Box::new(#mapped)) })
                 } else {
-                    panic!("Option inner invalid");
+                    Err(syn::Error::new_spanned(inner, "Option inner not a type"))
                 }
             }
-            _ => panic!("Option without generics"),
+            _ => Err(syn::Error::new_spanned(
+                segment,
+                "Option requires generic arguments",
+            )),
         },
         "Result" => match &segment.arguments {
             syn::PathArguments::AngleBracketed(args) => {
                 if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
                     map_type(inner_ty)
                 } else {
-                    panic!("Result without generic arguments");
+                    Err(syn::Error::new_spanned(
+                        segment,
+                        "Result requires generic arguments",
+                    ))
                 }
             }
-            _ => panic!("Result without angle bracketed args"),
+            _ => Err(syn::Error::new_spanned(
+                segment,
+                "Result requires angle bracketed arguments",
+            )),
         },
-        "Number" => quote::quote! { ndc_interpreter::function::StaticType::Number },
-        "Value" | "EvaluationResult" => {
-            quote::quote! { ndc_interpreter::function::StaticType::Any }
-        }
-        unmatched => panic!("Cannot map type string '{unmatched}' to StaticType"),
+        "Number" => Ok(quote! { ndc_core::StaticType::Number }),
+        "MapValue" => Ok(quote! {
+            ndc_core::StaticType::Map {
+                key: Box::new(ndc_core::StaticType::Any),
+                value: Box::new(ndc_core::StaticType::Any),
+            }
+        }),
+        "Value" | "EvaluationResult" | "SeqValue" => Ok(quote! { ndc_core::StaticType::Any }),
+        unmatched => Err(syn::Error::new_spanned(
+            segment,
+            format!("cannot map type '{unmatched}' to StaticType"),
+        )),
     }
 }
 
-/// Wraps an original rust function `function` in an outer function with the identifier `identifier`
-/// It's registered with the environment as `register_as_function_name`
-/// The argument translations mapping is defined by `input_arguments`
 fn wrap_single(
-    function: syn::ItemFn,
+    function: &syn::ItemFn,
     identifier: &syn::Ident,
     register_as_function_name: &proc_macro2::Literal,
-    input_arguments: Vec<Argument>,
     return_type: &TokenStream,
     docs: &str,
-) -> WrappedFunction {
+) -> syn::Result<WrappedFunction> {
     let inner_ident = format_ident!("{}_inner", identifier);
     let inner = {
         let mut inner = function.clone();
-        // Remove attributes to prevent compilation errors
         inner.attrs.clear();
-
-        // Change the name
+        inner.vis = syn::Visibility::Public(syn::token::Pub::default());
         inner.sig.ident = inner_ident.clone();
         inner
     };
 
-    let mut argument_init_code_blocks = Vec::new();
-    let mut arguments = Vec::new();
-    let mut param_types: Vec<TokenStream> = Vec::new();
-    let mut param_names: Vec<TokenStream> = Vec::new();
+    let vm = try_generate_vm_native(
+        function,
+        &inner_ident,
+        register_as_function_name,
+        docs,
+        return_type,
+    )
+    .ok_or_else(|| {
+        syn::Error::new_spanned(
+            &function.sig,
+            "unsupported parameter or return type for VM native",
+        )
+    })?;
 
-    for input_arg in input_arguments {
-        let Argument {
-            argument,
-            initialize_code,
-            param_type,
-            param_name,
-        } = input_arg;
-
-        arguments.push(argument);
-        argument_init_code_blocks.push(initialize_code);
-        param_types.push(param_type);
-        param_names.push(param_name);
-    }
-
-    let return_expr = match function.sig.output {
-        syn::ReturnType::Default => quote! {
-            return Ok(ndc_interpreter::value::Value::unit());
-        },
-        syn::ReturnType::Type(_, typ) => match &*typ {
-            // If the function returns a result we unpack it using the question mark operator
-            ty @ syn::Type::Path(_) if path_ends_with(ty, "EvaluationResult") => quote! {
-                return result;
-            },
-            ty @ syn::Type::Path(_) if path_ends_with(ty, "Result") => quote! {
-                let value = result.map_err(|err| ndc_interpreter::function::FunctionCarrier::IntoEvaluationError(Box::new(err)))?;
-                return Ok(ndc_interpreter::value::Value::from(value));
-            },
-            _ => quote! {
-                let result = ndc_interpreter::value::Value::from(result);
-                return Ok(result);
-            },
-        },
-    };
-
-    // This generates a function declaration from a rust function
-    // The expansion looks something like this
-    //
-    // fn wrapper_function(values: &[Value]) -> EvaluationResult {
-    //     fn original_function(....) { .... }
-    //     let arg0 = ....; // from values[0]
-    //     let arg1 = ....; // from values[1]
-    //
-    //     return original_function(arg0, arg1);
-    // }
     let function_declaration = quote! {
-        pub fn #identifier (
-            values: &mut [ndc_interpreter::value::Value],
-            environment: &std::rc::Rc<std::cell::RefCell<ndc_interpreter::environment::Environment>>
-        ) -> ndc_interpreter::evaluate::EvaluationResult {
-            // Define the inner function that has the rust type signature
-            #[inline]
-            #inner
-
-            // Initialize the arguments and map them from the Andy C types to the rust types
-            let [#(#arguments, )*] = values else { panic!("actual argument count did not match expected argument count when calling native method, this should be prevented by the runtime") };
-            #(#argument_init_code_blocks; )*
-
-            // Call the inner function with the unpacked arguments
-            let result = #inner_ident (#(#arguments, )*);
-
-            // Return the result (Possibly by unpacking errors)
-            #return_expr
-        }
+        #[inline]
+        #inner
     };
+
+    let VmNativeTokens {
+        native_let,
+        param_types: _,
+        param_names: _,
+    } = vm;
 
     let function_registration = quote! {
-        let func = ndc_interpreter::function::FunctionBuilder::default()
-            .body(ndc_interpreter::function::FunctionBody::GenericFunction {
-                function: #identifier,
-                type_signature: ndc_interpreter::function::TypeSignature::Exact(vec![
-                    #( ndc_interpreter::function::Parameter::new(#param_names, #param_types,) ),*
-                ]),
-                return_type: #return_type,
-            })
-            .name(String::from(#register_as_function_name))
-            .documentation(String::from(#docs))
-            .build()
-            .expect("expected function creation in proc macro to always succeed");
-
-        env.declare_global_fn(func);
+        #native_let
+        env.declare_global_fn(native);
     };
-
-    WrappedFunction {
+    Ok(WrappedFunction {
         function_declaration,
         function_registration,
-    }
+    })
 }
 
-fn into_param_type(ty: &syn::Type) -> TokenStream {
-    match ty {
-        ty if path_ends_with(ty, "Vec") => {
-            quote! { ndc_interpreter::function::StaticType::List(Box::new(ndc_interpreter::function::StaticType::Any)) }
+/// Tokens emitted by `try_generate_vm_native` when `vm_native` is possible.
+#[allow(dead_code)]
+struct VmNativeTokens {
+    /// `let native: Rc<NativeFunction> = Rc::new(NativeFunction { ... });`
+    native_let: TokenStream,
+    /// `StaticType` expressions for each parameter
+    param_types: Vec<TokenStream>,
+    /// Parameter name strings
+    param_names: Vec<TokenStream>,
+}
+
+/// Attempt to generate `vm_native` tokens for a function.
+///
+/// Returns `None` when any parameter or the return type cannot be expressed in
+/// VM-native terms.
+fn try_generate_vm_native(
+    function: &syn::ItemFn,
+    inner_ident: &syn::Ident,
+    fn_name: &proc_macro2::Literal,
+    docs: &str,
+    return_type_override: &TokenStream,
+) -> Option<VmNativeTokens> {
+    use crate::vm_convert::{try_vm_input, try_vm_return};
+
+    let mut extracts = Vec::new();
+    let mut passes = Vec::new();
+    let mut param_types = Vec::new();
+    let mut param_names = Vec::new();
+    let mut has_vm_callable = false;
+    let raw_args: Vec<_> = (0..function.sig.inputs.len())
+        .map(|i| format_ident!("vm_raw{i}"))
+        .collect();
+
+    for (i, arg) in function.sig.inputs.iter().enumerate() {
+        let pat_ty = match arg {
+            syn::FnArg::Typed(pat_ty) => pat_ty,
+            syn::FnArg::Receiver(_) => return None,
+        };
+        let ty = &*pat_ty.ty;
+        if classify(ty) == Some(NdcType::MutVmCallable) {
+            has_vm_callable = true;
         }
-        ty if path_ends_with(ty, "VecDeque") => {
-            quote! { ndc_interpreter::function::StaticType::Deque(Box::new(ndc_interpreter::function::StaticType::Any)) }
-        }
-        ty if path_ends_with(ty, "DefaultMap")
-            || path_ends_with(ty, "DefaultMapMut")
-            || path_ends_with(ty, "HashMap") =>
-        {
-            temp_create_map_any()
-        }
-        ty if path_ends_with(ty, "MinHeap") => {
-            quote! { ndc_interpreter::function::StaticType::MinHeap(Box::new(ndc_interpreter::function::StaticType::Any)) }
-        }
-        ty if path_ends_with(ty, "MaxHeap") => {
-            quote! { ndc_interpreter::function::StaticType::MaxHeap(Box::new(ndc_interpreter::function::StaticType::Any)) }
-        }
-        ty if path_ends_with(ty, "ListRepr") => {
-            quote! { ndc_interpreter::function::StaticType::List(Box::new(ndc_interpreter::function::StaticType::Any)) }
-        }
-        ty if path_ends_with(ty, "MapRepr") => temp_create_map_any(),
-        syn::Type::Reference(syn::TypeReference { elem, .. }) => into_param_type(elem),
-        syn::Type::Path(syn::TypePath { path, .. }) => match path {
-            _ if path.is_ident("i64") => quote! { ndc_interpreter::function::StaticType::Int },
-            _ if path.is_ident("usize") => {
-                quote! { ndc_interpreter::function::StaticType::Int }
-            }
-            _ if path.is_ident("f64") => {
-                quote! { ndc_interpreter::function::StaticType::Float }
-            }
-            _ if path.is_ident("bool") => {
-                quote! { ndc_interpreter::function::StaticType::Bool }
-            }
-            _ if path.is_ident("Value") => {
-                quote! { ndc_interpreter::function::StaticType::Any }
-            }
-            _ if path.is_ident("Number") => {
-                quote! { ndc_interpreter::function::StaticType::Number }
-            }
-            _ if path.is_ident("Sequence") => {
-                quote! { ndc_interpreter::function::StaticType::Sequence(Box::new(ndc_interpreter::function::StaticType::Any)) }
-            }
-            _ if path.is_ident("Callable") => {
-                quote! {
-                    ndc_interpreter::function::StaticType::Function {
-                        parameters: None,
-                        return_type: Box::new(ndc_interpreter::function::StaticType::Any)
-                    }
+        let conv = try_vm_input(ty, i)?;
+        extracts.push(conv.extract);
+        passes.push(conv.pass);
+        param_types.push(conv.static_type);
+        let name = match &*pat_ty.pat {
+            syn::Pat::Ident(ident) => ident.ident.to_string(),
+            _ => format!("arg{i}"),
+        };
+        param_names.push(quote! { #name });
+    }
+
+    let (return_code, _) = try_vm_return(&function.sig.output)?;
+    let return_static_type = return_type_override;
+    let n = function.sig.inputs.len();
+
+    let func_variant = if has_vm_callable {
+        quote! {
+            ndc_vm::value::NativeFunc::WithVm(Box::new(|args, _vm| match args {
+                [#(#raw_args),*] => {
+                    #(#extracts)*
+                    let result = #inner_ident(#(#passes),*);
+                    #return_code
                 }
-            }
-            _ => panic!("Don't know how to convert Path into StaticType\n\n{path:?}"),
-        },
-        syn::Type::ImplTrait(_) => {
-            quote! { ndc_interpreter::function::StaticType::Iterator(Box::new(ndc_interpreter::function::StaticType::Any)) }
+                _ => Err(ndc_vm::error::VmError::native(format!("expected {} arguments, got {}", #n, args.len()))),
+            }))
         }
-        x => panic!("Don't know how to convert {x:?} into StaticType"),
-    }
-}
+    } else {
+        quote! {
+            ndc_vm::value::NativeFunc::Simple(Box::new(|args| match args {
+                [#(#raw_args),*] => {
+                    #(#extracts)*
+                    let result = #inner_ident(#(#passes),*);
+                    #return_code
+                }
+                _ => Err(ndc_vm::error::VmError::native(format!("expected {} arguments, got {}", #n, args.len()))),
+            }))
+        }
+    };
 
-fn create_temp_variable(
-    position: usize,
-    input: &syn::FnArg,
-    identifier: &syn::Ident,
-    original_name: &str,
-) -> Vec<Argument> {
-    let argument_var_name = syn::Ident::new(&format!("arg{position}"), identifier.span());
-    if let syn::FnArg::Typed(pat_type) = input {
-        let ty = &*pat_type.ty;
+    let documentation_tokens = if docs.is_empty() {
+        quote! { None }
+    } else {
+        quote! { Some(String::from(#docs)) }
+    };
+    let native_let = quote! {
+        let native: std::rc::Rc<ndc_vm::value::NativeFunction> =
+            std::rc::Rc::new(ndc_vm::value::NativeFunction {
+                name: String::from(#fn_name),
+                documentation: #documentation_tokens,
+                static_type: ndc_core::StaticType::Function {
+                    parameters: Some(vec![#(#param_types.clone()),*]),
+                    return_type: Box::new(#return_static_type),
+                },
+                func: #func_variant,
+            });
+    };
 
-        let converters: Vec<Box<dyn TypeConverter>> = build();
-
-        let temp_var = syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
-
-        for converter in converters {
-            if converter.matches(ty) {
-                return converter.convert(temp_var, original_name, argument_var_name);
-            }
-        }
-
-        // The pattern is Callable
-        if path_ends_with(ty, "Callable") {
-            let temp_var = syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
-            return vec![Argument {
-                param_type: quote! {
-                    // TODO: how are we going to figure out the exact type of function here
-                    ndc_interpreter::function::StaticType::Function {
-                        parameters: None,
-                        return_type: Box::new(ndc_interpreter::function::StaticType::Any)
-                    }
-                },
-                param_name: quote! { #original_name },
-                argument: quote! { #argument_var_name },
-                initialize_code: quote! {
-                    let ndc_interpreter::value::Value::Function(#temp_var) = #argument_var_name else {
-                        panic!("Value #position needed to be a Sequence::Map but wasn't");
-                    };
-                    let #argument_var_name = &Callable {
-                        function: Rc::clone(#temp_var),
-                        environment: environment
-                    };
-                },
-            }];
-        }
-        // The pattern is &HashMap<Value, Value>
-        else if is_ref(ty) && path_ends_with(ty, "HashMap") {
-            let rc_temp_var =
-                syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
-            return vec![Argument {
-                param_type: temp_create_map_any(),
-                param_name: quote! { #original_name },
-                argument: quote! { #argument_var_name },
-                initialize_code: quote! {
-                    let ndc_interpreter::value::Value::Sequence(ndc_interpreter::sequence::Sequence::Map(#rc_temp_var, _default)) = #argument_var_name else {
-                        panic!("Value #position needed to be a Sequence::Map but wasn't");
-                    };
-                    let #argument_var_name = &*#rc_temp_var.borrow();
-                },
-            }];
-        }
-        // The pattern is &mut HashMap<Value, Value>
-        else if is_ref_mut(ty) && path_ends_with(ty, "HashMap") {
-            let rc_temp_var =
-                syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
-            return vec![Argument {
-                param_type: temp_create_map_any(),
-                param_name: quote! { #original_name },
-                argument: quote! { #argument_var_name },
-                initialize_code: quote! {
-                    let ndc_interpreter::value::Value::Sequence(ndc_interpreter::sequence::Sequence::Map(#rc_temp_var, _default)) = #argument_var_name else {
-                        panic!("Value #position needed to be a Sequence::Map but wasn't");
-                    };
-                    let #argument_var_name = &mut *#rc_temp_var.try_borrow_mut()?;
-                },
-            }];
-        }
-        // The pattern is DefaultMap
-        else if path_ends_with(ty, "DefaultMap") {
-            let rc_temp_var =
-                syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
-            return vec![Argument {
-                param_type: temp_create_map_any(),
-                param_name: quote! { #original_name },
-                argument: quote! { #argument_var_name },
-                initialize_code: quote! {
-                    let ndc_interpreter::value::Value::Sequence(ndc_interpreter::sequence::Sequence::Map(#rc_temp_var, default)) = #argument_var_name else {
-                        panic!("Value #position needed to be a Sequence::Map but wasn't");
-                    };
-                    let #argument_var_name = (&*#rc_temp_var.borrow(), default.to_owned());
-                },
-            }];
-        }
-        // The pattern is DefaultMapMut
-        else if path_ends_with(ty, "DefaultMapMut") {
-            let rc_temp_var =
-                syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
-            return vec![Argument {
-                param_type: temp_create_map_any(),
-                param_name: quote! { #original_name },
-                argument: quote! { #argument_var_name },
-                initialize_code: quote! {
-                    let ndc_interpreter::value::Value::Sequence(ndc_interpreter::sequence::Sequence::Map(#rc_temp_var, default)) = #argument_var_name else {
-                        panic!("Value #position needed to be a Sequence::Map but wasn't");
-                    };
-                    let #argument_var_name = (&mut *#rc_temp_var.try_borrow_mut()?, default.to_owned());
-                },
-            }];
-        }
-        // The pattern is exactly &mut Vec
-        // TODO: support this for tuple
-        else if is_ref_mut(ty) && path_ends_with(ty, "Vec") {
-            let rc_temp_var =
-                syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
-            return vec![Argument {
-                param_type: quote! { ndc_interpreter::function::StaticType::List(Box::new(ndc_interpreter::function::StaticType::Any)) },
-                param_name: quote! { #original_name },
-                argument: quote! { #argument_var_name },
-                initialize_code: quote! {
-                    let ndc_interpreter::value::Value::Sequence(ndc_interpreter::sequence::Sequence::List(#rc_temp_var)) = #argument_var_name else {
-                        panic!("Value #position needed to be a Sequence::List but wasn't");
-                    };
-                    let #argument_var_name = &mut *#rc_temp_var.try_borrow_mut()?;
-                },
-            }];
-        }
-        // The pattern is exactly &mut VecDeque
-        else if is_ref_mut(ty) && path_ends_with(ty, "VecDeque") {
-            let rc_temp_var =
-                syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
-            return vec![Argument {
-                param_type: into_param_type(ty),
-                param_name: quote! { #original_name },
-                argument: quote! { #argument_var_name },
-                initialize_code: quote! {
-                    let ndc_interpreter::value::Value::Sequence(ndc_interpreter::sequence::Sequence::Deque(#rc_temp_var)) = #argument_var_name else {
-                        panic!("Value #position needed to be a Sequence::List but wasn't");
-                    };
-                    let #argument_var_name = &mut *#rc_temp_var.try_borrow_mut()?;
-                },
-            }];
-        }
-        // The pattern is exactly &VecDeque
-        else if is_ref(ty) && path_ends_with(ty, "VecDeque") {
-            let rc_temp_var =
-                syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
-            return vec![Argument {
-                param_type: into_param_type(ty),
-                param_name: quote! { #original_name },
-                argument: quote! { #argument_var_name },
-                initialize_code: quote! {
-                    let ndc_interpreter::value::Value::Sequence(ndc_interpreter::sequence::Sequence::Deque(#rc_temp_var)) = #argument_var_name else {
-                        panic!("Value #position needed to be a Sequence::List but wasn't");
-                    };
-                    let #argument_var_name = &*#rc_temp_var.try_borrow()?;
-                },
-            }];
-        }
-        // The pattern is exactly &mut MaxHeap
-        else if is_ref_mut(ty) && path_ends_with(ty, "MaxHeap") {
-            let rc_temp_var =
-                syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
-            return vec![Argument {
-                param_type: into_param_type(ty),
-                param_name: quote! { #original_name },
-                argument: quote! { #argument_var_name },
-                initialize_code: quote! {
-                    let ndc_interpreter::value::Value::Sequence(ndc_interpreter::sequence::Sequence::MaxHeap(#rc_temp_var)) = #argument_var_name else {
-                        panic!("Value #position needed to be a Sequence::MaxHeap but wasn't");
-                    };
-                    let #argument_var_name = &mut *#rc_temp_var.try_borrow_mut()?;
-                },
-            }];
-        }
-        // The pattern is exactly &MaxHeap
-        else if is_ref(ty) && path_ends_with(ty, "MaxHeap") {
-            let rc_temp_var =
-                syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
-            return vec![Argument {
-                param_type: into_param_type(ty),
-                param_name: quote! { #original_name },
-                argument: quote! { #argument_var_name },
-                initialize_code: quote! {
-                    let ndc_interpreter::value::Value::Sequence(ndc_interpreter::sequence::Sequence::MaxHeap(#rc_temp_var)) = #argument_var_name else {
-                        panic!("Value #position needed to be a Sequence::MaxHeap but wasn't");
-                    };
-                    let #argument_var_name = &*#rc_temp_var.try_borrow()?;
-                },
-            }];
-        }
-        // The pattern is exactly &mut MinHeap
-        else if is_ref_mut(ty) && path_ends_with(ty, "MinHeap") {
-            let rc_temp_var =
-                syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
-            return vec![Argument {
-                param_type: into_param_type(ty),
-                param_name: quote! { #original_name },
-                argument: quote! { #argument_var_name },
-                initialize_code: quote! {
-                    let ndc_interpreter::value::Value::Sequence(ndc_interpreter::sequence::Sequence::MinHeap(#rc_temp_var)) = #argument_var_name else {
-                        panic!("Value #position needed to be a Sequence::MinHeap but wasn't");
-                    };
-                    let #argument_var_name = &mut *#rc_temp_var.try_borrow_mut()?;
-                },
-            }];
-        }
-        // The pattern is exactly &MinHeap
-        else if is_ref(ty) && path_ends_with(ty, "MinHeap") {
-            let rc_temp_var =
-                syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
-            return vec![Argument {
-                param_type: into_param_type(ty),
-                param_name: quote! { #original_name },
-                argument: quote! { #argument_var_name },
-                initialize_code: quote! {
-                    let ndc_interpreter::value::Value::Sequence(ndc_interpreter::sequence::Sequence::MinHeap(#rc_temp_var)) = #argument_var_name else {
-                        panic!("Value #position needed to be a Sequence::MinHeap but wasn't");
-                    };
-                    let #argument_var_name = &*#rc_temp_var.try_borrow()?;
-                },
-            }];
-        }
-        // The pattern is exactly &str
-        else if is_str_ref(ty) {
-            let rc_temp_var =
-                syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
-            return vec![Argument {
-                param_type: quote! { ndc_interpreter::function::StaticType::String },
-                param_name: quote! { #original_name },
-                argument: quote! { #argument_var_name },
-                initialize_code: quote! {
-                    let ndc_interpreter::value::Value::Sequence(ndc_interpreter::sequence::Sequence::String(#rc_temp_var)) = #argument_var_name else {
-                        panic!("Value #position needed to be a Sequence::String but wasn't");
-                    };
-                    let #rc_temp_var = #rc_temp_var.borrow();
-                    let #argument_var_name = #rc_temp_var.as_ref();
-                },
-            }];
-        }
-        // The pattern is &BigInt
-        else if is_ref_of_bigint(ty) {
-            let big_int = syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
-            return vec![Argument {
-                param_type: quote! { ndc_interpreter::function::StaticType::Int },
-                param_name: quote! { #original_name },
-                argument: quote! { #argument_var_name },
-                initialize_code: quote! {
-                    let #big_int = if let ndc_interpreter::value::Value::Number(ndc_interpreter::num::Number::Int(ndc_interpreter::int::Int::Int64(smol))) = #argument_var_name {
-                        Some(num::BigInt::from(*smol))
-                    } else {
-                        None
-                    };
-
-                    let #argument_var_name = match #argument_var_name {
-                        ndc_interpreter::value::Value::Number(ndc_interpreter::num::Number::Int(ndc_interpreter::int::Int::BigInt(big))) => big,
-                        ndc_interpreter::value::Value::Number(ndc_interpreter::num::Number::Int(ndc_interpreter::int::Int::Int64(smoll))) => #big_int.as_ref().unwrap(),
-                        _ => panic!("Value #position need to be an Int but wasn't"),
-                    }
-                },
-            }];
-        }
-        // If we need an owned Value
-        else if path_ends_with(ty, "Value") && !is_ref(ty) {
-            return vec![Argument {
-                param_type: quote! { ndc_interpreter::function::StaticType::Any },
-                param_name: quote! { #original_name },
-                argument: quote! { #argument_var_name },
-                initialize_code: quote! {
-                    let #argument_var_name = #argument_var_name.clone();
-                },
-            }];
-        }
-        // The pattern is &mut [Value]
-        else if is_ref_mut_of_slice_of_value(ty) {
-            let rc_temp_var =
-                syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
-            return vec![Argument {
-                param_type: quote! { ndc_interpreter::function::StaticType::List(Box::new(ndc_interpreter::function::StaticType::Any)) },
-                param_name: quote! { #original_name },
-                argument: quote! { #argument_var_name },
-                initialize_code: quote! {
-                    let ndc_interpreter::value::Value::Sequence(ndc_interpreter::sequence::Sequence::List(#rc_temp_var)) = #argument_var_name else {
-                        panic!("Value #position needed to be a Sequence::List but wasn't");
-                    };
-                    let #argument_var_name = &mut *#rc_temp_var.borrow_mut();
-                },
-            }];
-        }
-        // The pattern is &[Value]
-        else if is_ref_of_slice_of_value(ty) {
-            let rc_temp_var =
-                syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
-            return vec![
-                Argument {
-                    param_type: quote! { ndc_interpreter::function::StaticType::List(Box::new(ndc_interpreter::function::StaticType::Any)) },
-                    param_name: quote! { #original_name },
-                    argument: quote! { #argument_var_name },
-                    initialize_code: quote! {
-                        let ndc_interpreter::value::Value::Sequence(ndc_interpreter::sequence::Sequence::List(#rc_temp_var)) = #argument_var_name else {
-                            panic!("Value #position needed to be a Sequence::List but wasn't");
-                        };
-                        let #argument_var_name = &*#rc_temp_var.borrow();
-                    },
-                },
-                // Argument {
-                //     param_type: quote! { ndc_interpreter::function::StaticType::Tuple },
-                //     param_name: quote! { #original_name },
-                //     argument: quote! { #argument_var_name },
-                //     initialize_code: quote! {
-                //         let ndc_interpreter::value::Value::Sequence(ndc_interpreter::sequence::Sequence::Tuple(#rc_temp_var)) = #argument_var_name else {
-                //             panic!("Value #position needed to be a Sequence::List but wasn't");
-                //         };
-                //         let #argument_var_name = &#rc_temp_var;
-                //     },
-                // },
-            ];
-        }
-        // The pattern is &BigRational
-        else if path_ends_with(ty, "BigRational") && is_ref(ty) {
-            return vec![Argument {
-                param_type: quote! { ndc_interpreter::function::StaticType::Rational },
-                param_name: quote! { #original_name },
-                argument: quote! { #argument_var_name },
-                initialize_code: quote! {
-                    let ndc_interpreter::value::Value::Number(ndc_interpreter::num::Number::Rational(#argument_var_name)) = #argument_var_name else {
-                        panic!("Value #position needs to be Rational but wasn't");
-                    };
-
-                    let #argument_var_name = &#argument_var_name.clone();
-                },
-            }];
-        }
-        // The pattern is BigRational
-        else if path_ends_with(ty, "BigRational") && !is_ref(ty) {
-            return vec![Argument {
-                param_type: quote! { ndc_interpreter::function::StaticType::Rational },
-                param_name: quote! { #original_name },
-                argument: quote! { #argument_var_name },
-                initialize_code: quote! {
-                    let ndc_interpreter::value::Value::Number(ndc_interpreter::num::Number::Rational(#argument_var_name)) = #argument_var_name else {
-                        panic!("VValue #position needs to be Rational but wasn't");
-                    };
-
-                    let #argument_var_name = *#argument_var_name.clone();
-                },
-            }];
-        }
-        // The pattern is Complex64
-        else if path_ends_with(ty, "Complex64") && !is_ref(ty) {
-            return vec![Argument {
-                param_type: quote! { ndc_interpreter::function::StaticType::Complex },
-                param_name: quote! { #original_name },
-                argument: quote! { #argument_var_name },
-                initialize_code: quote! {
-                    let ndc_interpreter::value::Value::Number(ndc_interpreter::num::Number::Complex(#argument_var_name)) = #argument_var_name else {
-                        panic!("Value #position needs to be Complex64 but wasn't");
-                    };
-
-                    let #argument_var_name = #argument_var_name.clone();
-                },
-            }];
-        }
-        // The pattern is something like `i64` (but also matches other concrete types)
-        else if let syn::Type::Path(path) = ty {
-            return vec![Argument {
-                param_type: into_param_type(ty),
-                param_name: quote! { #original_name },
-                argument: quote! { #argument_var_name },
-                initialize_code: quote! {
-                    let #argument_var_name = #path :: try_from(#argument_var_name).map_err(|err| ndc_interpreter::function::FunctionCallError::ConvertToNativeTypeError(format!("{err}")))?
-                },
-            }];
-        }
-        // The pattern is something like '&Number'
-        else if let syn::Type::Reference(type_ref) = &*pat_type.ty {
-            return vec![Argument {
-                param_type: into_param_type(ty),
-                param_name: quote! { #original_name },
-                argument: quote! { #argument_var_name },
-                initialize_code: quote! {
-                    let #argument_var_name = <#type_ref as TryFrom<&mut ndc_interpreter::value::Value>> :: try_from(#argument_var_name).map_err(|err| ndc_interpreter::function::FunctionCallError::ConvertToNativeTypeError(format!("{err}")))?
-                },
-            }];
-        }
-        // The pattern is a trait implementation TODO: this is not implemented
-        else if let syn::Type::ImplTrait(syn::TypeImplTrait { .. }) = &*pat_type.ty {
-            // TODO: we should perform a type check, but in order to get results quick we can just assume that all impl blocks are iterators
-
-            let rc_temp_var =
-                syn::Ident::new(&format!("temp_{argument_var_name}"), identifier.span());
-            return vec![Argument {
-                param_type: into_param_type(ty),
-                param_name: quote! { #original_name },
-                argument: quote! { #argument_var_name },
-                initialize_code: quote! {
-                    let ndc_interpreter::value::Value::Sequence(ndc_interpreter::sequence::Sequence::Iterator(#rc_temp_var)) = #argument_var_name else {
-                        panic!("Value #position needed to be a Sequence::Iterator but wasn't");
-                    };
-
-                    let #argument_var_name = ndc_interpreter::iterator::RcIter::new(Rc::clone(#rc_temp_var));
-                },
-            }];
-        } else {
-            panic!("not sure how to handle this type of thing:\n|---> {:?}", ty);
-        }
-    }
-
-    panic!("Not sure how to handle receivers");
-}
-
-// TODO: just adding Any as type here is lazy AF but CBA fixing generics
-pub fn temp_create_map_any() -> TokenStream {
-    quote! {
-       ndc_interpreter::function::StaticType::Map {
-           key: Box::new(ndc_interpreter::function::StaticType::Any),
-           value: Box::new(ndc_interpreter::function::StaticType::Any)
-       }
-    }
+    Some(VmNativeTokens {
+        native_let,
+        param_types,
+        param_names,
+    })
 }
