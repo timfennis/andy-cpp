@@ -393,10 +393,10 @@ impl Vm {
                     let frame = self.frames.last().expect("no frame");
                     let list_val = &self.stack[frame.slot(slot)];
                     let Value::Object(obj) = list_val else {
-                        panic!("ListPush expects a list")
+                        return Err(VmError::new("ListPush expects a list", span));
                     };
                     let Object::List(rc) = &**obj else {
-                        panic!("ListPush expects a list")
+                        return Err(VmError::new("ListPush expects a list", span));
                     };
                     rc.borrow_mut().push(value);
                 }
@@ -407,10 +407,10 @@ impl Vm {
                     let frame = self.frames.last().expect("no frame");
                     let map_val = &self.stack[frame.slot(slot)];
                     let Value::Object(obj) = map_val else {
-                        panic!("MapInsert expects a map")
+                        return Err(VmError::new("MapInsert expects a map", span));
                     };
                     let Object::Map { entries, .. } = &**obj else {
-                        panic!("MapInsert expects a map")
+                        return Err(VmError::new("MapInsert expects a map", span));
                     };
                     entries.borrow_mut().insert(key, value);
                 }
