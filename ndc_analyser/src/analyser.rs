@@ -201,12 +201,14 @@ impl Analyser {
                     type_sig.push(self.analyse(a)?);
                 }
 
-                let StaticType::Function { return_type, .. } =
-                    self.resolve_function_with_argument_types(function, &type_sig, *span)?
-                else {
-                    // If we couldn't resolve the identifier to a function we have to just assume that
-                    // whatever identifier we did find is a function at runtime and will return Any
-                    return Ok(StaticType::Any);
+                let callee_type =
+                    self.resolve_function_with_argument_types(function, &type_sig, *span)?;
+
+                let StaticType::Function { return_type, .. } = callee_type else {
+                    if callee_type == StaticType::Any {
+                        return Ok(StaticType::Any);
+                    }
+                    return Err(AnalysisError::not_callable(&callee_type, *span));
                 };
 
                 Ok(*return_type)
@@ -617,6 +619,13 @@ impl AnalysisError {
                 "No function called '{ident}' found that matches the arguments '{}'",
                 types.iter().join(", ")
             ),
+            span,
+        }
+    }
+
+    fn not_callable(typ: &StaticType, span: Span) -> Self {
+        Self {
+            text: format!("Unable to invoke {typ} as a function."),
             span,
         }
     }
