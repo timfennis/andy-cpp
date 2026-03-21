@@ -20,7 +20,7 @@ mod inner {
 pub fn register_variadic(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     let print_native = Rc::new(NativeFunction {
         name: "print".to_string(),
-        documentation: None, // TODO figure out how to get the docs in here
+        documentation: Some("Prints its arguments to standard output, separated by spaces, followed by a newline.".to_string()),
         static_type: StaticType::Function {
             parameters: None,
             return_type: Box::new(StaticType::unit()),
@@ -46,7 +46,7 @@ pub fn register_variadic(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
 
     let dbg_native = Rc::new(NativeFunction {
         name: "dbg".to_string(),
-        documentation: None, // TODO figure out how to get the docs in here
+        documentation: Some("Prints its arguments in debug format to standard output, separated by spaces, followed by a newline.".to_string()),
         static_type: StaticType::Function {
             parameters: None,
             return_type: Box::new(StaticType::unit()),

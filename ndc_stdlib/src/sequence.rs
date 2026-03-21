@@ -961,7 +961,7 @@ pub mod extra {
     pub fn register(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
         env.declare_global_fn(Rc::new(NativeFunction {
             name: "zip".to_string(),
-            documentation: None,
+            documentation: Some("Zips two or more sequences together into a list of tuples. The result length is the minimum length of the inputs.".to_string()),
             static_type: StaticType::Function {
                 parameters: None,
                 return_type: Box::new(StaticType::List(Box::new(StaticType::Tuple(vec![

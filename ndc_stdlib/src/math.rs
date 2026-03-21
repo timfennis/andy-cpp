@@ -170,10 +170,10 @@ pub mod f64 {
 
     pub fn register(env: &mut ndc_core::FunctionRegistry<Rc<VmNativeFunction>>) {
         macro_rules! implement_binary_operator_on_num {
-            ($operator:literal,$method:expr) => {
+            ($operator:literal,$method:expr,$docs:literal) => {
                 env.declare_global_fn(Rc::new(VmNativeFunction {
                     name: $operator.to_string(),
-                    documentation: None, // TODO figure out how to get the docs in here
+                    documentation: Some($docs.to_string()),
                     static_type: StaticType::Function {
                         parameters: Some(vec![StaticType::Number, StaticType::Number]),
                         return_type: Box::new(StaticType::Number),
@@ -205,18 +205,18 @@ pub mod f64 {
             };
         }
 
-        implement_binary_operator_on_num!("-", std::ops::Sub::sub);
-        implement_binary_operator_on_num!("+", std::ops::Add::add);
-        implement_binary_operator_on_num!("*", std::ops::Mul::mul);
-        implement_binary_operator_on_num!("/", std::ops::Div::div);
-        implement_binary_operator_on_num!("\\", Number::floor_div);
-        implement_binary_operator_on_num!("^", Number::pow);
-        implement_binary_operator_on_num!("%", std::ops::Rem::rem);
-        implement_binary_operator_on_num!("%%", Number::checked_rem_euclid);
+        implement_binary_operator_on_num!("-", std::ops::Sub::sub, "Subtracts two numbers.");
+        implement_binary_operator_on_num!("+", std::ops::Add::add, "Adds two numbers.");
+        implement_binary_operator_on_num!("*", std::ops::Mul::mul, "Multiplies two numbers.");
+        implement_binary_operator_on_num!("/", std::ops::Div::div, "Divides two numbers.");
+        implement_binary_operator_on_num!("\\", Number::floor_div, "Integer (floor) division of two numbers.");
+        implement_binary_operator_on_num!("^", Number::pow, "Raises the first number to the power of the second.");
+        implement_binary_operator_on_num!("%", std::ops::Rem::rem, "Returns the remainder of dividing two numbers.");
+        implement_binary_operator_on_num!("%%", Number::checked_rem_euclid, "Returns the Euclidean remainder of dividing two numbers. The result is always non-negative.");
 
         env.declare_global_fn(Rc::new(VmNativeFunction {
             name: "-".to_string(),
-            documentation: None, // TODO figure out how to get the docs in here
+            documentation: Some("Negates a number.".to_string()),
             static_type: StaticType::Function {
                 parameters: Some(vec![StaticType::Number]),
                 return_type: Box::new(StaticType::Number),
@@ -237,10 +237,10 @@ pub mod f64 {
         }));
 
         macro_rules! impl_cmp {
-            ($operator:literal,$expected:pat) => {
+            ($operator:literal,$expected:pat,$docs:literal) => {
                 env.declare_global_fn(Rc::new(VmNativeFunction {
                     name: $operator.to_string(),
-                    documentation: None, // TODO figure out how to get the docs in here
+                    documentation: Some($docs.to_string()),
                     static_type: StaticType::Function {
                         parameters: Some(vec![StaticType::Any, StaticType::Any]),
                         return_type: Box::new(StaticType::Bool),
@@ -264,14 +264,14 @@ pub mod f64 {
             };
         }
 
-        impl_cmp!(">", Ordering::Greater);
-        impl_cmp!(">=", Ordering::Greater | Ordering::Equal);
-        impl_cmp!("<", Ordering::Less);
-        impl_cmp!("<=", Ordering::Less | Ordering::Equal);
+        impl_cmp!(">", Ordering::Greater, "Returns true if the left value is greater than the right.");
+        impl_cmp!(">=", Ordering::Greater | Ordering::Equal, "Returns true if the left value is greater than or equal to the right.");
+        impl_cmp!("<", Ordering::Less, "Returns true if the left value is less than the right.");
+        impl_cmp!("<=", Ordering::Less | Ordering::Equal, "Returns true if the left value is less than or equal to the right.");
 
         env.declare_global_fn(Rc::new(VmNativeFunction {
             name: "==".to_string(),
-            documentation: None, // TODO figure out how to get the docs in here
+            documentation: Some("Returns true if two values are equal.".to_string()),
             static_type: StaticType::Function {
                 parameters: Some(vec![StaticType::Any, StaticType::Any]),
                 return_type: Box::new(StaticType::Bool),
@@ -287,7 +287,7 @@ pub mod f64 {
 
         env.declare_global_fn(Rc::new(VmNativeFunction {
             name: "!=".to_string(),
-            documentation: None, // TODO figure out how to get the docs in here
+            documentation: Some("Returns true if two values are not equal.".to_string()),
             static_type: StaticType::Function {
                 parameters: Some(vec![StaticType::Any, StaticType::Any]),
                 return_type: Box::new(StaticType::Bool),
@@ -303,7 +303,7 @@ pub mod f64 {
 
         env.declare_global_fn(Rc::new(VmNativeFunction {
             name: "<=>".to_string(),
-            documentation: None, // TODO: add actual docs
+            documentation: Some("Three-way comparison (spaceship operator). Returns -1 if left < right, 0 if equal, 1 if left > right.".to_string()),
             static_type: StaticType::Function {
                 parameters: Some(vec![StaticType::Any, StaticType::Any]),
                 return_type: Box::new(StaticType::Int),
@@ -328,7 +328,7 @@ pub mod f64 {
 
         env.declare_global_fn(Rc::new(VmNativeFunction {
             name: ">=<".to_string(),
-            documentation: None, // TODO figure out how to get the docs in here
+            documentation: Some("Reverse three-way comparison. Returns 1 if left < right, 0 if equal, -1 if left > right.".to_string()),
             static_type: StaticType::Function {
                 parameters: Some(vec![StaticType::Any, StaticType::Any]),
                 return_type: Box::new(StaticType::Int),
@@ -352,10 +352,10 @@ pub mod f64 {
         }));
 
         macro_rules! impl_bitop {
-            ($operator:literal,$operation:expr) => {
+            ($operator:literal,$operation:expr,$docs_bool:literal,$docs_int:literal) => {
                 env.declare_global_fn(Rc::new(VmNativeFunction {
                     name: $operator.to_string(),
-                    documentation: None, // TODO figure out how to get the docs in here
+                    documentation: Some($docs_bool.to_string()),
                     static_type: StaticType::Function {
                         parameters: Some(vec![StaticType::Bool, StaticType::Bool]),
                         return_type: Box::new(StaticType::Bool),
@@ -372,7 +372,7 @@ pub mod f64 {
                 }));
                 env.declare_global_fn(Rc::new(VmNativeFunction {
                     name: $operator.to_string(),
-                    documentation: None, // TODO figure out how to get the docs in here
+                    documentation: Some($docs_int.to_string()),
                     static_type: StaticType::Function {
                         parameters: Some(vec![StaticType::Int, StaticType::Int]),
                         return_type: Box::new(StaticType::Int),
@@ -399,13 +399,13 @@ pub mod f64 {
             };
         }
 
-        impl_bitop!("&", std::ops::BitAnd::bitand);
-        impl_bitop!("|", std::ops::BitOr::bitor);
-        impl_bitop!("~", std::ops::BitXor::bitxor);
+        impl_bitop!("&", std::ops::BitAnd::bitand, "Logical AND of two booleans.", "Bitwise AND of two integers.");
+        impl_bitop!("|", std::ops::BitOr::bitor, "Logical OR of two booleans.", "Bitwise OR of two integers.");
+        impl_bitop!("~", std::ops::BitXor::bitxor, "Logical XOR of two booleans.", "Bitwise XOR of two integers.");
 
         env.declare_global_fn(Rc::new(VmNativeFunction {
             name: "~".to_string(),
-            documentation: None, // TODO figure out how to get the docs in here
+            documentation: Some("Bitwise NOT of a number.".to_string()),
             static_type: StaticType::Function {
                 parameters: Some(vec![StaticType::Number]),
                 return_type: Box::new(StaticType::Number),
@@ -428,7 +428,7 @@ pub mod f64 {
         for ident in ["!", "not"] {
             env.declare_global_fn(Rc::new(VmNativeFunction {
                 name: ident.to_string(),
-                documentation: None, // TODO figure out how to get the docs in here
+                documentation: Some("Logical negation. Returns the opposite boolean value.".to_string()),
                 static_type: StaticType::Function {
                     parameters: Some(vec![StaticType::Bool]),
                     return_type: Box::new(StaticType::Bool),
@@ -445,7 +445,7 @@ pub mod f64 {
 
         env.declare_global_fn(Rc::new(VmNativeFunction {
             name: ">>".to_string(),
-            documentation: None, // TODO figure out how to get the docs in here
+            documentation: Some("Right bit shift.".to_string()),
             static_type: StaticType::Function {
                 parameters: Some(vec![StaticType::Int, StaticType::Int]),
                 return_type: Box::new(StaticType::Int),
@@ -471,7 +471,7 @@ pub mod f64 {
 
         env.declare_global_fn(Rc::new(VmNativeFunction {
             name: "<<".to_string(),
-            documentation: None, // TODO figure out how to get the docs in here
+            documentation: Some("Left bit shift.".to_string()),
             static_type: StaticType::Function {
                 parameters: Some(vec![StaticType::Int, StaticType::Int]),
                 return_type: Box::new(StaticType::Int),
@@ -499,7 +499,7 @@ pub mod f64 {
             ($method:ident,$docs:literal) => {
                 env.declare_global_fn(Rc::new(VmNativeFunction {
                     name: stringify!($method).to_string(),
-                    documentation: None, // TODO figure out how to get the docs in here
+                    documentation: Some($docs.to_string()),
                     static_type: StaticType::Function {
                         parameters: Some(vec![StaticType::Number]),
                         return_type: Box::new(StaticType::Number),

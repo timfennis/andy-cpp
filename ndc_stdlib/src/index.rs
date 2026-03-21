@@ -7,7 +7,7 @@ use std::rc::Rc;
 pub fn register(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     let get_native = Rc::new(NativeFunction {
         name: "[]".to_string(),
-        documentation: None, // TODO figure out how to get the docs in here
+        documentation: Some("Index operator. Retrieves an element by index from a list, string, tuple, deque, or map. Supports negative indices and range slicing.".to_string()),
         static_type: StaticType::Function {
             parameters: None,
             return_type: Box::new(StaticType::Any),
@@ -26,7 +26,7 @@ pub fn register(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
 
     let set_native = Rc::new(NativeFunction {
         name: "[]=".to_string(),
-        documentation: None, // TODO figure out how to get the docs in here
+        documentation: Some("Index assignment operator. Sets an element by index in a list, string, or map. Supports negative indices and range slicing for lists and strings.".to_string()),
         static_type: StaticType::Function {
             parameters: None,
             return_type: Box::new(StaticType::Any),
