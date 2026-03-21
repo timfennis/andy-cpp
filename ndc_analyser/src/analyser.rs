@@ -418,11 +418,14 @@ impl Analyser {
                 resolved_set,
                 resolved_get,
             } => {
-                self.analyse(index)?;
+                let index_type = self.analyse(index)?;
                 let type_of_index_target = self.analyse(value)?;
 
-                *resolved_set = Some(self.scope_tree.resolve_function_binding("[]=", &[]));
-                *resolved_get = Some(self.scope_tree.resolve_function_binding("[]", &[]));
+                let get_args = [type_of_index_target.clone(), index_type.clone()];
+                let set_args = [type_of_index_target.clone(), index_type, StaticType::Any];
+
+                *resolved_get = Some(self.scope_tree.resolve_function_binding("[]", &get_args));
+                *resolved_set = Some(self.scope_tree.resolve_function_binding("[]=", &set_args));
 
                 type_of_index_target
                     .index_element_type()
