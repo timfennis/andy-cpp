@@ -1,4 +1,4 @@
-use crate::r#match::{is_ref, path_ends_with};
+use crate::r#match::{is_ref_mut, path_ends_with};
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use std::fmt::Write;
@@ -348,7 +348,7 @@ fn try_generate_vm_native(
             syn::FnArg::Receiver(_) => return None,
         };
         let ty = &*pat_ty.ty;
-        if path_ends_with(ty, "VmCallable") && is_ref(ty) {
+        if path_ends_with(ty, "VmCallable") && is_ref_mut(ty) {
             has_vm_callable = true;
         }
         let conv = try_vm_input(ty, i)?;

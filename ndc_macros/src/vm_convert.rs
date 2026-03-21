@@ -455,16 +455,16 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
         });
     }
 
-    // &VmCallable — extract a VM function and wrap it with the current globals for HOF dispatch.
-    // `globals` is the second parameter of the generated `|args, globals|` closure and is in scope.
-    if path_ends_with(ty, "VmCallable") && is_ref(ty) {
+    // &mut VmCallable — extract a VM function and wrap it with the current VM for HOF dispatch.
+    // `_vm` is the second parameter of the generated `|args, _vm|` closure and is in scope.
+    if path_ends_with(ty, "VmCallable") && is_ref_mut(ty) {
         return Some(VmInputArg {
             extract: quote! {
-                let #temp = match #raw {
+                let mut #temp = match #raw {
                     ndc_vm::value::Value::Object(_obj) => match _obj.as_ref() {
                         ndc_vm::value::Object::Function(f) => ndc_vm::VmCallable {
                             function: f.clone(),
-                            vm: std::cell::RefCell::new(_vm),
+                            vm: _vm,
                         },
                         _ => return Err(ndc_vm::error::VmError::native(format!(
                             "arg {}: expected function, got {}",
@@ -477,7 +477,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                     ))),
                 };
             },
-            pass: quote! { &#temp },
+            pass: quote! { &mut #temp },
             static_type: quote! {
                 ndc_core::StaticType::Function {
                     parameters: None,

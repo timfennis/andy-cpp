@@ -186,20 +186,30 @@ produces an uncontrolled panic rather than a `VmError`.
 
 ---
 
-### R1 — `SetUpvalue` clones top-of-stack but never pops
-**File:** `vm.rs:307` | **Axes:** Idiomatic Rust
+### ~~R1 — `SetUpvalue` clones top-of-stack but never pops~~ ✅ Fixed
+**File:** `vm.rs:307` | **Axes:** Bug, Idiomatic Rust
 
-`SetLocal` pops the value after storing; `SetUpvalue` uses `last()` + clone and
-leaves the value on the stack. The asymmetry should be documented or resolved.
+`SetLocal` pops the value after storing; `SetUpvalue` used `last()` + clone and
+left the value on the stack. This caused a stack leak of one phantom value per
+upvalue assignment, leading to crashes in loops that reassign captured variables
+(`IterNext` would find the leaked value instead of the iterator).
+
+**Fix:** Changed `SetUpvalue` to `pop()` (matching `SetLocal`). No compiler changes
+needed — the compiler already assumed both instructions consume the top value.
+Documented stack effects for all opcodes in `chunk.rs`.
 
 ---
 
-### R5 — `VmCallable` wraps `&mut Vm` in `RefCell` unnecessarily
+### ~~R5 — `VmCallable` wraps `&mut Vm` in `RefCell` unnecessarily~~ ✅ Fixed
 **File:** `vm.rs:1042` | **Axes:** Idiomatic Rust
 
 `RefCell<&mut Vm>` is used to get interior mutability for `call(&self, ...)`.
 This can panic if `borrow_mut()` is called re-entrantly. `call(&mut self, ...)` is
 the idiomatic alternative if the macro codegen allows it.
+
+**Fix:** Removed `RefCell` wrapper. `VmCallable` now holds `&'a mut Vm` directly
+and `call(&mut self)` borrows it. Updated macro codegen to detect `&mut VmCallable`
+and all stdlib HOFs to take `&mut VmCallable<'_>`.
 
 ---
 

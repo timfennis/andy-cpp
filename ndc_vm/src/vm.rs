@@ -311,7 +311,7 @@ impl Vm {
                 }
                 OpCode::SetUpvalue(slot) => {
                     let slot = *slot;
-                    let value = self.stack.last().expect("stack underflow").clone();
+                    let value = self.stack.pop().expect("stack underflow");
                     let mut cell = frame.closure.upvalues[slot].borrow_mut();
                     match &mut *cell {
                         UpvalueCell::Open(stack_slot) => self.stack[*stack_slot] = value,
@@ -1020,23 +1020,20 @@ impl CallFrame {
 }
 
 /// A callable VM function bound to the parent VM, for use in VmNative HOF
-/// implementations. Produced by the `&VmCallable` input-type handler in
+/// implementations. Produced by the `&mut VmCallable` input-type handler in
 /// `ndc_macros::vm_convert`.
 ///
 /// Calling `call()` runs the function inline on the parent VM via
-/// `Vm::call_callback` — no child VM is allocated. `RefCell` gives interior
-/// mutability so `call(&self)` works without changing any HOF signatures.
+/// `Vm::call_callback` — no child VM is allocated.
 pub struct VmCallable<'a> {
     pub function: Function,
-    pub vm: RefCell<&'a mut Vm>,
+    pub vm: &'a mut Vm,
 }
 
 impl VmCallable<'_> {
     /// Call this function with the given arguments, running inline on the
     /// parent VM.
-    pub fn call(&self, args: Vec<Value>) -> Result<Value, VmError> {
-        self.vm
-            .borrow_mut()
-            .call_callback(self.function.clone(), args)
+    pub fn call(&mut self, args: Vec<Value>) -> Result<Value, VmError> {
+        self.vm.call_callback(self.function.clone(), args)
     }
 }

@@ -147,7 +147,7 @@ mod inner {
     /// Returns the element for which the key function returns the highest value.
     pub fn max_by_key(
         seq: ndc_vm::value::SeqValue,
-        func: &VmCallable<'_>,
+        func: &mut VmCallable<'_>,
     ) -> anyhow::Result<ndc_vm::value::Value> {
         by_key(seq, func, Ordering::Greater)
     }
@@ -155,7 +155,7 @@ mod inner {
     /// Returns the element for which the key function returns the lowest value.
     pub fn min_by_key(
         seq: ndc_vm::value::SeqValue,
-        func: &VmCallable<'_>,
+        func: &mut VmCallable<'_>,
     ) -> anyhow::Result<ndc_vm::value::Value> {
         by_key(seq, func, Ordering::Less)
     }
@@ -167,7 +167,7 @@ mod inner {
     /// less than the second, and zero means they are equal.
     pub fn max_by(
         seq: ndc_vm::value::SeqValue,
-        comp: &VmCallable<'_>,
+        comp: &mut VmCallable<'_>,
     ) -> anyhow::Result<ndc_vm::value::Value> {
         by_comp(seq, comp, Ordering::Greater)
     }
@@ -179,7 +179,7 @@ mod inner {
     /// less than the second, and zero means they are equal.
     pub fn min_by(
         seq: ndc_vm::value::SeqValue,
-        comp: &VmCallable<'_>,
+        comp: &mut VmCallable<'_>,
     ) -> anyhow::Result<ndc_vm::value::Value> {
         by_comp(seq, comp, Ordering::Less)
     }
@@ -245,7 +245,7 @@ mod inner {
     #[function(return_type = ())]
     pub fn sort_by(
         list: &mut Vec<ndc_vm::value::Value>,
-        comp: &VmCallable<'_>,
+        comp: &mut VmCallable<'_>,
     ) -> anyhow::Result<()> {
         let mut err: Option<String> = None;
         list.sort_by(|left, right| {
@@ -293,7 +293,7 @@ mod inner {
     /// - for values equal to `0` the first argument is equal to the second argument
     pub fn sorted_by(
         seq: ndc_vm::value::SeqValue,
-        comp: &VmCallable<'_>,
+        comp: &mut VmCallable<'_>,
     ) -> anyhow::Result<ndc_vm::value::Value> {
         let mut list: Vec<VmValue> = seq
             .try_into_iter()
@@ -365,7 +365,7 @@ mod inner {
     pub fn fold(
         seq: ndc_vm::value::SeqValue,
         initial: ndc_vm::value::Value,
-        function: &VmCallable<'_>,
+        function: &mut VmCallable<'_>,
     ) -> anyhow::Result<ndc_vm::value::Value> {
         fold_iterator(
             seq.try_into_iter()
@@ -378,7 +378,7 @@ mod inner {
     /// Reduces/folds the given sequence using the given combining function.
     pub fn reduce(
         seq: ndc_vm::value::SeqValue,
-        function: &VmCallable<'_>,
+        function: &mut VmCallable<'_>,
     ) -> anyhow::Result<ndc_vm::value::Value> {
         let mut iterator = seq
             .try_into_iter()
@@ -392,7 +392,7 @@ mod inner {
     /// Filters the given sequence using the `predicate`.
     pub fn filter(
         seq: ndc_vm::value::SeqValue,
-        predicate: &VmCallable<'_>,
+        predicate: &mut VmCallable<'_>,
     ) -> anyhow::Result<ndc_vm::value::Value> {
         let mut out = Vec::new();
         for element in seq
@@ -414,7 +414,7 @@ mod inner {
     /// Returns the number of elements in the input sequence for which the given `predicate` returns `true`.
     pub fn count(
         seq: ndc_vm::value::SeqValue,
-        predicate: &VmCallable<'_>,
+        predicate: &mut VmCallable<'_>,
     ) -> anyhow::Result<ndc_vm::value::Value> {
         let mut out = 0i64;
         for element in seq
@@ -433,7 +433,7 @@ mod inner {
     /// Returns the value of the first element for which the `predicate` is true for the given input sequence.
     pub fn find(
         seq: ndc_vm::value::SeqValue,
-        predicate: &VmCallable<'_>,
+        predicate: &mut VmCallable<'_>,
     ) -> anyhow::Result<ndc_vm::value::Value> {
         for element in seq
             .try_into_iter()
@@ -454,7 +454,7 @@ mod inner {
     /// Returns the first index of the element for which the `predicate` is true in the input sequence.
     pub fn locate(
         seq: ndc_vm::value::SeqValue,
-        predicate: &VmCallable<'_>,
+        predicate: &mut VmCallable<'_>,
     ) -> anyhow::Result<ndc_vm::value::Value> {
         for (idx, element) in seq
             .try_into_iter()
@@ -491,7 +491,7 @@ mod inner {
     /// Returns `true` if the `predicate` is true for none of the elements in `seq`.
     pub fn none(
         seq: ndc_vm::value::SeqValue,
-        function: &VmCallable<'_>,
+        function: &mut VmCallable<'_>,
     ) -> anyhow::Result<ndc_vm::value::Value> {
         for item in seq
             .try_into_iter()
@@ -514,7 +514,7 @@ mod inner {
     /// Returns `true` if the `predicate` is true for all the elements in `seq`.
     pub fn all(
         seq: ndc_vm::value::SeqValue,
-        function: &VmCallable<'_>,
+        function: &mut VmCallable<'_>,
     ) -> anyhow::Result<ndc_vm::value::Value> {
         for item in seq
             .try_into_iter()
@@ -537,7 +537,7 @@ mod inner {
     /// Returns `true` if the `predicate` is true for any of the elements in `seq`.
     pub fn any(
         seq: ndc_vm::value::SeqValue,
-        predicate: &VmCallable<'_>,
+        predicate: &mut VmCallable<'_>,
     ) -> anyhow::Result<ndc_vm::value::Value> {
         for item in seq
             .try_into_iter()
@@ -560,7 +560,7 @@ mod inner {
     /// Applies the function to each element in a sequence returning the result as a list.
     pub fn map(
         seq: ndc_vm::value::SeqValue,
-        function: &VmCallable<'_>,
+        function: &mut VmCallable<'_>,
     ) -> anyhow::Result<ndc_vm::value::Value> {
         let mut out = Vec::new();
         for item in seq
@@ -575,7 +575,7 @@ mod inner {
     /// Applies a function to each item in a sequence, flattens the resulting sequences, and returns a single combined sequence.
     pub fn flat_map(
         seq: ndc_vm::value::SeqValue,
-        function: &VmCallable<'_>,
+        function: &mut VmCallable<'_>,
     ) -> anyhow::Result<ndc_vm::value::Value> {
         let mut out = Vec::new();
         for item in seq
@@ -604,7 +604,7 @@ mod inner {
     /// Returns the first element of the sequence or the return value of the given function.
     pub fn first_or_else(
         seq: ndc_vm::value::SeqValue,
-        default: &VmCallable<'_>,
+        default: &mut VmCallable<'_>,
     ) -> anyhow::Result<ndc_vm::value::Value> {
         if let Some(item) = seq.try_into_iter().and_then(|mut i| i.next()) {
             return Ok(item);
@@ -750,7 +750,7 @@ mod inner {
     #[function(name = "pairwise")]
     pub fn pairwise_map(
         seq: ndc_vm::value::SeqValue,
-        function: &VmCallable<'_>,
+        function: &mut VmCallable<'_>,
     ) -> anyhow::Result<ndc_vm::value::Value> {
         let main: Vec<VmValue> = seq
             .try_into_iter()
@@ -893,7 +893,7 @@ mod inner {
     }
 }
 
-fn by_key(seq: VmValue, func: &VmCallable<'_>, better: Ordering) -> anyhow::Result<VmValue> {
+fn by_key(seq: VmValue, func: &mut VmCallable<'_>, better: Ordering) -> anyhow::Result<VmValue> {
     let mut best_value: Option<VmValue> = None;
     let mut best_key: Option<VmValue> = None;
     for value in seq
@@ -918,7 +918,7 @@ fn by_key(seq: VmValue, func: &VmCallable<'_>, better: Ordering) -> anyhow::Resu
     best_value.ok_or_else(|| anyhow!("sequence was empty"))
 }
 
-fn by_comp(seq: VmValue, comp: &VmCallable<'_>, better: Ordering) -> anyhow::Result<VmValue> {
+fn by_comp(seq: VmValue, comp: &mut VmCallable<'_>, better: Ordering) -> anyhow::Result<VmValue> {
     let mut best: Option<VmValue> = None;
     for value in seq
         .try_into_iter()
@@ -943,7 +943,7 @@ fn by_comp(seq: VmValue, comp: &VmCallable<'_>, better: Ordering) -> anyhow::Res
 fn fold_iterator(
     iter: impl Iterator<Item = VmValue>,
     initial: VmValue,
-    function: &VmCallable<'_>,
+    function: &mut VmCallable<'_>,
 ) -> anyhow::Result<VmValue> {
     let mut acc = initial;
     for item in iter {
