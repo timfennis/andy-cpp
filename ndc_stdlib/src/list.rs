@@ -217,7 +217,7 @@ pub mod ops {
     fn register_list_concat(env: &mut FunctionRegistry<Rc<VmNativeFunction>>) {
         let native = Rc::new(VmNativeFunction {
             name: "++".to_string(),
-            documentation: None, // TODO figure out how to get the docs in here
+            documentation: None,
             static_type: StaticType::Function {
                 parameters: Some(vec![
                     StaticType::List(Box::new(StaticType::Any)),
@@ -279,7 +279,7 @@ pub mod ops {
     fn register_list_append(env: &mut FunctionRegistry<Rc<VmNativeFunction>>) {
         let native = Rc::new(VmNativeFunction {
             name: "++=".to_string(),
-            documentation: None, // TODO figure out how to get the docs in here
+            documentation: None,
             static_type: StaticType::Function {
                 parameters: Some(vec![
                     StaticType::List(Box::new(StaticType::Any)),

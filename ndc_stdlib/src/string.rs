@@ -103,7 +103,6 @@ mod inner {
         string.push_str(value);
     }
 
-    // TODO: should we optimize something here?
     #[function(name = "++")]
     pub fn concat(left: &str, right: &str) -> String {
         format!("{left}{right}")

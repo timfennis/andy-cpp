@@ -96,7 +96,6 @@ impl Scope {
                 let Some(param_types) = parameters else {
                     // If this branch happens then the function we're matching against is variadic meaning it's always a match
                     debug_assert!(false, "we should never be calling find_function_candidates if there were variadic matches");
-                    // TODO: Change to unreachable?
                     return Some(slot);
                 };
 

@@ -173,7 +173,7 @@ pub mod f64 {
             ($operator:literal,$method:expr) => {
                 env.declare_global_fn(Rc::new(VmNativeFunction {
                     name: $operator.to_string(),
-                    documentation: None, // TODO figure out how to get the docs in here
+                    documentation: None,
                     static_type: StaticType::Function {
                         parameters: Some(vec![StaticType::Number, StaticType::Number]),
                         return_type: Box::new(StaticType::Number),
@@ -216,7 +216,7 @@ pub mod f64 {
 
         env.declare_global_fn(Rc::new(VmNativeFunction {
             name: "-".to_string(),
-            documentation: None, // TODO figure out how to get the docs in here
+            documentation: None,
             static_type: StaticType::Function {
                 parameters: Some(vec![StaticType::Number]),
                 return_type: Box::new(StaticType::Number),
@@ -240,7 +240,7 @@ pub mod f64 {
             ($operator:literal,$expected:pat) => {
                 env.declare_global_fn(Rc::new(VmNativeFunction {
                     name: $operator.to_string(),
-                    documentation: None, // TODO figure out how to get the docs in here
+                    documentation: None,
                     static_type: StaticType::Function {
                         parameters: Some(vec![StaticType::Any, StaticType::Any]),
                         return_type: Box::new(StaticType::Bool),
@@ -271,7 +271,7 @@ pub mod f64 {
 
         env.declare_global_fn(Rc::new(VmNativeFunction {
             name: "==".to_string(),
-            documentation: None, // TODO figure out how to get the docs in here
+            documentation: None,
             static_type: StaticType::Function {
                 parameters: Some(vec![StaticType::Any, StaticType::Any]),
                 return_type: Box::new(StaticType::Bool),
@@ -287,7 +287,7 @@ pub mod f64 {
 
         env.declare_global_fn(Rc::new(VmNativeFunction {
             name: "!=".to_string(),
-            documentation: None, // TODO figure out how to get the docs in here
+            documentation: None,
             static_type: StaticType::Function {
                 parameters: Some(vec![StaticType::Any, StaticType::Any]),
                 return_type: Box::new(StaticType::Bool),
@@ -303,7 +303,7 @@ pub mod f64 {
 
         env.declare_global_fn(Rc::new(VmNativeFunction {
             name: "<=>".to_string(),
-            documentation: None, // TODO: add actual docs
+            documentation: None,
             static_type: StaticType::Function {
                 parameters: Some(vec![StaticType::Any, StaticType::Any]),
                 return_type: Box::new(StaticType::Int),
@@ -328,7 +328,7 @@ pub mod f64 {
 
         env.declare_global_fn(Rc::new(VmNativeFunction {
             name: ">=<".to_string(),
-            documentation: None, // TODO figure out how to get the docs in here
+            documentation: None,
             static_type: StaticType::Function {
                 parameters: Some(vec![StaticType::Any, StaticType::Any]),
                 return_type: Box::new(StaticType::Int),
@@ -355,7 +355,7 @@ pub mod f64 {
             ($operator:literal,$operation:expr) => {
                 env.declare_global_fn(Rc::new(VmNativeFunction {
                     name: $operator.to_string(),
-                    documentation: None, // TODO figure out how to get the docs in here
+                    documentation: None,
                     static_type: StaticType::Function {
                         parameters: Some(vec![StaticType::Bool, StaticType::Bool]),
                         return_type: Box::new(StaticType::Bool),
@@ -372,7 +372,7 @@ pub mod f64 {
                 }));
                 env.declare_global_fn(Rc::new(VmNativeFunction {
                     name: $operator.to_string(),
-                    documentation: None, // TODO figure out how to get the docs in here
+                    documentation: None,
                     static_type: StaticType::Function {
                         parameters: Some(vec![StaticType::Int, StaticType::Int]),
                         return_type: Box::new(StaticType::Int),
@@ -405,7 +405,7 @@ pub mod f64 {
 
         env.declare_global_fn(Rc::new(VmNativeFunction {
             name: "~".to_string(),
-            documentation: None, // TODO figure out how to get the docs in here
+            documentation: None,
             static_type: StaticType::Function {
                 parameters: Some(vec![StaticType::Number]),
                 return_type: Box::new(StaticType::Number),
@@ -428,7 +428,7 @@ pub mod f64 {
         for ident in ["!", "not"] {
             env.declare_global_fn(Rc::new(VmNativeFunction {
                 name: ident.to_string(),
-                documentation: None, // TODO figure out how to get the docs in here
+                documentation: None,
                 static_type: StaticType::Function {
                     parameters: Some(vec![StaticType::Bool]),
                     return_type: Box::new(StaticType::Bool),
@@ -445,7 +445,7 @@ pub mod f64 {
 
         env.declare_global_fn(Rc::new(VmNativeFunction {
             name: ">>".to_string(),
-            documentation: None, // TODO figure out how to get the docs in here
+            documentation: None,
             static_type: StaticType::Function {
                 parameters: Some(vec![StaticType::Int, StaticType::Int]),
                 return_type: Box::new(StaticType::Int),
@@ -471,7 +471,7 @@ pub mod f64 {
 
         env.declare_global_fn(Rc::new(VmNativeFunction {
             name: "<<".to_string(),
-            documentation: None, // TODO figure out how to get the docs in here
+            documentation: None,
             static_type: StaticType::Function {
                 parameters: Some(vec![StaticType::Int, StaticType::Int]),
                 return_type: Box::new(StaticType::Int),
@@ -499,7 +499,7 @@ pub mod f64 {
             ($method:ident,$docs:literal) => {
                 env.declare_global_fn(Rc::new(VmNativeFunction {
                     name: stringify!($method).to_string(),
-                    documentation: None, // TODO figure out how to get the docs in here
+                    documentation: None,
                     static_type: StaticType::Function {
                         parameters: Some(vec![StaticType::Number]),
                         return_type: Box::new(StaticType::Number),

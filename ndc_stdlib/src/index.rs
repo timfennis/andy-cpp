@@ -7,7 +7,7 @@ use std::rc::Rc;
 pub fn register(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     let get_native = Rc::new(NativeFunction {
         name: "[]".to_string(),
-        documentation: None, // TODO figure out how to get the docs in here
+        documentation: None,
         static_type: StaticType::Function {
             parameters: None,
             return_type: Box::new(StaticType::Any),
@@ -26,7 +26,7 @@ pub fn register(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
 
     let set_native = Rc::new(NativeFunction {
         name: "[]=".to_string(),
-        documentation: None, // TODO figure out how to get the docs in here
+        documentation: None,
         static_type: StaticType::Function {
             parameters: None,
             return_type: Box::new(StaticType::Any),

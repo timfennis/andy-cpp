@@ -39,7 +39,6 @@ impl Analyser {
                 resolved,
             } => {
                 if ident == "None" {
-                    // TODO: we're going to need something like HM to infer the type of option here, maybe force type annotations?
                     return Ok(StaticType::Option(Box::new(StaticType::Any)));
                 }
                 let binding = self.scope_tree.get_binding_any(ident).ok_or_else(|| {
@@ -55,15 +54,15 @@ impl Analyser {
                 Ok(StaticType::unit())
             }
             Expression::Logical { left, right, .. } => {
-                self.analyse(left)?; // TODO: throw error if type does not match bool?
-                self.analyse(right)?; // TODO: throw error if type does not match bool?
+                self.analyse(left)?;
+                self.analyse(right)?;
                 Ok(StaticType::Bool)
             }
             Expression::Grouping(expr) => self.analyse(expr),
             Expression::VariableDeclaration { l_value, value } => {
                 let typ = self.analyse(value)?;
                 self.resolve_lvalue_declarative(l_value, typ, *span)?;
-                Ok(StaticType::unit()) // TODO: never type here?
+                Ok(StaticType::unit())
             }
             Expression::Assignment { l_value, r_value } => {
                 self.resolve_lvalue(l_value, *span)?;
@@ -138,8 +137,6 @@ impl Analyser {
                 };
 
                 if let Some(slot) = pre_slot {
-                    // TODO: is this correct, for now we just always create a new binding, we could
-                    //       also produce an error if we are generating a conflicting binding
                     self.scope_tree
                         .update_binding_type(slot, function_type.clone());
                     *resolved_name = Some(slot);
@@ -170,13 +167,9 @@ impl Analyser {
                     StaticType::unit()
                 };
 
-                if true_type != StaticType::unit() {
-                    // TODO: Emit warning for not using a semicolon in this if
-                }
+                if true_type != StaticType::unit() {}
 
-                if true_type != false_type {
-                    // TODO maybe show warning?
-                }
+                if true_type != false_type {}
 
                 Ok(true_type.lub(&false_type))
             }
@@ -222,7 +215,6 @@ impl Analyser {
             Expression::List { values } => {
                 let element_type = self.analyse_multiple_expression_with_same_type(values)?;
 
-                // TODO: for now if we encounter an empty list expression we say the list is generic over Any but this clearly is not a good solution
                 Ok(StaticType::List(Box::new(
                     element_type.unwrap_or(StaticType::Any),
                 )))
@@ -257,7 +249,6 @@ impl Analyser {
                     self.analyse(default)?;
                 }
 
-                // TODO: defaulting to Any here is surely going to bite us later
                 Ok(StaticType::Map {
                     key: Box::new(key_type.unwrap_or(StaticType::Any)),
                     value: Box::new(value_type.unwrap_or_else(StaticType::unit)),
@@ -311,7 +302,6 @@ impl Analyser {
             }
             Binding::Resolved(res) => self.scope_tree.get_type(*res).clone(),
 
-            // TODO: are we just going to lie about the type or is this just how truthful we can be
             Binding::Dynamic(_) => StaticType::Function {
                 parameters: None,
                 return_type: Box::new(StaticType::Any),
@@ -339,7 +329,6 @@ impl Analyser {
 
                 self.scope_tree.new_iteration_scope();
 
-                // TODO: when we give type parameters to all instances of sequence we can correctly infer StaticType::Any in this position
                 self.resolve_lvalue_declarative(
                     l_value,
                     sequence_type
@@ -500,8 +489,6 @@ impl Analyser {
         let mut seen_names: Vec<&str> = Vec::new();
 
         for param in parameters {
-            // TODO: big challenge how do we figure out the function parameter types?
-            //       it seems like this is something we need an HM like system for!?
             let resolved_type = StaticType::Any;
             types.push(resolved_type.clone());
             if seen_names.contains(&param.name.as_str()) {

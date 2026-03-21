@@ -8,7 +8,6 @@ mod inner {
     /// Returns the documentation as a string for a given function in Andy C++.
     ///
     /// This function takes a function as its argument and returns a string containing its documentation.
-    // TODO: @Claude let's fix this later
     // pub fn docs(func: &Callable<'_>) -> anyhow::Result<String> {
     //     let mut buf = String::new();
     //
