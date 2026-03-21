@@ -1124,6 +1124,7 @@ dependencies = [
 name = "ndc_bin"
 version = "0.3.0"
 dependencies = [
+ "ahash",
  "anyhow",
  "clap",
  "codespan-reporting",
@@ -1132,6 +1133,7 @@ dependencies = [
  "ndc_interpreter",
  "ndc_lexer",
  "ndc_lsp",
+ "ndc_parser",
  "ndc_stdlib",
  "rustyline",
  "strsim",

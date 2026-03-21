@@ -143,7 +143,7 @@ fn main() -> anyhow::Result<()> {
         Action::HighlightFile(path) => {
             let string = fs::read_to_string(path)?;
 
-            let out = AndycppHighlighter::highlight_line(&string);
+            let out = AndycppHighlighter::highlight_parsed(&string);
             for styled in out {
                 print!("{}", styled);
             }
