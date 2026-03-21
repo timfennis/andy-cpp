@@ -1,0 +1,2 @@
+// expect-error: Unable to invoke List<Int> as a function.
+[1, 2, 3]()

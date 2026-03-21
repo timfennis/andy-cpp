@@ -734,10 +734,10 @@ impl Vm {
                     let start = self.stack.len() - args;
                     Ok(self.find_overload(candidates, &self.stack[start..]))
                 }
-                obj => panic!(
-                    "callee is unexpected object type: {:?}",
-                    std::mem::discriminant(obj)
-                ),
+                obj => Err(format!(
+                    "Unable to invoke {} as a function.",
+                    obj.static_type()
+                )),
             },
             callee => Err(format!(
                 "Unable to invoke {} as a function.",

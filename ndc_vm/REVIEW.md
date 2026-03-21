@@ -171,7 +171,7 @@ still live. If another closure in that frame shares the same cell, subsequent
 
 ---
 
-### B6 — `resolve_callee` panics on unexpected `Object` variants
+### ~~B6 — `resolve_callee` panics on unexpected `Object` variants~~ ✅ Fixed
 **File:** `vm.rs:766` | **Axes:** Bug
 
 ```rust
