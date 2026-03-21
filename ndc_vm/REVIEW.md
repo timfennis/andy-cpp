@@ -153,7 +153,7 @@ opcode that the analyser failed to reject). Should return `VmError` instead.
 
 ---
 
-### B4 — `UnboundedRangeIter` wraps silently at `i64::MAX`
+### ~~B4 — `UnboundedRangeIter` wraps silently at `i64::MAX`~~ ✅ Fixed
 **File:** `iterator.rs:149` | **Axes:** Bug
 
 `self.current += 1` overflows in release builds, silently producing negative values.
