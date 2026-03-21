@@ -42,9 +42,9 @@ assert_eq(10, my_function(10));
 assert_eq(15, my_function(5));
 assert_eq([10, 5], x);
 ```
-## Function overload
+## Function overloading
 
-Functions can be overloaded, allowing multiple definitions with different parameter counts ~or types~.
+Functions can be overloaded by declaring multiple `fn` definitions with the same name but different parameter counts.
 
 ```ndc
 fn add(n) { n + 1 };
@@ -54,9 +54,43 @@ assert_eq(10, add(9));
 assert_eq(12, add(8, 4));
 ```
 
+Declaring two `fn` definitions with the same name **and** the same number of parameters in the same scope is an error:
+
+```ndc
+fn foo(a) { a + 1 }
+fn foo(a) { a + 2 } // ERROR: redefinition of 'foo' with 1 parameter
+```
+
 > **Note:** The engine also supports overloading functions based on their argument types, and the standard
 > library takes advantage of this feature in some cases. However, the current syntax of the language does
 > not allow users to specify argument types, so this capability is not yet available for custom functions.
+
+## Function shadowing
+
+A `fn` declaration in a nested scope shadows only the overload with the same parameter count from outer scopes. Other overloads remain accessible:
+
+```ndc
+fn foo(a) { "outer-one" }
+fn foo(a, b) { "outer-two" }
+
+{
+    fn foo(a) { "inner-one" }
+    foo("x");        // "inner-one" — inner 1-arg shadows outer 1-arg
+    foo("x", "y");   // "outer-two" — outer 2-arg still reachable
+}
+
+foo("x");  // "outer-one" — shadow is gone after the block
+```
+
+A `let` binding completely replaces all previous bindings with the same name — it does not participate in function overloading:
+
+```ndc
+fn foo(a) { "one" }
+fn foo(a, b) { "two" }
+
+let foo = fn(a) => "let";
+foo("x");      // "let" — both fn overloads are shadowed
+```
 
 ## Anonymous functions
 

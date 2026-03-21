@@ -1,0 +1,15 @@
+// Multiple levels of nesting: each scope adds an overload of a different arity.
+// All arities should be reachable from the innermost scope.
+fn foo() { "zero" }
+{
+    fn foo(a) { "one" }
+    {
+        fn foo(a, b) { "two" }
+        assert_eq(foo(), "zero");
+        assert_eq(foo(1), "one");
+        assert_eq(foo(1, 2), "two");
+    }
+    assert_eq(foo(), "zero");
+    assert_eq(foo(1), "one");
+}
+assert_eq(foo(), "zero");

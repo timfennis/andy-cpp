@@ -1,0 +1,8 @@
+// A let binding completely shadows all fn overloads with the same name.
+fn foo(a) { "one" }
+fn foo(a, b) { "two" }
+
+let foo = fn(a) => "let:" ++ a;
+
+// Both arity-1 and arity-2 overloads are gone; only the let binding remains.
+assert_eq(foo("x"), "let:x");

@@ -107,6 +107,11 @@ impl Analyser {
                 // Pre-register the function before analysing its body so recursive calls can
                 // resolve the name. The return type is unknown at this point so we use Any.
                 let pre_slot = if let Some(name) = name {
+                    let arity = type_signature.types().map(|t| t.len());
+                    if self.scope_tree.has_function_in_current_scope(name, arity) {
+                        return Err(AnalysisError::function_redefinition(name, arity, *span));
+                    }
+
                     let placeholder = StaticType::Function {
                         parameters: type_signature.types(),
                         return_type: Box::new(StaticType::Any),
@@ -250,6 +255,7 @@ impl Analyser {
             }
         }
     }
+
     fn resolve_function_with_argument_types(
         &mut self,
         ident: &mut ExpressionLocation,
@@ -290,6 +296,7 @@ impl Analyser {
 
         Ok(out_type)
     }
+
     fn resolve_for_iterations(
         &mut self,
         iterations: &mut [ForIteration],
@@ -527,6 +534,19 @@ impl AnalysisError {
     pub fn span(&self) -> Span {
         self.span
     }
+    fn function_redefinition(name: &str, arity: Option<usize>, span: Span) -> Self {
+        let arity_desc = match arity {
+            Some(n) => format!("{n} parameter{}", if n == 1 { "" } else { "s" }),
+            None => "variadic parameters".to_string(),
+        };
+        Self {
+            text: format!(
+                "Illegal redefinition of function '{name}' with {arity_desc} in the same scope"
+            ),
+            span,
+        }
+    }
+
     fn parameter_redefined(param: &str, span: Span) -> Self {
         Self {
             text: format!("Illegal redefinition of parameter {param}"),

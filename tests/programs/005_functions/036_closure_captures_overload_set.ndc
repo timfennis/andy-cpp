@@ -1,0 +1,14 @@
+// A closure defined in a scope with multiple arity overloads should
+// capture all of them, not just one.
+fn foo(a) { "one" }
+fn foo(a, b) { "two" }
+
+fn make_callers() {
+    let one = fn() => foo(1);
+    let two = fn() => foo(1, 2);
+    (one, two)
+}
+
+let (one, two) = make_callers();
+assert_eq(one(), "one");
+assert_eq(two(), "two");

@@ -107,6 +107,28 @@ impl Scope {
             .map(|idx| idx + self.base_offset)
     }
 
+    /// Check if this scope already contains a function with the given name and arity.
+    fn has_function_with_arity(&self, name: &str, arity: Option<usize>) -> bool {
+        self.identifiers.iter().any(|(ident, typ)| {
+            if ident != name {
+                return false;
+            }
+            match typ {
+                StaticType::Function {
+                    parameters: Some(params),
+                    ..
+                } => match arity {
+                    Some(a) => params.len() == a,
+                    None => false,
+                },
+                StaticType::Function {
+                    parameters: None, ..
+                } => arity.is_none(),
+                _ => false,
+            }
+        })
+    }
+
     fn allocate(&mut self, name: String, typ: StaticType) -> usize {
         self.identifiers.push((name, typ));
         // Slot is just the length of the list minus one
@@ -114,7 +136,13 @@ impl Scope {
     }
 
     fn add_upvalue(&mut self, name: &str, source: CaptureSource) -> usize {
-        if let Some(idx) = self.upvalues.iter().position(|(n, _)| n == name) {
+        // Deduplicate by name AND source so that multiple overloads of the same
+        // function name can each have their own upvalue entry.
+        if let Some(idx) = self
+            .upvalues
+            .iter()
+            .position(|(n, s)| n == name && *s == source)
+        {
             return idx;
         }
 
@@ -124,6 +152,14 @@ impl Scope {
 
     fn find_upvalue(&self, name: &str) -> Option<usize> {
         self.upvalues.iter().position(|(n, _)| n == name)
+    }
+
+    fn find_upvalues_by_name(&self, name: &str) -> Vec<usize> {
+        self.upvalues
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, (n, _))| if n == name { Some(idx) } else { None })
+            .collect()
     }
 }
 
@@ -277,12 +313,12 @@ impl ScopeTree {
 
     /// Resolve a function call binding in a single scope-chain walk.
     ///
-    /// Combines what were previously three separate walks (`resolve_function`,
-    /// `resolve_function_dynamic`, `get_all_bindings_by_name`) into one pass.
     /// At each scope the priorities are:
-    ///   1. Exact type match or upvalue → return `Binding::Resolved` immediately
-    ///   2. Compatible-type candidates → remember first set found (for `Binding::Dynamic`)
-    ///   3. All same-named bindings → accumulate as last-resort fallback
+    ///   1. Exact type match on a local → return `Binding::Resolved` immediately
+    ///   2. Upvalues with matching name → added to candidates (not early-returned,
+    ///      because a different overload may be an exact match in an outer scope)
+    ///   3. Compatible-type candidates → remember first set found (for `Binding::Dynamic`)
+    ///   4. All same-named bindings → accumulate as last-resort fallback
     pub(crate) fn resolve_function_binding(&mut self, ident: &str, sig: &[StaticType]) -> Binding {
         let mut scope_ptr = self.current_scope_idx;
         let mut env_scopes: Vec<usize> = Vec::default();
@@ -290,16 +326,16 @@ impl ScopeTree {
         let mut all_by_name: Vec<ResolvedVar> = Vec::new();
 
         loop {
-            // 1. Exact match → return immediately
+            // 1. Exact match on a local → return immediately
             if let Some(slot) = self.scopes[scope_ptr].find_function(ident, sig) {
                 return Binding::Resolved(self.resolve_found_local(ident, slot, &env_scopes));
             }
 
-            // 2. Upvalue with matching name → return immediately
-            //    (matches prior behavior where resolve_function returned upvalues
-            //    without type-checking; the correctness issue is tracked separately)
-            if let Some(slot) = self.scopes[scope_ptr].find_upvalue(ident) {
-                return Binding::Resolved(self.resolve_found_upvalue(ident, slot, &env_scopes));
+            // 2. Upvalues with matching name — collect as candidates but continue
+            //    walking, because the upvalue may be a different overload (e.g.
+            //    different arity) and the exact match could be in a parent scope.
+            for uv_slot in self.scopes[scope_ptr].find_upvalues_by_name(ident) {
+                all_by_name.push(self.resolve_found_upvalue(ident, uv_slot, &env_scopes));
             }
 
             // 3. Compatible candidates (keep only the first scope's matches — shadowing)
@@ -371,6 +407,12 @@ impl ScopeTree {
         ResolvedVar::Local {
             slot: self.scopes[self.current_scope_idx].allocate(ident, typ),
         }
+    }
+
+    /// Check whether the current scope already has a `fn` declaration with
+    /// the given name and arity. Used to detect illegal same-scope redefinitions.
+    pub(crate) fn has_function_in_current_scope(&self, name: &str, arity: Option<usize>) -> bool {
+        self.scopes[self.current_scope_idx].has_function_with_arity(name, arity)
     }
 
     /// Reserve a slot in the current scope without creating a named binding.

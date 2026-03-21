@@ -1,0 +1,10 @@
+// Both arity overloads should be accessible through a closure boundary.
+fn foo(a) { "one:" ++ a }
+fn foo(a, b) { "two:" ++ a ++ "," ++ b }
+
+fn call_both() {
+    assert_eq(foo("x"), "one:x");
+    assert_eq(foo("x", "y"), "two:x,y");
+}
+
+call_both();

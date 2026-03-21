@@ -1,0 +1,6 @@
+// A second let binding fully shadows the first, no overloading.
+let foo = fn(a) => "first:" ++ a;
+let foo = fn(a, b) => "second:" ++ a ++ "," ++ b;
+
+// Only the 2-arg version exists now.
+assert_eq(foo("x", "y"), "second:x,y");
