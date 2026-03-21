@@ -73,7 +73,7 @@ impl Vm {
             frames: vec![CallFrame {
                 closure: ClosureFunction {
                     prototype: Rc::new(function),
-                    upvalues: vec![],
+                    upvalues: Vec::new(),
                 },
                 ip: 0,
                 frame_pointer: 0,
@@ -168,7 +168,9 @@ impl Vm {
                     if let Some((cache, key)) = &frame.memo {
                         cache.borrow_mut().insert(*key, ret.clone());
                     }
-                    self.close_upvalues(frame_pointer);
+                    if !self.open_upvalues.is_empty() {
+                        self.close_upvalues(frame_pointer);
+                    }
                     if frame_pointer == 0 {
                         return Err(VmError::new("Return at top level", span));
                     }
@@ -608,7 +610,7 @@ impl Vm {
             Function::Closure(c) => c,
             Function::Compiled(f) => ClosureFunction {
                 prototype: f,
-                upvalues: vec![],
+                upvalues: Vec::new(),
             },
             Function::Memoized { .. } => {
                 // Already unwrapped in dispatch_call; this branch is unreachable.
@@ -714,7 +716,7 @@ impl Vm {
         self.frames = vec![CallFrame {
             closure: ClosureFunction {
                 prototype: Rc::new(function),
-                upvalues: vec![],
+                upvalues: Vec::new(),
             },
             ip: resume_ip,
             frame_pointer: 0,
