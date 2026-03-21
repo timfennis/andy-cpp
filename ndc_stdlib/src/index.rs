@@ -199,8 +199,8 @@ enum VmOffset {
 }
 
 fn extract_vm_offset(index_value: &Value, size: usize) -> Result<VmOffset, VmError> {
-    if let Value::Object(obj) = index_value {
-        if let Object::Iterator(iter) = obj.as_ref() {
+    if let Value::Object(obj) = index_value
+        && let Object::Iterator(iter) = obj.as_ref() {
             let iter_ref = iter.borrow();
             if let Some((start, end, inclusive)) = iter_ref.range_bounds() {
                 let from_idx = to_forward_index(start, size, true)?;
@@ -218,7 +218,6 @@ fn extract_vm_offset(index_value: &Value, size: usize) -> Result<VmOffset, VmErr
             }
             return Err(VmError::native("cannot use non-range iterator as index"));
         }
-    }
     let i = match index_value {
         Value::Int(i) => *i,
         Value::Object(obj) => match obj.as_ref() {

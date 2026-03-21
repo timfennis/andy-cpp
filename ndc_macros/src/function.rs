@@ -105,7 +105,7 @@ fn map_type(ty: &syn::Type) -> syn::Result<TokenStream> {
         syn::Type::Infer(_) => Ok(quote! { ndc_core::StaticType::Any }),
         _ => Err(syn::Error::new_spanned(
             ty,
-            format!("cannot map type to StaticType"),
+            "cannot map type to StaticType".to_string(),
         )),
     }
 }
@@ -329,18 +329,18 @@ fn wrap_single(
     })
 }
 
-/// Tokens emitted by `try_generate_vm_native` when vm_native is possible.
+/// Tokens emitted by `try_generate_vm_native` when `vm_native` is possible.
 #[allow(dead_code)]
 struct VmNativeTokens {
     /// `let native: Rc<NativeFunction> = Rc::new(NativeFunction { ... });`
     native_let: TokenStream,
-    /// StaticType expressions for each parameter
+    /// `StaticType` expressions for each parameter
     param_types: Vec<TokenStream>,
     /// Parameter name strings
     param_names: Vec<TokenStream>,
 }
 
-/// Attempt to generate vm_native tokens for a function.
+/// Attempt to generate `vm_native` tokens for a function.
 ///
 /// Returns `None` when any parameter or the return type cannot be expressed in
 /// VM-native terms.

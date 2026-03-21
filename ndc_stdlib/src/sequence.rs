@@ -205,16 +205,13 @@ mod inner {
     #[function(return_type = ())]
     pub fn sort(list: &mut Vec<Value>) -> anyhow::Result<()> {
         let mut err: Option<String> = None;
-        list.sort_by(|a, b| match a.partial_cmp(b) {
-            Some(ord) => ord,
-            None => {
-                err = Some(format!(
-                    "cannot compare {} and {}",
-                    a.static_type(),
-                    b.static_type()
-                ));
-                Ordering::Equal
-            }
+        list.sort_by(|a, b| if let Some(ord) = a.partial_cmp(b) { ord } else {
+            err = Some(format!(
+                "cannot compare {} and {}",
+                a.static_type(),
+                b.static_type()
+            ));
+            Ordering::Equal
         });
         if let Some(e) = err {
             return Err(anyhow::anyhow!(e));
@@ -585,8 +582,8 @@ mod inner {
     /// Returns all prefixes of a sequence, each as a list.
     pub fn prefixes(seq: SeqValue) -> anyhow::Result<Value> {
         // Special case for String — produce string prefixes instead of lists of chars.
-        if let Value::Object(ref obj) = seq {
-            if let Object::String(s) = obj.as_ref() {
+        if let Value::Object(ref obj) = seq
+            && let Object::String(s) = obj.as_ref() {
                 return Ok(Value::list(
                     s.borrow()
                         .chars()
@@ -597,7 +594,6 @@ mod inner {
                         .collect(),
                 ));
             }
-        }
         Ok(Value::list(
             seq.try_into_iter()
                 .ok_or_else(|| anyhow!("prefixes requires a sequence"))?
@@ -612,8 +608,8 @@ mod inner {
     /// Returns all suffixes of a sequence, each as a list; for strings, returns all trailing substrings.
     pub fn suffixes(seq: SeqValue) -> anyhow::Result<Value> {
         // Special case for String — produce string suffixes instead of lists of chars.
-        if let Value::Object(ref obj) = seq {
-            if let Object::String(s) = obj.as_ref() {
+        if let Value::Object(ref obj) = seq
+            && let Object::String(s) = obj.as_ref() {
                 let borrowed = s.borrow();
                 return Ok(Value::list(
                     borrowed
@@ -622,7 +618,6 @@ mod inner {
                         .collect(),
                 ));
             }
-        }
         let out: Vec<Value> = seq
             .try_into_iter()
             .ok_or_else(|| anyhow!("suffixes requires a sequence"))?
@@ -903,7 +898,7 @@ pub mod extra {
                     .map(|arg| match arg {
                         Value::Object(obj) => match obj.as_ref() {
                             Object::List(l) => Some(l.borrow().clone()),
-                            Object::Tuple(t) => Some(t.to_vec()),
+                            Object::Tuple(t) => Some(t.clone()),
                             _ => None,
                         },
                         _ => None,

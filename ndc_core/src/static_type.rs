@@ -542,8 +542,7 @@ impl fmt::Display for StaticType {
                 "Function({}) -> {return_type}",
                 parameters
                     .as_deref()
-                    .map(|p| p.iter().join(", "))
-                    .unwrap_or(String::from("*"))
+                    .map_or(String::from("*"), |p| p.iter().join(", "))
             ),
             Self::Option(elem) => write!(f, "Option<{elem}>"),
             Self::Number => write!(f, "Number"),

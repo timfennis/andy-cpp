@@ -370,12 +370,9 @@ impl Compiler {
                 let has_default = default.is_some();
                 for (key, value) in values {
                     self.compile_expr(key)?;
-                    match value {
-                        Some(v) => self.compile_expr(v)?,
-                        None => {
-                            let idx = self.chunk.add_constant(Value::unit());
-                            self.chunk.write(OpCode::Constant(idx), Span::new(0, 0));
-                        }
+                    if let Some(v) = value { self.compile_expr(v)? } else {
+                        let idx = self.chunk.add_constant(Value::unit());
+                        self.chunk.write(OpCode::Constant(idx), Span::new(0, 0));
                     }
                 }
                 if let Some(default) = default {

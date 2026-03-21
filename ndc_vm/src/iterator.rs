@@ -7,7 +7,7 @@ use std::rc::Rc;
 pub trait VmIterator {
     fn next(&mut self) -> Option<Value>;
 
-    /// (lower_bound, upper_bound). None upper = unbounded.
+    /// (`lower_bound`, `upper_bound`). None upper = unbounded.
     fn size_hint(&self) -> (usize, Option<usize>) {
         (0, None)
     }
@@ -316,7 +316,7 @@ impl VmIterator for HeapIter {
     }
 
     fn deep_copy(&self) -> Option<SharedIterator> {
-        Some(Rc::new(RefCell::new(HeapIter {
+        Some(Rc::new(RefCell::new(Self {
             entries: self.entries.clone(),
             index: self.index,
         })))
@@ -424,12 +424,9 @@ impl CombinationsIter {
             return false;
         };
         while self.buffer.len() <= i {
-            match source.next() {
-                Some(v) => self.buffer.push(v),
-                None => {
-                    self.source = None;
-                    return false;
-                }
+            if let Some(v) = source.next() { self.buffer.push(v) } else {
+                self.source = None;
+                return false;
             }
         }
         true
@@ -605,7 +602,7 @@ impl VmIterator for StringIter {
 
     fn deep_copy(&self) -> Option<SharedIterator> {
         let s = self.string.borrow().clone();
-        Some(Rc::new(RefCell::new(StringIter {
+        Some(Rc::new(RefCell::new(Self {
             string: Rc::new(RefCell::new(s)),
             byte_offset: self.byte_offset,
         })))

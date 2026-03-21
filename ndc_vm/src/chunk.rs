@@ -27,7 +27,7 @@ use std::rc::Rc;
 /// | `JumpIfFalse` | `[… bool → … bool]`                    | 0 (peeks, jumps if false)                  |
 /// | `MakeList`    | `[… v1…vn → … list]`                   | −(n−1)                                     |
 /// | `MakeTuple`   | `[… v1…vn → … tuple]`                  | −(n−1)                                     |
-/// | `MakeMap`     | `[… k1 v1…kn vn (default?) → … map]`   | −(2n−1) or −2n if has_default              |
+/// | `MakeMap`     | `[… k1 v1…kn vn (default?) → … map]`   | −(2n−1) or −2n if `has_default`              |
 /// | `MakeRange`   | `[… start (end?) → … iter]`            | −1 if bounded, 0 if unbounded              |
 /// | `Closure`     | `[… → … closure]`                      | +1                                         |
 /// | `GetIterator` | `[… value → … iter]`                   | 0 (pops value, pushes iterator)            |

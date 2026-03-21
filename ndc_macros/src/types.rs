@@ -196,8 +196,8 @@ fn is_path_ident(ty: &syn::Type, ident: &str) -> bool {
     p.path.segments.last().is_some_and(|s| s.ident == ident)
 }
 
-/// Check if `ty` is `Collection<ndc_vm::value::Value>` (for Vec, VecDeque)
-/// or `Collection<ndc_vm::value::Value, ndc_vm::value::Value>` (for HashMap).
+/// Check if `ty` is `Collection<ndc_vm::value::Value>` (for Vec, `VecDeque`)
+/// or `Collection<ndc_vm::value::Value, ndc_vm::value::Value>` (for `HashMap`).
 fn is_collection_of_vm_value(ty: &syn::Type, collection_name: &str) -> bool {
     let syn::Type::Path(p) = ty else { return false };
     let Some(last) = p.path.segments.last() else {

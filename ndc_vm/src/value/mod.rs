@@ -172,7 +172,7 @@ impl Value {
     /// Creates a shallow copy: scalars are copied by value; mutable collection
     /// types (String, List, Map, Deque, heaps) get new independent containers
     /// with cloned contents; immutable / identity types (Tuple, Function,
-    /// Iterator, BigInt, Rational, Complex, Some, OverloadSet) share the Rc.
+    /// Iterator, `BigInt`, Rational, Complex, Some, `OverloadSet`) share the Rc.
     pub fn shallow_clone(&self) -> Self {
         match self {
             Self::Object(obj) => match obj.as_ref() {
@@ -256,20 +256,20 @@ impl Value {
         match param {
             StaticType::Any => true,
             StaticType::Int => {
-                matches!(self, Value::Int(_))
-                    || matches!(self, Value::Object(o) if matches!(o.as_ref(), Object::BigInt(_)))
+                matches!(self, Self::Int(_))
+                    || matches!(self, Self::Object(o) if matches!(o.as_ref(), Object::BigInt(_)))
             }
-            StaticType::Float => matches!(self, Value::Float(_)),
-            StaticType::Bool => matches!(self, Value::Bool(_)),
+            StaticType::Float => matches!(self, Self::Float(_)),
+            StaticType::Bool => matches!(self, Self::Bool(_)),
             StaticType::Number => self.is_number(),
             StaticType::String => {
-                matches!(self, Value::Object(o) if matches!(o.as_ref(), Object::String(_)))
+                matches!(self, Self::Object(o) if matches!(o.as_ref(), Object::String(_)))
             }
             StaticType::List(t) if matches!(t.as_ref(), StaticType::Any) => {
-                matches!(self, Value::Object(o) if matches!(o.as_ref(), Object::List(_)))
+                matches!(self, Self::Object(o) if matches!(o.as_ref(), Object::List(_)))
             }
             StaticType::Deque(t) if matches!(t.as_ref(), StaticType::Any) => {
-                matches!(self, Value::Object(o) if matches!(o.as_ref(), Object::Deque(_)))
+                matches!(self, Self::Object(o) if matches!(o.as_ref(), Object::Deque(_)))
             }
             StaticType::Map { key, value }
                 if matches!(
@@ -277,10 +277,10 @@ impl Value {
                     (StaticType::Any, StaticType::Any)
                 ) =>
             {
-                matches!(self, Value::Object(o) if matches!(o.as_ref(), Object::Map { .. }))
+                matches!(self, Self::Object(o) if matches!(o.as_ref(), Object::Map { .. }))
             }
             StaticType::Sequence(t) if matches!(t.as_ref(), StaticType::Any) => {
-                matches!(self, Value::Object(o) if matches!(
+                matches!(self, Self::Object(o) if matches!(
                     o.as_ref(),
                     Object::List(_)
                         | Object::Tuple(_)
@@ -315,7 +315,7 @@ impl Value {
     /// Uses `Rc::unwrap_or_clone` so no extra clone occurs when this value
     /// holds the sole reference to its object.
     pub fn try_into_iter(self) -> Option<ValueIter> {
-        let Value::Object(obj) = self else {
+        let Self::Object(obj) = self else {
             return None;
         };
         match Rc::unwrap_or_clone(obj) {
@@ -324,10 +324,10 @@ impl Value {
             Object::Deque(d) => Some(ValueIter::Deque(d.into_inner().into_iter())),
             Object::Iterator(i) => Some(ValueIter::Shared(i)),
             Object::String(s) => {
-                let chars: Vec<Value> = s
+                let chars: Vec<Self> = s
                     .borrow()
                     .chars()
-                    .map(|c| Value::string(c.to_string()))
+                    .map(|c| Self::string(c.to_string()))
                     .collect();
                 Some(ValueIter::List(chars.into_iter()))
             }
@@ -752,15 +752,12 @@ impl Hash for Value {
             Self::Float(f) => {
                 // Normalise whole-number floats to the same hash as their integer equivalent,
                 // so that Int(1) and Float(1.0) hash identically (consistent with PartialEq).
-                match Int::from_f64_if_int(*f) {
-                    Some(i) => {
-                        state.write_u8(1);
-                        i.hash(state);
-                    }
-                    None => {
-                        state.write_u8(2);
-                        OrderedFloat(*f).hash(state);
-                    }
+                if let Some(i) = Int::from_f64_if_int(*f) {
+                    state.write_u8(1);
+                    i.hash(state);
+                } else {
+                    state.write_u8(2);
+                    OrderedFloat(*f).hash(state);
                 }
             }
             Self::Bool(true) => state.write_u8(3),

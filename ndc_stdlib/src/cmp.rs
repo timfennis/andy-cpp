@@ -51,7 +51,7 @@ mod inner {
     /// Returns the larger of `left` and `right`, preferring `left` if they are equal.
     pub fn max(left: Value, right: Value) -> anyhow::Result<Value> {
         match left.partial_cmp(&right) {
-            Some(Ordering::Equal) | Some(Ordering::Greater) => Ok(left),
+            Some(Ordering::Equal | Ordering::Greater) => Ok(left),
             Some(Ordering::Less) => Ok(right),
             None => Err(anyhow!(
                 "cannot compare {} and {}",
@@ -64,7 +64,7 @@ mod inner {
     /// Returns the smaller of `left` and `right`, preferring `left` if they are equal.
     pub fn min(left: Value, right: Value) -> anyhow::Result<Value> {
         match left.partial_cmp(&right) {
-            Some(Ordering::Equal) | Some(Ordering::Less) => Ok(left),
+            Some(Ordering::Equal | Ordering::Less) => Ok(left),
             Some(Ordering::Greater) => Ok(right),
             None => Err(anyhow!(
                 "cannot compare {} and {}",

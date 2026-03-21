@@ -2,7 +2,7 @@
 //!
 //! Each `try_vm_*` function returns `None` when the type cannot be represented
 //! without the interpreter bridge, causing `export_module` to silently skip
-//! vm_native generation for that function.
+//! `vm_native` generation for that function.
 
 use crate::types::{NdcType, classify, unwrap_result};
 use proc_macro2::TokenStream;
@@ -31,7 +31,7 @@ fn arg_error(position: usize, expected: &str) -> TokenStream {
 
 /// Generate extraction code for a RefCell-based collection parameter.
 ///
-/// Covers List, Deque, MinHeap, MaxHeap (but not Map, which has different destructuring).
+/// Covers List, Deque, `MinHeap`, `MaxHeap` (but not Map, which has different destructuring).
 fn refcell_collection_arg(
     position: usize,
     expected: &str,
@@ -461,14 +461,13 @@ fn try_vm_return_type(ty: &syn::Type) -> Option<(TokenStream, TokenStream)> {
 /// Like `try_vm_return_type` but also handles `()` (unit), which only makes
 /// sense as the Ok type inside a `Result<()>`.
 fn try_vm_return_inner(ty: &syn::Type) -> Option<(TokenStream, TokenStream)> {
-    if let syn::Type::Tuple(t) = ty {
-        if t.elems.is_empty() {
+    if let syn::Type::Tuple(t) = ty
+        && t.elems.is_empty() {
             return Some((
                 quote! { Ok(ndc_vm::value::Value::unit()) },
                 quote! { ndc_core::StaticType::Tuple(vec![]) },
             ));
         }
-    }
     vm_return_for_classified(ty)
 }
 

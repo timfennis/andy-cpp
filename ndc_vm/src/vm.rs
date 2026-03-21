@@ -24,15 +24,15 @@ pub enum OutputSink {
 impl Write for OutputSink {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         match self {
-            OutputSink::Stdout => std::io::stdout().write(buf),
-            OutputSink::Buffer(vec) => vec.write(buf),
+            Self::Stdout => std::io::stdout().write(buf),
+            Self::Buffer(vec) => vec.write(buf),
         }
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
         match self {
-            OutputSink::Stdout => std::io::stdout().flush(),
-            OutputSink::Buffer(vec) => vec.flush(),
+            Self::Stdout => std::io::stdout().flush(),
+            Self::Buffer(vec) => vec.flush(),
         }
     }
 }
@@ -985,7 +985,7 @@ impl CallFrame {
     }
 }
 
-/// A callable VM function bound to the parent VM, for use in VmNative HOF
+/// A callable VM function bound to the parent VM, for use in `VmNative` HOF
 /// implementations. Produced by the `&mut VmCallable` input-type handler in
 /// `ndc_macros::vm_convert`.
 ///
