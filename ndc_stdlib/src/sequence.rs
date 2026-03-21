@@ -5,6 +5,7 @@ use ndc_core::compare::FallibleOrd;
 use ndc_macros::export_module;
 use ndc_vm::VmCallable;
 use ndc_vm::value::Value as VmValue;
+use ndc_vm::{CombinationsIter, TakeIter};
 use std::cmp::Ordering;
 
 fn try_sort_by<E>(
@@ -611,19 +612,22 @@ mod inner {
         default.call(vec![]).map_err(|e| anyhow!(e))
     }
 
-    /// Returns the `k` sized combinations of the given sequence `seq` as a list of tuples.
+    /// Returns the `k` sized combinations of the given sequence `seq` as a lazy iterator of tuples.
     pub fn combinations(
         seq: ndc_vm::value::SeqValue,
         k: i64,
     ) -> anyhow::Result<ndc_vm::value::Value> {
         let k = k as usize;
-        Ok(VmValue::list(
-            seq.try_into_iter()
-                .ok_or_else(|| anyhow!("combinations requires a sequence"))?
-                .combinations(k)
-                .map(VmValue::tuple)
-                .collect::<Vec<VmValue>>(),
-        ))
+        let iter = CombinationsIter::new(seq, k)
+            .ok_or_else(|| anyhow!("combinations requires a sequence"))?;
+        Ok(VmValue::iterator(iter.into_shared()))
+    }
+
+    /// Returns a lazy iterator yielding the first `n` elements of `seq`.
+    #[function(return_type = Iterator<Value>)]
+    pub fn take(seq: ndc_vm::value::SeqValue, n: usize) -> anyhow::Result<ndc_vm::value::Value> {
+        let iter = TakeIter::new(seq, n).ok_or_else(|| anyhow!("take requires a sequence"))?;
+        Ok(VmValue::iterator(iter.into_shared()))
     }
 
     /// Returns the `k` sized permutations of the given sequence `seq` as a list of tuples.

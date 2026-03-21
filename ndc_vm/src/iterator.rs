@@ -1,4 +1,4 @@
-use crate::{Object, OrdValue, Value};
+use crate::{Object, OrdValue, Value, ValueIter};
 use std::cell::RefCell;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
@@ -392,6 +392,197 @@ impl VmIterator for RepeatIter {
     fn deep_copy(&self) -> Option<SharedIterator> {
         Some(Rc::new(RefCell::new(Self {
             value: self.value.clone(),
+            remaining: self.remaining,
+        })))
+    }
+}
+
+/// Lazy k-combinations iterator.
+///
+/// Eager sources (List, Tuple, Deque, Map) are drained into an internal buffer
+/// at construction using [`Value::try_into_iter`], which already applies
+/// `Rc::unwrap_or_clone` so no copy occurs when this is the sole owner. This
+/// gives O(1) direct-index access with no `RefCell` overhead in the hot path.
+///
+/// Iterator sources (`Object::Iterator`) are buffered lazily: elements are
+/// pulled only as far as the current combination's maximum index requires, so
+/// stopping early avoids materialising the full pool.
+pub struct CombinationsIter {
+    buffer: Vec<Value>,
+    /// `Some` only for lazy (Shared) sources; set to `None` once exhausted.
+    source: Option<ValueIter>,
+    indices: Vec<usize>,
+    first: bool,
+}
+
+impl CombinationsIter {
+    /// Returns `None` if `value` is not iterable.
+    pub fn new(value: Value, k: usize) -> Option<Self> {
+        let iter = value.try_into_iter()?;
+        let (buffer, source) = match iter {
+            shared @ ValueIter::Shared(_) => (Vec::new(), Some(shared)),
+            eager => (eager.collect(), None),
+        };
+        Some(Self {
+            buffer,
+            source,
+            indices: (0..k).collect(),
+            first: true,
+        })
+    }
+
+    /// Pull from the lazy source until `buffer[i]` exists.
+    /// Returns false if the source is exhausted before index `i` is available.
+    fn ensure_index(&mut self, i: usize) -> bool {
+        if i < self.buffer.len() {
+            return true;
+        }
+        let Some(source) = &mut self.source else {
+            return false;
+        };
+        while self.buffer.len() <= i {
+            match source.next() {
+                Some(v) => self.buffer.push(v),
+                None => {
+                    self.source = None;
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    pub fn into_shared(self) -> SharedIterator {
+        Rc::new(RefCell::new(self))
+    }
+}
+
+impl VmIterator for CombinationsIter {
+    fn next(&mut self) -> Option<Value> {
+        let k = self.indices.len();
+
+        if k == 0 {
+            return if self.first {
+                self.first = false;
+                Some(Value::tuple(vec![]))
+            } else {
+                None
+            };
+        }
+
+        if self.first {
+            self.first = false;
+            if !self.ensure_index(k - 1) {
+                return None;
+            }
+        } else {
+            let pool_len = self.buffer.len();
+            if pool_len < k {
+                return None;
+            }
+
+            let pivot = match (0..k).rev().find(|&i| self.indices[i] < pool_len - k + i) {
+                Some(p) => p,
+                None if self.source.is_none() => return None,
+                // For lazy sources: pulling one more element always unlocks index k-1.
+                // When pivot = None, indices[j] = pool_len - k + j for all j, so
+                // indices[k-1] = pool_len - 1. After one pull, pool_len grows by 1 and
+                // indices[k-1] < new_pool_len - k + (k-1) holds.
+                None => {
+                    if !self.ensure_index(self.buffer.len()) {
+                        return None;
+                    }
+                    k - 1
+                }
+            };
+
+            self.indices[pivot] += 1;
+            for j in (pivot + 1)..k {
+                self.indices[j] = self.indices[j - 1] + 1;
+            }
+            // For lazy sources, buffer up to the new last index.
+            if !self.ensure_index(self.indices[k - 1]) {
+                return None;
+            }
+        }
+
+        // All indices are in-bounds: direct indexing is safe.
+        Some(Value::tuple(
+            self.indices
+                .iter()
+                .map(|&i| self.buffer[i].clone())
+                .collect(),
+        ))
+    }
+
+    fn deep_copy(&self) -> Option<SharedIterator> {
+        let source_copy = match &self.source {
+            None => None,
+            Some(ValueIter::Shared(shared)) => {
+                Some(ValueIter::Shared(shared.borrow().deep_copy()?))
+            }
+            Some(_) => return None, // unreachable: eager sources drain to None at construction
+        };
+        Some(Rc::new(RefCell::new(Self {
+            buffer: self.buffer.clone(),
+            source: source_copy,
+            indices: self.indices.clone(),
+            first: self.first,
+        })))
+    }
+}
+
+/// Takes at most `n` elements from an upstream iterator.
+///
+/// `deep_copy` is supported when the source is a `Shared` iterator (e.g. a
+/// `CombinationsIter`). It returns `None` for eager sources (list/deque/map
+/// `IntoIter`s) since those lack a copy mechanism.
+pub struct TakeIter {
+    source: ValueIter,
+    remaining: usize,
+}
+
+impl TakeIter {
+    /// Returns `None` if `value` is not iterable.
+    pub fn new(value: Value, n: usize) -> Option<Self> {
+        Some(Self {
+            source: value.try_into_iter()?,
+            remaining: n,
+        })
+    }
+
+    pub fn into_shared(self) -> SharedIterator {
+        Rc::new(RefCell::new(self))
+    }
+}
+
+impl VmIterator for TakeIter {
+    fn next(&mut self) -> Option<Value> {
+        if self.remaining == 0 {
+            return None;
+        }
+        let val = self.source.next()?;
+        self.remaining -= 1;
+        Some(val)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let (lo, hi) = match &self.source {
+            ValueIter::Shared(s) => s.borrow().size_hint(),
+            _ => (0, None),
+        };
+        (
+            lo.min(self.remaining),
+            Some(hi.unwrap_or(usize::MAX).min(self.remaining)),
+        )
+    }
+
+    fn deep_copy(&self) -> Option<SharedIterator> {
+        let ValueIter::Shared(shared) = &self.source else {
+            return None;
+        };
+        Some(Rc::new(RefCell::new(Self {
+            source: ValueIter::Shared(shared.borrow().deep_copy()?),
             remaining: self.remaining,
         })))
     }
