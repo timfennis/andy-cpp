@@ -236,8 +236,6 @@ impl Analyser {
                     value: Box::new(value_type.unwrap_or_else(StaticType::unit)),
                 })
             }
-            // Return evaluates to the type of the expression it returns, which makes type checking easier!
-            // Actually it doesn't seem to make it any easier
             Expression::Return { value } => self.analyse(value),
             Expression::RangeInclusive { start, end }
             | Expression::RangeExclusive { start, end } => {
@@ -267,8 +265,6 @@ impl Analyser {
             // invoking a value like `get_function()()` so in this case we just continue like normal?
             return self.analyse(ident);
         };
-
-        // println!("resolve fn {name} {}", argument_types.iter().join(", "));
 
         let binding = self
             .scope_tree
@@ -448,15 +444,14 @@ impl Analyser {
         let mut seen_names: Vec<&str> = Vec::new();
 
         for param in parameters {
-            let resolved_type = StaticType::Any;
-            types.push(resolved_type.clone());
+            types.push(StaticType::Any);
             if seen_names.contains(&param.name.as_str()) {
                 return Err(AnalysisError::parameter_redefined(&param.name, span));
             }
             seen_names.push(&param.name);
 
             self.scope_tree
-                .create_local_binding(param.name.clone(), resolved_type);
+                .create_local_binding(param.name.clone(), StaticType::Any);
         }
 
         Ok(types)

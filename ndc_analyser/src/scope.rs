@@ -43,19 +43,14 @@ impl Scope {
         }
     }
 
+    /// Identical to `new_block_scope` today — kept as a separate constructor so that
+    /// iteration-specific behaviour (e.g. break/continue scoping) can be added later.
     pub(crate) fn new_iteration_scope(
         parent_idx: Option<usize>,
         base_offset: usize,
         function_scope_idx: usize,
     ) -> Self {
-        Self {
-            parent_idx,
-            creates_environment: false,
-            base_offset,
-            function_scope_idx,
-            identifiers: Vec::default(),
-            upvalues: Vec::default(),
-        }
+        Self::new_block_scope(parent_idx, base_offset, function_scope_idx)
     }
 
     pub(crate) fn find_slot_by_name(&self, find_ident: &str) -> Option<usize> {
@@ -94,9 +89,7 @@ impl Scope {
                 };
 
                 let Some(param_types) = parameters else {
-                    // If this branch happens then the function we're matching against is variadic meaning it's always a match
-                    debug_assert!(false, "we should never be calling find_function_candidates if there were variadic matches");
-                    return Some(slot);
+                    unreachable!("find_function_candidates should never be called when there are variadic matches");
                 };
 
                 let is_good = param_types.len() == find_types.len()
@@ -142,6 +135,13 @@ pub struct ScopeTree {
 }
 
 impl ScopeTree {
+    /// Build a `ScopeTree` seeded with pre-registered global bindings (native functions etc.).
+    ///
+    /// Two root scopes exist by design: `global_scope` holds native/built-in bindings that are
+    /// always accessible, while `scopes[0]` is the user's top-level function scope where
+    /// user-defined declarations land. This separation keeps native bindings out of the
+    /// mutable scope chain so they can be searched as a fallback without interfering with
+    /// user-level shadowing.
     pub fn from_global_scope(global_scope_map: Vec<(String, StaticType)>) -> Self {
         let mut global_scope = Scope::new_function_scope(None, 0);
         global_scope.identifiers = global_scope_map;
@@ -406,6 +406,9 @@ impl ScopeTree {
     /// Used to allocate the list/map accumulator before analysing the body of a
     /// for-comprehension, so that any nested comprehensions receive strictly
     /// higher slot numbers and cannot collide with this accumulator.
+    ///
+    /// Uses `"\x00"` as a sentinel name that can never collide with user identifiers
+    /// since the lexer never produces null bytes.
     pub(crate) fn reserve_anonymous_slot(&mut self) -> usize {
         self.scopes[self.current_scope_idx].allocate("\x00".to_string(), StaticType::Any)
     }
