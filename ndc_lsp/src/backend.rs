@@ -2,9 +2,9 @@ use std::collections::HashMap;
 
 use ndc_core::{FunctionRegistry, StaticType};
 use ndc_interpreter::Interpreter;
+use ndc_interpreter::NativeFunction;
 use ndc_lexer::{Lexer, Span, TokenLocation};
 use ndc_parser::{Expression, ExpressionLocation, ForBody, ForIteration, Lvalue};
-use ndc_vm::NativeFunction;
 use std::rc::Rc;
 use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::Result as JsonRPCResult;

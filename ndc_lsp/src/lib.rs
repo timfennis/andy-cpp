@@ -2,7 +2,7 @@ mod backend;
 
 use crate::backend::Backend;
 use ndc_core::FunctionRegistry;
-use ndc_vm::NativeFunction;
+use ndc_interpreter::NativeFunction;
 use std::rc::Rc;
 use tower_lsp::{LspService, Server};
 

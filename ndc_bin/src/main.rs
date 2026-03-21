@@ -136,7 +136,7 @@ fn main() -> anyhow::Result<()> {
 
             let mut interpreter = Interpreter::new();
             interpreter.configure(ndc_stdlib::register);
-            match into_miette_result(interpreter.run_str(&string)) {
+            match into_miette_result(interpreter.eval(&string)) {
                 // we can just ignore successful runs because we have print statements
                 Ok(_final_value) => {}
                 Err(report) => {

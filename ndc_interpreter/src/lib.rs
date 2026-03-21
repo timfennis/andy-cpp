@@ -4,15 +4,17 @@ use ndc_lexer::{Lexer, TokenLocation};
 use ndc_parser::ExpressionLocation;
 use ndc_vm::compiler::Compiler;
 use ndc_vm::value::CompiledFunction;
-use ndc_vm::{NativeFunction, OutputSink, Value, Vm};
+use ndc_vm::{OutputSink, Vm};
 use std::rc::Rc;
+
+pub use ndc_vm::{NativeFunction, Value};
 
 pub struct Interpreter {
     registry: FunctionRegistry<Rc<NativeFunction>>,
     capturing: bool,
     analyser: Analyser,
     /// Persistent REPL VM and the compiler checkpoint from the last run.
-    /// `None` until the first `run_str` call; kept alive afterwards so that
+    /// `None` until the first `eval` call; kept alive afterwards so that
     /// variables declared on one line are visible on subsequent lines.
     repl_state: Option<(Vm, Compiler)>,
 }
@@ -56,10 +58,18 @@ impl Interpreter {
     }
 
     /// Returns the captured output, or `None` if this interpreter writes to stdout.
+    /// Returns `Some(vec![])` for a capturing interpreter that hasn't run yet.
     pub fn get_output(&self) -> Option<Vec<u8>> {
-        self.repl_state
-            .as_ref()
-            .and_then(|(vm, _)| vm.get_output().map(<[u8]>::to_vec))
+        if self.capturing {
+            Some(
+                self.repl_state
+                    .as_ref()
+                    .and_then(|(vm, _)| vm.get_output().map(<[u8]>::to_vec))
+                    .unwrap_or_default(),
+            )
+        } else {
+            None
+        }
     }
 
     pub fn analyse_str(
@@ -81,10 +91,12 @@ impl Interpreter {
         Ok(out)
     }
 
-    pub fn run_str(&mut self, input: &str) -> Result<String, InterpreterError> {
+    /// Execute source code and return the resulting [`Value`].
+    ///
+    /// Statements (semicolon-terminated) produce [`Value::unit()`].
+    pub fn eval(&mut self, input: &str) -> Result<Value, InterpreterError> {
         let expressions = self.parse_and_analyse(input)?;
-        let final_value = self.interpret_vm(input, expressions.into_iter())?;
-        Ok(format!("{final_value}"))
+        self.interpret_vm(input, expressions.into_iter())
     }
 
     fn parse_and_analyse(

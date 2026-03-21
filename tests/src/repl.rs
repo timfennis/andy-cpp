@@ -9,7 +9,7 @@ fn repl_output(lines: &[&str]) -> String {
         i
     };
     for line in lines {
-        interp.run_str(line).expect("line should not error");
+        interp.eval(line).expect("line should not error");
     }
     String::from_utf8(interp.get_output().expect("interpreter must have output"))
         .expect("output must be valid UTF-8")
@@ -25,9 +25,9 @@ fn repl_error(lines: &[&str], expected_error: &str) {
     };
     let n = lines.len();
     for line in &lines[..n - 1] {
-        interp.run_str(line).expect("line should not error");
+        interp.eval(line).expect("line should not error");
     }
-    let err = interp.run_str(lines[n - 1]).expect_err("expected an error");
+    let err = interp.eval(lines[n - 1]).expect_err("expected an error");
     let msg = format!("{err:?}");
     assert!(
         msg.contains(expected_error),
@@ -89,30 +89,30 @@ fn expression_result_is_returned() {
         i.configure(ndc_stdlib::register);
         i
     };
-    let result = interp.run_str("2 + 3").unwrap();
-    assert_eq!(result, "5");
+    let result = interp.eval("2 + 3").unwrap();
+    assert_eq!(result.to_string(), "5");
 }
 
 #[test]
-fn statement_returns_empty() {
+fn statement_returns_unit() {
     let mut interp = {
         let mut i = Interpreter::capturing();
         i.configure(ndc_stdlib::register);
         i
     };
-    let result = interp.run_str("2 + 3;").unwrap();
-    assert_eq!(result, "");
+    let result = interp.eval("2 + 3;").unwrap();
+    assert!(result.is_unit());
 }
 
 #[test]
-fn unit_returns_empty() {
+fn let_returns_unit() {
     let mut interp = {
         let mut i = Interpreter::capturing();
         i.configure(ndc_stdlib::register);
         i
     };
-    let result = interp.run_str("let x = 5;").unwrap();
-    assert_eq!(result, "");
+    let result = interp.eval("let x = 5;").unwrap();
+    assert!(result.is_unit());
 }
 
 #[test]
@@ -123,9 +123,9 @@ fn error_does_not_corrupt_state() {
         i.configure(ndc_stdlib::register);
         i
     };
-    interp.run_str("let x = 99;").unwrap();
-    let _ = interp.run_str("undefined_var"); // this should error, ignore it
-    interp.run_str("print(x)").unwrap();
+    interp.eval("let x = 99;").unwrap();
+    let _ = interp.eval("undefined_var"); // this should error, ignore it
+    interp.eval("print(x)").unwrap();
     let out = String::from_utf8(interp.get_output().unwrap()).unwrap();
     assert_eq!(out.trim(), "99");
 }
