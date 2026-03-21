@@ -1262,7 +1262,6 @@ dependencies = [
  "ndc_interpreter",
  "ndc_lexer",
  "ndc_parser",
- "ndc_vm",
  "tokio",
  "tower-lsp",
 ]
