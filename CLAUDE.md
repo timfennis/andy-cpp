@@ -6,6 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Run `cargo fmt`
 - Run `cargo check` and fix warnings and errors
 - Ensure all tests pass (`cargo test`)
+- Do not leave `TODO` comments in code — either fix the issue immediately or open a GitHub issue and record it in `TODO.md`
 
 ## Common Commands
 

@@ -199,7 +199,6 @@ impl SourceIterator<'_> {
 
     pub fn consume(&mut self, count: usize) {
         for _ in 0..count {
-            // TODO: this is an internal error how should we handle these?
             self.next()
                 .expect("tried to consume but iterator was empty");
         }
