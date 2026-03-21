@@ -275,125 +275,96 @@ impl ScopeTree {
         }
     }
 
-    pub(crate) fn resolve_function_dynamic(
-        &mut self,
-        ident: &str,
-        sig: &[StaticType],
-    ) -> Vec<ResolvedVar> {
-        let mut scope_ptr = self.current_scope_idx;
-        let mut env_scopes: Vec<usize> = Vec::default();
-
-        loop {
-            let candidates = self.scopes[scope_ptr].find_function_candidates(ident, sig);
-            if !candidates.is_empty() {
-                return candidates
-                    .into_iter()
-                    .map(|slot| self.resolve_found_local(ident, slot, &env_scopes))
-                    .collect();
-            } else if let Some(slot) = self.scopes[scope_ptr].find_upvalue(ident) {
-                return vec![self.resolve_found_upvalue(ident, slot, &env_scopes)];
-            } else if let Some(parent_idx) = self.scopes[scope_ptr].parent_idx {
-                if self.scopes[scope_ptr].creates_environment {
-                    env_scopes.push(scope_ptr);
-                }
-
-                scope_ptr = parent_idx;
-            } else {
-                return self
-                    .global_scope
-                    .find_function_candidates(ident, sig)
-                    .into_iter()
-                    .map(|slot| ResolvedVar::Global { slot })
-                    .collect();
-            }
-        }
-    }
-
+    /// Resolve a function call binding in a single scope-chain walk.
+    ///
+    /// Combines what were previously three separate walks (`resolve_function`,
+    /// `resolve_function_dynamic`, `get_all_bindings_by_name`) into one pass.
+    /// At each scope the priorities are:
+    ///   1. Exact type match or upvalue → return `Binding::Resolved` immediately
+    ///   2. Compatible-type candidates → remember first set found (for `Binding::Dynamic`)
+    ///   3. All same-named bindings → accumulate as last-resort fallback
     pub(crate) fn resolve_function_binding(&mut self, ident: &str, sig: &[StaticType]) -> Binding {
-        self.resolve_function(ident, sig)
-            .map(Binding::Resolved)
-            .or_else(|| {
-                let loose_bindings = self.resolve_function_dynamic(ident, sig);
-
-                if loose_bindings.is_empty() {
-                    return None;
-                }
-
-                Some(Binding::Dynamic(loose_bindings))
-            })
-            // If we can't find any function in scope that could match, fall back to all same-named
-            // bindings so runtime dynamic dispatch (including vectorization) can pick the right one.
-            .or_else(|| {
-                let all_bindings = self.get_all_bindings_by_name(ident);
-                if all_bindings.is_empty() {
-                    return None;
-                }
-                Some(Binding::Dynamic(all_bindings))
-            })
-            .unwrap_or(Binding::None)
-    }
-
-    pub(crate) fn get_all_bindings_by_name(&mut self, ident: &str) -> Vec<ResolvedVar> {
-        let mut results = Vec::new();
         let mut scope_ptr = self.current_scope_idx;
         let mut env_scopes: Vec<usize> = Vec::default();
+        let mut loose_candidates: Option<Vec<ResolvedVar>> = None;
+        let mut all_by_name: Vec<ResolvedVar> = Vec::new();
 
         loop {
+            // 1. Exact match → return immediately
+            if let Some(slot) = self.scopes[scope_ptr].find_function(ident, sig) {
+                return Binding::Resolved(self.resolve_found_local(ident, slot, &env_scopes));
+            }
+
+            // 2. Upvalue with matching name → return immediately
+            //    (matches prior behavior where resolve_function returned upvalues
+            //    without type-checking; the correctness issue is tracked separately)
+            if let Some(slot) = self.scopes[scope_ptr].find_upvalue(ident) {
+                return Binding::Resolved(self.resolve_found_upvalue(ident, slot, &env_scopes));
+            }
+
+            // 3. Compatible candidates (keep only the first scope's matches — shadowing)
+            if loose_candidates.is_none() {
+                let candidates = self.scopes[scope_ptr].find_function_candidates(ident, sig);
+                if !candidates.is_empty() {
+                    loose_candidates = Some(
+                        candidates
+                            .into_iter()
+                            .map(|slot| self.resolve_found_local(ident, slot, &env_scopes))
+                            .collect(),
+                    );
+                }
+            }
+
+            // 4. All same-named bindings (accumulate across all scopes)
             let slots = self.scopes[scope_ptr].find_all_slots_by_name(ident);
-            results.extend(
+            all_by_name.extend(
                 slots
                     .into_iter()
                     .map(|slot| self.resolve_found_local(ident, slot, &env_scopes)),
             );
 
-            if let Some(slot) = self.scopes[scope_ptr].find_upvalue(ident) {
-                results.push(self.resolve_found_upvalue(ident, slot, &env_scopes));
-            }
-
+            // Advance to parent scope
             if let Some(parent_idx) = self.scopes[scope_ptr].parent_idx {
                 if self.scopes[scope_ptr].creates_environment {
                     env_scopes.push(scope_ptr);
                 }
-
                 scope_ptr = parent_idx;
             } else {
-                let global_slots = self.global_scope.find_all_slots_by_name(ident);
-                results.extend(
-                    global_slots
+                // Fall through to globals
+                if let Some(slot) = self.global_scope.find_function(ident, sig) {
+                    return Binding::Resolved(ResolvedVar::Global { slot });
+                }
+
+                if loose_candidates.is_none() {
+                    let candidates = self.global_scope.find_function_candidates(ident, sig);
+                    if !candidates.is_empty() {
+                        loose_candidates = Some(
+                            candidates
+                                .into_iter()
+                                .map(|slot| ResolvedVar::Global { slot })
+                                .collect(),
+                        );
+                    }
+                }
+
+                all_by_name.extend(
+                    self.global_scope
+                        .find_all_slots_by_name(ident)
                         .into_iter()
                         .map(|slot| ResolvedVar::Global { slot }),
                 );
+
                 break;
             }
         }
 
-        results
-    }
-
-    pub(crate) fn resolve_function(
-        &mut self,
-        ident: &str,
-        arg_types: &[StaticType],
-    ) -> Option<ResolvedVar> {
-        let mut scope_ptr = self.current_scope_idx;
-        let mut env_scopes: Vec<usize> = Vec::default();
-
-        loop {
-            if let Some(slot) = self.scopes[scope_ptr].find_function(ident, arg_types) {
-                return Some(self.resolve_found_local(ident, slot, &env_scopes));
-            } else if let Some(slot) = self.scopes[scope_ptr].find_upvalue(ident) {
-                return Some(self.resolve_found_upvalue(ident, slot, &env_scopes));
-            } else if let Some(parent_idx) = self.scopes[scope_ptr].parent_idx {
-                if self.scopes[scope_ptr].creates_environment {
-                    env_scopes.push(scope_ptr);
-                }
-                scope_ptr = parent_idx;
-            } else {
-                return Some(ResolvedVar::Global {
-                    slot: self.global_scope.find_function(ident, arg_types)?,
-                });
-            }
+        if let Some(candidates) = loose_candidates {
+            return Binding::Dynamic(candidates);
         }
+        if !all_by_name.is_empty() {
+            return Binding::Dynamic(all_by_name);
+        }
+        Binding::None
     }
 
     pub(crate) fn create_local_binding(&mut self, ident: String, typ: StaticType) -> ResolvedVar {

@@ -18,12 +18,3 @@
   `Binding::Resolved` for index operations — it always falls through to `Binding::Dynamic`. Add a
   comment explaining this is intentional, or pass actual types for better static resolution.
 
-## Medium: Performance
-
-- **Triple scope walk for function resolution** (`src/scope.rs` ~line 338)
-  `resolve_function_binding` tries `resolve_function`, then `resolve_function_dynamic`, then
-  `get_all_bindings_by_name` — each performing a full scope walk. For dynamic dispatch cases (e.g.,
-  operators with `Any` types), this means 2–3 redundant traversals. Merging into a single pass that
-  collects exact matches, loose matches, and all-by-name simultaneously would improve compile-time
-  performance for programs with many overloads.
-
