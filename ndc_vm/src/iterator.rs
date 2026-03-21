@@ -277,60 +277,29 @@ impl VmIterator for MapIter {
     }
 }
 
-/// Iterates over a min-heap, yielding elements in sorted (ascending) order.
-/// Drains the heap — snapshot the entries at creation time.
-pub struct MinHeapIter {
+/// Iterates over a heap snapshot, yielding pre-collected elements in order.
+/// Used for both min-heaps (sorted ascending) and max-heaps (arbitrary order).
+pub struct HeapIter {
     entries: Vec<Value>,
     index: usize,
 }
 
-impl MinHeapIter {
-    pub fn new(heap: &RefCell<BinaryHeap<Reverse<OrdValue>>>) -> Self {
+impl HeapIter {
+    /// Creates an iterator over a min-heap, yielding elements in sorted ascending order.
+    pub fn new_min(heap: &RefCell<BinaryHeap<Reverse<OrdValue>>>) -> Self {
         let mut entries: Vec<Value> = heap.borrow().iter().map(|Reverse(v)| v.0.clone()).collect();
         entries.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         Self { entries, index: 0 }
     }
-}
 
-impl VmIterator for MinHeapIter {
-    fn next(&mut self) -> Option<Value> {
-        if self.index < self.entries.len() {
-            let val = self.entries[self.index].clone();
-            self.index += 1;
-            Some(val)
-        } else {
-            None
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.entries.len() - self.index;
-        (remaining, Some(remaining))
-    }
-
-    fn deep_copy(&self) -> Option<SharedIterator> {
-        Some(Rc::new(RefCell::new(MinHeapIter {
-            entries: self.entries.clone(),
-            index: self.index,
-        })))
-    }
-}
-
-/// Iterates over a max-heap, yielding elements in arbitrary (heap) order.
-/// Snapshot the entries at creation time.
-pub struct MaxHeapIter {
-    entries: Vec<Value>,
-    index: usize,
-}
-
-impl MaxHeapIter {
-    pub fn new(heap: &RefCell<BinaryHeap<OrdValue>>) -> Self {
+    /// Creates an iterator over a max-heap, yielding elements in arbitrary heap order.
+    pub fn new_max(heap: &RefCell<BinaryHeap<OrdValue>>) -> Self {
         let entries: Vec<Value> = heap.borrow().iter().map(|v| v.0.clone()).collect();
         Self { entries, index: 0 }
     }
 }
 
-impl VmIterator for MaxHeapIter {
+impl VmIterator for HeapIter {
     fn next(&mut self) -> Option<Value> {
         if self.index < self.entries.len() {
             let val = self.entries[self.index].clone();
@@ -347,7 +316,7 @@ impl VmIterator for MaxHeapIter {
     }
 
     fn deep_copy(&self) -> Option<SharedIterator> {
-        Some(Rc::new(RefCell::new(MaxHeapIter {
+        Some(Rc::new(RefCell::new(HeapIter {
             entries: self.entries.clone(),
             index: self.index,
         })))

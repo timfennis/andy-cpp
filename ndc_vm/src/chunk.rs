@@ -169,7 +169,7 @@ impl Chunk {
 
     pub fn write(&mut self, op: OpCode, span: Span) -> usize {
         self.code.push(op);
-        (self.spans).push(span);
+        self.spans.push(span);
         self.code.len() - 1
     }
 
@@ -216,13 +216,13 @@ impl Chunk {
 
     /// Iterates opcodes as `(index, opcode, constant_value)` where `constant_value`
     /// is `Some` for `Constant(idx)` and `Closure(idx)` opcodes.
-    pub fn iter(&self) -> impl Iterator<Item = (usize, OpCode, Option<&Value>)> {
-        self.code.iter().cloned().enumerate().map(|(i, op)| {
+    pub fn iter(&self) -> impl Iterator<Item = (usize, &OpCode, Option<&Value>)> {
+        self.code.iter().enumerate().map(|(i, op)| {
             let val = match op {
                 OpCode::Constant(idx)
                 | OpCode::Closure {
                     constant_idx: idx, ..
-                } => Some(&self.constants[idx]),
+                } => Some(&self.constants[*idx]),
                 _ => None,
             };
             (i, op, val)

@@ -19,6 +19,10 @@ use std::fmt::Formatter;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
+thread_local! {
+    static UNIT: Value = Value::Object(Rc::new(Object::Tuple(vec![])));
+}
+
 /// Enumerates all the different types of values that exist in the language
 /// All values should be pretty cheap to clone because the bigger ones are wrapped using Rc's
 #[derive(Clone)]
@@ -116,7 +120,7 @@ impl Iterator for ValueIter {
 
 impl Value {
     pub fn unit() -> Self {
-        Self::Object(Rc::new(Object::Tuple(vec![])))
+        UNIT.with(Clone::clone)
     }
 
     pub fn is_unit(&self) -> bool {

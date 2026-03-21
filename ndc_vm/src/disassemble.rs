@@ -16,7 +16,7 @@ fn disassemble_function(function: &CompiledFunction, source: Option<&str>, out: 
     let mut nested: Vec<Rc<CompiledFunction>> = Vec::new();
 
     for (i, op, constant) in function.body.iter() {
-        let annotation = constant_annotation(op.clone(), constant, &mut nested);
+        let annotation = constant_annotation(op, constant, &mut nested);
         let excerpt = source
             .and_then(|src| src.get(function.body.span(i).range()))
             .map(|s| s.trim().replace('\n', "↵"));
@@ -37,7 +37,7 @@ fn disassemble_function(function: &CompiledFunction, source: Option<&str>, out: 
 }
 
 fn constant_annotation(
-    op: OpCode,
+    op: &OpCode,
     constant: Option<&Value>,
     nested: &mut Vec<Rc<CompiledFunction>>,
 ) -> Option<String> {

@@ -136,10 +136,10 @@ fn classify_ref(inner: &syn::Type) -> Option<NdcType> {
     }
 
     // &[ndc_vm::value::Value]
-    if let syn::Type::Slice(slice) = inner {
-        if classify_owned(&slice.elem) == Some(NdcType::VmValue) {
-            return Some(NdcType::SliceOfValue);
-        }
+    if let syn::Type::Slice(slice) = inner
+        && classify_owned(&slice.elem) == Some(NdcType::VmValue)
+    {
+        return Some(NdcType::SliceOfValue);
     }
 
     // &HashMap<Value, Value>
@@ -191,11 +191,9 @@ fn classify_ref_mut(inner: &syn::Type) -> Option<NdcType> {
     None
 }
 
-// --- Low-level helpers ---
-
 fn is_path_ident(ty: &syn::Type, ident: &str) -> bool {
     let syn::Type::Path(p) = ty else { return false };
-    p.path.segments.last().map_or(false, |s| s.ident == ident)
+    p.path.segments.last().is_some_and(|s| s.ident == ident)
 }
 
 /// Check if `ty` is `Collection<ndc_vm::value::Value>` (for Vec, VecDeque)

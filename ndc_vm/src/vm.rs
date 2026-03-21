@@ -1,8 +1,8 @@
 use crate::chunk::OpCode;
 use crate::error::VmError;
 use crate::iterator::{
-    MapIter, MaxHeapIter, MinHeapIter, RangeInclusiveIter, RangeIter, SeqIter, StringIter,
-    UnboundedRangeIter, VmIterator,
+    HeapIter, MapIter, RangeInclusiveIter, RangeIter, SeqIter, StringIter, UnboundedRangeIter,
+    VmIterator,
 };
 use crate::value::{CompiledFunction, Function, NativeFunc};
 use crate::{ClosureFunction, Object, UpvalueCell, Value};
@@ -346,10 +346,10 @@ impl Vm {
                                 MapIter::new(Rc::clone(&rc)),
                             )))),
                             Object::MinHeap(h) => {
-                                Some(Value::iterator(Rc::new(RefCell::new(MinHeapIter::new(h)))))
+                                Some(Value::iterator(Rc::new(RefCell::new(HeapIter::new_min(h)))))
                             }
                             Object::MaxHeap(h) => {
-                                Some(Value::iterator(Rc::new(RefCell::new(MaxHeapIter::new(h)))))
+                                Some(Value::iterator(Rc::new(RefCell::new(HeapIter::new_max(h)))))
                             }
                             _ => None,
                         },
@@ -801,7 +801,7 @@ impl Vm {
 
         // Use a block to scope all shared borrows of self.stack so they are
         // dropped before the &mut self calls (call_callback, truncate) below.
-        let (inner_fn, left, right) = {
+        let (inner_fn, pairs) = {
             // P5: borrow candidates rather than cloning the Vec.
             let candidates: &[ResolvedVar] = match &self.stack[callee_idx] {
                 Value::Object(obj) => match obj.as_ref() {
@@ -814,14 +814,24 @@ impl Vm {
             let left = &self.stack[self.stack.len() - 2];
             let right = &self.stack[self.stack.len() - 1];
 
-            // P4: check shape and build a two-element probe for overload lookup
-            // before committing to a full Vec allocation.
+            // Check shape, build a two-element probe for overload lookup, and
+            // extract the element pairs all in one pass — avoiding the redundant
+            // as_numeric_tuple calls that a separate vectorization_pairs would do.
             let left_tup = as_numeric_tuple(left);
             let right_tup = as_numeric_tuple(right);
-            let probe: [Value; 2] = match (left_tup, right_tup) {
-                (Some(ls), Some(rs)) if ls.len() == rs.len() => [ls[0].clone(), rs[0].clone()],
-                (None, Some(rs)) if left.is_number() => [left.clone(), rs[0].clone()],
-                (Some(ls), None) if right.is_number() => [ls[0].clone(), right.clone()],
+            let (probe, pairs): ([Value; 2], Vec<(Value, Value)>) = match (left_tup, right_tup) {
+                (Some(ls), Some(rs)) if ls.len() == rs.len() => (
+                    [ls[0].clone(), rs[0].clone()],
+                    ls.iter().cloned().zip(rs.iter().cloned()).collect(),
+                ),
+                (None, Some(rs)) if left.is_number() => (
+                    [left.clone(), rs[0].clone()],
+                    rs.iter().map(|r| (left.clone(), r.clone())).collect(),
+                ),
+                (Some(ls), None) if right.is_number() => (
+                    [ls[0].clone(), right.clone()],
+                    ls.iter().map(|l| (l.clone(), right.clone())).collect(),
+                ),
                 _ => return Ok(None),
             };
 
@@ -829,11 +839,7 @@ impl Vm {
                 return Ok(None);
             };
 
-            (inner_fn, left.clone(), right.clone())
-        };
-
-        let Some(pairs) = vectorization_pairs(&left, &right) else {
-            unreachable!("shape was already verified above")
+            (inner_fn, pairs)
         };
 
         let mut results = Vec::with_capacity(pairs.len());
@@ -862,52 +868,37 @@ impl Vm {
             ));
         };
         match obj.as_ref() {
-            Object::List(seq) => {
-                let len = seq.borrow().len();
+            Object::List(_) | Object::Tuple(_) => {
+                let type_name = match obj.as_ref() {
+                    Object::List(_) => "list",
+                    Object::Tuple(_) => "tuple",
+                    _ => unreachable!(),
+                };
+                let len = match obj.as_ref() {
+                    Object::List(seq) => seq.borrow().len(),
+                    Object::Tuple(seq) => seq.len(),
+                    _ => unreachable!(),
+                };
                 if len != size {
                     return Err(VmError::new(
                         format!(
-                            "cannot unpack a list of length {} into {} variables",
-                            len, size
+                            "cannot unpack a {type_name} of length {len} into {size} variables",
                         ),
                         span,
                     ));
                 }
                 // Try to avoid a clone when we're the sole owner.
+                // Elements are pushed in reverse order so that the first element
+                // ends up on top of the stack after all pushes complete.
                 let mut elements = match Rc::try_unwrap(obj) {
                     Ok(Object::List(seq)) => seq.into_inner(),
-                    Ok(_) => unreachable!(),
-                    Err(rc) => {
-                        let Object::List(seq) = rc.as_ref() else {
-                            unreachable!()
-                        };
-                        seq.borrow().to_vec()
-                    }
-                };
-                elements.reverse();
-                self.stack.append(&mut elements);
-            }
-            Object::Tuple(seq) => {
-                if seq.len() != size {
-                    return Err(VmError::new(
-                        format!(
-                            "cannot unpack a tuple of length {} into {} variables",
-                            seq.len(),
-                            size
-                        ),
-                        span,
-                    ));
-                }
-                // Try to avoid a clone when we're the sole owner.
-                let mut elements = match Rc::try_unwrap(obj) {
                     Ok(Object::Tuple(seq)) => seq,
                     Ok(_) => unreachable!(),
-                    Err(rc) => {
-                        let Object::Tuple(seq) = rc.as_ref() else {
-                            unreachable!()
-                        };
-                        seq.clone()
-                    }
+                    Err(rc) => match rc.as_ref() {
+                        Object::List(seq) => seq.borrow().to_vec(),
+                        Object::Tuple(seq) => seq.clone(),
+                        _ => unreachable!(),
+                    },
                 };
                 elements.reverse();
                 self.stack.append(&mut elements);
@@ -985,37 +976,10 @@ fn as_numeric_tuple(value: &Value) -> Option<&Vec<Value>> {
     }
 }
 
-/// Returns the element pairs to apply a binary op to when vectorizing over
-/// numeric tuples, or `None` when the arguments do not support vectorization.
-///
-/// Three shapes are supported:
-///   - `(tuple, tuple)` — same-length numeric tuples: paired element-wise
-///   - `(scalar, tuple)` — scalar broadcast over each tuple element
-///   - `(tuple, scalar)` — tuple element paired with scalar
-fn vectorization_pairs(left: &Value, right: &Value) -> Option<Vec<(Value, Value)>> {
-    let left_tuple = as_numeric_tuple(left);
-    let right_tuple = as_numeric_tuple(right);
-    let left_is_scalar = left.is_number();
-    let right_is_scalar = right.is_number();
-
-    match (left_tuple, right_tuple) {
-        (Some(ls), Some(rs)) if ls.len() == rs.len() => {
-            Some(ls.iter().cloned().zip(rs.iter().cloned()).collect())
-        }
-        (None, Some(rs)) if left_is_scalar => {
-            Some(rs.iter().map(|r| (left.clone(), r.clone())).collect())
-        }
-        (Some(ls), None) if right_is_scalar => {
-            Some(ls.iter().map(|l| (l.clone(), right.clone())).collect())
-        }
-        _ => None,
-    }
-}
-
 impl CallFrame {
     #[inline(always)]
-    fn slot(&self, slot: usize) -> usize {
-        self.frame_pointer + slot
+    fn slot(&self, local: usize) -> usize {
+        self.frame_pointer + local
     }
 }
 
