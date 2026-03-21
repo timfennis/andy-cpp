@@ -82,7 +82,7 @@ fn foo(a, b) { "outer-two" }
 foo("x");  // "outer-one" — shadow is gone after the block
 ```
 
-A `let` binding completely replaces all previous bindings with the same name — it does not participate in function overloading:
+A `let` binding with a function value completely replaces all previous bindings with the same name — it does not participate in function overloading:
 
 ```ndc
 fn foo(a) { "one" }
@@ -90,6 +90,15 @@ fn foo(a, b) { "two" }
 
 let foo = fn(a) => "let";
 foo("x");      // "let" — both fn overloads are shadowed
+```
+
+A non-function `let` binding shadows the name for value access, but function calls still resolve to the underlying function:
+
+```ndc
+let len = 300;
+len;           // 300 — the value
+len("test");   // 4 — calls the stdlib function, skipping the non-function binding
+"test".len;    // 4 — method call also resolves to the function
 ```
 
 ## Anonymous functions

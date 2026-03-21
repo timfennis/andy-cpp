@@ -60,12 +60,16 @@ impl Scope {
             .map(|idx| idx + self.base_offset)
     }
 
-    fn find_all_slots_by_name(&self, find_ident: &str) -> Vec<usize> {
+    /// Returns slots for all bindings with the given name whose type could be
+    /// callable at runtime (`Function` or `Any`). Bindings with concrete
+    /// non-function types (e.g. `Int`, `String`) are excluded so they never
+    /// pollute the dynamic overload set used for function resolution.
+    fn find_all_callable_slots_by_name(&self, find_ident: &str) -> Vec<usize> {
         self.identifiers
             .iter()
             .enumerate()
-            .filter_map(|(slot, (ident, _))| {
-                if ident == find_ident {
+            .filter_map(|(slot, (ident, typ))| {
+                if ident == find_ident && typ.could_be_callable() {
                     Some(slot + self.base_offset)
                 } else {
                     None
@@ -352,7 +356,7 @@ impl ScopeTree {
             }
 
             // 4. All same-named bindings (accumulate across all scopes)
-            let slots = self.scopes[scope_ptr].find_all_slots_by_name(ident);
+            let slots = self.scopes[scope_ptr].find_all_callable_slots_by_name(ident);
             all_by_name.extend(
                 slots
                     .into_iter()
@@ -385,7 +389,7 @@ impl ScopeTree {
 
                 all_by_name.extend(
                     self.global_scope
-                        .find_all_slots_by_name(ident)
+                        .find_all_callable_slots_by_name(ident)
                         .into_iter()
                         .map(|slot| ResolvedVar::Global { slot }),
                 );

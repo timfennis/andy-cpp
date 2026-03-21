@@ -1,0 +1,8 @@
+// A let binding that shadows a function name should not break function calls.
+// `let len = 300` shadows the `len` function for value access,
+// but function calls (both regular and method syntax) should still
+// resolve to the function, skipping non-function bindings.
+let len = 300;
+assert_eq(4, "test".len);
+assert_eq(4, len("test"));
+assert_eq(300, len);

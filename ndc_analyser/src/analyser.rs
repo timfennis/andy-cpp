@@ -8,11 +8,18 @@ use std::fmt::Debug;
 #[derive(Debug)]
 pub struct Analyser {
     scope_tree: ScopeTree,
+    /// Stack of explicit `return` types for each enclosing function scope.
+    /// Pushed on function entry, popped on exit. The value accumulates the
+    /// lub of all `return <expr>` types seen so far.
+    return_type_stack: Vec<Option<StaticType>>,
 }
 
 impl Analyser {
     pub fn from_scope_tree(scope_tree: ScopeTree) -> Self {
-        Self { scope_tree }
+        Self {
+            scope_tree,
+            return_type_stack: Vec::new(),
+        }
     }
 
     pub fn checkpoint(&self) -> ScopeTree {
@@ -125,11 +132,19 @@ impl Analyser {
                 };
 
                 self.scope_tree.new_function_scope();
+                self.return_type_stack.push(None);
                 let param_types = self.resolve_parameters_declarative(type_signature, *span)?;
 
-                let return_type = self.analyse(body)?;
+                let implicit_return = self.analyse(body)?;
+                let explicit_return = self.return_type_stack.pop().unwrap();
                 *captures = self.scope_tree.current_scope_captures();
                 self.scope_tree.destroy_scope();
+
+                // Combine explicit `return` types with the block's implicit return type.
+                let return_type = match explicit_return {
+                    Some(ret) => ret.lub(&implicit_return),
+                    None => implicit_return,
+                };
                 *return_type_slot = Some(return_type);
 
                 let function_type = StaticType::Function {
@@ -241,7 +256,13 @@ impl Analyser {
                     value: Box::new(value_type.unwrap_or_else(StaticType::unit)),
                 })
             }
-            Expression::Return { value } => self.analyse(value),
+            Expression::Return { value } => {
+                let typ = self.analyse(value)?;
+                if let Some(slot) = self.return_type_stack.last_mut() {
+                    Self::fold_lub(slot, typ.clone());
+                }
+                Ok(typ)
+            }
             Expression::RangeInclusive { start, end }
             | Expression::RangeExclusive { start, end } => {
                 if let Some(start) = start {

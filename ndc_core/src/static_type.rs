@@ -462,6 +462,13 @@ impl StaticType {
         self.sequence_element_type()
     }
 
+    /// Returns `true` if this type could be a callable function at runtime.
+    /// This is true for `Function` types and for `Any` (which might be a
+    /// function at runtime). Concrete non-function types return `false`.
+    pub fn could_be_callable(&self) -> bool {
+        matches!(self, Self::Function { .. } | Self::Any)
+    }
+
     pub fn is_fn_and_matches(&self, types: &[Self]) -> bool {
         // If the thing is not a function we're not interested
         let Self::Function { parameters, .. } = self else {

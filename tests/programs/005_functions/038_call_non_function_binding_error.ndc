@@ -1,0 +1,5 @@
+// Calling a non-function binding should produce a compile-time error,
+// not a confusing runtime error.
+// expect-error: No function called 'foo' found
+let foo = 300;
+foo(42);
