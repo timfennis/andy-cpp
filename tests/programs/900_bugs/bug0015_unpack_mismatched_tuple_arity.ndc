@@ -1,5 +1,6 @@
 // Destructuring let where the variable was declared as () but later
 // reassigned to a 2-tuple should not cause a false "not declared" error.
+// The analyser widens the type via LUB on reassignment.
 // expect-output: 4
 
 let pos = ();
