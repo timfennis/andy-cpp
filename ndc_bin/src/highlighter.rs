@@ -1,7 +1,7 @@
+use ahash::AHashSet;
 use itertools::Itertools;
 use ndc_lexer::{Lexer, Token, TokenLocation};
 use ndc_parser::{Expression, ExpressionLocation, ForBody, ForIteration};
-use ahash::AHashSet;
 use yansi::{Paint, Painted};
 
 pub(crate) struct AndycppHighlighter;
