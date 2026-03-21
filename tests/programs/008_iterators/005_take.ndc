@@ -1,0 +1,14 @@
+// Basic take from a list.
+assert_eq([1, 2, 3, 4, 5].take(3).list(), [1, 2, 3]);
+
+// Take from a range iterator.
+assert_eq((1..10).take(4).list(), [1, 2, 3, 4]);
+
+// Take more than available — yields all elements without error.
+assert_eq([1, 2].take(10).list(), [1, 2]);
+
+// Take 0 yields nothing.
+assert_eq([1, 2, 3].take(0).list(), []);
+
+// Chained: take from a combinations iterator.
+assert_eq(combinations([1, 2, 3, 4], 2).take(3).list(), [(1, 2), (1, 3), (1, 4)]);
