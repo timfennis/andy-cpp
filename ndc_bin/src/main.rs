@@ -19,7 +19,7 @@ mod highlighter;
 #[derive(Parser)]
 #[command(name = "Andy C++")]
 #[command(author = "Tim Fennis <fennis.tim@gmail.com>")]
-#[command(version)]
+#[command(version, long_version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("GIT_HASH"), ")"))]
 #[command(about = "An interpreter for the Andy C++ language")]
 struct Cli {
     #[arg(short = 'C', long, default_value_t = 1)]
