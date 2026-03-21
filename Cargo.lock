@@ -1132,6 +1132,7 @@ dependencies = [
  "ndc_interpreter",
  "ndc_lexer",
  "ndc_lsp",
+ "ndc_parser",
  "ndc_stdlib",
  "rustyline",
  "strsim",

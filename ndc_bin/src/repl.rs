@@ -15,7 +15,7 @@ struct RustylineHelper {}
 
 impl rustyline::highlight::Highlighter for RustylineHelper {
     fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
-        let out = AndycppHighlighter::highlight_line(line);
+        let out = AndycppHighlighter::highlight_parsed(line);
 
         Cow::Owned(out.into_iter().join(""))
     }
