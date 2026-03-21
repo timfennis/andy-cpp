@@ -258,8 +258,9 @@ fn collect_hints(expr: &ExpressionLocation, text: &str, hints: &mut Vec<InlayHin
             }
             collect_hints(body, text, hints);
         }
-        Expression::Statement(inner) => collect_hints(inner, text, hints),
-        Expression::Grouping(inner) => collect_hints(inner, text, hints),
+        Expression::Statement(inner) | Expression::Grouping(inner) => {
+            collect_hints(inner, text, hints);
+        }
         Expression::Block { statements } => {
             for s in statements {
                 collect_hints(s, text, hints);
@@ -294,8 +295,9 @@ fn collect_hints(expr: &ExpressionLocation, text: &str, hints: &mut Vec<InlayHin
                 }
             }
             match body.as_ref() {
-                ForBody::Block(e) => collect_hints(e, text, hints),
-                ForBody::List { expr: e, .. } => collect_hints(e, text, hints),
+                ForBody::Block(e) | ForBody::List { expr: e, .. } => {
+                    collect_hints(e, text, hints);
+                }
                 ForBody::Map {
                     key,
                     value,

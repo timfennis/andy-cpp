@@ -307,7 +307,7 @@ impl Compiler {
                     name,
                     resolved_name,
                     *body,
-                    type_signature,
+                    &type_signature,
                     return_type,
                     captures,
                     pure,
@@ -334,7 +334,7 @@ impl Compiler {
                 self.compile_while(*condition, *loop_body, span)?;
             }
             Expression::For { iterations, body } => {
-                self.compile_for(iterations, *body, span)?;
+                self.compile_for(&iterations, *body, span)?;
             }
             Expression::Call {
                 function,
@@ -370,7 +370,9 @@ impl Compiler {
                 let has_default = default.is_some();
                 for (key, value) in values {
                     self.compile_expr(key)?;
-                    if let Some(v) = value { self.compile_expr(v)? } else {
+                    if let Some(v) = value {
+                        self.compile_expr(v)?
+                    } else {
                         let idx = self.chunk.add_constant(Value::unit());
                         self.chunk.write(OpCode::Constant(idx), Span::new(0, 0));
                     }
@@ -605,7 +607,7 @@ impl Compiler {
         name: Option<String>,
         resolved_name: Option<ResolvedVar>,
         body: ExpressionLocation,
-        type_signature: TypeSignature,
+        type_signature: &TypeSignature,
         return_type: Option<StaticType>,
         captures: Vec<CaptureSource>,
         pure: bool,
@@ -678,13 +680,13 @@ impl Compiler {
 
     fn compile_for(
         &mut self,
-        iterations: Vec<ForIteration>,
+        iterations: &[ForIteration],
         body: ForBody,
         span: Span,
     ) -> Result<(), CompileError> {
         match body {
             ForBody::Block(block) => {
-                self.compile_for_iterations(&iterations, span, &mut |this| {
+                self.compile_for_iterations(iterations, span, &mut |this| {
                     // The body is always a block, which always pushes exactly one value.
                     // Discard it — the loop itself produces no value.
                     this.compile_expr(block.clone())?;
@@ -702,7 +704,7 @@ impl Compiler {
                 self.num_locals = self.num_locals.max(tmp_list + 1);
                 self.chunk.write(OpCode::MakeList(0), span);
                 self.chunk.write(OpCode::SetLocal(tmp_list), span);
-                self.compile_for_iterations(&iterations, span, &mut |this| {
+                self.compile_for_iterations(iterations, span, &mut |this| {
                     this.compile_expr(expr.clone())?;
                     this.chunk.write(OpCode::ListPush(tmp_list), span);
                     Ok(())
@@ -731,7 +733,7 @@ impl Compiler {
                     span,
                 );
                 self.chunk.write(OpCode::SetLocal(tmp_map), span);
-                self.compile_for_iterations(&iterations, span, &mut |this| {
+                self.compile_for_iterations(iterations, span, &mut |this| {
                     this.compile_expr(key.clone())?;
                     if let Some(value) = value.clone() {
                         this.compile_expr(value)?;

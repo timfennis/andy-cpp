@@ -314,11 +314,10 @@ impl StaticType {
 
                 // Parameters: contravariant, so we need GLB (greatest lower bound)
                 let parameters = match (p1, p2) {
-                    (None, None) => None,
                     (Some(ps1), Some(ps2)) if ps1.len() == ps2.len() => {
                         Some(ps1.iter().zip(ps2).map(|(a, b)| a.glb(b)).collect())
                     }
-                    // Incompatible parameter lists
+                    // Incompatible or unknown parameter lists
                     _ => None,
                 };
 

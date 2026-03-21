@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Before commit
 - Run `cargo fmt`
-- Run `cargo check` and fix warnings and errors
+- Run `cargo clippy` and fix all warnings
 - Ensure all tests pass (`cargo test`)
 - Do not leave `TODO` comments in code — either fix the issue immediately or open a GitHub issue and record it in `TODO.md`
 

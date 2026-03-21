@@ -69,7 +69,7 @@ pub fn wrap_function(function: &syn::ItemFn) -> syn::Result<Vec<WrappedFunction>
         .map(|(i, function_name)| {
             let ident = format_ident!("{original_identifier}_{i}");
             wrap_single(
-                function.clone(),
+                function,
                 &ident,
                 function_name,
                 &return_type,
@@ -279,7 +279,7 @@ fn map_type_path(p: &syn::TypePath) -> syn::Result<TokenStream> {
 }
 
 fn wrap_single(
-    function: syn::ItemFn,
+    function: &syn::ItemFn,
     identifier: &syn::Ident,
     register_as_function_name: &proc_macro2::Literal,
     return_type: &TokenStream,
@@ -295,7 +295,7 @@ fn wrap_single(
     };
 
     let vm = try_generate_vm_native(
-        &function,
+        function,
         &inner_ident,
         register_as_function_name,
         docs,

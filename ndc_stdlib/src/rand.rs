@@ -25,7 +25,7 @@ mod inner {
     use ndc_core::num::Number;
 
     /// Randomly shuffles the elements of the list in place.
-    pub fn shuffle(list: &mut Vec<Value>) {
+    pub fn shuffle(list: &mut [Value]) {
         list.shuffle(&mut rand::rng());
     }
 

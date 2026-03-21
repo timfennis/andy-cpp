@@ -18,6 +18,10 @@ pub trait VmIterator {
         hi.filter(|&hi| hi == lo)
     }
 
+    fn is_empty(&self) -> bool {
+        self.len() == Some(0)
+    }
+
     /// If this iterator represents a range, returns `(start, end, inclusive)`.
     fn range_bounds(&self) -> Option<(i64, i64, bool)> {
         None
@@ -424,7 +428,9 @@ impl CombinationsIter {
             return false;
         };
         while self.buffer.len() <= i {
-            if let Some(v) = source.next() { self.buffer.push(v) } else {
+            if let Some(v) = source.next() {
+                self.buffer.push(v)
+            } else {
                 self.source = None;
                 return false;
             }

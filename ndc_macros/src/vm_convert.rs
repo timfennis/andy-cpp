@@ -462,12 +462,13 @@ fn try_vm_return_type(ty: &syn::Type) -> Option<(TokenStream, TokenStream)> {
 /// sense as the Ok type inside a `Result<()>`.
 fn try_vm_return_inner(ty: &syn::Type) -> Option<(TokenStream, TokenStream)> {
     if let syn::Type::Tuple(t) = ty
-        && t.elems.is_empty() {
-            return Some((
-                quote! { Ok(ndc_vm::value::Value::unit()) },
-                quote! { ndc_core::StaticType::Tuple(vec![]) },
-            ));
-        }
+        && t.elems.is_empty()
+    {
+        return Some((
+            quote! { Ok(ndc_vm::value::Value::unit()) },
+            quote! { ndc_core::StaticType::Tuple(vec![]) },
+        ));
+    }
     vm_return_for_classified(ty)
 }
 

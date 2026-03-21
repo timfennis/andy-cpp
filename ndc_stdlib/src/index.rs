@@ -200,24 +200,25 @@ enum VmOffset {
 
 fn extract_vm_offset(index_value: &Value, size: usize) -> Result<VmOffset, VmError> {
     if let Value::Object(obj) = index_value
-        && let Object::Iterator(iter) = obj.as_ref() {
-            let iter_ref = iter.borrow();
-            if let Some((start, end, inclusive)) = iter_ref.range_bounds() {
-                let from_idx = to_forward_index(start, size, true)?;
-                let to_idx = to_forward_index(end, size, true)?;
-                let to_idx = if inclusive {
-                    (to_idx + 1).min(size)
-                } else {
-                    to_idx
-                };
-                return Ok(VmOffset::Range(from_idx, to_idx));
-            }
-            if let Some(start) = iter_ref.unbounded_range_start() {
-                let from_idx = to_forward_index(start, size, true)?;
-                return Ok(VmOffset::Range(from_idx, size));
-            }
-            return Err(VmError::native("cannot use non-range iterator as index"));
+        && let Object::Iterator(iter) = obj.as_ref()
+    {
+        let iter_ref = iter.borrow();
+        if let Some((start, end, inclusive)) = iter_ref.range_bounds() {
+            let from_idx = to_forward_index(start, size, true)?;
+            let to_idx = to_forward_index(end, size, true)?;
+            let to_idx = if inclusive {
+                (to_idx + 1).min(size)
+            } else {
+                to_idx
+            };
+            return Ok(VmOffset::Range(from_idx, to_idx));
         }
+        if let Some(start) = iter_ref.unbounded_range_start() {
+            let from_idx = to_forward_index(start, size, true)?;
+            return Ok(VmOffset::Range(from_idx, size));
+        }
+        return Err(VmError::native("cannot use non-range iterator as index"));
+    }
     let i = match index_value {
         Value::Int(i) => *i,
         Value::Object(obj) => match obj.as_ref() {
@@ -353,7 +354,7 @@ fn vm_set_at_index(container: &Value, index_value: &Value, rhs: Value) -> Result
     match container {
         Value::Object(obj) => match obj.as_ref() {
             Object::List(list) => {
-                let mut list = list.try_borrow_mut().map_err(|_| {
+                let mut list = list.try_borrow_mut().map_err(|_borrow_err| {
                     VmError::native("Mutation error: you cannot mutate a value in a list while you're iterating over this list")
                 })?;
                 match extract_vm_offset(index_value, size)? {

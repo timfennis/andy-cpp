@@ -205,13 +205,17 @@ mod inner {
     #[function(return_type = ())]
     pub fn sort(list: &mut Vec<Value>) -> anyhow::Result<()> {
         let mut err: Option<String> = None;
-        list.sort_by(|a, b| if let Some(ord) = a.partial_cmp(b) { ord } else {
-            err = Some(format!(
-                "cannot compare {} and {}",
-                a.static_type(),
-                b.static_type()
-            ));
-            Ordering::Equal
+        list.sort_by(|a, b| {
+            if let Some(ord) = a.partial_cmp(b) {
+                ord
+            } else {
+                err = Some(format!(
+                    "cannot compare {} and {}",
+                    a.static_type(),
+                    b.static_type()
+                ));
+                Ordering::Equal
+            }
         });
         if let Some(e) = err {
             return Err(anyhow::anyhow!(e));
@@ -583,17 +587,18 @@ mod inner {
     pub fn prefixes(seq: SeqValue) -> anyhow::Result<Value> {
         // Special case for String — produce string prefixes instead of lists of chars.
         if let Value::Object(ref obj) = seq
-            && let Object::String(s) = obj.as_ref() {
-                return Ok(Value::list(
-                    s.borrow()
-                        .chars()
-                        .scan(String::new(), |acc, c| {
-                            acc.push(c);
-                            Some(Value::string(acc.clone()))
-                        })
-                        .collect(),
-                ));
-            }
+            && let Object::String(s) = obj.as_ref()
+        {
+            return Ok(Value::list(
+                s.borrow()
+                    .chars()
+                    .scan(String::new(), |acc, c| {
+                        acc.push(c);
+                        Some(Value::string(acc.clone()))
+                    })
+                    .collect(),
+            ));
+        }
         Ok(Value::list(
             seq.try_into_iter()
                 .ok_or_else(|| anyhow!("prefixes requires a sequence"))?
@@ -609,15 +614,16 @@ mod inner {
     pub fn suffixes(seq: SeqValue) -> anyhow::Result<Value> {
         // Special case for String — produce string suffixes instead of lists of chars.
         if let Value::Object(ref obj) = seq
-            && let Object::String(s) = obj.as_ref() {
-                let borrowed = s.borrow();
-                return Ok(Value::list(
-                    borrowed
-                        .char_indices()
-                        .map(|(i, _)| Value::string(borrowed[i..].to_string()))
-                        .collect(),
-                ));
-            }
+            && let Object::String(s) = obj.as_ref()
+        {
+            let borrowed = s.borrow();
+            return Ok(Value::list(
+                borrowed
+                    .char_indices()
+                    .map(|(i, _)| Value::string(borrowed[i..].to_string()))
+                    .collect(),
+            ));
+        }
         let out: Vec<Value> = seq
             .try_into_iter()
             .ok_or_else(|| anyhow!("suffixes requires a sequence"))?

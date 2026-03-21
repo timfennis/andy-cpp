@@ -53,6 +53,8 @@ pub struct Vm {
     source: Option<String>,
 }
 
+type MemoCache = (Rc<RefCell<HashMap<u64, Value>>>, u64);
+
 pub struct CallFrame {
     closure: ClosureFunction,
     ip: usize,
@@ -61,7 +63,7 @@ pub struct CallFrame {
     /// If this frame was called from a `pure` (memoized) function, holds the
     /// cache to write into and the hash key when the frame returns.  `None`
     /// for ordinary (non-memoized) calls.
-    memo: Option<(Rc<RefCell<HashMap<u64, Value>>>, u64)>,
+    memo: Option<MemoCache>,
 }
 
 impl Vm {
@@ -581,7 +583,7 @@ impl Vm {
         &mut self,
         func: Function,
         args: usize,
-        memo: Option<(Rc<RefCell<HashMap<u64, Value>>>, u64)>,
+        memo: Option<MemoCache>,
     ) -> Result<(), VmError> {
         let closure = match func {
             Function::Native(native) => {

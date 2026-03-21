@@ -30,13 +30,16 @@ pub struct NativeFunction {
     pub static_type: StaticType,
 }
 
+type SimpleFn = dyn Fn(&[Value]) -> Result<Value, VmError>;
+type WithVmFn = dyn Fn(&[Value], &mut crate::Vm) -> Result<Value, VmError>;
+
 pub enum NativeFunc {
     /// Zero-allocation path: args are a slice directly into the VM stack.
     /// Use for functions that do not invoke VM callbacks (no `VmCallable` params).
-    Simple(Box<dyn Fn(&[Value]) -> Result<Value, VmError>>),
+    Simple(Box<SimpleFn>),
     /// HOF path: args are drained off the stack before the call so `&mut Vm`
     /// can be passed safely. Use for functions with `&VmCallable` params.
-    WithVm(Box<dyn Fn(&[Value], &mut crate::Vm) -> Result<Value, VmError>>),
+    WithVm(Box<WithVmFn>),
 }
 
 pub struct CompiledFunction {

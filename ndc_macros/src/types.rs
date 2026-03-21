@@ -176,6 +176,12 @@ fn classify_ref_mut(inner: &syn::Type) -> Option<NdcType> {
     if is_collection_of_vm_value(inner, "Vec") {
         return Some(NdcType::MutVecOfValue);
     }
+    // &mut [Value] — same extraction as &mut Vec<Value>, Rust auto-coerces
+    if let syn::Type::Slice(slice) = inner
+        && classify_owned(&slice.elem) == Some(NdcType::VmValue)
+    {
+        return Some(NdcType::MutVecOfValue);
+    }
     if is_collection_of_vm_value(inner, "HashMap") {
         return Some(NdcType::MutHashMap);
     }
