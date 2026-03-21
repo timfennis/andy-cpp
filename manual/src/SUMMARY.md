@@ -25,6 +25,7 @@
 - [While loop](./reference/while-loop.md)
 - [For loops and comprehensions](./reference/for-loop.md)
 - [Functions](./reference/functions.md)
+- [Memory Management](./reference/memory-management.md)
 
 # Features
 - [Augmented assignment](./features/augmented-assignment.md)
