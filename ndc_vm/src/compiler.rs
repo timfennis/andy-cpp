@@ -701,7 +701,7 @@ impl Compiler {
                 accumulator_slot,
             } => {
                 let tmp_list = accumulator_slot
-                    .expect("list accumulator slot must be assigned by the analyser");
+                    .ok_or_else(|| CompileError::unresolved_accumulator_slot(span))?;
                 self.num_locals = self.num_locals.max(tmp_list + 1);
                 self.chunk.write(OpCode::MakeList(0), span);
                 self.chunk.write(OpCode::SetLocal(tmp_list), span);
@@ -720,7 +720,7 @@ impl Compiler {
                 accumulator_slot,
             } => {
                 let tmp_map = accumulator_slot
-                    .expect("map accumulator slot must be assigned by the analyser");
+                    .ok_or_else(|| CompileError::unresolved_accumulator_slot(span))?;
                 self.num_locals = self.num_locals.max(tmp_map + 1);
                 let has_default = default.is_some();
                 if let Some(default) = default {
@@ -911,6 +911,14 @@ impl CompileError {
     fn lvalue_required_to_be_single_identifier(span: Span) -> Self {
         Self {
             text: "This lvalue is required to be a single identifier".to_string(),
+            span,
+        }
+    }
+
+    fn unresolved_accumulator_slot(span: Span) -> Self {
+        Self {
+            text: "accumulator slot was not assigned by the analyser; this is an internal error"
+                .to_string(),
             span,
         }
     }
