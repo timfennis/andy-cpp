@@ -256,25 +256,12 @@ impl ScopeTree {
 
         loop {
             if let Some(slot) = self.scopes[scope_ptr].find_slot_by_name(ident) {
-                if env_scopes.is_empty() {
-                    return Some(ResolvedVar::Local { slot });
-                }
-
-                let slot = self.hoist_upvalue(ident, slot, &env_scopes);
-                return Some(ResolvedVar::Upvalue { slot });
+                return Some(self.resolve_found_local(ident, slot, &env_scopes));
             }
-
             if let Some(slot) = self.scopes[scope_ptr].find_upvalue(ident) {
-                if env_scopes.is_empty() {
-                    return Some(ResolvedVar::Upvalue { slot });
-                }
-
-                let slot = self.hoist_from_upvalue(ident, slot, &env_scopes);
-                return Some(ResolvedVar::Upvalue { slot });
+                return Some(self.resolve_found_upvalue(ident, slot, &env_scopes));
             }
 
-            // We couldn't find this ident in the local scope, or as an upvalue in the current scope
-            // in this case we just recurse.
             if let Some(parent_idx) = self.scopes[scope_ptr].parent_idx {
                 if self.scopes[scope_ptr].creates_environment {
                     env_scopes.push(scope_ptr);
@@ -301,23 +288,10 @@ impl ScopeTree {
             if !candidates.is_empty() {
                 return candidates
                     .into_iter()
-                    .map(|slot| {
-                        if env_scopes.is_empty() {
-                            return ResolvedVar::Local { slot };
-                        }
-
-                        let slot = self.hoist_upvalue(ident, slot, &env_scopes);
-                        ResolvedVar::Upvalue { slot }
-                    })
+                    .map(|slot| self.resolve_found_local(ident, slot, &env_scopes))
                     .collect();
             } else if let Some(slot) = self.scopes[scope_ptr].find_upvalue(ident) {
-                if env_scopes.is_empty() {
-                    return vec![ResolvedVar::Upvalue { slot }];
-                }
-
-                let slot = self.hoist_from_upvalue(ident, slot, &env_scopes);
-
-                return vec![ResolvedVar::Upvalue { slot }];
+                return vec![self.resolve_found_upvalue(ident, slot, &env_scopes)];
             } else if let Some(parent_idx) = self.scopes[scope_ptr].parent_idx {
                 if self.scopes[scope_ptr].creates_environment {
                     env_scopes.push(scope_ptr);
@@ -366,23 +340,14 @@ impl ScopeTree {
 
         loop {
             let slots = self.scopes[scope_ptr].find_all_slots_by_name(ident);
-
-            results.extend(slots.into_iter().map(|slot| {
-                if env_scopes.is_empty() {
-                    ResolvedVar::Local { slot }
-                } else {
-                    let slot = self.hoist_upvalue(ident, slot, &env_scopes);
-                    ResolvedVar::Upvalue { slot }
-                }
-            }));
+            results.extend(
+                slots
+                    .into_iter()
+                    .map(|slot| self.resolve_found_local(ident, slot, &env_scopes)),
+            );
 
             if let Some(slot) = self.scopes[scope_ptr].find_upvalue(ident) {
-                if env_scopes.is_empty() {
-                    results.push(ResolvedVar::Upvalue { slot });
-                } else {
-                    let slot = self.hoist_from_upvalue(ident, slot, &env_scopes);
-                    results.push(ResolvedVar::Upvalue { slot });
-                }
+                results.push(self.resolve_found_upvalue(ident, slot, &env_scopes));
             }
 
             if let Some(parent_idx) = self.scopes[scope_ptr].parent_idx {
@@ -415,20 +380,9 @@ impl ScopeTree {
 
         loop {
             if let Some(slot) = self.scopes[scope_ptr].find_function(ident, arg_types) {
-                if env_scopes.is_empty() {
-                    return Some(ResolvedVar::Local { slot });
-                }
-
-                let slot = self.hoist_upvalue(ident, slot, &env_scopes);
-
-                return Some(ResolvedVar::Upvalue { slot });
+                return Some(self.resolve_found_local(ident, slot, &env_scopes));
             } else if let Some(slot) = self.scopes[scope_ptr].find_upvalue(ident) {
-                if env_scopes.is_empty() {
-                    return Some(ResolvedVar::Upvalue { slot });
-                }
-
-                let slot = self.hoist_from_upvalue(ident, slot, &env_scopes);
-                return Some(ResolvedVar::Upvalue { slot });
+                return Some(self.resolve_found_upvalue(ident, slot, &env_scopes));
             } else if let Some(parent_idx) = self.scopes[scope_ptr].parent_idx {
                 if self.scopes[scope_ptr].creates_environment {
                     env_scopes.push(scope_ptr);
@@ -503,6 +457,41 @@ impl ScopeTree {
             scope_idx = scope
                 .parent_idx
                 .expect("slot not found in any scope within function");
+        }
+    }
+
+    /// Given a local slot found during a scope walk, return the appropriate `ResolvedVar`.
+    /// If `env_scopes` is empty the slot is in the current function scope and can be
+    /// referenced directly as a `Local`. Otherwise it must be hoisted through intervening
+    /// function scopes as an upvalue chain.
+    fn resolve_found_local(
+        &mut self,
+        ident: &str,
+        slot: usize,
+        env_scopes: &[usize],
+    ) -> ResolvedVar {
+        if env_scopes.is_empty() {
+            ResolvedVar::Local { slot }
+        } else {
+            let slot = self.hoist_upvalue(ident, slot, env_scopes);
+            ResolvedVar::Upvalue { slot }
+        }
+    }
+
+    /// Given an upvalue slot found during a scope walk, return the appropriate `ResolvedVar`.
+    /// If `env_scopes` is empty the upvalue belongs to the current function scope. Otherwise
+    /// it must be hoisted further through intervening function scopes.
+    fn resolve_found_upvalue(
+        &mut self,
+        ident: &str,
+        slot: usize,
+        env_scopes: &[usize],
+    ) -> ResolvedVar {
+        if env_scopes.is_empty() {
+            ResolvedVar::Upvalue { slot }
+        } else {
+            let slot = self.hoist_from_upvalue(ident, slot, env_scopes);
+            ResolvedVar::Upvalue { slot }
         }
     }
 

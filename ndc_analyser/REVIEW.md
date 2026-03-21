@@ -27,24 +27,6 @@
   collects exact matches, loose matches, and all-by-name simultaneously would improve compile-time
   performance for programs with many overloads.
 
-## Medium: Code duplication
-
-- **Scope-walking loop repeated 5 times** (`src/scope.rs`)
-  `get_binding_any`, `resolve_function_dynamic`, `get_all_bindings_by_name`, `resolve_function`,
-  and partially `find_type_by_slot` / `find_scope_owning_slot` all share the same structure: walk
-  up the scope chain, check each scope, track `env_scopes` for upvalue hoisting, fall through to
-  globals. Extracting a generic scope-walk iterator or visitor would eliminate ~100 lines.
-
-- **Duplicated lub-fold pattern** (`src/analyser.rs`)
-  The pattern of folding types via `lub` appears in `analyse_multiple_expression_with_same_type`
-  (list elements), map key accumulation (~line 228), and map value accumulation (~line 234). A small
-  helper `fn analyse_lub(&mut self, exprs) -> Option<StaticType>` could unify these.
-
-- **`resolve_lvalue` and `resolve_single_lvalue` overlap** (`src/analyser.rs` ~line 397)
-  Both resolve an lvalue's identifier binding. The `Identifier` and `Index` arms are near-identical;
-  they differ only in that `resolve_single_lvalue` returns the type and errors on `Sequence`. Consider
-  having `resolve_lvalue` return `Option<StaticType>` to avoid the duplication.
-
 ## Small: Cleanup
 
 - **`debug_assert!(false)` → `unreachable!`** (`src/scope.rs` ~line 98)

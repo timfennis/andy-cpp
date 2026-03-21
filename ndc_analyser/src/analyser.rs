@@ -221,25 +221,9 @@ impl Analyser {
                 let mut key_type: Option<StaticType> = None;
                 let mut value_type: Option<StaticType> = None;
                 for (key, value) in values {
-                    // let map = %{
-                    //     "key": 1,
-                    //     10: 1,
-                    // }
-                    if let Some(key_type) = &mut key_type {
-                        let next_type = self.analyse(key)?;
-                        *key_type = key_type.lub(&next_type);
-                    } else {
-                        key_type = Some(self.analyse(key)?);
-                    }
+                    Self::fold_lub(&mut key_type, self.analyse(key)?);
                     if let Some(value) = value {
-                        if let Some(value_type) = &mut value_type {
-                            let next_type = self.analyse(value)?;
-                            if &next_type != value_type {
-                                *value_type = value_type.lub(&next_type);
-                            }
-                        } else {
-                            value_type = Some(self.analyse(value)?);
-                        }
+                        Self::fold_lub(&mut value_type, self.analyse(value)?);
                     }
                 }
 
@@ -399,6 +383,17 @@ impl Analyser {
         lvalue: &mut Lvalue,
         span: Span,
     ) -> Result<StaticType, AnalysisError> {
+        if matches!(lvalue, Lvalue::Sequence(_)) {
+            return Err(AnalysisError::lvalue_required_to_be_single_identifier(span));
+        }
+        self.resolve_lvalue(lvalue, span)
+    }
+
+    fn resolve_lvalue(
+        &mut self,
+        lvalue: &mut Lvalue,
+        span: Span,
+    ) -> Result<StaticType, AnalysisError> {
         match lvalue {
             Lvalue::Identifier {
                 identifier,
@@ -412,7 +407,6 @@ impl Analyser {
                 };
 
                 *resolved = Some(target);
-
                 Ok(self.scope_tree.get_type(target).clone())
             }
             Lvalue::Index {
@@ -431,46 +425,13 @@ impl Analyser {
                     .index_element_type()
                     .ok_or_else(|| AnalysisError::unable_to_index_into(&type_of_index_target, span))
             }
-            Lvalue::Sequence(_) => {
-                Err(AnalysisError::lvalue_required_to_be_single_identifier(span))
-            }
-        }
-    }
-
-    fn resolve_lvalue(&mut self, lvalue: &mut Lvalue, span: Span) -> Result<(), AnalysisError> {
-        match lvalue {
-            Lvalue::Identifier {
-                identifier,
-                resolved,
-                ..
-            } => {
-                let Some(target) = self.scope_tree.get_binding_any(identifier) else {
-                    return Err(AnalysisError::identifier_not_previously_declared(
-                        identifier, span,
-                    ));
-                };
-
-                *resolved = Some(target);
-            }
-            Lvalue::Index {
-                index,
-                value,
-                resolved_set,
-                resolved_get,
-            } => {
-                self.analyse(index)?;
-                self.analyse(value)?;
-                *resolved_set = Some(self.scope_tree.resolve_function_binding("[]=", &[]));
-                *resolved_get = Some(self.scope_tree.resolve_function_binding("[]", &[]));
-            }
             Lvalue::Sequence(seq) => {
                 for sub_lvalue in seq {
-                    self.resolve_lvalue(sub_lvalue, span)?
+                    self.resolve_lvalue(sub_lvalue, span)?;
                 }
+                Ok(StaticType::unit())
             }
         }
-
-        Ok(())
     }
 
     /// Resolve expressions as arguments to a function and return the function arity
@@ -545,18 +506,18 @@ impl Analyser {
         expressions: &mut Vec<ExpressionLocation>,
     ) -> Result<Option<StaticType>, AnalysisError> {
         let mut element_type: Option<StaticType> = None;
-
         for expression in expressions {
-            if let Some(element_type) = &mut element_type {
-                let following_type = self.analyse(expression)?;
-
-                *element_type = element_type.lub(&following_type);
-            } else {
-                element_type = Some(self.analyse(expression)?);
-            }
+            Self::fold_lub(&mut element_type, self.analyse(expression)?);
         }
-
         Ok(element_type)
+    }
+
+    /// Fold a new type into an accumulator via least-upper-bound.
+    fn fold_lub(acc: &mut Option<StaticType>, new_type: StaticType) {
+        match acc {
+            Some(prev) => *prev = prev.lub(&new_type),
+            None => *acc = Some(new_type),
+        }
     }
 }
 
