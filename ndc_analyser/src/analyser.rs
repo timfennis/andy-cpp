@@ -517,9 +517,22 @@ impl Analyser {
                 self.analyse(value)?;
             }
             Lvalue::Sequence(seq) => {
-                let sub_types = typ
-                    .unpack()
-                    .ok_or_else(|| AnalysisError::unable_to_unpack_type(&typ, span))?;
+                // If the type is a fixed-length Tuple whose arity doesn't match
+                // the number of lvalues, fall back to Any for each element. This
+                // can happen when a variable is declared with one type (e.g. ())
+                // and later reassigned to a tuple of a different arity — the
+                // analyser doesn't track reassignment types.
+                let sub_types: Box<dyn Iterator<Item = &StaticType>> =
+                    if let StaticType::Tuple(elems) = &typ {
+                        if elems.len() != seq.len() {
+                            Box::new(std::iter::repeat(&StaticType::Any))
+                        } else {
+                            Box::new(elems.iter())
+                        }
+                    } else {
+                        typ.unpack()
+                            .ok_or_else(|| AnalysisError::unable_to_unpack_type(&typ, span))?
+                    };
 
                 for (sub_lvalue, sub_lvalue_type) in seq.iter_mut().zip(sub_types) {
                     self.resolve_lvalue_declarative(
