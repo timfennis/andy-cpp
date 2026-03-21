@@ -3,9 +3,8 @@
 use crate::docs::docs;
 use anyhow::{Context, anyhow};
 use clap::{Parser, Subcommand};
-use highlighter::{AndycppHighlighter, AndycppHighlighterState};
-use miette::{NamedSource, highlighters::HighlighterState};
-use ndc_interpreter::{Interpreter, InterpreterError};
+use highlighter::AndycppHighlighter;
+use ndc_interpreter::Interpreter;
 use std::path::PathBuf;
 use std::process;
 use std::{fs, io::Write};
@@ -22,9 +21,6 @@ mod highlighter;
 #[command(version, long_version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("GIT_HASH"), ")"))]
 #[command(about = "An interpreter for the Andy C++ language")]
 struct Cli {
-    #[arg(short = 'C', long, default_value_t = 1)]
-    context_lines: usize,
-
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -109,20 +105,6 @@ impl TryFrom<Command> for Action {
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
-    let context_lines = cli.context_lines;
-
-    miette::set_hook(Box::new(move |_| {
-        Box::new(
-            miette::MietteHandlerOpts::new()
-                .terminal_links(true)
-                .color(true)
-                .unicode(true)
-                .context_lines(context_lines)
-                .with_syntax_highlighting(AndycppHighlighter::default())
-                .build(),
-        )
-    }))?;
-
     let action: Action = cli.command.unwrap_or_default().try_into()?;
 
     match action {
@@ -136,27 +118,24 @@ fn main() -> anyhow::Result<()> {
 
             let mut interpreter = Interpreter::new();
             interpreter.configure(ndc_stdlib::register);
-            match into_miette_result(interpreter.eval(&string)) {
-                // we can just ignore successful runs because we have print statements
-                Ok(_final_value) => {}
-                Err(report) => {
-                    let source =
-                        NamedSource::new(filename.expect("filename must exist"), string.clone());
-                    let report = report.with_source_code(source);
-                    eprintln!("{:?}", report);
-
-                    process::exit(1);
-                }
+            if let Err(err) = interpreter.eval(&string) {
+                diagnostic::emit_error(&filename.expect("filename must exist"), &string, err);
+                process::exit(1);
             }
         }
         Action::DisassembleFile(path) => {
+            let filename = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("<input>")
+                .to_string();
             let string = fs::read_to_string(path)?;
             let mut interpreter = Interpreter::new();
             interpreter.configure(ndc_stdlib::register);
             match interpreter.disassemble_str(&string) {
                 Ok(output) => print!("{output}"),
                 Err(e) => {
-                    eprintln!("{:?}", miette::Report::new(diagnostic::NdcReport::from(e)));
+                    diagnostic::emit_error(&filename, &string, e);
                     process::exit(1);
                 }
             }
@@ -164,8 +143,7 @@ fn main() -> anyhow::Result<()> {
         Action::HighlightFile(path) => {
             let string = fs::read_to_string(path)?;
 
-            let mut highlighter = AndycppHighlighterState {};
-            let out = highlighter.highlight_line(&string);
+            let out = AndycppHighlighter::highlight_line(&string);
             for styled in out {
                 print!("{}", styled);
             }
@@ -194,10 +172,6 @@ fn start_lsp() {
             .expect("Failed building the Runtime")
             .block_on(async { ndc_lsp::start_lsp(ndc_stdlib::register).await });
     }
-}
-
-pub fn into_miette_result<T>(result: Result<T, InterpreterError>) -> miette::Result<T> {
-    result.map_err(|e| miette::Report::new(diagnostic::NdcReport::from(e)))
 }
 
 #[cfg(test)]
