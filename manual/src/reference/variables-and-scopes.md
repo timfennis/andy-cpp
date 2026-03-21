@@ -40,6 +40,24 @@ let x = {
 print(x); // 3
 ```
 
+## Reassignment
+
+The `=` operator can be used to reassign a value to an existing variable. When you reassign a variable to a value of a different type, the variable's type is widened to the least upper bound (LUB) of the old and new types.
+
+```ndc
+let x = 1;     // type is Int
+x = 2;         // type is still Int
+x = 3.14;      // type widens to Number (LUB of Int and Float)
+```
+
+```ndc
+let pos = ();        // type is ()
+pos = (1, 2);        // type widens to Sequence<Any>
+pos = ("a", "b");    // type is still Sequence<Any>
+```
+
+> **Tip:** For the best type inference, initialize variables with a value that matches the intended type. For example, use `let pos = (0, 0);` instead of `let pos = ();` if you intend to store a 2-tuple of numbers.
+
 ## Destructuring
 
 Destructuring is more similar to how it works in python and cares mostly about where commas are and not so much about the delimiters (`[]`, `()`) used.

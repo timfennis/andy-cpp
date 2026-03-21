@@ -78,8 +78,22 @@ impl Analyser {
                 Ok(StaticType::unit())
             }
             Expression::Assignment { l_value, r_value } => {
-                self.resolve_lvalue(l_value, *span)?;
-                self.analyse(r_value)?;
+                let old_type = self.resolve_lvalue(l_value, *span)?;
+                let new_type = self.analyse(r_value)?;
+
+                // Widen the binding's type to the LUB so subsequent uses
+                // see the broader type.
+                if let Lvalue::Identifier {
+                    resolved: Some(target),
+                    ..
+                } = l_value
+                {
+                    let widened = old_type.lub(&new_type);
+                    if widened != old_type {
+                        self.scope_tree.update_binding_type(*target, widened);
+                    }
+                }
+
                 Ok(StaticType::unit())
             }
             Expression::OpAssignment {
