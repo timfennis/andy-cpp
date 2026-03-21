@@ -1,7 +1,7 @@
 use itertools::Itertools;
 use ndc_lexer::{Lexer, Token, TokenLocation};
 use ndc_parser::{Expression, ExpressionLocation, ForBody, ForIteration};
-use std::collections::HashSet;
+use ahash::AHashSet;
 use yansi::{Paint, Painted};
 
 pub(crate) struct AndycppHighlighter;
@@ -10,7 +10,7 @@ impl AndycppHighlighter {
     /// Parser-enhanced highlighting that correctly identifies function names
     /// even in method-call syntax like `foo.len`.
     pub fn highlight_parsed(line: &str) -> Vec<Painted<&str>> {
-        let mut function_spans = HashSet::new();
+        let mut function_spans = AHashSet::new();
 
         let expressions = Lexer::new(line)
             .collect::<Result<Vec<TokenLocation>, _>>()
@@ -28,7 +28,7 @@ impl AndycppHighlighter {
 
     fn highlight_tokens<'a>(
         line: &'a str,
-        function_spans: &HashSet<usize>,
+        function_spans: &AHashSet<usize>,
     ) -> Vec<Painted<&'a str>> {
         let Ok(tokens) = Lexer::new(line).collect::<Result<Vec<_>, _>>() else {
             return vec![line.red()];
@@ -117,7 +117,7 @@ impl AndycppHighlighter {
 }
 
 /// Walk the parsed AST and collect the byte offsets of identifiers used as function names.
-fn collect_function_spans(expr: &ExpressionLocation, spans: &mut HashSet<usize>) {
+fn collect_function_spans(expr: &ExpressionLocation, spans: &mut AHashSet<usize>) {
     match &expr.expression {
         Expression::Call {
             function,
@@ -215,7 +215,23 @@ fn collect_function_spans(expr: &ExpressionLocation, spans: &mut HashSet<usize>)
                 collect_function_spans(d, spans);
             }
         }
-        // Literals, identifiers (non-call), etc. — nothing to collect
-        _ => {}
+        Expression::RangeInclusive { start, end } | Expression::RangeExclusive { start, end } => {
+            if let Some(s) = start {
+                collect_function_spans(s, spans);
+            }
+            if let Some(e) = end {
+                collect_function_spans(e, spans);
+            }
+        }
+        // Leaves — no sub-expressions to recurse into
+        Expression::BoolLiteral(_)
+        | Expression::StringLiteral(_)
+        | Expression::Int64Literal(_)
+        | Expression::Float64Literal(_)
+        | Expression::BigIntLiteral(_)
+        | Expression::ComplexLiteral(_)
+        | Expression::Identifier { .. }
+        | Expression::Break
+        | Expression::Continue => {}
     }
 }
