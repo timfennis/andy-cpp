@@ -277,6 +277,7 @@ mod inner {
     /// - for values lower than `0` the first argument is smaller than the second argument
     /// - for values higher than `0` the first argument is greater than the second argument
     /// - for values equal to `0` the first argument is equal to the second argument
+    #[function(return_type = Vec<_>)]
     pub fn sorted_by(seq: SeqValue, comp: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         let mut list: Vec<Value> = seq
             .try_into_iter()
@@ -334,6 +335,7 @@ mod inner {
     }
 
     /// Enumerates the given sequence returning a list of tuples where the first element of the tuple is the index of the element in the input sequence.
+    #[function(return_type = Vec<_>)]
     pub fn enumerate(seq: SeqValue) -> anyhow::Result<Value> {
         Ok(Value::list(
             seq.try_into_iter()
@@ -370,6 +372,7 @@ mod inner {
     }
 
     /// Filters the given sequence using the `predicate`.
+    #[function(return_type = Vec<_>)]
     pub fn filter(seq: SeqValue, predicate: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         let mut out = Vec::new();
         for element in seq
@@ -514,6 +517,7 @@ mod inner {
     }
 
     /// Applies the function to each element in a sequence returning the result as a list.
+    #[function(return_type = Vec<_>)]
     pub fn map(seq: SeqValue, function: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         let mut out = Vec::new();
         for item in seq
@@ -526,6 +530,7 @@ mod inner {
     }
 
     /// Applies a function to each item in a sequence, flattens the resulting sequences, and returns a single combined sequence.
+    #[function(return_type = Vec<_>)]
     pub fn flat_map(seq: SeqValue, function: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         let mut out = Vec::new();
         for item in seq
@@ -557,6 +562,7 @@ mod inner {
     }
 
     /// Returns the `k` sized combinations of the given sequence `seq` as a lazy iterator of tuples.
+    #[function(return_type = Iterator<Value>)]
     pub fn combinations(seq: SeqValue, k: i64) -> anyhow::Result<Value> {
         let k = k as usize;
         let iter = CombinationsIter::new(seq, k)
@@ -572,6 +578,7 @@ mod inner {
     }
 
     /// Returns the `k` sized permutations of the given sequence `seq` as a list of tuples.
+    #[function(return_type = Vec<_>)]
     pub fn permutations(seq: SeqValue, k: i64) -> anyhow::Result<Value> {
         let k = k as usize;
         Ok(Value::list(
@@ -584,6 +591,7 @@ mod inner {
     }
 
     /// Returns all prefixes of a sequence, each as a list.
+    #[function(return_type = Vec<_>)]
     pub fn prefixes(seq: SeqValue) -> anyhow::Result<Value> {
         // Special case for String — produce string prefixes instead of lists of chars.
         if let Value::Object(ref obj) = seq
@@ -611,6 +619,7 @@ mod inner {
     }
 
     /// Returns all suffixes of a sequence, each as a list; for strings, returns all trailing substrings.
+    #[function(return_type = Vec<_>)]
     pub fn suffixes(seq: SeqValue) -> anyhow::Result<Value> {
         // Special case for String — produce string suffixes instead of lists of chars.
         if let Value::Object(ref obj) = seq
@@ -636,6 +645,7 @@ mod inner {
     }
 
     /// Transposes a sequence of sequences, turning rows into columns, and returns the result as a list of lists.
+    #[function(return_type = Vec<_>)]
     pub fn transposed(seq: SeqValue) -> anyhow::Result<Value> {
         let main: Vec<Value> = seq
             .try_into_iter()
@@ -658,6 +668,7 @@ mod inner {
     }
 
     /// Return a list of all windows, wrapping back to the first elements when the window would otherwise exceed the length of source list, producing tuples of size 2.
+    #[function(return_type = Vec<_>)]
     pub fn circular_tuple_windows(seq: SeqValue) -> anyhow::Result<Value> {
         Ok(Value::list(
             seq.try_into_iter()
@@ -671,6 +682,7 @@ mod inner {
     }
 
     /// Returns a list of all size-2 windows in `seq`.
+    #[function(return_type = Vec<_>)]
     pub fn pairwise(seq: SeqValue) -> anyhow::Result<Value> {
         Ok(Value::list(
             seq.try_into_iter()
@@ -683,7 +695,7 @@ mod inner {
     }
 
     /// Applies a function to each pair of consecutive elements in a sequence and returns the results as a list.
-    #[function(name = "pairwise")]
+    #[function(name = "pairwise", return_type = Vec<_>)]
     pub fn pairwise_map(seq: SeqValue, function: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         let main: Vec<Value> = seq
             .try_into_iter()
@@ -697,6 +709,7 @@ mod inner {
     }
 
     /// Returns a list of all contiguous windows of `length` size. The windows overlap. If the `seq` is shorter than size, the iterator returns no values.
+    #[function(return_type = Vec<_>)]
     pub fn windows(seq: SeqValue, length: i64) -> anyhow::Result<Value> {
         let length = length as usize;
         Ok(Value::list(
@@ -713,6 +726,7 @@ mod inner {
     ///
     /// The powerset of a set contains all subsets including the empty set and the full input set. A powerset has length `2^n` where `n` is the length of the input set.
     /// Each list produced by this function represents a subset of the elements in the source sequence.
+    #[function(return_type = Vec<_>)]
     pub fn subsequences(seq: SeqValue) -> anyhow::Result<Value> {
         Ok(Value::list(
             seq.try_into_iter()
@@ -724,7 +738,7 @@ mod inner {
     }
 
     /// Return a list that represents the powerset of the elements of `seq` that are exactly `length` long.
-    #[function(name = "subsequences")]
+    #[function(name = "subsequences", return_type = Vec<_>)]
     pub fn subsequences_len(seq: SeqValue, length: i64) -> anyhow::Result<Value> {
         let length = length as usize;
         Ok(Value::list(
@@ -763,6 +777,7 @@ mod inner {
     ///   [3,"c",false]
     /// ]
     /// ```
+    #[function(return_type = Vec<_>)]
     pub fn multi_cartesian_product(seq: SeqValue) -> anyhow::Result<Value> {
         let mut iterators = Vec::new();
         for elem in seq
@@ -786,6 +801,7 @@ mod inner {
 
     /// Split the input sequence into evenly sized chunks. If the input length of the sequence
     /// is not dividable by the chunk_size the last chunk will contain fewer elements.
+    #[function(return_type = Vec<_>)]
     pub fn chunks(seq: SeqValue, chunk_size: usize) -> anyhow::Result<Value> {
         if chunk_size == 0 {
             return Err(anyhow!("chunk size must be non-zero"));
