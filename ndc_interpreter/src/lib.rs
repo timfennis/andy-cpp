@@ -107,7 +107,11 @@ impl Interpreter {
     }
 
     /// Execute source code with a custom source name for diagnostics.
-    pub fn eval_named(&mut self, name: &str, input: &str) -> Result<Value, InterpreterError> {
+    pub fn eval_named(
+        &mut self,
+        name: impl Into<String>,
+        input: &str,
+    ) -> Result<Value, InterpreterError> {
         let source_id = self.source_db.add(name, input);
         let expressions = self.parse_and_analyse(input, source_id)?;
         self.interpret_vm(input, expressions.into_iter())

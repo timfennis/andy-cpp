@@ -34,14 +34,14 @@ pub fn run() -> anyhow::Result<()> {
 
     let mut interpreter = Interpreter::new();
     interpreter.configure(ndc_stdlib::register);
-    loop {
+    for command_nr in 1.. {
         match rl.readline("λ ") {
             Ok(line) => {
                 // If we can't append the history we just ignore this
                 let _ = rl.add_history_entry(line.as_str());
 
                 // Run the line we just read through the interpreter
-                match interpreter.eval_named("<repl>", line.as_str()) {
+                match interpreter.eval_named(format!("<repl:{command_nr}>"), line.as_str()) {
                     Ok(value) => {
                         let output = value.to_string();
                         if !output.is_empty() {
