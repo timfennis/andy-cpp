@@ -32,6 +32,7 @@
 - [Method call syntax](./features/method-call-syntax.md)
 - [Slices](./features/slices.md)
 - [Memoization](./features/memoization.md)
+- [Tracing](./features/tracing.md)
 
 # Troubleshooting
 - [Overload dispatch with collections](./troubleshooting/overload-dispatch-collections.md)
