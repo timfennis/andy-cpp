@@ -3,12 +3,8 @@ use codespan_reporting::files;
 use codespan_reporting::term;
 use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
 use ndc_interpreter::InterpreterError;
-use ndc_lexer::{SourceDb, SourceId, Span};
+use ndc_lexer::{SourceDb, SourceId};
 use std::ops::Range;
-
-fn span_to_range(span: Span) -> Range<usize> {
-    span.offset()..span.end()
-}
 
 struct DiagnosticFiles<'a>(&'a SourceDb);
 
@@ -64,7 +60,7 @@ fn into_diagnostic(err: InterpreterError) -> Diagnostic<SourceId> {
                 .with_code("lexer")
                 .with_message(cause.to_string())
                 .with_labels(vec![
-                    Label::primary(span.source_id(), span_to_range(span)).with_message("here"),
+                    Label::primary(span.source_id(), span.range()).with_message("here"),
                 ]);
             if let Some(help) = cause.help_text() {
                 d = d.with_notes(vec![help.to_owned()]);
@@ -77,7 +73,7 @@ fn into_diagnostic(err: InterpreterError) -> Diagnostic<SourceId> {
                 .with_code("parser")
                 .with_message(cause.to_string())
                 .with_labels(vec![
-                    Label::primary(span.source_id(), span_to_range(span)).with_message("here"),
+                    Label::primary(span.source_id(), span.range()).with_message("here"),
                 ]);
             if let Some(help) = cause.help_text() {
                 d = d.with_notes(vec![help.to_owned()]);
@@ -90,8 +86,7 @@ fn into_diagnostic(err: InterpreterError) -> Diagnostic<SourceId> {
                 .with_code("resolver")
                 .with_message(cause.to_string())
                 .with_labels(vec![
-                    Label::primary(span.source_id(), span_to_range(span))
-                        .with_message("related to this"),
+                    Label::primary(span.source_id(), span.range()).with_message("related to this"),
                 ])
         }
         InterpreterError::Compiler { cause } => {
@@ -100,8 +95,7 @@ fn into_diagnostic(err: InterpreterError) -> Diagnostic<SourceId> {
                 .with_code("compiler")
                 .with_message(cause.to_string())
                 .with_labels(vec![
-                    Label::primary(span.source_id(), span_to_range(span))
-                        .with_message("related to this"),
+                    Label::primary(span.source_id(), span.range()).with_message("related to this"),
                 ])
         }
         InterpreterError::Vm(err) => {
@@ -110,8 +104,7 @@ fn into_diagnostic(err: InterpreterError) -> Diagnostic<SourceId> {
                 .with_message(&err.message);
             if let Some(span) = err.span {
                 d = d.with_labels(vec![
-                    Label::primary(span.source_id(), span_to_range(span))
-                        .with_message("related to this"),
+                    Label::primary(span.source_id(), span.range()).with_message("related to this"),
                 ]);
             }
             d
