@@ -147,7 +147,7 @@ impl Vm {
             panic!("no call frames")
         }
 
-        loop {
+        let result = loop {
             let frame = self.frames.last_mut().expect("must not be empty");
             let ip = frame.ip;
             let span = frame.closure.prototype.body.span(ip);
@@ -166,13 +166,7 @@ impl Vm {
 
             match op {
                 OpCode::Halt => {
-                    #[cfg(feature = "trace")]
-                    if target_depth == 0
-                        && let Some(tracer) = &mut self.tracer
-                    {
-                        tracer.on_complete();
-                    }
-                    return Ok(());
+                    break Ok(());
                 }
                 OpCode::Return => {
                     let ret = self.stack.pop().expect("stack underflow");
@@ -193,13 +187,7 @@ impl Vm {
                     self.frames.pop().expect("no frame to pop");
                     self.stack.push(ret);
                     if self.frames.len() == target_depth {
-                        #[cfg(feature = "trace")]
-                        if target_depth == 0
-                            && let Some(tracer) = &mut self.tracer
-                        {
-                            tracer.on_complete();
-                        }
-                        return Ok(());
+                        break Ok(());
                     }
                 }
                 OpCode::Constant(idx) => {
@@ -527,7 +515,16 @@ impl Vm {
                     }));
                 }
             }
+        };
+
+        #[cfg(feature = "trace")]
+        if target_depth == 0
+            && let Some(tracer) = &mut self.tracer
+        {
+            tracer.on_complete();
         }
+
+        result
     }
 
     /// Returns a shared upvalue cell for the given absolute stack slot, creating
