@@ -7,6 +7,7 @@ use ndc_vm::value::CompiledFunction;
 use ndc_vm::{OutputSink, Vm};
 use std::rc::Rc;
 
+pub use ndc_analyser::AnalysisResult;
 #[cfg(feature = "trace")]
 pub use ndc_vm::tracer;
 pub use ndc_vm::{NativeFunction, Value};
@@ -92,9 +93,11 @@ impl Interpreter {
     pub fn analyse_str(
         &mut self,
         input: &str,
-    ) -> Result<Vec<ExpressionLocation>, InterpreterError> {
+    ) -> Result<(Vec<ExpressionLocation>, AnalysisResult), InterpreterError> {
         let source_id = self.source_db.add("<input>", input);
-        self.parse_and_analyse(input, source_id)
+        let expressions = self.parse_and_analyse(input, source_id)?;
+        let result = self.analyser.take_result();
+        Ok((expressions, result))
     }
 
     pub fn compile_str(&mut self, input: &str) -> Result<CompiledFunction, InterpreterError> {
