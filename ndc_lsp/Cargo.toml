@@ -11,3 +11,6 @@ ndc_interpreter.workspace = true
 ndc_core.workspace = true
 tower-lsp.workspace = true
 ndc_parser.workspace = true
+
+[dev-dependencies]
+ndc_stdlib.workspace = true

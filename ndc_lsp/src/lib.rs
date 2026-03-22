@@ -1,4 +1,9 @@
 mod backend;
+mod diagnostics;
+mod features;
+mod state;
+mod util;
+mod visitor;
 
 use crate::backend::Backend;
 use ndc_core::FunctionRegistry;
