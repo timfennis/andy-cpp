@@ -1,4 +1,5 @@
 use ndc_interpreter::Interpreter;
+use yansi as _;
 
 /// Run a sequence of REPL lines against a shared interpreter and return the
 /// collected stdout output after all lines have been executed.
