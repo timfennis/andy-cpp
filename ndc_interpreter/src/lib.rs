@@ -7,6 +7,8 @@ use ndc_vm::value::CompiledFunction;
 use ndc_vm::{OutputSink, Vm};
 use std::rc::Rc;
 
+#[cfg(feature = "trace")]
+pub use ndc_vm::tracer;
 pub use ndc_vm::{NativeFunction, Value};
 
 pub struct Interpreter {
@@ -18,6 +20,8 @@ pub struct Interpreter {
     /// `None` until the first `eval` call; kept alive afterwards so that
     /// variables declared on one line are visible on subsequent lines.
     repl_state: Option<(Vm, Compiler)>,
+    #[cfg(feature = "trace")]
+    tracer: Option<Box<dyn tracer::VmTracer>>,
 }
 
 impl Interpreter {
@@ -41,6 +45,8 @@ impl Interpreter {
             analyser: Analyser::from_scope_tree(ScopeTree::from_global_scope(vec![])),
             source_db: SourceDb::new(),
             repl_state: None,
+            #[cfg(feature = "trace")]
+            tracer: None,
         }
     }
 
@@ -53,6 +59,11 @@ impl Interpreter {
             .collect();
 
         self.analyser = Analyser::from_scope_tree(ScopeTree::from_global_scope(functions));
+    }
+
+    #[cfg(feature = "trace")]
+    pub fn set_tracer(&mut self, tracer: Box<dyn tracer::VmTracer>) {
+        self.tracer = Some(tracer);
     }
 
     pub fn functions(&self) -> impl Iterator<Item = &Rc<NativeFunction>> {
@@ -138,8 +149,8 @@ impl Interpreter {
 
     fn interpret_vm(
         &mut self,
-        #[cfg(feature = "vm-trace")] input: &str,
-        #[cfg(not(feature = "vm-trace"))] _input: &str,
+        #[cfg(feature = "trace")] input: &str,
+        #[cfg(not(feature = "trace"))] _input: &str,
         expressions: impl Iterator<Item = ExpressionLocation>,
     ) -> Result<Value, InterpreterError> {
         use ndc_vm::{Function as VmFunction, Object as VmObject, Value as VmValue};
@@ -163,9 +174,12 @@ impl Interpreter {
                 };
                 let (code, checkpoint) = Compiler::compile_resumable(expressions)?;
                 let mut vm = Vm::new(code, globals).with_output(output);
-                #[cfg(feature = "vm-trace")]
+                #[cfg(feature = "trace")]
                 {
                     vm = vm.with_source(input);
+                    if let Some(tracer) = self.tracer.take() {
+                        vm = vm.with_tracer(tracer);
+                    }
                 }
                 vm.run()?;
                 let result = vm.last_value(checkpoint.num_locals());
@@ -177,7 +191,7 @@ impl Interpreter {
                 let prev_num_locals = checkpoint.num_locals();
                 let (code, new_checkpoint) = checkpoint.resume(expressions)?;
                 vm.resume_from_halt(code, globals, resume_ip, prev_num_locals);
-                #[cfg(feature = "vm-trace")]
+                #[cfg(feature = "trace")]
                 {
                     vm.set_source(input);
                 }
