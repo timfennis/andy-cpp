@@ -3,7 +3,7 @@ mod operator;
 mod parser;
 
 pub use expression::{
-    Binding, CaptureSource, Expression, ExpressionLocation, ForBody, ForIteration, Lvalue,
+    Binding, CaptureSource, Expression, ExpressionLocation, ForBody, ForIteration, Lvalue, NodeId,
     ResolvedVar,
 };
 pub use operator::{BinaryOperator, LogicalOperator, UnaryOperator};

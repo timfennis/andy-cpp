@@ -4,6 +4,20 @@ use ndc_core::{StaticType, TypeSignature};
 use ndc_lexer::Span;
 use num::BigInt;
 use num::complex::Complex64;
+use std::sync::atomic::{AtomicU32, Ordering};
+
+/// Unique identity for an AST node. Used as a key in side tables (e.g. the
+/// analyser's expression type map) so that tooling data doesn't bloat the AST.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct NodeId(pub u32);
+
+static NEXT_NODE_ID: AtomicU32 = AtomicU32::new(0);
+
+impl NodeId {
+    pub fn next() -> Self {
+        Self(NEXT_NODE_ID.fetch_add(1, Ordering::Relaxed))
+    }
+}
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Binding {
@@ -35,10 +49,9 @@ pub enum CaptureSource {
 
 #[derive(Eq, PartialEq, Clone, Debug)]
 pub struct ExpressionLocation {
+    pub id: NodeId,
     pub expression: Expression,
     pub span: Span,
-    /// Filled by the semantic analyser with the inferred result type of this expression.
-    pub inferred_type: Option<StaticType>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -183,9 +196,9 @@ impl Expression {
     #[must_use]
     pub fn to_location(self, span: Span) -> ExpressionLocation {
         ExpressionLocation {
+            id: NodeId::next(),
             expression: self,
             span,
-            inferred_type: None,
         }
     }
 }
@@ -194,9 +207,9 @@ impl ExpressionLocation {
     #[must_use]
     pub fn to_statement(self) -> Self {
         Self {
+            id: NodeId::next(),
             span: self.span,
             expression: Expression::Statement(Box::new(self)),
-            inferred_type: None,
         }
     }
 

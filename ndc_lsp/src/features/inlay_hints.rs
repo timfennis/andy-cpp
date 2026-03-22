@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use ndc_core::StaticType;
+use ndc_interpreter::AnalysisResult;
 use ndc_lexer::Span;
 use ndc_parser::ExpressionLocation;
 use tower_lsp::lsp_types::{InlayHint, InlayHintKind, InlayHintLabel};
@@ -12,15 +13,20 @@ use crate::visitor::{AstVisitor, walk_ast};
 pub struct AnalysisInfo {
     pub hints: Vec<InlayHint>,
     pub variable_types: HashMap<String, StaticType>,
-    /// Maps expression end offset → inferred type for dot-completion on
+    /// Maps expression end offset -> inferred type for dot-completion on
     /// arbitrary expressions (e.g. `read_file("foo").`).
     pub expression_types: HashMap<usize, StaticType>,
 }
 
 /// Collect inlay hints, variable types, and expression types from an analysed AST.
-pub fn collect(expressions: &[ExpressionLocation], text: &str) -> AnalysisInfo {
+pub fn collect(
+    expressions: &[ExpressionLocation],
+    analysis_result: &AnalysisResult,
+    text: &str,
+) -> AnalysisInfo {
     let mut collector = HintCollector {
         text,
+        analysis_result,
         hints: Vec::new(),
         variable_types: HashMap::new(),
         expression_types: HashMap::new(),
@@ -35,6 +41,7 @@ pub fn collect(expressions: &[ExpressionLocation], text: &str) -> AnalysisInfo {
 
 struct HintCollector<'a> {
     text: &'a str,
+    analysis_result: &'a AnalysisResult,
     hints: Vec<InlayHint>,
     variable_types: HashMap<String, StaticType>,
     expression_types: HashMap<usize, StaticType>,
@@ -42,7 +49,7 @@ struct HintCollector<'a> {
 
 impl AstVisitor for HintCollector<'_> {
     fn on_expression(&mut self, expr: &ExpressionLocation) {
-        if let Some(typ) = &expr.inferred_type {
+        if let Some(typ) = self.analysis_result.expr_types.get(&expr.id) {
             self.expression_types.insert(expr.span.end(), typ.clone());
         }
     }

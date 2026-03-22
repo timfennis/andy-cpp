@@ -1,7 +1,7 @@
 use std::fmt::Write;
 
 use crate::expression::Expression;
-use crate::expression::{Binding, ExpressionLocation, ForBody, ForIteration, Lvalue};
+use crate::expression::{Binding, ExpressionLocation, ForBody, ForIteration, Lvalue, NodeId};
 use crate::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
 use ndc_core::{Parameter, StaticType, TypeSignature};
 use ndc_lexer::{Span, Token, TokenLocation};
@@ -421,7 +421,7 @@ impl Parser {
                 values: expressions,
             },
             span: new_span,
-            inferred_type: None,
+            id: NodeId::next(),
         };
 
         if must_be_tuple {
@@ -519,7 +519,7 @@ impl Parser {
             Ok(ExpressionLocation {
                 expression,
                 span,
-                inferred_type: None,
+                id: NodeId::next(),
             })
         } else {
             Ok(left)
@@ -653,7 +653,7 @@ impl Parser {
                             arguments,
                         },
                         span: span.merge(arguments_span),
-                        inferred_type: None,
+                        id: NodeId::next(),
                     };
                 }
                 Token::Dot => {
@@ -698,7 +698,7 @@ impl Parser {
                         span: tuple_span
                             .unwrap_or(identifier_span)
                             .merge(first_argument_span),
-                        inferred_type: None,
+                        id: NodeId::next(),
                     }
 
                     // for now, we require parentheses
@@ -763,7 +763,7 @@ impl Parser {
                             arguments: vec![expr, index_expression],
                         },
                         span,
-                        inferred_type: None,
+                        id: NodeId::next(),
                     };
                 }
                 _ => unreachable!("guaranteed to match"),
@@ -1194,7 +1194,7 @@ impl Parser {
                 pure: is_pure,
             },
             span,
-            inferred_type: None,
+            id: NodeId::next(),
         })
     }
 

@@ -1,9 +1,19 @@
+use std::collections::HashMap;
+use std::fmt::Debug;
+
 use crate::scope::ScopeTree;
 use itertools::Itertools;
 use ndc_core::{StaticType, TypeSignature};
 use ndc_lexer::Span;
-use ndc_parser::{Binding, Expression, ExpressionLocation, ForBody, ForIteration, Lvalue};
-use std::fmt::Debug;
+use ndc_parser::{Binding, Expression, ExpressionLocation, ForBody, ForIteration, Lvalue, NodeId};
+
+/// Side table holding semantic information keyed by AST node identity.
+/// Keeps tooling-specific data (like per-expression types) out of the AST.
+#[derive(Debug, Default)]
+pub struct AnalysisResult {
+    /// Maps each expression node to its inferred result type.
+    pub expr_types: HashMap<NodeId, StaticType>,
+}
 
 #[derive(Debug)]
 pub struct Analyser {
@@ -12,6 +22,8 @@ pub struct Analyser {
     /// Pushed on function entry, popped on exit. The value accumulates the
     /// lub of all `return <expr>` types seen so far.
     return_type_stack: Vec<Option<StaticType>>,
+    /// Side table populated during analysis.
+    result: AnalysisResult,
 }
 
 impl Analyser {
@@ -19,6 +31,7 @@ impl Analyser {
         Self {
             scope_tree,
             return_type_stack: Vec::new(),
+            result: AnalysisResult::default(),
         }
     }
 
@@ -30,13 +43,18 @@ impl Analyser {
         self.scope_tree = checkpoint;
     }
 
+    /// Take the accumulated analysis result, resetting it for the next analysis.
+    pub fn take_result(&mut self) -> AnalysisResult {
+        std::mem::take(&mut self.result)
+    }
+
     pub fn analyse(
         &mut self,
         expr_loc: &mut ExpressionLocation,
     ) -> Result<StaticType, AnalysisError> {
-        let result = self.analyse_inner(expr_loc)?;
-        expr_loc.inferred_type = Some(result.clone());
-        Ok(result)
+        let typ = self.analyse_inner(expr_loc)?;
+        self.result.expr_types.insert(expr_loc.id, typ.clone());
+        Ok(typ)
     }
 
     fn analyse_inner(

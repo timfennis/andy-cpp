@@ -75,7 +75,9 @@ impl Backend {
             interpreter
                 .analyse_str(text)
                 .ok()
-                .map(|expressions| inlay_hints::collect(&expressions, text))
+                .map(|(expressions, analysis_result)| {
+                    inlay_hints::collect(&expressions, &analysis_result, text)
+                })
         };
 
         // Only update document state when analysis succeeds. On failure (e.g.
