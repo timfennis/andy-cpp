@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use ndc_core::FunctionRegistry;
 use ndc_interpreter::{Interpreter, NativeFunction};
 use std::rc::Rc;
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 use tower_lsp::jsonrpc::Result as JsonRPCResult;
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionOptions, CompletionParams, CompletionResponse,
@@ -19,7 +19,7 @@ use crate::state::DocumentState;
 
 pub struct Backend {
     pub client: Client,
-    documents: Mutex<HashMap<Url, DocumentState>>,
+    documents: RwLock<HashMap<Url, DocumentState>>,
     configure: fn(&mut FunctionRegistry<Rc<NativeFunction>>),
 }
 
@@ -27,7 +27,7 @@ impl Backend {
     pub fn new(client: Client, configure: fn(&mut FunctionRegistry<Rc<NativeFunction>>)) -> Self {
         Self {
             client,
-            documents: Mutex::new(HashMap::new()),
+            documents: RwLock::new(HashMap::new()),
             configure,
         }
     }
@@ -41,7 +41,7 @@ impl Backend {
     /// Update the source text immediately so concurrent requests (e.g. completion
     /// triggered by `.`) always see the latest document content.
     async fn update_source(&self, uri: &Url, text: &str) {
-        let mut docs = self.documents.lock().await;
+        let mut docs = self.documents.write().await;
         match docs.get_mut(uri) {
             Some(state) => state.source = text.to_string(),
             None => {
@@ -84,7 +84,7 @@ impl Backend {
         // incomplete syntax while typing `x.`), keep the last good hints and
         // variable types so inlay hints stay visible and dot-completion works.
         if let Some(info) = analysis {
-            let mut docs = self.documents.lock().await;
+            let mut docs = self.documents.write().await;
             if let Some(state) = docs.get_mut(uri) {
                 state.hints = info.hints;
                 state.variable_types = info.variable_types;
@@ -144,7 +144,7 @@ impl LanguageServer for Backend {
     }
 
     async fn inlay_hint(&self, params: InlayHintParams) -> JsonRPCResult<Option<Vec<InlayHint>>> {
-        let docs = self.documents.lock().await;
+        let docs = self.documents.read().await;
         Ok(docs
             .get(&params.text_document.uri)
             .map(|state| state.hints.clone()))
@@ -155,7 +155,7 @@ impl LanguageServer for Backend {
         params: CompletionParams,
     ) -> JsonRPCResult<Option<CompletionResponse>> {
         let state = {
-            let docs = self.documents.lock().await;
+            let docs = self.documents.read().await;
             let uri = &params.text_document_position.text_document.uri;
             docs.get(uri).map(|s| {
                 // Clone what completion needs so we can drop the lock.
