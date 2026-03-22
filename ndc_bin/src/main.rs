@@ -14,6 +14,8 @@ mod repl;
 
 mod docs;
 mod highlighter;
+#[cfg(feature = "trace")]
+mod span_tracer;
 
 #[derive(Parser)]
 #[command(name = "Andy C++")]
@@ -28,7 +30,25 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Execute an .ndc file or start the repl (this default action may be omitted)
-    Run { file: Option<PathBuf> },
+    Run {
+        file: Option<PathBuf>,
+        /// Print each instruction as it is dispatched
+        #[cfg(feature = "trace")]
+        #[arg(long)]
+        trace_print: bool,
+        /// Print a histogram of instruction dispatch counts
+        #[cfg(feature = "trace")]
+        #[arg(long)]
+        trace_histogram: bool,
+        /// Print cumulative time spent per instruction type
+        #[cfg(feature = "trace")]
+        #[arg(long)]
+        trace_time: bool,
+        /// Render source as a heat map colored by time spent per span
+        #[cfg(feature = "trace")]
+        #[arg(long)]
+        trace_span: bool,
+    },
     /// Output an .ndc file using the built-in syntax highlighting engine
     Highlight { file: PathBuf },
 
@@ -56,7 +76,17 @@ enum Command {
 
 impl Default for Command {
     fn default() -> Self {
-        Self::Run { file: None }
+        Self::Run {
+            file: None,
+            #[cfg(feature = "trace")]
+            trace_print: false,
+            #[cfg(feature = "trace")]
+            trace_histogram: false,
+            #[cfg(feature = "trace")]
+            trace_time: false,
+            #[cfg(feature = "trace")]
+            trace_span: false,
+        }
     }
 }
 
@@ -64,6 +94,14 @@ enum Action {
     RunLsp,
     RunFile {
         path: PathBuf,
+        #[cfg(feature = "trace")]
+        trace_print: bool,
+        #[cfg(feature = "trace")]
+        trace_histogram: bool,
+        #[cfg(feature = "trace")]
+        trace_time: bool,
+        #[cfg(feature = "trace")]
+        trace_span: bool,
     },
     DisassembleFile(PathBuf),
     HighlightFile(PathBuf),
@@ -79,8 +117,28 @@ impl TryFrom<Command> for Action {
 
     fn try_from(value: Command) -> Result<Self, Self::Error> {
         let action = match value {
-            Command::Run { file: Some(file) } => Self::RunFile { path: file },
-            Command::Run { file: None } => Self::StartRepl,
+            Command::Run {
+                file: Some(file),
+                #[cfg(feature = "trace")]
+                trace_print,
+                #[cfg(feature = "trace")]
+                trace_histogram,
+                #[cfg(feature = "trace")]
+                trace_time,
+                #[cfg(feature = "trace")]
+                trace_span,
+            } => Self::RunFile {
+                path: file,
+                #[cfg(feature = "trace")]
+                trace_print,
+                #[cfg(feature = "trace")]
+                trace_histogram,
+                #[cfg(feature = "trace")]
+                trace_time,
+                #[cfg(feature = "trace")]
+                trace_span,
+            },
+            Command::Run { file: None, .. } => Self::StartRepl,
             Command::Lsp { stdio: _ } => Self::RunLsp,
             Command::Disassemble { file } => Self::DisassembleFile(file),
             Command::Highlight { file } => Self::HighlightFile(file),
@@ -93,6 +151,14 @@ impl TryFrom<Command> for Action {
                     }
                     1 => Self::RunFile {
                         path: args[0].parse::<PathBuf>().context("invalid path")?,
+                        #[cfg(feature = "trace")]
+                        trace_print: false,
+                        #[cfg(feature = "trace")]
+                        trace_histogram: false,
+                        #[cfg(feature = "trace")]
+                        trace_time: false,
+                        #[cfg(feature = "trace")]
+                        trace_span: false,
                     },
                     n => return Err(anyhow!("invalid number of arguments: {n}")),
                 }
@@ -108,7 +174,17 @@ fn main() -> anyhow::Result<()> {
     let action: Action = cli.command.unwrap_or_default().try_into()?;
 
     match action {
-        Action::RunFile { path } => {
+        Action::RunFile {
+            path,
+            #[cfg(feature = "trace")]
+            trace_print,
+            #[cfg(feature = "trace")]
+            trace_histogram,
+            #[cfg(feature = "trace")]
+            trace_time,
+            #[cfg(feature = "trace")]
+            trace_span,
+        } => {
             let filename = path
                 .file_name()
                 .and_then(|name| name.to_str())
@@ -118,6 +194,28 @@ fn main() -> anyhow::Result<()> {
 
             let mut interpreter = Interpreter::new();
             interpreter.configure(ndc_stdlib::register);
+
+            #[cfg(feature = "trace")]
+            {
+                use ndc_interpreter::tracer;
+                let mut tracers: Vec<Box<dyn tracer::VmTracer>> = Vec::new();
+                if trace_print {
+                    tracers.push(Box::new(tracer::PrintTracer));
+                }
+                if trace_histogram {
+                    tracers.push(Box::new(tracer::HistogramTracer::new()));
+                }
+                if trace_time {
+                    tracers.push(Box::new(tracer::TimingTracer::new()));
+                }
+                if trace_span {
+                    tracers.push(Box::new(span_tracer::SpanTracer::new()));
+                }
+                if !tracers.is_empty() {
+                    interpreter.set_tracer(Box::new(tracer::CompositeTracer::new(tracers)));
+                }
+            }
+
             let name = filename.as_deref().unwrap_or("<input>");
             if let Err(err) = interpreter.eval_named(name, &string) {
                 diagnostic::emit_error(interpreter.source_db(), err);

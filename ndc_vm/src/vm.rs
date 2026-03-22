@@ -49,8 +49,10 @@ pub struct Vm {
     open_upvalues: Vec<Rc<RefCell<UpvalueCell>>>,
     /// Output sink for `print`, `dbg`, and similar I/O built-ins.
     output: OutputSink,
-    #[cfg(feature = "vm-trace")]
+    #[cfg(feature = "trace")]
     source: Option<String>,
+    #[cfg(feature = "trace")]
+    tracer: Option<Box<dyn crate::tracer::VmTracer>>,
 }
 
 type MemoCache = (Rc<RefCell<HashMap<u64, Value>>>, u64);
@@ -83,8 +85,10 @@ impl Vm {
             }],
             open_upvalues: Vec::new(),
             output: OutputSink::Stdout,
-            #[cfg(feature = "vm-trace")]
+            #[cfg(feature = "trace")]
             source: None,
+            #[cfg(feature = "trace")]
+            tracer: None,
         };
         for _ in 0..num_locals {
             vm.stack.push(Value::unit());
@@ -114,15 +118,21 @@ impl Vm {
             .map_err(|e| VmError::native(e.to_string()))
     }
 
-    #[cfg(feature = "vm-trace")]
+    #[cfg(feature = "trace")]
     pub fn with_source(mut self, source: impl Into<String>) -> Self {
         self.source = Some(source.into());
         self
     }
 
-    #[cfg(feature = "vm-trace")]
+    #[cfg(feature = "trace")]
     pub fn set_source(&mut self, source: impl Into<String>) {
         self.source = Some(source.into());
+    }
+
+    #[cfg(feature = "trace")]
+    pub fn with_tracer(mut self, tracer: Box<dyn crate::tracer::VmTracer>) -> Self {
+        self.tracer = Some(tracer);
+        self
     }
 
     pub fn run(&mut self) -> Result<(), VmError> {
@@ -137,29 +147,26 @@ impl Vm {
             panic!("no call frames")
         }
 
-        loop {
+        let result = loop {
             let frame = self.frames.last_mut().expect("must not be empty");
             let ip = frame.ip;
             let span = frame.closure.prototype.body.span(ip);
             let op = frame.closure.prototype.body.opcode(ip);
             frame.ip += 1;
 
-            #[cfg(feature = "vm-trace")]
-            {
-                let excerpt = self
-                    .source
-                    .as_deref()
-                    .and_then(|src| src.get(span.range()).map(|s| s.trim().replace('\n', "↵")));
-                let op_str = format!("{op:?}");
-                match excerpt {
-                    Some(s) => eprintln!("[VM] {ip:04} {op_str:<30}  {s}"),
-                    None => eprintln!("[VM] {ip:04} {op_str}"),
-                }
+            #[cfg(feature = "trace")]
+            if let Some(tracer) = &mut self.tracer {
+                tracer.on_instruction(&crate::tracer::InstructionContext {
+                    ip,
+                    opcode: op,
+                    span,
+                    source: self.source.as_deref(),
+                });
             }
 
             match op {
                 OpCode::Halt => {
-                    return Ok(());
+                    break Ok(());
                 }
                 OpCode::Return => {
                     let ret = self.stack.pop().expect("stack underflow");
@@ -180,7 +187,7 @@ impl Vm {
                     self.frames.pop().expect("no frame to pop");
                     self.stack.push(ret);
                     if self.frames.len() == target_depth {
-                        return Ok(());
+                        break Ok(());
                     }
                 }
                 OpCode::Constant(idx) => {
@@ -508,12 +515,16 @@ impl Vm {
                     }));
                 }
             }
+        };
 
-            #[cfg(feature = "vm-trace")]
-            {
-                dbg!(&self.stack);
-            }
+        #[cfg(feature = "trace")]
+        if target_depth == 0
+            && let Some(tracer) = &mut self.tracer
+        {
+            tracer.on_complete();
         }
+
+        result
     }
 
     /// Returns a shared upvalue cell for the given absolute stack slot, creating
@@ -649,8 +660,10 @@ impl Vm {
             frames: Vec::new(),
             open_upvalues: Vec::new(),
             output: OutputSink::Stdout,
-            #[cfg(feature = "vm-trace")]
+            #[cfg(feature = "trace")]
             source: None,
+            #[cfg(feature = "trace")]
+            tracer: None,
         };
         vm.call_callback(func, args)
     }

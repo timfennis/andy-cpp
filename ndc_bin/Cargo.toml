@@ -25,3 +25,6 @@ yansi.workspace = true
 rustyline.workspace = true
 termimad = "0.34.1"
 tokio.workspace = true
+
+[features]
+trace = ["ndc_interpreter/trace"]

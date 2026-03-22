@@ -5,7 +5,7 @@ edition.workspace = true
 version.workspace = true
 
 [features]
-vm-trace = ["ndc_vm/vm-trace"]
+trace = ["ndc_vm/trace"]
 
 [dependencies]
 ndc_analyser.workspace = true

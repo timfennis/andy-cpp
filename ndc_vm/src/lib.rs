@@ -3,6 +3,9 @@ pub mod compiler;
 pub mod disassemble;
 pub mod error;
 pub mod iterator;
+#[cfg(feature = "trace")]
+#[allow(clippy::print_stderr)]
+pub mod tracer;
 pub mod value;
 mod vm;
 
