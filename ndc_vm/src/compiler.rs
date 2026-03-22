@@ -70,7 +70,7 @@ impl Compiler {
     /// Internal: clone a checkpoint (pre-Halt), write Halt, return both.
     fn finish(mut self) -> Result<(CompiledFunction, Self), CompileError> {
         let checkpoint = self.clone();
-        self.chunk.write(OpCode::Halt, Span::new(0, 0));
+        self.chunk.write(OpCode::Halt, Span::synthetic());
         let function = CompiledFunction {
             name: None,
             static_type: StaticType::Function {
@@ -125,7 +125,7 @@ impl Compiler {
                 let needs_pop = produces_value(&stm.expression);
                 self.compile_expr(*stm)?;
                 if needs_pop {
-                    self.chunk.write(OpCode::Pop, Span::new(0, 0));
+                    self.chunk.write(OpCode::Pop, Span::synthetic());
                 }
             }
             Expression::Logical {
@@ -138,13 +138,13 @@ impl Compiler {
                 match operator {
                     LogicalOperator::And => {
                         let end_jump = self.chunk.write(OpCode::JumpIfFalse(0), left_span);
-                        self.chunk.write(OpCode::Pop, Span::new(0, 0));
+                        self.chunk.write(OpCode::Pop, Span::synthetic());
                         self.compile_expr(*right)?;
                         self.chunk.patch_jump(end_jump);
                     }
                     LogicalOperator::Or => {
                         let end_jump = self.chunk.write(OpCode::JumpIfTrue(0), left_span);
-                        self.chunk.write(OpCode::Pop, Span::new(0, 0));
+                        self.chunk.write(OpCode::Pop, Span::synthetic());
                         self.compile_expr(*right)?;
                         self.chunk.patch_jump(end_jump);
                     }
@@ -175,7 +175,7 @@ impl Compiler {
                     self.compile_expr(*value)?;
                     self.compile_lvalue(l_value, span)?;
                     let idx = self.chunk.add_constant(Value::unit());
-                    self.chunk.write(OpCode::Constant(idx), Span::new(0, 0));
+                    self.chunk.write(OpCode::Constant(idx), Span::synthetic());
                 }
                 Lvalue::Sequence(seq) => {
                     self.compile_expr(*value)?;
@@ -184,7 +184,7 @@ impl Compiler {
                         self.compile_lvalue(l_value, span)?;
                     }
                     let idx = self.chunk.add_constant(Value::unit());
-                    self.chunk.write(OpCode::Constant(idx), Span::new(0, 0));
+                    self.chunk.write(OpCode::Constant(idx), Span::synthetic());
                 }
             },
             Expression::OpAssignment {
@@ -374,7 +374,7 @@ impl Compiler {
                         self.compile_expr(v)?
                     } else {
                         let idx = self.chunk.add_constant(Value::unit());
-                        self.chunk.write(OpCode::Constant(idx), Span::new(0, 0));
+                        self.chunk.write(OpCode::Constant(idx), Span::synthetic());
                     }
                 }
                 if let Some(default) = default {
@@ -456,7 +456,7 @@ impl Compiler {
                 self.compile_expr(*index)?;
                 self.chunk.write(OpCode::GetLocal(tmp_value), span);
                 self.chunk.write(OpCode::Call(3), span);
-                self.chunk.write(OpCode::Pop, Span::new(0, 0));
+                self.chunk.write(OpCode::Pop, Span::synthetic());
             }
             Lvalue::Sequence(seq) => {
                 self.chunk.write(OpCode::Unpack(seq.len()), span);
@@ -528,7 +528,7 @@ impl Compiler {
         if statements.is_empty() {
             let idx = self.chunk.add_constant(Value::unit());
             // Synthetic unit from empty block has no meaningful source
-            self.chunk.write(OpCode::Constant(idx), Span::new(0, 0));
+            self.chunk.write(OpCode::Constant(idx), Span::synthetic());
         } else {
             let last = statements.len() - 1;
             for (i, stmt) in statements.into_iter().enumerate() {
@@ -537,7 +537,7 @@ impl Compiler {
                 if i == last && !is_last_expr {
                     let idx = self.chunk.add_constant(Value::unit());
                     // Synthetic unit when last statement doesn't produce value
-                    self.chunk.write(OpCode::Constant(idx), Span::new(0, 0));
+                    self.chunk.write(OpCode::Constant(idx), Span::synthetic());
                 }
             }
         }
@@ -555,21 +555,21 @@ impl Compiler {
         let condition_span = condition.span;
         self.compile_expr(condition)?;
         let conditional_jump_idx = self.chunk.write(OpCode::JumpIfFalse(0), condition_span);
-        self.chunk.write(OpCode::Pop, Span::new(0, 0));
+        self.chunk.write(OpCode::Pop, Span::synthetic());
         self.compile_expr(on_true)?;
         if let Some(on_false) = on_false {
-            let jump_to_end = self.chunk.write(OpCode::Jump(0), Span::new(0, 0));
+            let jump_to_end = self.chunk.write(OpCode::Jump(0), Span::synthetic());
             self.chunk.patch_jump(conditional_jump_idx);
-            self.chunk.write(OpCode::Pop, Span::new(0, 0));
+            self.chunk.write(OpCode::Pop, Span::synthetic());
             self.compile_expr(on_false)?;
             self.chunk.patch_jump(jump_to_end);
         } else {
             // No else branch — push unit so the if-expression always produces a value.
-            let jump_to_end = self.chunk.write(OpCode::Jump(0), Span::new(0, 0));
+            let jump_to_end = self.chunk.write(OpCode::Jump(0), Span::synthetic());
             self.chunk.patch_jump(conditional_jump_idx);
-            self.chunk.write(OpCode::Pop, Span::new(0, 0));
+            self.chunk.write(OpCode::Pop, Span::synthetic());
             let idx = self.chunk.add_constant(Value::unit());
-            self.chunk.write(OpCode::Constant(idx), Span::new(0, 0));
+            self.chunk.write(OpCode::Constant(idx), Span::synthetic());
             self.chunk.patch_jump(jump_to_end);
         }
 
@@ -586,12 +586,12 @@ impl Compiler {
         let loop_start = self.new_loop_context();
         self.compile_expr(condition)?;
         let conditional_jump_idx = self.chunk.write(OpCode::JumpIfFalse(0), condition_span);
-        self.chunk.write(OpCode::Pop, Span::new(0, 0));
+        self.chunk.write(OpCode::Pop, Span::synthetic());
         self.compile_expr(loop_body)?;
-        self.chunk.write(OpCode::Pop, Span::new(0, 0));
-        self.chunk.write_jump_back(loop_start, Span::new(0, 0));
+        self.chunk.write(OpCode::Pop, Span::synthetic());
+        self.chunk.write_jump_back(loop_start, Span::synthetic());
         self.chunk.patch_jump(conditional_jump_idx);
-        self.chunk.write(OpCode::Pop, Span::new(0, 0));
+        self.chunk.write(OpCode::Pop, Span::synthetic());
         let break_instructions =
             std::mem::take(&mut self.current_loop_context_mut().unwrap().break_instructions);
         for instruction in break_instructions {
@@ -633,7 +633,7 @@ impl Compiler {
             ..Default::default()
         };
         fn_compiler.compile_expr(body)?;
-        fn_compiler.chunk.write(OpCode::Return, Span::new(0, 0));
+        fn_compiler.chunk.write(OpCode::Return, Span::synthetic());
 
         let compiled = CompiledFunction {
             name,
@@ -739,7 +739,7 @@ impl Compiler {
                         this.compile_expr(value)?;
                     } else {
                         let idx = this.chunk.add_constant(Value::unit());
-                        this.chunk.write(OpCode::Constant(idx), Span::new(0, 0));
+                        this.chunk.write(OpCode::Constant(idx), Span::synthetic());
                     }
                     this.chunk.write(OpCode::MapInsert(tmp_map), span);
                     Ok(())
@@ -793,16 +793,16 @@ impl Compiler {
                 self.end_loop_context();
 
                 // Pop the iterator
-                self.chunk.write(OpCode::Pop, Span::new(0, 0));
+                self.chunk.write(OpCode::Pop, Span::synthetic());
             }
             ForIteration::Guard(condition) => {
                 self.compile_expr(condition.clone())?;
                 let skip_jump = self.chunk.write(OpCode::JumpIfFalse(0), span);
-                self.chunk.write(OpCode::Pop, Span::new(0, 0));
+                self.chunk.write(OpCode::Pop, Span::synthetic());
                 self.compile_for_iterations(rest, span, compile_leaf)?;
                 let end_jump = self.chunk.write(OpCode::Jump(0), span);
                 self.chunk.patch_jump(skip_jump);
-                self.chunk.write(OpCode::Pop, Span::new(0, 0));
+                self.chunk.write(OpCode::Pop, Span::synthetic());
                 self.chunk.patch_jump(end_jump);
             }
         }

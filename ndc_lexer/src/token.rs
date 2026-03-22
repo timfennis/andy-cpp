@@ -331,17 +331,18 @@ impl From<String> for Token {
 
 #[cfg(test)]
 mod test {
-    use crate::Span;
+    use crate::{SourceId, Span};
 
     #[test]
     fn test_merge() {
-        let a = Span::new(0, 1);
-        let b = Span::new(3, 1);
-        assert_eq!(Span::new(0, 4), a.merge(b));
+        let s = SourceId::SYNTHETIC;
+        let a = Span::new(s, 0, 1);
+        let b = Span::new(s, 3, 1);
+        assert_eq!(Span::new(s, 0, 4), a.merge(b));
 
-        let a = Span::new(3, 100);
-        let b = Span::new(5, 10);
-        assert_eq!(Span::new(3, 100), a.merge(b));
-        assert_eq!(Span::new(3, 100), a.merge(a));
+        let a = Span::new(s, 3, 100);
+        let b = Span::new(s, 5, 10);
+        assert_eq!(Span::new(s, 3, 100), a.merge(b));
+        assert_eq!(Span::new(s, 3, 100), a.merge(a));
     }
 }

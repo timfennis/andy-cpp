@@ -118,24 +118,20 @@ fn main() -> anyhow::Result<()> {
 
             let mut interpreter = Interpreter::new();
             interpreter.configure(ndc_stdlib::register);
-            if let Err(err) = interpreter.eval(&string) {
-                diagnostic::emit_error(&filename.expect("filename must exist"), &string, err);
+            let name = filename.as_deref().unwrap_or("<input>");
+            if let Err(err) = interpreter.eval_named(name, &string) {
+                diagnostic::emit_error(interpreter.source_db(), err);
                 process::exit(1);
             }
         }
         Action::DisassembleFile(path) => {
-            let filename = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("<input>")
-                .to_string();
             let string = fs::read_to_string(path)?;
             let mut interpreter = Interpreter::new();
             interpreter.configure(ndc_stdlib::register);
             match interpreter.disassemble_str(&string) {
                 Ok(output) => print!("{output}"),
                 Err(e) => {
-                    diagnostic::emit_error(&filename, &string, e);
+                    diagnostic::emit_error(interpreter.source_db(), e);
                     process::exit(1);
                 }
             }

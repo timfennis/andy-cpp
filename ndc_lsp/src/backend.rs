@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use ndc_core::{FunctionRegistry, StaticType};
 use ndc_interpreter::Interpreter;
 use ndc_interpreter::NativeFunction;
-use ndc_lexer::{Lexer, Span, TokenLocation};
+use ndc_lexer::{Lexer, SourceId, Span, TokenLocation};
 use ndc_parser::{Expression, ExpressionLocation, ForBody, ForIteration, Lvalue};
 use std::rc::Rc;
 use tokio::sync::Mutex;
@@ -40,7 +40,7 @@ impl Backend {
     }
 
     async fn validate(&self, uri: &Url, text: &str) {
-        let scanner = Lexer::new(text);
+        let scanner = Lexer::new(text, SourceId::SYNTHETIC);
         let tokens = scanner
             .collect::<Result<Vec<TokenLocation>, ndc_lexer::Error>>()
             .map_err(|err| {

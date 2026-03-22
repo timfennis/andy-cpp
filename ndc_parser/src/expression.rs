@@ -140,6 +140,7 @@ pub enum ForIteration {
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum ForBody {
     Block(ExpressionLocation),
     List {

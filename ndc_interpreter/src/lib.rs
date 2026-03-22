@@ -1,6 +1,6 @@
 use ndc_analyser::{Analyser, ScopeTree};
 use ndc_core::FunctionRegistry;
-use ndc_lexer::{Lexer, TokenLocation};
+use ndc_lexer::{Lexer, SourceDb, SourceId, TokenLocation};
 use ndc_parser::ExpressionLocation;
 use ndc_vm::compiler::Compiler;
 use ndc_vm::value::CompiledFunction;
@@ -13,6 +13,7 @@ pub struct Interpreter {
     registry: FunctionRegistry<Rc<NativeFunction>>,
     capturing: bool,
     analyser: Analyser,
+    source_db: SourceDb,
     /// Persistent REPL VM and the compiler checkpoint from the last run.
     /// `None` until the first `eval` call; kept alive afterwards so that
     /// variables declared on one line are visible on subsequent lines.
@@ -38,6 +39,7 @@ impl Interpreter {
             registry: FunctionRegistry::default(),
             capturing,
             analyser: Analyser::from_scope_tree(ScopeTree::from_global_scope(vec![])),
+            source_db: SourceDb::new(),
             repl_state: None,
         }
     }
@@ -72,15 +74,21 @@ impl Interpreter {
         }
     }
 
+    pub fn source_db(&self) -> &SourceDb {
+        &self.source_db
+    }
+
     pub fn analyse_str(
         &mut self,
         input: &str,
     ) -> Result<Vec<ExpressionLocation>, InterpreterError> {
-        self.parse_and_analyse(input)
+        let source_id = self.source_db.add("<input>", input);
+        self.parse_and_analyse(input, source_id)
     }
 
     pub fn compile_str(&mut self, input: &str) -> Result<CompiledFunction, InterpreterError> {
-        let expressions = self.parse_and_analyse(input)?;
+        let source_id = self.source_db.add("<input>", input);
+        let expressions = self.parse_and_analyse(input, source_id)?;
         Ok(Compiler::compile(expressions.into_iter())?)
     }
 
@@ -95,15 +103,26 @@ impl Interpreter {
     ///
     /// Statements (semicolon-terminated) produce [`Value::unit()`].
     pub fn eval(&mut self, input: &str) -> Result<Value, InterpreterError> {
-        let expressions = self.parse_and_analyse(input)?;
+        self.eval_named("<input>", input)
+    }
+
+    /// Execute source code with a custom source name for diagnostics.
+    pub fn eval_named(
+        &mut self,
+        name: impl Into<String>,
+        input: &str,
+    ) -> Result<Value, InterpreterError> {
+        let source_id = self.source_db.add(name, input);
+        let expressions = self.parse_and_analyse(input, source_id)?;
         self.interpret_vm(input, expressions.into_iter())
     }
 
     fn parse_and_analyse(
         &mut self,
         input: &str,
+        source_id: SourceId,
     ) -> Result<Vec<ExpressionLocation>, InterpreterError> {
-        let tokens = Lexer::new(input).collect::<Result<Vec<TokenLocation>, _>>()?;
+        let tokens = Lexer::new(input, source_id).collect::<Result<Vec<TokenLocation>, _>>()?;
         let mut expressions = ndc_parser::Parser::from_tokens(tokens).parse()?;
 
         let checkpoint = self.analyser.checkpoint();

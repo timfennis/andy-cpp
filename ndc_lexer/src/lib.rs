@@ -1,4 +1,5 @@
 mod number;
+mod source_db;
 mod span;
 mod string;
 mod token;
@@ -8,7 +9,8 @@ use std::collections::VecDeque;
 use std::str::Chars;
 use string::StringLexer;
 
-pub use span::Span;
+pub use source_db::SourceDb;
+pub use span::{SourceId, Span};
 pub use token::{Token, TokenLocation};
 
 pub struct Lexer<'a> {
@@ -41,12 +43,13 @@ impl<'a> Lexer<'a> {
     }
 
     #[must_use]
-    pub fn new(source: &'a str) -> Self {
+    pub fn new(source: &'a str, source_id: SourceId) -> Self {
         Self {
             source: SourceIterator {
                 inner: source.chars(),
                 buffer: VecDeque::default(),
                 offset: 0,
+                source_id,
             },
         }
     }
@@ -182,6 +185,7 @@ struct SourceIterator<'a> {
     inner: Chars<'a>,
     buffer: VecDeque<char>,
     offset: usize,
+    source_id: SourceId,
 }
 
 impl SourceIterator<'_> {
@@ -190,11 +194,11 @@ impl SourceIterator<'_> {
     }
 
     pub fn create_span(&self, start: usize) -> Span {
-        Span::new(start, (self.current_offset()) - start)
+        Span::new(self.source_id, start, self.current_offset() - start)
     }
 
     pub fn span(&self) -> Span {
-        Span::new(self.current_offset(), 1)
+        Span::new(self.source_id, self.current_offset(), 1)
     }
 
     pub fn consume(&mut self, count: usize) {
