@@ -1,11 +1,11 @@
-use ndc_lexer::Lexer;
+use ndc_lexer::{Lexer, SourceId};
 use ndc_parser::Parser;
 use ndc_vm::chunk::OpCode;
 use ndc_vm::chunk::OpCode::*;
 use ndc_vm::compiler::Compiler;
 
 fn compile(input: &str) -> Vec<OpCode> {
-    let tokens = Lexer::new(input)
+    let tokens = Lexer::new(input, SourceId::SYNTHETIC)
         .collect::<Result<Vec<_>, _>>()
         .expect("lex failed");
     let expressions = Parser::from_tokens(tokens).parse().expect("parse failed");

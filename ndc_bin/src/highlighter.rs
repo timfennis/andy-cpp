@@ -1,6 +1,6 @@
 use ahash::AHashSet;
 use itertools::Itertools;
-use ndc_lexer::{Lexer, Token, TokenLocation};
+use ndc_lexer::{Lexer, SourceId, Token, TokenLocation};
 use ndc_parser::{Expression, ExpressionLocation, ForBody, ForIteration};
 use yansi::{Paint, Painted};
 
@@ -12,7 +12,7 @@ impl AndycppHighlighter {
     pub fn highlight_parsed(line: &str) -> Vec<Painted<&str>> {
         let mut function_spans = AHashSet::new();
 
-        let expressions = Lexer::new(line)
+        let expressions = Lexer::new(line, SourceId::SYNTHETIC)
             .collect::<Result<Vec<TokenLocation>, _>>()
             .ok()
             .and_then(|tokens| ndc_parser::Parser::from_tokens(tokens).parse().ok());
@@ -30,7 +30,8 @@ impl AndycppHighlighter {
         line: &'a str,
         function_spans: &AHashSet<usize>,
     ) -> Vec<Painted<&'a str>> {
-        let Ok(tokens) = Lexer::new(line).collect::<Result<Vec<_>, _>>() else {
+        let Ok(tokens) = Lexer::new(line, SourceId::SYNTHETIC).collect::<Result<Vec<_>, _>>()
+        else {
             return vec![line.red()];
         };
 

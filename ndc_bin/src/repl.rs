@@ -41,7 +41,7 @@ pub fn run() -> anyhow::Result<()> {
                 let _ = rl.add_history_entry(line.as_str());
 
                 // Run the line we just read through the interpreter
-                match interpreter.eval(line.as_str()) {
+                match interpreter.eval_named("<repl>", line.as_str()) {
                     Ok(value) => {
                         let output = value.to_string();
                         if !output.is_empty() {
@@ -49,7 +49,7 @@ pub fn run() -> anyhow::Result<()> {
                         }
                     }
                     Err(err) => {
-                        crate::diagnostic::emit_error("<repl>", &line, err);
+                        crate::diagnostic::emit_error(interpreter.source_db(), err);
                     }
                 }
             }

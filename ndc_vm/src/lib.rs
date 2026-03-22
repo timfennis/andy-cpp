@@ -35,7 +35,7 @@ mod test {
         use ndc_core::StaticType;
         use ndc_lexer::Span;
 
-        let dummy_span = Span::new(0, 0);
+        let dummy_span = Span::synthetic();
         let mut chunk = Chunk::default();
         chunk.write(OpCode::Return, dummy_span);
         let function = CompiledFunction {
