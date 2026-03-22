@@ -8,27 +8,45 @@ use tower_lsp::lsp_types::{InlayHint, InlayHintKind, InlayHintLabel};
 use crate::util::position_from_offset;
 use crate::visitor::{AstVisitor, walk_ast};
 
-/// Collect inlay hints and variable type mappings from an analysed AST.
-pub fn collect(
-    expressions: &[ExpressionLocation],
-    text: &str,
-) -> (Vec<InlayHint>, HashMap<String, StaticType>) {
+/// Results of collecting information from an analysed AST.
+pub struct AnalysisInfo {
+    pub hints: Vec<InlayHint>,
+    pub variable_types: HashMap<String, StaticType>,
+    /// Maps expression end offset → inferred type for dot-completion on
+    /// arbitrary expressions (e.g. `read_file("foo").`).
+    pub expression_types: HashMap<usize, StaticType>,
+}
+
+/// Collect inlay hints, variable types, and expression types from an analysed AST.
+pub fn collect(expressions: &[ExpressionLocation], text: &str) -> AnalysisInfo {
     let mut collector = HintCollector {
         text,
         hints: Vec::new(),
         variable_types: HashMap::new(),
+        expression_types: HashMap::new(),
     };
     walk_ast(&mut collector, expressions);
-    (collector.hints, collector.variable_types)
+    AnalysisInfo {
+        hints: collector.hints,
+        variable_types: collector.variable_types,
+        expression_types: collector.expression_types,
+    }
 }
 
 struct HintCollector<'a> {
     text: &'a str,
     hints: Vec<InlayHint>,
     variable_types: HashMap<String, StaticType>,
+    expression_types: HashMap<usize, StaticType>,
 }
 
 impl AstVisitor for HintCollector<'_> {
+    fn on_expression(&mut self, expr: &ExpressionLocation) {
+        if let Some(typ) = &expr.inferred_type {
+            self.expression_types.insert(expr.span.end(), typ.clone());
+        }
+    }
+
     fn on_declaration(&mut self, identifier: &str, inferred_type: Option<&StaticType>, span: Span) {
         if let Some(typ) = inferred_type {
             self.hints.push(InlayHint {

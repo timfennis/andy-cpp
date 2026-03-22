@@ -87,7 +87,9 @@ impl Compiler {
         &mut self,
         expression_location: ExpressionLocation,
     ) -> Result<(), CompileError> {
-        let ExpressionLocation { expression, span } = expression_location;
+        let ExpressionLocation {
+            expression, span, ..
+        } = expression_location;
         match expression {
             Expression::BoolLiteral(b) => {
                 let idx = self.chunk.add_constant(Value::Bool(b));

@@ -9,4 +9,7 @@ pub struct DocumentState {
     pub source: String,
     /// Variable name -> inferred type, collected from analysed AST declarations.
     pub variable_types: HashMap<String, StaticType>,
+    /// Expression end offset -> inferred type, for looking up the receiver type
+    /// of dot-completion on arbitrary expressions (e.g. `read_file("foo").`).
+    pub expression_types: HashMap<usize, StaticType>,
 }

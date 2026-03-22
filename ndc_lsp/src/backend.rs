@@ -51,6 +51,7 @@ impl Backend {
                         hints: Vec::new(),
                         source: text.to_string(),
                         variable_types: HashMap::new(),
+                        expression_types: HashMap::new(),
                     },
                 );
             }
@@ -80,11 +81,12 @@ impl Backend {
         // Only update document state when analysis succeeds. On failure (e.g.
         // incomplete syntax while typing `x.`), keep the last good hints and
         // variable types so inlay hints stay visible and dot-completion works.
-        if let Some((hints, variable_types)) = analysis {
+        if let Some(info) = analysis {
             let mut docs = self.documents.lock().await;
             if let Some(state) = docs.get_mut(uri) {
-                state.hints = hints;
-                state.variable_types = variable_types;
+                state.hints = info.hints;
+                state.variable_types = info.variable_types;
+                state.expression_types = info.expression_types;
             }
         }
     }
@@ -159,6 +161,7 @@ impl LanguageServer for Backend {
                     hints: Vec::new(), // not needed for completion
                     source: s.source.clone(),
                     variable_types: s.variable_types.clone(),
+                    expression_types: s.expression_types.clone(),
                 }
             })
         };

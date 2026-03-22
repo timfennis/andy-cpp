@@ -16,8 +16,13 @@ pub fn complete(
 ) -> CompletionResponse {
     let receiver_type = state.and_then(|s| {
         let offset = offset_from_position(&s.source, position)?;
-        let ident = identifier_before_dot(&s.source, offset)?;
-        s.variable_types.get(ident).cloned()
+        let dot_offset = find_dot_before(s.source.as_bytes(), offset)?;
+        // Try expression type map first (handles `func(args).` and any expression),
+        // then fall back to variable name lookup for simple `ident.` cases.
+        s.expression_types.get(&dot_offset).cloned().or_else(|| {
+            let ident = identifier_before_dot(&s.source, offset)?;
+            s.variable_types.get(ident).cloned()
+        })
     });
 
     let is_dot = receiver_type.is_some();
@@ -109,6 +114,22 @@ fn is_normal_ident(input: &str) -> bool {
         .all(|c| c.is_alphanumeric() || c == '?' || c == '_')
 }
 
+/// Scan backward from `offset` to find the byte position of the `.` trigger.
+/// Returns the offset of the dot itself (i.e. the byte offset where the expression
+/// before the dot ends, which is the key in `expression_types`).
+fn find_dot_before(text: &[u8], offset: usize) -> Option<usize> {
+    // Skip any whitespace between cursor and the dot
+    let mut i = offset;
+    while i > 0 && text[i - 1].is_ascii_whitespace() {
+        i -= 1;
+    }
+    if i > 0 && text[i - 1] == b'.' {
+        Some(i - 1)
+    } else {
+        None
+    }
+}
+
 /// Given a byte offset (pointing at or just after the `.`), scan backward to find
 /// the identifier immediately before the dot.
 fn identifier_before_dot(text: &str, offset: usize) -> Option<&str> {
@@ -196,6 +217,7 @@ mod tests {
                 "x".to_string(),
                 StaticType::List(Box::new(StaticType::Int)),
             )]),
+            expression_types: HashMap::new(),
         };
 
         // Cursor is after the dot: line 1, character 2
@@ -230,6 +252,7 @@ mod tests {
             source: "let x = 42\nx.".to_string(),
             // Types from the last successful analysis
             variable_types: HashMap::from([("x".to_string(), StaticType::Int)]),
+            expression_types: HashMap::new(),
         };
 
         let response = complete(Some(&state), Position::new(1, 2), &interpreter);
@@ -251,6 +274,44 @@ mod tests {
     }
 
     #[test]
+    fn dot_completion_on_call_expression_via_expression_types() {
+        // Simulates `read_file("foo").` where the expression type map knows
+        // that the call expression `read_file("foo")` returns String.
+        let mut interpreter = Interpreter::capturing();
+        interpreter.configure(ndc_stdlib::register);
+
+        //                0         1
+        //                0123456789012345678
+        let source = r#"read_file("foo")."#;
+        // The call expression `read_file("foo")` spans bytes 0..16,
+        // so its end offset is 16 (just before the dot at byte 16).
+        let state = DocumentState {
+            hints: Vec::new(),
+            source: source.to_string(),
+            variable_types: HashMap::new(),
+            expression_types: HashMap::from([(16, StaticType::String)]),
+        };
+
+        // Cursor is at end: line 0, character 17 (after the dot)
+        let response = complete(Some(&state), Position::new(0, 17), &interpreter);
+        let CompletionResponse::Array(items) = response else {
+            panic!("expected Array response");
+        };
+
+        // Should be dot-completion (no keywords)
+        assert!(
+            !items.iter().any(|i| i.label == "true"),
+            "should be dot-completion, not general"
+        );
+
+        // Should include string-compatible functions like `len`
+        assert!(
+            items.iter().any(|i| i.label == "len"),
+            "dot-completion on String should include `len`"
+        );
+    }
+
+    #[test]
     fn general_completion_includes_keywords() {
         let mut interpreter = Interpreter::capturing();
         interpreter.configure(ndc_stdlib::register);
@@ -259,6 +320,7 @@ mod tests {
             hints: Vec::new(),
             source: "let x = 42\n".to_string(),
             variable_types: HashMap::from([("x".to_string(), StaticType::Int)]),
+            expression_types: HashMap::new(),
         };
 
         // No dot — general completion

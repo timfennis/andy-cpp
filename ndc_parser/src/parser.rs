@@ -421,6 +421,7 @@ impl Parser {
                 values: expressions,
             },
             span: new_span,
+            inferred_type: None,
         };
 
         if must_be_tuple {
@@ -515,7 +516,11 @@ impl Parser {
                 }
             };
 
-            Ok(ExpressionLocation { expression, span })
+            Ok(ExpressionLocation {
+                expression,
+                span,
+                inferred_type: None,
+            })
         } else {
             Ok(left)
         }
@@ -648,6 +653,7 @@ impl Parser {
                             arguments,
                         },
                         span: span.merge(arguments_span),
+                        inferred_type: None,
                     };
                 }
                 Token::Dot => {
@@ -692,6 +698,7 @@ impl Parser {
                         span: tuple_span
                             .unwrap_or(identifier_span)
                             .merge(first_argument_span),
+                        inferred_type: None,
                     }
 
                     // for now, we require parentheses
@@ -756,6 +763,7 @@ impl Parser {
                             arguments: vec![expr, index_expression],
                         },
                         span,
+                        inferred_type: None,
                     };
                 }
                 _ => unreachable!("guaranteed to match"),
@@ -1186,6 +1194,7 @@ impl Parser {
                 pure: is_pure,
             },
             span,
+            inferred_type: None,
         })
     }
 

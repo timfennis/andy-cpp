@@ -32,7 +32,18 @@ impl Analyser {
 
     pub fn analyse(
         &mut self,
-        ExpressionLocation { expression, span }: &mut ExpressionLocation,
+        expr_loc: &mut ExpressionLocation,
+    ) -> Result<StaticType, AnalysisError> {
+        let result = self.analyse_inner(expr_loc)?;
+        expr_loc.inferred_type = Some(result.clone());
+        Ok(result)
+    }
+
+    fn analyse_inner(
+        &mut self,
+        ExpressionLocation {
+            expression, span, ..
+        }: &mut ExpressionLocation,
     ) -> Result<StaticType, AnalysisError> {
         match expression {
             Expression::BoolLiteral(_) => Ok(StaticType::Bool),

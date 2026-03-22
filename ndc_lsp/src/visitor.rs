@@ -17,6 +17,9 @@ pub trait AstVisitor {
     ) {
     }
 
+    /// Called for every expression node, before its children are walked.
+    fn on_expression(&mut self, _expr: &ExpressionLocation) {}
+
     /// A function declaration, called before the body is walked.
     fn on_function_declaration(
         &mut self,
@@ -34,6 +37,7 @@ pub fn walk_ast(visitor: &mut impl AstVisitor, expressions: &[ExpressionLocation
 }
 
 fn walk_expression(visitor: &mut impl AstVisitor, expr: &ExpressionLocation) {
+    visitor.on_expression(expr);
     match &expr.expression {
         Expression::VariableDeclaration { l_value, value } => {
             walk_lvalue(visitor, l_value);

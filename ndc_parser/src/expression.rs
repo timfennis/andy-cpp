@@ -37,6 +37,8 @@ pub enum CaptureSource {
 pub struct ExpressionLocation {
     pub expression: Expression,
     pub span: Span,
+    /// Filled by the semantic analyser with the inferred result type of this expression.
+    pub inferred_type: Option<StaticType>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -183,6 +185,7 @@ impl Expression {
         ExpressionLocation {
             expression: self,
             span,
+            inferred_type: None,
         }
     }
 }
@@ -193,6 +196,7 @@ impl ExpressionLocation {
         Self {
             span: self.span,
             expression: Expression::Statement(Box::new(self)),
+            inferred_type: None,
         }
     }
 
