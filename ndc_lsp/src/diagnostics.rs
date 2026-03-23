@@ -1,3 +1,4 @@
+use ndc_analyser::AnalysisError;
 use ndc_lexer::{Lexer, SourceId, Span, TokenLocation};
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity};
 
@@ -10,6 +11,11 @@ fn make_diagnostic(text: &str, span: Span, message: String) -> Diagnostic {
         message,
         ..Default::default()
     }
+}
+
+/// Convert an [`AnalysisError`] into an LSP [`Diagnostic`].
+pub fn analysis_error_to_diagnostic(text: &str, err: &AnalysisError) -> Diagnostic {
+    make_diagnostic(text, err.span(), err.to_string())
 }
 
 /// Lex and parse the source text, returning any diagnostics and (on success)

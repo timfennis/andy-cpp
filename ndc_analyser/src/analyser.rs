@@ -13,6 +13,9 @@ use ndc_parser::{Binding, Expression, ExpressionLocation, ForBody, ForIteration,
 pub struct AnalysisResult {
     /// Maps each expression node to its inferred result type.
     pub expr_types: HashMap<NodeId, StaticType>,
+    /// Errors accumulated during analysis. Non-empty when the analyser
+    /// encountered problems but was able to continue with fallback types.
+    pub errors: Vec<AnalysisError>,
 }
 
 #[derive(Debug)]
@@ -24,6 +27,8 @@ pub struct Analyser {
     return_type_stack: Vec<Option<StaticType>>,
     /// Side table populated during analysis.
     result: AnalysisResult,
+    /// Non-fatal errors accumulated during the current analysis pass.
+    errors: Vec<AnalysisError>,
 }
 
 impl Analyser {
@@ -32,6 +37,7 @@ impl Analyser {
             scope_tree,
             return_type_stack: Vec::new(),
             result: AnalysisResult::default(),
+            errors: Vec::new(),
         }
     }
 
@@ -43,9 +49,29 @@ impl Analyser {
         self.scope_tree = checkpoint;
     }
 
-    /// Take the accumulated analysis result, resetting it for the next analysis.
+    /// Take the accumulated analysis result (including any errors),
+    /// resetting it for the next analysis.
     pub fn take_result(&mut self) -> AnalysisResult {
-        std::mem::take(&mut self.result)
+        let mut result = std::mem::take(&mut self.result);
+        result.errors = std::mem::take(&mut self.errors);
+        result
+    }
+
+    /// Record a non-fatal analysis error. The analyser continues with a
+    /// fallback type (usually `Any`) so that subsequent code is still checked.
+    fn emit(&mut self, err: AnalysisError) {
+        self.errors.push(err);
+    }
+
+    /// Record an error from outside the analyser (e.g. a hard error caught by the caller).
+    pub fn emit_external(&mut self, err: AnalysisError) {
+        self.errors.push(err);
+    }
+
+    /// Returns `true` if any errors have been recorded during the current
+    /// analysis pass.
+    pub fn has_errors(&self) -> bool {
+        !self.errors.is_empty()
     }
 
     pub fn analyse(
@@ -55,6 +81,18 @@ impl Analyser {
         let typ = self.analyse_inner(expr_loc)?;
         self.result.expr_types.insert(expr_loc.id, typ.clone());
         Ok(typ)
+    }
+
+    /// Like [`analyse`], but on error emits the error and returns `Any`
+    /// so that analysis can continue.
+    fn analyse_or_any(&mut self, expr_loc: &mut ExpressionLocation) -> StaticType {
+        match self.analyse(expr_loc) {
+            Ok(t) => t,
+            Err(e) => {
+                self.emit(e);
+                StaticType::Any
+            }
+        }
     }
 
     fn analyse_inner(
@@ -77,16 +115,19 @@ impl Analyser {
                 if ident == "None" {
                     return Ok(StaticType::Option(Box::new(StaticType::Any)));
                 }
-                let binding = self.scope_tree.get_binding_any(ident).ok_or_else(|| {
-                    AnalysisError::identifier_not_previously_declared(ident, *span)
-                })?;
+                let Some(binding) = self.scope_tree.get_binding_any(ident) else {
+                    self.emit(AnalysisError::identifier_not_previously_declared(
+                        ident, *span,
+                    ));
+                    return Ok(StaticType::Any);
+                };
 
                 *resolved = Binding::Resolved(binding);
 
                 Ok(self.scope_tree.get_type(binding).clone())
             }
             Expression::Statement(inner) => {
-                let typ = self.analyse(inner)?;
+                let typ = self.analyse_or_any(inner);
                 // Diverging statements (return/break/continue) propagate Never
                 // so that blocks can see that control doesn't fall through.
                 if typ == StaticType::Never {
@@ -96,19 +137,19 @@ impl Analyser {
                 }
             }
             Expression::Logical { left, right, .. } => {
-                self.analyse(left)?;
-                self.analyse(right)?;
+                self.analyse_or_any(left);
+                self.analyse_or_any(right);
                 Ok(StaticType::Bool)
             }
             Expression::Grouping(expr) => self.analyse(expr),
             Expression::VariableDeclaration { l_value, value } => {
-                let typ = self.analyse(value)?;
-                self.resolve_lvalue_declarative(l_value, typ, *span)?;
+                let typ = self.analyse_or_any(value);
+                self.resolve_lvalue_declarative(l_value, typ, *span);
                 Ok(StaticType::unit())
             }
             Expression::Assignment { l_value, r_value } => {
-                let old_type = self.resolve_lvalue(l_value, *span)?;
-                let new_type = self.analyse(r_value)?;
+                let old_type = self.resolve_lvalue_or_any(l_value, *span);
+                let new_type = self.analyse_or_any(r_value);
 
                 // Widen the binding's type to the LUB so subsequent uses
                 // see the broader type.
@@ -133,7 +174,7 @@ impl Analyser {
                 resolved_operation,
             } => {
                 let left_type = self.resolve_single_lvalue(l_value, *span)?;
-                let right_type = self.analyse(r_value)?;
+                let right_type = self.analyse_or_any(r_value);
                 let arg_types = vec![left_type, right_type];
 
                 *resolved_assign_operation = self
@@ -144,7 +185,7 @@ impl Analyser {
                     .resolve_function_binding(operation, &arg_types);
 
                 if let Binding::None = resolved_operation {
-                    return Err(AnalysisError::function_not_found(
+                    self.emit(AnalysisError::function_not_found(
                         operation, &arg_types, *span,
                     ));
                 }
@@ -165,26 +206,28 @@ impl Analyser {
                 let pre_slot = if let Some(name) = name {
                     let arity = type_signature.types().map(|t| t.len());
                     if self.scope_tree.has_function_in_current_scope(name, arity) {
-                        return Err(AnalysisError::function_redefinition(name, arity, *span));
+                        self.emit(AnalysisError::function_redefinition(name, arity, *span));
+                        // Skip re-registering but still analyse the body below.
+                        None
+                    } else {
+                        let placeholder = StaticType::Function {
+                            parameters: type_signature.types(),
+                            return_type: Box::new(StaticType::Any),
+                        };
+                        Some(
+                            self.scope_tree
+                                .create_local_binding(name.clone(), placeholder),
+                        )
                     }
-
-                    let placeholder = StaticType::Function {
-                        parameters: type_signature.types(),
-                        return_type: Box::new(StaticType::Any),
-                    };
-                    Some(
-                        self.scope_tree
-                            .create_local_binding(name.clone(), placeholder),
-                    )
                 } else {
                     None
                 };
 
                 self.scope_tree.new_function_scope();
                 self.return_type_stack.push(None);
-                let param_types = self.resolve_parameters_declarative(type_signature, *span)?;
+                let param_types = self.resolve_parameters_declarative(type_signature, *span);
 
-                let implicit_return = self.analyse(body)?;
+                let implicit_return = self.analyse_or_any(body);
                 let explicit_return = self.return_type_stack.pop().unwrap();
                 *captures = self.scope_tree.current_scope_captures();
                 self.scope_tree.destroy_scope();
@@ -217,7 +260,7 @@ impl Analyser {
                 self.scope_tree.new_block_scope();
                 let mut last = None;
                 for s in statements {
-                    last = Some(self.analyse(s)?);
+                    last = Some(self.analyse_or_any(s));
                 }
                 self.scope_tree.destroy_scope();
 
@@ -228,10 +271,10 @@ impl Analyser {
                 on_true,
                 on_false,
             } => {
-                self.analyse(condition)?;
-                let true_type = self.analyse(on_true)?;
+                self.analyse_or_any(condition);
+                let true_type = self.analyse_or_any(on_true);
                 let false_type = if let Some(on_false) = on_false {
-                    self.analyse(on_false)?
+                    self.analyse_or_any(on_false)
                 } else {
                     StaticType::unit()
                 };
@@ -242,12 +285,12 @@ impl Analyser {
                 expression,
                 loop_body,
             } => {
-                self.analyse(expression)?;
-                self.analyse(loop_body)?;
+                self.analyse_or_any(expression);
+                self.analyse_or_any(loop_body);
                 Ok(StaticType::unit())
             }
             Expression::For { iterations, body } => {
-                let return_type = self.resolve_for_iterations(iterations, body, *span)?;
+                let return_type = self.resolve_for_iterations(iterations, body, *span);
                 Ok(return_type)
             }
             Expression::Call {
@@ -256,17 +299,18 @@ impl Analyser {
             } => {
                 let mut type_sig = Vec::with_capacity(arguments.len());
                 for a in arguments {
-                    type_sig.push(self.analyse(a)?);
+                    type_sig.push(self.analyse_or_any(a));
                 }
 
                 let callee_type =
-                    self.resolve_function_with_argument_types(function, &type_sig, *span)?;
+                    self.resolve_function_with_argument_types(function, &type_sig, *span);
 
                 let StaticType::Function { return_type, .. } = callee_type else {
                     if callee_type == StaticType::Any {
                         return Ok(StaticType::Any);
                     }
-                    return Err(AnalysisError::not_callable(&callee_type, *span));
+                    self.emit(AnalysisError::not_callable(&callee_type, *span));
+                    return Ok(StaticType::Any);
                 };
 
                 Ok(*return_type)
@@ -274,13 +318,13 @@ impl Analyser {
             Expression::Tuple { values } => {
                 let mut types = Vec::with_capacity(values.len());
                 for v in values {
-                    types.push(self.analyse(v)?);
+                    types.push(self.analyse_or_any(v));
                 }
 
                 Ok(StaticType::Tuple(types))
             }
             Expression::List { values } => {
-                let element_type = self.analyse_multiple_expression_with_same_type(values)?;
+                let element_type = self.analyse_multiple_expression_with_same_type(values);
 
                 Ok(StaticType::List(Box::new(
                     element_type.unwrap_or(StaticType::Any),
@@ -290,14 +334,14 @@ impl Analyser {
                 let mut key_type: Option<StaticType> = None;
                 let mut value_type: Option<StaticType> = None;
                 for (key, value) in values {
-                    Self::fold_lub(&mut key_type, self.analyse(key)?);
+                    Self::fold_lub(&mut key_type, self.analyse_or_any(key));
                     if let Some(value) = value {
-                        Self::fold_lub(&mut value_type, self.analyse(value)?);
+                        Self::fold_lub(&mut value_type, self.analyse_or_any(value));
                     }
                 }
 
                 if let Some(default) = default {
-                    self.analyse(default)?;
+                    self.analyse_or_any(default);
                 }
 
                 Ok(StaticType::Map {
@@ -306,7 +350,7 @@ impl Analyser {
                 })
             }
             Expression::Return { value } => {
-                let typ = self.analyse(value)?;
+                let typ = self.analyse_or_any(value);
                 if let Some(slot) = self.return_type_stack.last_mut() {
                     Self::fold_lub(slot, typ);
                 }
@@ -315,10 +359,10 @@ impl Analyser {
             Expression::RangeInclusive { start, end }
             | Expression::RangeExclusive { start, end } => {
                 if let Some(start) = start {
-                    self.analyse(start)?;
+                    self.analyse_or_any(start);
                 }
                 if let Some(end) = end {
-                    self.analyse(end)?;
+                    self.analyse_or_any(end);
                 }
 
                 Ok(StaticType::Iterator(Box::new(StaticType::Int)))
@@ -331,7 +375,7 @@ impl Analyser {
         ident: &mut ExpressionLocation,
         argument_types: &[StaticType],
         span: Span,
-    ) -> Result<StaticType, AnalysisError> {
+    ) -> StaticType {
         let ExpressionLocation {
             expression: Expression::Identifier { name, resolved },
             ..
@@ -339,7 +383,7 @@ impl Analyser {
         else {
             // It's possible that we're not trying to invoke an identifier `foo()` but instead we're
             // invoking a value like `get_function()()` so in this case we just continue like normal?
-            return self.analyse(ident);
+            return self.analyse_or_any(ident);
         };
 
         let binding = self
@@ -348,11 +392,12 @@ impl Analyser {
 
         let out_type = match &binding {
             Binding::None => {
-                return Err(AnalysisError::function_not_found(
+                self.emit(AnalysisError::function_not_found(
                     name,
                     argument_types,
                     span,
                 ));
+                return StaticType::Any;
             }
             Binding::Resolved(res) => self.scope_tree.get_type(*res).clone(),
 
@@ -364,7 +409,7 @@ impl Analyser {
 
         *resolved = binding;
 
-        Ok(out_type)
+        out_type
     }
 
     fn resolve_for_iterations(
@@ -372,7 +417,7 @@ impl Analyser {
         iterations: &mut [ForIteration],
         body: &mut ForBody,
         span: Span,
-    ) -> Result<StaticType, AnalysisError> {
+    ) -> StaticType {
         let Some((iteration, tail)) = iterations.split_first_mut() else {
             unreachable!("because this function is never called with an empty slice");
         };
@@ -380,7 +425,7 @@ impl Analyser {
         let mut do_destroy = false;
         match iteration {
             ForIteration::Iteration { l_value, sequence } => {
-                let sequence_type = self.analyse(sequence)?;
+                let sequence_type = self.analyse_or_any(sequence);
 
                 self.scope_tree.new_iteration_scope();
 
@@ -390,20 +435,20 @@ impl Analyser {
                         .sequence_element_type()
                         .unwrap_or(StaticType::Any),
                     span,
-                )?;
+                );
                 do_destroy = true;
             }
             ForIteration::Guard(expr) => {
-                self.analyse(expr)?;
+                self.analyse_or_any(expr);
             }
         }
 
         let out_type = if !tail.is_empty() {
-            self.resolve_for_iterations(tail, body, span)?
+            self.resolve_for_iterations(tail, body, span)
         } else {
             match body {
                 ForBody::Block(block) => {
-                    self.analyse(block)?;
+                    self.analyse_or_any(block);
                     StaticType::unit()
                 }
                 ForBody::List {
@@ -415,7 +460,7 @@ impl Analyser {
                     // that nested for-comprehensions receive strictly higher slot
                     // numbers and cannot collide with this accumulator.
                     *accumulator_slot = Some(self.scope_tree.reserve_anonymous_slot());
-                    StaticType::List(Box::new(self.analyse(expr)?))
+                    StaticType::List(Box::new(self.analyse_or_any(expr)))
                 }
                 ForBody::Map {
                     key,
@@ -425,15 +470,15 @@ impl Analyser {
                     ..
                 } => {
                     *accumulator_slot = Some(self.scope_tree.reserve_anonymous_slot());
-                    let key_type = self.analyse(key)?;
+                    let key_type = self.analyse_or_any(key);
                     let value_type = if let Some(value) = value {
-                        self.analyse(value)?
+                        self.analyse_or_any(value)
                     } else {
                         StaticType::unit()
                     };
 
                     if let Some(default) = default {
-                        self.analyse(default)?;
+                        self.analyse_or_any(default);
                     }
 
                     StaticType::Map {
@@ -448,7 +493,7 @@ impl Analyser {
             self.scope_tree.destroy_scope();
         }
 
-        Ok(out_type)
+        out_type
     }
 
     fn resolve_single_lvalue(
@@ -488,8 +533,8 @@ impl Analyser {
                 resolved_set,
                 resolved_get,
             } => {
-                let index_type = self.analyse(index)?;
-                let type_of_index_target = self.analyse(value)?;
+                let index_type = self.analyse_or_any(index);
+                let type_of_index_target = self.analyse_or_any(value);
 
                 let get_args = [type_of_index_target.clone(), index_type.clone()];
                 let set_args = [type_of_index_target.clone(), index_type, StaticType::Any];
@@ -497,15 +542,31 @@ impl Analyser {
                 *resolved_get = Some(self.scope_tree.resolve_function_binding("[]", &get_args));
                 *resolved_set = Some(self.scope_tree.resolve_function_binding("[]=", &set_args));
 
-                type_of_index_target
-                    .index_element_type()
-                    .ok_or_else(|| AnalysisError::unable_to_index_into(&type_of_index_target, span))
+                if let Some(t) = type_of_index_target.index_element_type() {
+                    Ok(t)
+                } else {
+                    self.emit(AnalysisError::unable_to_index_into(
+                        &type_of_index_target,
+                        span,
+                    ));
+                    Ok(StaticType::Any)
+                }
             }
             Lvalue::Sequence(seq) => {
                 for sub_lvalue in seq {
-                    self.resolve_lvalue(sub_lvalue, span)?;
+                    self.resolve_lvalue_or_any(sub_lvalue, span);
                 }
                 Ok(StaticType::unit())
+            }
+        }
+    }
+
+    fn resolve_lvalue_or_any(&mut self, lvalue: &mut Lvalue, span: Span) -> StaticType {
+        match self.resolve_lvalue(lvalue, span) {
+            Ok(t) => t,
+            Err(e) => {
+                self.emit(e);
+                StaticType::Any
             }
         }
     }
@@ -515,9 +576,9 @@ impl Analyser {
         &mut self,
         type_signature: &TypeSignature,
         span: Span,
-    ) -> Result<Vec<StaticType>, AnalysisError> {
+    ) -> Vec<StaticType> {
         let TypeSignature::Exact(parameters) = type_signature else {
-            return Ok(vec![]);
+            return vec![];
         };
 
         let mut types: Vec<StaticType> = Vec::new();
@@ -526,7 +587,9 @@ impl Analyser {
         for param in parameters {
             types.push(StaticType::Any);
             if seen_names.contains(&param.name.as_str()) {
-                return Err(AnalysisError::parameter_redefined(&param.name, span));
+                self.emit(AnalysisError::parameter_redefined(&param.name, span));
+                // Skip duplicate but continue checking remaining params.
+                continue;
             }
             seen_names.push(&param.name);
 
@@ -534,14 +597,9 @@ impl Analyser {
                 .create_local_binding(param.name.clone(), StaticType::Any);
         }
 
-        Ok(types)
+        types
     }
-    fn resolve_lvalue_declarative(
-        &mut self,
-        lvalue: &mut Lvalue,
-        typ: StaticType,
-        span: Span,
-    ) -> Result<(), AnalysisError> {
+    fn resolve_lvalue_declarative(&mut self, lvalue: &mut Lvalue, typ: StaticType, span: Span) {
         match lvalue {
             Lvalue::Identifier {
                 identifier,
@@ -556,8 +614,8 @@ impl Analyser {
                 *inferred_type = Some(typ);
             }
             Lvalue::Index { index, value, .. } => {
-                self.analyse(index)?;
-                self.analyse(value)?;
+                self.analyse_or_any(index);
+                self.analyse_or_any(value);
             }
             Lvalue::Sequence(seq) => {
                 // If the type is a fixed-length Tuple whose arity doesn't match
@@ -572,9 +630,11 @@ impl Analyser {
                         } else {
                             Box::new(elems.iter())
                         }
+                    } else if let Some(iter) = typ.unpack() {
+                        iter
                     } else {
-                        typ.unpack()
-                            .ok_or_else(|| AnalysisError::unable_to_unpack_type(&typ, span))?
+                        self.emit(AnalysisError::unable_to_unpack_type(&typ, span));
+                        return;
                     };
 
                 for (sub_lvalue, sub_lvalue_type) in seq.iter_mut().zip(sub_types) {
@@ -582,22 +642,20 @@ impl Analyser {
                         sub_lvalue,
                         sub_lvalue_type.clone(),
                         /* todo: figure out how to narrow this span */ span,
-                    )?
+                    );
                 }
             }
         }
-
-        Ok(())
     }
     fn analyse_multiple_expression_with_same_type(
         &mut self,
         expressions: &mut Vec<ExpressionLocation>,
-    ) -> Result<Option<StaticType>, AnalysisError> {
+    ) -> Option<StaticType> {
         let mut element_type: Option<StaticType> = None;
         for expression in expressions {
-            Self::fold_lub(&mut element_type, self.analyse(expression)?);
+            Self::fold_lub(&mut element_type, self.analyse_or_any(expression));
         }
-        Ok(element_type)
+        element_type
     }
 
     /// Fold a new type into an accumulator via least-upper-bound.

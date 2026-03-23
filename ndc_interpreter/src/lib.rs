@@ -90,12 +90,27 @@ impl Interpreter {
         &self.source_db
     }
 
+    /// Lex, parse, and analyse `input`, returning the annotated AST and an
+    /// [`AnalysisResult`] that includes any accumulated analysis errors.
+    ///
+    /// Lexer and parser errors still short-circuit (no AST to return).
+    /// Analysis errors are collected into [`AnalysisResult::errors`] so the
+    /// caller can inspect them while still using the partial type information.
     pub fn analyse_str(
         &mut self,
         input: &str,
     ) -> Result<(Vec<ExpressionLocation>, AnalysisResult), InterpreterError> {
         let source_id = self.source_db.add("<input>", input);
-        let expressions = self.parse_and_analyse(input, source_id)?;
+        let tokens = Lexer::new(input, source_id).collect::<Result<Vec<TokenLocation>, _>>()?;
+        let mut expressions = ndc_parser::Parser::from_tokens(tokens).parse()?;
+
+        for e in &mut expressions {
+            // Hard errors (structural issues) are accumulated too.
+            if let Err(e) = self.analyser.analyse(e) {
+                self.analyser.emit_external(e);
+            }
+        }
+
         let result = self.analyser.take_result();
         Ok((expressions, result))
     }
@@ -141,10 +156,19 @@ impl Interpreter {
 
         let checkpoint = self.analyser.checkpoint();
         for e in &mut expressions {
+            // Hard errors (structural issues) still abort immediately.
             if let Err(e) = self.analyser.analyse(e) {
                 self.analyser.restore(checkpoint);
-                return Err(e.into());
+                return Err(InterpreterError::Resolver { causes: vec![e] });
             }
+        }
+
+        if self.analyser.has_errors() {
+            self.analyser.restore(checkpoint);
+            let result = self.analyser.take_result();
+            return Err(InterpreterError::Resolver {
+                causes: result.errors,
+            });
         }
 
         Ok(expressions)
@@ -229,8 +253,7 @@ pub enum InterpreterError {
     },
     #[error("Error during static analysis")]
     Resolver {
-        #[from]
-        cause: ndc_analyser::AnalysisError,
+        causes: Vec<ndc_analyser::AnalysisError>,
     },
     #[error("Compilation error")]
     Compiler {

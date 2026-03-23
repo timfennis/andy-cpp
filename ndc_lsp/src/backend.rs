@@ -61,11 +61,7 @@ impl Backend {
     /// Run diagnostics and semantic analysis, updating cached hints and types.
     /// The source text must already be updated via `update_source` before calling this.
     async fn validate(&self, uri: &Url, text: &str) {
-        let (diagnostics, _ast) = diagnostics::lex_and_parse(text);
-
-        self.client
-            .publish_diagnostics(uri.clone(), diagnostics, None)
-            .await;
+        let (mut diagnostics, _ast) = diagnostics::lex_and_parse(text);
 
         // Run full semantic analysis and collect inlay hints + variable types.
         // The interpreter uses Rc internally (non-Send), so it must be fully
@@ -76,9 +72,17 @@ impl Backend {
                 .analyse_str(text)
                 .ok()
                 .map(|(expressions, analysis_result)| {
+                    // Convert analysis errors to LSP diagnostics.
+                    for err in &analysis_result.errors {
+                        diagnostics.push(diagnostics::analysis_error_to_diagnostic(text, err));
+                    }
                     inlay_hints::collect(&expressions, &analysis_result, text)
                 })
         };
+
+        self.client
+            .publish_diagnostics(uri.clone(), diagnostics, None)
+            .await;
 
         // Only update document state when analysis succeeds. On failure (e.g.
         // incomplete syntax while typing `x.`), keep the last good hints and

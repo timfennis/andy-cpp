@@ -52,7 +52,7 @@ impl<'a> files::Files<'a> for DiagnosticFiles<'a> {
     }
 }
 
-fn into_diagnostic(err: InterpreterError) -> Diagnostic<SourceId> {
+fn into_diagnostics(err: InterpreterError) -> Vec<Diagnostic<SourceId>> {
     match err {
         InterpreterError::Lexer { cause } => {
             let span = cause.span();
@@ -65,7 +65,7 @@ fn into_diagnostic(err: InterpreterError) -> Diagnostic<SourceId> {
             if let Some(help) = cause.help_text() {
                 d = d.with_notes(vec![help.to_owned()]);
             }
-            d
+            vec![d]
         }
         InterpreterError::Parser { cause } => {
             let span = cause.span();
@@ -78,25 +78,32 @@ fn into_diagnostic(err: InterpreterError) -> Diagnostic<SourceId> {
             if let Some(help) = cause.help_text() {
                 d = d.with_notes(vec![help.to_owned()]);
             }
-            d
+            vec![d]
         }
-        InterpreterError::Resolver { cause } => {
-            let span = cause.span();
-            Diagnostic::error()
-                .with_code("resolver")
-                .with_message(cause.to_string())
-                .with_labels(vec![
-                    Label::primary(span.source_id(), span.range()).with_message("related to this"),
-                ])
-        }
+        InterpreterError::Resolver { causes } => causes
+            .iter()
+            .map(|cause| {
+                let span = cause.span();
+                Diagnostic::error()
+                    .with_code("resolver")
+                    .with_message(cause.to_string())
+                    .with_labels(vec![
+                        Label::primary(span.source_id(), span.range())
+                            .with_message("related to this"),
+                    ])
+            })
+            .collect(),
         InterpreterError::Compiler { cause } => {
             let span = cause.span();
-            Diagnostic::error()
-                .with_code("compiler")
-                .with_message(cause.to_string())
-                .with_labels(vec![
-                    Label::primary(span.source_id(), span.range()).with_message("related to this"),
-                ])
+            vec![
+                Diagnostic::error()
+                    .with_code("compiler")
+                    .with_message(cause.to_string())
+                    .with_labels(vec![
+                        Label::primary(span.source_id(), span.range())
+                            .with_message("related to this"),
+                    ]),
+            ]
         }
         InterpreterError::Vm(err) => {
             let mut d = Diagnostic::error()
@@ -107,15 +114,17 @@ fn into_diagnostic(err: InterpreterError) -> Diagnostic<SourceId> {
                     Label::primary(span.source_id(), span.range()).with_message("related to this"),
                 ]);
             }
-            d
+            vec![d]
         }
     }
 }
 
 pub fn emit_error(source_db: &SourceDb, err: InterpreterError) {
-    let diagnostic = into_diagnostic(err);
+    let diagnostics = into_diagnostics(err);
     let files = DiagnosticFiles(source_db);
     let writer = StandardStream::stderr(ColorChoice::Auto);
     let config = term::Config::default();
-    let _ = term::emit(&mut writer.lock(), &config, &files, &diagnostic);
+    for diagnostic in &diagnostics {
+        let _ = term::emit(&mut writer.lock(), &config, &files, diagnostic);
+    }
 }
