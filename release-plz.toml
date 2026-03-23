@@ -1,0 +1,30 @@
+[workspace]
+release = false
+publish = false
+git_release_enable = false
+git_tag_enable = false
+changelog_update = false
+semver_check = false
+repo_url = "https://github.com/timfennis/andy-cpp"
+
+[[package]]
+name = "ndc_bin"
+release = true
+publish = false
+git_only = true
+git_tag_name = "v{{ version }}"
+git_tag_enable = true
+git_release_name = "v{{ version }}"
+git_release_enable = true
+changelog_path = "CHANGELOG.md"
+changelog_include = [
+    "ndc_analyser",
+    "ndc_core",
+    "ndc_interpreter",
+    "ndc_lexer",
+    "ndc_lsp",
+    "ndc_macros",
+    "ndc_parser",
+    "ndc_stdlib",
+    "ndc_vm",
+]
