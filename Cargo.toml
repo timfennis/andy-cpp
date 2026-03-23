@@ -21,15 +21,15 @@ derive_builder = { version = "0.20.2" }
 derive_more = { version = "2.1.1", features = ["deref", "deref_mut", "from", "display", "constructor"] }
 factorial = "0.4.0"
 itertools = "0.14.0"
-ndc_core = { path = "ndc_core" }
-ndc_lexer = { path = "ndc_lexer" }
-ndc_analyser = { path = "ndc_analyser" }
-ndc_interpreter = { path = "ndc_interpreter" }
-ndc_vm = { path = "ndc_vm" }
-ndc_parser = { path = "ndc_parser" }
-ndc_lsp = { path = "ndc_lsp" }
-ndc_macros = { path = "ndc_macros" }
-ndc_stdlib = { path = "ndc_stdlib" }
+ndc_core = { path = "ndc_core", version = "0.3.0" }
+ndc_lexer = { path = "ndc_lexer", version = "0.3.0" }
+ndc_analyser = { path = "ndc_analyser", version = "0.3.0" }
+ndc_interpreter = { path = "ndc_interpreter", version = "0.3.0" }
+ndc_vm = { path = "ndc_vm", version = "0.3.0" }
+ndc_parser = { path = "ndc_parser", version = "0.3.0" }
+ndc_lsp = { path = "ndc_lsp", version = "0.3.0" }
+ndc_macros = { path = "ndc_macros", version = "0.1.0" }
+ndc_stdlib = { path = "ndc_stdlib", version = "0.3.0" }
 num = "0.4.3"
 once_cell = "1.21.3"
 ordered-float = "5.1.0"
