@@ -25,4 +25,8 @@ Follow standard Rust formatting and run `cargo fmt --all` before submitting chan
 Add language behavior tests as `.ndc` programs under `tests/programs/<category>/` using the existing numeric prefixes such as `001_addition.ndc`. Encode expectations inline with `// expect-output:` or `// expect-error:` comments. Add compiler bytecode assertions to `compiler_tests/tests/compiler.rs` for VM-level changes. Run `cargo test --workspace` before opening a PR.
 
 ## Commit & Pull Request Guidelines
-Recent commits use short, imperative subjects, often with an emoji prefix, for example `🐛 Fix incorrect return types for sequence functions`. Keep subjects specific and under one line. PRs should describe the behavioral change, link the relevant issue or PR when applicable, and call out AI-generated contributions as requested in `README.md`. Include screenshots only for editor-extension UI changes.
+Use Conventional Commit subjects for commits and pull request titles: `feat`, `fix`, `refactor`, `perf`, `style`, `test`, `docs`, `build`, `ops`, and `chore`. Scopes are optional. When a scope helps, prefer a crate or subsystem such as `lexer`, `parser`, `vm`, `compiler`, or `lsp`, for example `fix(parser): handle trailing commas`.
+
+This repository uses squash merging for pull requests, so every PR title must conform to the Conventional Commit format because it becomes the final merged commit message. If you include an emoji in a commit or PR title, place it at the end of the title rather than the beginning, for example `perf(lexer): make token scanning faster 🐌` or `refactor(lsp): move completion logic into handlers 🧹`.
+
+PRs should describe the behavioral change, link the relevant issue or PR when applicable, and call out AI-generated contributions as requested in `README.md`. Include screenshots only for editor-extension UI changes.

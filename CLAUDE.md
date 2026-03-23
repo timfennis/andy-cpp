@@ -62,8 +62,10 @@ Source → [Lexer] → Tokens → [Parser] → AST → [Analyser] → Annotated 
 ```
 
 ### Git Workflow
-- Prefer short commit messages, only use multiple lines in case of unrelated changes
-- Pull request titles must start with an emoji
+- Use Conventional Commit subjects for commits and pull request titles: `feat`, `fix`, `refactor`, `perf`, `style`, `test`, `docs`, `build`, `ops`, `chore`
+- Scopes are optional; when a scope helps, prefer a crate or subsystem such as `lexer`, `parser`, `vm`, `compiler`, or `lsp`
+- This repository uses squash merging, so every pull request title must already be a valid Conventional Commit subject because it becomes the merged commit message
+- If an emoji is included in a commit or pull request title, place it at the end of the title, for example `perf(lexer): make token scanning faster 🐌`
 - Branch names use category prefixes: `feature/`, `bugfix/`, `housekeeping/`, etc.
 
 ### Crate Layout
