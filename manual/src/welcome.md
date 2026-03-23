@@ -10,7 +10,7 @@ for the inspiration his work provided.
 
 ## Disclaimers
  * To enhance clarity and minimize errors in this documentation, I used AI assistance, hoping it would make the language’s concepts
-   easier to understand. Thank you for checking out Andy C++—I hope you enjoy exploring it as much as I enjoyed creating it!
+   easier to understand. Thank you for checking out Andy C++, I hope you enjoy exploring it as much as I enjoyed creating it!
  * This is the first time I attempted to make a programming language, and it's one of my first Rust projects. You're welcome to
    look at the source or even send in contributions but don't expect it to be easy. I'm just an average guy bashing my head
    against problems until I stumble into a solution that seems to work. There will be a lot of really bad stuff under the hood.

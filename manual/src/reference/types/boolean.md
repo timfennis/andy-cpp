@@ -17,24 +17,4 @@ Operators defined for booleans:
 | `and` | lazy logical and |
 | `not` | logical not like `!` but lower precedence |
 
-## Lazy evaluation of `and` and `or`
-
-The `and` and `or` operators are **lazy**, meaning their operands are evaluated only when necessary to determine the result.
-This differs from bitwise operators (`|`, `&`, `~`), which always evaluate both operands.
-
-```ndc
-fn a() {
-    print("a invoked");
-    false
-};
-
-fn b() {
-    print("b invoked");
-    true
-};
-
-// Only "a invoked" is printed because evaluation is lazy.
-if a() and b() {
-    // ...
-}
-```
+See [Logical operators](../logical-operators.md) for short-circuiting and precedence rules.

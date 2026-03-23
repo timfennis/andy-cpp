@@ -1,6 +1,6 @@
 # List
 
-Lists are mutable constructs in Andy C++.
+Lists are mutable in Andy C++.
 
 ```ndc
 let my_list = [1,2,3];
@@ -17,8 +17,7 @@ let element = my_list.pop();
 
 ## Indexing
 
-Aside from regular (forward) indexing lists, strings and tuples also support negative indexes to retrieve elements based
-on their position relative to the end of the list.
+Lists, strings, and tuples also support negative indexes. Negative indexes count from the end.
 
 ```
 let my_list = [1,2,3,4,5,6,7,8,9];

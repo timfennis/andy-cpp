@@ -1,6 +1,6 @@
 # Map and Set
 
-Andy C++ does not have separate map and set types, a set is just a map where all the values are the unit type `()`.
+Andy C++ does not have separate map and set types. A set is a map whose values all use the unit type `()`.
 
 ## Set
 
@@ -25,21 +25,19 @@ let my_map = %{
 ```ndc
 let defaultdict = %{:0};
 
-// All nonexisting elements in defaultdict default to 0
+// Missing keys in defaultdict default to 0
 assert(defaultdict[10] == 0);
 
-// You can also mutate elements that don't exist in this way
+// You can also mutate a missing key this way
 defaultdict[33] += 7; // adds 7 to 0 and associates it to key 33
 ```
 
-> **Note:** Because lists are copied by reference setting the default value of a dictionary to `[]` will insert
-> the same instance of the list into the dictionary every time. Use the function syntax instead!
+> **Note:** Lists are copied by reference. If you use `[]` as a dictionary default value, every missing key gets the same list instance. Use a default function instead.
 
 
 ## Default functions
 
-You may also specify the default value as a function, in this case the function is evaluated every time a new value is produced.
-This is useful when you want the default value of the dictionary to be a new list instead of a pointer to the same list.
+You can also specify the default value as a function. Andy C++ evaluates that function each time it needs a new value. Use this form when each missing key needs its own list.
 
 ```ndc
 let dd = %{:fn() => []};
@@ -50,8 +48,7 @@ assert_eq(dd["foo"].len, 1);
 assert_eq(dd["bar"].len, 1);
 ```
 
-This does make it a bit more complicated to set the default value of your dictionary to a function, but luckily that's still
-possible.
+You can still use a function itself as the default value:
 
 ```ndc
 let dd = %{:fn() => fn(x) => x * x};
@@ -60,7 +57,7 @@ print(dd["test"](5)); // 25
 
 ## Iteration
 
-You can iterate over a map with a `for` loop. Each element is a `(key, value)` tuple:
+Iterate over a map with a `for` loop. Each element is a `(key, value)` tuple:
 
 ```ndc
 let m = %{"a": 1, "b": 2};
@@ -69,9 +66,9 @@ for (k, v) in m {
 }
 ```
 
-**Iteration order is unspecified** — maps are hash-based, so keys may appear in any order.
+**Iteration order is unspecified.** Maps are hash-based, so keys may appear in any order.
 
-**Keys are snapshotted at the start of the loop.** Mutations to the map during iteration (adding or removing keys) are not reflected in the current loop — the set of keys visited is fixed when the `for` loop begins. Values read during iteration do reflect any changes made to existing keys.
+**Keys are snapshotted at the start of the loop.** Mutations to the map during iteration, such as adding or removing keys, are not reflected in the current loop. The set of keys visited is fixed when the `for` loop begins. Values read during iteration do reflect changes to existing keys.
 
 ## Operators
 

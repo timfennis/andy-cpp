@@ -1,5 +1,5 @@
-In Andy C++, functions can be called using a *method syntax* on their first argument. This provides a cleaner,
-object-oriented feel without needing to define member functions.
+In Andy C++, you can call a function as a *method* on its first argument. You get method-style syntax without
+defining member functions.
 
 ```ndc
 fn add(x, y) {
@@ -13,11 +13,11 @@ print(add(3, 5));
 print(3.add(5));
 ```
 
-Both styles are equivalent, allowing you to choose the one that suits your code best.
+Both forms do the same thing.
 
 ### Implicit call
 
-Additionally it's also possible to omit the `()` if you're calling a 0-ary function (one that takes no arguments).
+You can also omit `()` when you call a 0-ary function.
 
 ```ndc
 let input = "some text\nsome more text";

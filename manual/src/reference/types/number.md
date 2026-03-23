@@ -1,6 +1,6 @@
 # Numbers
 
-Andy C++ has four number types that you should keep in mind when programming.
+Andy C++ has four number types:
 
  * Int: which is subdivided into `Int64` and `BigInt` to support arbitrarily large numbers
  * Float: which is backed by an `f64`
@@ -30,7 +30,7 @@ Andy C++ has four number types that you should keep in mind when programming.
 | `>=<` | Reverse compare | `false` | `false` |
 | `<>` | Concatenate string values | `true` | `false` |
 
-Additionally for **integers** the following operations are available:
+Integers also support these operations:
 
 | Operator | Function | Support augmented assignment <sup>[[1]](../../features/augmented-assignment.md)</sup> | Augmentable with `not` |
 | :-: | --- | --- | --- |
@@ -43,10 +43,7 @@ Additionally for **integers** the following operations are available:
 
 ### Integers
 
-Andy C++ uses signed 64-bit integers under the hood to do math. But if you write an expression that would normally overflow it
-automatically switches to a `BitInt` and calculates the result using the [num crate](https://crates.io/crates/num). The advantage
-of this is that you can quickly compute some really big numbers, but the downside is that naive solutions to puzzles like
-[Advent of Code 2022 - Day 11](https://adventofcode.com/2022/day/11) will never throw an error and continue running you run out of memory.
+Andy C++ uses signed 64-bit integers until an expression overflows. At that point it switches to `BigInt` and computes the result with the [num crate](https://crates.io/crates/num). You can compute very large numbers this way, but code such as a naive solution to [Advent of Code 2022 - Day 11](https://adventofcode.com/2022/day/11) may keep allocating until you run out of memory.
 
 ```ndc
 let result = 2 ^ 1024;
@@ -55,11 +52,9 @@ let result = 2 ^ 1024;
 ```
 
 ### Rational numbers and Floats
-The math system is designed to never lose precision unless you ask for it. That means that dividing with integers always results
-in a rational number instead of a float. Expression will only have a float as a result if one of the operands is a float.
+The math system keeps exact values unless you ask for a float. Dividing integers produces a rational number, not a float. An expression produces a float only when one of its operands is a float.
 
-However, there is an exception when raising an integer to the power of a rational. In such cases, Andy C++ will use a float to
-represent the result.
+One exception exists: raising an integer to a rational power produces a float.
 
 For example:
 ```ndc
@@ -71,8 +66,7 @@ assert_eq(result, 2.23606797749979); // Using == assertions on floats is risky
 
 ### Complex numbers
 
-Complex numbers are supported in the language, and you can use both i and j as the imaginary unit. Complex numbers can be
-created by adding a real number and an imaginary number, represented with either i or j.
+Andy C++ supports complex numbers. Use either `i` or `j` as the imaginary unit. Create a complex number by combining a real part with an imaginary part.
 
 ```ndc
 let complex = 5.0 + 3.1j;

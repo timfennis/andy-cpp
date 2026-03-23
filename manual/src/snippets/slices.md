@@ -1,5 +1,4 @@
-You can slice lists using ranges to extract sublists. Ranges can be inclusive or exclusive, and you can also use negative
-indices to count from the end of the list.
+Use ranges to slice lists. Ranges can be inclusive or exclusive. Negative indices count from the end of the list.
 
 ```ndc
 let my_list = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]

@@ -1,6 +1,6 @@
 # For loop
 
-For loops are where Andy C++ gets a little spicier. First let's look at some basic examples:
+Start with a basic `for` loop:
 
 ```ndc
 for n in 1..=100 {
@@ -16,7 +16,7 @@ for n in 1..=100 {
 }
 ```
 
-You can combine multiple iterations in a single loop:
+You can combine multiple iterators in one loop:
 
 ```ndc
 let drinks = ["Coffee", "Tea", "Juice"];
@@ -28,7 +28,7 @@ for drink in drinks, dessert in desserts {
 }
 ```
 
-Finally you can also add one or more guards. The example below finds all pairs of numbers from 1 until 10 that have an even sum.
+You can also add one or more guards. This example finds all pairs from `1..10` with an even sum.
 
 ```ndc
 for x in 1..10, y in 1..10, if (x + y) % 2 == 0 {
@@ -38,16 +38,16 @@ for x in 1..10, y in 1..10, if (x + y) % 2 == 0 {
 
 ## For comprehensions
 
-The same features, using a similar syntax, can also be used to produce lists on the go using list comprehensions.
+You can use the same syntax in a list comprehension.
 
 ```ndc
-// To produce a series fo perfect squares
+// Produce a series of perfect squares
 let perfect_squares = [x * x for x in 1..10];
 
 assert_eq([1,4,9,16,25,36,49,64,81,100], perfect_squares);
 ```
 
-Once again the earlier example can be used to produce actual pairs as follows:
+The earlier example can also produce pairs:
 
 ```ndc
 let pairs_with_even_sum = [x, y for x in 1..10, y in 1..10, if (x + y) % 2 == 0]
