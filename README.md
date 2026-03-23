@@ -44,6 +44,8 @@ ndc docs
 ndc docs sort   # filter by keyword
 ```
 
+For the language manual, see <https://timfennis.github.io/andy-cpp/>.
+
 ### VS Code Extension
 
 A VS Code extension is available on the
