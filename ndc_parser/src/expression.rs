@@ -76,6 +76,7 @@ pub enum Expression {
     Grouping(Box<ExpressionLocation>),
     VariableDeclaration {
         l_value: Lvalue,
+        annotated_type: Option<StaticType>,
         value: Box<ExpressionLocation>,
     },
     Assignment {

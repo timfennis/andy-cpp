@@ -152,7 +152,7 @@ impl Compiler {
                     }
                 }
             }
-            Expression::VariableDeclaration { value, l_value } => {
+            Expression::VariableDeclaration { value, l_value, .. } => {
                 self.compile_expr(*value)?;
                 self.compile_declare_lvalue(l_value, span)?;
             }

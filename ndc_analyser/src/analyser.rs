@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 
 use crate::scope::ScopeTree;
-use itertools::Itertools;
+use itertools::{Itertools, izip};
 use ndc_core::{StaticType, TypeSignature};
 use ndc_lexer::Span;
 use ndc_parser::{Binding, Expression, ExpressionLocation, ForBody, ForIteration, Lvalue, NodeId};
@@ -142,9 +142,19 @@ impl Analyser {
                 Ok(StaticType::Bool)
             }
             Expression::Grouping(expr) => self.analyse(expr),
-            Expression::VariableDeclaration { l_value, value } => {
-                let typ = self.analyse_or_any(value);
-                self.resolve_lvalue_declarative(l_value, typ, *span);
+            Expression::VariableDeclaration {
+                l_value,
+                annotated_type,
+                value,
+            } => {
+                let found_type = self.analyse_or_any(value);
+
+                self.resolve_lvalue_declarative(
+                    l_value,
+                    annotated_type.to_owned(),
+                    found_type.clone(),
+                    *span,
+                );
                 Ok(StaticType::unit())
             }
             Expression::Assignment { l_value, r_value } => {
@@ -429,13 +439,14 @@ impl Analyser {
 
                 self.scope_tree.new_iteration_scope();
 
-                self.resolve_lvalue_declarative(
-                    l_value,
-                    sequence_type
-                        .sequence_element_type()
-                        .unwrap_or(StaticType::Any),
-                    span,
-                );
+                let found_type = sequence_type
+                    .sequence_element_type()
+                    .unwrap_or(StaticType::Any);
+
+                // TOOD: get this from the AST when the parser adds it
+                let expected_type = None;
+
+                self.resolve_lvalue_declarative(l_value, expected_type, found_type, span);
                 do_destroy = true;
             }
             ForIteration::Guard(expr) => {
@@ -599,19 +610,40 @@ impl Analyser {
 
         types
     }
-    fn resolve_lvalue_declarative(&mut self, lvalue: &mut Lvalue, typ: StaticType, span: Span) {
+    fn resolve_lvalue_declarative(
+        &mut self,
+        lvalue: &mut Lvalue,
+        expected_type: Option<StaticType>,
+        found_type: StaticType,
+        span: Span,
+    ) {
         match lvalue {
             Lvalue::Identifier {
                 identifier,
                 resolved,
                 inferred_type,
-                ..
+                span,
             } => {
+                // If there is a type annotation and the given type is not a subtype of the annotated type we emit an error
+                if let Some(expected_type) = expected_type
+                    && !found_type.is_incompatible_with(&expected_type)
+                {
+                    self.emit(AnalysisError::mismatched_types(
+                        found_type.clone(),
+                        expected_type.clone(),
+                        *span,
+                    ));
+                }
+
+                let resolved_type = expected_type.unwrap_or(found_type);
+
                 *resolved = Some(
                     self.scope_tree
-                        .create_local_binding(identifier.clone(), typ.clone()),
+                        .create_local_binding(identifier.clone(), resolved_type.clone()),
                 );
-                *inferred_type = Some(typ);
+
+                // We set the inferred type of this binding to the annotated/expected type but fall back to the infered type if we can't
+                *inferred_type = Some(resolved_type)
             }
             Lvalue::Index { index, value, .. } => {
                 self.analyse_or_any(index);
@@ -623,24 +655,33 @@ impl Analyser {
                 // can happen when a variable is declared with one type (e.g. ())
                 // and later reassigned to a tuple of a different arity — the
                 // analyser doesn't track reassignment types.
+
+                let resolved_type = expected_type.unwrap_or(found_type.clone());
+
                 let sub_types: Box<dyn Iterator<Item = &StaticType>> =
-                    if let StaticType::Tuple(elems) = &typ {
+                    if let StaticType::Tuple(elems) = &resolved_type {
                         if elems.len() != seq.len() {
                             Box::new(std::iter::repeat(&StaticType::Any))
                         } else {
                             Box::new(elems.iter())
                         }
-                    } else if let Some(iter) = typ.unpack() {
+                    } else if let Some(iter) = expected_type.unpack() {
                         iter
                     } else {
-                        self.emit(AnalysisError::unable_to_unpack_type(&typ, span));
+                        self.emit(AnalysisError::unable_to_unpack_type(&resolved_type, span));
                         return;
                     };
 
-                for (sub_lvalue, sub_lvalue_type) in seq.iter_mut().zip(sub_types) {
+                // TODO: emit error that foudn_type could not be unpacked and continue as if it were Any
+                let found_types = found_type.unpack().unwrap();
+
+                for (sub_lvalue, expected_type, found_type) in
+                    izip!(seq.iter_mut(), sub_types, found_types)
+                {
                     self.resolve_lvalue_declarative(
                         sub_lvalue,
-                        sub_lvalue_type.clone(),
+                        expected_type.clone(),
+                        found_type.clone(),
                         /* todo: figure out how to narrow this span */ span,
                     );
                 }
@@ -678,6 +719,14 @@ impl AnalysisError {
     pub fn span(&self) -> Span {
         self.span
     }
+
+    fn mismatched_types(found: StaticType, expected: StaticType, span: Span) -> Self {
+        Self {
+            text: format!("mismatched types: found {found} but expected {expected}"),
+            span,
+        }
+    }
+
     fn function_redefinition(name: &str, arity: Option<usize>, span: Span) -> Self {
         let arity_desc = match arity {
             Some(n) => format!("{n} parameter{}", if n == 1 { "" } else { "s" }),
