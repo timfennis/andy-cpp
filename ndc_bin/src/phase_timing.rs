@@ -1,19 +1,6 @@
+use ndc_core::duration::format_duration;
 use ndc_interpreter::ExecutionTimings;
 use std::io::{self, Write};
-use std::time::Duration;
-
-fn format_duration(d: Duration) -> String {
-    let nanos = d.as_nanos();
-    if nanos < 1_000 {
-        format!("{nanos}ns")
-    } else if nanos < 1_000_000 {
-        format!("{:.0}us", nanos as f64 / 1_000.0)
-    } else if nanos < 1_000_000_000 {
-        format!("{:.1}ms", nanos as f64 / 1_000_000.0)
-    } else {
-        format!("{:.2}s", d.as_secs_f64())
-    }
-}
 
 pub fn write_phase_timings<W: Write>(writer: &mut W, timings: &ExecutionTimings) -> io::Result<()> {
     writeln!(writer)?;
