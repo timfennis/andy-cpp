@@ -4,9 +4,10 @@ use crate::docs::docs;
 use anyhow::{Context, anyhow};
 use clap::{Parser, Subcommand};
 use highlighter::AndycppHighlighter;
-use ndc_interpreter::Interpreter;
+use ndc_interpreter::{ExecutionTimings, Interpreter};
 use std::path::PathBuf;
 use std::process;
+use std::time::Duration;
 use std::{fs, io::Write};
 
 mod diagnostic;
@@ -32,6 +33,9 @@ enum Command {
     /// Execute an .ndc file or start the repl (this default action may be omitted)
     Run {
         file: Option<PathBuf>,
+        /// Print total time spent in each interpreter phase
+        #[arg(long)]
+        time: bool,
         /// Print each instruction as it is dispatched
         #[cfg(feature = "trace")]
         #[arg(long)]
@@ -78,6 +82,7 @@ impl Default for Command {
     fn default() -> Self {
         Self::Run {
             file: None,
+            time: false,
             #[cfg(feature = "trace")]
             trace_print: false,
             #[cfg(feature = "trace")]
@@ -94,6 +99,7 @@ enum Action {
     RunLsp,
     RunFile {
         path: PathBuf,
+        time: bool,
         #[cfg(feature = "trace")]
         trace_print: bool,
         #[cfg(feature = "trace")]
@@ -119,6 +125,7 @@ impl TryFrom<Command> for Action {
         let action = match value {
             Command::Run {
                 file: Some(file),
+                time,
                 #[cfg(feature = "trace")]
                 trace_print,
                 #[cfg(feature = "trace")]
@@ -129,6 +136,7 @@ impl TryFrom<Command> for Action {
                 trace_span,
             } => Self::RunFile {
                 path: file,
+                time,
                 #[cfg(feature = "trace")]
                 trace_print,
                 #[cfg(feature = "trace")]
@@ -151,6 +159,7 @@ impl TryFrom<Command> for Action {
                     }
                     1 => Self::RunFile {
                         path: args[0].parse::<PathBuf>().context("invalid path")?,
+                        time: false,
                         #[cfg(feature = "trace")]
                         trace_print: false,
                         #[cfg(feature = "trace")]
@@ -176,6 +185,7 @@ fn main() -> anyhow::Result<()> {
     match action {
         Action::RunFile {
             path,
+            time,
             #[cfg(feature = "trace")]
             trace_print,
             #[cfg(feature = "trace")]
@@ -217,9 +227,16 @@ fn main() -> anyhow::Result<()> {
             }
 
             let name = filename.as_deref().unwrap_or("<input>");
-            if let Err(err) = interpreter.eval_named(name, &string) {
-                diagnostic::emit_error(interpreter.source_db(), err);
-                process::exit(1);
+            match interpreter.eval_named_with_timings(name, &string) {
+                Ok((_, timings)) => {
+                    if time {
+                        print_phase_timings(&timings);
+                    }
+                }
+                Err(err) => {
+                    diagnostic::emit_error(interpreter.source_db(), err);
+                    process::exit(1);
+                }
             }
         }
         Action::DisassembleFile(path) => {
@@ -250,6 +267,41 @@ fn main() -> anyhow::Result<()> {
         Action::RunLsp => start_lsp(),
     }
     Ok(())
+}
+
+fn format_duration(d: Duration) -> String {
+    let nanos = d.as_nanos();
+    if nanos < 1_000 {
+        format!("{nanos}ns")
+    } else if nanos < 1_000_000 {
+        format!("{:.0}us", nanos as f64 / 1_000.0)
+    } else if nanos < 1_000_000_000 {
+        format!("{:.1}ms", nanos as f64 / 1_000_000.0)
+    } else {
+        format!("{:.2}s", d.as_secs_f64())
+    }
+}
+
+fn print_phase_timings(timings: &ExecutionTimings) {
+    let total =
+        timings.lexing + timings.parsing + timings.analysing + timings.compiling + timings.running;
+
+    eprintln!("\n{:-<56}", "");
+    eprintln!("Phase timings (total: {})", format_duration(total));
+    eprintln!("{:-<56}", "");
+    eprintln!("  {:<12} {}", "lexing", format_duration(timings.lexing));
+    eprintln!("  {:<12} {}", "parsing", format_duration(timings.parsing));
+    eprintln!(
+        "  {:<12} {}",
+        "analyser",
+        format_duration(timings.analysing)
+    );
+    eprintln!(
+        "  {:<12} {}",
+        "compiling",
+        format_duration(timings.compiling)
+    );
+    eprintln!("  {:<12} {}", "running", format_duration(timings.running));
 }
 
 fn start_lsp() {

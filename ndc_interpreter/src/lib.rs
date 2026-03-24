@@ -6,11 +6,15 @@ use ndc_vm::compiler::Compiler;
 use ndc_vm::value::CompiledFunction;
 use ndc_vm::{OutputSink, Vm};
 use std::rc::Rc;
+use timing::{Phase, measure};
 
 pub use ndc_analyser::AnalysisResult;
 #[cfg(feature = "trace")]
 pub use ndc_vm::tracer;
 pub use ndc_vm::{NativeFunction, Value};
+pub use timing::ExecutionTimings;
+
+mod timing;
 
 pub struct Interpreter {
     registry: FunctionRegistry<Rc<NativeFunction>>,
@@ -117,7 +121,7 @@ impl Interpreter {
 
     pub fn compile_str(&mut self, input: &str) -> Result<CompiledFunction, InterpreterError> {
         let source_id = self.source_db.add("<input>", input);
-        let expressions = self.parse_and_analyse(input, source_id)?;
+        let (expressions, _) = self.parse_and_analyse(input, source_id)?;
         Ok(Compiler::compile(expressions.into_iter())?)
     }
 
@@ -141,27 +145,51 @@ impl Interpreter {
         name: impl Into<String>,
         input: &str,
     ) -> Result<Value, InterpreterError> {
+        Ok(self.eval_named_with_timings(name, input)?.0)
+    }
+
+    /// Execute source code with a custom source name for diagnostics and
+    /// return wall-clock timings for each pipeline phase.
+    pub fn eval_named_with_timings(
+        &mut self,
+        name: impl Into<String>,
+        input: &str,
+    ) -> Result<(Value, ExecutionTimings), InterpreterError> {
         let source_id = self.source_db.add(name, input);
-        let expressions = self.parse_and_analyse(input, source_id)?;
-        self.interpret_vm(input, expressions.into_iter())
+        let (expressions, mut timings) = self.parse_and_analyse(input, source_id)?;
+        let (value, vm_timings) = self.interpret_vm(input, expressions.into_iter())?;
+        timings.compiling = vm_timings.compiling;
+        timings.running = vm_timings.running;
+        Ok((value, timings))
     }
 
     fn parse_and_analyse(
         &mut self,
         input: &str,
         source_id: SourceId,
-    ) -> Result<Vec<ExpressionLocation>, InterpreterError> {
-        let tokens = Lexer::new(input, source_id).collect::<Result<Vec<TokenLocation>, _>>()?;
-        let mut expressions = ndc_parser::Parser::from_tokens(tokens).parse()?;
+    ) -> Result<(Vec<ExpressionLocation>, ExecutionTimings), InterpreterError> {
+        let mut timings = ExecutionTimings::default();
+
+        let tokens = measure(&mut timings, Phase::Lexing, || {
+            Lexer::new(input, source_id).collect::<Result<Vec<TokenLocation>, _>>()
+        })?;
+
+        let mut expressions = measure(&mut timings, Phase::Parsing, || {
+            ndc_parser::Parser::from_tokens(tokens).parse()
+        })?;
 
         let checkpoint = self.analyser.checkpoint();
-        for e in &mut expressions {
-            // Hard errors (structural issues) still abort immediately.
-            if let Err(e) = self.analyser.analyse(e) {
-                self.analyser.restore(checkpoint);
-                return Err(InterpreterError::Resolver { causes: vec![e] });
+        measure(&mut timings, Phase::Analysing, || {
+            for e in &mut expressions {
+                // Hard errors (structural issues) still abort immediately.
+                if let Err(e) = self.analyser.analyse(e) {
+                    self.analyser.restore(checkpoint.clone());
+                    return Err(InterpreterError::Resolver { causes: vec![e] });
+                }
             }
-        }
+
+            Ok(())
+        })?;
 
         if self.analyser.has_errors() {
             self.analyser.restore(checkpoint);
@@ -171,7 +199,7 @@ impl Interpreter {
             });
         }
 
-        Ok(expressions)
+        Ok((expressions, timings))
     }
 
     fn interpret_vm(
@@ -179,7 +207,7 @@ impl Interpreter {
         #[cfg(feature = "trace")] input: &str,
         #[cfg(not(feature = "trace"))] _input: &str,
         expressions: impl Iterator<Item = ExpressionLocation>,
-    ) -> Result<Value, InterpreterError> {
+    ) -> Result<(Value, ExecutionTimings), InterpreterError> {
         use ndc_vm::{Function as VmFunction, Object as VmObject, Value as VmValue};
 
         let globals: Vec<VmValue> = self
@@ -192,6 +220,7 @@ impl Interpreter {
             })
             .collect();
 
+        let mut timings = ExecutionTimings::default();
         let result = match self.repl_state.take() {
             None => {
                 let output = if self.capturing {
@@ -199,7 +228,9 @@ impl Interpreter {
                 } else {
                     OutputSink::Stdout
                 };
-                let (code, checkpoint) = Compiler::compile_resumable(expressions)?;
+                let (code, checkpoint) = measure(&mut timings, Phase::Compiling, || {
+                    Compiler::compile_resumable(expressions)
+                })?;
                 let mut vm = Vm::new(code, globals).with_output(output);
                 #[cfg(feature = "trace")]
                 {
@@ -208,7 +239,7 @@ impl Interpreter {
                         vm = vm.with_tracer(tracer);
                     }
                 }
-                vm.run()?;
+                measure(&mut timings, Phase::Running, || vm.run())?;
                 let result = vm.last_value(checkpoint.num_locals());
                 self.repl_state = Some((vm, checkpoint));
                 result
@@ -216,20 +247,22 @@ impl Interpreter {
             Some((mut vm, checkpoint)) => {
                 let resume_ip = checkpoint.halt_ip();
                 let prev_num_locals = checkpoint.num_locals();
-                let (code, new_checkpoint) = checkpoint.resume(expressions)?;
+                let (code, new_checkpoint) = measure(&mut timings, Phase::Compiling, || {
+                    checkpoint.resume(expressions)
+                })?;
                 vm.resume_from_halt(code, globals, resume_ip, prev_num_locals);
                 #[cfg(feature = "trace")]
                 {
                     vm.set_source(input);
                 }
-                vm.run()?;
+                measure(&mut timings, Phase::Running, || vm.run())?;
                 let result = vm.last_value(new_checkpoint.num_locals());
                 self.repl_state = Some((vm, new_checkpoint));
                 result
             }
         };
 
-        Ok(result)
+        Ok((result, timings))
     }
 }
 
