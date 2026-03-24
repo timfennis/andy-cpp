@@ -1,4 +1,5 @@
 pub mod compare;
+pub mod duration;
 pub mod hash_map;
 pub mod int;
 pub mod num;

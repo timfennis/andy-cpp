@@ -1,24 +1,8 @@
 use crate::chunk::OpCode;
+use ndc_core::duration::format_duration;
 use ndc_lexer::Span;
 use std::collections::HashMap;
-use std::fmt;
 use std::time::{Duration, Instant};
-
-fn format_duration(d: &Duration) -> String {
-    let nanos = d.as_nanos();
-    if nanos < 1_000 {
-        format!("{nanos}ns")
-    } else if nanos < 1_000_000 {
-        let micros = nanos as f64 / 1_000.0;
-        fmt::format(format_args!("{micros:.0}µs"))
-    } else if nanos < 1_000_000_000 {
-        let millis = nanos as f64 / 1_000_000.0;
-        fmt::format(format_args!("{millis:.1}ms"))
-    } else {
-        let secs = d.as_secs_f64();
-        fmt::format(format_args!("{secs:.2}s"))
-    }
-}
 
 /// Context passed to a tracer on every dispatched instruction.
 pub struct InstructionContext<'a> {
@@ -184,11 +168,11 @@ impl VmTracer for TimingTracer {
 
         let total: Duration = entries.iter().map(|(_, d)| d).sum();
         eprintln!("\n{:-<60}", "");
-        eprintln!("Instruction timing (total: {})", format_duration(&total));
+        eprintln!("Instruction timing (total: {})", format_duration(total));
         eprintln!("{:-<60}", "");
         for (name, dur) in &entries {
             let pct = dur.as_secs_f64() / total.as_secs_f64() * 100.0;
-            eprintln!("  {name:<20} {:>10}  ({pct:5.1}%)", format_duration(dur));
+            eprintln!("  {name:<20} {:>10}  ({pct:5.1}%)", format_duration(*dur));
         }
     }
 }

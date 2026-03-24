@@ -1,15 +1,17 @@
 #![allow(clippy::print_stdout, clippy::print_stderr, clippy::exit)]
 
 use crate::docs::docs;
-use anyhow::{Context, anyhow};
-use clap::{Parser, Subcommand};
+use anyhow::anyhow;
+use clap::{Args, Parser, Subcommand};
 use highlighter::AndycppHighlighter;
 use ndc_interpreter::Interpreter;
+use phase_timing::write_phase_timings;
 use std::path::PathBuf;
 use std::process;
 use std::{fs, io::Write};
 
 mod diagnostic;
+mod phase_timing;
 mod repl;
 
 mod docs;
@@ -32,22 +34,8 @@ enum Command {
     /// Execute an .ndc file or start the repl (this default action may be omitted)
     Run {
         file: Option<PathBuf>,
-        /// Print each instruction as it is dispatched
-        #[cfg(feature = "trace")]
-        #[arg(long)]
-        trace_print: bool,
-        /// Print a histogram of instruction dispatch counts
-        #[cfg(feature = "trace")]
-        #[arg(long)]
-        trace_histogram: bool,
-        /// Print cumulative time spent per instruction type
-        #[cfg(feature = "trace")]
-        #[arg(long)]
-        trace_time: bool,
-        /// Render source as a heat map colored by time spent per span
-        #[cfg(feature = "trace")]
-        #[arg(long)]
-        trace_span: bool,
+        #[command(flatten)]
+        options: RunOptions,
     },
     /// Output an .ndc file using the built-in syntax highlighting engine
     Highlight { file: PathBuf },
@@ -74,18 +62,42 @@ enum Command {
     Unknown(Vec<String>),
 }
 
+#[derive(Args, Clone, Copy, Default)]
+struct RunOptions {
+    /// Print total time spent in each interpreter phase
+    #[arg(long)]
+    time: bool,
+    /// Print each instruction as it is dispatched
+    #[cfg(feature = "trace")]
+    #[arg(long)]
+    trace_print: bool,
+    /// Print a histogram of instruction dispatch counts
+    #[cfg(feature = "trace")]
+    #[arg(long)]
+    trace_histogram: bool,
+    /// Print cumulative time spent per instruction type
+    #[cfg(feature = "trace")]
+    #[arg(long)]
+    trace_time: bool,
+    /// Render source as a heat map colored by time spent per span
+    #[cfg(feature = "trace")]
+    #[arg(long)]
+    trace_span: bool,
+}
+
+#[derive(Parser)]
+#[command(name = "ndc", disable_help_subcommand = true)]
+struct ImplicitRunArgs {
+    file: PathBuf,
+    #[command(flatten)]
+    options: RunOptions,
+}
+
 impl Default for Command {
     fn default() -> Self {
         Self::Run {
             file: None,
-            #[cfg(feature = "trace")]
-            trace_print: false,
-            #[cfg(feature = "trace")]
-            trace_histogram: false,
-            #[cfg(feature = "trace")]
-            trace_time: false,
-            #[cfg(feature = "trace")]
-            trace_span: false,
+            options: RunOptions::default(),
         }
     }
 }
@@ -94,14 +106,7 @@ enum Action {
     RunLsp,
     RunFile {
         path: PathBuf,
-        #[cfg(feature = "trace")]
-        trace_print: bool,
-        #[cfg(feature = "trace")]
-        trace_histogram: bool,
-        #[cfg(feature = "trace")]
-        trace_time: bool,
-        #[cfg(feature = "trace")]
-        trace_span: bool,
+        options: RunOptions,
     },
     DisassembleFile(PathBuf),
     HighlightFile(PathBuf),
@@ -119,48 +124,22 @@ impl TryFrom<Command> for Action {
         let action = match value {
             Command::Run {
                 file: Some(file),
-                #[cfg(feature = "trace")]
-                trace_print,
-                #[cfg(feature = "trace")]
-                trace_histogram,
-                #[cfg(feature = "trace")]
-                trace_time,
-                #[cfg(feature = "trace")]
-                trace_span,
-            } => Self::RunFile {
-                path: file,
-                #[cfg(feature = "trace")]
-                trace_print,
-                #[cfg(feature = "trace")]
-                trace_histogram,
-                #[cfg(feature = "trace")]
-                trace_time,
-                #[cfg(feature = "trace")]
-                trace_span,
-            },
+                options,
+            } => Self::RunFile { path: file, options },
             Command::Run { file: None, .. } => Self::StartRepl,
             Command::Lsp { stdio: _ } => Self::RunLsp,
             Command::Disassemble { file } => Self::DisassembleFile(file),
             Command::Highlight { file } => Self::HighlightFile(file),
             Command::Docs { query, no_color } => Self::Docs { query, no_color },
             Command::Unknown(args) => {
-                match args.len() {
-                    0 => {
-                        // This case should have defaulted to `Command::Run { file: None }`
-                        unreachable!("fallback case reached with 0 arguments (should never happen)")
-                    }
-                    1 => Self::RunFile {
-                        path: args[0].parse::<PathBuf>().context("invalid path")?,
-                        #[cfg(feature = "trace")]
-                        trace_print: false,
-                        #[cfg(feature = "trace")]
-                        trace_histogram: false,
-                        #[cfg(feature = "trace")]
-                        trace_time: false,
-                        #[cfg(feature = "trace")]
-                        trace_span: false,
-                    },
-                    n => return Err(anyhow!("invalid number of arguments: {n}")),
+                let implicit_run = ImplicitRunArgs::try_parse_from(
+                    std::iter::once("ndc").chain(args.iter().map(String::as_str)),
+                )
+                .map_err(|err| anyhow!(err.render().to_string()))?;
+
+                Self::RunFile {
+                    path: implicit_run.file,
+                    options: implicit_run.options,
                 }
             }
         };
@@ -176,14 +155,7 @@ fn main() -> anyhow::Result<()> {
     match action {
         Action::RunFile {
             path,
-            #[cfg(feature = "trace")]
-            trace_print,
-            #[cfg(feature = "trace")]
-            trace_histogram,
-            #[cfg(feature = "trace")]
-            trace_time,
-            #[cfg(feature = "trace")]
-            trace_span,
+            options,
         } => {
             let filename = path
                 .file_name()
@@ -199,16 +171,16 @@ fn main() -> anyhow::Result<()> {
             {
                 use ndc_interpreter::tracer;
                 let mut tracers: Vec<Box<dyn tracer::VmTracer>> = Vec::new();
-                if trace_print {
+                if options.trace_print {
                     tracers.push(Box::new(tracer::PrintTracer));
                 }
-                if trace_histogram {
+                if options.trace_histogram {
                     tracers.push(Box::new(tracer::HistogramTracer::new()));
                 }
-                if trace_time {
+                if options.trace_time {
                     tracers.push(Box::new(tracer::TimingTracer::new()));
                 }
-                if trace_span {
+                if options.trace_span {
                     tracers.push(Box::new(span_tracer::SpanTracer::new()));
                 }
                 if !tracers.is_empty() {
@@ -217,7 +189,17 @@ fn main() -> anyhow::Result<()> {
             }
 
             let name = filename.as_deref().unwrap_or("<input>");
-            if let Err(err) = interpreter.eval_named(name, &string) {
+            if options.time {
+                match interpreter.eval_named_with_timings(name, &string) {
+                    Ok((_, timings)) => {
+                        write_phase_timings(&mut std::io::stderr(), &timings)?;
+                    }
+                    Err(err) => {
+                        diagnostic::emit_error(interpreter.source_db(), err);
+                        process::exit(1);
+                    }
+                }
+            } else if let Err(err) = interpreter.eval_named(name, &string) {
                 diagnostic::emit_error(interpreter.source_db(), err);
                 process::exit(1);
             }
@@ -271,11 +253,29 @@ fn start_lsp() {
 #[cfg(test)]
 mod test {
     use clap::CommandFactory;
+    use std::path::PathBuf;
 
-    use crate::Cli;
+    use crate::{Action, Cli, Command};
 
     #[test]
     fn test_clap() {
         Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn implicit_run_honors_time_flag() {
+        let action = Action::try_from(Command::Unknown(vec![
+            "script.ndc".to_string(),
+            "--time".to_string(),
+        ]))
+        .expect("implicit run flags should parse");
+
+        match action {
+            Action::RunFile { path, options } => {
+                assert_eq!(path, PathBuf::from("script.ndc"));
+                assert!(options.time);
+            }
+            _ => panic!("expected run action"),
+        }
     }
 }
