@@ -15,6 +15,8 @@ pub mod sequence;
 pub mod string;
 pub mod value;
 
+#[cfg(feature = "base64")]
+pub mod base64;
 #[cfg(feature = "crypto")]
 pub mod crypto;
 #[cfg(feature = "rand")]
@@ -26,6 +28,8 @@ pub mod serde;
 
 pub fn register(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     aoc::register(env);
+    #[cfg(feature = "base64")]
+    base64::register(env);
     cmp::register(env);
     #[cfg(feature = "crypto")]
     crypto::register(env);
