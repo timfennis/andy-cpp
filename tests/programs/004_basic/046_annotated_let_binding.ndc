@@ -1,3 +1,26 @@
-// This test simply asserts that these expressions are valid syntax
-let x: Int = 3;
-let y: Float = 3.0;
+// This test asserts that supported annotated let bindings are valid syntax.
+let any_value: Any = 3;
+while false {
+    let never_value: Never = break;
+}
+let bool_value: Bool = true;
+let int_value: Int = 3;
+let float_value: Float = 3.0;
+let rational_value: Rational = 3 / 4;
+let complex_value: Complex = 1 + 2i;
+let number_value: Number = 3;
+let string_value: String = "hello";
+
+let option_value: Option<Int> = Some(3);
+let sequence_value: Sequence<Int> = [1, 2, 3];
+let list_value: List<Int> = [1, 2, 3];
+let iterator_value: Iterator<Int> = 1..10;
+let min_heap_value: MinHeap<Int> = MinHeap();
+let max_heap_value: MaxHeap<Int> = MaxHeap();
+let deque_value: Deque<Int> = Deque();
+let map_value: Map<String, Int> = %{"a": 1, "b": 2};
+let tuple_named_value: Tuple<Int, String> = (1, "hello");
+
+// Currently unsupported in the parser:
+// - tuple type syntax parsed via `tuple_type()` is still unimplemented
+// - function type annotations are not yet parsed

@@ -617,6 +617,7 @@ impl Analyser {
         found_type: StaticType,
         span: Span,
     ) {
+        eprintln!("E: {:?}, F: {:?}", expected_type, found_type);
         match lvalue {
             Lvalue::Identifier {
                 identifier,
