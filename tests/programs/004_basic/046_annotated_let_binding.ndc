@@ -1,0 +1,3 @@
+// This test simply asserts that these expressions are valid syntax
+let x: Int = 3;
+let y: Float = 3.0;
