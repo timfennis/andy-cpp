@@ -320,13 +320,20 @@ impl Parser {
             ));
         };
 
+        let annotated_type = if self.peek_current_token() == Some(&Token::Colon) {
+            self.advance();
+            Some(self.static_type()?)
+        } else {
+            None
+        };
+
         self.require_current_token_matches(&Token::EqualsSign)?;
 
         let expression = self.variable_assignment()?;
         let end = expression.span;
         let declaration = Expression::VariableDeclaration {
             l_value: lvalue,
-            annotated_type: None, // TODO: insert parsed result here
+            annotated_type,
             value: Box::new(expression),
         };
 
@@ -432,25 +439,54 @@ impl Parser {
         }
     }
 
+    fn delimited_comma_separated<T>(
+        &mut self,
+        open: Token,
+        close: Token,
+        parse_item: fn(&mut Self) -> Result<T, Error>,
+        allow_empty: bool,
+    ) -> Result<(Vec<T>, Span), Error> {
+        let open_span = self.require_current_token_matches(&open)?.span;
+
+        if let Some(close_token) = self.consume_token_if(&[close.clone()]) {
+            if allow_empty {
+                return Ok((Vec::new(), open_span.merge(close_token.span)));
+            }
+
+            return Err(Error::with_help(
+                format!("expected an item before '{close}'"),
+                close_token.span,
+                "This delimited list cannot be empty.".to_string(),
+            ));
+        }
+
+        let mut items = vec![parse_item(self)?];
+
+        while self.consume_token_if(&[Token::Comma]).is_some() {
+            if self.match_token(&[close.clone()]).is_some() {
+                break;
+            }
+
+            items.push(parse_item(self)?);
+        }
+
+        let close_span = self.require_current_token_matches(&close)?.span;
+        Ok((items, open_span.merge(close_span)))
+    }
+
     /// Parses a delimited tuple (enclosed in parentheses) that can be empty
     fn delimited_tuple(
         &mut self,
         next: fn(&mut Self) -> Result<ExpressionLocation, Error>,
     ) -> Result<ExpressionLocation, Error> {
-        let start = self.require_current_token_matches(&Token::LeftParentheses)?;
-        if let Some(end) = self.consume_token_if(&[Token::RightParentheses]) {
-            Ok(Expression::Tuple { values: vec![] }.to_location(start.span.merge(end.span)))
-        } else {
-            let mut tuple_expression = self.tuple_expression(next, true)?;
-            let right_paren_span = self
-                .require_current_token_matches(&Token::RightParentheses)?
-                .span;
+        let (values, span) = self.delimited_comma_separated(
+            Token::LeftParentheses,
+            Token::RightParentheses,
+            next,
+            true,
+        )?;
 
-            // Include the right paretheses in the span
-            tuple_expression.span = tuple_expression.span.merge(right_paren_span);
-
-            Ok(tuple_expression)
-        }
+        Ok(Expression::Tuple { values }.to_location(span))
     }
 
     fn single_expression(&mut self) -> Result<ExpressionLocation, Error> {
@@ -1297,6 +1333,49 @@ impl Parser {
         };
         Ok(Expression::Map { values, default }.to_location(map_open_span.merge(map_close_span)))
     }
+
+    pub fn static_type(&mut self) -> Result<StaticType, Error> {
+        let Some(TokenLocation { token, span }) = self.peek_current_token_location() else {
+            return Err(Error::end_of_input(
+                self.tokens.last().expect("last token exists").span,
+            ));
+        };
+
+        match token {
+            Token::Identifier(_) => self.named_or_generic_type(),
+            Token::LeftCurlyBracket => self.tuple_type(),
+            _ => Err(Error::with_help(
+                format!("expected a type annotation, found `{token}`"),
+                *span,
+                "Use a valid type name or tuple type annotation in this position.".to_string(),
+            )),
+        }
+    }
+
+    pub fn named_or_generic_type(&mut self) -> Result<StaticType, Error> {
+        let Ok(TokenLocation {
+            token: Token::Identifier(ident),
+            span,
+        }) = self.require_current_token()
+        else {
+            unreachable!("this should have been checked");
+        };
+
+        let generic_args = if self.peek_current_token() == Some(&Token::Less) {
+            self.delimited_comma_separated(Token::Less, Token::Greater, Self::static_type, false)?
+                .0
+        } else {
+            Vec::new()
+        };
+
+        StaticType::from_name_and_args(ident.as_str(), generic_args)
+            .map_err(|err| Error::with_help(err.to_string(), span, err.help_text().to_string()))
+    }
+
+    pub fn tuple_type(&mut self) -> Result<StaticType, Error> {
+        todo!()
+    }
+
     fn peek_range_end(&self) -> bool {
         matches!(
             self.peek_current_token(),
@@ -1321,9 +1400,12 @@ pub struct Error {
 
 impl Error {
     #[must_use]
-    pub fn text(text: String, span: Span) -> Self {
+    pub fn text<S>(text: S, span: Span) -> Self
+    where
+        S: Into<String>,
+    {
         Self {
-            text,
+            text: text.into(),
             span,
             help_text: None,
         }
