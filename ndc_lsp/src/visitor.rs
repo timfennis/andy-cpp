@@ -39,7 +39,8 @@ pub fn walk_ast(visitor: &mut impl AstVisitor, expressions: &[ExpressionLocation
 fn walk_expression(visitor: &mut impl AstVisitor, expr: &ExpressionLocation) {
     visitor.on_expression(expr);
     match &expr.expression {
-        Expression::VariableDeclaration { l_value, value } => {
+        Expression::VariableDeclaration { l_value, value, .. } => {
+            // TODO: if we have an explicit type we should not show the inlays. How though?
             walk_lvalue(visitor, l_value);
             walk_expression(visitor, value);
         }
