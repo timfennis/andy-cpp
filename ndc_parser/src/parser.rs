@@ -326,7 +326,7 @@ impl Parser {
         let end = expression.span;
         let declaration = Expression::VariableDeclaration {
             l_value: lvalue,
-            annotated_type: StaticType::Any, // TODO: insert parsed result here
+            annotated_type: None, // TODO: insert parsed result here
             value: Box::new(expression),
         };
 

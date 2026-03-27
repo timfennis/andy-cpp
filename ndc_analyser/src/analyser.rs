@@ -625,8 +625,8 @@ impl Analyser {
                 span,
             } => {
                 // If there is a type annotation and the given type is not a subtype of the annotated type we emit an error
-                if let Some(expected_type) = expected_type
-                    && !found_type.is_incompatible_with(&expected_type)
+                if let Some(expected_type) = &expected_type
+                    && found_type.is_incompatible_with(&expected_type)
                 {
                     self.emit(AnalysisError::mismatched_types(
                         found_type.clone(),
@@ -665,7 +665,7 @@ impl Analyser {
                         } else {
                             Box::new(elems.iter())
                         }
-                    } else if let Some(iter) = expected_type.unpack() {
+                    } else if let Some(iter) = resolved_type.unpack() {
                         iter
                     } else {
                         self.emit(AnalysisError::unable_to_unpack_type(&resolved_type, span));
@@ -680,7 +680,7 @@ impl Analyser {
                 {
                     self.resolve_lvalue_declarative(
                         sub_lvalue,
-                        expected_type.clone(),
+                        Some(expected_type.clone()),
                         found_type.clone(),
                         /* todo: figure out how to narrow this span */ span,
                     );
