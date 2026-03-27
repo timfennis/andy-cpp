@@ -54,18 +54,26 @@ impl AstVisitor for HintCollector<'_> {
         }
     }
 
-    fn on_declaration(&mut self, identifier: &str, inferred_type: Option<&StaticType>, span: Span) {
+    fn on_declaration(
+        &mut self,
+        identifier: &str,
+        inferred_type: Option<&StaticType>,
+        has_annotation: bool,
+        span: Span,
+    ) {
         if let Some(typ) = inferred_type {
-            self.hints.push(InlayHint {
-                position: position_from_offset(self.text, span.end()),
-                label: InlayHintLabel::String(format!(": {typ}")),
-                kind: Some(InlayHintKind::TYPE),
-                text_edits: None,
-                tooltip: None,
-                padding_left: None,
-                padding_right: Some(true),
-                data: None,
-            });
+            if !has_annotation {
+                self.hints.push(InlayHint {
+                    position: position_from_offset(self.text, span.end()),
+                    label: InlayHintLabel::String(format!(": {typ}")),
+                    kind: Some(InlayHintKind::TYPE),
+                    text_edits: None,
+                    tooltip: None,
+                    padding_left: None,
+                    padding_right: Some(true),
+                    data: None,
+                });
+            }
             self.variable_types
                 .insert(identifier.to_string(), typ.clone());
         }
@@ -84,5 +92,41 @@ impl AstVisitor for HintCollector<'_> {
                 data: None,
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndc_interpreter::Interpreter;
+
+    fn collect_hints(source: &str) -> AnalysisInfo {
+        let mut interpreter = Interpreter::capturing();
+        interpreter.configure(ndc_stdlib::register);
+        let (expressions, analysis_result) = interpreter
+            .analyse_str(source)
+            .expect("analysis should succeed");
+        collect(&expressions, &analysis_result, source)
+    }
+
+    #[test]
+    fn inferred_let_binding_gets_type_inlay() {
+        let info = collect_hints("let value = 1;");
+        assert!(
+            info.hints
+                .iter()
+                .any(|hint| matches!(&hint.label, InlayHintLabel::String(label) if label == ": Int"))
+        );
+    }
+
+    #[test]
+    fn annotated_let_binding_skips_type_inlay() {
+        let info = collect_hints("let value: Int = 1;");
+        assert!(
+            !info.hints
+                .iter()
+                .any(|hint| matches!(&hint.label, InlayHintLabel::String(label) if label == ": Int"))
+        );
+        assert_eq!(info.variable_types.get("value"), Some(&StaticType::Int));
     }
 }
