@@ -13,6 +13,7 @@ pub trait AstVisitor {
         &mut self,
         _identifier: &str,
         _inferred_type: Option<&StaticType>,
+        _has_annotation: bool,
         _span: Span,
     ) {
     }
@@ -39,9 +40,12 @@ pub fn walk_ast(visitor: &mut impl AstVisitor, expressions: &[ExpressionLocation
 fn walk_expression(visitor: &mut impl AstVisitor, expr: &ExpressionLocation) {
     visitor.on_expression(expr);
     match &expr.expression {
-        Expression::VariableDeclaration { l_value, value, .. } => {
-            // TODO: if we have an explicit type we should not show the inlays. How though?
-            walk_lvalue(visitor, l_value);
+        Expression::VariableDeclaration {
+            l_value,
+            annotated_type,
+            value,
+        } => {
+            walk_lvalue(visitor, l_value, annotated_type.is_some());
             walk_expression(visitor, value);
         }
         Expression::FunctionDeclaration {
@@ -83,7 +87,7 @@ fn walk_expression(visitor: &mut impl AstVisitor, expr: &ExpressionLocation) {
             for iteration in iterations {
                 match iteration {
                     ForIteration::Iteration { l_value, sequence } => {
-                        walk_lvalue(visitor, l_value);
+                        walk_lvalue(visitor, l_value, false);
                         walk_expression(visitor, sequence);
                     }
                     ForIteration::Guard(expr) => walk_expression(visitor, expr),
@@ -114,7 +118,7 @@ fn walk_expression(visitor: &mut impl AstVisitor, expr: &ExpressionLocation) {
     }
 }
 
-fn walk_lvalue(visitor: &mut impl AstVisitor, lvalue: &Lvalue) {
+fn walk_lvalue(visitor: &mut impl AstVisitor, lvalue: &Lvalue, has_annotation: bool) {
     match lvalue {
         Lvalue::Identifier {
             identifier,
@@ -122,11 +126,11 @@ fn walk_lvalue(visitor: &mut impl AstVisitor, lvalue: &Lvalue) {
             span,
             ..
         } => {
-            visitor.on_declaration(identifier, inferred_type.as_ref(), *span);
+            visitor.on_declaration(identifier, inferred_type.as_ref(), has_annotation, *span);
         }
         Lvalue::Sequence(lvalues) => {
             for lv in lvalues {
-                walk_lvalue(visitor, lv);
+                walk_lvalue(visitor, lv, has_annotation);
             }
         }
         Lvalue::Index { .. } => {}
