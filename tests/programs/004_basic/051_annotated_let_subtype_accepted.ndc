@@ -1,0 +1,3 @@
+// expect-output: 42
+let x: Number = 42;
+print(x);

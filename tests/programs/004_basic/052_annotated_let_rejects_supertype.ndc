@@ -1,0 +1,3 @@
+// expect-error: mismatched types: found Number but expected Int
+let x: Number = 3;
+let y: Int = x;

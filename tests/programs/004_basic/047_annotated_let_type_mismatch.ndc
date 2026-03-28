@@ -1,0 +1,2 @@
+// expect-error: mismatched types: found String but expected Int
+let x: Int = "hello";

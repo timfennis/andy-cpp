@@ -113,9 +113,9 @@ mod tests {
     fn inferred_let_binding_gets_type_inlay() {
         let info = collect_hints("let value = 1;");
         assert!(
-            info.hints
-                .iter()
-                .any(|hint| matches!(&hint.label, InlayHintLabel::String(label) if label == ": Int"))
+            info.hints.iter().any(
+                |hint| matches!(&hint.label, InlayHintLabel::String(label) if label == ": Int")
+            )
         );
     }
 
@@ -123,9 +123,9 @@ mod tests {
     fn annotated_let_binding_skips_type_inlay() {
         let info = collect_hints("let value: Int = 1;");
         assert!(
-            !info.hints
-                .iter()
-                .any(|hint| matches!(&hint.label, InlayHintLabel::String(label) if label == ": Int"))
+            !info.hints.iter().any(
+                |hint| matches!(&hint.label, InlayHintLabel::String(label) if label == ": Int")
+            )
         );
         assert_eq!(info.variable_types.get("value"), Some(&StaticType::Int));
     }
