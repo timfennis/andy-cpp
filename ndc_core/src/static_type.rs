@@ -139,15 +139,15 @@ impl StaticType {
         args: Vec<Self>,
     ) -> Result<Self, StaticTypeConstructionError> {
         match name {
-            "Any" => Self::require_no_args(name, args).map(|_| Self::Any),
-            "Never" => Self::require_no_args(name, args).map(|_| Self::Never),
-            "Bool" => Self::require_no_args(name, args).map(|_| Self::Bool),
-            "Number" => Self::require_no_args(name, args).map(|_| Self::Number),
-            "Float" => Self::require_no_args(name, args).map(|_| Self::Float),
-            "Int" => Self::require_no_args(name, args).map(|_| Self::Int),
-            "Rational" => Self::require_no_args(name, args).map(|_| Self::Rational),
-            "Complex" => Self::require_no_args(name, args).map(|_| Self::Complex),
-            "String" => Self::require_no_args(name, args).map(|_| Self::String),
+            "Any" => Self::require_no_args(name, &args).map(|_| Self::Any),
+            "Never" => Self::require_no_args(name, &args).map(|_| Self::Never),
+            "Bool" => Self::require_no_args(name, &args).map(|_| Self::Bool),
+            "Number" => Self::require_no_args(name, &args).map(|_| Self::Number),
+            "Float" => Self::require_no_args(name, &args).map(|_| Self::Float),
+            "Int" => Self::require_no_args(name, &args).map(|_| Self::Int),
+            "Rational" => Self::require_no_args(name, &args).map(|_| Self::Rational),
+            "Complex" => Self::require_no_args(name, &args).map(|_| Self::Complex),
+            "String" => Self::require_no_args(name, &args).map(|_| Self::String),
             "Option" => {
                 Self::require_exactly_one_arg(name, args).map(|elem| Self::Option(Box::new(elem)))
             }
@@ -184,7 +184,7 @@ impl StaticType {
         }
     }
 
-    fn require_no_args(name: &str, args: Vec<Self>) -> Result<(), StaticTypeConstructionError> {
+    fn require_no_args(name: &str, args: &[Self]) -> Result<(), StaticTypeConstructionError> {
         if args.is_empty() {
             Ok(())
         } else {
@@ -207,7 +207,7 @@ impl StaticType {
         name: &str,
         args: Vec<Self>,
     ) -> Result<[Self; N], StaticTypeConstructionError> {
-        args.try_into().map_err(|_: Vec<Self>| {
+        args.try_into().map_err(|_err: Vec<Self>| {
             StaticTypeConstructionError::new(
                 format!("type `{name}` expects exactly {N} generic arguments"),
                 format!("Use `{name}<...>` with {N} type arguments."),

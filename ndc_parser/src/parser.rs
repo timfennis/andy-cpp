@@ -441,14 +441,14 @@ impl Parser {
 
     fn delimited_comma_separated<T>(
         &mut self,
-        open: Token,
-        close: Token,
+        open: &Token,
+        close: &Token,
         parse_item: fn(&mut Self) -> Result<T, Error>,
         allow_empty: bool,
     ) -> Result<(Vec<T>, Span), Error> {
-        let open_span = self.require_current_token_matches(&open)?.span;
+        let open_span = self.require_current_token_matches(open)?.span;
 
-        if let Some(close_token) = self.consume_token_if(&[close.clone()]) {
+        if let Some(close_token) = self.consume_token_if(std::slice::from_ref(close)) {
             if allow_empty {
                 return Ok((Vec::new(), open_span.merge(close_token.span)));
             }
@@ -463,14 +463,14 @@ impl Parser {
         let mut items = vec![parse_item(self)?];
 
         while self.consume_token_if(&[Token::Comma]).is_some() {
-            if self.match_token(&[close.clone()]).is_some() {
+            if self.match_token(std::slice::from_ref(close)).is_some() {
                 break;
             }
 
             items.push(parse_item(self)?);
         }
 
-        let close_span = self.require_current_token_matches(&close)?.span;
+        let close_span = self.require_current_token_matches(close)?.span;
         Ok((items, open_span.merge(close_span)))
     }
 
@@ -480,8 +480,8 @@ impl Parser {
         next: fn(&mut Self) -> Result<ExpressionLocation, Error>,
     ) -> Result<ExpressionLocation, Error> {
         let (values, span) = self.delimited_comma_separated(
-            Token::LeftParentheses,
-            Token::RightParentheses,
+            &Token::LeftParentheses,
+            &Token::RightParentheses,
             next,
             true,
         )?;
@@ -1362,7 +1362,7 @@ impl Parser {
         };
 
         let generic_args = if self.peek_current_token() == Some(&Token::Less) {
-            self.delimited_comma_separated(Token::Less, Token::Greater, Self::static_type, false)?
+            self.delimited_comma_separated(&Token::Less, &Token::Greater, Self::static_type, false)?
                 .0
         } else {
             Vec::new()
@@ -1373,7 +1373,13 @@ impl Parser {
     }
 
     pub fn tuple_type(&mut self) -> Result<StaticType, Error> {
-        todo!()
+        let (types, _span) = self.delimited_comma_separated(
+            &Token::LeftCurlyBracket,
+            &Token::RightCurlyBracket,
+            Self::static_type,
+            true,
+        )?;
+        Ok(StaticType::Tuple(types))
     }
 
     fn peek_range_end(&self) -> bool {
