@@ -617,7 +617,6 @@ impl Analyser {
         found_type: StaticType,
         span: Span,
     ) {
-        eprintln!("E: {:?}, F: {:?}", expected_type, found_type);
         match lvalue {
             Lvalue::Identifier {
                 identifier,
@@ -627,11 +626,11 @@ impl Analyser {
             } => {
                 // If there is a type annotation and the given type is not a subtype of the annotated type we emit an error
                 if let Some(expected_type) = &expected_type
-                    && found_type.is_incompatible_with(&expected_type)
+                    && !found_type.is_subtype(expected_type)
                 {
                     self.emit(AnalysisError::mismatched_types(
-                        found_type.clone(),
-                        expected_type.clone(),
+                        &found_type,
+                        expected_type,
                         *span,
                     ));
                 }
@@ -673,8 +672,9 @@ impl Analyser {
                         return;
                     };
 
-                // TODO: emit error that foudn_type could not be unpacked and continue as if it were Any
-                let found_types = found_type.unpack().unwrap();
+                let found_types = found_type
+                    .unpack()
+                    .unwrap_or_else(|| Box::new(std::iter::repeat(&StaticType::Any)));
 
                 for (sub_lvalue, expected_type, found_type) in
                     izip!(seq.iter_mut(), sub_types, found_types)
@@ -683,7 +683,7 @@ impl Analyser {
                         sub_lvalue,
                         Some(expected_type.clone()),
                         found_type.clone(),
-                        /* todo: figure out how to narrow this span */ span,
+                        span,
                     );
                 }
             }
@@ -721,7 +721,7 @@ impl AnalysisError {
         self.span
     }
 
-    fn mismatched_types(found: StaticType, expected: StaticType, span: Span) -> Self {
+    fn mismatched_types(found: &StaticType, expected: &StaticType, span: Span) -> Self {
         Self {
             text: format!("mismatched types: found {found} but expected {expected}"),
             span,
