@@ -287,7 +287,9 @@ impl Analyser {
                         } else {
                             let placeholder = StaticType::Function {
                                 parameters: type_signature.types(),
-                                return_type: Box::new(StaticType::Any),
+                                return_type: Box::new(
+                                    return_type_slot.clone().unwrap_or(StaticType::Any),
+                                ),
                             };
                             Some(self.scope_tree.create_local_binding(
                                 name.clone(),
