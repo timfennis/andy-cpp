@@ -626,7 +626,7 @@ impl Analyser {
             } => {
                 // If there is a type annotation and the given type is not a subtype of the annotated type we emit an error
                 if let Some(expected_type) = &expected_type
-                    && found_type.is_incompatible_with(expected_type)
+                    && !found_type.is_subtype(expected_type)
                 {
                     self.emit(AnalysisError::mismatched_types(
                         &found_type,
