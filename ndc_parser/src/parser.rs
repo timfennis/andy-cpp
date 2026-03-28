@@ -1188,6 +1188,14 @@ impl Parser {
             true,
         )?;
 
+        // Optional return type annotation: `-> Type`
+        let annotated_return_type = if self.peek_current_token() == Some(&Token::RightArrow) {
+            self.advance();
+            Some(self.static_type()?)
+        } else {
+            None
+        };
+
         // Next we either expect a body block `{ ... }` or a fat arrow followed by a single expression `=> ...`
 
         let body = match self.peek_current_token() {
@@ -1226,7 +1234,7 @@ impl Parser {
                 ),
                 parameters_span,
                 body: Box::new(body),
-                return_type: None, // At some point in the future we could use type declarations here to insert the type (return type inference is cringe anyway)
+                return_type: annotated_return_type,
                 resolved_name: None,
                 captures: vec![],
                 pure: is_pure,

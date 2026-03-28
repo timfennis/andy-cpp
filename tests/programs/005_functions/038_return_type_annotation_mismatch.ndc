@@ -1,0 +1,2 @@
+fn bad() -> Int { "hello" }
+// expect-error: mismatched types
