@@ -1343,7 +1343,7 @@ impl Parser {
 
         match token {
             Token::Identifier(_) => self.named_or_generic_type(),
-            Token::LeftCurlyBracket => self.tuple_type(),
+            Token::LeftParentheses => self.tuple_type(),
             _ => Err(Error::with_help(
                 format!("expected a type annotation, found `{token}`"),
                 *span,
@@ -1374,8 +1374,8 @@ impl Parser {
 
     pub fn tuple_type(&mut self) -> Result<StaticType, Error> {
         let (types, _span) = self.delimited_comma_separated(
-            &Token::LeftCurlyBracket,
-            &Token::RightCurlyBracket,
+            &Token::LeftParentheses,
+            &Token::RightParentheses,
             Self::static_type,
             true,
         )?;

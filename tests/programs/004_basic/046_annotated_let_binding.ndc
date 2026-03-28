@@ -20,5 +20,5 @@ let max_heap_value: MaxHeap<Int> = MaxHeap();
 let deque_value: Deque<Int> = Deque();
 let map_value: Map<String, Int> = %{"a": 1, "b": 2};
 let tuple_named_value: Tuple<Int, String> = (1, "hello");
-let tuple_shorthand_value: {Int, String} = (1, "hello");
-let tuple_empty_value: {} = ();
+let tuple_shorthand_value: (Int, String) = (1, "hello");
+let tuple_empty_value: () = ();
