@@ -1,0 +1,3 @@
+let x: Int = 3;
+x /= 4;
+// expect-error: mismatched types
