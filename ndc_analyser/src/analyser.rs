@@ -206,6 +206,39 @@ impl Analyser {
                     ));
                 }
 
+                // Check that the result type is compatible with an annotated binding
+                if let Lvalue::Identifier {
+                    resolved: Some(target),
+                    ..
+                } = l_value
+                {
+                    let result_type = match resolved_operation {
+                        Binding::Resolved(res) => {
+                            if let StaticType::Function { return_type, .. } =
+                                self.scope_tree.get_type(*res)
+                            {
+                                Some(return_type.as_ref().clone())
+                            } else {
+                                None
+                            }
+                        }
+                        _ => None,
+                    };
+
+                    if let Some(result_type) = result_type
+                        && let Err(annotated_type) = self
+                            .scope_tree
+                            .update_binding_type(*target, result_type.clone())
+                        && !result_type.is_subtype(&annotated_type)
+                    {
+                        self.emit(AnalysisError::mismatched_types(
+                            &result_type,
+                            &annotated_type,
+                            *span,
+                        ));
+                    }
+                }
+
                 Ok(StaticType::unit())
             }
             Expression::FunctionDeclaration {
@@ -665,7 +698,7 @@ impl Analyser {
                 // can happen when a variable is declared with one type (e.g. ())
                 // and later reassigned to a tuple of a different arity — the
                 // analyser doesn't track reassignment types.
-
+                let is_annotated = expected_type.is_some();
                 let resolved_type = expected_type.unwrap_or(found_type.clone());
 
                 let sub_types: Box<dyn Iterator<Item = &StaticType>> =
@@ -686,12 +719,17 @@ impl Analyser {
                     .unpack()
                     .unwrap_or_else(|| Box::new(std::iter::repeat(&StaticType::Any)));
 
-                for (sub_lvalue, expected_type, found_type) in
+                for (sub_lvalue, sub_type, found_type) in
                     izip!(seq.iter_mut(), sub_types, found_types)
                 {
+                    let sub_expected = if is_annotated {
+                        Some(sub_type.clone())
+                    } else {
+                        None
+                    };
                     self.resolve_lvalue_declarative(
                         sub_lvalue,
-                        Some(expected_type.clone()),
+                        sub_expected,
                         found_type.clone(),
                         span,
                     );
