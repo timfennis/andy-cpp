@@ -49,6 +49,17 @@ impl TypeSignature {
         }
     }
 
+    pub fn from_annotated_bindings(bindings: Vec<(String, Option<StaticType>)>) -> Self {
+        Self::Exact(
+            bindings
+                .into_iter()
+                .map(|(name, annotation)| {
+                    Parameter::new(name, annotation.unwrap_or(StaticType::Any))
+                })
+                .collect(),
+        )
+    }
+
     pub fn types(&self) -> Option<Vec<StaticType>> {
         match self {
             Self::Variadic => None,

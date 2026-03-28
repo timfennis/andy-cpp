@@ -309,23 +309,7 @@ impl Parser {
             .require_current_token_matches(&Token::Let)
             .expect("guaranteed to match by caller");
 
-        let maybe_lvalue = self.tuple_expression(Self::single_expression, false)?;
-        let lvalue_span = maybe_lvalue.span;
-
-        let Ok(lvalue) = Lvalue::try_from(maybe_lvalue) else {
-            return Err(Error::with_help(
-                "Invalid assignment target".to_string(),
-                lvalue_span,
-                "Assignment target is not a valid lvalue. Only a few expressions can be assigned a value. Check that the left-hand side of the assignment is a valid target.".to_string(),
-            ));
-        };
-
-        let annotated_type = if self.peek_current_token() == Some(&Token::Colon) {
-            self.advance();
-            Some(self.static_type()?)
-        } else {
-            None
-        };
+        let (lvalue, annotated_type) = self.named_binding()?;
 
         self.require_current_token_matches(&Token::EqualsSign)?;
 
@@ -1195,7 +1179,14 @@ impl Parser {
             }
         };
 
-        let argument_list = self.delimited_tuple(Self::single_expression)?;
+        // let argument_list = self.delimited_tuple(Self::single_expression)?;
+
+        let (argument_list, parameters_span) = self.delimited_comma_separated(
+            &Token::LeftParentheses,
+            &Token::RightParentheses,
+            Self::named_parameter,
+            true,
+        )?;
 
         // Next we either expect a body block `{ ... }` or a fat arrow followed by a single expression `=> ...`
 
@@ -1212,17 +1203,27 @@ impl Parser {
                     "Expected that the argument list is followed by either a body `{}` or a fat arrow `=>`".to_string(),
                 ))
             }
-            None => return Err(Error::end_of_input(argument_list.span)),
+            None => return Err(Error::end_of_input(parameters_span)),
         };
 
-        let parameters_span = argument_list.span;
         let span = fn_token.span.merge(body.span);
         Ok(ExpressionLocation {
             expression: Expression::FunctionDeclaration {
                 name: identifier,
-                type_signature: argument_list
-                    .try_into()
-                    .expect("INTERNAL ERROR: type of argument list is incorrect"),
+                type_signature: TypeSignature::from_annotated_bindings(
+                    argument_list
+                        .into_iter()
+                        .map(|(lvalue, annotation)| {
+                            let Lvalue::Identifier { identifier, .. } = lvalue else {
+                                panic!(
+                                    "INTERNAL ERROR: expected identifier in argument list: {:?}",
+                                    lvalue
+                                );
+                            };
+                            (identifier, annotation)
+                        })
+                        .collect(),
+                ),
                 parameters_span,
                 body: Box::new(body),
                 return_type: None, // At some point in the future we could use type declarations here to insert the type (return type inference is cringe anyway)
@@ -1442,6 +1443,50 @@ impl Parser {
             true,
         )?;
         Ok(StaticType::Tuple(types))
+    }
+
+    fn named_parameter(&mut self) -> Result<(Lvalue, Option<StaticType>), Error> {
+        let maybe_lvalue = self.single_expression()?;
+        let lvalue_span = maybe_lvalue.span;
+
+        let Ok(lvalue) = Lvalue::try_from(maybe_lvalue) else {
+            return Err(Error::with_help(
+                "Expected parameter name".to_string(),
+                lvalue_span,
+                "Function parameters must be identifiers, optionally followed by a type annotation (e.g. `x` or `x: Int`).".to_string(),
+            ));
+        };
+
+        let annotated_type = if self.peek_current_token() == Some(&Token::Colon) {
+            self.advance();
+            Some(self.static_type()?)
+        } else {
+            None
+        };
+
+        Ok((lvalue, annotated_type))
+    }
+
+    pub fn named_binding(&mut self) -> Result<(Lvalue, Option<StaticType>), Error> {
+        let maybe_lvalue = self.tuple_expression(Self::single_expression, false)?;
+        let lvalue_span = maybe_lvalue.span;
+
+        let Ok(lvalue) = Lvalue::try_from(maybe_lvalue) else {
+            return Err(Error::with_help(
+                "Invalid assignment target".to_string(),
+                lvalue_span,
+                "Assignment target is not a valid lvalue. Only a few expressions can be assigned a value. Check that the left-hand side of the assignment is a valid target.".to_string(),
+            ));
+        };
+
+        let annotated_type = if self.peek_current_token() == Some(&Token::Colon) {
+            self.advance();
+            Some(self.static_type()?)
+        } else {
+            None
+        };
+
+        Ok((lvalue, annotated_type))
     }
 
     fn peek_range_end(&self) -> bool {
