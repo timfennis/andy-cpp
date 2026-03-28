@@ -1,0 +1,19 @@
+// expect-output: [[1]]
+// expect-output: [2]
+// expect-output: [[3]]
+
+// This test ensures the parser correctly splits compound `>` tokens
+// when closing nested generic type parameters.
+
+// >> is split into > >
+let xs: List<List<Int>> = [[1]];
+
+// >= is split into > = (no space before `=`)
+let ys: List<Int>= [2];
+
+// >>= is split into > >= then > = (no space before `=` with nested generics)
+let zs: List<List<Int>>= [[3]];
+
+print(xs);
+print(ys);
+print(zs);

@@ -1362,14 +1362,76 @@ impl Parser {
         };
 
         let generic_args = if self.peek_current_token() == Some(&Token::Less) {
-            self.delimited_comma_separated(&Token::Less, &Token::Greater, Self::static_type, false)?
-                .0
+            self.delimited_type_params()?
         } else {
             Vec::new()
         };
 
         StaticType::from_name_and_args(ident.as_str(), generic_args)
             .map_err(|err| Error::with_help(err.to_string(), span, err.help_text().to_string()))
+    }
+
+    /// Parses `<T, U, ...>` type parameter lists, handling the `>>` / `>=` / `>>=`
+    /// ambiguity that arises with nested generics like `List<List<Int>>`.
+    fn delimited_type_params(&mut self) -> Result<Vec<StaticType>, Error> {
+        self.require_current_token_matches(&Token::Less)?;
+
+        let mut items = vec![self.static_type()?];
+
+        while self.consume_token_if(&[Token::Comma]).is_some() {
+            if self.peek_current_token() == Some(&Token::Greater) {
+                break;
+            }
+            items.push(self.static_type()?);
+        }
+
+        self.consume_closing_angle_bracket()?;
+        Ok(items)
+    }
+
+    /// Consumes a closing `>` for a generic type parameter list. If the current
+    /// token is `>>`, `>=`, or `>>=`, it is split so that the leading `>` is
+    /// consumed and the remainder is left as the current token.
+    fn consume_closing_angle_bracket(&mut self) -> Result<Span, Error> {
+        if let Some(token) = self.consume_token_if(&[Token::Greater]) {
+            return Ok(token.span);
+        }
+
+        let Some(loc) = self.peek_current_token_location() else {
+            return Err(Error::end_of_input(
+                self.tokens.last().expect("last token exists").span,
+            ));
+        };
+
+        let greater_span = Span::new(loc.span.source_id(), loc.span.offset(), 1);
+        let rest_span = Span::new(
+            loc.span.source_id(),
+            loc.span.offset() + 1,
+            loc.span.end() - loc.span.offset() - 1,
+        );
+
+        let remainder = match &loc.token {
+            // >> becomes >
+            Token::GreaterGreater => Token::Greater,
+            // >= becomes =
+            Token::GreaterEquals => Token::EqualsSign,
+            // >>= (OpAssign(>>)) becomes >=
+            Token::OpAssign(inner) if inner.token == Token::GreaterGreater => Token::GreaterEquals,
+            _ => {
+                let loc = loc.clone();
+                return Err(Error::text(
+                    format!("Expected token '>' but got '{}' instead", loc.token),
+                    loc.span,
+                ));
+            }
+        };
+
+        self.tokens[self.current] = TokenLocation {
+            token: remainder,
+            span: rest_span,
+        };
+
+        Ok(greater_span)
     }
 
     pub fn tuple_type(&mut self) -> Result<StaticType, Error> {
