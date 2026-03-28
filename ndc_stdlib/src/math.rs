@@ -172,6 +172,7 @@ mod inner {
 pub mod f64 {
     use super::{Number, ToPrimitive, f64};
     use ndc_core::StaticType;
+    use ndc_core::int::Int;
     use ndc_core::num::BinaryOperatorError;
     use ndc_vm::error::VmError;
     use ndc_vm::value::{NativeFunc, NativeFunction, Value};
@@ -239,6 +240,103 @@ pub mod f64 {
             "%%",
             Number::checked_rem_euclid,
             "Returns the Euclidean remainder of dividing two numbers. The result is always non-negative."
+        );
+
+        // Int-specific overloads: fast path on i64, fall back to Number on overflow/BigInt.
+        macro_rules! implement_binary_operator_on_int {
+            ($operator:literal, $checked_method:ident, $fallback:expr, $docs:literal) => {
+                env.declare_global_fn(Rc::new(NativeFunction {
+                    name: $operator.to_string(),
+                    documentation: Some($docs.to_string()),
+                    static_type: StaticType::Function {
+                        parameters: Some(vec![StaticType::Int, StaticType::Int]),
+                        return_type: Box::new(StaticType::Int),
+                    },
+                    func: NativeFunc::Simple(Box::new(|args| match args {
+                        [Value::Int(l), Value::Int(r)] => {
+                            if let Some(result) = l.$checked_method(*r) {
+                                Ok(Value::Int(result))
+                            } else {
+                                let l = Int::Int64(*l);
+                                let r = Int::Int64(*r);
+                                Ok(Value::from_int($fallback(l, r)))
+                            }
+                        }
+                        [left, right] => {
+                            let l = left.to_int().ok_or_else(|| {
+                                VmError::native(format!("expected int, got {}", left.static_type()))
+                            })?;
+                            let r = right.to_int().ok_or_else(|| {
+                                VmError::native(format!(
+                                    "expected int, got {}",
+                                    right.static_type()
+                                ))
+                            })?;
+                            Ok(Value::from_int($fallback(l, r)))
+                        }
+                        _ => Err(VmError::native(format!(
+                            "expected 2 arguments, got {}",
+                            args.len()
+                        ))),
+                    })),
+                }));
+            };
+        }
+
+        implement_binary_operator_on_int!(
+            "+",
+            checked_add,
+            std::ops::Add::add,
+            "Adds two integers."
+        );
+        implement_binary_operator_on_int!(
+            "-",
+            checked_sub,
+            std::ops::Sub::sub,
+            "Subtracts two integers."
+        );
+        implement_binary_operator_on_int!(
+            "*",
+            checked_mul,
+            std::ops::Mul::mul,
+            "Multiplies two integers."
+        );
+        implement_binary_operator_on_int!(
+            "%",
+            checked_rem,
+            std::ops::Rem::rem,
+            "Returns the remainder of dividing two integers."
+        );
+
+        // Float-specific overloads: operate directly on f64.
+        macro_rules! implement_binary_operator_on_float {
+            ($operator:literal, $op:expr, $docs:literal) => {
+                env.declare_global_fn(Rc::new(NativeFunction {
+                    name: $operator.to_string(),
+                    documentation: Some($docs.to_string()),
+                    static_type: StaticType::Function {
+                        parameters: Some(vec![StaticType::Float, StaticType::Float]),
+                        return_type: Box::new(StaticType::Float),
+                    },
+                    func: NativeFunc::Simple(Box::new(|args| match args {
+                        [Value::Float(l), Value::Float(r)] => Ok(Value::Float($op(*l, *r))),
+                        _ => Err(VmError::native(format!(
+                            "expected 2 float arguments, got {}",
+                            args.len()
+                        ))),
+                    })),
+                }));
+            };
+        }
+
+        implement_binary_operator_on_float!("+", std::ops::Add::add, "Adds two floats.");
+        implement_binary_operator_on_float!("-", std::ops::Sub::sub, "Subtracts two floats.");
+        implement_binary_operator_on_float!("*", std::ops::Mul::mul, "Multiplies two floats.");
+        implement_binary_operator_on_float!("/", std::ops::Div::div, "Divides two floats.");
+        implement_binary_operator_on_float!(
+            "%",
+            std::ops::Rem::rem,
+            "Returns the remainder of dividing two floats."
         );
 
         env.declare_global_fn(Rc::new(NativeFunction {

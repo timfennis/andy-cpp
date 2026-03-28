@@ -1,0 +1,6 @@
+fn greet(name: String) -> String => "hello " <> name;
+assert_eq(greet("world"), "hello world");
+
+fn identity(x: Int) -> Int => x;
+assert_eq(identity(5), 5);
+// expect-output:

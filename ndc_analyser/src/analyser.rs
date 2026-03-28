@@ -206,36 +206,61 @@ impl Analyser {
                     ));
                 }
 
-                // Check that the result type is compatible with an annotated binding
-                if let Lvalue::Identifier {
-                    resolved: Some(target),
-                    ..
-                } = l_value
-                {
-                    let result_type = match resolved_operation {
-                        Binding::Resolved(res) => {
-                            if let StaticType::Function { return_type, .. } =
-                                self.scope_tree.get_type(*res)
+                // Determine the result type of the operation
+                let result_type = match resolved_operation {
+                    Binding::Resolved(res) => {
+                        if let StaticType::Function { return_type, .. } =
+                            self.scope_tree.get_type(*res)
+                        {
+                            Some(return_type.as_ref().clone())
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                };
+
+                if let Some(result_type) = result_type {
+                    match l_value {
+                        // Direct variable: widen or reject if annotated
+                        Lvalue::Identifier {
+                            resolved: Some(target),
+                            ..
+                        } => {
+                            let widened = arg_types[0].lub(&result_type);
+                            if widened != arg_types[0]
+                                && let Err(annotated_type) =
+                                    self.scope_tree.update_binding_type(*target, widened)
+                                && !result_type.is_subtype(&annotated_type)
                             {
-                                Some(return_type.as_ref().clone())
-                            } else {
-                                None
+                                self.emit(AnalysisError::mismatched_types(
+                                    &result_type,
+                                    &annotated_type,
+                                    *span,
+                                ));
                             }
                         }
-                        _ => None,
-                    };
-
-                    if let Some(result_type) = result_type
-                        && let Err(annotated_type) = self
-                            .scope_tree
-                            .update_binding_type(*target, result_type.clone())
-                        && !result_type.is_subtype(&annotated_type)
-                    {
-                        self.emit(AnalysisError::mismatched_types(
-                            &result_type,
-                            &annotated_type,
-                            *span,
-                        ));
+                        // Index into a container: widen the container's type
+                        Lvalue::Index { value, .. } => {
+                            if let Expression::Identifier {
+                                resolved: Binding::Resolved(target),
+                                ..
+                            } = &value.expression
+                            {
+                                let container_type = self.scope_tree.get_type(*target).clone();
+                                if let Some(elem_type) = container_type.index_element_type() {
+                                    let widened_elem = elem_type.lub(&result_type);
+                                    if widened_elem != elem_type {
+                                        let new_container =
+                                            container_type.with_element_type(widened_elem);
+                                        let _ = self
+                                            .scope_tree
+                                            .update_binding_type(*target, new_container);
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
                     }
                 }
 
@@ -283,11 +308,24 @@ impl Analyser {
                 self.scope_tree.destroy_scope();
 
                 // Combine explicit `return` types with the block's implicit return type.
-                let return_type = match explicit_return {
+                let inferred_return = match explicit_return {
                     Some(ret) => ret.lub(&implicit_return),
                     None => implicit_return,
                 };
-                *return_type_slot = Some(return_type);
+
+                // If there is an annotated return type, validate and use it;
+                // otherwise fall back to the inferred type.
+                if let Some(annotated) = return_type_slot {
+                    if !inferred_return.is_subtype(annotated) {
+                        self.emit(AnalysisError::mismatched_types(
+                            &inferred_return,
+                            annotated,
+                            *span,
+                        ));
+                    }
+                } else {
+                    *return_type_slot = Some(inferred_return);
+                }
 
                 let function_type = StaticType::Function {
                     parameters: Some(param_types.clone()),
@@ -637,16 +675,22 @@ impl Analyser {
         let mut seen_names: Vec<&str> = Vec::new();
 
         for param in parameters {
-            types.push(StaticType::Any);
+            let has_annotation = param.type_name != StaticType::Any;
+            let binding = if has_annotation {
+                TypeBinding::Annotated(param.type_name.clone())
+            } else {
+                TypeBinding::Inferred(StaticType::Any)
+            };
+
+            types.push(param.type_name.clone());
             if seen_names.contains(&param.name.as_str()) {
                 self.emit(AnalysisError::parameter_redefined(&param.name, span));
-                // Skip duplicate but continue checking remaining params.
                 continue;
             }
             seen_names.push(&param.name);
 
             self.scope_tree
-                .create_local_binding(param.name.clone(), TypeBinding::Inferred(StaticType::Any));
+                .create_local_binding(param.name.clone(), binding);
         }
 
         types
