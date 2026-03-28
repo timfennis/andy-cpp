@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 
-use crate::scope::ScopeTree;
+use crate::scope::{ScopeTree, TypeBinding};
 use itertools::{Itertools, izip};
 use ndc_core::{StaticType, TypeSignature};
 use ndc_lexer::Span;
@@ -161,16 +161,22 @@ impl Analyser {
                 let old_type = self.resolve_lvalue_or_any(l_value, *span);
                 let new_type = self.analyse_or_any(r_value);
 
-                // Widen the binding's type to the LUB so subsequent uses
-                // see the broader type.
                 if let Lvalue::Identifier {
                     resolved: Some(target),
                     ..
                 } = l_value
                 {
                     let widened = old_type.lub(&new_type);
-                    if widened != old_type {
-                        self.scope_tree.update_binding_type(*target, widened);
+                    if widened != old_type
+                        && let Err(annotated_type) =
+                            self.scope_tree.update_binding_type(*target, widened)
+                        && !new_type.is_subtype(&annotated_type)
+                    {
+                        self.emit(AnalysisError::mismatched_types(
+                            &new_type,
+                            &annotated_type,
+                            *span,
+                        ));
                     }
                 }
 
@@ -213,25 +219,26 @@ impl Analyser {
             } => {
                 // Pre-register the function before analysing its body so recursive calls can
                 // resolve the name. The return type is unknown at this point so we use Any.
-                let pre_slot = if let Some(name) = name {
-                    let arity = type_signature.types().map(|t| t.len());
-                    if self.scope_tree.has_function_in_current_scope(name, arity) {
-                        self.emit(AnalysisError::function_redefinition(name, arity, *span));
-                        // Skip re-registering but still analyse the body below.
-                        None
+                let pre_slot =
+                    if let Some(name) = name {
+                        let arity = type_signature.types().map(|t| t.len());
+                        if self.scope_tree.has_function_in_current_scope(name, arity) {
+                            self.emit(AnalysisError::function_redefinition(name, arity, *span));
+                            // Skip re-registering but still analyse the body below.
+                            None
+                        } else {
+                            let placeholder = StaticType::Function {
+                                parameters: type_signature.types(),
+                                return_type: Box::new(StaticType::Any),
+                            };
+                            Some(self.scope_tree.create_local_binding(
+                                name.clone(),
+                                TypeBinding::Inferred(placeholder),
+                            ))
+                        }
                     } else {
-                        let placeholder = StaticType::Function {
-                            parameters: type_signature.types(),
-                            return_type: Box::new(StaticType::Any),
-                        };
-                        Some(
-                            self.scope_tree
-                                .create_local_binding(name.clone(), placeholder),
-                        )
-                    }
-                } else {
-                    None
-                };
+                        None
+                    };
 
                 self.scope_tree.new_function_scope();
                 self.return_type_stack.push(None);
@@ -259,7 +266,8 @@ impl Analyser {
                 };
 
                 if let Some(slot) = pre_slot {
-                    self.scope_tree
+                    let _ = self
+                        .scope_tree
                         .update_binding_type(slot, function_type.clone());
                     *resolved_name = Some(slot);
                 }
@@ -605,7 +613,7 @@ impl Analyser {
             seen_names.push(&param.name);
 
             self.scope_tree
-                .create_local_binding(param.name.clone(), StaticType::Any);
+                .create_local_binding(param.name.clone(), TypeBinding::Inferred(StaticType::Any));
         }
 
         types
@@ -635,15 +643,17 @@ impl Analyser {
                     ));
                 }
 
-                let resolved_type = expected_type.unwrap_or(found_type);
+                let type_binding = match expected_type {
+                    Some(annotated) => TypeBinding::Annotated(annotated),
+                    None => TypeBinding::Inferred(found_type),
+                };
 
                 *resolved = Some(
                     self.scope_tree
-                        .create_local_binding(identifier.clone(), resolved_type.clone()),
+                        .create_local_binding(identifier.clone(), type_binding.clone()),
                 );
 
-                // We set the inferred type of this binding to the annotated/expected type but fall back to the infered type if we can't
-                *inferred_type = Some(resolved_type)
+                *inferred_type = Some(type_binding.typ().clone())
             }
             Lvalue::Index { index, value, .. } => {
                 self.analyse_or_any(index);
