@@ -6,12 +6,18 @@ while false {
 let bool_value: Bool = true;
 let int_value: Int = 3;
 let float_value: Float = 3.0;
+let rational_value: Number = 3 / 4;
+let complex_value: Number = 1 + 2i;
 let number_value: Number = 3;
 let string_value: String = "hello";
 
+let option_value: Option<Any> = Some(3);
 let sequence_value: Sequence<Int> = [1, 2, 3];
 let list_value: List<Int> = [1, 2, 3];
 let iterator_value: Iterator<Int> = 1..10;
+let min_heap_value: MinHeap<Any> = MinHeap();
+let max_heap_value: MaxHeap<Any> = MaxHeap();
+let deque_value: Deque<Any> = Deque();
 let map_value: Map<String, Int> = %{"a": 1, "b": 2};
 let tuple_named_value: Tuple<Int, String> = (1, "hello");
 let tuple_shorthand_value: (Int, String) = (1, "hello");
