@@ -1,6 +1,6 @@
 use ndc_core::StaticType;
 use ndc_lexer::Span;
-use ndc_parser::{Expression, ExpressionLocation, ForBody, ForIteration, Lvalue};
+use ndc_parser::{Expression, ExpressionLocation, ForBody, ForIteration, Lvalue, NodeId};
 
 /// Trait for visiting interesting nodes during an AST walk.
 ///
@@ -26,6 +26,7 @@ pub trait AstVisitor {
         &mut self,
         _return_type: Option<&StaticType>,
         _parameters_span: Span,
+        _node_id: NodeId,
     ) {
     }
 }
@@ -50,11 +51,15 @@ fn walk_expression(visitor: &mut impl AstVisitor, expr: &ExpressionLocation) {
         }
         Expression::FunctionDeclaration {
             return_type,
+            parameters,
             parameters_span,
             body,
             ..
         } => {
-            visitor.on_function_declaration(return_type.as_ref(), *parameters_span);
+            for p in parameters {
+                walk_lvalue(visitor, &p.lvalue, p.annotation.is_some());
+            }
+            visitor.on_function_declaration(return_type.as_ref(), *parameters_span, expr.id);
             walk_expression(visitor, body);
         }
         Expression::Statement(inner) | Expression::Grouping(inner) => {

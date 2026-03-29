@@ -1,7 +1,9 @@
 use std::fmt::Write;
 
 use crate::expression::Expression;
-use crate::expression::{Binding, ExpressionLocation, ForBody, ForIteration, Lvalue, NodeId};
+use crate::expression::{
+    Binding, ExpressionLocation, ForBody, ForIteration, FunctionParameter, Lvalue, NodeId,
+};
 use crate::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
 use ndc_core::{Parameter, StaticType, TypeSignature};
 use ndc_lexer::{Span, Token, TokenLocation};
@@ -1218,20 +1220,7 @@ impl Parser {
         Ok(ExpressionLocation {
             expression: Expression::FunctionDeclaration {
                 name: identifier,
-                type_signature: TypeSignature::from_annotated_bindings(
-                    argument_list
-                        .into_iter()
-                        .map(|(lvalue, annotation)| {
-                            let Lvalue::Identifier { identifier, .. } = lvalue else {
-                                panic!(
-                                    "INTERNAL ERROR: expected identifier in argument list: {:?}",
-                                    lvalue
-                                );
-                            };
-                            (identifier, annotation)
-                        })
-                        .collect(),
-                ),
+                parameters: argument_list,
                 parameters_span,
                 body: Box::new(body),
                 return_type: annotated_return_type,
@@ -1453,7 +1442,7 @@ impl Parser {
         Ok(StaticType::Tuple(types))
     }
 
-    fn named_parameter(&mut self) -> Result<(Lvalue, Option<StaticType>), Error> {
+    fn named_parameter(&mut self) -> Result<FunctionParameter, Error> {
         let maybe_lvalue = self.single_expression()?;
         let lvalue_span = maybe_lvalue.span;
 
@@ -1465,14 +1454,24 @@ impl Parser {
             ));
         };
 
-        let annotated_type = if self.peek_current_token() == Some(&Token::Colon) {
+        let annotation = if self.peek_current_token() == Some(&Token::Colon) {
             self.advance();
             Some(self.static_type()?)
         } else {
             None
         };
 
-        Ok((lvalue, annotated_type))
+        let span = if annotation.is_some() {
+            lvalue_span.merge(self.tokens[self.current - 1].span)
+        } else {
+            lvalue_span
+        };
+
+        Ok(FunctionParameter {
+            lvalue,
+            annotation,
+            span,
+        })
     }
 
     pub fn named_binding(&mut self) -> Result<(Lvalue, Option<StaticType>), Error> {

@@ -93,7 +93,7 @@ pub enum Expression {
     FunctionDeclaration {
         name: Option<String>,
         resolved_name: Option<ResolvedVar>,
-        type_signature: TypeSignature,
+        parameters: Vec<FunctionParameter>,
         parameters_span: Span,
         body: Box<ExpressionLocation>,
         return_type: Option<StaticType>,
@@ -169,6 +169,32 @@ pub enum ForBody {
         default: Option<Box<ExpressionLocation>>,
         accumulator_slot: Option<usize>,
     },
+}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct FunctionParameter {
+    pub lvalue: Lvalue,
+    pub annotation: Option<StaticType>,
+    pub span: Span,
+}
+
+impl FunctionParameter {
+    pub fn from_params(params: &[Self]) -> TypeSignature {
+        TypeSignature::from_annotated_bindings(
+            params
+                .iter()
+                .map(|p| {
+                    let Lvalue::Identifier { identifier, .. } = &p.lvalue else {
+                        unreachable!(
+                            "parameter list may only contain identifiers {:?} found.",
+                            p.lvalue
+                        );
+                    };
+                    (identifier.clone(), p.annotation.clone())
+                })
+                .collect(),
+        )
+    }
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
