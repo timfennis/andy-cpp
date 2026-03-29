@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use ndc_core::StaticType;
 use ndc_interpreter::AnalysisResult;
 use ndc_lexer::Span;
-use ndc_parser::ExpressionLocation;
+use ndc_parser::{ExpressionLocation, NodeId};
 use tower_lsp::lsp_types::{InlayHint, InlayHintKind, InlayHintLabel};
 
 use crate::util::position_from_offset;
@@ -79,18 +79,27 @@ impl AstVisitor for HintCollector<'_> {
         }
     }
 
-    fn on_function_declaration(&mut self, return_type: Option<&StaticType>, parameters_span: Span) {
-        if let Some(rt) = return_type {
-            self.hints.push(InlayHint {
-                position: position_from_offset(self.text, parameters_span.end()),
-                label: InlayHintLabel::String(format!(" -> {rt}")),
-                kind: Some(InlayHintKind::TYPE),
-                text_edits: None,
-                tooltip: None,
-                padding_left: None,
-                padding_right: None,
-                data: None,
-            });
+    fn on_function_declaration(
+        &mut self,
+        return_type: Option<&StaticType>,
+        parameters_span: Span,
+        node_id: NodeId,
+    ) {
+        // return_type is Some only when explicitly annotated by the user — skip the hint.
+        // Inferred return types are stored in the side table.
+        if return_type.is_none() {
+            if let Some(rt) = self.analysis_result.inferred_return_types.get(&node_id) {
+                self.hints.push(InlayHint {
+                    position: position_from_offset(self.text, parameters_span.end()),
+                    label: InlayHintLabel::String(format!(" -> {rt}")),
+                    kind: Some(InlayHintKind::TYPE),
+                    text_edits: None,
+                    tooltip: None,
+                    padding_left: None,
+                    padding_right: None,
+                    data: None,
+                });
+            }
         }
     }
 }
@@ -128,5 +137,41 @@ mod tests {
             )
         );
         assert_eq!(info.variable_types.get("value"), Some(&StaticType::Int));
+    }
+
+    #[test]
+    fn annotated_return_type_skips_inlay() {
+        let info = collect_hints("fn foo(x: Int) -> Int { x + 1 }");
+        assert!(!info.hints.iter().any(
+            |hint| matches!(&hint.label, InlayHintLabel::String(label) if label.contains("->"))
+        ));
+    }
+
+    #[test]
+    fn inferred_return_type_gets_inlay() {
+        let info = collect_hints("fn foo() { 42 }");
+        assert!(info.hints.iter().any(
+            |hint| matches!(&hint.label, InlayHintLabel::String(label) if label == " -> Int")
+        ));
+    }
+
+    #[test]
+    fn annotated_param_skips_inlay() {
+        let info = collect_hints("fn foo(x: Int) { x }");
+        assert!(
+            !info.hints.iter().any(
+                |hint| matches!(&hint.label, InlayHintLabel::String(label) if label == ": Int")
+            )
+        );
+    }
+
+    #[test]
+    fn unannotated_param_gets_inlay() {
+        let info = collect_hints("fn foo(x) { x }");
+        assert!(
+            info.hints.iter().any(
+                |hint| matches!(&hint.label, InlayHintLabel::String(label) if label == ": Any")
+            )
+        );
     }
 }

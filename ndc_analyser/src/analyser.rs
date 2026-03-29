@@ -5,7 +5,10 @@ use crate::scope::{ScopeTree, TypeBinding};
 use itertools::{Itertools, izip};
 use ndc_core::{StaticType, TypeSignature};
 use ndc_lexer::Span;
-use ndc_parser::{Binding, Expression, ExpressionLocation, ForBody, ForIteration, Lvalue, NodeId};
+use ndc_parser::{
+    Binding, Expression, ExpressionLocation, ForBody, ForIteration, FunctionParameter, Lvalue,
+    NodeId,
+};
 
 /// Side table holding semantic information keyed by AST node identity.
 /// Keeps tooling-specific data (like per-expression types) out of the AST.
@@ -13,6 +16,9 @@ use ndc_parser::{Binding, Expression, ExpressionLocation, ForBody, ForIteration,
 pub struct AnalysisResult {
     /// Maps each expression node to its inferred result type.
     pub expr_types: HashMap<NodeId, StaticType>,
+    /// Inferred return types for functions without explicit annotations.
+    /// Keyed by the FunctionDeclaration's `NodeId`.
+    pub inferred_return_types: HashMap<NodeId, StaticType>,
     /// Errors accumulated during analysis. Non-empty when the analyser
     /// encountered problems but was able to continue with fallback types.
     pub errors: Vec<AnalysisError>,
@@ -98,7 +104,9 @@ impl Analyser {
     fn analyse_inner(
         &mut self,
         ExpressionLocation {
-            expression, span, ..
+            expression,
+            span,
+            id,
         }: &mut ExpressionLocation,
     ) -> Result<StaticType, AnalysisError> {
         match expression {
@@ -269,12 +277,14 @@ impl Analyser {
             Expression::FunctionDeclaration {
                 name,
                 resolved_name,
-                type_signature,
+                parameters,
                 body,
                 return_type: return_type_slot,
                 captures,
                 ..
             } => {
+                let type_signature = FunctionParameter::to_type_signature(parameters);
+
                 // Pre-register the function before analysing its body so recursive calls can
                 // resolve the name. The return type is unknown at this point so we use Any.
                 let pre_slot =
@@ -302,7 +312,14 @@ impl Analyser {
 
                 self.scope_tree.new_function_scope();
                 self.return_type_stack.push(None);
-                let param_types = self.resolve_parameters_declarative(type_signature, *span);
+                let param_types = self.resolve_parameters_declarative(&type_signature, *span);
+
+                // Fill inferred_type on parameter Lvalues for LSP hints.
+                for (p, typ) in parameters.iter_mut().zip(&param_types) {
+                    if let Lvalue::Identifier { inferred_type, .. } = &mut p.lvalue {
+                        *inferred_type = Some(typ.clone());
+                    }
+                }
 
                 let implicit_return = self.analyse_or_any(body);
                 let explicit_return = self.return_type_stack.pop().unwrap();
@@ -315,8 +332,8 @@ impl Analyser {
                     None => implicit_return,
                 };
 
-                // If there is an annotated return type, validate and use it;
-                // otherwise fall back to the inferred type.
+                // If there is an annotated return type, validate it;
+                // otherwise record the inferred type in the side table.
                 if let Some(annotated) = return_type_slot {
                     if !inferred_return.is_subtype(annotated) {
                         self.emit(AnalysisError::mismatched_types(
@@ -326,16 +343,16 @@ impl Analyser {
                         ));
                     }
                 } else {
-                    *return_type_slot = Some(inferred_return);
+                    self.result
+                        .inferred_return_types
+                        .insert(*id, inferred_return.clone());
                 }
+
+                let effective_return = return_type_slot.clone().unwrap_or(inferred_return);
 
                 let function_type = StaticType::Function {
                     parameters: Some(param_types.clone()),
-                    return_type: Box::new(
-                        return_type_slot
-                            .clone()
-                            .expect("must have a value at this point"),
-                    ),
+                    return_type: Box::new(effective_return),
                 };
 
                 if let Some(slot) = pre_slot {
@@ -492,10 +509,22 @@ impl Analyser {
             }
             Binding::Resolved(res) => self.scope_tree.get_type(*res).clone(),
 
-            Binding::Dynamic(_) => StaticType::Function {
-                parameters: None,
-                return_type: Box::new(StaticType::Any),
-            },
+            Binding::Dynamic(candidates) => {
+                let return_type = candidates
+                    .iter()
+                    .map(|c| self.scope_tree.get_type(*c).clone())
+                    .filter_map(|t| match t {
+                        StaticType::Function { return_type, .. } => Some(*return_type),
+                        _ => None,
+                    })
+                    .reduce(|a, b| a.lub(&b))
+                    .unwrap_or(StaticType::Any);
+
+                StaticType::Function {
+                    parameters: None,
+                    return_type: Box::new(return_type),
+                }
+            }
         };
 
         *resolved = binding;
