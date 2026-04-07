@@ -156,8 +156,16 @@ impl Interpreter {
         input: &str,
     ) -> Result<(Value, ExecutionTimings), InterpreterError> {
         let source_id = self.source_db.add(name, input);
+        // Save the analyser state before parsing so we can roll it back if the VM
+        // fails — otherwise the analyser would remember declarations from a line
+        // that never actually ran.
+        let analyser_checkpoint = self.analyser.checkpoint();
         let (expressions, mut timings) = self.parse_and_analyse(input, source_id)?;
-        let (value, vm_timings) = self.interpret_vm(input, expressions.into_iter())?;
+        let vm_result = self.interpret_vm(input, expressions.into_iter());
+        if vm_result.is_err() {
+            self.analyser.restore(analyser_checkpoint);
+        }
+        let (value, vm_timings) = vm_result?;
         timings.compiling = vm_timings.compiling;
         timings.running = vm_timings.running;
         Ok((value, timings))
@@ -247,6 +255,10 @@ impl Interpreter {
             Some((mut vm, checkpoint)) => {
                 let resume_ip = checkpoint.halt_ip();
                 let prev_num_locals = checkpoint.num_locals();
+                // Clone before consuming: we need the old checkpoint to restore
+                // repl_state if the VM errors, so subsequent REPL lines can still
+                // find their locals on the stack.
+                let old_checkpoint = checkpoint.clone();
                 let (code, new_checkpoint) = measure(&mut timings, Phase::Compiling, || {
                     checkpoint.resume(expressions)
                 })?;
@@ -255,7 +267,12 @@ impl Interpreter {
                 {
                     vm.set_source(input);
                 }
-                measure(&mut timings, Phase::Running, || vm.run())?;
+                if let Err(e) = measure(&mut timings, Phase::Running, || vm.run()) {
+                    // Restore the VM so the next resume_from_halt can cleanly
+                    // truncate the stack back to the pre-error locals.
+                    self.repl_state = Some((vm, old_checkpoint));
+                    return Err(InterpreterError::Vm(e));
+                }
                 let result = vm.last_value(new_checkpoint.num_locals());
                 self.repl_state = Some((vm, new_checkpoint));
                 result
