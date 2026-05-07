@@ -130,3 +130,42 @@ fn error_does_not_corrupt_state() {
     let out = String::from_utf8(interp.get_output().unwrap()).unwrap();
     assert_eq!(out.trim(), "99");
 }
+
+#[test]
+fn vm_error_does_not_panic_on_subsequent_local_access() {
+    // Regression test for GitHub issue #130.
+    // A VM-level runtime error (wrong argument type) used to drop repl_state,
+    // causing a subsequent GetLocal on an empty stack to panic.
+    let mut interp = {
+        let mut i = Interpreter::capturing();
+        i.configure(ndc_stdlib::register);
+        i
+    };
+    interp.eval("let data = \"a,b,c\\na,b,c\\n\";").unwrap();
+    // lines() expects a String; passing an Int triggers a VM error.
+    assert!(interp.eval("lines(1)").is_err());
+    // Referencing `data` must not panic.
+    let result = interp.eval("data");
+    assert!(
+        result.is_ok(),
+        "referencing 'data' after a VM error should not fail: {result:?}"
+    );
+}
+
+#[test]
+fn vm_error_rolls_back_failed_declaration() {
+    // After a VM error on a `let` declaration, the name must not be in scope.
+    let mut interp = {
+        let mut i = Interpreter::capturing();
+        i.configure(ndc_stdlib::register);
+        i
+    };
+    // lines() expects a String; this fails at the VM level, so `x` is never bound.
+    assert!(interp.eval("let x = lines(1);").is_err());
+    // `x` should not be accessible.
+    let err = interp.eval("x").expect_err("x should not be declared");
+    assert!(
+        format!("{err:?}").contains("has not previously been declared"),
+        "unexpected error: {err:?}"
+    );
+}

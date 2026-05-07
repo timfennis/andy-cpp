@@ -125,7 +125,10 @@ impl TryFrom<Command> for Action {
             Command::Run {
                 file: Some(file),
                 options,
-            } => Self::RunFile { path: file, options },
+            } => Self::RunFile {
+                path: file,
+                options,
+            },
             Command::Run { file: None, .. } => Self::StartRepl,
             Command::Lsp { stdio: _ } => Self::RunLsp,
             Command::Disassemble { file } => Self::DisassembleFile(file),
@@ -153,10 +156,7 @@ fn main() -> anyhow::Result<()> {
     let action: Action = cli.command.unwrap_or_default().try_into()?;
 
     match action {
-        Action::RunFile {
-            path,
-            options,
-        } => {
+        Action::RunFile { path, options } => {
             let filename = path
                 .file_name()
                 .and_then(|name| name.to_str())
