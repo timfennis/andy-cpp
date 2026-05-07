@@ -4,8 +4,8 @@ use crate::{Object, Value};
 use ndc_core::{StaticType, TypeSignature};
 use ndc_lexer::Span;
 use ndc_parser::{
-    Binding, CaptureSource, Expression, ExpressionLocation, ForBody, ForIteration, LogicalOperator,
-    Lvalue, ResolvedVar,
+    Binding, CaptureSource, Expression, ExpressionLocation, ForBody, ForIteration,
+    FunctionParameter, LogicalOperator, Lvalue, ResolvedVar,
 };
 use std::rc::Rc;
 
@@ -152,7 +152,7 @@ impl Compiler {
                     }
                 }
             }
-            Expression::VariableDeclaration { value, l_value } => {
+            Expression::VariableDeclaration { value, l_value, .. } => {
                 self.compile_expr(*value)?;
                 self.compile_declare_lvalue(l_value, span)?;
             }
@@ -299,12 +299,13 @@ impl Compiler {
                 name,
                 resolved_name,
                 body,
-                type_signature,
+                parameters,
                 return_type,
                 captures,
                 pure,
                 ..
             } => {
+                let type_signature = FunctionParameter::from_params(&parameters);
                 self.compile_function_decl(
                     name,
                     resolved_name,

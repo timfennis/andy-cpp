@@ -1,6 +1,6 @@
 use ndc_core::StaticType;
 use ndc_lexer::Span;
-use ndc_parser::{Expression, ExpressionLocation, ForBody, ForIteration, Lvalue};
+use ndc_parser::{Expression, ExpressionLocation, ForBody, ForIteration, Lvalue, NodeId};
 
 /// Trait for visiting interesting nodes during an AST walk.
 ///
@@ -13,6 +13,7 @@ pub trait AstVisitor {
         &mut self,
         _identifier: &str,
         _inferred_type: Option<&StaticType>,
+        _has_annotation: bool,
         _span: Span,
     ) {
     }
@@ -25,6 +26,7 @@ pub trait AstVisitor {
         &mut self,
         _return_type: Option<&StaticType>,
         _parameters_span: Span,
+        _node_id: NodeId,
     ) {
     }
 }
@@ -39,17 +41,25 @@ pub fn walk_ast(visitor: &mut impl AstVisitor, expressions: &[ExpressionLocation
 fn walk_expression(visitor: &mut impl AstVisitor, expr: &ExpressionLocation) {
     visitor.on_expression(expr);
     match &expr.expression {
-        Expression::VariableDeclaration { l_value, value } => {
-            walk_lvalue(visitor, l_value);
+        Expression::VariableDeclaration {
+            l_value,
+            annotated_type,
+            value,
+        } => {
+            walk_lvalue(visitor, l_value, annotated_type.is_some());
             walk_expression(visitor, value);
         }
         Expression::FunctionDeclaration {
             return_type,
+            parameters,
             parameters_span,
             body,
             ..
         } => {
-            visitor.on_function_declaration(return_type.as_ref(), *parameters_span);
+            for p in parameters {
+                walk_lvalue(visitor, &p.lvalue, p.annotation.is_some());
+            }
+            visitor.on_function_declaration(return_type.as_ref(), *parameters_span, expr.id);
             walk_expression(visitor, body);
         }
         Expression::Statement(inner) | Expression::Grouping(inner) => {
@@ -82,7 +92,7 @@ fn walk_expression(visitor: &mut impl AstVisitor, expr: &ExpressionLocation) {
             for iteration in iterations {
                 match iteration {
                     ForIteration::Iteration { l_value, sequence } => {
-                        walk_lvalue(visitor, l_value);
+                        walk_lvalue(visitor, l_value, false);
                         walk_expression(visitor, sequence);
                     }
                     ForIteration::Guard(expr) => walk_expression(visitor, expr),
@@ -113,7 +123,7 @@ fn walk_expression(visitor: &mut impl AstVisitor, expr: &ExpressionLocation) {
     }
 }
 
-fn walk_lvalue(visitor: &mut impl AstVisitor, lvalue: &Lvalue) {
+fn walk_lvalue(visitor: &mut impl AstVisitor, lvalue: &Lvalue, has_annotation: bool) {
     match lvalue {
         Lvalue::Identifier {
             identifier,
@@ -121,11 +131,11 @@ fn walk_lvalue(visitor: &mut impl AstVisitor, lvalue: &Lvalue) {
             span,
             ..
         } => {
-            visitor.on_declaration(identifier, inferred_type.as_ref(), *span);
+            visitor.on_declaration(identifier, inferred_type.as_ref(), has_annotation, *span);
         }
         Lvalue::Sequence(lvalues) => {
             for lv in lvalues {
-                walk_lvalue(visitor, lv);
+                walk_lvalue(visitor, lv, has_annotation);
             }
         }
         Lvalue::Index { .. } => {}

@@ -1,11 +1,14 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 
-use crate::scope::ScopeTree;
-use itertools::Itertools;
+use crate::scope::{ScopeTree, TypeBinding};
+use itertools::{Itertools, izip};
 use ndc_core::{StaticType, TypeSignature};
 use ndc_lexer::Span;
-use ndc_parser::{Binding, Expression, ExpressionLocation, ForBody, ForIteration, Lvalue, NodeId};
+use ndc_parser::{
+    Binding, Expression, ExpressionLocation, ForBody, ForIteration, FunctionParameter, Lvalue,
+    NodeId,
+};
 
 /// Side table holding semantic information keyed by AST node identity.
 /// Keeps tooling-specific data (like per-expression types) out of the AST.
@@ -13,6 +16,9 @@ use ndc_parser::{Binding, Expression, ExpressionLocation, ForBody, ForIteration,
 pub struct AnalysisResult {
     /// Maps each expression node to its inferred result type.
     pub expr_types: HashMap<NodeId, StaticType>,
+    /// Inferred return types for functions without explicit annotations.
+    /// Keyed by the FunctionDeclaration's `NodeId`.
+    pub inferred_return_types: HashMap<NodeId, StaticType>,
     /// Errors accumulated during analysis. Non-empty when the analyser
     /// encountered problems but was able to continue with fallback types.
     pub errors: Vec<AnalysisError>,
@@ -98,7 +104,9 @@ impl Analyser {
     fn analyse_inner(
         &mut self,
         ExpressionLocation {
-            expression, span, ..
+            expression,
+            span,
+            id,
         }: &mut ExpressionLocation,
     ) -> Result<StaticType, AnalysisError> {
         match expression {
@@ -142,25 +150,41 @@ impl Analyser {
                 Ok(StaticType::Bool)
             }
             Expression::Grouping(expr) => self.analyse(expr),
-            Expression::VariableDeclaration { l_value, value } => {
-                let typ = self.analyse_or_any(value);
-                self.resolve_lvalue_declarative(l_value, typ, *span);
+            Expression::VariableDeclaration {
+                l_value,
+                annotated_type,
+                value,
+            } => {
+                let found_type = self.analyse_or_any(value);
+
+                self.resolve_lvalue_declarative(
+                    l_value,
+                    annotated_type.to_owned(),
+                    found_type.clone(),
+                    *span,
+                );
                 Ok(StaticType::unit())
             }
             Expression::Assignment { l_value, r_value } => {
                 let old_type = self.resolve_lvalue_or_any(l_value, *span);
                 let new_type = self.analyse_or_any(r_value);
 
-                // Widen the binding's type to the LUB so subsequent uses
-                // see the broader type.
                 if let Lvalue::Identifier {
                     resolved: Some(target),
                     ..
                 } = l_value
                 {
                     let widened = old_type.lub(&new_type);
-                    if widened != old_type {
-                        self.scope_tree.update_binding_type(*target, widened);
+                    if widened != old_type
+                        && let Err(annotated_type) =
+                            self.scope_tree.update_binding_type(*target, widened)
+                        && !new_type.is_subtype(&annotated_type)
+                    {
+                        self.emit(AnalysisError::mismatched_types(
+                            &new_type,
+                            &annotated_type,
+                            *span,
+                        ));
                     }
                 }
 
@@ -190,42 +214,112 @@ impl Analyser {
                     ));
                 }
 
+                // Determine the result type of the operation
+                let result_type = match resolved_operation {
+                    Binding::Resolved(res) => {
+                        if let StaticType::Function { return_type, .. } =
+                            self.scope_tree.get_type(*res)
+                        {
+                            Some(return_type.as_ref().clone())
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                };
+
+                if let Some(result_type) = result_type {
+                    match l_value {
+                        // Direct variable: widen or reject if annotated
+                        Lvalue::Identifier {
+                            resolved: Some(target),
+                            ..
+                        } => {
+                            let widened = arg_types[0].lub(&result_type);
+                            if widened != arg_types[0]
+                                && let Err(annotated_type) =
+                                    self.scope_tree.update_binding_type(*target, widened)
+                                && !result_type.is_subtype(&annotated_type)
+                            {
+                                self.emit(AnalysisError::mismatched_types(
+                                    &result_type,
+                                    &annotated_type,
+                                    *span,
+                                ));
+                            }
+                        }
+                        // Index into a container: widen the container's type
+                        Lvalue::Index { value, .. } => {
+                            if let Expression::Identifier {
+                                resolved: Binding::Resolved(target),
+                                ..
+                            } = &value.expression
+                            {
+                                let container_type = self.scope_tree.get_type(*target).clone();
+                                if let Some(elem_type) = container_type.index_element_type() {
+                                    let widened_elem = elem_type.lub(&result_type);
+                                    if widened_elem != elem_type {
+                                        let new_container =
+                                            container_type.with_element_type(widened_elem);
+                                        let _ = self
+                                            .scope_tree
+                                            .update_binding_type(*target, new_container);
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
                 Ok(StaticType::unit())
             }
             Expression::FunctionDeclaration {
                 name,
                 resolved_name,
-                type_signature,
+                parameters,
                 body,
                 return_type: return_type_slot,
                 captures,
                 ..
             } => {
+                let type_signature = FunctionParameter::from_params(parameters);
+
                 // Pre-register the function before analysing its body so recursive calls can
                 // resolve the name. The return type is unknown at this point so we use Any.
-                let pre_slot = if let Some(name) = name {
-                    let arity = type_signature.types().map(|t| t.len());
-                    if self.scope_tree.has_function_in_current_scope(name, arity) {
-                        self.emit(AnalysisError::function_redefinition(name, arity, *span));
-                        // Skip re-registering but still analyse the body below.
-                        None
+                let pre_slot =
+                    if let Some(name) = name {
+                        let arity = type_signature.types().map(|t| t.len());
+                        if self.scope_tree.has_function_in_current_scope(name, arity) {
+                            self.emit(AnalysisError::function_redefinition(name, arity, *span));
+                            // Skip re-registering but still analyse the body below.
+                            None
+                        } else {
+                            let placeholder = StaticType::Function {
+                                parameters: type_signature.types(),
+                                return_type: Box::new(
+                                    return_type_slot.clone().unwrap_or(StaticType::Any),
+                                ),
+                            };
+                            Some(self.scope_tree.create_local_binding(
+                                name.clone(),
+                                TypeBinding::Inferred(placeholder),
+                            ))
+                        }
                     } else {
-                        let placeholder = StaticType::Function {
-                            parameters: type_signature.types(),
-                            return_type: Box::new(StaticType::Any),
-                        };
-                        Some(
-                            self.scope_tree
-                                .create_local_binding(name.clone(), placeholder),
-                        )
-                    }
-                } else {
-                    None
-                };
+                        None
+                    };
 
                 self.scope_tree.new_function_scope();
                 self.return_type_stack.push(None);
-                let param_types = self.resolve_parameters_declarative(type_signature, *span);
+                let param_types = self.resolve_parameters_declarative(&type_signature, *span);
+
+                // Fill inferred_type on parameter Lvalues for LSP hints.
+                for (p, typ) in parameters.iter_mut().zip(&param_types) {
+                    if let Lvalue::Identifier { inferred_type, .. } = &mut p.lvalue {
+                        *inferred_type = Some(typ.clone());
+                    }
+                }
 
                 let implicit_return = self.analyse_or_any(body);
                 let explicit_return = self.return_type_stack.pop().unwrap();
@@ -233,23 +327,37 @@ impl Analyser {
                 self.scope_tree.destroy_scope();
 
                 // Combine explicit `return` types with the block's implicit return type.
-                let return_type = match explicit_return {
+                let inferred_return = match explicit_return {
                     Some(ret) => ret.lub(&implicit_return),
                     None => implicit_return,
                 };
-                *return_type_slot = Some(return_type);
+
+                // If there is an annotated return type, validate it;
+                // otherwise record the inferred type in the side table.
+                if let Some(annotated) = return_type_slot {
+                    if !inferred_return.is_subtype(annotated) {
+                        self.emit(AnalysisError::mismatched_types(
+                            &inferred_return,
+                            annotated,
+                            *span,
+                        ));
+                    }
+                } else {
+                    self.result
+                        .inferred_return_types
+                        .insert(*id, inferred_return.clone());
+                }
+
+                let effective_return = return_type_slot.clone().unwrap_or(inferred_return);
 
                 let function_type = StaticType::Function {
                     parameters: Some(param_types.clone()),
-                    return_type: Box::new(
-                        return_type_slot
-                            .clone()
-                            .expect("must have a value at this point"),
-                    ),
+                    return_type: Box::new(effective_return),
                 };
 
                 if let Some(slot) = pre_slot {
-                    self.scope_tree
+                    let _ = self
+                        .scope_tree
                         .update_binding_type(slot, function_type.clone());
                     *resolved_name = Some(slot);
                 }
@@ -401,10 +509,22 @@ impl Analyser {
             }
             Binding::Resolved(res) => self.scope_tree.get_type(*res).clone(),
 
-            Binding::Dynamic(_) => StaticType::Function {
-                parameters: None,
-                return_type: Box::new(StaticType::Any),
-            },
+            Binding::Dynamic(candidates) => {
+                let return_type = candidates
+                    .iter()
+                    .map(|c| self.scope_tree.get_type(*c).clone())
+                    .filter_map(|t| match t {
+                        StaticType::Function { return_type, .. } => Some(*return_type),
+                        _ => None,
+                    })
+                    .reduce(|a, b| a.lub(&b))
+                    .unwrap_or(StaticType::Any);
+
+                StaticType::Function {
+                    parameters: None,
+                    return_type: Box::new(return_type),
+                }
+            }
         };
 
         *resolved = binding;
@@ -429,13 +549,14 @@ impl Analyser {
 
                 self.scope_tree.new_iteration_scope();
 
-                self.resolve_lvalue_declarative(
-                    l_value,
-                    sequence_type
-                        .sequence_element_type()
-                        .unwrap_or(StaticType::Any),
-                    span,
-                );
+                let found_type = sequence_type
+                    .sequence_element_type()
+                    .unwrap_or(StaticType::Any);
+
+                // TOOD: get this from the AST when the parser adds it
+                let expected_type = None;
+
+                self.resolve_lvalue_declarative(l_value, expected_type, found_type, span);
                 do_destroy = true;
             }
             ForIteration::Guard(expr) => {
@@ -585,33 +706,62 @@ impl Analyser {
         let mut seen_names: Vec<&str> = Vec::new();
 
         for param in parameters {
-            types.push(StaticType::Any);
+            let has_annotation = param.type_name != StaticType::Any;
+            let binding = if has_annotation {
+                TypeBinding::Annotated(param.type_name.clone())
+            } else {
+                TypeBinding::Inferred(StaticType::Any)
+            };
+
+            types.push(param.type_name.clone());
             if seen_names.contains(&param.name.as_str()) {
                 self.emit(AnalysisError::parameter_redefined(&param.name, span));
-                // Skip duplicate but continue checking remaining params.
                 continue;
             }
             seen_names.push(&param.name);
 
             self.scope_tree
-                .create_local_binding(param.name.clone(), StaticType::Any);
+                .create_local_binding(param.name.clone(), binding);
         }
 
         types
     }
-    fn resolve_lvalue_declarative(&mut self, lvalue: &mut Lvalue, typ: StaticType, span: Span) {
+    fn resolve_lvalue_declarative(
+        &mut self,
+        lvalue: &mut Lvalue,
+        expected_type: Option<StaticType>,
+        found_type: StaticType,
+        span: Span,
+    ) {
         match lvalue {
             Lvalue::Identifier {
                 identifier,
                 resolved,
                 inferred_type,
-                ..
+                span,
             } => {
+                // If there is a type annotation and the given type is not a subtype of the annotated type we emit an error
+                if let Some(expected_type) = &expected_type
+                    && !found_type.is_subtype(expected_type)
+                {
+                    self.emit(AnalysisError::mismatched_types(
+                        &found_type,
+                        expected_type,
+                        *span,
+                    ));
+                }
+
+                let type_binding = match expected_type {
+                    Some(annotated) => TypeBinding::Annotated(annotated),
+                    None => TypeBinding::Inferred(found_type),
+                };
+
                 *resolved = Some(
                     self.scope_tree
-                        .create_local_binding(identifier.clone(), typ.clone()),
+                        .create_local_binding(identifier.clone(), type_binding.clone()),
                 );
-                *inferred_type = Some(typ);
+
+                *inferred_type = Some(type_binding.typ().clone())
             }
             Lvalue::Index { index, value, .. } => {
                 self.analyse_or_any(index);
@@ -623,25 +773,45 @@ impl Analyser {
                 // can happen when a variable is declared with one type (e.g. ())
                 // and later reassigned to a tuple of a different arity — the
                 // analyser doesn't track reassignment types.
+                let is_annotated = expected_type.is_some();
+                let resolved_type = expected_type.unwrap_or(found_type.clone());
+
                 let sub_types: Box<dyn Iterator<Item = &StaticType>> =
-                    if let StaticType::Tuple(elems) = &typ {
+                    if let StaticType::Tuple(elems) = &resolved_type {
                         if elems.len() != seq.len() {
-                            Box::new(std::iter::repeat(&StaticType::Any))
+                            self.emit(AnalysisError::tuple_arity_mismatch(
+                                seq.len(),
+                                elems.len(),
+                                span,
+                            ));
+                            return;
                         } else {
                             Box::new(elems.iter())
                         }
-                    } else if let Some(iter) = typ.unpack() {
+                    } else if let Some(iter) = resolved_type.unpack() {
                         iter
                     } else {
-                        self.emit(AnalysisError::unable_to_unpack_type(&typ, span));
+                        self.emit(AnalysisError::unable_to_unpack_type(&resolved_type, span));
                         return;
                     };
 
-                for (sub_lvalue, sub_lvalue_type) in seq.iter_mut().zip(sub_types) {
+                let found_types = found_type
+                    .unpack()
+                    .unwrap_or_else(|| Box::new(std::iter::repeat(&StaticType::Any)));
+
+                for (sub_lvalue, sub_type, found_type) in
+                    izip!(seq.iter_mut(), sub_types, found_types)
+                {
+                    let sub_expected = if is_annotated {
+                        Some(sub_type.clone())
+                    } else {
+                        None
+                    };
                     self.resolve_lvalue_declarative(
                         sub_lvalue,
-                        sub_lvalue_type.clone(),
-                        /* todo: figure out how to narrow this span */ span,
+                        sub_expected,
+                        found_type.clone(),
+                        span,
                     );
                 }
             }
@@ -678,6 +848,22 @@ impl AnalysisError {
     pub fn span(&self) -> Span {
         self.span
     }
+    fn tuple_arity_mismatch(ident_len: usize, annotation_len: usize, span: Span) -> Self {
+        Self {
+            text: format!(
+                "mismatched tuple arity: found a len={ident_len} identifier and a len={annotation_len} annotation."
+            ),
+            span,
+        }
+    }
+
+    fn mismatched_types(found: &StaticType, expected: &StaticType, span: Span) -> Self {
+        Self {
+            text: format!("mismatched types: found {found} but expected {expected}"),
+            span,
+        }
+    }
+
     fn function_redefinition(name: &str, arity: Option<usize>, span: Span) -> Self {
         let arity_desc = match arity {
             Some(n) => format!("{n} parameter{}", if n == 1 { "" } else { "s" }),

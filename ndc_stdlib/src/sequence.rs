@@ -477,6 +477,7 @@ mod inner {
     }
 
     /// Returns `true` if the `predicate` is true for all the elements in `seq`.
+    #[function(return_type = bool)]
     pub fn all(seq: SeqValue, function: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         for item in seq
             .try_into_iter()

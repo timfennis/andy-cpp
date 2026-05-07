@@ -49,6 +49,17 @@ impl TypeSignature {
         }
     }
 
+    pub fn from_annotated_bindings(bindings: Vec<(String, Option<StaticType>)>) -> Self {
+        Self::Exact(
+            bindings
+                .into_iter()
+                .map(|(name, annotation)| {
+                    Parameter::new(name, annotation.unwrap_or(StaticType::Any))
+                })
+                .collect(),
+        )
+    }
+
     pub fn types(&self) -> Option<Vec<StaticType>> {
         match self {
             Self::Variadic => None,
@@ -108,7 +119,127 @@ pub enum StaticType {
     Deque(Box<Self>),
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct StaticTypeConstructionError {
+    message: String,
+    help_text: String,
+}
+
+impl StaticTypeConstructionError {
+    fn new<M: Into<String>, H: Into<String>>(message: M, help_text: H) -> Self {
+        Self {
+            message: message.into(),
+            help_text: help_text.into(),
+        }
+    }
+
+    pub fn help_text(&self) -> &str {
+        &self.help_text
+    }
+}
+
+impl fmt::Display for StaticTypeConstructionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.message.fmt(f)
+    }
+}
+
 impl StaticType {
+    pub fn from_name_and_args(
+        name: &str,
+        args: Vec<Self>,
+    ) -> Result<Self, StaticTypeConstructionError> {
+        match name {
+            "Any" => Self::require_no_args(name, &args).map(|_| Self::Any),
+            "Never" => Self::require_no_args(name, &args).map(|_| Self::Never),
+            "Bool" => Self::require_no_args(name, &args).map(|_| Self::Bool),
+            "Number" => Self::require_no_args(name, &args).map(|_| Self::Number),
+            "Float" => Self::require_no_args(name, &args).map(|_| Self::Float),
+            "Int" => Self::require_no_args(name, &args).map(|_| Self::Int),
+            "Rational" => Self::require_no_args(name, &args).map(|_| Self::Rational),
+            "Complex" => Self::require_no_args(name, &args).map(|_| Self::Complex),
+            "String" => Self::require_no_args(name, &args).map(|_| Self::String),
+            "Option" => {
+                Self::require_exactly_one_arg(name, args).map(|elem| Self::Option(Box::new(elem)))
+            }
+            "Sequence" => {
+                Self::require_exactly_one_arg(name, args).map(|elem| Self::Sequence(Box::new(elem)))
+            }
+            "List" => {
+                Self::require_exactly_one_arg(name, args).map(|elem| Self::List(Box::new(elem)))
+            }
+            "Iterator" => {
+                Self::require_exactly_one_arg(name, args).map(|elem| Self::Iterator(Box::new(elem)))
+            }
+            "MinHeap" => {
+                Self::require_exactly_one_arg(name, args).map(|elem| Self::MinHeap(Box::new(elem)))
+            }
+            "MaxHeap" => {
+                Self::require_exactly_one_arg(name, args).map(|elem| Self::MaxHeap(Box::new(elem)))
+            }
+            "Deque" => {
+                Self::require_exactly_one_arg(name, args).map(|elem| Self::Deque(Box::new(elem)))
+            }
+            "Tuple" => Self::require_at_least_one_arg(name, args).map(Self::Tuple),
+            "Map" => {
+                let [key, value] = Self::require_exactly_n_args::<2>(name, args)?;
+                Ok(Self::Map {
+                    key: Box::new(key),
+                    value: Box::new(value),
+                })
+            }
+            _ => Err(StaticTypeConstructionError::new(
+                format!("unknown type `{name}`"),
+                "Use a valid type name in this annotation.",
+            )),
+        }
+    }
+
+    fn require_no_args(name: &str, args: &[Self]) -> Result<(), StaticTypeConstructionError> {
+        if args.is_empty() {
+            Ok(())
+        } else {
+            Err(StaticTypeConstructionError::new(
+                format!("type `{name}` does not take generic arguments"),
+                format!("Remove the generic arguments from `{name}`."),
+            ))
+        }
+    }
+
+    fn require_exactly_one_arg(
+        name: &str,
+        args: Vec<Self>,
+    ) -> Result<Self, StaticTypeConstructionError> {
+        let [arg] = Self::require_exactly_n_args(name, args)?;
+        Ok(arg)
+    }
+
+    fn require_exactly_n_args<const N: usize>(
+        name: &str,
+        args: Vec<Self>,
+    ) -> Result<[Self; N], StaticTypeConstructionError> {
+        args.try_into().map_err(|_err: Vec<Self>| {
+            StaticTypeConstructionError::new(
+                format!("type `{name}` expects exactly {N} generic arguments"),
+                format!("Use `{name}<...>` with {N} type arguments."),
+            )
+        })
+    }
+
+    fn require_at_least_one_arg(
+        name: &str,
+        args: Vec<Self>,
+    ) -> Result<Vec<Self>, StaticTypeConstructionError> {
+        if args.is_empty() {
+            Err(StaticTypeConstructionError::new(
+                format!("type `{name}` requires generic arguments"),
+                format!("Add generic arguments like `{name}<...>`."),
+            ))
+        } else {
+            Ok(args)
+        }
+    }
+
     /// Checks if `self` is a subtype of `other`.
     ///
     /// A type S is a subtype of T (S <: T) if a value of type S can be safely
@@ -467,6 +598,21 @@ impl StaticType {
     // BRUH
     pub fn is_incompatible_with(&self, other: &Self) -> bool {
         !self.is_subtype(other) && !other.is_subtype(self)
+    }
+
+    /// Returns a new type with the element type replaced. For container types
+    /// like `List<T>`, this returns `List<new_elem>`. Returns `None` if the
+    /// type does not have a replaceable element type.
+    pub fn with_element_type(&self, new_elem: Self) -> Self {
+        match self {
+            Self::List(_) => Self::List(Box::new(new_elem)),
+            Self::Sequence(_) => Self::Sequence(Box::new(new_elem)),
+            Self::Iterator(_) => Self::Iterator(Box::new(new_elem)),
+            Self::MinHeap(_) => Self::MinHeap(Box::new(new_elem)),
+            Self::MaxHeap(_) => Self::MaxHeap(Box::new(new_elem)),
+            Self::Deque(_) => Self::Deque(Box::new(new_elem)),
+            _ => self.clone(),
+        }
     }
 
     pub fn index_element_type(&self) -> Option<Self> {

@@ -1,0 +1,2 @@
+// expect-error: mismatched types: found Bool but expected String
+let x: String = true;

@@ -89,6 +89,33 @@ let x = fn(y) => y, 3;
 let x = fn(y) => (y, 3);
 ```
 
+## Type annotations
+
+Parameters and return values can carry type annotations, just like `let` bindings:
+
+```ndc
+fn greet(name: String) -> String => "hello " <> name;
+
+fn add(x: Int, y: Int) -> Int {
+    x + y
+}
+```
+
+Annotations are optional — leave them off and the parameter is treated as `Any`. Mix and match as you like:
+
+```ndc
+fn first(xs: List<Int>) => xs[0];   // params annotated, return inferred
+fn count(xs) -> Int => len(xs);      // return annotated, params inferred
+```
+
+If the body produces a value that doesn't fit the declared return type, the analyser flags it:
+
+```ndc
+fn bad() -> Int { "hello" }   // ERROR: mismatched types
+```
+
+A return-type annotation also helps the analyser understand recursive calls — without it, a recursive call resolves against an unknown return type and you can lose precision.
+
 ## Function overloading
 
 You can overload functions by declaring multiple `fn` definitions with the same name and different parameter counts.
@@ -108,7 +135,7 @@ fn foo(a) { a + 1 }
 fn foo(a) { a + 2 } // ERROR: redefinition of 'foo' with 1 parameter
 ```
 
-> **Note:** The engine can also overload functions by argument type, and the standard library uses that support in a few places. You cannot write those overloads in user code yet because the language does not let you declare argument types in function signatures.
+> **Note:** The engine can also dispatch by argument type, and the standard library uses that to register specialised overloads (for example, an `Int`-only fast path for `+`). User code can't declare two overloads with the same name and arity yet, even when the parameter types differ — the resolver only distinguishes overloads by parameter count.
 
 ## Function shadowing
 

@@ -1,0 +1,2 @@
+// expect-error: mismatched tuple arity: found a len=2 identifier and a len=1 annotation.
+let (a, b): (Int) = (1, 2);

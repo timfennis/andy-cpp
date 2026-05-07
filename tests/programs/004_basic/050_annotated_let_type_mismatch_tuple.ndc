@@ -1,0 +1,2 @@
+// expect-error: mismatched types: found Tuple<Int, Int> but expected Tuple<String, String>
+let x: (String, String) = (1, 2);

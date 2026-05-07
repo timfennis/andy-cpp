@@ -1,0 +1,2 @@
+// expect-error: mismatched types: found List<Int> but expected List<String>
+let x: List<String> = [1, 2, 3];
