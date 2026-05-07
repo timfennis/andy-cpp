@@ -167,19 +167,18 @@ impl Parser {
 
         while let Some(token_location) = self.consume_token_if(&extended_valid_tokens) {
             let (invert, operator_token_loc) = if token_location.token == Token::LogicNot {
-                let augmented = self.consume_token_if(valid_tokens).ok_or_else(|| {
-                    Error::text(
-                        format!(
-                            "unexpected token {}",
-                            self.require_current_token()
-                                .expect("there has to be a token")
-                                .token
-                        ),
-                        self.require_current_token()
-                            .expect("must have current token")
-                            .span,
-                    )
-                })?;
+                let augmented = match self.consume_token_if(valid_tokens) {
+                    Some(t) => t,
+                    None => {
+                        return Err(match self.peek_current_token_location() {
+                            Some(current) => Error::text(
+                                format!("unexpected token {}", current.token),
+                                current.span,
+                            ),
+                            None => Error::end_of_input(token_location.span),
+                        });
+                    }
+                };
                 (Some(token_location), augmented)
             } else {
                 (None, token_location)
