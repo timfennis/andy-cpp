@@ -236,9 +236,11 @@ fn run_pipeline(tokens: Vec<TokenLocation>) {
     let _ = vm.run();
 }
 
-/// Run the pipeline in a worker thread with a hard timeout. Hangs are
-/// silently dropped (the worker leaks; the OS reaps it on process exit).
-/// Genuine panics propagate to the proptest harness so it can shrink.
+/// Run the pipeline in a worker thread with a hard timeout. Both genuine
+/// panics and timeouts propagate to the proptest harness so it can shrink
+/// them. A timed-out worker is left running (Rust has no cooperative thread
+/// cancellation), but proptest stops generating fresh cases on first
+/// failure, so leaks are bounded by `max_shrink_iters` rather than `cases`.
 fn run_with_timeout(program: Program) {
     install_quiet_panic_hook();
     let (tx, rx) = mpsc::channel();
@@ -250,8 +252,13 @@ fn run_with_timeout(program: Program) {
         })
         .expect("spawn worker thread");
 
-    if let Ok(Err(payload)) = rx.recv_timeout(PER_CASE_TIMEOUT) {
-        panic::resume_unwind(payload);
+    match rx.recv_timeout(PER_CASE_TIMEOUT) {
+        Err(mpsc::RecvTimeoutError::Timeout) => panic!(
+            "pipeline did not terminate within {} ms",
+            PER_CASE_TIMEOUT.as_millis()
+        ),
+        Ok(Err(payload)) => panic::resume_unwind(payload),
+        Ok(Ok(())) | Err(mpsc::RecvTimeoutError::Disconnected) => {}
     }
 }
 
