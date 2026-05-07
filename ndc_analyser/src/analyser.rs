@@ -779,7 +779,12 @@ impl Analyser {
                 let sub_types: Box<dyn Iterator<Item = &StaticType>> =
                     if let StaticType::Tuple(elems) = &resolved_type {
                         if elems.len() != seq.len() {
-                            Box::new(std::iter::repeat(&StaticType::Any))
+                            self.emit(AnalysisError::tuple_arity_mismatch(
+                                seq.len(),
+                                elems.len(),
+                                span,
+                            ));
+                            return;
                         } else {
                             Box::new(elems.iter())
                         }
@@ -842,6 +847,14 @@ pub struct AnalysisError {
 impl AnalysisError {
     pub fn span(&self) -> Span {
         self.span
+    }
+    fn tuple_arity_mismatch(ident_len: usize, annotation_len: usize, span: Span) -> Self {
+        Self {
+            text: format!(
+                "mismatched tuple arity: found a len={ident_len} identifier and a len={annotation_len} annotation."
+            ),
+            span,
+        }
     }
 
     fn mismatched_types(found: &StaticType, expected: &StaticType, span: Span) -> Self {

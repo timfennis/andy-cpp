@@ -58,6 +58,43 @@ pos = ("a", "b");    // type is still Sequence<Any>
 
 > **Tip:** For the best type inference, initialize variables with a value that matches the intended type. For example, use `let pos = (0, 0);` instead of `let pos = ();` if you intend to store a 2-tuple of numbers.
 
+## Type annotations
+
+You can pin a variable's type by adding `: Type` after the name. The initialiser still has to fit, the analyser just checks it for you up front.
+
+```ndc
+let count: Int = 0;
+let name: String = "world";
+let xs: List<Int> = [1, 2, 3];
+```
+
+A subtype is fine — `Int` fits where `Number` is asked for, and so on:
+
+```ndc
+let n: Number = 3;        // OK: Int is a Number
+let x: Any = "anything";  // OK: everything is Any
+```
+
+A mismatch is rejected with a `mismatched types` error:
+
+```ndc
+let x: Int = "hello";   // ERROR: mismatched types: found String but expected Int
+```
+
+Once a binding has an annotation, it stays locked to that type. Reassignment and augmented assignment can't widen it the way they widen an inferred binding:
+
+```ndc
+let x: Int = 5;
+x = "test";   // ERROR: mismatched types
+x /= 2;       // ERROR: division can produce a Rational, which doesn't fit in Int
+```
+
+If you want a binding that widens freely, just leave the annotation off. Annotations are opt-in.
+
+The same syntax shows up on function parameters and return types — see the [Function](./types/function.md) page.
+
+See [Types](./types.md) for the full list of names you can use, including generics like `List<T>`, `Map<K, V>`, and tuple shorthand `(Int, String)`.
+
 ## Destructuring
 
 Destructuring works more like Python than Rust. Commas matter more than the delimiters, so `[]` and `()` both work.
