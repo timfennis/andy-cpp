@@ -27,14 +27,17 @@
 //! will guard against the regression automatically.
 
 use ndc_analyser::{Analyser, ScopeTree};
+use ndc_core::FunctionRegistry;
 use ndc_lexer::{Span, Token, TokenLocation};
 use ndc_parser::Parser;
 use ndc_vm::compiler::Compiler;
-use ndc_vm::{OutputSink, Vm};
+use ndc_vm::value::{Function as VmFunction, Object as VmObject};
+use ndc_vm::{NativeFunction, OutputSink, Value as VmValue, Vm};
 use proptest::prelude::*;
 use proptest::test_runner::FileFailurePersistence;
 use std::fmt;
 use std::panic::{self, AssertUnwindSafe};
+use std::rc::Rc;
 use std::sync::Once;
 use std::sync::mpsc;
 use std::thread;
@@ -207,17 +210,34 @@ fn arb_program() -> impl Strategy<Value = Program> {
     prop::collection::vec(arb_token().prop_map(loc), 0..=MAX_PROGRAM_LEN).prop_map(Program)
 }
 
-/// Drive parser → analyser → compiler → VM. Returns `()` on any error
-/// because the test only cares about panics, not error variants. The
-/// analyser runs against an empty global scope (no stdlib registered);
-/// undefined-identifier failures are expected and silently ignored.
+/// Build a fresh stdlib `FunctionRegistry`. Cannot be cached across worker
+/// threads because `Rc<NativeFunction>` is `!Send`, so we rebuild it once
+/// per case. In release mode this is sub-millisecond; in debug it adds
+/// noticeable overhead but the regression-replay test only triggers it
+/// for failing seeds, and the fuzz test is opt-in.
+fn build_stdlib_registry() -> FunctionRegistry<Rc<NativeFunction>> {
+    let mut registry = FunctionRegistry::default();
+    ndc_stdlib::register(&mut registry);
+    registry
+}
+
+/// Drive parser → analyser → compiler → VM with the stdlib registered, so
+/// the analyser accepts programs that reference built-ins like `print`,
+/// `len`, `sum`, etc. Returns `()` on any error — the test only cares
+/// about panics, not error variants.
 fn run_pipeline(tokens: Vec<TokenLocation>) {
     let mut expressions = match Parser::from_tokens(tokens).parse() {
         Ok(e) => e,
         Err(_) => return,
     };
 
-    let mut analyser = Analyser::from_scope_tree(ScopeTree::from_global_scope(vec![]));
+    let registry = build_stdlib_registry();
+    let scope = registry
+        .iter()
+        .map(|f| (f.name.clone(), f.static_type.clone()))
+        .collect();
+
+    let mut analyser = Analyser::from_scope_tree(ScopeTree::from_global_scope(scope));
     for e in &mut expressions {
         if analyser.analyse(e).is_err() {
             return;
@@ -232,7 +252,18 @@ fn run_pipeline(tokens: Vec<TokenLocation>) {
         Err(_) => return,
     };
 
-    let mut vm = Vm::new(compiled, Vec::new()).with_output(OutputSink::Buffer(Vec::new()));
+    // Globals must be in the same iteration order as the analyser scope
+    // so the global slot indices match.
+    let globals: Vec<VmValue> = registry
+        .iter()
+        .map(|native| {
+            VmValue::Object(Rc::new(VmObject::Function(VmFunction::Native(Rc::clone(
+                native,
+            )))))
+        })
+        .collect();
+
+    let mut vm = Vm::new(compiled, globals).with_output(OutputSink::Buffer(Vec::new()));
     let _ = vm.run();
 }
 

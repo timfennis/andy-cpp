@@ -404,6 +404,21 @@ impl Number {
     }
 
     pub fn pow(self, rhs: Self) -> Result<Self, BinaryOperatorError> {
+        // Reject astronomically large integer exponents up front: an exponent
+        // that doesn't fit in u32 would produce a result too large to compute
+        // in finite time. Without this guard, `2 ^ i64::MAX` hangs the VM.
+        const MAX_EXPONENT_BITS: u64 = 32;
+        let too_large = match &rhs {
+            Self::Int(Int::BigInt(b)) => b.magnitude().bits() > MAX_EXPONENT_BITS,
+            Self::Rational(p) if p.is_integer() => p.numer().magnitude().bits() > MAX_EXPONENT_BITS,
+            _ => false,
+        };
+        if too_large {
+            return Err(BinaryOperatorError::new(
+                "exponent too large to compute".to_string(),
+            ));
+        }
+
         Ok(match (self, rhs) {
             // Int vs others
             (Self::Int(p1), Self::Int(p2)) => {
