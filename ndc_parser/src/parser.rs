@@ -994,9 +994,10 @@ impl Parser {
                     .to_location(start_parentheses.span.merge(end_parentheses.span)));
             }
 
-            let grouped = self.expression()?;
+            let mut grouped = self.expression()?;
 
-            self.require_current_token_matches(&Token::RightParentheses)?;
+            let end_parentheses = self.require_current_token_matches(&Token::RightParentheses)?;
+            grouped.span = start_parentheses.span.merge(end_parentheses.span);
 
             return Ok(grouped);
         }

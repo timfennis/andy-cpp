@@ -1,0 +1,3 @@
+// expect-error: Invalid unpacking
+let (a, b, c): (Int, Int, Int) = (1, 2);
+print(a, b, c);

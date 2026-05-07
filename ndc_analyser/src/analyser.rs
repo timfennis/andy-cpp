@@ -155,13 +155,14 @@ impl Analyser {
                 annotated_type,
                 value,
             } => {
+                let value_span = value.span;
                 let found_type = self.analyse_or_any(value);
 
                 self.resolve_lvalue_declarative(
                     l_value,
                     annotated_type.to_owned(),
                     found_type.clone(),
-                    *span,
+                    value_span,
                 );
                 Ok(StaticType::unit())
             }
@@ -545,6 +546,7 @@ impl Analyser {
         let mut do_destroy = false;
         match iteration {
             ForIteration::Iteration { l_value, sequence } => {
+                let sequence_span = sequence.span;
                 let sequence_type = self.analyse_or_any(sequence);
 
                 self.scope_tree.new_iteration_scope();
@@ -556,7 +558,7 @@ impl Analyser {
                 // TOOD: get this from the AST when the parser adds it
                 let expected_type = None;
 
-                self.resolve_lvalue_declarative(l_value, expected_type, found_type, span);
+                self.resolve_lvalue_declarative(l_value, expected_type, found_type, sequence_span);
                 do_destroy = true;
             }
             ForIteration::Guard(expr) => {
@@ -799,6 +801,9 @@ impl Analyser {
                     .unpack()
                     .unwrap_or_else(|| Box::new(std::iter::repeat(&StaticType::Any)));
 
+                let desired_length = seq.len();
+                let mut actual_len = 0;
+
                 for (sub_lvalue, sub_type, found_type) in
                     izip!(seq.iter_mut(), sub_types, found_types)
                 {
@@ -813,6 +818,12 @@ impl Analyser {
                         found_type.clone(),
                         span,
                     );
+
+                    actual_len += 1;
+                }
+
+                if (desired_length != actual_len) {
+                    self.emit(AnalysisError::unable_to_unpack_type(&found_type, span));
                 }
             }
         }
@@ -848,6 +859,14 @@ impl AnalysisError {
     pub fn span(&self) -> Span {
         self.span
     }
+
+    fn text(p0: impl Into<String>, span: Span) -> AnalysisError {
+        Self {
+            text: p0.into(),
+            span,
+        }
+    }
+
     fn tuple_arity_mismatch(ident_len: usize, annotation_len: usize, span: Span) -> Self {
         Self {
             text: format!(
