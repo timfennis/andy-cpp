@@ -822,7 +822,7 @@ impl Analyser {
                     actual_len += 1;
                 }
 
-                if (desired_length != actual_len) {
+                if desired_length != actual_len {
                     self.emit(AnalysisError::unable_to_unpack_type(&found_type, span));
                 }
             }
@@ -858,13 +858,6 @@ pub struct AnalysisError {
 impl AnalysisError {
     pub fn span(&self) -> Span {
         self.span
-    }
-
-    fn text(p0: impl Into<String>, span: Span) -> AnalysisError {
-        Self {
-            text: p0.into(),
-            span,
-        }
     }
 
     fn tuple_arity_mismatch(ident_len: usize, annotation_len: usize, span: Span) -> Self {
