@@ -8,17 +8,23 @@
 //! so generated infinite loops don't hang the test. Panics are caught
 //! and re-raised on the test thread so proptest can shrink them.
 //!
-//! Marked `#[ignore]` so a regular `cargo test` doesn't run it — random
-//! programs frequently turn up real panics, which would otherwise break
-//! the build. Run on demand:
+//! Two test functions share the same `panic.regressions` file:
 //!
-//! ```sh
-//! cargo test -p proptest_tests -- --ignored
-//! PROPTEST_CASES=100000 cargo test -p proptest_tests -- --ignored
-//! ```
+//! * `known_regressions_do_not_panic` runs by default — it generates 0
+//!   fresh cases and only replays seeds saved in `panic.regressions`, so
+//!   any future commit that resurrects a known panic fails immediately.
+//! * `fuzz_random_tokens` is `#[ignore]`d because each run typically turns
+//!   up new panics that haven't been triaged yet. Opt in with:
 //!
-//! Known regressions are persisted to `panic.regressions` next to this
-//! file and replayed on every run.
+//!   ```sh
+//!   cargo test -p proptest_tests -- --ignored             # fuzz only
+//!   cargo test -p proptest_tests -- --include-ignored     # regressions + fuzz
+//!   PROPTEST_CASES=100000 cargo test -p proptest_tests -- --ignored
+//!   ```
+//!
+//! When the fuzz run finds a new panic, proptest shrinks it and appends
+//! the seed to `panic.regressions`; the next default `cargo test` run
+//! will guard against the regression automatically.
 
 use ndc_analyser::{Analyser, ScopeTree};
 use ndc_lexer::{Span, Token, TokenLocation};
@@ -249,19 +255,33 @@ fn run_with_timeout(program: Program) {
     }
 }
 
+fn persistence_config(cases: u32, max_shrink_iters: u32) -> ProptestConfig {
+    ProptestConfig {
+        cases,
+        max_shrink_iters,
+        failure_persistence: Some(Box::new(FileFailurePersistence::WithSource("regressions"))),
+        ..ProptestConfig::default()
+    }
+}
+
 proptest! {
-    #![proptest_config(ProptestConfig {
-        cases: 1024,
-        max_shrink_iters: 4096,
-        failure_persistence: Some(Box::new(FileFailurePersistence::WithSource(
-            "regressions",
-        ))),
-        .. ProptestConfig::default()
-    })]
+    // cases=0 skips fresh generation; proptest still replays every seed in
+    // `panic.regressions` before checking the case count, so this acts as
+    // a regression test for known panics.
+    #![proptest_config(persistence_config(0, 0))]
+
+    #[test]
+    fn known_regressions_do_not_panic(program in arb_program()) {
+        run_with_timeout(program);
+    }
+}
+
+proptest! {
+    #![proptest_config(persistence_config(1024, 4096))]
 
     #[test]
     #[ignore = "fuzz test; opt-in via `cargo test ... -- --ignored`"]
-    fn no_panic_on_random_tokens(program in arb_program()) {
+    fn fuzz_random_tokens(program in arb_program()) {
         run_with_timeout(program);
     }
 }
