@@ -1578,8 +1578,10 @@ name = "proptest_tests"
 version = "0.3.0"
 dependencies = [
  "ndc_analyser",
+ "ndc_core",
  "ndc_lexer",
  "ndc_parser",
+ "ndc_stdlib",
  "ndc_vm",
  "num",
  "proptest",
