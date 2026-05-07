@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["ndc_macros", "ndc_bin", "ndc_core", "ndc_analyser", "ndc_interpreter", "ndc_vm", "ndc_lsp", "ndc_lexer", "ndc_parser", "ndc_stdlib", "benches", "tests", "compiler_tests"]
+members = ["ndc_macros", "ndc_bin", "ndc_core", "ndc_analyser", "ndc_interpreter", "ndc_vm", "ndc_lsp", "ndc_lexer", "ndc_parser", "ndc_stdlib", "benches", "tests/functional", "tests/compiler", "tests/proptest"]
 
 [profile.release-with-debug]
 inherits = "release"
@@ -33,6 +33,7 @@ ndc_stdlib = { path = "ndc_stdlib", version = "0.3.0" }
 num = "0.4.3"
 once_cell = "1.21.3"
 ordered-float = "5.1.0"
+proptest = "1.8"
 yansi = { version = "1.0.1", features = ["detect-tty", "detect-env"] }
 rand = "0.10.0"
 rand_chacha = "0.10.0"
