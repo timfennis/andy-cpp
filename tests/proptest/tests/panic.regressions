@@ -4,3 +4,4 @@
 #
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
+cc 50438352354e375bdee77e3a649ee19200ed77839b009f4ab76f4a782807be98 # shrinks to program = [2] a not
