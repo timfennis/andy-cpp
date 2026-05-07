@@ -1,0 +1,12 @@
+[package]
+name = "proptest_tests"
+edition.workspace = true
+version.workspace = true
+
+[dev-dependencies]
+ndc_analyser.workspace = true
+ndc_lexer.workspace = true
+ndc_parser.workspace = true
+ndc_vm.workspace = true
+num.workspace = true
+proptest.workspace = true

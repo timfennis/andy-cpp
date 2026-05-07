@@ -97,15 +97,12 @@ Source → [Lexer] → Tokens → [Parser] → AST → [Analyser] → Annotated 
 
 ### Test Infrastructure
 
-The `tests` crate auto-generates one test function per `.ndc` file at build time via `tests/build.rs`. For every `.ndc` file under `tests/programs/`, a single Rust test function is generated:
-- `test_<path>` — runs via `Interpreter::run_str` (VM)
+Test crates live under `tests/`:
 
-Test directives are comments inside `.ndc` files:
-```ndc
-// expect-output: 42      ← assert stdout equals this
-// expect-error: divide   ← assert error message contains this substring
-```
-
-### Compiler Tests
-
-`compiler_tests/` validates the bytecode compiler by asserting exact `OpCode` sequences. Use these when adding new VM instructions.
+- `tests/functional/` (`functional_tests`) — `.ndc` integration tests and REPL tests. `build.rs` auto-generates one Rust `#[test]` per `.ndc` file under `tests/functional/programs/`, runs via `Interpreter::eval` (VM). Test directives in `.ndc` files:
+  ```ndc
+  // expect-output: 42      ← assert stdout equals this
+  // expect-error: divide   ← assert error message contains this substring
+  ```
+- `tests/compiler/` (`compiler_tests`) — validates the bytecode compiler by asserting exact `OpCode` sequences. Use when adding new VM instructions.
+- `tests/proptest/` (`proptest_tests`) — property-based panic fuzzer over random token streams. The fresh-fuzz test is `#[ignore]`d; regression replay (from `panic.regressions`) runs by default. See [CONTRIBUTING.md](CONTRIBUTING.md) for run commands.

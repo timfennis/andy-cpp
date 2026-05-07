@@ -1,5 +1,5 @@
 [package]
-name = "tests"
+name = "functional_tests"
 edition.workspace = true
 version.workspace = true
 
@@ -7,11 +7,3 @@ version.workspace = true
 ndc_interpreter.workspace = true
 ndc_stdlib.workspace = true
 yansi.workspace = true
-
-[[test]]
-name = "ndc_tests"
-path = "src/programs.rs"
-
-[[test]]
-name = "repl"
-path = "src/repl.rs"
