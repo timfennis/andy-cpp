@@ -1,0 +1,7 @@
+// Found by the panic.rs proptest fuzzer with stdlib loaded.
+// `2 ^ i128::MAX` would call num::pow::Pow on a multi-billion-bit
+// magnitude, hanging the VM indefinitely. Now bails with an error
+// instead of computing a result that wouldn't fit in any reasonable
+// amount of memory.
+// expect-error: exponent too large
+print(-2 ^ 170141183460469231731687303715884105727)
