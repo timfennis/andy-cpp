@@ -119,7 +119,59 @@ fn walk_expression(visitor: &mut impl AstVisitor, expr: &ExpressionLocation) {
             }
         }
         Expression::Return { value } => walk_expression(visitor, value),
-        _ => {}
+        Expression::Logical { left, right, .. } => {
+            walk_expression(visitor, left);
+            walk_expression(visitor, right);
+        }
+        Expression::Assignment { l_value, r_value }
+        | Expression::OpAssignment {
+            l_value, r_value, ..
+        } => {
+            walk_lvalue(visitor, l_value, false);
+            walk_expression(visitor, r_value);
+        }
+        Expression::Call {
+            function,
+            arguments,
+        } => {
+            walk_expression(visitor, function);
+            for arg in arguments {
+                walk_expression(visitor, arg);
+            }
+        }
+        Expression::Tuple { values } | Expression::List { values } => {
+            for v in values {
+                walk_expression(visitor, v);
+            }
+        }
+        Expression::Map { values, default } => {
+            for (key, value) in values {
+                walk_expression(visitor, key);
+                if let Some(v) = value {
+                    walk_expression(visitor, v);
+                }
+            }
+            if let Some(d) = default {
+                walk_expression(visitor, d);
+            }
+        }
+        Expression::RangeInclusive { start, end } | Expression::RangeExclusive { start, end } => {
+            if let Some(s) = start {
+                walk_expression(visitor, s);
+            }
+            if let Some(e) = end {
+                walk_expression(visitor, e);
+            }
+        }
+        Expression::Identifier { .. }
+        | Expression::BoolLiteral(_)
+        | Expression::StringLiteral(_)
+        | Expression::Int64Literal(_)
+        | Expression::Float64Literal(_)
+        | Expression::BigIntLiteral(_)
+        | Expression::ComplexLiteral(_)
+        | Expression::Break
+        | Expression::Continue => {}
     }
 }
 
@@ -138,6 +190,9 @@ fn walk_lvalue(visitor: &mut impl AstVisitor, lvalue: &Lvalue, has_annotation: b
                 walk_lvalue(visitor, lv, has_annotation);
             }
         }
-        Lvalue::Index { .. } => {}
+        Lvalue::Index { value, index, .. } => {
+            walk_expression(visitor, value);
+            walk_expression(visitor, index);
+        }
     }
 }
