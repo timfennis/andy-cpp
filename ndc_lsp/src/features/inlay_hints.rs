@@ -174,4 +174,20 @@ mod tests {
             )
         );
     }
+
+    #[test]
+    fn lambda_inside_call_gets_return_type_inlay() {
+        let info = collect_hints("[1,2,3].map(fn(y) => y / 2.0);");
+        assert!(info.hints.iter().any(
+            |hint| matches!(&hint.label, InlayHintLabel::String(label) if label.starts_with(" -> "))
+        ));
+    }
+
+    #[test]
+    fn lambda_inside_list_literal_gets_return_type_inlay() {
+        let info = collect_hints("let fns = [fn(x) => x + 1];");
+        assert!(info.hints.iter().any(
+            |hint| matches!(&hint.label, InlayHintLabel::String(label) if label.starts_with(" -> "))
+        ));
+    }
 }
