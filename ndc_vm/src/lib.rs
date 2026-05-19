@@ -13,7 +13,9 @@ pub use vm::*;
 
 pub use compiler::CompileError;
 pub use error::VmError;
-pub use iterator::{CombinationsIter, RepeatIter, SharedIterator, TakeIter, VmIterator};
+pub use iterator::{
+    CombinationsIter, EnumerateIter, RepeatIter, SharedIterator, TakeIter, VmIterator,
+};
 pub use value::*;
 
 #[cfg(test)]

@@ -5,7 +5,7 @@ use ndc_core::compare::FallibleOrd;
 use ndc_macros::export_module;
 use ndc_vm::VmCallable;
 use ndc_vm::value::{Object, SeqValue, Value};
-use ndc_vm::{CombinationsIter, TakeIter};
+use ndc_vm::{CombinationsIter, EnumerateIter, TakeIter};
 use std::cmp::Ordering;
 
 fn try_sort_by<E>(
@@ -334,16 +334,12 @@ mod inner {
         }
     }
 
-    /// Enumerates the given sequence returning a list of tuples where the first element of the tuple is the index of the element in the input sequence.
-    #[function(return_type = Vec<_>)]
+    /// Returns a lazy iterator yielding `(index, value)` tuples for each element of `seq`.
+    #[function(return_type = Iterator<Value>)]
     pub fn enumerate(seq: SeqValue) -> anyhow::Result<Value> {
-        Ok(Value::list(
-            seq.try_into_iter()
-                .ok_or_else(|| anyhow!("enumerate requires a sequence"))?
-                .enumerate()
-                .map(|(i, v)| Value::tuple(vec![Value::Int(i as i64), v]))
-                .collect(),
-        ))
+        let iter =
+            EnumerateIter::new(seq).ok_or_else(|| anyhow!("enumerate requires a sequence"))?;
+        Ok(Value::iterator(iter.into_shared()))
     }
 
     /// Reduces/folds the given sequence using the given combining function and a custom initial value.

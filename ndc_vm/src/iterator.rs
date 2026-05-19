@@ -574,6 +574,58 @@ impl VmIterator for TakeIter {
     }
 }
 
+/// Pairs each upstream element with its 0-based index, lazily.
+///
+/// `deep_copy` is supported when the source is a `Shared` iterator. It returns
+/// `None` for eager sources (list/deque/map `IntoIter`s) since those lack a
+/// copy mechanism — same constraint as [`TakeIter`].
+pub struct EnumerateIter {
+    source: ValueIter,
+    index: usize,
+}
+
+impl EnumerateIter {
+    /// Returns `None` if `value` is not iterable.
+    pub fn new(value: Value) -> Option<Self> {
+        Some(Self {
+            source: value.try_into_iter()?,
+            index: 0,
+        })
+    }
+
+    pub fn into_shared(self) -> SharedIterator {
+        Rc::new(RefCell::new(self))
+    }
+}
+
+impl VmIterator for EnumerateIter {
+    fn next(&mut self) -> Option<Value> {
+        let v = self.source.next()?;
+        let i = self.index;
+        self.index += 1;
+        Some(Value::tuple(vec![Value::Int(i as i64), v]))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match &self.source {
+            ValueIter::Shared(s) => s.borrow().size_hint(),
+            ValueIter::List(it) => it.size_hint(),
+            ValueIter::Deque(it) => it.size_hint(),
+            ValueIter::Map(it) => it.size_hint(),
+        }
+    }
+
+    fn deep_copy(&self) -> Option<SharedIterator> {
+        let ValueIter::Shared(shared) = &self.source else {
+            return None;
+        };
+        Some(Rc::new(RefCell::new(Self {
+            source: ValueIter::Shared(shared.borrow().deep_copy()?),
+            index: self.index,
+        })))
+    }
+}
+
 /// Iterates over string characters, yielding each as a single-char string
 pub struct StringIter {
     string: Rc<RefCell<String>>,
