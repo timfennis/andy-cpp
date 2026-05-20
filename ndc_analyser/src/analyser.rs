@@ -479,42 +479,6 @@ impl Analyser {
         }
     }
 
-    /// Returns the tuple length a vectorized call would produce, if `left` and
-    /// `right` together have a shape the VM's vectorized fallback could handle:
-    /// two equal-length tuples, or one tuple and one scalar. `Any` is treated
-    /// as a potentially-numeric element / scalar — at static-analysis time we
-    /// don't know what it holds, so we stay permissive and let the dynamic
-    /// dispatch decide at runtime.
-    fn maybe_vectorize_len(left: &StaticType, right: &StaticType) -> Option<usize> {
-        fn could_be_number(t: &StaticType) -> bool {
-            t.is_number() || matches!(t, StaticType::Any)
-        }
-        fn tuple_of_potential_numbers(t: &StaticType) -> Option<usize> {
-            match t {
-                StaticType::Tuple(elems)
-                    if !elems.is_empty() && elems.iter().all(could_be_number) =>
-                {
-                    Some(elems.len())
-                }
-                _ => None,
-            }
-        }
-        match (left, right) {
-            (StaticType::Tuple(_), StaticType::Tuple(_)) => {
-                let l = tuple_of_potential_numbers(left)?;
-                let r = tuple_of_potential_numbers(right)?;
-                (l == r).then_some(l)
-            }
-            (StaticType::Tuple(_), other) => {
-                tuple_of_potential_numbers(left).filter(|_| could_be_number(other))
-            }
-            (other, StaticType::Tuple(_)) => {
-                tuple_of_potential_numbers(right).filter(|_| could_be_number(other))
-            }
-            _ => None,
-        }
-    }
-
     fn resolve_function_with_argument_types(
         &mut self,
         ident: &mut ExpressionLocation,
@@ -546,35 +510,18 @@ impl Analyser {
             }
             Binding::Resolved(res) => self.scope_tree.get_type(*res).clone(),
 
-            Binding::Dynamic(candidates) => {
-                // Mirror the VM's vectorized fallback (see `Vm::try_vectorized_call`):
-                // a binary call on a tuple-shaped argument may produce a tuple at
-                // runtime, even though no declared overload returns one. Preserve
-                // that shape so chained ops like `(a - b) * (a - b)` stay on the
-                // dynamic-dispatch path instead of resolving to a numeric overload
-                // that the value doesn't actually fit. `Any` is treated as a
-                // potentially-numeric element so tuples whose elements come from
-                // stdlib natives (which infer to `Any`) are also caught.
-                let vectorized_return = (argument_types.len() == 2)
-                    .then(|| Self::maybe_vectorize_len(&argument_types[0], &argument_types[1]))
-                    .flatten()
-                    .map(|len| StaticType::Tuple(vec![StaticType::Number; len]));
-
-                let return_type = vectorized_return.unwrap_or_else(|| {
-                    candidates
-                        .iter()
-                        .map(|c| self.scope_tree.get_type(*c).clone())
-                        .filter_map(|t| match t {
-                            StaticType::Function { return_type, .. } => Some(*return_type),
-                            _ => None,
-                        })
-                        .reduce(|a, b| a.lub(&b))
-                        .unwrap_or(StaticType::Any)
-                });
-
+            Binding::Dynamic(_) => {
+                // Dispatch is decided at runtime, so we have no sound static bound
+                // on the result. The runtime may pick a declared overload or fall
+                // through to elementwise (vectorized) dispatch, which can produce
+                // a value no declared overload returns — treating the LUB of
+                // declared returns as the result type is unsound and led to issue
+                // #139, where `let diff = a - b` over tuples was inferred as
+                // `Number` and a follow-up `diff * diff` then matched the numeric
+                // overload directly and bypassed dynamic dispatch entirely.
                 StaticType::Function {
                     parameters: None,
-                    return_type: Box::new(return_type),
+                    return_type: Box::new(StaticType::Any),
                 }
             }
         };
