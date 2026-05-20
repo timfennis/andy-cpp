@@ -1,0 +1,17 @@
+// BUG#0021 (issue #139): vectorized tuple arithmetic broke when the result
+// of one tuple op was fed into another. The analyser inferred the result of
+// `a - b` as `Number` (the LUB of the dynamic candidates' return types), so
+// `diff * diff` resolved statically to a `(Number, Number) -> Number`
+// overload via `Binding::Resolved` and bypassed OverloadSet dispatch — and
+// therefore the VM's vectorized fallback. The native then bailed with
+// "expected number, got Tuple<Int, Int, Int>".
+let a = (1, 2, 3);
+let b = (4, 5, 6);
+
+assert_eq(a * b, (4, 10, 18));
+
+let diff = a - b;
+assert_eq(diff, (-3, -3, -3));
+assert_eq(diff * diff, (9, 9, 9));
+
+assert_eq((a - b) * (a - b), (9, 9, 9));
