@@ -15,3 +15,15 @@ assert_eq(diff, (-3, -3, -3));
 assert_eq(diff * diff, (9, 9, 9));
 
 assert_eq((a - b) * (a - b), (9, 9, 9));
+
+// Same hazard but the tuple elements are statically `Any`. `id` here erases
+// type information so the tuples below are `Tuple<Any, Any, Any>`; this
+// mirrors what happens with stdlib natives whose `Value` return type infers
+// to `Any`. The vectorization detection must treat `Any` as a potentially-
+// numeric element so chained ops still go through dynamic dispatch.
+fn id(x) -> Any => x;
+let av = (id(1), id(2), id(3));
+let bv = (id(4), id(5), id(6));
+let cv = av - bv;
+assert_eq(cv, (-3, -3, -3));
+assert_eq(cv * cv, (9, 9, 9));

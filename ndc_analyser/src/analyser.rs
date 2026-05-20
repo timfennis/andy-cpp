@@ -479,6 +479,42 @@ impl Analyser {
         }
     }
 
+    /// Returns the tuple length a vectorized call would produce, if `left` and
+    /// `right` together have a shape the VM's vectorized fallback could handle:
+    /// two equal-length tuples, or one tuple and one scalar. `Any` is treated
+    /// as a potentially-numeric element / scalar — at static-analysis time we
+    /// don't know what it holds, so we stay permissive and let the dynamic
+    /// dispatch decide at runtime.
+    fn maybe_vectorize_len(left: &StaticType, right: &StaticType) -> Option<usize> {
+        fn could_be_number(t: &StaticType) -> bool {
+            t.is_number() || matches!(t, StaticType::Any)
+        }
+        fn tuple_of_potential_numbers(t: &StaticType) -> Option<usize> {
+            match t {
+                StaticType::Tuple(elems)
+                    if !elems.is_empty() && elems.iter().all(could_be_number) =>
+                {
+                    Some(elems.len())
+                }
+                _ => None,
+            }
+        }
+        match (left, right) {
+            (StaticType::Tuple(_), StaticType::Tuple(_)) => {
+                let l = tuple_of_potential_numbers(left)?;
+                let r = tuple_of_potential_numbers(right)?;
+                (l == r).then_some(l)
+            }
+            (StaticType::Tuple(_), other) => {
+                tuple_of_potential_numbers(left).filter(|_| could_be_number(other))
+            }
+            (other, StaticType::Tuple(_)) => {
+                tuple_of_potential_numbers(right).filter(|_| could_be_number(other))
+            }
+            _ => None,
+        }
+    }
+
     fn resolve_function_with_argument_types(
         &mut self,
         ident: &mut ExpressionLocation,
@@ -512,24 +548,17 @@ impl Analyser {
 
             Binding::Dynamic(candidates) => {
                 // Mirror the VM's vectorized fallback (see `Vm::try_vectorized_call`):
-                // a binary call on tuple-of-number arguments produces a tuple at
+                // a binary call on a tuple-shaped argument may produce a tuple at
                 // runtime, even though no declared overload returns one. Preserve
                 // that shape so chained ops like `(a - b) * (a - b)` stay on the
                 // dynamic-dispatch path instead of resolving to a numeric overload
-                // that the value doesn't actually fit.
-                let vectorized_return = if argument_types.len() == 2
-                    && argument_types[0].supports_vectorization_with(&argument_types[1])
-                {
-                    let len = match (&argument_types[0], &argument_types[1]) {
-                        (StaticType::Tuple(l), StaticType::Tuple(r)) => l.len().max(r.len()),
-                        (StaticType::Tuple(l), _) => l.len(),
-                        (_, StaticType::Tuple(r)) => r.len(),
-                        _ => unreachable!("supports_vectorization_with requires a tuple side"),
-                    };
-                    Some(StaticType::Tuple(vec![StaticType::Number; len]))
-                } else {
-                    None
-                };
+                // that the value doesn't actually fit. `Any` is treated as a
+                // potentially-numeric element so tuples whose elements come from
+                // stdlib natives (which infer to `Any`) are also caught.
+                let vectorized_return = (argument_types.len() == 2)
+                    .then(|| Self::maybe_vectorize_len(&argument_types[0], &argument_types[1]))
+                    .flatten()
+                    .map(|len| StaticType::Tuple(vec![StaticType::Number; len]));
 
                 let return_type = vectorized_return.unwrap_or_else(|| {
                     candidates
