@@ -1,0 +1,8 @@
+// Common pattern: iterate every element with its index.
+// Lazy version avoids allocating an intermediate list of tuples.
+let xs = list(0..500_000);
+let acc = 0;
+for (i, v) in xs.enumerate() {
+    acc += i + v;
+}
+print(acc);

@@ -1,6 +1,12 @@
 let my_list = ["Foo", "Bar", "Baz"];
-let out = my_list.enumerate();
+let out = my_list.enumerate().list();
 
 assert_eq(out[0], (0, "Foo"));
 assert_eq(out[1], (1, "Bar"));
 assert_eq(out[2], (2, "Baz"));
+
+// Laziness: enumerating an unbounded range and taking is finite.
+assert_eq((0..).enumerate().take(3).list(), [(0, 0), (1, 1), (2, 2)]);
+
+// Enumeration composes with iterator combinators.
+assert_eq([10, 20, 30].enumerate().map(fn(p) { p[0] + p[1] }), [10, 21, 32]);
