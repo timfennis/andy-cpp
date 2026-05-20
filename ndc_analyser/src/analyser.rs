@@ -511,15 +511,37 @@ impl Analyser {
             Binding::Resolved(res) => self.scope_tree.get_type(*res).clone(),
 
             Binding::Dynamic(candidates) => {
-                let return_type = candidates
-                    .iter()
-                    .map(|c| self.scope_tree.get_type(*c).clone())
-                    .filter_map(|t| match t {
-                        StaticType::Function { return_type, .. } => Some(*return_type),
-                        _ => None,
-                    })
-                    .reduce(|a, b| a.lub(&b))
-                    .unwrap_or(StaticType::Any);
+                // Mirror the VM's vectorized fallback (see `Vm::try_vectorized_call`):
+                // a binary call on tuple-of-number arguments produces a tuple at
+                // runtime, even though no declared overload returns one. Preserve
+                // that shape so chained ops like `(a - b) * (a - b)` stay on the
+                // dynamic-dispatch path instead of resolving to a numeric overload
+                // that the value doesn't actually fit.
+                let vectorized_return = if argument_types.len() == 2
+                    && argument_types[0].supports_vectorization_with(&argument_types[1])
+                {
+                    let len = match (&argument_types[0], &argument_types[1]) {
+                        (StaticType::Tuple(l), StaticType::Tuple(r)) => l.len().max(r.len()),
+                        (StaticType::Tuple(l), _) => l.len(),
+                        (_, StaticType::Tuple(r)) => r.len(),
+                        _ => unreachable!("supports_vectorization_with requires a tuple side"),
+                    };
+                    Some(StaticType::Tuple(vec![StaticType::Number; len]))
+                } else {
+                    None
+                };
+
+                let return_type = vectorized_return.unwrap_or_else(|| {
+                    candidates
+                        .iter()
+                        .map(|c| self.scope_tree.get_type(*c).clone())
+                        .filter_map(|t| match t {
+                            StaticType::Function { return_type, .. } => Some(*return_type),
+                            _ => None,
+                        })
+                        .reduce(|a, b| a.lub(&b))
+                        .unwrap_or(StaticType::Any)
+                });
 
                 StaticType::Function {
                     parameters: None,
