@@ -1,0 +1,5 @@
+// Lazy enumerate should win big: only the first 10 tuples are needed,
+// but the eager version allocates a full Vec of 1_000_000 tuples first.
+let xs = list(0..1_000_000);
+let head = xs.enumerate().take(10).list();
+print(head.len);
