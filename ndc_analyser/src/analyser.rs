@@ -510,20 +510,18 @@ impl Analyser {
             }
             Binding::Resolved(res) => self.scope_tree.get_type(*res).clone(),
 
-            Binding::Dynamic(candidates) => {
-                let return_type = candidates
-                    .iter()
-                    .map(|c| self.scope_tree.get_type(*c).clone())
-                    .filter_map(|t| match t {
-                        StaticType::Function { return_type, .. } => Some(*return_type),
-                        _ => None,
-                    })
-                    .reduce(|a, b| a.lub(&b))
-                    .unwrap_or(StaticType::Any);
-
+            Binding::Dynamic(_) => {
+                // Dispatch is decided at runtime, so we have no sound static bound
+                // on the result. The runtime may pick a declared overload or fall
+                // through to elementwise (vectorized) dispatch, which can produce
+                // a value no declared overload returns — treating the LUB of
+                // declared returns as the result type is unsound and led to issue
+                // #139, where `let diff = a - b` over tuples was inferred as
+                // `Number` and a follow-up `diff * diff` then matched the numeric
+                // overload directly and bypassed dynamic dispatch entirely.
                 StaticType::Function {
                     parameters: None,
-                    return_type: Box::new(return_type),
+                    return_type: Box::new(StaticType::Any),
                 }
             }
         };
