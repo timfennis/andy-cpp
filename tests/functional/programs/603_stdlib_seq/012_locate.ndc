@@ -1,0 +1,7 @@
+// Element-equality overload: find the index of a value.
+assert_eq(locate([1, 2, 3], 2), 1);
+assert_eq(locate(["a", "b", "c"], "c"), 2);
+
+// Predicate overload: find the first index matching a function.
+assert_eq(locate([1, 2, 3], fn(x) => x == 2), 1);
+assert_eq(locate([10, 20, 30, 40], fn(x) => x > 25), 2);

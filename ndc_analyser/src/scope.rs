@@ -47,6 +47,27 @@ struct ScalarWalk {
     all_by_name: Vec<ResolvedVar>,
 }
 
+/// Returns `true` iff `more` is a strict subtype of `less` pointwise — i.e.
+/// every position satisfies `more[i] <: less[i]` and at least one position is
+/// not bidirectionally equivalent. Used by [`Scope::find_function`] to order
+/// matching overloads by specificity: an overload with `more` parameters
+/// accepts strictly fewer call signatures than one with `less` parameters.
+fn is_strictly_more_specific(more: &[StaticType], less: &[StaticType]) -> bool {
+    if more.len() != less.len() {
+        return false;
+    }
+    let mut any_strict = false;
+    for (m, l) in more.iter().zip(less) {
+        if !m.is_subtype(l) {
+            return false;
+        }
+        if !l.is_subtype(m) {
+            any_strict = true;
+        }
+    }
+    any_strict
+}
+
 /// If every per-position candidate list contains exactly one entry and they
 /// all point to the same scalar overload, return it. This is the only case
 /// where `Binding::Resolved(Candidate::Vec)` is safe to emit: a single scalar
@@ -205,10 +226,71 @@ impl Scope {
             .map(|idx| idx + self.base_offset)
             .collect()
     }
+    /// Find the best-matching overload in this scope for a call of the given
+    /// signature, or `None` if no overload in this scope accepts the call.
+    ///
+    /// Resolution proceeds in two stages:
+    ///   1. Filter to overloads whose declared signature accepts `find_types`
+    ///      (the usual subtype check via [`StaticType::is_fn_and_matches`]).
+    ///   2. Among the survivors, pick the one whose parameter signature is
+    ///      most specific — i.e. not strictly dominated by any other match's
+    ///      parameter signature in the subtype partial order. A signature `b`
+    ///      strictly dominates `a` when `b <: a` and `a` is not `<: b`.
+    ///
+    /// Variadic overloads (`parameters: None`) match anything but are treated
+    /// as the least specific shape: any concrete overload that also matches
+    /// will dominate them.
+    ///
+    /// When multiple undominated overloads remain (genuinely incomparable
+    /// shapes, e.g. `fn(Int, Any)` vs `fn(Any, Int)` called with `(Int, Int)`),
+    /// the latest-registered one wins — preserving shadow semantics.
     fn find_function(&self, find_ident: &str, find_types: &[StaticType]) -> Option<usize> {
-        self.identifiers
+        let matches: Vec<usize> = self
+            .identifiers
             .iter()
-            .rposition(|b| b.name == find_ident && b.binding.typ().is_fn_and_matches(find_types))
+            .enumerate()
+            .filter_map(|(idx, b)| {
+                (b.name == find_ident && b.binding.typ().is_fn_and_matches(find_types))
+                    .then_some(idx)
+            })
+            .collect();
+
+        if matches.is_empty() {
+            return None;
+        }
+
+        let params_of = |idx: usize| -> Option<&[StaticType]> {
+            match self.identifiers[idx].binding.typ() {
+                StaticType::Function {
+                    parameters: Some(p),
+                    ..
+                } => Some(p.as_slice()),
+                // Variadic / non-function bindings have no concrete shape.
+                _ => None,
+            }
+        };
+
+        // Iterate latest-first so ties resolve to the most-recently registered overload.
+        matches
+            .iter()
+            .rev()
+            .copied()
+            .find(|&i| {
+                let Some(pi) = params_of(i) else {
+                    // Variadic only wins if every other match is also variadic.
+                    return matches.iter().all(|&j| params_of(j).is_none());
+                };
+                matches.iter().all(|&j| {
+                    if i == j {
+                        return true;
+                    }
+                    let Some(pj) = params_of(j) else {
+                        // Variadic never dominates a concrete overload.
+                        return true;
+                    };
+                    !is_strictly_more_specific(pj, pi)
+                })
+            })
             .map(|idx| idx + self.base_offset)
     }
 
@@ -1207,5 +1289,144 @@ mod tests {
         // middle should still have exactly one upvalue entry
         let middle_idx = tree.current_scope_idx;
         assert_eq!(tree.scopes[middle_idx].upvalues.len(), 1);
+    }
+
+    fn fn_type(params: Vec<StaticType>, ret: StaticType) -> StaticType {
+        StaticType::Function {
+            parameters: Some(params),
+            return_type: Box::new(ret),
+        }
+    }
+
+    fn variadic_fn(ret: StaticType) -> StaticType {
+        StaticType::Function {
+            parameters: None,
+            return_type: Box::new(ret),
+        }
+    }
+
+    fn assert_resolves_to(tree: &mut ScopeTree, name: &str, sig: &[StaticType], slot: usize) {
+        let resolved = tree.resolve_call(name, sig, CallKind::Regular);
+        match resolved.binding {
+            Binding::Resolved(Candidate::Scalar(ResolvedVar::Global { slot: s })) => {
+                assert_eq!(s, slot, "expected global slot {slot} for {name}, got {s}");
+            }
+            Binding::Resolved(Candidate::Scalar(ResolvedVar::Local { slot: s })) => {
+                assert_eq!(s, slot, "expected local slot {slot} for {name}, got {s}");
+            }
+            other => panic!("expected Resolved Scalar, got {other:?}"),
+        }
+    }
+
+    // Two overloads of `locate` registered in the same scope: a more-specific
+    // predicate version (takes a function) and a less-specific element version
+    // (takes any value). When called with a function value, the predicate
+    // version must win even though the element version was registered later.
+    #[test]
+    fn more_specific_overload_wins_in_same_scope() {
+        let seq_any = StaticType::Sequence(Box::new(StaticType::Any));
+        let fn_any = variadic_fn(StaticType::Any);
+        let mut tree = ScopeTree::from_global_scope(vec![
+            (
+                "locate".into(),
+                fn_type(vec![seq_any.clone(), fn_any.clone()], StaticType::Any),
+            ),
+            (
+                "locate".into(),
+                fn_type(vec![seq_any.clone(), StaticType::Any], StaticType::Any),
+            ),
+        ]);
+
+        let call_sig = [
+            StaticType::List(Box::new(StaticType::Int)),
+            fn_type(vec![StaticType::Any], StaticType::Bool),
+        ];
+        // Slot 0 is the predicate version; it must win over slot 1 (element).
+        assert_resolves_to(&mut tree, "locate", &call_sig, 0);
+    }
+
+    // From the spec: distance(fn(Int) -> String, fn(Number) -> String) = 1.
+    // When two overloads in the same scope both match, the one whose params
+    // are a strict subtype (here `Int` is a subtype of `Number`) wins.
+    #[test]
+    fn more_specific_numeric_overload_wins() {
+        let mut tree = ScopeTree::from_global_scope(vec![
+            (
+                "foo".into(),
+                fn_type(vec![StaticType::Number], StaticType::String),
+            ),
+            (
+                "foo".into(),
+                fn_type(vec![StaticType::Int], StaticType::String),
+            ),
+        ]);
+        assert_resolves_to(&mut tree, "foo", &[StaticType::Int], 1);
+    }
+
+    // `fn foo(Any)` declared in an inner scope matches every call shape, so
+    // it completely shadows any `foo` overload in the parent scope — even a
+    // more-specific one. The walk must stop at the first scope with a match.
+    #[test]
+    fn inner_any_overload_shadows_parent() {
+        let mut tree = ScopeTree::from_global_scope(vec![(
+            "foo".into(),
+            fn_type(vec![StaticType::Int], StaticType::Int),
+        )]);
+
+        // Push an inner scope holding `foo(Any) -> Any`.
+        tree.new_block_scope();
+        let inner_var = tree.create_local_binding(
+            "foo".into(),
+            TypeBinding::Inferred(fn_type(vec![StaticType::Any], StaticType::Any)),
+        );
+        let ResolvedVar::Local { slot: inner_slot } = inner_var else {
+            panic!("expected local binding");
+        };
+
+        // Called with `Int`: inner `foo(Any)` matches and shadows the global.
+        let resolved = tree.resolve_call("foo", &[StaticType::Int], CallKind::Regular);
+        match resolved.binding {
+            Binding::Resolved(Candidate::Scalar(ResolvedVar::Local { slot })) => {
+                assert_eq!(
+                    slot, inner_slot,
+                    "inner foo(Any) must shadow global foo(Int)"
+                );
+            }
+            other => panic!("expected inner local resolution, got {other:?}"),
+        }
+    }
+
+    // `fn foo(Int)` in an inner scope only matches `Int` calls; calls with a
+    // different argument type must fall through to the parent scope's overload.
+    #[test]
+    fn inner_int_overload_does_not_shadow_other_types() {
+        let mut tree = ScopeTree::from_global_scope(vec![(
+            "foo".into(),
+            fn_type(vec![StaticType::Any], StaticType::Int),
+        )]);
+
+        tree.new_block_scope();
+        tree.create_local_binding(
+            "foo".into(),
+            TypeBinding::Inferred(fn_type(vec![StaticType::Int], StaticType::Int)),
+        );
+
+        // Called with `String`: inner `foo(Int)` doesn't match, falls through
+        // to the global `foo(Any)`.
+        assert_resolves_to(&mut tree, "foo", &[StaticType::String], 0);
+    }
+
+    // A concrete overload should beat a variadic overload registered in the
+    // same scope when both match the call.
+    #[test]
+    fn concrete_overload_beats_variadic() {
+        let mut tree = ScopeTree::from_global_scope(vec![
+            ("foo".into(), variadic_fn(StaticType::Any)),
+            (
+                "foo".into(),
+                fn_type(vec![StaticType::Int], StaticType::Int),
+            ),
+        ]);
+        assert_resolves_to(&mut tree, "foo", &[StaticType::Int], 1);
     }
 }
