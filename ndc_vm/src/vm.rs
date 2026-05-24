@@ -498,28 +498,30 @@ impl Vm {
                     // and before `capture_upvalue` needs `&mut self`.
                     let idx = *idx;
                     let values = Rc::clone(values);
-                    let frame = self.frames.last().expect("no frame");
-                    let Value::Object(obj) = frame.closure.prototype.body.constant(idx) else {
-                        panic!("Closure opcode: constant at index {idx} is not an Object");
+                    let (compiled, frame_pointer) = {
+                        let frame = self.frames.last().expect("no frame");
+                        let Value::Object(obj) = frame.closure.prototype.body.constant(idx) else {
+                            panic!("Closure opcode: constant at index {idx} is not an Object");
+                        };
+                        let Object::Function(Function::Compiled(compiled)) = &**obj else {
+                            panic!(
+                                "Closure opcode: constant at index {idx} is not a Compiled function"
+                            );
+                        };
+                        (Rc::clone(compiled), frame.frame_pointer)
                     };
-                    let Object::Function(Function::Compiled(compiled)) = &**obj else {
-                        panic!(
-                            "Closure opcode: constant at index {idx} is not a Compiled function"
-                        );
-                    };
-                    let compiled = Rc::clone(compiled);
-                    let frame_pointer = frame.frame_pointer;
-                    // Pre-clone parent upvalue Rcs so we can drop the frame borrow
-                    // before calling capture_upvalue (which needs &mut self).
-                    let parent_upvalues: Vec<_> =
-                        frame.closure.upvalues.iter().map(Rc::clone).collect();
+                    // Resolve captures lazily: only clone the specific parent upvalue
+                    // Rcs that this closure references, and capture locals on demand.
                     let upvalues = values
                         .iter()
                         .map(|c| match c {
                             CaptureSource::Local(slot) => {
                                 self.capture_upvalue(frame_pointer + slot)
                             }
-                            CaptureSource::Upvalue(slot) => Rc::clone(&parent_upvalues[*slot]),
+                            CaptureSource::Upvalue(slot) => {
+                                let frame = self.frames.last().expect("no frame");
+                                Rc::clone(&frame.closure.upvalues[*slot])
+                            }
                         })
                         .collect();
                     let closure = Value::function(Function::Closure(ClosureFunction {
