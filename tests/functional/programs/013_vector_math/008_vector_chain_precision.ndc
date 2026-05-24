@@ -1,0 +1,13 @@
+// The analyser used to widen any operator call to `Any` after PR #140 to
+// keep dispatch sound, which pessimised every follow-up. With per-binding
+// vec tracking we can pin the result type, so chained operator calls keep
+// dispatching to the precise scalar overload.
+let v = (1, 2) + (3, 4);
+let w = v + (10, 20);
+let x = w * (2, 1);
+assert_eq(x, (28, 26));
+
+// Same chain mixing scalar broadcast with full tuple form.
+let a = (1, 2) + 10;
+let b = a * (3, 4);
+assert_eq(b, (33, 48));

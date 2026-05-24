@@ -1,0 +1,9 @@
+// A regular function call must NOT vec over its tuple argument.
+// `id((1, 2, 3))` returns the tuple verbatim; if vec leaked through
+// regular call syntax this would call `id` element-wise instead.
+fn id(x) { x };
+assert_eq(id((1, 2, 3)), (1, 2, 3));
+
+// Same shape but the argument is a tuple of tuples — proves the call
+// shape isn't being unwrapped.
+assert_eq(id(((1, 2), (3, 4))), ((1, 2), (3, 4)));

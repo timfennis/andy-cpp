@@ -203,17 +203,33 @@ impl Compiler {
                         ..
                     } => {
                         let var = resolved.expect("lvalue must be resolved");
-                        if matches!(resolved_assign_operation, Binding::Resolved(_)) {
-                            // In-place operation (e.g. |=, &=) resolved exactly: modifies
-                            // the value's Rc in place via sync_map_mutations in the bridge,
-                            // so all aliases sharing the Rc see the change. We discard the
-                            // unit return value; the variable slot already holds the
+                        if matches!(resolved_assign_operation, Binding::Resolved(c) if !c.vectorized)
+                        {
+                            // Scalar in-place op= resolved exactly: modifies the value's
+                            // Rc in place via sync_map_mutations in the bridge, so all
+                            // aliases sharing the Rc see the change. We discard the
+                            // return value; the variable slot already holds the
                             // (now-updated) shared reference.
                             self.compile_binding(resolved_assign_operation, span)?;
                             self.emit_get_var(var, lv_span);
                             self.compile_expr(*r_value)?;
                             self.chunk.write(OpCode::Call(2), span);
                             self.chunk.write(OpCode::Pop, span);
+                        } else if matches!(resolved_assign_operation, Binding::Resolved(c) if c.vectorized)
+                        {
+                            // Vec-resolved op=: dispatch_vec_call allocates a fresh
+                            // result tuple whose elements are the per-element scalar
+                            // returns. Store it back so we don't silently lose the
+                            // update if a future scalar op= doesn't mutate through Rc.
+                            // For the current stdlib (List/String ++=, HashMap -=)
+                            // this is functionally equivalent to Pop because the
+                            // element calls already mutated their inputs through Rc;
+                            // the stored tuple just holds those same (now-mutated) Rcs.
+                            self.compile_binding(resolved_assign_operation, span)?;
+                            self.emit_get_var(var, lv_span);
+                            self.compile_expr(*r_value)?;
+                            self.chunk.write(OpCode::Call(2), span);
+                            self.emit_set_var(var, lv_span);
                         } else if let Binding::Dynamic(assign_candidates) =
                             resolved_assign_operation
                         {
@@ -342,6 +358,7 @@ impl Compiler {
             Expression::Call {
                 function,
                 arguments,
+                operator_form: _,
             } => {
                 let function_span = function.span;
                 self.compile_expr(*function)?;
@@ -496,7 +513,19 @@ impl Compiler {
     fn compile_binding(&mut self, resolved: Binding, span: Span) -> Result<(), CompileError> {
         match resolved {
             Binding::None => return Err(CompileError::unresolved_binding(span)),
-            Binding::Resolved(var) => self.emit_get_var(var, span),
+            Binding::Resolved(candidate) => {
+                if candidate.vectorized {
+                    // Vec-resolved candidates flow through the overload-set path so
+                    // the runtime dispatcher can pick the vec entry. The unrolled
+                    // emission optimisation lives behind RFC step 6 (deferred).
+                    let idx = self
+                        .chunk
+                        .add_constant(Value::Object(Rc::new(Object::OverloadSet(vec![candidate]))));
+                    self.chunk.write(OpCode::Constant(idx), span);
+                } else {
+                    self.emit_get_var(candidate.var, span);
+                }
+            }
             Binding::Dynamic(candidates) => {
                 let idx = self
                     .chunk

@@ -123,6 +123,7 @@ fn collect_function_spans(expr: &ExpressionLocation, spans: &mut AHashSet<usize>
         Expression::Call {
             function,
             arguments,
+            ..
         } => {
             if let Expression::Identifier { .. } = &function.expression {
                 spans.insert(function.span.offset());

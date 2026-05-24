@@ -1,0 +1,5 @@
+// expect-error: No function called '+' found that matches the arguments
+// Position 1 has element types `(Bool, Bool)` and `+` has no overload
+// that accepts booleans. The per-position lookup catches this at compile
+// time even though position 0's `(Int, Int)` would resolve cleanly.
+let r = (1, true) + (2, false);

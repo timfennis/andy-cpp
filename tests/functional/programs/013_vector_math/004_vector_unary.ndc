@@ -1,0 +1,9 @@
+// Unary operators broadcast across a tuple.
+assert_eq(-(1, 2, 3), (-1, -2, -3));
+assert_eq(-(1.5, 2.5), (-1.5, -2.5));
+
+// Bitwise negation also vec's.
+assert_eq(~(1, 2, 3), (-2, -3, -4));
+
+// Boolean negation across a tuple of bools.
+assert_eq(!(true, false, true), (false, true, false));

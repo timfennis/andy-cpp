@@ -8,7 +8,7 @@ use ndc_core::compare::FallibleOrd;
 use ndc_core::hash_map::{DefaultHasher, HashMap};
 use ndc_core::int::Int;
 use ndc_core::num::Number;
-use ndc_parser::ResolvedVar;
+use ndc_parser::Candidate;
 use ordered_float::OrderedFloat;
 use std::cell::RefCell;
 use std::cmp::{Ordering, Reverse};
@@ -48,7 +48,7 @@ pub enum Object {
         default: Option<Value>,
     },
     Function(Function),
-    OverloadSet(Vec<ResolvedVar>),
+    OverloadSet(Vec<Candidate>),
     Iterator(SharedIterator),
     Deque(RefCell<VecDeque<Value>>),
     MinHeap(RefCell<BinaryHeap<Reverse<OrdValue>>>),

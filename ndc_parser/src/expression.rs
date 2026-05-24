@@ -22,8 +22,8 @@ impl NodeId {
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Binding {
     None,
-    Resolved(ResolvedVar),
-    Dynamic(Vec<ResolvedVar>), // figure it out at runtime
+    Resolved(Candidate),
+    Dynamic(Vec<Candidate>), // figure it out at runtime
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
@@ -37,6 +37,32 @@ impl ResolvedVar {
     pub fn slot(self) -> usize {
         match self {
             Self::Local { slot } | Self::Upvalue { slot, .. } | Self::Global { slot } => slot,
+        }
+    }
+}
+
+/// A function overload candidate. `vectorized` is set on synthesised vec
+/// variants whose `var` points to the underlying scalar overload's slot.
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
+pub struct Candidate {
+    pub var: ResolvedVar,
+    pub vectorized: bool,
+}
+
+impl Candidate {
+    #[must_use]
+    pub fn scalar(var: ResolvedVar) -> Self {
+        Self {
+            var,
+            vectorized: false,
+        }
+    }
+
+    #[must_use]
+    pub fn vec(var: ResolvedVar) -> Self {
+        Self {
+            var,
+            vectorized: true,
         }
     }
 }
@@ -120,6 +146,8 @@ pub enum Expression {
         /// The function to call, could be an identifier, or any expression that produces a function as its value
         function: Box<ExpressionLocation>,
         arguments: Vec<ExpressionLocation>,
+        /// True when this Call was desugared from operator syntax (`a + b`, `-x`).
+        operator_form: bool,
     },
     Tuple {
         values: Vec<ExpressionLocation>,
@@ -288,6 +316,7 @@ impl Lvalue {
             Expression::Call {
                 function,
                 arguments,
+                ..
             } if is_index_call(function, arguments) => true,
             Expression::List { values } | Expression::Tuple { values } => values
                 .iter()
@@ -316,6 +345,7 @@ impl TryFrom<ExpressionLocation> for Lvalue {
             Expression::Call {
                 function,
                 mut arguments,
+                ..
             } if is_index_call(&function, &arguments) => {
                 let index = arguments.remove(1);
                 let container = arguments.remove(0);

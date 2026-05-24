@@ -8,7 +8,7 @@ use crate::value::{CompiledFunction, Function, NativeFunc};
 use crate::{ClosureFunction, Object, UpvalueCell, Value};
 use ndc_core::hash_map::{DefaultHasher, HashMap};
 use ndc_lexer::Span;
-use ndc_parser::{CaptureSource, ResolvedVar};
+use ndc_parser::{Candidate, CaptureSource, ResolvedVar};
 use std::cell::RefCell;
 use std::hash::{Hash, Hasher};
 use std::io::Write;
@@ -255,16 +255,21 @@ impl Vm {
                 }
                 OpCode::Call(args) => {
                     let args = *args;
-                    if let Some(func) = self
+                    if let Some(callable) = self
                         .resolve_callee(args)
                         .map_err(|msg| VmError::new(msg, span))?
                     {
-                        if let Err(mut e) = self.dispatch_call(func, args) {
+                        let result = match callable {
+                            Callable::Scalar(func) => self.dispatch_call(func, args),
+                            Callable::Vec {
+                                candidates,
+                                axis_len,
+                            } => self.dispatch_vec_call(&candidates, args, axis_len, span),
+                        };
+                        if let Err(mut e) = result {
                             e.span.get_or_insert(span);
                             return Err(e);
                         }
-                    } else if let Some(result) = self.try_vectorized_call(args, span)? {
-                        self.stack.push(result);
                     } else {
                         let arg_types: Vec<_> = self.stack[self.stack.len() - args..]
                             .iter()
@@ -739,14 +744,13 @@ impl Vm {
         }];
     }
 
-    /// Resolves the callee on the stack to a concrete `Function`. Returns `Ok(None)`
-    /// when the callee is an overload set and no candidate matches the argument
-    /// types — the caller should then try a vectorized fallback. Returns `Err` when
-    /// the callee is not callable at all.
-    fn resolve_callee(&self, args: usize) -> Result<Option<Function>, String> {
+    /// Resolves the callee on the stack to a `Callable`. Returns `Ok(None)`
+    /// when the callee is an overload set and no candidate matches the
+    /// argument types. Returns `Err` when the callee is not callable at all.
+    fn resolve_callee(&self, args: usize) -> Result<Option<Callable>, String> {
         match &self.stack[self.stack.len() - args - 1] {
             Value::Object(obj) => match obj.as_ref() {
-                Object::Function(f) => Ok(Some(f.clone())),
+                Object::Function(f) => Ok(Some(Callable::Scalar(f.clone()))),
                 Object::OverloadSet(candidates) => {
                     let start = self.stack.len() - args;
                     Ok(self.find_overload(candidates, &self.stack[start..]))
@@ -771,8 +775,8 @@ impl Vm {
         match &self.stack[self.stack.len() - args - 1] {
             Value::Object(obj) => match obj.as_ref() {
                 Object::Function(f) => f.name().map(str::to_string),
-                Object::OverloadSet(candidates) => candidates.first().and_then(|var| {
-                    let value = self.resolve_var(var, frame_pointer);
+                Object::OverloadSet(candidates) => candidates.first().and_then(|candidate| {
+                    let value = self.resolve_var(&candidate.var, frame_pointer);
                     let Value::Object(obj) = value else {
                         return None;
                     };
@@ -788,91 +792,103 @@ impl Vm {
     }
 
     /// Searches an overload set for the first candidate whose type signature
-    /// accepts the given argument types.
-    fn find_overload(&self, candidates: &[ResolvedVar], args: &[Value]) -> Option<Function> {
+    /// accepts the given argument types. Scalar candidates use direct param
+    /// matching; vec candidates check that every element pair (under tuple
+    /// broadcast) satisfies the underlying scalar's parameter types.
+    fn find_overload(&self, candidates: &[Candidate], args: &[Value]) -> Option<Callable> {
         let frame_pointer = self.frames.last().expect("no frame").frame_pointer;
-        candidates.iter().find_map(|var| {
-            let value = self.resolve_var(var, frame_pointer);
+        let mut vec_scalars: Vec<Function> = Vec::new();
+        for candidate in candidates {
+            let value = self.resolve_var(&candidate.var, frame_pointer);
             let Value::Object(obj) = value else {
-                return None;
+                continue;
             };
             let Object::Function(f) = obj.as_ref() else {
-                return None;
+                continue;
             };
-            f.matches_value_args(args).then(|| f.clone())
+            if candidate.vectorized {
+                vec_scalars.push(f.clone());
+            } else if f.matches_value_args(args) {
+                // Scalars are first-match-wins and take precedence over vec.
+                return Some(Callable::Scalar(f.clone()));
+            }
+        }
+
+        if vec_scalars.is_empty() {
+            return None;
+        }
+        let axis_len = vec_axis_len(args)?;
+        Some(Callable::Vec {
+            candidates: vec_scalars,
+            axis_len,
         })
     }
 
-    /// Applies a binary operator element-wise over numeric tuples.
-    ///
-    /// Returns `Some(result_tuple)` when both arguments (or one argument and
-    /// one scalar) are numeric tuples of compatible shape and an inner function
-    /// can be found for the element types.  Returns `None` when vectorization
-    /// does not apply.
-    fn try_vectorized_call(&mut self, args: usize, span: Span) -> Result<Option<Value>, VmError> {
-        if args != 2 {
-            return Ok(None);
-        }
+    /// Dispatches a vec-resolved call by walking the broadcast axis and
+    /// looking up a scalar overload per element pair. Non-tuple args
+    /// broadcast through unchanged. Element-call errors are wrapped with
+    /// `"while vectorising '<name>' at index N"` to preserve outer-call
+    /// context. When no candidate accepts a given element pair, surfaces
+    /// `"no overload accepts element N: (…)"` so the user sees which
+    /// position failed.
+    fn dispatch_vec_call(
+        &mut self,
+        candidates: &[Function],
+        args: usize,
+        axis_len: usize,
+        span: Span,
+    ) -> Result<(), VmError> {
+        let arg_start = self.stack.len() - args;
+        let callee_name = self.callee_name(args);
 
-        let callee_idx = self.stack.len() - args - 1;
+        // Materialise arg values up front so the stack borrow doesn't conflict
+        // with call_callback's mutable access. Tuples are cheap to clone (Rc
+        // for the values; the Vec is the only fresh allocation).
+        let arg_values: Vec<Value> = self.stack.split_off(arg_start);
+        self.stack.pop(); // clean up the callee
 
-        // Use a block to scope all shared borrows of self.stack so they are
-        // dropped before the &mut self calls (call_callback, truncate) below.
-        let (inner_fn, pairs) = {
-            // P5: borrow candidates rather than cloning the Vec.
-            let candidates: &[ResolvedVar] = match &self.stack[callee_idx] {
-                Value::Object(obj) => match obj.as_ref() {
-                    Object::OverloadSet(candidates) => candidates,
-                    _ => return Ok(None),
-                },
-                _ => return Ok(None),
-            };
+        let mut results = Vec::with_capacity(axis_len);
+        for i in 0..axis_len {
+            let element_args: Vec<Value> = arg_values
+                .iter()
+                .map(|arg| vec_element_at(arg, i))
+                .collect();
 
-            let left = &self.stack[self.stack.len() - 2];
-            let right = &self.stack[self.stack.len() - 1];
+            let scalar = candidates
+                .iter()
+                .find(|f| f.matches_value_args(&element_args))
+                .ok_or_else(|| {
+                    let element_types = element_args
+                        .iter()
+                        .map(|v| v.static_type().to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let name = callee_name.as_deref().unwrap_or("?");
+                    VmError::new(
+                        format!(
+                            "no overload of '{name}' accepts element {i}: ({element_types})"
+                        ),
+                        span,
+                    )
+                })?;
 
-            // Check shape, build a two-element probe for overload lookup, and
-            // extract the element pairs all in one pass — avoiding the redundant
-            // as_numeric_tuple calls that a separate vectorization_pairs would do.
-            let left_tup = as_numeric_tuple(left);
-            let right_tup = as_numeric_tuple(right);
-            let (probe, pairs): ([Value; 2], Vec<(Value, Value)>) = match (left_tup, right_tup) {
-                (Some(ls), Some(rs)) if ls.len() == rs.len() => (
-                    [ls[0].clone(), rs[0].clone()],
-                    ls.iter().cloned().zip(rs.iter().cloned()).collect(),
-                ),
-                (None, Some(rs)) if left.is_number() => (
-                    [left.clone(), rs[0].clone()],
-                    rs.iter().map(|r| (left.clone(), r.clone())).collect(),
-                ),
-                (Some(ls), None) if right.is_number() => (
-                    [ls[0].clone(), right.clone()],
-                    ls.iter().map(|l| (l.clone(), right.clone())).collect(),
-                ),
-                _ => return Ok(None),
-            };
-
-            let Some(inner_fn) = self.find_overload(candidates, &probe) else {
-                return Ok(None);
-            };
-
-            (inner_fn, pairs)
-        };
-
-        let mut results = Vec::with_capacity(pairs.len());
-        for (l, r) in pairs {
-            let v = self
-                .call_callback(inner_fn.clone(), vec![l, r])
+            let result = self
+                .call_callback(scalar.clone(), element_args)
                 .map_err(|mut e| {
+                    let prefix = match &callee_name {
+                        Some(name) => format!("while vectorising '{name}' at index {i}: "),
+                        None => format!("while vectorising at index {i}: "),
+                    };
+                    e.message = format!("{prefix}{}", e.message);
                     e.span.get_or_insert(span);
                     e
                 })?;
-            results.push(v);
+            results.push(result);
         }
 
-        // Replace callee + args on the stack with the result tuple.
-        self.stack.truncate(callee_idx);
-        Ok(Some(Value::Object(Rc::new(Object::Tuple(results)))))
+        self.stack
+            .push(Value::Object(Rc::new(Object::Tuple(results))));
+        Ok(())
     }
 
     /// Pops a value from the stack and pushes `size` unpacked elements back.
@@ -976,21 +992,51 @@ impl Vm {
     }
 }
 
-/// If `value` is a tuple whose elements are all numeric, returns a reference to
-/// its element vec.  Returns `None` for empty tuples, non-tuples, or tuples
-/// that contain non-numeric elements.
-fn as_numeric_tuple(value: &Value) -> Option<&Vec<Value>> {
-    let Value::Object(obj) = value else {
-        return None;
-    };
-    let Object::Tuple(elems) = obj.as_ref() else {
-        return None;
-    };
-    if !elems.is_empty() && elems.iter().all(|e| e.is_number()) {
-        Some(elems)
-    } else {
-        None
+/// What `resolve_callee` hands back. A `Scalar` callable runs once with
+/// the full argument set; a `Vec` callable holds the full set of scalar
+/// overloads available for vec dispatch — `dispatch_vec_call` resolves
+/// one per element position via the same `matches_value_args` lookup the
+/// scalar path uses.
+pub(crate) enum Callable {
+    Scalar(Function),
+    Vec {
+        candidates: Vec<Function>,
+        axis_len: usize,
+    },
+}
+
+/// Finds the broadcast-axis length for a vec call: the shared length of
+/// every tuple-shaped argument. Empty tuples and length mismatches return
+/// `None` so vec dispatch declines and the call falls through to the
+/// regular "no overload found" error.
+pub(crate) fn vec_axis_len(args: &[Value]) -> Option<usize> {
+    let mut axis: Option<usize> = None;
+    for arg in args {
+        if let Value::Object(obj) = arg
+            && let Object::Tuple(elems) = obj.as_ref()
+        {
+            if elems.is_empty() {
+                return None;
+            }
+            match axis {
+                None => axis = Some(elems.len()),
+                Some(n) if n == elems.len() => {}
+                _ => return None,
+            }
+        }
     }
+    axis
+}
+
+/// Pick the per-element value for vec position `i`: tuple args contribute
+/// `tuple[i]`; non-tuple args broadcast through unchanged.
+pub(crate) fn vec_element_at(arg: &Value, i: usize) -> Value {
+    if let Value::Object(obj) = arg
+        && let Object::Tuple(elems) = obj.as_ref()
+    {
+        return elems[i].clone();
+    }
+    arg.clone()
 }
 
 impl CallFrame {

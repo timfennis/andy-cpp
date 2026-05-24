@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 
-use crate::scope::{ScopeTree, TypeBinding};
+use crate::scope::{ScopeTree, TypeBinding, VecResolution};
 use itertools::{Itertools, izip};
 use ndc_core::{StaticType, TypeSignature};
 use ndc_lexer::Span;
 use ndc_parser::{
-    Binding, Expression, ExpressionLocation, ForBody, ForIteration, FunctionParameter, Lvalue,
-    NodeId,
+    Binding, Candidate, Expression, ExpressionLocation, ForBody, ForIteration, FunctionParameter,
+    Lvalue, NodeId,
 };
 
 /// Side table holding semantic information keyed by AST node identity.
@@ -130,7 +130,7 @@ impl Analyser {
                     return Ok(StaticType::Any);
                 };
 
-                *resolved = Binding::Resolved(binding);
+                *resolved = Binding::Resolved(Candidate::scalar(binding));
 
                 Ok(self.scope_tree.get_type(binding).clone())
             }
@@ -202,29 +202,39 @@ impl Analyser {
                 let right_type = self.analyse_or_any(r_value);
                 let arg_types = vec![left_type, right_type];
 
-                *resolved_assign_operation = self
-                    .scope_tree
-                    .resolve_function_binding(&format!("{operation}="), &arg_types);
+                // OpAssignment desugars to `x = x op y` where `op` is operator-form,
+                // so vec dispatch must be available for both the in-place and the
+                // fallback regular operator overload.
+                *resolved_assign_operation = self.scope_tree.resolve_function_binding(
+                    &format!("{operation}="),
+                    &arg_types,
+                    true,
+                );
                 *resolved_operation = self
                     .scope_tree
-                    .resolve_function_binding(operation, &arg_types);
+                    .resolve_function_binding(operation, &arg_types, true);
 
-                if let Binding::None = resolved_operation {
+                // Either operator can handle the call: `op=` modifies in
+                // place, `op` falls back via `a = a op b`. Only error when
+                // both are missing — e.g. `Map -= Map` is fine via `-=`
+                // even though bare `-` has no overload for maps.
+                if matches!(resolved_assign_operation, Binding::None)
+                    && matches!(resolved_operation, Binding::None)
+                {
                     self.emit(AnalysisError::function_not_found(
                         operation, &arg_types, *span,
                     ));
                 }
 
-                // Determine the result type of the operation
+                // Determine the result type of the operation. Routed through
+                // candidate_return so that a Resolved vec candidate widens the
+                // lvalue with `Tuple<elem_return; max_len>` instead of the
+                // underlying scalar's return — otherwise `a += (3, 4)` on a
+                // `Tuple<Int, Int>` lvalue would try to widen with `Int`.
                 let result_type = match resolved_operation {
                     Binding::Resolved(res) => {
-                        if let StaticType::Function { return_type, .. } =
-                            self.scope_tree.get_type(*res)
-                        {
-                            Some(return_type.as_ref().clone())
-                        } else {
-                            None
-                        }
+                        let scalar_type = self.scope_tree.get_type(res.var).clone();
+                        Some(candidate_return(&scalar_type, res, &arg_types))
                     }
                     _ => None,
                 };
@@ -256,7 +266,7 @@ impl Analyser {
                                 ..
                             } = &value.expression
                             {
-                                let container_type = self.scope_tree.get_type(*target).clone();
+                                let container_type = self.scope_tree.get_type(target.var).clone();
                                 if let Some(elem_type) = container_type.index_element_type() {
                                     let widened_elem = elem_type.lub(&result_type);
                                     if widened_elem != elem_type {
@@ -264,7 +274,7 @@ impl Analyser {
                                             container_type.with_element_type(widened_elem);
                                         let _ = self
                                             .scope_tree
-                                            .update_binding_type(*target, new_container);
+                                            .update_binding_type(target.var, new_container);
                                     }
                                 }
                             }
@@ -405,14 +415,19 @@ impl Analyser {
             Expression::Call {
                 function,
                 arguments,
+                operator_form,
             } => {
                 let mut type_sig = Vec::with_capacity(arguments.len());
                 for a in arguments {
                     type_sig.push(self.analyse_or_any(a));
                 }
 
-                let callee_type =
-                    self.resolve_function_with_argument_types(function, &type_sig, *span);
+                let callee_type = self.resolve_function_with_argument_types(
+                    function,
+                    &type_sig,
+                    *operator_form,
+                    *span,
+                );
 
                 let StaticType::Function { return_type, .. } = callee_type else {
                     if callee_type == StaticType::Any {
@@ -450,7 +465,10 @@ impl Analyser {
                 }
 
                 if let Some(default) = default {
-                    self.analyse_or_any(default);
+                    // The default is what `map[missing]` returns, so it
+                    // contributes to the value type just like a regular entry.
+                    let default_type = self.analyse_or_any(default);
+                    Self::fold_lub(&mut value_type, default_type);
                 }
 
                 Ok(StaticType::Map {
@@ -483,6 +501,7 @@ impl Analyser {
         &mut self,
         ident: &mut ExpressionLocation,
         argument_types: &[StaticType],
+        operator_form: bool,
         span: Span,
     ) -> StaticType {
         let ExpressionLocation {
@@ -497,7 +516,7 @@ impl Analyser {
 
         let binding = self
             .scope_tree
-            .resolve_function_binding(name, argument_types);
+            .resolve_function_binding(name, argument_types, operator_form);
 
         let out_type = match &binding {
             Binding::None => {
@@ -508,20 +527,31 @@ impl Analyser {
                 ));
                 return StaticType::Any;
             }
-            Binding::Resolved(res) => self.scope_tree.get_type(*res).clone(),
-
-            Binding::Dynamic(_) => {
-                // Dispatch is decided at runtime, so we have no sound static bound
-                // on the result. The runtime may pick a declared overload or fall
-                // through to elementwise (vectorized) dispatch, which can produce
-                // a value no declared overload returns — treating the LUB of
-                // declared returns as the result type is unsound and led to issue
-                // #139, where `let diff = a - b` over tuples was inferred as
-                // `Number` and a follow-up `diff * diff` then matched the numeric
-                // overload directly and bypassed dynamic dispatch entirely.
+            Binding::Resolved(candidate) => {
+                let scalar_type = self.scope_tree.get_type(candidate.var).clone();
+                let return_type = candidate_return(&scalar_type, candidate, argument_types);
+                // Preserve `parameters` from the underlying scalar so any
+                // downstream consumer that inspects the function shape sees
+                // the original arity; only the return type changes for vec.
+                match scalar_type {
+                    StaticType::Function { parameters, .. } => StaticType::Function {
+                        parameters,
+                        return_type: Box::new(return_type),
+                    },
+                    _ => StaticType::Any,
+                }
+            }
+            Binding::Dynamic(candidates) => {
+                let return_type = self.dynamic_return_type(
+                    name,
+                    candidates,
+                    argument_types,
+                    operator_form,
+                    span,
+                );
                 StaticType::Function {
                     parameters: None,
-                    return_type: Box::new(StaticType::Any),
+                    return_type: Box::new(return_type),
                 }
             }
         };
@@ -529,6 +559,102 @@ impl Analyser {
         *resolved = binding;
 
         out_type
+    }
+
+    /// Compute the return type for a `Binding::Dynamic` call. The candidate
+    /// list can contain a mix of scalar overloads (from the loose scalar
+    /// walk or the `all_by_name` fallback) and vec variants (from per-position
+    /// resolution or the Any-fallback). Each subset is typed independently:
+    ///
+    /// - **Mixed scalar + vec**: at runtime the dispatcher will pick either
+    ///   shape depending on actual values. The LUB of a scalar return and
+    ///   a `Tuple<…>` collapses to `Any` in our type lattice, so we don't
+    ///   bother computing it and just return `Any`.
+    /// - **Pure vec**: re-run per-position resolution to get precise
+    ///   per-position result types and build the result tuple. If any
+    ///   position has no compatible overload, emit `function_not_found`
+    ///   and recover with `Any`.
+    /// - **Pure scalar from a compat-filtered walk**: LUB declared returns
+    ///   (precision recovery). If any candidate is incompatible — which
+    ///   only happens when the binding came from the `all_by_name` fallback
+    ///   with no compat-filtered matches — widen to `Any` so we don't
+    ///   synthesise a precise return for a call that's likely to fail at
+    ///   runtime.
+    fn dynamic_return_type(
+        &mut self,
+        name: &str,
+        candidates: &[Candidate],
+        argument_types: &[StaticType],
+        operator_form: bool,
+        span: Span,
+    ) -> StaticType {
+        let has_vec = candidates.iter().any(|c| c.vectorized);
+        let has_scalar = candidates.iter().any(|c| !c.vectorized);
+
+        if has_vec && has_scalar {
+            return StaticType::Any;
+        }
+
+        if has_vec {
+            return match self
+                .scope_tree
+                .resolve_vec_candidates(name, argument_types)
+            {
+                Some(VecResolution::Static { axis_len, positions }) => {
+                    let mut element_types = Vec::with_capacity(axis_len);
+                    let mut had_empty = false;
+                    for pos_candidates in &positions {
+                        if pos_candidates.is_empty() {
+                            had_empty = true;
+                            break;
+                        }
+                        let pos_type = pos_candidates
+                            .iter()
+                            .filter_map(|var| match self.scope_tree.get_type(*var) {
+                                StaticType::Function { return_type, .. } => {
+                                    Some(return_type.as_ref().clone())
+                                }
+                                _ => None,
+                            })
+                            .reduce(|a, b| a.lub(&b))
+                            .unwrap_or(StaticType::Any);
+                        element_types.push(pos_type);
+                    }
+                    if had_empty {
+                        self.emit(AnalysisError::function_not_found(
+                            name,
+                            argument_types,
+                            span,
+                        ));
+                        StaticType::Any
+                    } else {
+                        StaticType::Tuple(element_types)
+                    }
+                }
+                Some(VecResolution::AnyFallback(_)) | None => StaticType::Any,
+            };
+        }
+
+        // Pure scalar Dynamic. The candidate list either came from the
+        // loose-compat walk (every entry is compat-filtered) or from the
+        // `all_by_name` fallback (entries may not match). Drop to Any when
+        // any candidate is incompatible so we don't claim a precise return
+        // for a doomed call.
+        let _ = operator_form;
+        let all_compat = candidates
+            .iter()
+            .all(|c| scalar_candidate_is_compat(&self.scope_tree, c, argument_types));
+        if !all_compat {
+            return StaticType::Any;
+        }
+        candidates
+            .iter()
+            .filter_map(|c| match self.scope_tree.get_type(c.var) {
+                StaticType::Function { return_type, .. } => Some(return_type.as_ref().clone()),
+                _ => None,
+            })
+            .reduce(|a, b| a.lub(&b))
+            .unwrap_or(StaticType::Any)
     }
 
     fn resolve_for_iterations(
@@ -660,8 +786,16 @@ impl Analyser {
                 let get_args = [type_of_index_target.clone(), index_type.clone()];
                 let set_args = [type_of_index_target.clone(), index_type, StaticType::Any];
 
-                *resolved_get = Some(self.scope_tree.resolve_function_binding("[]", &get_args));
-                *resolved_set = Some(self.scope_tree.resolve_function_binding("[]=", &set_args));
+                // Index syntax is not operator-form for vec purposes — there is no
+                // natural element-wise broadcast story for `(list_a, list_b)[i]`.
+                *resolved_get = Some(
+                    self.scope_tree
+                        .resolve_function_binding("[]", &get_args, false),
+                );
+                *resolved_set = Some(
+                    self.scope_tree
+                        .resolve_function_binding("[]=", &set_args, false),
+                );
 
                 if let Some(t) = type_of_index_target.index_element_type() {
                     Ok(t)
@@ -843,6 +977,69 @@ impl Analyser {
             Some(prev) => *prev = prev.lub(&new_type),
             None => *acc = Some(new_type),
         }
+    }
+}
+
+/// Whether a scalar candidate's parameter types could accept the call's
+/// argument types. Vec candidates aren't checked here — they're added by
+/// per-position resolution which already verified compatibility at each
+/// position, so they're trusted unconditionally.
+///
+/// Examples (with `fn typed(s: String) -> Int` registered as `typed`):
+/// - scalar candidate for `typed`, call args `[Int]` → `false`
+/// - scalar candidate for `typed`, call args `[Any]` → `true`
+/// - scalar candidate for `+(Int, Int)`, call args `[Int]` → `false`
+///   (arity mismatch)
+fn scalar_candidate_is_compat(
+    scope_tree: &ScopeTree,
+    candidate: &Candidate,
+    argument_types: &[StaticType],
+) -> bool {
+    if candidate.vectorized {
+        return true;
+    }
+    let StaticType::Function {
+        parameters: Some(params),
+        ..
+    } = scope_tree.get_type(candidate.var)
+    else {
+        return false;
+    };
+    if params.len() != argument_types.len() {
+        return false;
+    }
+    params
+        .iter()
+        .zip(argument_types)
+        .all(|(p, a)| !p.is_incompatible_with(a))
+}
+
+/// Static return type for a single candidate of a call.
+///
+/// Examples (assume `+(Int, Int) -> Int` is the underlying scalar):
+/// - scalar candidate, call args `[Int, Int]` → `Int`
+/// - vec candidate, call args `[Tuple<Int, Int>, Tuple<Int, Int>]` →
+///   `Tuple<Int, Int>` (the same scalar fires for every position)
+/// - vec candidate, call args `[Any, Any]` → `Any` (no tuple length
+///   visible at compile time, so we can't say how long the result is)
+fn candidate_return(
+    scalar_type: &StaticType,
+    candidate: &Candidate,
+    argument_types: &[StaticType],
+) -> StaticType {
+    let StaticType::Function { return_type, .. } = scalar_type else {
+        return StaticType::Any;
+    };
+    let scalar_return = return_type.as_ref().clone();
+    if !candidate.vectorized {
+        return scalar_return;
+    }
+    match argument_types.iter().find_map(|t| match t {
+        StaticType::Tuple(elems) if !elems.is_empty() => Some(elems.len()),
+        _ => None,
+    }) {
+        Some(len) => StaticType::Tuple(vec![scalar_return; len]),
+        None => StaticType::Any,
     }
 }
 

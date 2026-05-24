@@ -207,6 +207,7 @@ impl Parser {
                     .to_location(operator_token_loc.span),
                 ),
                 arguments: vec![left, right],
+                operator_form: true,
             }
             .to_location(new_span);
 
@@ -220,6 +221,7 @@ impl Parser {
                         .to_location(not_token.span),
                     ),
                     arguments: vec![left],
+                    operator_form: true,
                 }
                 .to_location(new_span.merge(not_token.span));
             }
@@ -252,6 +254,7 @@ impl Parser {
                     .to_location(operator_span),
                 ),
                 arguments: vec![left, right],
+                operator_form: true,
             }
             .to_location(new_span));
         }
@@ -509,6 +512,7 @@ impl Parser {
                     .to_location(operator_span),
                 ),
                 arguments: vec![right],
+                operator_form: true,
             }
             .to_location(span))
         } else {
@@ -640,6 +644,7 @@ impl Parser {
                     .to_location(token_span),
                 ),
                 arguments: vec![right],
+                operator_form: true,
             }
             .to_location(span.merge(token_span)))
         } else {
@@ -673,6 +678,7 @@ impl Parser {
                         expression: Expression::Call {
                             function: Box::new(expr),
                             arguments,
+                            operator_form: false,
                         },
                         span: span.merge(arguments_span),
                         id: NodeId::next(),
@@ -716,6 +722,7 @@ impl Parser {
                                 .to_location(identifier_span),
                             ),
                             arguments,
+                            operator_form: false,
                         },
                         span: tuple_span
                             .unwrap_or(identifier_span)
@@ -783,6 +790,7 @@ impl Parser {
                                 .to_location(bracket_span),
                             ),
                             arguments: vec![expr, index_expression],
+                            operator_form: false,
                         },
                         span,
                         id: NodeId::next(),

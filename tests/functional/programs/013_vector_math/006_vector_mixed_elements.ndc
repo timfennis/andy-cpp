@@ -1,0 +1,6 @@
+// expect-error: No function called '+' found that matches the arguments
+// Per-position resolution catches this at compile time: position 1 has
+// `(String, String)` element types and no `+(String, String)` overload
+// exists. Position 0 would resolve cleanly to `+(Int, Int)`, but a
+// position-with-no-overload makes the whole call fail at analysis time.
+(1, "a") + (2, "b")

@@ -1,0 +1,25 @@
+// Vec dispatch should pick the most specific scalar overload by subtype
+// (mirroring scalar dispatch's `find_function` precedence), not collapse
+// to the LUB of every compatible overload. `Tuple<Int, Int> - Tuple<Int,
+// Int>` must infer as `Tuple<Int, Int>`, not `Tuple<Number, Number>`.
+let a: Tuple<Int, Int> = (1, 2);
+let b: Tuple<Int, Int> = (3, 4);
+let c: Tuple<Int, Int> = a - b;
+let d: Tuple<Int, Int> = c * c;
+assert_eq(d, (4, 4));
+
+// Chained: `+` keeps the precise element type through several operators.
+let e: Tuple<Int, Int> = a + b;
+let f: Tuple<Int, Int> = e + (10, 20);
+assert_eq(f, (14, 26));
+
+// Any args fall to LUB (no scalar `-(Any, Any)` exists, so vec dispatch
+// can't pin a single overload at compile time): `Tuple<Any, Any> -
+// Tuple<Any, Any>` infers as `Tuple<Number, Number>`, the LUB across
+// every numeric overload's return type.
+let l: List<Int> = [1, 2];
+let p: Tuple<Any, Any> = (l.first, l.first);
+let q: Tuple<Any, Any> = (l.last, l.last);
+let r: Tuple<Number, Number> = p - q;
+let s: Tuple<Number, Number> = r * r;
+assert_eq(s, (1, 1));

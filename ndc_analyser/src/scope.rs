@@ -1,6 +1,73 @@
 use ndc_core::StaticType;
-use ndc_parser::{Binding, CaptureSource, ResolvedVar};
+use ndc_parser::{Binding, Candidate, CaptureSource, ResolvedVar};
 use std::fmt::{Debug, Formatter};
+
+/// Vec dispatch resolution at the analyser layer.
+///
+/// `Static` carries per-position candidate lists when every tuple-shaped
+/// argument's length is known statically. The runtime can use these
+/// directly for per-pair dispatch; the analyser uses them to compute
+/// precise per-position result types.
+///
+/// `AnyFallback` is the case where no arg is statically tuple-shaped but
+/// at least one is `Any` — vec might still apply at runtime if those
+/// Any-typed values turn out to be tuples. We carry all arity-matching
+/// callable overloads so the runtime can narrow per pair; the analyser
+/// can't say anything precise about the result type beyond `Any`.
+pub(crate) enum VecResolution {
+    Static {
+        axis_len: usize,
+        /// For each position, scalar overload `ResolvedVar`s whose params
+        /// accept that position's element types. Priority-ordered
+        /// (exact-subtype first if any). Empty means no overload accepts
+        /// that position — caller surfaces as `function_not_found`.
+        positions: Vec<Vec<ResolvedVar>>,
+    },
+    AnyFallback(Vec<ResolvedVar>),
+}
+
+/// Result of walking the scope chain looking up a scalar signature.
+///
+/// Mirrors the precedence semantics the previous `resolve_function_binding`
+/// inlined: exact subtype match (short-circuits the walk), then
+/// first-scope-wins loose-compatibility candidates, then the
+/// `all_by_name` fallback that gathers same-named callable bindings even
+/// when their signatures don't match (used for runtime narrowing of
+/// `Any`-typed callees, upvalues, and similar cases).
+struct ScalarWalk {
+    exact: Option<ResolvedVar>,
+    loose: Option<Vec<ResolvedVar>>,
+    all_by_name: Vec<ResolvedVar>,
+}
+
+/// If every per-position candidate list contains exactly one entry and they
+/// all point to the same `ResolvedVar`, return it. This is the case where
+/// `Binding::Resolved(vec)` is safe: one underlying scalar handles every
+/// element pair.
+fn unique_single_scalar(positions: &[Vec<ResolvedVar>]) -> Option<ResolvedVar> {
+    let first = positions.first()?.first().copied()?;
+    for pos in positions {
+        if pos.len() != 1 || pos[0] != first {
+            return None;
+        }
+    }
+    Some(first)
+}
+
+/// Union of per-position candidate lists, preserving the order in which
+/// entries are first encountered. Used to build the merged candidate list
+/// the runtime carries for heterogeneous vec dispatch.
+fn union_preserve_order(positions: &[Vec<ResolvedVar>]) -> Vec<ResolvedVar> {
+    let mut out: Vec<ResolvedVar> = Vec::new();
+    for pos in positions {
+        for c in pos {
+            if !out.contains(c) {
+                out.push(*c);
+            }
+        }
+    }
+    out
+}
 
 #[derive(Debug, Clone)]
 pub(crate) enum TypeBinding {
@@ -355,30 +422,99 @@ impl ScopeTree {
     ///      because a different overload may be an exact match in an outer scope)
     ///   3. Compatible-type candidates → remember first set found (for `Binding::Dynamic`)
     ///   4. All same-named bindings → accumulate as last-resort fallback
-    pub(crate) fn resolve_function_binding(&mut self, ident: &str, sig: &[StaticType]) -> Binding {
+    ///
+    /// When `operator_form` is true, synthesises vec variants from a per-position
+    /// LUB-collapsed signature so the runtime can dispatch tuple-broadcast forms
+    /// like `(1, 2) + (3, 4)` against the underlying scalar overloads.
+    pub(crate) fn resolve_function_binding(
+        &mut self,
+        ident: &str,
+        sig: &[StaticType],
+        operator_form: bool,
+    ) -> Binding {
+        // Scalar walk first. An exact subtype match short-circuits the whole
+        // call — first-class scalar dispatch always wins over vec.
+        let walk = self.scalar_scope_walk(ident, sig);
+        if let Some(exact) = walk.exact {
+            return Binding::Resolved(Candidate::scalar(exact));
+        }
+
+        // Per-position vec resolution, if this is an operator-form call.
+        let vec_resolution = if operator_form {
+            self.resolve_vec_candidates(ident, sig)
+        } else {
+            None
+        };
+
+        let scalar_loose = walk.loose.unwrap_or_default();
+
+        // Try Resolved(vec): every position pins to a single scalar AND
+        // they all agree. No scalar competes (would force Dynamic).
+        if scalar_loose.is_empty()
+            && let Some(VecResolution::Static { positions, .. }) = &vec_resolution
+            && let Some(unique) = unique_single_scalar(positions)
+        {
+            return Binding::Resolved(Candidate::vec(unique));
+        }
+
+        // Collect vec candidates (union across positions for Static; the flat
+        // list for AnyFallback). Preserve relative order so the runtime's
+        // per-pair lookup is stable.
+        let vec_candidates: Vec<ResolvedVar> = match &vec_resolution {
+            Some(VecResolution::Static { positions, .. }) => union_preserve_order(positions),
+            Some(VecResolution::AnyFallback(candidates)) => candidates.clone(),
+            None => Vec::new(),
+        };
+
+        if !scalar_loose.is_empty() || !vec_candidates.is_empty() {
+            let combined: Vec<Candidate> = scalar_loose
+                .into_iter()
+                .map(Candidate::scalar)
+                .chain(vec_candidates.into_iter().map(Candidate::vec))
+                .collect();
+            return Binding::Dynamic(combined);
+        }
+
+        if !walk.all_by_name.is_empty() {
+            return Binding::Dynamic(
+                walk.all_by_name
+                    .into_iter()
+                    .map(Candidate::scalar)
+                    .collect(),
+            );
+        }
+        Binding::None
+    }
+
+    /// Walks the scope chain looking up a scalar signature, gathering the
+    /// usual precedence-ordered candidate sets. Exact subtype match
+    /// short-circuits the walk (returned in `exact`); otherwise the
+    /// first-scope-wins loose-compatibility set populates `loose`, and
+    /// `all_by_name` accumulates same-named callable bindings across every
+    /// scope for the runtime-narrowing fallback path.
+    fn scalar_scope_walk(&mut self, ident: &str, sig: &[StaticType]) -> ScalarWalk {
         let mut scope_ptr = self.current_scope_idx;
         let mut env_scopes: Vec<usize> = Vec::default();
-        let mut loose_candidates: Option<Vec<ResolvedVar>> = None;
+        let mut loose: Option<Vec<ResolvedVar>> = None;
         let mut all_by_name: Vec<ResolvedVar> = Vec::new();
 
         loop {
-            // 1. Exact match on a local → return immediately
             if let Some(slot) = self.scopes[scope_ptr].find_function(ident, sig) {
-                return Binding::Resolved(self.resolve_found_local(ident, slot, &env_scopes));
+                return ScalarWalk {
+                    exact: Some(self.resolve_found_local(ident, slot, &env_scopes)),
+                    loose: None,
+                    all_by_name: Vec::new(),
+                };
             }
 
-            // 2. Upvalues with matching name — collect as candidates but continue
-            //    walking, because the upvalue may be a different overload (e.g.
-            //    different arity) and the exact match could be in a parent scope.
             for uv_slot in self.scopes[scope_ptr].find_upvalues_by_name(ident) {
                 all_by_name.push(self.resolve_found_upvalue(ident, uv_slot, &env_scopes));
             }
 
-            // 3. Compatible candidates (keep only the first scope's matches — shadowing)
-            if loose_candidates.is_none() {
+            if loose.is_none() {
                 let candidates = self.scopes[scope_ptr].find_function_candidates(ident, sig);
                 if !candidates.is_empty() {
-                    loose_candidates = Some(
+                    loose = Some(
                         candidates
                             .into_iter()
                             .map(|slot| self.resolve_found_local(ident, slot, &env_scopes))
@@ -387,7 +523,6 @@ impl ScopeTree {
                 }
             }
 
-            // 4. All same-named bindings (accumulate across all scopes)
             let slots = self.scopes[scope_ptr].find_all_callable_slots_by_name(ident);
             all_by_name.extend(
                 slots
@@ -395,22 +530,23 @@ impl ScopeTree {
                     .map(|slot| self.resolve_found_local(ident, slot, &env_scopes)),
             );
 
-            // Advance to parent scope
             if let Some(parent_idx) = self.scopes[scope_ptr].parent_idx {
                 if self.scopes[scope_ptr].creates_environment {
                     env_scopes.push(scope_ptr);
                 }
                 scope_ptr = parent_idx;
             } else {
-                // Fall through to globals
                 if let Some(slot) = self.global_scope.find_function(ident, sig) {
-                    return Binding::Resolved(ResolvedVar::Global { slot });
+                    return ScalarWalk {
+                        exact: Some(ResolvedVar::Global { slot }),
+                        loose: None,
+                        all_by_name: Vec::new(),
+                    };
                 }
-
-                if loose_candidates.is_none() {
+                if loose.is_none() {
                     let candidates = self.global_scope.find_function_candidates(ident, sig);
                     if !candidates.is_empty() {
-                        loose_candidates = Some(
+                        loose = Some(
                             candidates
                                 .into_iter()
                                 .map(|slot| ResolvedVar::Global { slot })
@@ -418,25 +554,117 @@ impl ScopeTree {
                         );
                     }
                 }
-
                 all_by_name.extend(
                     self.global_scope
                         .find_all_callable_slots_by_name(ident)
                         .into_iter()
                         .map(|slot| ResolvedVar::Global { slot }),
                 );
-
                 break;
             }
         }
 
-        if let Some(candidates) = loose_candidates {
-            return Binding::Dynamic(candidates);
+        ScalarWalk {
+            exact: None,
+            loose,
+            all_by_name,
         }
-        if !all_by_name.is_empty() {
-            return Binding::Dynamic(all_by_name);
+    }
+
+    /// Per-position priority-ordered scalar candidate list for one sig.
+    /// `exact` (if any) comes first, then `loose` with the exact entry
+    /// deduplicated. Empty when no overload accepts the signature — the
+    /// caller decides whether to surface as an error.
+    pub(crate) fn candidates_for_position_sig(
+        &mut self,
+        ident: &str,
+        sig: &[StaticType],
+    ) -> Vec<ResolvedVar> {
+        let walk = self.scalar_scope_walk(ident, sig);
+        let mut result: Vec<ResolvedVar> = Vec::new();
+        if let Some(e) = walk.exact {
+            result.push(e);
         }
-        Binding::None
+        if let Some(loose) = walk.loose {
+            for c in loose {
+                if !result.contains(&c) {
+                    result.push(c);
+                }
+            }
+        }
+        result
+    }
+
+    /// Resolve vec candidates for an operator-form call.
+    ///
+    /// `Static` case: at least one arg is statically a non-empty tuple and
+    /// all tuple-shaped args share that length. Per-position lookups give
+    /// the scalar overload(s) compatible at each position.
+    ///
+    /// `AnyFallback` case: no arg is statically tuple-shaped but at least
+    /// one is `Any`, so the runtime might still find tuples there. Collect
+    /// every arity-matching callable so per-pair dispatch can narrow.
+    ///
+    /// `None`: no tuple-shaped or Any args — vec cannot apply.
+    pub(crate) fn resolve_vec_candidates(
+        &mut self,
+        ident: &str,
+        argument_types: &[StaticType],
+    ) -> Option<VecResolution> {
+        if let Some((axis_len, positions)) = self.resolve_vec_static(ident, argument_types) {
+            return Some(VecResolution::Static { axis_len, positions });
+        }
+
+        if !argument_types
+            .iter()
+            .any(|t| matches!(t, StaticType::Any))
+        {
+            return None;
+        }
+
+        let permissive_sig: Vec<StaticType> = vec![StaticType::Any; argument_types.len()];
+        let candidates = self.candidates_for_position_sig(ident, &permissive_sig);
+        if candidates.is_empty() {
+            return None;
+        }
+        Some(VecResolution::AnyFallback(candidates))
+    }
+
+    /// Per-position vec resolution against statically known tuple shapes.
+    /// Returns `(axis_len, positions)` or `None` if no statically tuple-shaped
+    /// arg is involved (empty tuples and length mismatches also disqualify).
+    fn resolve_vec_static(
+        &mut self,
+        ident: &str,
+        argument_types: &[StaticType],
+    ) -> Option<(usize, Vec<Vec<ResolvedVar>>)> {
+        let mut axis: Option<usize> = None;
+        for arg in argument_types {
+            if let StaticType::Tuple(elems) = arg {
+                if elems.is_empty() {
+                    return None;
+                }
+                match axis {
+                    None => axis = Some(elems.len()),
+                    Some(n) if n == elems.len() => {}
+                    _ => return None,
+                }
+            }
+        }
+        let axis_len = axis?;
+
+        let mut positions = Vec::with_capacity(axis_len);
+        for i in 0..axis_len {
+            let pos_sig: Vec<StaticType> = argument_types
+                .iter()
+                .map(|arg| match arg {
+                    StaticType::Tuple(elems) => elems[i].clone(),
+                    other => other.clone(),
+                })
+                .collect();
+            positions.push(self.candidates_for_position_sig(ident, &pos_sig));
+        }
+        Some((axis_len, positions))
     }
 
     pub(crate) fn create_local_binding(
@@ -876,5 +1104,55 @@ mod tests {
         // middle should still have exactly one upvalue entry
         let middle_idx = tree.current_scope_idx;
         assert_eq!(tree.scopes[middle_idx].upvalues.len(), 1);
+    }
+
+    // ----------------------------------------------------------------------
+    // Pure helpers from the vec-dispatch refactor. End-to-end behaviour is
+    // covered by functional tests under tests/functional/programs/013_vector_math/.
+    // ----------------------------------------------------------------------
+
+    #[test]
+    fn unique_single_scalar_homogeneous() {
+        // Every position has one entry pointing to the same slot — the
+        // "homogeneous vec" case that becomes Binding::Resolved(vec).
+        let v = ResolvedVar::Global { slot: 7 };
+        let positions = vec![vec![v], vec![v], vec![v]];
+        assert_eq!(unique_single_scalar(&positions), Some(v));
+    }
+
+    #[test]
+    fn unique_single_scalar_heterogeneous_pins() {
+        // Positions pin to different scalars — must be promoted to Dynamic.
+        let a = ResolvedVar::Global { slot: 7 };
+        let b = ResolvedVar::Global { slot: 8 };
+        let positions = vec![vec![a], vec![b]];
+        assert_eq!(unique_single_scalar(&positions), None);
+    }
+
+    #[test]
+    fn unique_single_scalar_multi_entry_position() {
+        // A position with more than one candidate isn't pinned — Dynamic.
+        let a = ResolvedVar::Global { slot: 7 };
+        let b = ResolvedVar::Global { slot: 8 };
+        let positions = vec![vec![a, b], vec![a]];
+        assert_eq!(unique_single_scalar(&positions), None);
+    }
+
+    #[test]
+    fn unique_single_scalar_empty_position() {
+        // An empty position means no overload accepts those element types —
+        // can't pin Resolved.
+        let a = ResolvedVar::Global { slot: 7 };
+        let positions = vec![vec![a], Vec::new()];
+        assert_eq!(unique_single_scalar(&positions), None);
+    }
+
+    #[test]
+    fn union_preserve_order_dedups_across_positions() {
+        let a = ResolvedVar::Global { slot: 1 };
+        let b = ResolvedVar::Global { slot: 2 };
+        let c = ResolvedVar::Global { slot: 3 };
+        let positions = vec![vec![a, b], vec![b, c], vec![a, c]];
+        assert_eq!(union_preserve_order(&positions), vec![a, b, c]);
     }
 }
