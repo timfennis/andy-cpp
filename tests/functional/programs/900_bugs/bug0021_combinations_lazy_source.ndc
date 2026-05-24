@@ -1,0 +1,28 @@
+// CombinationsIter over a lazy source (e.g. `.enumerate()`) used to skip
+// combinations whose rightmost index lay in the not-yet-pulled tail.
+// `indices[k-1]` would hit the buffer end before the source was drained,
+// and the pivot algorithm would advance an earlier index instead of
+// pulling one more — yielding combinations out of lex order and missing
+// some entirely. Fix: pull `indices[k-1] + 1` before computing pivot.
+
+// Eager (list) reference — correct for both pre- and post-fix.
+assert_eq([1, 2, 3, 4].combinations(2).list(), [(1, 2), (1, 3), (1, 4), (2, 3), (2, 4), (3, 4)]);
+
+// Lazy (iterator) source — this is the path the bug lived in.
+assert_eq(
+    [1, 2, 3, 4].enumerate().combinations(2).list(),
+    [
+        ((0, 1), (1, 2)),
+        ((0, 1), (2, 3)),
+        ((0, 1), (3, 4)),
+        ((1, 2), (2, 3)),
+        ((1, 2), (3, 4)),
+        ((2, 3), (3, 4))
+    ]
+);
+
+// Larger k — exercise the multi-pull-per-pivot path.
+let triples = [10, 20, 30, 40, 50].enumerate().combinations(3).list();
+assert_eq(triples.len, 10);
+assert_eq(triples[0], ((0, 10), (1, 20), (2, 30)));
+assert_eq(triples[-1], ((2, 30), (3, 40), (4, 50)));

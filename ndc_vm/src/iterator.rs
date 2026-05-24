@@ -462,6 +462,18 @@ impl VmIterator for CombinationsIter {
                 return None;
             }
         } else {
+            // For lazy sources: pull one more element before choosing the
+            // pivot. Without this, when `indices[k-1]` reaches the end of
+            // the current buffer the algorithm advances an earlier index
+            // (because `indices[k-1] < pool_len - 1` is false against the
+            // not-yet-extended pool), skipping combinations whose rightmost
+            // index lives in the unrealised tail. Pulling first makes the
+            // rightmost index pivot whenever the source still has elements,
+            // matching the eager-source lex order.
+            if self.source.is_some() {
+                let _ = self.ensure_index(self.indices[k - 1] + 1);
+            }
+
             let pool_len = self.buffer.len();
             if pool_len < k {
                 return None;
@@ -469,26 +481,12 @@ impl VmIterator for CombinationsIter {
 
             let pivot = match (0..k).rev().find(|&i| self.indices[i] < pool_len - k + i) {
                 Some(p) => p,
-                None if self.source.is_none() => return None,
-                // For lazy sources: pulling one more element always unlocks index k-1.
-                // When pivot = None, indices[j] = pool_len - k + j for all j, so
-                // indices[k-1] = pool_len - 1. After one pull, pool_len grows by 1 and
-                // indices[k-1] < new_pool_len - k + (k-1) holds.
-                None => {
-                    if !self.ensure_index(self.buffer.len()) {
-                        return None;
-                    }
-                    k - 1
-                }
+                None => return None,
             };
 
             self.indices[pivot] += 1;
             for j in (pivot + 1)..k {
                 self.indices[j] = self.indices[j - 1] + 1;
-            }
-            // For lazy sources, buffer up to the new last index.
-            if !self.ensure_index(self.indices[k - 1]) {
-                return None;
             }
         }
 
