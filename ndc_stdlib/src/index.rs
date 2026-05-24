@@ -21,6 +21,23 @@ fn make_get_func() -> NativeFunc {
     }))
 }
 
+/// Allocation-free `[]` for overloads whose parameter type guarantees the
+/// container can never trigger the Map default-function callback path
+/// (List/String/Deque/Tuple). Using `NativeFunc::Simple` here lets the VM
+/// pass stack args by slice instead of draining them into a `Vec<Value>`
+/// on every call — a real win for hot inner loops like `dists[i][j]`.
+fn make_get_func_simple() -> NativeFunc {
+    NativeFunc::Simple(Box::new(|args: &[Value]| {
+        let [container, index_value] = args else {
+            return Err(VmError::native(format!(
+                "[] requires exactly 2 arguments, got {}",
+                args.len()
+            )));
+        };
+        vm_get_at_index_simple(container, index_value)
+    }))
+}
+
 fn make_set_func() -> NativeFunc {
     NativeFunc::Simple(Box::new(|args: &[Value]| {
         let [container, index_value, rhs] = args else {
@@ -49,7 +66,7 @@ fn register_get(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
             ]),
             return_type: Box::new(StaticType::Any),
         },
-        func: make_get_func(),
+        func: make_get_func_simple(),
     }));
 
     // []<String, Any> -> String
@@ -60,10 +77,12 @@ fn register_get(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
             parameters: Some(vec![StaticType::String, StaticType::Any]),
             return_type: Box::new(StaticType::String),
         },
-        func: make_get_func(),
+        func: make_get_func_simple(),
     }));
 
-    // []<Any, Any> -> Any (fallback for Tuple and other indexable types)
+    // []<Any, Any> -> Any (fallback for Tuple and other indexable types).
+    // Kept on the WithVm path because Maps can fall through here when their
+    // static type is `Any`, and the Map default-function lookup needs `&mut Vm`.
     env.declare_global_fn(Rc::new(NativeFunction {
         name: "[]".to_string(),
         documentation: Some(doc.clone()),
@@ -85,7 +104,7 @@ fn register_get(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
             ]),
             return_type: Box::new(StaticType::Any),
         },
-        func: make_get_func(),
+        func: make_get_func_simple(),
     }));
 
     // []<Map, Any> -> Any
@@ -332,6 +351,86 @@ fn vm_get_at_index(container: &Value, index_value: &Value, vm: &mut Vm) -> Resul
                     }
                 }
             }
+            _ => Err(VmError::native(format!(
+                "cannot index into {}",
+                container.static_type()
+            ))),
+        },
+        _ => Err(VmError::native(format!(
+            "cannot index into {}",
+            container.static_type()
+        ))),
+    }
+}
+
+/// `vm_get_at_index` without the Map default-function callback path. Used by
+/// `make_get_func_simple` for overloads (`List`/`String`/`Deque`) whose
+/// parameter type means the Map branch is unreachable in practice. The Map
+/// arm is kept as a defensive error so that any future widening which routes
+/// a Map through here doesn't silently misbehave.
+fn vm_get_at_index_simple(container: &Value, index_value: &Value) -> Result<Value, VmError> {
+    let Some(size) = vm_sequence_length(container) else {
+        return Err(VmError::native(format!(
+            "cannot index into {}",
+            container.static_type()
+        )));
+    };
+    match container {
+        Value::Object(obj) => match obj.as_ref() {
+            Object::List(list) => {
+                let list = list.borrow();
+                match extract_vm_offset(index_value, size)? {
+                    VmOffset::Element(idx) => Ok(list[idx].clone()),
+                    VmOffset::Range(from, to) => {
+                        let values = list.get(from..to).ok_or_else(|| {
+                            VmError::native(format!("{from}..{to} out of bounds"))
+                        })?;
+                        Ok(Value::Object(Rc::new(Object::list(values.to_vec()))))
+                    }
+                }
+            }
+            Object::String(s) => {
+                let s = s.borrow();
+                match extract_vm_offset(index_value, size)? {
+                    VmOffset::Element(idx) => {
+                        let ch = s.chars().nth(idx).expect("bounds already checked");
+                        Ok(Value::string(ch.to_string()))
+                    }
+                    VmOffset::Range(from, to) => {
+                        let result: String = s.chars().skip(from).take(to - from).collect();
+                        Ok(Value::string(result))
+                    }
+                }
+            }
+            Object::Tuple(tuple) => match extract_vm_offset(index_value, size)? {
+                VmOffset::Element(idx) => tuple
+                    .get(idx)
+                    .cloned()
+                    .ok_or_else(|| VmError::native("index out of bounds")),
+                VmOffset::Range(from, to) => {
+                    let values = tuple
+                        .get(from..to)
+                        .ok_or_else(|| VmError::native("index out of bounds"))?;
+                    Ok(Value::Object(Rc::new(Object::Tuple(values.to_vec()))))
+                }
+            },
+            Object::Deque(deque) => {
+                let deque = deque.borrow();
+                match extract_vm_offset(index_value, size)? {
+                    VmOffset::Element(idx) => deque
+                        .get(idx)
+                        .cloned()
+                        .ok_or_else(|| VmError::native("index out of bounds")),
+                    VmOffset::Range(from, to) => {
+                        let out: Vec<Value> =
+                            deque.iter().skip(from).take(to - from).cloned().collect();
+                        Ok(Value::Object(Rc::new(Object::list(out))))
+                    }
+                }
+            }
+            Object::Map { .. } => Err(VmError::native(
+                "internal: Map indexing reached the no-callback path",
+            )),
             _ => Err(VmError::native(format!(
                 "cannot index into {}",
                 container.static_type()
