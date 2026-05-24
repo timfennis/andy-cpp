@@ -693,7 +693,7 @@ impl Vm {
     /// uses `call_callback` instead, which runs inline on the parent VM.
     pub fn call_function(
         func: Function,
-        args: Vec<Value>,
+        args: &[Value],
         globals: Vec<Value>,
     ) -> Result<Value, VmError> {
         let mut vm = Self {
@@ -713,17 +713,17 @@ impl Vm {
     /// Call a function inline on this VM, without spawning a child VM.
     /// Used by `VmCallable::call` so stdlib HOFs run their predicates/mappers
     /// directly on the parent stack — zero allocation per callback invocation.
-    pub fn call_callback(&mut self, func: Function, args: Vec<Value>) -> Result<Value, VmError> {
+    pub fn call_callback(&mut self, func: Function, args: &[Value]) -> Result<Value, VmError> {
         if let Function::Native(native) = func {
             match &native.func {
-                NativeFunc::Simple(f) => f(&args),
-                NativeFunc::WithVm(f) => f(&args, self),
+                NativeFunc::Simple(f) => f(args),
+                NativeFunc::WithVm(f) => f(args, self),
             }
         } else {
             let depth = self.frames.len();
             let n = args.len();
             self.stack.push(Value::unit()); // dummy callee slot
-            self.stack.extend(args);
+            self.stack.extend(args.iter().cloned());
             self.dispatch_call_with_memo(func, n, None)?;
             self.run_to_depth(depth)?;
             Ok(self.stack.pop().expect("callback must produce a value"))
@@ -945,8 +945,7 @@ impl Vm {
                 f
             };
 
-            let call_args = std::mem::replace(&mut elem_args, Vec::with_capacity(args));
-            let result = self.call_callback(scalar, call_args).map_err(|mut e| {
+            let result = self.call_callback(scalar, &elem_args).map_err(|mut e| {
                 let prefix = match &callee_name {
                     Some(name) => format!("while vectorising '{name}' at index {i}: "),
                     None => format!("while vectorising at index {i}: "),
@@ -1028,8 +1027,7 @@ impl Vm {
                 found.clone()
             };
 
-            let call_args = std::mem::replace(&mut elem_args, Vec::with_capacity(args));
-            let result = self.call_callback(scalar, call_args).map_err(|mut e| {
+            let result = self.call_callback(scalar, &elem_args).map_err(|mut e| {
                 let prefix = match &callee_name {
                     Some(name) => format!("while vectorising '{name}' at index {i}: "),
                     None => format!("while vectorising at index {i}: "),
@@ -1202,7 +1200,7 @@ pub struct VmCallable<'a> {
 impl VmCallable<'_> {
     /// Call this function with the given arguments, running inline on the
     /// parent VM.
-    pub fn call(&mut self, args: Vec<Value>) -> Result<Value, VmError> {
+    pub fn call(&mut self, args: &[Value]) -> Result<Value, VmError> {
         self.vm.call_callback(self.function.clone(), args)
     }
 }

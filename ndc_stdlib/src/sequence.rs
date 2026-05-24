@@ -238,7 +238,7 @@ mod inner {
             if err.is_some() {
                 return Ordering::Equal;
             }
-            match comp.call(vec![left.clone(), right.clone()]) {
+            match comp.call(&[left.clone(), right.clone()]) {
                 Ok(ret) => match ret.cmp_to_zero() {
                     Ok(ord) => ord,
                     Err(e) => {
@@ -288,7 +288,7 @@ mod inner {
             if err.is_some() {
                 return Ordering::Equal;
             }
-            match comp.call(vec![left.clone(), right.clone()]) {
+            match comp.call(&[left.clone(), right.clone()]) {
                 Ok(ret) => match ret.cmp_to_zero() {
                     Ok(ord) => ord,
                     Err(e) => {
@@ -376,7 +376,7 @@ mod inner {
             .ok_or_else(|| anyhow!("filter requires a sequence"))?
         {
             match predicate
-                .call(vec![element.clone()])
+                .call(std::slice::from_ref(&element))
                 .map_err(|e| anyhow!(e))?
             {
                 Value::Bool(true) => out.push(element),
@@ -394,7 +394,7 @@ mod inner {
             .try_into_iter()
             .ok_or_else(|| anyhow!("count requires a sequence"))?
         {
-            match predicate.call(vec![element]).map_err(|e| anyhow!(e))? {
+            match predicate.call(&[element]).map_err(|e| anyhow!(e))? {
                 Value::Bool(true) => out += 1,
                 Value::Bool(false) => {}
                 _ => return Err(anyhow!("return value of predicate must be a boolean")),
@@ -410,7 +410,7 @@ mod inner {
             .ok_or_else(|| anyhow!("find requires a sequence"))?
         {
             match predicate
-                .call(vec![element.clone()])
+                .call(std::slice::from_ref(&element))
                 .map_err(|e| anyhow!(e))?
             {
                 Value::Bool(true) => return Ok(element),
@@ -428,7 +428,7 @@ mod inner {
             .ok_or_else(|| anyhow!("locate requires a sequence"))?
             .enumerate()
         {
-            match predicate.call(vec![element]).map_err(|e| anyhow!(e))? {
+            match predicate.call(&[element]).map_err(|e| anyhow!(e))? {
                 Value::Bool(true) => return Ok(Value::Int(idx as i64)),
                 Value::Bool(false) => {}
                 _ => return Err(anyhow!("return value of predicate must be a boolean")),
@@ -458,7 +458,7 @@ mod inner {
             .try_into_iter()
             .ok_or_else(|| anyhow!("none requires a sequence"))?
         {
-            match function.call(vec![item]).map_err(|e| anyhow!(e))? {
+            match function.call(&[item]).map_err(|e| anyhow!(e))? {
                 Value::Bool(true) => return Ok(Value::Bool(false)),
                 Value::Bool(false) => {}
                 v => {
@@ -479,7 +479,7 @@ mod inner {
             .try_into_iter()
             .ok_or_else(|| anyhow!("all requires a sequence"))?
         {
-            match function.call(vec![item]).map_err(|e| anyhow!(e))? {
+            match function.call(&[item]).map_err(|e| anyhow!(e))? {
                 Value::Bool(true) => {}
                 Value::Bool(false) => return Ok(Value::Bool(false)),
                 v => {
@@ -499,7 +499,7 @@ mod inner {
             .try_into_iter()
             .ok_or_else(|| anyhow!("any requires a sequence"))?
         {
-            match predicate.call(vec![item]).map_err(|e| anyhow!(e))? {
+            match predicate.call(&[item]).map_err(|e| anyhow!(e))? {
                 Value::Bool(true) => return Ok(Value::Bool(true)),
                 Value::Bool(false) => {}
                 v => {
@@ -521,7 +521,7 @@ mod inner {
             .try_into_iter()
             .ok_or_else(|| anyhow!("map requires a sequence"))?
         {
-            out.push(function.call(vec![item]).map_err(|e| anyhow!(e))?);
+            out.push(function.call(&[item]).map_err(|e| anyhow!(e))?);
         }
         Ok(Value::list(out))
     }
@@ -534,7 +534,7 @@ mod inner {
             .try_into_iter()
             .ok_or_else(|| anyhow!("flat_map requires a sequence"))?
         {
-            let result = function.call(vec![item]).map_err(|e| anyhow!(e))?;
+            let result = function.call(&[item]).map_err(|e| anyhow!(e))?;
             let inner = result
                 .try_into_iter()
                 .ok_or_else(|| anyhow!("callable argument to flat_map must return a sequence"))?;
@@ -555,7 +555,7 @@ mod inner {
         if let Some(item) = seq.try_into_iter().and_then(|mut i| i.next()) {
             return Ok(item);
         }
-        default.call(vec![]).map_err(|e| anyhow!(e))
+        default.call(&[]).map_err(|e| anyhow!(e))
     }
 
     /// Returns the `k` sized combinations of the given sequence `seq` as a lazy iterator of tuples.
@@ -700,7 +700,7 @@ mod inner {
             .collect();
         let mut out = Vec::with_capacity(main.len().saturating_sub(1));
         for (a, b) in main.into_iter().tuple_windows() {
-            out.push(function.call(vec![a, b]).map_err(|e| anyhow!(e))?);
+            out.push(function.call(&[a, b]).map_err(|e| anyhow!(e))?);
         }
         Ok(Value::list(out))
     }
@@ -837,7 +837,9 @@ fn by_key(seq: Value, func: &mut VmCallable<'_>, better: Ordering) -> anyhow::Re
         .try_into_iter()
         .ok_or_else(|| anyhow!("sequence is required"))?
     {
-        let new_key = func.call(vec![value.clone()]).map_err(|e| anyhow!(e))?;
+        let new_key = func
+            .call(std::slice::from_ref(&value))
+            .map_err(|e| anyhow!(e))?;
         let is_better = match &best_key {
             None => true,
             Some(current_best) => {
@@ -865,7 +867,7 @@ fn by_comp(seq: Value, comp: &mut VmCallable<'_>, better: Ordering) -> anyhow::R
             None => true,
             Some(current) => {
                 let result = comp
-                    .call(vec![value.clone(), current.clone()])
+                    .call(&[value.clone(), current.clone()])
                     .map_err(|e| anyhow!(e))?;
                 result.cmp_to_zero().map_err(|e| anyhow!(e))? == better
             }
@@ -884,7 +886,7 @@ fn fold_iterator(
 ) -> anyhow::Result<Value> {
     let mut acc = initial;
     for item in iter {
-        acc = function.call(vec![acc, item]).map_err(|e| anyhow!(e))?;
+        acc = function.call(&[acc, item]).map_err(|e| anyhow!(e))?;
     }
     Ok(acc)
 }

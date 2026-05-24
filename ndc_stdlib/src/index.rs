@@ -294,7 +294,7 @@ fn vm_get_at_index(container: &Value, index_value: &Value, vm: &mut Vm) -> Resul
                             let Object::Function(f) = o.as_ref() else {
                                 unreachable!()
                             };
-                            let result = vm.call_callback(f.clone(), vec![])?;
+                            let result = vm.call_callback(f.clone(), &[])?;
                             entries.borrow_mut().insert(key, result.clone());
                             Ok(result)
                         }
