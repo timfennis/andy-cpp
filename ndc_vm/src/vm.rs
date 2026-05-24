@@ -893,12 +893,26 @@ impl Vm {
         debug_assert!(!vec_candidates.is_empty());
 
         let arg_start = self.stack.len() - args;
-        let callee_name = self.callee_name(args);
-
         let arg_values: Vec<Value> = self.stack.split_off(arg_start);
         self.stack.pop(); // discard the callee slot
 
         let frame_pointer = self.frames.last().expect("no frame").frame_pointer;
+
+        // Resolve one candidate up front so the error paths can borrow its name
+        // as `&str` instead of allocating a `String` on every successful call.
+        let callee_fn: Option<Rc<Object>> =
+            vec_candidates
+                .first()
+                .and_then(|var| match self.resolve_var(var, frame_pointer) {
+                    Value::Object(obj) if matches!(obj.as_ref(), Object::Function(_)) => Some(obj),
+                    _ => None,
+                });
+        let callee_name: Option<&str> = callee_fn.as_ref().and_then(|obj| {
+            let Object::Function(f) = obj.as_ref() else {
+                return None;
+            };
+            f.name()
+        });
 
         let mut elem_args: Vec<Value> = Vec::with_capacity(args);
         let mut results: Vec<Value> = Vec::with_capacity(axis_len);
@@ -935,7 +949,7 @@ impl Vm {
                         .map(|v| v.static_type().to_string())
                         .collect::<Vec<_>>()
                         .join(", ");
-                    let name = callee_name.as_deref().unwrap_or("?");
+                    let name = callee_name.unwrap_or("?");
                     return Err(VmError::new(
                         format!("no overload of '{name}' accepts element {i}: ({element_types})"),
                         span,
@@ -946,7 +960,7 @@ impl Vm {
             };
 
             let result = self.call_callback(scalar, &elem_args).map_err(|mut e| {
-                let prefix = match &callee_name {
+                let prefix = match callee_name {
                     Some(name) => format!("while vectorising '{name}' at index {i}: "),
                     None => format!("while vectorising at index {i}: "),
                 };
@@ -973,7 +987,10 @@ impl Vm {
         span: Span,
     ) -> Result<(), VmError> {
         let arg_start = self.stack.len() - args;
-        let callee_name = self.callee_name(args);
+        // Borrow the callee name straight off the resolved scalars — its lifetime
+        // is tied to the caller-owned slice, not to `self`, so the error paths
+        // can use it without allocating a `String` on the success path.
+        let callee_name: Option<&str> = scalars.first().and_then(|f| f.name());
 
         // Materialise the broadcast arguments up front so the inner
         // call_callback can hold &mut self without conflicting with stack
@@ -1017,7 +1034,7 @@ impl Vm {
                         .map(|v| v.static_type().to_string())
                         .collect::<Vec<_>>()
                         .join(", ");
-                    let name = callee_name.as_deref().unwrap_or("?");
+                    let name = callee_name.unwrap_or("?");
                     return Err(VmError::new(
                         format!("no overload of '{name}' accepts element {i}: ({element_types})"),
                         span,
@@ -1028,7 +1045,7 @@ impl Vm {
             };
 
             let result = self.call_callback(scalar, &elem_args).map_err(|mut e| {
-                let prefix = match &callee_name {
+                let prefix = match callee_name {
                     Some(name) => format!("while vectorising '{name}' at index {i}: "),
                     None => format!("while vectorising at index {i}: "),
                 };
