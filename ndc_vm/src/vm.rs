@@ -387,22 +387,16 @@ impl Vm {
                         continue;
                     }
 
-                    // Get type string before moving val
-                    let type_str = format!("{}", val.static_type());
-
-                    // Try to create an iterator
-                    let iter_val = match val {
+                    let iter_val = match &val {
                         Value::Object(rc) => match rc.as_ref() {
-                            Object::List(_) | Object::Tuple(_) | Object::Deque(_) => {
-                                Some(Value::iterator(Rc::new(RefCell::new(SeqIter::new(
-                                    Rc::clone(&rc),
-                                )))))
-                            }
+                            Object::List(_) | Object::Tuple(_) | Object::Deque(_) => Some(
+                                Value::iterator(Rc::new(RefCell::new(SeqIter::new(Rc::clone(rc))))),
+                            ),
                             Object::String(s) => Some(Value::iterator(Rc::new(RefCell::new(
                                 StringIter::new(Rc::clone(s)),
                             )))),
                             Object::Map { .. } => Some(Value::iterator(Rc::new(RefCell::new(
-                                MapIter::new(Rc::clone(&rc)),
+                                MapIter::new(Rc::clone(rc)),
                             )))),
                             Object::MinHeap(h) => {
                                 Some(Value::iterator(Rc::new(RefCell::new(HeapIter::new_min(h)))))
@@ -419,7 +413,7 @@ impl Vm {
                         Some(iter) => self.stack.push(iter),
                         None => {
                             return Err(VmError::new(
-                                format!("{} is not iterable", type_str),
+                                format!("{} is not iterable", val.static_type()),
                                 span,
                             ));
                         }
