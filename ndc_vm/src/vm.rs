@@ -263,8 +263,10 @@ impl Vm {
                             e.span.get_or_insert(span);
                             return Err(e);
                         }
-                    } else if let Some((scalars, axis_len)) = self.try_vec_dispatch(args) {
-                        if let Err(mut e) = self.dispatch_vec_call(&scalars, args, axis_len, span) {
+                    } else if let Some((overload_set, axis_len)) = self.try_vec_dispatch(args) {
+                        if let Err(mut e) =
+                            self.dispatch_vec_call_dynamic(&overload_set, args, axis_len, span)
+                        {
                             e.span.get_or_insert(span);
                             return Err(e);
                         }
@@ -815,38 +817,22 @@ impl Vm {
         }
     }
 
-    /// Vec-dispatch fallback for `OpCode::Call`. Returns the matched vec
-    /// scalars and the broadcast axis length when the callee is an
-    /// `OverloadSet` with at least one vec candidate *and* the args have
-    /// a consistent tuple axis length (`vec_axis_len`).
-    ///
-    /// Returns `None` to mean "vec doesn't apply" — caller errors out.
-    fn try_vec_dispatch(&self, args: usize) -> Option<(Vec<Function>, usize)> {
+    /// Probes `OpCode::Call`'s callee for vec dispatch eligibility without
+    /// allocating: returns `(vec_candidates_vars, axis_len)` borrowed off the
+    /// stack when vec applies. `dispatch_vec_call_dynamic` resolves the
+    /// candidates lazily — avoids the `Vec<Function>` allocation per call
+    /// that the eager-resolve version cost on AoC-style hot loops.
+    fn try_vec_dispatch(&self, args: usize) -> Option<(Rc<Object>, usize)> {
         let Value::Object(obj) = &self.stack[self.stack.len() - args - 1] else {
             return None;
         };
-        let Object::OverloadSet { vec_candidates, .. } = obj.as_ref() else {
-            return None;
-        };
-        if vec_candidates.is_empty() {
-            return None;
-        }
-        let start = self.stack.len() - args;
-        let axis_len = vec_axis_len(&self.stack[start..])?;
-        let frame_pointer = self.frames.last().expect("no frame").frame_pointer;
-        let mut scalars: Vec<Function> = Vec::with_capacity(vec_candidates.len());
-        for var in vec_candidates {
-            let value = self.resolve_var(var, frame_pointer);
-            let Value::Object(obj) = value else { continue };
-            let Object::Function(f) = obj.as_ref() else {
-                continue;
-            };
-            scalars.push(f.clone());
-        }
-        if scalars.is_empty() {
-            None
-        } else {
-            Some((scalars, axis_len))
+        match obj.as_ref() {
+            Object::OverloadSet { vec_candidates, .. } if !vec_candidates.is_empty() => {
+                let start = self.stack.len() - args;
+                let axis_len = vec_axis_len(&self.stack[start..])?;
+                Some((Rc::clone(obj), axis_len))
+            }
+            _ => None,
         }
     }
 
@@ -896,15 +882,98 @@ impl Vm {
         })
     }
 
-    /// Broadcast `scalars` across `axis_len` element positions, looking up the
-    /// matching scalar per pair when more than one is in play. Non-tuple args
-    /// broadcast unchanged.
-    ///
-    /// **Fast path**: when `scalars` has exactly one entry — which is the
-    /// `CallVec` opcode case and the "pinned single scalar" `Resolved(Vec)`
-    /// case at runtime — the per-element overload probe is skipped and the
-    /// scalar is called directly. This is the bulk of the win over the PR's
-    /// always-probe dispatcher.
+    /// Vec dispatch when `vec_candidates` lives behind a shared `Object::OverloadSet`
+    /// Rc — the runtime-narrowing path for `Binding::Dynamic` operator calls.
+    /// Resolves the candidate vars to `Function`s lazily inside the broadcast
+    /// loop with a last-match cache, so homogeneous tuples (the common case,
+    /// including the `AoC` 2025/08 hot loop) pay one resolve per outer call
+    /// instead of N. No upfront `Vec<Function>` allocation.
+    fn dispatch_vec_call_dynamic(
+        &mut self,
+        overload_set: &Rc<Object>,
+        args: usize,
+        axis_len: usize,
+        span: Span,
+    ) -> Result<(), VmError> {
+        let Object::OverloadSet { vec_candidates, .. } = overload_set.as_ref() else {
+            unreachable!("dispatch_vec_call_dynamic invoked with non-OverloadSet callee");
+        };
+        debug_assert!(!vec_candidates.is_empty());
+
+        let arg_start = self.stack.len() - args;
+        let callee_name = self.callee_name(args);
+
+        let arg_values: Vec<Value> = self.stack.split_off(arg_start);
+        self.stack.pop(); // discard the callee slot
+
+        let frame_pointer = self.frames.last().expect("no frame").frame_pointer;
+
+        let mut elem_args: Vec<Value> = Vec::with_capacity(args);
+        let mut results: Vec<Value> = Vec::with_capacity(axis_len);
+        // Cached last-match Function. Homogeneous tuples reuse this across
+        // positions; heterogeneous tuples fall through to the candidate walk.
+        let mut last_match: Option<Function> = None;
+
+        for i in 0..axis_len {
+            elem_args.clear();
+            for arg in &arg_values {
+                elem_args.push(vec_element_at(arg, i));
+            }
+
+            let scalar: Function = if let Some(f) = &last_match
+                && f.matches_value_args(&elem_args)
+            {
+                f.clone()
+            } else {
+                let mut found: Option<Function> = None;
+                for var in vec_candidates {
+                    let value = self.resolve_var(var, frame_pointer);
+                    let Value::Object(obj) = value else { continue };
+                    let Object::Function(f) = obj.as_ref() else {
+                        continue;
+                    };
+                    if f.matches_value_args(&elem_args) {
+                        found = Some(f.clone());
+                        break;
+                    }
+                }
+                let Some(f) = found else {
+                    let element_types = elem_args
+                        .iter()
+                        .map(|v| v.static_type().to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let name = callee_name.as_deref().unwrap_or("?");
+                    return Err(VmError::new(
+                        format!("no overload of '{name}' accepts element {i}: ({element_types})"),
+                        span,
+                    ));
+                };
+                last_match = Some(f.clone());
+                f
+            };
+
+            let call_args = std::mem::replace(&mut elem_args, Vec::with_capacity(args));
+            let result = self.call_callback(scalar, call_args).map_err(|mut e| {
+                let prefix = match &callee_name {
+                    Some(name) => format!("while vectorising '{name}' at index {i}: "),
+                    None => format!("while vectorising at index {i}: "),
+                };
+                e.message = format!("{prefix}{}", e.message);
+                e.span.get_or_insert(span);
+                e
+            })?;
+            results.push(result);
+        }
+
+        self.stack
+            .push(Value::Object(Rc::new(Object::Tuple(results))));
+        Ok(())
+    }
+
+    /// Vec dispatch when the scalar set is already resolved — the `CallVec`
+    /// opcode path. `scalars.len() == 1` is the analyser-pinned fast path
+    /// that skips the per-element probe entirely.
     fn dispatch_vec_call(
         &mut self,
         scalars: &[Function],
@@ -929,6 +998,11 @@ impl Vm {
 
         let mut elem_args: Vec<Value> = Vec::with_capacity(args);
         let mut results: Vec<Value> = Vec::with_capacity(axis_len);
+        // Cache the last scalar that matched. Homogeneous tuples — the common
+        // case at runtime, including the AoC 2025/08 hot loop — all want the
+        // same scalar at every position, so probing it first short-circuits
+        // the candidate walk for positions 1..N.
+        let mut last_match: Option<usize> = None;
 
         for i in 0..axis_len {
             elem_args.clear();
@@ -938,8 +1012,16 @@ impl Vm {
 
             let scalar: Function = if let Some(f) = pinned {
                 f.clone()
+            } else if let Some(idx) = last_match
+                && scalars[idx].matches_value_args(&elem_args)
+            {
+                scalars[idx].clone()
             } else {
-                let Some(found) = scalars.iter().find(|f| f.matches_value_args(&elem_args)) else {
+                let Some((idx, found)) = scalars
+                    .iter()
+                    .enumerate()
+                    .find(|(_, f)| f.matches_value_args(&elem_args))
+                else {
                     let element_types = elem_args
                         .iter()
                         .map(|v| v.static_type().to_string())
@@ -951,6 +1033,7 @@ impl Vm {
                         span,
                     ));
                 };
+                last_match = Some(idx);
                 found.clone()
             };
 

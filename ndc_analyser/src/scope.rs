@@ -61,18 +61,20 @@ fn unique_scalar(positions: &[Vec<ResolvedVar>]) -> Option<ResolvedVar> {
     Some(first)
 }
 
-/// Extend `out` with the result of mapping `vars` through `wrap`, skipping any
-/// `Candidate` whose underlying `ResolvedVar` is already present in `out`.
-/// Preserves first-seen order — relevant because the runtime probes
-/// candidates in list order and stops at the first match.
+/// Extend `out` with the result of mapping `vars` through `wrap`, skipping
+/// any entry equal to one already present. Compares by full `Candidate`
+/// (variant + var), so the same `ResolvedVar` can appear once as
+/// `Scalar` and once as `Vec` — they are distinct dispatch shapes that
+/// must each reach the runtime. Preserves first-seen order.
 fn extend_dedup(
     out: &mut Vec<Candidate>,
     vars: impl IntoIterator<Item = ResolvedVar>,
     wrap: fn(ResolvedVar) -> Candidate,
 ) {
     for v in vars {
-        if !out.iter().any(|c| c.var() == v) {
-            out.push(wrap(v));
+        let candidate = wrap(v);
+        if !out.contains(&candidate) {
+            out.push(candidate);
         }
     }
 }

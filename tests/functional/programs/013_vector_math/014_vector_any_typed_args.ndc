@@ -1,0 +1,13 @@
+// Regression: when both args are statically `Any` but happen to be
+// numeric tuples at runtime, the Dynamic binding must carry both the
+// scalar overloads (in case the values turn out scalar) AND the vec
+// candidates pointing at those same scalar slots. An earlier draft
+// deduped vec candidates against their scalar twins by inner var,
+// which left the OverloadSet with no vec_candidates and the call
+// errored at runtime with "no function called '-' found".
+fn id(x) { x };
+let a = id((1, 2, 3));  // statically: Any. runtime: Tuple<Int, Int, Int>.
+let b = id((4, 5, 6));
+let diff = a - b;
+assert_eq(diff, (-3, -3, -3));
+assert_eq(diff * diff, (9, 9, 9));
