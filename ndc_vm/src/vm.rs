@@ -351,7 +351,7 @@ impl Vm {
                         None
                     };
                     let flat = self.stack.split_off(self.stack.len() - pairs * 2);
-                    let mut map = HashMap::new();
+                    let mut map = HashMap::with_capacity(pairs);
                     let mut flat_iter = flat.into_iter();
                     for _ in 0..pairs {
                         let key = flat_iter.next().expect("expected key");
