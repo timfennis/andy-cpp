@@ -818,10 +818,9 @@ impl Vm {
     }
 
     /// Probes `OpCode::Call`'s callee for vec dispatch eligibility without
-    /// allocating: returns `(vec_candidates_vars, axis_len)` borrowed off the
-    /// stack when vec applies. `dispatch_vec_call_dynamic` resolves the
-    /// candidates lazily — avoids the `Vec<Function>` allocation per call
-    /// that the eager-resolve version cost on AoC-style hot loops.
+    /// allocating: returns the `OverloadSet` Rc and broadcast axis length
+    /// when vec applies. `dispatch_vec_call_dynamic` resolves the candidates
+    /// lazily from there, avoiding a per-call `Vec<Function>` allocation.
     fn try_vec_dispatch(&self, args: usize) -> Option<(Rc<Object>, usize)> {
         let Value::Object(obj) = &self.stack[self.stack.len() - args - 1] else {
             return None;
@@ -882,11 +881,10 @@ impl Vm {
         })
     }
 
-    /// Vec dispatch when `vec_candidates` lives behind a shared `Object::OverloadSet`
-    /// Rc — the runtime-narrowing path for `Binding::Dynamic` operator calls.
-    /// Resolves the candidate vars to `Function`s lazily inside the broadcast
-    /// loop with a last-match cache, so homogeneous tuples (the common case,
-    /// including the `AoC` 2025/08 hot loop) pay one resolve per outer call
+    /// Vec dispatch for `Binding::Dynamic` operator calls — the runtime
+    /// picks the matching scalar overload per element position. Resolves
+    /// candidates lazily from `vec_candidates` with a last-match cache, so
+    /// homogeneous tuples (the common case) pay one resolve per outer call
     /// instead of N. No upfront `Vec<Function>` allocation.
     fn dispatch_vec_call_dynamic(
         &mut self,
@@ -999,9 +997,8 @@ impl Vm {
         let mut elem_args: Vec<Value> = Vec::with_capacity(args);
         let mut results: Vec<Value> = Vec::with_capacity(axis_len);
         // Cache the last scalar that matched. Homogeneous tuples — the common
-        // case at runtime, including the AoC 2025/08 hot loop — all want the
-        // same scalar at every position, so probing it first short-circuits
-        // the candidate walk for positions 1..N.
+        // case — all want the same scalar at every position, so probing it
+        // first short-circuits the candidate walk for positions 1..N.
         let mut last_match: Option<usize> = None;
 
         for i in 0..axis_len {

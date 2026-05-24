@@ -202,11 +202,8 @@ impl Analyser {
                 let right_type = self.analyse_or_any(r_value);
                 let arg_types = vec![left_type, right_type];
 
-                // Both `op=` and `op` desugar from operator syntax, so vec
-                // dispatch is available for either path. Resolving `op` gives
-                // us the result type to widen the lvalue with — that's how
-                // `a += (3, 4)` on `Tuple<Int, Int>` widens correctly instead
-                // of trying to widen with the scalar `+(Int,Int) -> Int`.
+                // Resolve both `op=` and `op` so we can widen the lvalue
+                // by the result type of whichever one actually fires.
                 let ResolvedCall {
                     binding: assign_binding,
                     ..
@@ -472,11 +469,8 @@ impl Analyser {
         }
     }
 
-    /// Analyse a call expression — either `Call` (regular) or `OperatorCall`.
-    /// Resolves the function binding (with vec dispatch eligible iff
-    /// `kind == Operator`) and returns the inferred result type. The binding
-    /// is written back into the function-identifier node and the return type
-    /// recorded on the call's [`NodeId`] via the surrounding `analyse` wrapper.
+    /// Resolves a call (regular or operator-form) and returns its result type.
+    /// Only operator-form calls are eligible for vec dispatch.
     fn analyse_call(
         &mut self,
         function: &mut ExpressionLocation,
