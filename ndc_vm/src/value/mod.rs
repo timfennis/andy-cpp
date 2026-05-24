@@ -48,7 +48,16 @@ pub enum Object {
         default: Option<Value>,
     },
     Function(Function),
-    OverloadSet(Vec<ResolvedVar>),
+    /// A set of overload candidates the runtime narrows per call. Scalars are
+    /// walked first (first-match-wins, same shape as the master baseline);
+    /// `vec_candidates` is only consulted as a fallback for operator-form
+    /// calls when no scalar accepts the args. `vec_candidates` is empty for
+    /// non-operator call sites, so the hot path stays a single `Vec<ResolvedVar>`
+    /// walk identical to scalar-only dispatch.
+    OverloadSet {
+        scalars: Vec<ResolvedVar>,
+        vec_candidates: Vec<ResolvedVar>,
+    },
     Iterator(SharedIterator),
     Deque(RefCell<VecDeque<Value>>),
     MinHeap(RefCell<BinaryHeap<Reverse<OrdValue>>>),
@@ -488,7 +497,7 @@ impl Object {
                 }
             }
             Self::Function(f) => f.static_type(),
-            Self::OverloadSet(_) => StaticType::Any,
+            Self::OverloadSet { .. } => StaticType::Any,
             Self::Iterator(_) => StaticType::Iterator(Box::new(StaticType::Any)),
             Self::Deque(elements) => {
                 let elements = elements.borrow();
@@ -567,7 +576,14 @@ impl fmt::Display for Object {
                 write!(f, "}}")
             }
             Self::Function(func) => write!(f, "{func}"),
-            Self::OverloadSet(slots) => write!(f, "<overload set ({} candidates)>", slots.len()),
+            Self::OverloadSet {
+                scalars,
+                vec_candidates,
+            } => write!(
+                f,
+                "<overload set ({} candidates)>",
+                scalars.len() + vec_candidates.len()
+            ),
             Self::Iterator(iter) => match iter.borrow().len() {
                 Some(n) => write!(f, "<iterator (len={n})>"),
                 None => write!(f, "<iterator>"),
@@ -609,7 +625,14 @@ impl fmt::Debug for Object {
                 .field("default", default)
                 .finish(),
             Self::Function(func) => write!(f, "{func:?}"),
-            Self::OverloadSet(slots) => f.debug_tuple("OverloadSet").field(slots).finish(),
+            Self::OverloadSet {
+                scalars,
+                vec_candidates,
+            } => f
+                .debug_struct("OverloadSet")
+                .field("scalars", scalars)
+                .field("vec_candidates", vec_candidates)
+                .finish(),
             Self::Iterator(iter) => match iter.borrow().len() {
                 Some(n) => write!(f, "<iterator (len={n})>"),
                 None => write!(f, "<iterator>"),
@@ -804,7 +827,7 @@ impl PartialEq for Object {
                     _ => false,
                 }
             }
-            (Self::OverloadSet(_), Self::OverloadSet(_)) => {
+            (Self::OverloadSet { .. }, Self::OverloadSet { .. }) => {
                 panic!("OverloadSet cannot be used as a map key")
             }
             (Self::Iterator(a), Self::Iterator(b)) => {
@@ -901,7 +924,7 @@ impl Hash for Object {
                     }
                 }
             }
-            Self::OverloadSet(_) => {
+            Self::OverloadSet { .. } => {
                 panic!("OverloadSet cannot be used as a map key")
             }
             Self::Iterator(iter) => {

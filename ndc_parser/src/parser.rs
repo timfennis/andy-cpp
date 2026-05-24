@@ -198,7 +198,7 @@ impl Parser {
             // Is this always the same
             debug_assert_eq!(operator.to_string(), operator_token_loc.token.to_string());
 
-            left = Expression::Call {
+            left = Expression::OperatorCall {
                 function: Box::new(
                     Expression::Identifier {
                         name: operator_token_loc.token.to_string(),
@@ -211,7 +211,7 @@ impl Parser {
             .to_location(new_span);
 
             if let Some(not_token) = invert {
-                left = Expression::Call {
+                left = Expression::OperatorCall {
                     function: Box::new(
                         Expression::Identifier {
                             name: not_token.token.to_string(),
@@ -243,7 +243,7 @@ impl Parser {
 
             let new_span = left.span.merge(right.span);
 
-            return Ok(Expression::Call {
+            return Ok(Expression::OperatorCall {
                 function: Box::new(
                     Expression::Identifier {
                         name: operator.to_string(),
@@ -500,7 +500,7 @@ impl Parser {
             let right = self.logic_not()?;
             let span = right.span;
 
-            Ok(Expression::Call {
+            Ok(Expression::OperatorCall {
                 function: Box::new(
                     Expression::Identifier {
                         name: operator_token_loc.token.to_string(),
@@ -631,7 +631,7 @@ impl Parser {
             let right = self.tight_unary()?;
             let span = right.span;
 
-            Ok(Expression::Call {
+            Ok(Expression::OperatorCall {
                 function: Box::new(
                     Expression::Identifier {
                         name: operator_token_loc.token.to_string(),

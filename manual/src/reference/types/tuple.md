@@ -43,3 +43,27 @@ assert_eq(b, (1,2,3,4,5));
 ## Operators
 
 {{#include ../../snippets/list-operators.md}}
+
+## Vectorization
+
+Operators broadcast element-wise over tuples. Both arguments must be tuples
+of the same length, or one side may be a scalar that broadcasts:
+
+```ndc
+assert_eq((1, 2) + (3, 4), (4, 6));
+assert_eq(-(1, 2, 3), (-1, -2, -3));
+assert_eq((1, 2) + 5, (6, 7));
+assert_eq(("a", "b") ++ ("c", "d"), ("ac", "bd"));
+```
+
+Vectorization only kicks in for operator syntax (`a + b`, `-x`, `a ++ b`).
+Regular function calls never broadcast, so `f((1, 2, 3))` passes the whole
+tuple to `f` and does not call `f` once per element.
+
+Mixed-element tuples or length mismatches error at compile time rather than
+silently producing wrong results:
+
+```ndc
+(1, 2, 3) + (4, 5)   // ERROR: no overload accepts those argument types
+(1, "a") + (2, "b")  // ERROR: no `+(String, String)` overload
+```

@@ -1,0 +1,8 @@
+// Vec dispatch hot loop: a tight loop over many
+// `Tuple<Int, Int> + Tuple<Int, Int>` calls.
+let n = 200_000;
+let acc = (0, 0);
+for i in 0..n {
+    acc = acc + (i, i);
+}
+print(acc);

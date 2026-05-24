@@ -561,38 +561,11 @@ impl StaticType {
         Self::Tuple(vec![])
     }
 
-    #[must_use]
-    pub fn supports_vectorization(&self) -> bool {
-        match self {
-            Self::Tuple(values) => values.iter().all(|v| v.is_number()),
-            _ => false,
-        }
-    }
-
     pub fn is_number(&self) -> bool {
         matches!(
             self,
             Self::Number | Self::Float | Self::Int | Self::Rational | Self::Complex
         )
-    }
-
-    #[must_use]
-    pub fn supports_vectorization_with(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Tuple(l), Self::Tuple(r))
-                if {
-                    l.len() == r.len()
-                        && self.supports_vectorization()
-                        && other.supports_vectorization()
-                } =>
-            {
-                true
-            }
-            (tup @ Self::Tuple(_), maybe_num) | (maybe_num, tup @ Self::Tuple(_)) => {
-                tup.supports_vectorization() && maybe_num.is_number()
-            }
-            _ => false,
-        }
     }
 
     // BRUH

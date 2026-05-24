@@ -22,8 +22,8 @@ impl NodeId {
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Binding {
     None,
-    Resolved(ResolvedVar),
-    Dynamic(Vec<ResolvedVar>), // figure it out at runtime
+    Resolved(Candidate),
+    Dynamic(Vec<Candidate>), // figure it out at runtime
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
@@ -38,6 +38,29 @@ impl ResolvedVar {
         match self {
             Self::Local { slot } | Self::Upvalue { slot, .. } | Self::Global { slot } => slot,
         }
+    }
+}
+
+/// A function overload candidate the analyser picked. The two variants encode
+/// what kind of call this candidate is — a direct scalar call, or an element-wise
+/// tuple broadcast over the scalar overload that `var()` returns.
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
+pub enum Candidate {
+    Scalar(ResolvedVar),
+    /// Element-wise tuple broadcast. The inner `ResolvedVar` points to the
+    /// scalar overload that fires for each element pair.
+    Vec(ResolvedVar),
+}
+
+impl Candidate {
+    pub fn var(self) -> ResolvedVar {
+        match self {
+            Self::Scalar(v) | Self::Vec(v) => v,
+        }
+    }
+
+    pub fn is_vec(self) -> bool {
+        matches!(self, Self::Vec(_))
     }
 }
 
@@ -118,6 +141,14 @@ pub enum Expression {
     },
     Call {
         /// The function to call, could be an identifier, or any expression that produces a function as its value
+        function: Box<ExpressionLocation>,
+        arguments: Vec<ExpressionLocation>,
+    },
+    /// Desugared operator syntax: `a + b`, `-x`, `not x`, etc. Distinguished
+    /// from `Call` so the analyser can apply tuple-broadcast (vec) dispatch
+    /// rules without leaking the curated list of operator names downstream.
+    /// Regular function calls never broadcast.
+    OperatorCall {
         function: Box<ExpressionLocation>,
         arguments: Vec<ExpressionLocation>,
     },

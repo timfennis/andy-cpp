@@ -24,7 +24,7 @@ fn generate_tests(output: &mut impl Write, base: &Path, dir: &Path) {
         let path = entry.path();
         if path.is_dir() {
             generate_tests(output, base, &path);
-        } else if path.extension().map_or(false, |e| e == "ndc") {
+        } else if path.extension().is_some_and(|e| e == "ndc") {
             let relative = path.strip_prefix(base).unwrap();
             let stem = relative
                 .with_extension("")

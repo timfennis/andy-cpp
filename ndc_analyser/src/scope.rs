@@ -1,6 +1,83 @@
 use ndc_core::StaticType;
-use ndc_parser::{Binding, CaptureSource, ResolvedVar};
+use ndc_parser::{Binding, Candidate, CaptureSource, ResolvedVar};
 use std::fmt::{Debug, Formatter};
+
+/// Whether a call site can fall back to element-wise tuple broadcast when no
+/// scalar overload matches the argument types directly. Set by the parser:
+/// operator desugars (`a + b`, `-x`, `op=`) produce `Operator`; everything
+/// else (`f(x)`, dot calls, indexing) produces `Regular`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallKind {
+    Regular,
+    Operator,
+}
+
+/// What [`ScopeTree::resolve_call`] hands back: the binding the analyser will
+/// store on the call node, plus the inferred return type of the call.
+///
+/// Folding the return-type computation into the same walk that produces the
+/// binding lets the analyser avoid doing per-position resolution twice on
+/// every Dynamic operator-form call.
+pub(crate) struct ResolvedCall {
+    pub binding: Binding,
+    pub return_type: StaticType,
+}
+
+/// Per-position vec resolution result for an operator-form call. See
+/// [`ScopeTree::resolve_vec`] for the case breakdown.
+pub(crate) enum VecResolution {
+    Static {
+        axis_len: usize,
+        /// `positions[i]` is the priority-ordered scalar overloads compatible
+        /// with the call's element types at position `i`. Always non-empty —
+        /// an empty position cancels the whole vec resolution upstream.
+        positions: Vec<Vec<ResolvedVar>>,
+    },
+    AnyFallback(Vec<ResolvedVar>),
+}
+
+/// Output of a single scalar overload walk across the scope chain.
+struct ScalarWalk {
+    /// First exact-subtype match found; short-circuits the walk.
+    exact: Option<ResolvedVar>,
+    /// First-scope-wins loose-compatibility candidates.
+    loose: Option<Vec<ResolvedVar>>,
+    /// Every same-name callable across the whole chain, for runtime-narrowing
+    /// fallback when the callee's static type is `Any`.
+    all_by_name: Vec<ResolvedVar>,
+}
+
+/// If every per-position candidate list contains exactly one entry and they
+/// all point to the same scalar overload, return it. This is the only case
+/// where `Binding::Resolved(Candidate::Vec)` is safe to emit: a single scalar
+/// fires for every element pair.
+fn unique_scalar(positions: &[Vec<ResolvedVar>]) -> Option<ResolvedVar> {
+    let first = positions.first()?.first().copied()?;
+    for pos in positions {
+        if pos.len() != 1 || pos[0] != first {
+            return None;
+        }
+    }
+    Some(first)
+}
+
+/// Extend `out` with the result of mapping `vars` through `wrap`, skipping
+/// any entry equal to one already present. Compares by full `Candidate`
+/// (variant + var), so the same `ResolvedVar` can appear once as
+/// `Scalar` and once as `Vec` — they are distinct dispatch shapes that
+/// must each reach the runtime. Preserves first-seen order.
+fn extend_dedup(
+    out: &mut Vec<Candidate>,
+    vars: impl IntoIterator<Item = ResolvedVar>,
+    wrap: fn(ResolvedVar) -> Candidate,
+) {
+    for v in vars {
+        let candidate = wrap(v);
+        if !out.contains(&candidate) {
+            out.push(candidate);
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub(crate) enum TypeBinding {
@@ -347,38 +424,159 @@ impl ScopeTree {
         }
     }
 
-    /// Resolve a function call binding in a single scope-chain walk.
+    /// Resolve a function call to a binding and an inferred return type.
     ///
-    /// At each scope the priorities are:
-    ///   1. Exact type match on a local → return `Binding::Resolved` immediately
-    ///   2. Upvalues with matching name → added to candidates (not early-returned,
-    ///      because a different overload may be an exact match in an outer scope)
-    ///   3. Compatible-type candidates → remember first set found (for `Binding::Dynamic`)
-    ///   4. All same-named bindings → accumulate as last-resort fallback
-    pub(crate) fn resolve_function_binding(&mut self, ident: &str, sig: &[StaticType]) -> Binding {
+    /// Single entry point for both regular calls (`f(x)`) and operator-form
+    /// calls (`a + b`, `-x`, `op=`). The two differ only in whether
+    /// element-wise tuple broadcast is allowed when no scalar overload matches.
+    ///
+    /// Resolution order, first match wins:
+    ///   1. **Scalar exact match** — `is_fn_and_matches` on the args. Returns
+    ///      `Binding::Resolved(Scalar)`, return type = the overload's declared
+    ///      return.
+    ///   2. **Operator-form vec, single scalar across all positions** — the
+    ///      per-position lookup pins exactly one scalar for every element
+    ///      position and no looser scalar competes. Returns
+    ///      `Binding::Resolved(Vec)`, return type = `Tuple<scalar_return; n>`.
+    ///   3. **Loose scalar or vec candidates** — returns
+    ///      `Binding::Dynamic(candidates)`, return type = LUB of contributions
+    ///      (pure-scalar LUBs declared returns; pure-vec LUBs per position and
+    ///      wraps in `Tuple<…>`; mixed scalar+vec collapses to `Any`).
+    ///   4. **Same-name callables, no signature match** — last-resort
+    ///      fallback so `Any`-typed callees still get a candidate list.
+    ///      Returns `Binding::Dynamic`, return type = `Any`.
+    ///   5. Nothing found — `Binding::None`, return type = `Any`.
+    pub(crate) fn resolve_call(
+        &mut self,
+        ident: &str,
+        sig: &[StaticType],
+        kind: CallKind,
+    ) -> ResolvedCall {
+        let walk = self.scalar_walk(ident, sig);
+
+        // 1. Scalar exact match.
+        if let Some(exact) = walk.exact {
+            let return_type = self.scalar_return_type(exact);
+            return ResolvedCall {
+                binding: Binding::Resolved(Candidate::Scalar(exact)),
+                return_type,
+            };
+        }
+
+        // 2. Per-position vec resolution, but only for operator-form calls.
+        let vec_resolution = match kind {
+            CallKind::Operator => self.resolve_vec(ident, sig),
+            CallKind::Regular => None,
+        };
+
+        // 2a. If the user clearly *meant* vec dispatch (at least one arg is
+        // statically a tuple) but a per-position lookup found no overload at
+        // some position, the call can't succeed at runtime either. Surfacing
+        // this as `Binding::None` lets the caller emit a precise compile-time
+        // error instead of letting the program limp on to a runtime miss.
+        if let Some(VecResolution::Static { positions, .. }) = &vec_resolution
+            && sig
+                .iter()
+                .any(|t| matches!(t, StaticType::Tuple(elems) if !elems.is_empty()))
+            && positions.iter().any(|p| p.is_empty())
+        {
+            return ResolvedCall {
+                binding: Binding::None,
+                return_type: StaticType::Any,
+            };
+        }
+
+        let scalar_loose = walk.loose.unwrap_or_default();
+
+        // Resolved(Vec): vec is the unique candidate (no loose scalars compete)
+        // and every position pins the same scalar overload.
+        if scalar_loose.is_empty()
+            && let Some(VecResolution::Static {
+                axis_len,
+                positions,
+            }) = &vec_resolution
+            && let Some(scalar) = unique_scalar(positions)
+        {
+            let scalar_return = self.scalar_return_type(scalar);
+            return ResolvedCall {
+                binding: Binding::Resolved(Candidate::Vec(scalar)),
+                return_type: StaticType::Tuple(vec![scalar_return; *axis_len]),
+            };
+        }
+
+        // 3. Dynamic: mix scalar loose candidates with vec candidates.
+        let has_vec_candidates = vec_resolution.is_some();
+        if !scalar_loose.is_empty() || has_vec_candidates {
+            let return_type = self.dynamic_return_type(&scalar_loose, vec_resolution.as_ref());
+            let mut combined: Vec<Candidate> = scalar_loose
+                .iter()
+                .copied()
+                .map(Candidate::Scalar)
+                .collect();
+            match vec_resolution {
+                Some(VecResolution::Static { positions, .. }) => {
+                    extend_dedup(&mut combined, positions.into_iter().flatten(), |v| {
+                        Candidate::Vec(v)
+                    });
+                }
+                Some(VecResolution::AnyFallback(vars)) => {
+                    extend_dedup(&mut combined, vars, Candidate::Vec);
+                }
+                None => {}
+            }
+            return ResolvedCall {
+                binding: Binding::Dynamic(combined),
+                return_type,
+            };
+        }
+
+        // 4. Last-resort same-name callables (for Any-typed callees, upvalues, …).
+        if !walk.all_by_name.is_empty() {
+            return ResolvedCall {
+                binding: Binding::Dynamic(
+                    walk.all_by_name
+                        .into_iter()
+                        .map(Candidate::Scalar)
+                        .collect(),
+                ),
+                return_type: StaticType::Any,
+            };
+        }
+
+        // 5. Nothing.
+        ResolvedCall {
+            binding: Binding::None,
+            return_type: StaticType::Any,
+        }
+    }
+
+    /// Per-scope walk for scalar matches against `sig`. Exact matches
+    /// short-circuit; `loose` holds the first scope's compatibility candidates;
+    /// `all_by_name` accumulates every same-name callable across the chain for
+    /// the runtime-narrowing fallback.
+    fn scalar_walk(&mut self, ident: &str, sig: &[StaticType]) -> ScalarWalk {
         let mut scope_ptr = self.current_scope_idx;
         let mut env_scopes: Vec<usize> = Vec::default();
-        let mut loose_candidates: Option<Vec<ResolvedVar>> = None;
+        let mut loose: Option<Vec<ResolvedVar>> = None;
         let mut all_by_name: Vec<ResolvedVar> = Vec::new();
 
         loop {
-            // 1. Exact match on a local → return immediately
             if let Some(slot) = self.scopes[scope_ptr].find_function(ident, sig) {
-                return Binding::Resolved(self.resolve_found_local(ident, slot, &env_scopes));
+                return ScalarWalk {
+                    exact: Some(self.resolve_found_local(ident, slot, &env_scopes)),
+                    loose: None,
+                    all_by_name: Vec::new(),
+                };
             }
 
-            // 2. Upvalues with matching name — collect as candidates but continue
-            //    walking, because the upvalue may be a different overload (e.g.
-            //    different arity) and the exact match could be in a parent scope.
             for uv_slot in self.scopes[scope_ptr].find_upvalues_by_name(ident) {
                 all_by_name.push(self.resolve_found_upvalue(ident, uv_slot, &env_scopes));
             }
 
-            // 3. Compatible candidates (keep only the first scope's matches — shadowing)
-            if loose_candidates.is_none() {
+            if loose.is_none() {
                 let candidates = self.scopes[scope_ptr].find_function_candidates(ident, sig);
                 if !candidates.is_empty() {
-                    loose_candidates = Some(
+                    loose = Some(
                         candidates
                             .into_iter()
                             .map(|slot| self.resolve_found_local(ident, slot, &env_scopes))
@@ -387,7 +585,6 @@ impl ScopeTree {
                 }
             }
 
-            // 4. All same-named bindings (accumulate across all scopes)
             let slots = self.scopes[scope_ptr].find_all_callable_slots_by_name(ident);
             all_by_name.extend(
                 slots
@@ -395,22 +592,23 @@ impl ScopeTree {
                     .map(|slot| self.resolve_found_local(ident, slot, &env_scopes)),
             );
 
-            // Advance to parent scope
             if let Some(parent_idx) = self.scopes[scope_ptr].parent_idx {
                 if self.scopes[scope_ptr].creates_environment {
                     env_scopes.push(scope_ptr);
                 }
                 scope_ptr = parent_idx;
             } else {
-                // Fall through to globals
                 if let Some(slot) = self.global_scope.find_function(ident, sig) {
-                    return Binding::Resolved(ResolvedVar::Global { slot });
+                    return ScalarWalk {
+                        exact: Some(ResolvedVar::Global { slot }),
+                        loose: None,
+                        all_by_name: Vec::new(),
+                    };
                 }
-
-                if loose_candidates.is_none() {
+                if loose.is_none() {
                     let candidates = self.global_scope.find_function_candidates(ident, sig);
                     if !candidates.is_empty() {
-                        loose_candidates = Some(
+                        loose = Some(
                             candidates
                                 .into_iter()
                                 .map(|slot| ResolvedVar::Global { slot })
@@ -418,25 +616,158 @@ impl ScopeTree {
                         );
                     }
                 }
-
                 all_by_name.extend(
                     self.global_scope
                         .find_all_callable_slots_by_name(ident)
                         .into_iter()
                         .map(|slot| ResolvedVar::Global { slot }),
                 );
-
                 break;
             }
         }
 
-        if let Some(candidates) = loose_candidates {
-            return Binding::Dynamic(candidates);
+        ScalarWalk {
+            exact: None,
+            loose,
+            all_by_name,
         }
-        if !all_by_name.is_empty() {
-            return Binding::Dynamic(all_by_name);
+    }
+
+    /// Try to resolve a vec candidate set for `(name, sig)`.
+    ///
+    /// * `Static` — at least one arg is statically a non-empty tuple and
+    ///   every tuple-shaped arg shares that length. Positions *may* contain
+    ///   empty candidate lists; the caller surfaces that as a call error.
+    /// * `AnyFallback` — no static tuple shape but at least one arg is `Any`,
+    ///   so vec might still apply at runtime; the runtime narrows per pair.
+    /// * `None` — no possible vec interpretation.
+    fn resolve_vec(&mut self, ident: &str, sig: &[StaticType]) -> Option<VecResolution> {
+        if let Some((axis_len, positions)) = self.resolve_vec_static(ident, sig) {
+            return Some(VecResolution::Static {
+                axis_len,
+                positions,
+            });
         }
-        Binding::None
+        if !sig.iter().any(|t| matches!(t, StaticType::Any)) {
+            return None;
+        }
+        let permissive: Vec<StaticType> = vec![StaticType::Any; sig.len()];
+        let vars = self.candidates_for_sig(ident, &permissive);
+        if vars.is_empty() {
+            None
+        } else {
+            Some(VecResolution::AnyFallback(vars))
+        }
+    }
+
+    fn resolve_vec_static(
+        &mut self,
+        ident: &str,
+        sig: &[StaticType],
+    ) -> Option<(usize, Vec<Vec<ResolvedVar>>)> {
+        let mut axis: Option<usize> = None;
+        for arg in sig {
+            if let StaticType::Tuple(elems) = arg {
+                if elems.is_empty() {
+                    return None;
+                }
+                match axis {
+                    None => axis = Some(elems.len()),
+                    Some(n) if n == elems.len() => {}
+                    _ => return None,
+                }
+            }
+        }
+        let axis_len = axis?;
+
+        let mut positions = Vec::with_capacity(axis_len);
+        for i in 0..axis_len {
+            let pos_sig: Vec<StaticType> = sig
+                .iter()
+                .map(|arg| match arg {
+                    StaticType::Tuple(elems) => elems[i].clone(),
+                    other => other.clone(),
+                })
+                .collect();
+            positions.push(self.candidates_for_sig(ident, &pos_sig));
+        }
+        Some((axis_len, positions))
+    }
+
+    /// Priority-ordered scalar candidates for one signature, used by per-position
+    /// vec resolution. Exact match (if any) first, then loose-compat candidates
+    /// with the exact entry deduplicated.
+    fn candidates_for_sig(&mut self, ident: &str, sig: &[StaticType]) -> Vec<ResolvedVar> {
+        let walk = self.scalar_walk(ident, sig);
+        let mut out: Vec<ResolvedVar> = Vec::new();
+        if let Some(e) = walk.exact {
+            out.push(e);
+        }
+        if let Some(loose) = walk.loose {
+            for v in loose {
+                if !out.contains(&v) {
+                    out.push(v);
+                }
+            }
+        }
+        out
+    }
+
+    /// Return type of a scalar candidate. Falls back to `Any` if the binding
+    /// turned out not to carry a function type (e.g. `Any`-typed callee).
+    fn scalar_return_type(&self, var: ResolvedVar) -> StaticType {
+        match self.get_type(var) {
+            StaticType::Function { return_type, .. } => return_type.as_ref().clone(),
+            _ => StaticType::Any,
+        }
+    }
+
+    /// LUB the return types of a list of scalar candidates. Used when every
+    /// candidate in a Dynamic binding came from the compat-filtered walk and
+    /// is therefore guaranteed to be a function.
+    fn lub_scalar_returns(&self, vars: &[ResolvedVar]) -> StaticType {
+        vars.iter()
+            .map(|v| self.scalar_return_type(*v))
+            .reduce(|a, b| a.lub(&b))
+            .unwrap_or(StaticType::Any)
+    }
+
+    /// Return type for a `Binding::Dynamic`. See [`ResolvedCall`] for the
+    /// case breakdown.
+    fn dynamic_return_type(
+        &self,
+        scalar_loose: &[ResolvedVar],
+        vec_resolution: Option<&VecResolution>,
+    ) -> StaticType {
+        let has_scalar = !scalar_loose.is_empty();
+
+        // Pure scalar: LUB the declared returns. This is the precision-recovery
+        // case PR #140 had to widen to `Any` for soundness; routing it through
+        // the LUB now is safe because we know none of the candidates can vec.
+        if has_scalar && vec_resolution.is_none() {
+            return self.lub_scalar_returns(scalar_loose);
+        }
+
+        // Pure static vec: per-position LUB → Tuple<…> of element returns.
+        if !has_scalar
+            && let Some(VecResolution::Static {
+                axis_len,
+                positions,
+            }) = vec_resolution
+        {
+            let elements: Vec<StaticType> = positions
+                .iter()
+                .map(|pos| self.lub_scalar_returns(pos))
+                .collect();
+            debug_assert_eq!(elements.len(), *axis_len);
+            return StaticType::Tuple(elements);
+        }
+
+        // Mixed scalar+vec, Any-fallback vec, or empty (defensive): the
+        // result has no useful upper bound — widen to `Any`. `LUB(scalar,
+        // Tuple<…>)` collapses to `Any` in our lattice anyway, so there's
+        // nothing more precise to compute for the mixed case.
+        StaticType::Any
     }
 
     pub(crate) fn create_local_binding(

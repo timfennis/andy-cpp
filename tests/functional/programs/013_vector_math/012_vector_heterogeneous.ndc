@@ -1,0 +1,19 @@
+// Per-position vec dispatch: positions can resolve to different scalar
+// overloads. Element 0 dispatches `++(List, List)`; element 1 dispatches
+// `++(String, String)`. The result tuple has different element types per
+// position.
+assert_eq(
+    ([1, 2, 3], "foo") ++ ([4, 5, 6], "bar"),
+    ([1, 2, 3, 4, 5, 6], "foobar")
+);
+
+// Same shape, longer axis with three distinct overloads per position.
+assert_eq(
+    ([1], "a", [10]) ++ ([2], "b", [20]),
+    ([1, 2], "ab", [10, 20])
+);
+
+// Mixed numerics: position 0 stays Int; position 1 needs Number coercion
+// because of the Float on the left.
+let mixed = (1, 1.5) + (2, 3);
+assert_eq(mixed, (3, 4.5));

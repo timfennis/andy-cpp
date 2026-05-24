@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 
-use crate::scope::{ScopeTree, TypeBinding};
+use crate::scope::{CallKind, ResolvedCall, ScopeTree, TypeBinding};
 use itertools::{Itertools, izip};
 use ndc_core::{StaticType, TypeSignature};
 use ndc_lexer::Span;
 use ndc_parser::{
-    Binding, Expression, ExpressionLocation, ForBody, ForIteration, FunctionParameter, Lvalue,
-    NodeId,
+    Binding, Candidate, Expression, ExpressionLocation, ForBody, ForIteration, FunctionParameter,
+    Lvalue, NodeId,
 };
 
 /// Side table holding semantic information keyed by AST node identity.
@@ -130,7 +130,7 @@ impl Analyser {
                     return Ok(StaticType::Any);
                 };
 
-                *resolved = Binding::Resolved(binding);
+                *resolved = Binding::Resolved(Candidate::Scalar(binding));
 
                 Ok(self.scope_tree.get_type(binding).clone())
             }
@@ -202,36 +202,41 @@ impl Analyser {
                 let right_type = self.analyse_or_any(r_value);
                 let arg_types = vec![left_type, right_type];
 
-                *resolved_assign_operation = self
+                // Resolve both `op=` and `op` so we can widen the lvalue
+                // by the result type of whichever one actually fires.
+                let ResolvedCall {
+                    binding: assign_binding,
+                    ..
+                } = self.scope_tree.resolve_call(
+                    &format!("{operation}="),
+                    &arg_types,
+                    CallKind::Operator,
+                );
+                let ResolvedCall {
+                    binding: op_binding,
+                    return_type: op_return,
+                } = self
                     .scope_tree
-                    .resolve_function_binding(&format!("{operation}="), &arg_types);
-                *resolved_operation = self
-                    .scope_tree
-                    .resolve_function_binding(operation, &arg_types);
+                    .resolve_call(operation, &arg_types, CallKind::Operator);
 
-                if let Binding::None = resolved_operation {
+                *resolved_assign_operation = assign_binding;
+                *resolved_operation = op_binding;
+
+                // Either form satisfies the call: `op=` mutates in place;
+                // `op` falls back through `a = a op b`. Only error when both
+                // are missing — e.g. `Map -= Map` is fine via `-=` even when
+                // `-` itself has no Map overload.
+                if matches!(resolved_assign_operation, Binding::None)
+                    && matches!(resolved_operation, Binding::None)
+                {
                     self.emit(AnalysisError::function_not_found(
                         operation, &arg_types, *span,
                     ));
                 }
 
-                // Determine the result type of the operation
-                let result_type = match resolved_operation {
-                    Binding::Resolved(res) => {
-                        if let StaticType::Function { return_type, .. } =
-                            self.scope_tree.get_type(*res)
-                        {
-                            Some(return_type.as_ref().clone())
-                        } else {
-                            None
-                        }
-                    }
-                    _ => None,
-                };
-
-                if let Some(result_type) = result_type {
+                if !matches!(resolved_operation, Binding::None) {
+                    let result_type = op_return;
                     match l_value {
-                        // Direct variable: widen or reject if annotated
                         Lvalue::Identifier {
                             resolved: Some(target),
                             ..
@@ -249,10 +254,9 @@ impl Analyser {
                                 ));
                             }
                         }
-                        // Index into a container: widen the container's type
                         Lvalue::Index { value, .. } => {
                             if let Expression::Identifier {
-                                resolved: Binding::Resolved(target),
+                                resolved: Binding::Resolved(Candidate::Scalar(target)),
                                 ..
                             } = &value.expression
                             {
@@ -405,25 +409,11 @@ impl Analyser {
             Expression::Call {
                 function,
                 arguments,
-            } => {
-                let mut type_sig = Vec::with_capacity(arguments.len());
-                for a in arguments {
-                    type_sig.push(self.analyse_or_any(a));
-                }
-
-                let callee_type =
-                    self.resolve_function_with_argument_types(function, &type_sig, *span);
-
-                let StaticType::Function { return_type, .. } = callee_type else {
-                    if callee_type == StaticType::Any {
-                        return Ok(StaticType::Any);
-                    }
-                    self.emit(AnalysisError::not_callable(&callee_type, *span));
-                    return Ok(StaticType::Any);
-                };
-
-                Ok(*return_type)
-            }
+            } => self.analyse_call(function, arguments, CallKind::Regular, *span),
+            Expression::OperatorCall {
+                function,
+                arguments,
+            } => self.analyse_call(function, arguments, CallKind::Operator, *span),
             Expression::Tuple { values } => {
                 let mut types = Vec::with_capacity(values.len());
                 for v in values {
@@ -479,56 +469,48 @@ impl Analyser {
         }
     }
 
-    fn resolve_function_with_argument_types(
+    /// Resolves a call (regular or operator-form) and returns its result type.
+    /// Only operator-form calls are eligible for vec dispatch.
+    fn analyse_call(
         &mut self,
-        ident: &mut ExpressionLocation,
-        argument_types: &[StaticType],
+        function: &mut ExpressionLocation,
+        arguments: &mut [ExpressionLocation],
+        kind: CallKind,
         span: Span,
-    ) -> StaticType {
-        let ExpressionLocation {
-            expression: Expression::Identifier { name, resolved },
-            ..
-        } = ident
-        else {
-            // It's possible that we're not trying to invoke an identifier `foo()` but instead we're
-            // invoking a value like `get_function()()` so in this case we just continue like normal?
-            return self.analyse_or_any(ident);
-        };
+    ) -> Result<StaticType, AnalysisError> {
+        let mut type_sig = Vec::with_capacity(arguments.len());
+        for arg in arguments {
+            type_sig.push(self.analyse_or_any(arg));
+        }
 
-        let binding = self
-            .scope_tree
-            .resolve_function_binding(name, argument_types);
-
-        let out_type = match &binding {
-            Binding::None => {
-                self.emit(AnalysisError::function_not_found(
-                    name,
-                    argument_types,
-                    span,
-                ));
-                return StaticType::Any;
-            }
-            Binding::Resolved(res) => self.scope_tree.get_type(*res).clone(),
-
-            Binding::Dynamic(_) => {
-                // Dispatch is decided at runtime, so we have no sound static bound
-                // on the result. The runtime may pick a declared overload or fall
-                // through to elementwise (vectorized) dispatch, which can produce
-                // a value no declared overload returns — treating the LUB of
-                // declared returns as the result type is unsound and led to issue
-                // #139, where `let diff = a - b` over tuples was inferred as
-                // `Number` and a follow-up `diff * diff` then matched the numeric
-                // overload directly and bypassed dynamic dispatch entirely.
-                StaticType::Function {
-                    parameters: None,
-                    return_type: Box::new(StaticType::Any),
+        // Higher-order call shapes like `get_function()()` have a non-identifier
+        // function position; in that case we just analyse the callee as a value
+        // and trust the runtime to dispatch.
+        let Expression::Identifier { name, resolved } = &mut function.expression else {
+            let callee_type = self.analyse_or_any(function);
+            return Ok(match callee_type {
+                StaticType::Function { return_type, .. } => *return_type,
+                StaticType::Any => StaticType::Any,
+                other => {
+                    self.emit(AnalysisError::not_callable(&other, span));
+                    StaticType::Any
                 }
-            }
+            });
         };
+
+        let ResolvedCall {
+            binding,
+            return_type,
+        } = self.scope_tree.resolve_call(name, &type_sig, kind);
+
+        if matches!(binding, Binding::None) {
+            self.emit(AnalysisError::function_not_found(name, &type_sig, span));
+            *resolved = binding;
+            return Ok(StaticType::Any);
+        }
 
         *resolved = binding;
-
-        out_type
+        Ok(return_type)
     }
 
     fn resolve_for_iterations(
@@ -660,8 +642,18 @@ impl Analyser {
                 let get_args = [type_of_index_target.clone(), index_type.clone()];
                 let set_args = [type_of_index_target.clone(), index_type, StaticType::Any];
 
-                *resolved_get = Some(self.scope_tree.resolve_function_binding("[]", &get_args));
-                *resolved_set = Some(self.scope_tree.resolve_function_binding("[]=", &set_args));
+                // Indexing isn't operator-form for vec purposes: there's no
+                // natural broadcast story for `(list_a, list_b)[i]`.
+                *resolved_get = Some(
+                    self.scope_tree
+                        .resolve_call("[]", &get_args, CallKind::Regular)
+                        .binding,
+                );
+                *resolved_set = Some(
+                    self.scope_tree
+                        .resolve_call("[]=", &set_args, CallKind::Regular)
+                        .binding,
+                );
 
                 if let Some(t) = type_of_index_target.index_element_type() {
                     Ok(t)

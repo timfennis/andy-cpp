@@ -133,6 +133,10 @@ fn walk_expression(visitor: &mut impl AstVisitor, expr: &ExpressionLocation) {
         Expression::Call {
             function,
             arguments,
+        }
+        | Expression::OperatorCall {
+            function,
+            arguments,
         } => {
             walk_expression(visitor, function);
             for arg in arguments {
