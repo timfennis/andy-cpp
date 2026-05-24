@@ -72,7 +72,7 @@ fn value_to_json(value: Value) -> Result<JsonValue, anyhow::Error> {
                     .map(|v| value_to_json(v.clone()))
                     .collect::<Result<Vec<_>, _>>()?,
             )),
-            Object::Function(_) | Object::OverloadSet(_) => {
+            Object::Function(_) | Object::OverloadSet { .. } => {
                 Err(anyhow::anyhow!("Unable to serialize function"))
             }
         },

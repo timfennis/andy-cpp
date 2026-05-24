@@ -1,0 +1,10 @@
+// Vec dispatch hot loop. Mirrors the per-iteration vec calls that drove
+// the AoC 2025/08 regression in PR #141: a tight loop over millions of
+// `Tuple<Int, Int> + Tuple<Int, Int>` calls. The CallVec fast path
+// should bring this close to the master baseline.
+let n = 200_000;
+let acc = (0, 0);
+for i in 0..n {
+    acc = acc + (i, i);
+}
+print(acc);

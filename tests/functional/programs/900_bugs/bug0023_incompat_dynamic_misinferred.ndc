@@ -1,0 +1,9 @@
+// expect-error: mismatched types: found Any but expected String
+// `returns_int(42)` has no compatible overload — `returns_int` only takes
+// a `String`. Before this fix, the analyser LUB'd every candidate's
+// declared return regardless of compatibility, so the call inferred as
+// `Int` and the assignment errored with the misleading "found Int but
+// expected String". Dynamic with all-by-name fallback now widens to
+// `Any`, so the mismatch surfaces against `Any` instead.
+fn returns_int(s: String) -> Int { 1 };
+let x: String = returns_int(42);

@@ -320,6 +320,7 @@ dependencies = [
  "ndc_interpreter",
  "ndc_lexer",
  "ndc_parser",
+ "ndc_stdlib",
  "ndc_vm",
 ]
 

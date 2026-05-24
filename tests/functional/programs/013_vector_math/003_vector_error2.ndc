@@ -1,3 +1,4 @@
-// expect-error: no function called '+' found matches the arguments
-// This looks valid, but isn't
+// expect-error: No function called '+' found that matches the arguments
+// Per-position vec resolution catches this at compile time: position 2 has
+// nested tuples and `+` has no overload that accepts `Tuple<Int>` operands.
 (1,1,(1,)) + (1,1,(1,))

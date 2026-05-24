@@ -24,6 +24,19 @@ fn compile_with_analysis(input: &str) -> Vec<OpCode> {
         .to_vec()
 }
 
+/// Like [`compile_with_analysis`] but also loads the standard library so
+/// tests can exercise operator overloads (`+`, `*`, `++`, …) by name. Cheap
+/// enough to set up fresh per test.
+fn compile_with_stdlib(input: &str) -> Vec<OpCode> {
+    let mut interp = ndc_interpreter::Interpreter::capturing();
+    interp.configure(ndc_stdlib::register);
+    interp
+        .compile_str(input)
+        .expect("compile failed")
+        .opcodes()
+        .to_vec()
+}
+
 // if true { 1 }
 //
 // 0: Constant(0)      push `true`
@@ -336,5 +349,59 @@ fn test_block_scope_cleanup_multiple_locals() {
             GetLocal(0),
             Halt
         ]
+    );
+}
+
+// (1, 2) + (3, 4)
+//
+// The analyser pins this to a single scalar `+(Int, Int)` overload broadcast
+// across two positions. The compiler emits a direct GetGlobal load of the
+// scalar function — no OverloadSet allocation — and a CallVec opcode that
+// vec-dispatches at runtime.
+#[test]
+fn test_vec_call_homogeneous_resolved() {
+    let ops = compile_with_stdlib("(1, 2) + (3, 4)");
+    let call_op = ops
+        .iter()
+        .rev()
+        .find(|op| matches!(op, CallVec(_) | Call(_)));
+    assert_eq!(
+        call_op,
+        Some(&CallVec(2)),
+        "Resolved(Vec) call should compile to CallVec(2), got: {ops:?}",
+    );
+}
+
+// (1, "a") + (2, "b")
+//
+// Mixed-element tuple over `+`: position 0 resolves to `+(Int, Int)`, but
+// position 1 has `(String, String)` and there's no `+(String, String)`
+// overload. The analyser surfaces this as Binding::None, which the
+// compiler refuses to lower — `compile` must fail.
+#[test]
+fn test_vec_call_per_position_failure_errors() {
+    let mut interp = ndc_interpreter::Interpreter::capturing();
+    interp.configure(ndc_stdlib::register);
+    assert!(
+        interp.compile_str("(1, \"a\") + (2, \"b\")").is_err(),
+        "mixed-element vec call should fail compilation",
+    );
+}
+
+// fn id(x) { x }; id((1, 2, 3))
+//
+// Regular function call (not operator syntax) must NEVER compile to CallVec
+// even when the argument is a tuple — vec dispatch is gated to operator
+// syntax via the `OperatorCall` AST variant.
+#[test]
+fn test_regular_call_with_tuple_arg_does_not_vec() {
+    let ops = compile_with_stdlib("fn id(x) { x }; id((1, 2, 3))");
+    assert!(
+        ops.iter().all(|op| !matches!(op, CallVec(_))),
+        "regular call must not lower to CallVec, got: {ops:?}",
+    );
+    assert!(
+        ops.iter().any(|op| matches!(op, Call(1))),
+        "expected a Call(1) for id((1, 2, 3)), got: {ops:?}",
     );
 }

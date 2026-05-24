@@ -4,7 +4,7 @@ use crate::{Object, Value};
 use ndc_core::{StaticType, TypeSignature};
 use ndc_lexer::Span;
 use ndc_parser::{
-    Binding, CaptureSource, Expression, ExpressionLocation, ForBody, ForIteration,
+    Binding, Candidate, CaptureSource, Expression, ExpressionLocation, ForBody, ForIteration,
     FunctionParameter, LogicalOperator, Lvalue, ResolvedVar,
 };
 use std::rc::Rc;
@@ -203,47 +203,65 @@ impl Compiler {
                         ..
                     } => {
                         let var = resolved.expect("lvalue must be resolved");
-                        if matches!(resolved_assign_operation, Binding::Resolved(_)) {
-                            // In-place operation (e.g. |=, &=) resolved exactly: modifies
-                            // the value's Rc in place via sync_map_mutations in the bridge,
-                            // so all aliases sharing the Rc see the change. We discard the
-                            // unit return value; the variable slot already holds the
-                            // (now-updated) shared reference.
-                            self.compile_binding(resolved_assign_operation, span)?;
-                            self.emit_get_var(var, lv_span);
-                            self.compile_expr(*r_value)?;
-                            self.chunk.write(OpCode::Call(2), span);
-                            self.chunk.write(OpCode::Pop, span);
-                        } else if let Binding::Dynamic(assign_candidates) =
-                            resolved_assign_operation
-                        {
-                            // Assign-op exists but type was unknown at compile time (Any).
-                            // Build a merged overload set: assign-op candidates first so they
-                            // win for map/string/list args, then binary-op candidates as
-                            // fallback for numeric args. Assign-ops return lhs so SET_VAR
-                            // stores a meaningful value; sync_map_mutations propagates in-place
-                            // changes to VM Rcs via the bridge.
-                            let binary_candidates = match resolved_operation {
-                                Binding::Dynamic(c) => c,
-                                Binding::Resolved(v) => vec![v],
-                                Binding::None => vec![],
-                            };
-                            let merged: Vec<_> = assign_candidates
-                                .into_iter()
-                                .chain(binary_candidates)
-                                .collect();
-                            self.compile_binding(Binding::Dynamic(merged), span)?;
-                            self.emit_get_var(var, lv_span);
-                            self.compile_expr(*r_value)?;
-                            self.chunk.write(OpCode::Call(2), span);
-                            self.emit_set_var(var, lv_span);
-                        } else {
-                            // No exact in-place op: call the regular operation and store result.
-                            self.compile_binding(resolved_operation, span)?;
-                            self.emit_get_var(var, lv_span);
-                            self.compile_expr(*r_value)?;
-                            self.chunk.write(OpCode::Call(2), span);
-                            self.emit_set_var(var, lv_span);
+                        match Self::op_assign_strategy(&resolved_assign_operation) {
+                            OpAssignStrategy::InPlaceScalar => {
+                                // `|=`, `&=`, `++=` over a List/Map/String:
+                                // the in-place op mutates the value's Rc and
+                                // returns unit (or the lhs). The slot already
+                                // points at the shared Rc, so just discard.
+                                self.compile_binding(resolved_assign_operation, span)?;
+                                self.emit_get_var(var, lv_span);
+                                self.compile_expr(*r_value)?;
+                                self.chunk.write(OpCode::Call(2), span);
+                                self.chunk.write(OpCode::Pop, span);
+                            }
+                            OpAssignStrategy::DynamicMerge => {
+                                // `op=` exists but either dispatches to
+                                // multiple candidates at runtime, or resolved
+                                // to a single vec candidate that produces a
+                                // fresh tuple. Either way the result must be
+                                // stored back via SetVar — `op=` returns lhs
+                                // when it mutates in place, or a fresh value
+                                // when vec'd.
+                                let (opcode, callee_binding): (OpCode, Binding) =
+                                    match resolved_assign_operation {
+                                        Binding::Resolved(Candidate::Vec(_)) => {
+                                            (OpCode::CallVec(2), resolved_assign_operation)
+                                        }
+                                        Binding::Dynamic(assign_candidates) => {
+                                            // Merge with `op` candidates so the runtime
+                                            // dispatcher can fall back to `a op b` shape
+                                            // for arg types `op=` doesn't accept.
+                                            let mut merged = assign_candidates;
+                                            match resolved_operation {
+                                                Binding::Dynamic(c) => merged.extend(c),
+                                                Binding::Resolved(c) => merged.push(c),
+                                                Binding::None => {}
+                                            }
+                                            (OpCode::Call(2), Binding::Dynamic(merged))
+                                        }
+                                        _ => unreachable!(
+                                            "DynamicMerge fires only for Resolved(Vec) or Dynamic op="
+                                        ),
+                                    };
+                                self.compile_binding(callee_binding, span)?;
+                                self.emit_get_var(var, lv_span);
+                                self.compile_expr(*r_value)?;
+                                self.chunk.write(opcode, span);
+                                self.emit_set_var(var, lv_span);
+                            }
+                            OpAssignStrategy::FallbackToOp => {
+                                // No `op=` overload: lower to `lhs = lhs op rhs`.
+                                // Vec-resolved `op` (e.g. `a += (3, 4)` on
+                                // `Tuple<Int, Int>`) goes through `CallVec`
+                                // for the speed-up; everything else is `Call`.
+                                let opcode = Self::call_opcode_for(&resolved_operation, 2);
+                                self.compile_binding(resolved_operation, span)?;
+                                self.emit_get_var(var, lv_span);
+                                self.compile_expr(*r_value)?;
+                                self.chunk.write(opcode, span);
+                                self.emit_set_var(var, lv_span);
+                            }
                         }
                     }
                     Lvalue::Index {
@@ -252,7 +270,6 @@ impl Compiler {
                         resolved_get,
                         resolved_set,
                     } => {
-                        // let getter = ;
                         let container_span = value.span;
                         let index_span = index.span;
 
@@ -274,6 +291,7 @@ impl Compiler {
                             .write(OpCode::GetLocal(tmp_container), container_span);
                         self.chunk.write(OpCode::GetLocal(tmp_index), index_span);
 
+                        let op_opcode = Self::call_opcode_for(&resolved_operation, 2);
                         self.compile_binding(resolved_operation, span)?;
                         self.compile_binding(
                             resolved_get.expect("[] must be resolved"),
@@ -284,7 +302,7 @@ impl Compiler {
                         self.chunk.write(OpCode::GetLocal(tmp_index), index_span);
                         self.chunk.write(OpCode::Call(2), span); // [](container, index) → current_value
                         self.compile_expr(*r_value)?;
-                        self.chunk.write(OpCode::Call(2), span); // op(current_value, r_value) → new_value
+                        self.chunk.write(op_opcode, span); // op(current_value, r_value) → new_value
                         self.chunk.write(OpCode::Call(3), span); // []=(container, index, new_value)
                         self.chunk.write(OpCode::Pop, span); // discard []= result; common code below pushes unit
                     }
@@ -342,17 +360,25 @@ impl Compiler {
             Expression::Call {
                 function,
                 arguments,
+            }
+            | Expression::OperatorCall {
+                function,
+                arguments,
             } => {
                 let function_span = function.span;
+                let opcode = match &function.expression {
+                    Expression::Identifier { resolved, .. } => {
+                        Self::call_opcode_for(resolved, arguments.len())
+                    }
+                    _ => OpCode::Call(arguments.len()),
+                };
                 self.compile_expr(*function)?;
 
-                let argument_count = arguments.len();
                 for argument in arguments {
                     self.compile_expr(argument)?;
                 }
 
-                self.chunk
-                    .write(OpCode::Call(argument_count), function_span);
+                self.chunk.write(opcode, function_span);
             }
             Expression::Tuple { values } => {
                 let size = values.len();
@@ -493,19 +519,53 @@ impl Compiler {
         Ok(())
     }
 
+    /// Emit code that puts the resolved callee on top of the stack.
+    ///
+    /// * `Resolved(Scalar(var))` and `Resolved(Vec(scalar))` both emit a
+    ///   direct `GetVar`; the call-site picks `Call` vs `CallVec` based on
+    ///   which one the analyser chose (see [`Self::call_opcode_for`]).
+    /// * `Dynamic(candidates)` pushes the candidate list as an `OverloadSet`
+    ///   constant; the VM dispatcher narrows at runtime.
     fn compile_binding(&mut self, resolved: Binding, span: Span) -> Result<(), CompileError> {
         match resolved {
             Binding::None => return Err(CompileError::unresolved_binding(span)),
-            Binding::Resolved(var) => self.emit_get_var(var, span),
+            Binding::Resolved(candidate) => self.emit_get_var(candidate.var(), span),
             Binding::Dynamic(candidates) => {
+                // Split candidates by kind: scalars walked first (hot path),
+                // vec candidates only consulted as fallback. Keeps the
+                // scalar-only call site cost identical to master.
+                let (scalars, vec_candidates) =
+                    candidates
+                        .into_iter()
+                        .fold((Vec::new(), Vec::new()), |mut acc, c| {
+                            match c {
+                                Candidate::Scalar(v) => acc.0.push(v),
+                                Candidate::Vec(v) => acc.1.push(v),
+                            }
+                            acc
+                        });
                 let idx = self
                     .chunk
-                    .add_constant(Value::Object(Rc::new(Object::OverloadSet(candidates))));
+                    .add_constant(Value::Object(Rc::new(Object::OverloadSet {
+                        scalars,
+                        vec_candidates,
+                    })));
                 self.chunk.write(OpCode::Constant(idx), span);
             }
         }
 
         Ok(())
+    }
+
+    /// Pick the call opcode for a given binding: `CallVec(args)` when the
+    /// analyser pinned a single vec candidate at compile time, else
+    /// `Call(args)`. Dynamic bindings always use `Call` and let the VM's
+    /// `find_overload` route to scalar vs vec dispatch.
+    fn call_opcode_for(binding: &Binding, args: usize) -> OpCode {
+        match binding {
+            Binding::Resolved(Candidate::Vec(_)) => OpCode::CallVec(args),
+            _ => OpCode::Call(args),
+        }
     }
 
     fn emit_get_var(&mut self, var: ResolvedVar, span: Span) {
@@ -841,6 +901,34 @@ impl Compiler {
 struct LoopContext {
     start: usize,
     break_instructions: Vec<usize>,
+}
+
+/// Which lowering shape an `op=` site takes.
+enum OpAssignStrategy {
+    /// A scalar `op=` overload exists and was resolved exactly. The op
+    /// mutates the value's Rc in place; the result is discarded.
+    InPlaceScalar,
+    /// `op=` resolved to multiple candidates. Merge with `op` candidates and
+    /// dispatch at runtime; store the result back.
+    DynamicMerge,
+    /// No `op=` overload — lower to `lhs = lhs op rhs`.
+    FallbackToOp,
+}
+
+impl Compiler {
+    fn op_assign_strategy(op_assign: &Binding) -> OpAssignStrategy {
+        match op_assign {
+            Binding::Resolved(Candidate::Scalar(_)) => OpAssignStrategy::InPlaceScalar,
+            // A vec-resolved op= would produce a fresh tuple result that must
+            // be stored back; the merge path handles that correctly via
+            // SetVar after the call. (In practice the stdlib has no such
+            // overload, but this keeps the contract uniform.)
+            Binding::Resolved(Candidate::Vec(_)) | Binding::Dynamic(_) => {
+                OpAssignStrategy::DynamicMerge
+            }
+            Binding::None => OpAssignStrategy::FallbackToOp,
+        }
+    }
 }
 
 /// Returns the minimum local slot referenced by an lvalue, used to determine

@@ -1,0 +1,7 @@
+// Non-numeric vec: `++` over tuples of strings dispatches per-element.
+assert_eq(("a", "b") ++ ("c", "d"), ("ac", "bd"));
+assert_eq(("hello", "foo") ++ (" world", "bar"), ("hello world", "foobar"));
+
+// Vec over tuples of lists.
+assert_eq(([1], [2]) ++ ([3], [4]), ([1, 3], [2, 4]));
+assert_eq(([1, 2], []) ++ ([3], [4, 5]), ([1, 2, 3], [4, 5]));

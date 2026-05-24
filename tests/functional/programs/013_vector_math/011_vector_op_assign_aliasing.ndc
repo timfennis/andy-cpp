@@ -1,0 +1,16 @@
+// Vec-resolved op= must preserve the in-place aliasing contract that
+// scalar op= guarantees: inner Rc mutations stay visible through every
+// alias of the originals, and the variable itself still reads as the
+// updated value.
+let l1 = [1, 2];
+let l2 = [3, 4];
+let pair = (l1, l2);
+let outer_alias = pair;
+pair ++= ([5], [6]);
+// Inner-list mutation visible through the original bindings.
+assert_eq(l1, [1, 2, 5]);
+assert_eq(l2, [3, 4, 6]);
+// Outer alias still sees the same inner lists, now mutated.
+assert_eq(outer_alias, ([1, 2, 5], [3, 4, 6]));
+// pair itself reads as the updated value.
+assert_eq(pair, ([1, 2, 5], [3, 4, 6]));
