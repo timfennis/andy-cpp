@@ -1,4 +1,4 @@
-use crate::chunk::{Chunk, OpCode};
+use crate::chunk::{Chunk, JumpOffset, OpCode};
 use crate::value::{CompiledFunction, Function};
 use crate::{Object, Value};
 use ndc_core::{StaticType, TypeSignature};
@@ -139,16 +139,20 @@ impl Compiler {
                 self.compile_expr(*left)?;
                 match operator {
                     LogicalOperator::And => {
-                        let end_jump = self.chunk.write(OpCode::JumpIfFalse(0), left_span);
+                        let end_jump = self
+                            .chunk
+                            .write(OpCode::JumpIfFalse(JumpOffset::ZERO), left_span);
                         self.chunk.write(OpCode::Pop, Span::synthetic());
                         self.compile_expr(*right)?;
-                        self.chunk.patch_jump(end_jump);
+                        self.patch_jump(end_jump);
                     }
                     LogicalOperator::Or => {
-                        let end_jump = self.chunk.write(OpCode::JumpIfTrue(0), left_span);
+                        let end_jump = self
+                            .chunk
+                            .write(OpCode::JumpIfTrue(JumpOffset::ZERO), left_span);
                         self.chunk.write(OpCode::Pop, Span::synthetic());
                         self.compile_expr(*right)?;
-                        self.chunk.patch_jump(end_jump);
+                        self.patch_jump(end_jump);
                     }
                 }
             }
@@ -420,14 +424,14 @@ impl Compiler {
                 self.chunk.write(OpCode::Return, span);
             }
             Expression::Break => {
-                let idx = self.chunk.write(OpCode::Jump(0), span); // will be backpatched
+                let idx = self.chunk.write(OpCode::Jump(JumpOffset::ZERO), span); // will be backpatched
                 self.current_loop_context_mut()
                     .ok_or(CompileError::unexpected_break(span))?
                     .break_instructions
                     .push(idx);
             }
             Expression::Continue => {
-                self.chunk.write_jump_back(
+                self.write_jump_back(
                     self.current_loop_context()
                         .ok_or(CompileError::unexpected_continue(span))?
                         .start,
@@ -583,6 +587,23 @@ impl Compiler {
             ResolvedVar::Global { .. } => unreachable!("globals are native, never assigned"),
         };
     }
+
+    /// Backpatches a forward jump at `op_idx` to land just after the most recently
+    /// written instruction.
+    fn patch_jump(&mut self, op_idx: usize) {
+        let offset =
+            isize::try_from(self.chunk.len() - op_idx - 1).expect("jump too large to patch");
+        self.chunk.set_jump_offset(op_idx, JumpOffset::new(offset));
+    }
+
+    /// Emits a `Jump` that goes back to `target` (a previously recorded chunk offset).
+    fn write_jump_back(&mut self, target: usize, span: Span) -> usize {
+        let offset =
+            -isize::try_from(self.chunk.len() - target + 1).expect("loop too large to jump back");
+        self.chunk
+            .write(OpCode::Jump(JumpOffset::new(offset)), span)
+    }
+
     fn compile_block(
         &mut self,
         statements: Vec<ExpressionLocation>,
@@ -617,23 +638,29 @@ impl Compiler {
     ) -> Result<(), CompileError> {
         let condition_span = condition.span;
         self.compile_expr(condition)?;
-        let conditional_jump_idx = self.chunk.write(OpCode::JumpIfFalse(0), condition_span);
+        let conditional_jump_idx = self
+            .chunk
+            .write(OpCode::JumpIfFalse(JumpOffset::ZERO), condition_span);
         self.chunk.write(OpCode::Pop, Span::synthetic());
         self.compile_expr(on_true)?;
         if let Some(on_false) = on_false {
-            let jump_to_end = self.chunk.write(OpCode::Jump(0), Span::synthetic());
-            self.chunk.patch_jump(conditional_jump_idx);
+            let jump_to_end = self
+                .chunk
+                .write(OpCode::Jump(JumpOffset::ZERO), Span::synthetic());
+            self.patch_jump(conditional_jump_idx);
             self.chunk.write(OpCode::Pop, Span::synthetic());
             self.compile_expr(on_false)?;
-            self.chunk.patch_jump(jump_to_end);
+            self.patch_jump(jump_to_end);
         } else {
             // No else branch — push unit so the if-expression always produces a value.
-            let jump_to_end = self.chunk.write(OpCode::Jump(0), Span::synthetic());
-            self.chunk.patch_jump(conditional_jump_idx);
+            let jump_to_end = self
+                .chunk
+                .write(OpCode::Jump(JumpOffset::ZERO), Span::synthetic());
+            self.patch_jump(conditional_jump_idx);
             self.chunk.write(OpCode::Pop, Span::synthetic());
             let idx = self.chunk.add_constant(Value::unit());
             self.chunk.write(OpCode::Constant(idx), Span::synthetic());
-            self.chunk.patch_jump(jump_to_end);
+            self.patch_jump(jump_to_end);
         }
 
         Ok(())
@@ -648,17 +675,19 @@ impl Compiler {
         let condition_span = condition.span;
         let loop_start = self.new_loop_context();
         self.compile_expr(condition)?;
-        let conditional_jump_idx = self.chunk.write(OpCode::JumpIfFalse(0), condition_span);
+        let conditional_jump_idx = self
+            .chunk
+            .write(OpCode::JumpIfFalse(JumpOffset::ZERO), condition_span);
         self.chunk.write(OpCode::Pop, Span::synthetic());
         self.compile_expr(loop_body)?;
         self.chunk.write(OpCode::Pop, Span::synthetic());
-        self.chunk.write_jump_back(loop_start, Span::synthetic());
-        self.chunk.patch_jump(conditional_jump_idx);
+        self.write_jump_back(loop_start, Span::synthetic());
+        self.patch_jump(conditional_jump_idx);
         self.chunk.write(OpCode::Pop, Span::synthetic());
         let break_instructions =
             std::mem::take(&mut self.current_loop_context_mut().unwrap().break_instructions);
         for instruction in break_instructions {
-            self.chunk.patch_jump(instruction)
+            self.patch_jump(instruction)
         }
         self.end_loop_context();
         Ok(())
@@ -832,7 +861,7 @@ impl Compiler {
                 self.chunk.write(OpCode::GetIterator, sequence.span);
 
                 let loop_start = self.new_loop_context();
-                let iter_next = self.chunk.write(OpCode::IterNext(0), span);
+                let iter_next = self.chunk.write(OpCode::IterNext(JumpOffset::ZERO), span);
                 self.compile_declare_lvalue(l_value.clone(), span)?;
 
                 self.compile_for_iterations(rest, span, compile_leaf)?;
@@ -843,15 +872,15 @@ impl Compiler {
                     self.chunk.write(OpCode::CloseUpvalue(slot), span);
                 }
 
-                self.chunk.write_jump_back(loop_start, span);
+                self.write_jump_back(loop_start, span);
 
                 // Both IterNext-done and break jump to the iterator Pop
-                self.chunk.patch_jump(iter_next);
+                self.patch_jump(iter_next);
                 let break_instructions = std::mem::take(
                     &mut self.current_loop_context_mut().unwrap().break_instructions,
                 );
                 for instruction in break_instructions {
-                    self.chunk.patch_jump(instruction);
+                    self.patch_jump(instruction);
                 }
                 self.end_loop_context();
 
@@ -860,13 +889,15 @@ impl Compiler {
             }
             ForIteration::Guard(condition) => {
                 self.compile_expr(condition.clone())?;
-                let skip_jump = self.chunk.write(OpCode::JumpIfFalse(0), span);
+                let skip_jump = self
+                    .chunk
+                    .write(OpCode::JumpIfFalse(JumpOffset::ZERO), span);
                 self.chunk.write(OpCode::Pop, Span::synthetic());
                 self.compile_for_iterations(rest, span, compile_leaf)?;
-                let end_jump = self.chunk.write(OpCode::Jump(0), span);
-                self.chunk.patch_jump(skip_jump);
+                let end_jump = self.chunk.write(OpCode::Jump(JumpOffset::ZERO), span);
+                self.patch_jump(skip_jump);
                 self.chunk.write(OpCode::Pop, Span::synthetic());
-                self.chunk.patch_jump(end_jump);
+                self.patch_jump(end_jump);
             }
         }
 

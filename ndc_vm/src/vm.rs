@@ -217,7 +217,7 @@ impl Vm {
                     let top = self.stack.last().expect("stack underflow");
                     match top {
                         Value::Bool(false) => {
-                            frame.ip = frame.ip.wrapping_add_signed(offset);
+                            frame.ip = offset.apply(frame.ip);
                         }
                         Value::Bool(true) => {}
                         value => {
@@ -234,7 +234,7 @@ impl Vm {
                     let top = self.stack.last().expect("stack underflow");
                     match top {
                         Value::Bool(true) => {
-                            frame.ip = frame.ip.wrapping_add_signed(offset);
+                            frame.ip = offset.apply(frame.ip);
                         }
                         Value::Bool(false) => {}
                         value => {
@@ -247,8 +247,7 @@ impl Vm {
                     }
                 }
                 OpCode::Jump(offset) => {
-                    let offset = *offset;
-                    frame.ip = frame.ip.wrapping_add_signed(offset);
+                    frame.ip = offset.apply(frame.ip);
                 }
                 OpCode::Pop => {
                     self.stack.pop();
@@ -434,7 +433,7 @@ impl Vm {
                             self.stack.push(value);
                         }
                         None => {
-                            frame.ip = frame.ip.wrapping_add_signed(offset);
+                            frame.ip = offset.apply(frame.ip);
                         }
                     }
                 }
