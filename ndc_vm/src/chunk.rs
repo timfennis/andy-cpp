@@ -180,25 +180,18 @@ impl Chunk {
         self.code.len() - 1
     }
 
-    pub fn patch_jump(&mut self, op_idx: usize) {
-        let offset =
-            isize::try_from(self.code.len() - op_idx - 1).expect("jump too large to patch");
-        match self.code.get_mut(op_idx) {
+    /// Overwrites the jump operand of a `Jump`, `JumpIfTrue`, `JumpIfFalse`, or
+    /// `IterNext` already written at `idx`. Panics on any other opcode.
+    pub fn set_jump_offset(&mut self, idx: usize, offset: isize) {
+        match self.code.get_mut(idx) {
             Some(
                 OpCode::JumpIfFalse(n)
                 | OpCode::JumpIfTrue(n)
                 | OpCode::Jump(n)
                 | OpCode::IterNext(n),
             ) => *n = offset,
-            _ => panic!("expected a patchable jump instruction at index {op_idx}"),
+            _ => panic!("expected a patchable jump instruction at index {idx}"),
         }
-    }
-
-    /// Emits a `Jump` that goes back to `target` (a previously recorded chunk offset).
-    pub fn write_jump_back(&mut self, target: usize, span: Span) -> usize {
-        let offset =
-            -isize::try_from(self.len() - target + 1).expect("loop too large to jump back");
-        self.write(OpCode::Jump(offset), span)
     }
 
     pub fn is_empty(&self) -> bool {
