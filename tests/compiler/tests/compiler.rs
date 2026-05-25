@@ -1,5 +1,6 @@
 use ndc_lexer::{Lexer, SourceId};
 use ndc_parser::Parser;
+use ndc_vm::chunk::JumpOffset;
 use ndc_vm::chunk::OpCode;
 use ndc_vm::chunk::OpCode::*;
 use ndc_vm::compiler::Compiler;
@@ -53,10 +54,10 @@ fn test_if_without_else() {
         compile("if true { 1 }"),
         [
             Constant(0),
-            JumpIfFalse(3),
+            JumpIfFalse(JumpOffset::new(3)),
             Pop,
             Constant(1),
-            Jump(2),
+            Jump(JumpOffset::new(2)),
             Pop,
             Constant(2),
             Halt
@@ -80,10 +81,10 @@ fn test_if_with_else() {
         compile("if true { 1 } else { 2 }"),
         [
             Constant(0),
-            JumpIfFalse(3),
+            JumpIfFalse(JumpOffset::new(3)),
             Pop,
             Constant(1),
-            Jump(2),
+            Jump(JumpOffset::new(2)),
             Pop,
             Constant(2),
             Halt
@@ -104,7 +105,13 @@ fn test_if_with_else() {
 fn test_and() {
     assert_eq!(
         compile("true and false"),
-        [Constant(0), JumpIfFalse(2), Pop, Constant(1), Halt]
+        [
+            Constant(0),
+            JumpIfFalse(JumpOffset::new(2)),
+            Pop,
+            Constant(1),
+            Halt
+        ]
     );
 }
 
@@ -121,7 +128,13 @@ fn test_and() {
 fn test_or() {
     assert_eq!(
         compile("true or false"),
-        [Constant(0), JumpIfTrue(2), Pop, Constant(1), Halt]
+        [
+            Constant(0),
+            JumpIfTrue(JumpOffset::new(2)),
+            Pop,
+            Constant(1),
+            Halt
+        ]
     );
 }
 
@@ -186,10 +199,10 @@ fn test_if_with_statement_else() {
         compile("if true { 3 } else { 3; }"),
         [
             Constant(0),
-            JumpIfFalse(3),
+            JumpIfFalse(JumpOffset::new(3)),
             Pop,
             Constant(1),
-            Jump(4),
+            Jump(JumpOffset::new(4)),
             Pop,
             Constant(2),
             Pop,
@@ -221,12 +234,12 @@ fn test_if_with_statement_branches() {
         compile("if true { 3; } else { 3; }"),
         [
             Constant(0),
-            JumpIfFalse(5),
+            JumpIfFalse(JumpOffset::new(5)),
             Pop,
             Constant(1),
             Pop,
             Constant(2),
-            Jump(4),
+            Jump(JumpOffset::new(4)),
             Pop,
             Constant(3),
             Pop,
@@ -252,11 +265,11 @@ fn test_while() {
         compile("while true { 1 }"),
         [
             Constant(0),
-            JumpIfFalse(4),
+            JumpIfFalse(JumpOffset::new(4)),
             Pop,
             Constant(1),
             Pop,
-            Jump(-6),
+            Jump(JumpOffset::new(-6)),
             Pop,
             Halt
         ]

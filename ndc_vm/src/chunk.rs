@@ -3,6 +3,41 @@ use ndc_lexer::Span;
 use ndc_parser::CaptureSource;
 use std::rc::Rc;
 
+/// A signed displacement applied to the instruction pointer to perform a jump.
+///
+/// Wraps `isize` so the contract — "relative offset, in instructions, from the
+/// instruction *after* the jump opcode" — has a single definition site. Future
+/// stages of a compile pipeline may swap this for an `enum JumpTarget { … }`
+/// without touching every call site.
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub struct JumpOffset(isize);
+
+impl JumpOffset {
+    pub const ZERO: Self = Self(0);
+
+    #[inline]
+    pub fn new(offset: isize) -> Self {
+        Self(offset)
+    }
+
+    #[inline]
+    pub fn raw(self) -> isize {
+        self.0
+    }
+
+    /// Advance `ip` by this offset using wrapping signed arithmetic.
+    #[inline]
+    pub fn apply(self, ip: usize) -> usize {
+        ip.wrapping_add_signed(self.0)
+    }
+}
+
+impl std::fmt::Debug for JumpOffset {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&self.0, f)
+    }
+}
+
 /// A single bytecode instruction.
 ///
 /// ## Stack effects
@@ -57,11 +92,11 @@ pub enum OpCode {
     /// Pops top of stack. `[… value → …]`
     Pop,
     /// Unconditional jump. `[…] → […]`
-    Jump(isize),
+    Jump(JumpOffset),
     /// Peeks top; jumps if true. `[… bool → … bool]`
-    JumpIfTrue(isize),
+    JumpIfTrue(JumpOffset),
     /// Peeks top; jumps if false. `[… bool → … bool]`
-    JumpIfFalse(isize),
+    JumpIfFalse(JumpOffset),
     /// Pushes a constant. `[… → … value]`
     Constant(usize),
     /// Copies local slot onto stack. `[… → … value]`
@@ -88,7 +123,7 @@ pub enum OpCode {
     /// Pops value, pushes iterator. No-op if already an iterator. `[… value → … iter]`
     GetIterator,
     /// Peeks iterator; pushes next value or jumps if exhausted. `[… iter → … iter value]`
-    IterNext(isize),
+    IterNext(JumpOffset),
     /// Pops value, appends to list at local slot. `[… value → …]`
     ListPush(usize),
     /// Pops value then key, inserts into map at local slot. `[… key value → …]`
@@ -113,9 +148,9 @@ impl std::fmt::Debug for OpCode {
             Self::Call(n) => write!(f, "Call({n})"),
             Self::CallVec(n) => write!(f, "CallVec({n})"),
             Self::Pop => write!(f, "Pop"),
-            Self::Jump(n) => write!(f, "Jump({n})"),
-            Self::JumpIfTrue(n) => write!(f, "JumpIfTrue({n})"),
-            Self::JumpIfFalse(n) => write!(f, "JumpIfFalse({n})"),
+            Self::Jump(n) => write!(f, "Jump({n:?})"),
+            Self::JumpIfTrue(n) => write!(f, "JumpIfTrue({n:?})"),
+            Self::JumpIfFalse(n) => write!(f, "JumpIfFalse({n:?})"),
             Self::Constant(n) => write!(f, "Constant({n})"),
             Self::GetLocal(n) => write!(f, "GetLocal({n})"),
             Self::SetLocal(n) => write!(f, "SetLocal({n})"),
@@ -141,7 +176,7 @@ impl std::fmt::Debug for OpCode {
                 write!(f, ")")
             }
             Self::GetIterator => write!(f, "GetIterator"),
-            Self::IterNext(n) => write!(f, "IterNext({n})"),
+            Self::IterNext(n) => write!(f, "IterNext({n:?})"),
             Self::ListPush(n) => write!(f, "ListPush({n})"),
             Self::MapInsert(n) => write!(f, "MapInsert({n})"),
             Self::MakeRange { inclusive, bounded } => {
@@ -182,7 +217,7 @@ impl Chunk {
 
     /// Overwrites the jump operand of a `Jump`, `JumpIfTrue`, `JumpIfFalse`, or
     /// `IterNext` already written at `idx`. Panics on any other opcode.
-    pub fn set_jump_offset(&mut self, idx: usize, offset: isize) {
+    pub fn set_jump_offset(&mut self, idx: usize, offset: JumpOffset) {
         match self.code.get_mut(idx) {
             Some(
                 OpCode::JumpIfFalse(n)
