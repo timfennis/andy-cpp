@@ -19,7 +19,7 @@ pub enum Function {
 
     Memoized {
         cache: Rc<RefCell<HashMap<u64, Value>>>,
-        function: Box<Self>,
+        function: Rc<Self>,
     },
 }
 

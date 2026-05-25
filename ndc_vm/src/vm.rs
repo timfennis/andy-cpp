@@ -555,7 +555,7 @@ impl Vm {
                     let func = func.clone();
                     self.stack.push(Value::function(Function::Memoized {
                         cache: Rc::new(RefCell::new(HashMap::default())),
-                        function: Box::new(func),
+                        function: Rc::new(func),
                     }));
                 }
             }
@@ -625,7 +625,7 @@ impl Vm {
 
             // Cache miss: dispatch the inner function and remember to store
             // the result in the cache when this frame returns.
-            self.dispatch_call_with_memo(*function, args, Some((cache, key)))
+            self.dispatch_call_with_memo(Rc::unwrap_or_clone(function), args, Some((cache, key)))
         } else {
             self.dispatch_call_with_memo(func, args, None)
         }
