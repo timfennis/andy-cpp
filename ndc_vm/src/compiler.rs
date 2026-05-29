@@ -1,4 +1,4 @@
-use crate::chunk::{Chunk, JumpOffset, OpCode};
+use crate::chunk::{JumpTarget, LabelId, OpCode, OptimizerIr};
 use crate::value::{CompiledFunction, Function};
 use crate::{Object, Value};
 use ndc_core::{StaticType, TypeSignature};
@@ -11,7 +11,7 @@ use std::rc::Rc;
 
 #[derive(Default, Clone)]
 pub struct Compiler {
-    chunk: Chunk,
+    ir: OptimizerIr,
     num_locals: usize,
     loop_stack: Vec<LoopContext>,
     allow_return: bool,
@@ -59,7 +59,7 @@ impl Compiler {
     /// The instruction index where the trailing `Halt` was written.
     /// When resuming, this is the `ip` to start from in the new function.
     pub fn halt_ip(&self) -> usize {
-        self.chunk.len()
+        self.ir.len()
     }
 
     /// Number of top-level local slots used so far.
@@ -70,14 +70,14 @@ impl Compiler {
     /// Internal: clone a checkpoint (pre-Halt), write Halt, return both.
     fn finish(mut self) -> Result<(CompiledFunction, Self), CompileError> {
         let checkpoint = self.clone();
-        self.chunk.write(OpCode::Halt, Span::synthetic());
+        self.ir.write(OpCode::Halt, Span::synthetic());
         let function = CompiledFunction {
             name: None,
             static_type: StaticType::Function {
                 parameters: Some(vec![]),
                 return_type: Box::new(StaticType::Any),
             },
-            body: self.chunk,
+            body: self.ir.into_chunk(),
             num_locals: self.num_locals,
         };
         Ok((function, checkpoint))
@@ -92,33 +92,33 @@ impl Compiler {
         } = expression_location;
         match expression {
             Expression::BoolLiteral(b) => {
-                let idx = self.chunk.add_constant(Value::Bool(b));
-                self.chunk.write(OpCode::Constant(idx), span);
+                let idx = self.ir.add_constant(Value::Bool(b));
+                self.ir.write(OpCode::Constant(idx), span);
             }
             Expression::StringLiteral(s) => {
-                let idx = self.chunk.add_constant(Value::string(s));
-                self.chunk.write(OpCode::Constant(idx), span);
+                let idx = self.ir.add_constant(Value::string(s));
+                self.ir.write(OpCode::Constant(idx), span);
             }
             Expression::Int64Literal(i) => {
-                let idx = self.chunk.add_constant(Value::int(i));
-                self.chunk.write(OpCode::Constant(idx), span);
+                let idx = self.ir.add_constant(Value::int(i));
+                self.ir.write(OpCode::Constant(idx), span);
             }
             Expression::Float64Literal(f) => {
-                let idx = self.chunk.add_constant(Value::float(f));
-                self.chunk.write(OpCode::Constant(idx), span);
+                let idx = self.ir.add_constant(Value::float(f));
+                self.ir.write(OpCode::Constant(idx), span);
             }
             Expression::BigIntLiteral(i) => {
-                let idx = self.chunk.add_constant(Value::bigint(i));
-                self.chunk.write(OpCode::Constant(idx), span);
+                let idx = self.ir.add_constant(Value::bigint(i));
+                self.ir.write(OpCode::Constant(idx), span);
             }
             Expression::ComplexLiteral(c) => {
-                let idx = self.chunk.add_constant(Value::complex(c));
-                self.chunk.write(OpCode::Constant(idx), span);
+                let idx = self.ir.add_constant(Value::complex(c));
+                self.ir.write(OpCode::Constant(idx), span);
             }
             Expression::Identifier { name, resolved } => {
                 if name == "None" {
-                    let idx = self.chunk.add_constant(Value::None);
-                    self.chunk.write(OpCode::Constant(idx), span);
+                    let idx = self.ir.add_constant(Value::None);
+                    self.ir.write(OpCode::Constant(idx), span);
                 } else {
                     self.compile_binding(resolved, span)?;
                 }
@@ -127,7 +127,7 @@ impl Compiler {
                 let needs_pop = produces_value(&stm.expression);
                 self.compile_expr(*stm)?;
                 if needs_pop {
-                    self.chunk.write(OpCode::Pop, Span::synthetic());
+                    self.ir.write(OpCode::Pop, Span::synthetic());
                 }
             }
             Expression::Logical {
@@ -140,17 +140,17 @@ impl Compiler {
                 match operator {
                     LogicalOperator::And => {
                         let end_jump = self
-                            .chunk
-                            .write(OpCode::JumpIfFalse(JumpOffset::ZERO), left_span);
-                        self.chunk.write(OpCode::Pop, Span::synthetic());
+                            .ir
+                            .write(OpCode::JumpIfFalse(JumpTarget::PLACEHOLDER), left_span);
+                        self.ir.write(OpCode::Pop, Span::synthetic());
                         self.compile_expr(*right)?;
                         self.patch_jump(end_jump);
                     }
                     LogicalOperator::Or => {
                         let end_jump = self
-                            .chunk
-                            .write(OpCode::JumpIfTrue(JumpOffset::ZERO), left_span);
-                        self.chunk.write(OpCode::Pop, Span::synthetic());
+                            .ir
+                            .write(OpCode::JumpIfTrue(JumpTarget::PLACEHOLDER), left_span);
+                        self.ir.write(OpCode::Pop, Span::synthetic());
                         self.compile_expr(*right)?;
                         self.patch_jump(end_jump);
                     }
@@ -175,22 +175,22 @@ impl Compiler {
                     self.compile_expr(*container)?;
                     self.compile_expr(*index)?;
                     self.compile_expr(*value)?;
-                    self.chunk.write(OpCode::Call(3), span);
+                    self.ir.write(OpCode::Call(3), span);
                 }
                 l_value @ Lvalue::Identifier { .. } => {
                     self.compile_expr(*value)?;
                     self.compile_lvalue(l_value, span)?;
-                    let idx = self.chunk.add_constant(Value::unit());
-                    self.chunk.write(OpCode::Constant(idx), Span::synthetic());
+                    let idx = self.ir.add_constant(Value::unit());
+                    self.ir.write(OpCode::Constant(idx), Span::synthetic());
                 }
                 Lvalue::Sequence(seq) => {
                     self.compile_expr(*value)?;
-                    self.chunk.write(OpCode::Unpack(seq.len()), span);
+                    self.ir.write(OpCode::Unpack(seq.len()), span);
                     for l_value in seq {
                         self.compile_lvalue(l_value, span)?;
                     }
-                    let idx = self.chunk.add_constant(Value::unit());
-                    self.chunk.write(OpCode::Constant(idx), Span::synthetic());
+                    let idx = self.ir.add_constant(Value::unit());
+                    self.ir.write(OpCode::Constant(idx), Span::synthetic());
                 }
             },
             Expression::OpAssignment {
@@ -216,8 +216,8 @@ impl Compiler {
                                 self.compile_binding(resolved_assign_operation, span)?;
                                 self.emit_get_var(var, lv_span);
                                 self.compile_expr(*r_value)?;
-                                self.chunk.write(OpCode::Call(2), span);
-                                self.chunk.write(OpCode::Pop, span);
+                                self.ir.write(OpCode::Call(2), span);
+                                self.ir.write(OpCode::Pop, span);
                             }
                             OpAssignStrategy::DynamicMerge => {
                                 // `op=` exists but either dispatches to
@@ -251,7 +251,7 @@ impl Compiler {
                                 self.compile_binding(callee_binding, span)?;
                                 self.emit_get_var(var, lv_span);
                                 self.compile_expr(*r_value)?;
-                                self.chunk.write(opcode, span);
+                                self.ir.write(opcode, span);
                                 self.emit_set_var(var, lv_span);
                             }
                             OpAssignStrategy::FallbackToOp => {
@@ -263,7 +263,7 @@ impl Compiler {
                                 self.compile_binding(resolved_operation, span)?;
                                 self.emit_get_var(var, lv_span);
                                 self.compile_expr(*r_value)?;
-                                self.chunk.write(opcode, span);
+                                self.ir.write(opcode, span);
                                 self.emit_set_var(var, lv_span);
                             }
                         }
@@ -282,18 +282,18 @@ impl Compiler {
                         self.num_locals += 2;
 
                         self.compile_expr(*value)?;
-                        self.chunk
+                        self.ir
                             .write(OpCode::SetLocal(tmp_container), container_span);
                         self.compile_expr(*index)?;
-                        self.chunk.write(OpCode::SetLocal(tmp_index), index_span);
+                        self.ir.write(OpCode::SetLocal(tmp_index), index_span);
 
                         self.compile_binding(
                             resolved_set.expect("[]= must be resolved"),
                             container_span.merge(index_span),
                         )?;
-                        self.chunk
+                        self.ir
                             .write(OpCode::GetLocal(tmp_container), container_span);
-                        self.chunk.write(OpCode::GetLocal(tmp_index), index_span);
+                        self.ir.write(OpCode::GetLocal(tmp_index), index_span);
 
                         let op_opcode = Self::call_opcode_for(&resolved_operation, 2);
                         self.compile_binding(resolved_operation, span)?;
@@ -301,21 +301,21 @@ impl Compiler {
                             resolved_get.expect("[] must be resolved"),
                             index_span,
                         )?;
-                        self.chunk
+                        self.ir
                             .write(OpCode::GetLocal(tmp_container), container_span);
-                        self.chunk.write(OpCode::GetLocal(tmp_index), index_span);
-                        self.chunk.write(OpCode::Call(2), span); // [](container, index) → current_value
+                        self.ir.write(OpCode::GetLocal(tmp_index), index_span);
+                        self.ir.write(OpCode::Call(2), span); // [](container, index) → current_value
                         self.compile_expr(*r_value)?;
-                        self.chunk.write(op_opcode, span); // op(current_value, r_value) → new_value
-                        self.chunk.write(OpCode::Call(3), span); // []=(container, index, new_value)
-                        self.chunk.write(OpCode::Pop, span); // discard []= result; common code below pushes unit
+                        self.ir.write(op_opcode, span); // op(current_value, r_value) → new_value
+                        self.ir.write(OpCode::Call(3), span); // []=(container, index, new_value)
+                        self.ir.write(OpCode::Pop, span); // discard []= result; common code below pushes unit
                     }
                     Lvalue::Sequence(_) => {
                         return Err(CompileError::lvalue_required_to_be_single_identifier(span));
                     }
                 }
-                let idx = self.chunk.add_constant(Value::unit());
-                self.chunk.write(OpCode::Constant(idx), span);
+                let idx = self.ir.add_constant(Value::unit());
+                self.ir.write(OpCode::Constant(idx), span);
             }
             Expression::FunctionDeclaration {
                 name,
@@ -382,21 +382,21 @@ impl Compiler {
                     self.compile_expr(argument)?;
                 }
 
-                self.chunk.write(opcode, function_span);
+                self.ir.write(opcode, function_span);
             }
             Expression::Tuple { values } => {
                 let size = values.len();
                 for expression in values {
                     self.compile_expr(expression)?;
                 }
-                self.chunk.write(OpCode::MakeTuple(size), span);
+                self.ir.write(OpCode::MakeTuple(size), span);
             }
             Expression::List { values } => {
                 let size = values.len();
                 for expression in values {
                     self.compile_expr(expression)?;
                 }
-                self.chunk.write(OpCode::MakeList(size), span);
+                self.ir.write(OpCode::MakeList(size), span);
             }
             Expression::Map { values, default } => {
                 let pairs = values.len();
@@ -406,25 +406,25 @@ impl Compiler {
                     if let Some(v) = value {
                         self.compile_expr(v)?
                     } else {
-                        let idx = self.chunk.add_constant(Value::unit());
-                        self.chunk.write(OpCode::Constant(idx), Span::synthetic());
+                        let idx = self.ir.add_constant(Value::unit());
+                        self.ir.write(OpCode::Constant(idx), Span::synthetic());
                     }
                 }
                 if let Some(default) = default {
                     self.compile_expr(*default)?;
                 }
-                self.chunk
-                    .write(OpCode::MakeMap { pairs, has_default }, span);
+                self.ir.write(OpCode::MakeMap { pairs, has_default }, span);
             }
             Expression::Return { value } => {
                 if !self.allow_return {
                     return Err(CompileError::return_outside_function(span));
                 }
                 self.compile_expr(*value)?;
-                self.chunk.write(OpCode::Return, span);
+                self.ir.write(OpCode::Return, span);
             }
             Expression::Break => {
-                let idx = self.chunk.write(OpCode::Jump(JumpOffset::ZERO), span); // will be backpatched
+                let idx = self.ir.write(OpCode::Jump(JumpTarget::PLACEHOLDER), span); // will be backpatched
+
                 self.current_loop_context_mut()
                     .ok_or(CompileError::unexpected_break(span))?
                     .break_instructions
@@ -450,7 +450,7 @@ impl Compiler {
                 if let Some(end) = end {
                     self.compile_expr(*end)?;
                 }
-                self.chunk
+                self.ir
                     .write(OpCode::MakeRange { inclusive, bounded }, span);
             }
         }
@@ -482,17 +482,17 @@ impl Compiler {
 
                 let tmp_value = self.num_locals;
                 self.num_locals += 1;
-                self.chunk.write(OpCode::SetLocal(tmp_value), span);
+                self.ir.write(OpCode::SetLocal(tmp_value), span);
 
                 self.compile_binding(resolved_set.expect("[]= must be resolved"), span)?;
                 self.compile_expr(*value)?;
                 self.compile_expr(*index)?;
-                self.chunk.write(OpCode::GetLocal(tmp_value), span);
-                self.chunk.write(OpCode::Call(3), span);
-                self.chunk.write(OpCode::Pop, Span::synthetic());
+                self.ir.write(OpCode::GetLocal(tmp_value), span);
+                self.ir.write(OpCode::Call(3), span);
+                self.ir.write(OpCode::Pop, Span::synthetic());
             }
             Lvalue::Sequence(seq) => {
-                self.chunk.write(OpCode::Unpack(seq.len()), span);
+                self.ir.write(OpCode::Unpack(seq.len()), span);
                 for lv in seq {
                     self.compile_lvalue(lv, span)?;
                 }
@@ -509,12 +509,12 @@ impl Compiler {
                     ResolvedVar::Local { slot } => slot,
                     _ => unreachable!("declaration lvalue must be a local"),
                 };
-                self.chunk.write(OpCode::SetLocal(slot), span);
+                self.ir.write(OpCode::SetLocal(slot), span);
                 self.num_locals = self.num_locals.max(slot + 1);
             }
             Lvalue::Index { .. } => unreachable!("cannot declare into index"),
             Lvalue::Sequence(seq) => {
-                self.chunk.write(OpCode::Unpack(seq.len()), span);
+                self.ir.write(OpCode::Unpack(seq.len()), span);
                 for lv in seq {
                     self.compile_declare_lvalue(lv, span)?;
                 }
@@ -549,12 +549,12 @@ impl Compiler {
                             acc
                         });
                 let idx = self
-                    .chunk
+                    .ir
                     .add_constant(Value::Object(Rc::new(Object::OverloadSet {
                         scalars,
                         vec_candidates,
                     })));
-                self.chunk.write(OpCode::Constant(idx), span);
+                self.ir.write(OpCode::Constant(idx), span);
             }
         }
 
@@ -574,34 +574,30 @@ impl Compiler {
 
     fn emit_get_var(&mut self, var: ResolvedVar, span: Span) {
         match var {
-            ResolvedVar::Local { slot } => self.chunk.write(OpCode::GetLocal(slot), span),
-            ResolvedVar::Upvalue { slot } => self.chunk.write(OpCode::GetUpvalue(slot), span),
-            ResolvedVar::Global { slot } => self.chunk.write(OpCode::GetGlobal(slot), span),
+            ResolvedVar::Local { slot } => self.ir.write(OpCode::GetLocal(slot), span),
+            ResolvedVar::Upvalue { slot } => self.ir.write(OpCode::GetUpvalue(slot), span),
+            ResolvedVar::Global { slot } => self.ir.write(OpCode::GetGlobal(slot), span),
         };
     }
 
     fn emit_set_var(&mut self, var: ResolvedVar, span: Span) {
         match var {
-            ResolvedVar::Local { slot } => self.chunk.write(OpCode::SetLocal(slot), span),
-            ResolvedVar::Upvalue { slot } => self.chunk.write(OpCode::SetUpvalue(slot), span),
+            ResolvedVar::Local { slot } => self.ir.write(OpCode::SetLocal(slot), span),
+            ResolvedVar::Upvalue { slot } => self.ir.write(OpCode::SetUpvalue(slot), span),
             ResolvedVar::Global { .. } => unreachable!("globals are native, never assigned"),
         };
     }
 
     /// Backpatches a forward jump at `op_idx` to land just after the most recently
     /// written instruction.
-    fn patch_jump(&mut self, op_idx: usize) {
-        let offset =
-            isize::try_from(self.chunk.len() - op_idx - 1).expect("jump too large to patch");
-        self.chunk.set_jump_offset(op_idx, JumpOffset::new(offset));
+    fn patch_jump(&mut self, label: LabelId) {
+        self.ir
+            .set_jump_offset(label, JumpTarget::Label(self.ir.next_label()));
     }
 
     /// Emits a `Jump` that goes back to `target` (a previously recorded chunk offset).
-    fn write_jump_back(&mut self, target: usize, span: Span) -> usize {
-        let offset =
-            -isize::try_from(self.chunk.len() - target + 1).expect("loop too large to jump back");
-        self.chunk
-            .write(OpCode::Jump(JumpOffset::new(offset)), span)
+    fn write_jump_back(&mut self, target: LabelId, span: Span) -> LabelId {
+        self.ir.write(OpCode::Jump(JumpTarget::Label(target)), span)
     }
 
     fn compile_block(
@@ -610,18 +606,18 @@ impl Compiler {
         _span: Span,
     ) -> Result<(), CompileError> {
         if statements.is_empty() {
-            let idx = self.chunk.add_constant(Value::unit());
+            let idx = self.ir.add_constant(Value::unit());
             // Synthetic unit from empty block has no meaningful source
-            self.chunk.write(OpCode::Constant(idx), Span::synthetic());
+            self.ir.write(OpCode::Constant(idx), Span::synthetic());
         } else {
             let last = statements.len() - 1;
             for (i, stmt) in statements.into_iter().enumerate() {
                 let is_last_expr = i == last && produces_value(&stmt.expression);
                 self.compile_expr(stmt)?;
                 if i == last && !is_last_expr {
-                    let idx = self.chunk.add_constant(Value::unit());
+                    let idx = self.ir.add_constant(Value::unit());
                     // Synthetic unit when last statement doesn't produce value
-                    self.chunk.write(OpCode::Constant(idx), Span::synthetic());
+                    self.ir.write(OpCode::Constant(idx), Span::synthetic());
                 }
             }
         }
@@ -639,27 +635,27 @@ impl Compiler {
         let condition_span = condition.span;
         self.compile_expr(condition)?;
         let conditional_jump_idx = self
-            .chunk
-            .write(OpCode::JumpIfFalse(JumpOffset::ZERO), condition_span);
-        self.chunk.write(OpCode::Pop, Span::synthetic());
+            .ir
+            .write(OpCode::JumpIfFalse(JumpTarget::PLACEHOLDER), condition_span);
+        self.ir.write(OpCode::Pop, Span::synthetic());
         self.compile_expr(on_true)?;
         if let Some(on_false) = on_false {
             let jump_to_end = self
-                .chunk
-                .write(OpCode::Jump(JumpOffset::ZERO), Span::synthetic());
+                .ir
+                .write(OpCode::Jump(JumpTarget::PLACEHOLDER), Span::synthetic());
             self.patch_jump(conditional_jump_idx);
-            self.chunk.write(OpCode::Pop, Span::synthetic());
+            self.ir.write(OpCode::Pop, Span::synthetic());
             self.compile_expr(on_false)?;
             self.patch_jump(jump_to_end);
         } else {
             // No else branch — push unit so the if-expression always produces a value.
             let jump_to_end = self
-                .chunk
-                .write(OpCode::Jump(JumpOffset::ZERO), Span::synthetic());
+                .ir
+                .write(OpCode::Jump(JumpTarget::PLACEHOLDER), Span::synthetic());
             self.patch_jump(conditional_jump_idx);
-            self.chunk.write(OpCode::Pop, Span::synthetic());
-            let idx = self.chunk.add_constant(Value::unit());
-            self.chunk.write(OpCode::Constant(idx), Span::synthetic());
+            self.ir.write(OpCode::Pop, Span::synthetic());
+            let idx = self.ir.add_constant(Value::unit());
+            self.ir.write(OpCode::Constant(idx), Span::synthetic());
             self.patch_jump(jump_to_end);
         }
 
@@ -676,14 +672,14 @@ impl Compiler {
         let loop_start = self.new_loop_context();
         self.compile_expr(condition)?;
         let conditional_jump_idx = self
-            .chunk
-            .write(OpCode::JumpIfFalse(JumpOffset::ZERO), condition_span);
-        self.chunk.write(OpCode::Pop, Span::synthetic());
+            .ir
+            .write(OpCode::JumpIfFalse(JumpTarget::PLACEHOLDER), condition_span);
+        self.ir.write(OpCode::Pop, Span::synthetic());
         self.compile_expr(loop_body)?;
-        self.chunk.write(OpCode::Pop, Span::synthetic());
+        self.ir.write(OpCode::Pop, Span::synthetic());
         self.write_jump_back(loop_start, Span::synthetic());
         self.patch_jump(conditional_jump_idx);
-        self.chunk.write(OpCode::Pop, Span::synthetic());
+        self.ir.write(OpCode::Pop, Span::synthetic());
         let break_instructions =
             std::mem::take(&mut self.current_loop_context_mut().unwrap().break_instructions);
         for instruction in break_instructions {
@@ -725,20 +721,20 @@ impl Compiler {
             ..Default::default()
         };
         fn_compiler.compile_expr(body)?;
-        fn_compiler.chunk.write(OpCode::Return, Span::synthetic());
+        fn_compiler.ir.write(OpCode::Return, Span::synthetic());
 
         let compiled = CompiledFunction {
             name,
             static_type,
-            body: fn_compiler.chunk,
+            body: fn_compiler.ir.into_chunk(),
             num_locals: fn_compiler.num_locals,
         };
         let idx = self
-            .chunk
+            .ir
             .add_constant(Value::function(Function::Compiled(Rc::new(compiled))));
 
         if !captures.is_empty() {
-            self.chunk.write(
+            self.ir.write(
                 OpCode::Closure {
                     constant_idx: idx,
                     values: captures.into(),
@@ -746,19 +742,19 @@ impl Compiler {
                 span,
             );
         } else {
-            self.chunk.write(OpCode::Constant(idx), span);
+            self.ir.write(OpCode::Constant(idx), span);
         }
 
         // For `pure fn`, wrap the function in a memoization cache.  The cache
         // is allocated fresh each time the declaration is evaluated, so each
         // closure instance has its own independent cache.
         if pure {
-            self.chunk.write(OpCode::Memoize, span);
+            self.ir.write(OpCode::Memoize, span);
         }
 
         match resolved_name {
             Some(ResolvedVar::Local { slot }) => {
-                self.chunk.write(OpCode::SetLocal(slot), span);
+                self.ir.write(OpCode::SetLocal(slot), span);
                 self.num_locals = self.num_locals.max(slot + 1);
             }
             Some(ResolvedVar::Upvalue { .. } | ResolvedVar::Global { .. }) => {
@@ -782,7 +778,7 @@ impl Compiler {
                     // The body is always a block, which always pushes exactly one value.
                     // Discard it — the loop itself produces no value.
                     this.compile_expr(block.clone())?;
-                    this.chunk.write(OpCode::Pop, span);
+                    this.ir.write(OpCode::Pop, span);
                     Ok(())
                 })?;
                 Ok(())
@@ -794,14 +790,14 @@ impl Compiler {
                 let tmp_list = accumulator_slot
                     .ok_or_else(|| CompileError::unresolved_accumulator_slot(span))?;
                 self.num_locals = self.num_locals.max(tmp_list + 1);
-                self.chunk.write(OpCode::MakeList(0), span);
-                self.chunk.write(OpCode::SetLocal(tmp_list), span);
+                self.ir.write(OpCode::MakeList(0), span);
+                self.ir.write(OpCode::SetLocal(tmp_list), span);
                 self.compile_for_iterations(iterations, span, &mut |this| {
                     this.compile_expr(expr.clone())?;
-                    this.chunk.write(OpCode::ListPush(tmp_list), span);
+                    this.ir.write(OpCode::ListPush(tmp_list), span);
                     Ok(())
                 })?;
-                self.chunk.write(OpCode::GetLocal(tmp_list), span);
+                self.ir.write(OpCode::GetLocal(tmp_list), span);
                 Ok(())
             }
             ForBody::Map {
@@ -817,26 +813,26 @@ impl Compiler {
                 if let Some(default) = default {
                     self.compile_expr(*default)?;
                 }
-                self.chunk.write(
+                self.ir.write(
                     OpCode::MakeMap {
                         pairs: 0,
                         has_default,
                     },
                     span,
                 );
-                self.chunk.write(OpCode::SetLocal(tmp_map), span);
+                self.ir.write(OpCode::SetLocal(tmp_map), span);
                 self.compile_for_iterations(iterations, span, &mut |this| {
                     this.compile_expr(key.clone())?;
                     if let Some(value) = value.clone() {
                         this.compile_expr(value)?;
                     } else {
-                        let idx = this.chunk.add_constant(Value::unit());
-                        this.chunk.write(OpCode::Constant(idx), Span::synthetic());
+                        let idx = this.ir.add_constant(Value::unit());
+                        this.ir.write(OpCode::Constant(idx), Span::synthetic());
                     }
-                    this.chunk.write(OpCode::MapInsert(tmp_map), span);
+                    this.ir.write(OpCode::MapInsert(tmp_map), span);
                     Ok(())
                 })?;
-                self.chunk.write(OpCode::GetLocal(tmp_map), span);
+                self.ir.write(OpCode::GetLocal(tmp_map), span);
                 Ok(())
             }
         }
@@ -858,10 +854,12 @@ impl Compiler {
         match first {
             ForIteration::Iteration { l_value, sequence } => {
                 self.compile_expr(sequence.clone())?;
-                self.chunk.write(OpCode::GetIterator, sequence.span);
+                self.ir.write(OpCode::GetIterator, sequence.span);
 
                 let loop_start = self.new_loop_context();
-                let iter_next = self.chunk.write(OpCode::IterNext(JumpOffset::ZERO), span);
+                let iter_next = self
+                    .ir
+                    .write(OpCode::IterNext(JumpTarget::PLACEHOLDER), span);
                 self.compile_declare_lvalue(l_value.clone(), span)?;
 
                 self.compile_for_iterations(rest, span, compile_leaf)?;
@@ -869,7 +867,7 @@ impl Compiler {
                 // Close upvalues for the loop variable so each iteration's closures
                 // get their own frozen copy rather than sharing a mutable slot.
                 if let Some(slot) = min_lvalue_slot(l_value) {
-                    self.chunk.write(OpCode::CloseUpvalue(slot), span);
+                    self.ir.write(OpCode::CloseUpvalue(slot), span);
                 }
 
                 self.write_jump_back(loop_start, span);
@@ -885,18 +883,18 @@ impl Compiler {
                 self.end_loop_context();
 
                 // Pop the iterator
-                self.chunk.write(OpCode::Pop, Span::synthetic());
+                self.ir.write(OpCode::Pop, Span::synthetic());
             }
             ForIteration::Guard(condition) => {
                 self.compile_expr(condition.clone())?;
                 let skip_jump = self
-                    .chunk
-                    .write(OpCode::JumpIfFalse(JumpOffset::ZERO), span);
-                self.chunk.write(OpCode::Pop, Span::synthetic());
+                    .ir
+                    .write(OpCode::JumpIfFalse(JumpTarget::PLACEHOLDER), span);
+                self.ir.write(OpCode::Pop, Span::synthetic());
                 self.compile_for_iterations(rest, span, compile_leaf)?;
-                let end_jump = self.chunk.write(OpCode::Jump(JumpOffset::ZERO), span);
+                let end_jump = self.ir.write(OpCode::Jump(JumpTarget::PLACEHOLDER), span);
                 self.patch_jump(skip_jump);
-                self.chunk.write(OpCode::Pop, Span::synthetic());
+                self.ir.write(OpCode::Pop, Span::synthetic());
                 self.patch_jump(end_jump);
             }
         }
@@ -904,8 +902,8 @@ impl Compiler {
         Ok(())
     }
 
-    fn new_loop_context(&mut self) -> usize {
-        let start = self.chunk.len();
+    fn new_loop_context(&mut self) -> LabelId {
+        let start = self.ir.next_label();
         self.loop_stack.push(LoopContext {
             start,
             break_instructions: Vec::new(),
@@ -930,8 +928,8 @@ impl Compiler {
 
 #[derive(Clone)]
 struct LoopContext {
-    start: usize,
-    break_instructions: Vec<usize>,
+    start: LabelId,
+    break_instructions: Vec<LabelId>,
 }
 
 /// Which lowering shape an `op=` site takes.

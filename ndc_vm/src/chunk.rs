@@ -1,4 +1,5 @@
 use crate::Value;
+use ndc_core::hash_map::HashMap;
 use ndc_lexer::Span;
 use ndc_parser::CaptureSource;
 use std::rc::Rc;
@@ -9,32 +10,46 @@ use std::rc::Rc;
 /// instruction *after* the jump opcode" — has a single definition site. Future
 /// stages of a compile pipeline may swap this for an `enum JumpTarget { … }`
 /// without touching every call site.
-#[derive(Copy, Clone, PartialEq, Eq)]
-pub struct JumpOffset(isize);
 
-impl JumpOffset {
-    pub const ZERO: Self = Self(0);
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub enum JumpTarget {
+    Offset(isize),
+    Label(LabelId),
+}
+
+impl JumpTarget {
+    pub const PLACEHOLDER: Self = Self::Label(LabelId(usize::MAX));
 
     #[inline]
     pub fn new(offset: isize) -> Self {
-        Self(offset)
+        Self::Offset(offset)
     }
 
     #[inline]
     pub fn raw(self) -> isize {
-        self.0
+        match self {
+            JumpTarget::Offset(i) => i,
+            JumpTarget::Label(_) => panic!("cannot get raw offset of unresolved label"),
+        }
     }
 
     /// Advance `ip` by this offset using wrapping signed arithmetic.
     #[inline]
     pub fn apply(self, ip: usize) -> usize {
-        ip.wrapping_add_signed(self.0)
+        // TODO: is this bad for perf?
+        match self {
+            JumpTarget::Offset(o) => ip.wrapping_add_signed(o),
+            JumpTarget::Label(_) => panic!("cannot apply instruction pointer to unresolved label"),
+        }
     }
 }
 
-impl std::fmt::Debug for JumpOffset {
+impl std::fmt::Debug for JumpTarget {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Debug::fmt(&self.0, f)
+        match self {
+            JumpTarget::Offset(offset) => std::fmt::Debug::fmt(&offset, f),
+            JumpTarget::Label(label_id) => std::fmt::Debug::fmt(&label_id.0, f),
+        }
     }
 }
 
@@ -92,11 +107,11 @@ pub enum OpCode {
     /// Pops top of stack. `[… value → …]`
     Pop,
     /// Unconditional jump. `[…] → […]`
-    Jump(JumpOffset),
+    Jump(JumpTarget),
     /// Peeks top; jumps if true. `[… bool → … bool]`
-    JumpIfTrue(JumpOffset),
+    JumpIfTrue(JumpTarget),
     /// Peeks top; jumps if false. `[… bool → … bool]`
-    JumpIfFalse(JumpOffset),
+    JumpIfFalse(JumpTarget),
     /// Pushes a constant. `[… → … value]`
     Constant(usize),
     /// Copies local slot onto stack. `[… → … value]`
@@ -123,7 +138,7 @@ pub enum OpCode {
     /// Pops value, pushes iterator. No-op if already an iterator. `[… value → … iter]`
     GetIterator,
     /// Peeks iterator; pushes next value or jumps if exhausted. `[… iter → … iter value]`
-    IterNext(JumpOffset),
+    IterNext(JumpTarget),
     /// Pops value, appends to list at local slot. `[… value → …]`
     ListPush(usize),
     /// Pops value then key, inserts into map at local slot. `[… key value → …]`
@@ -191,6 +206,101 @@ impl std::fmt::Debug for OpCode {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct LabelId(usize);
+
+#[derive(Default, Clone)]
+pub(crate) struct OptimizerIr {
+    constants: Vec<Value>,
+    code: Vec<(LabelId, OpCode, Span)>,
+}
+
+impl OptimizerIr {
+    pub(crate) fn len(&self) -> usize {
+        self.code.len()
+    }
+
+    pub(crate) fn next_label(&self) -> LabelId {
+        LabelId(self.len())
+    }
+
+    pub(crate) fn into_chunk(self) -> Chunk {
+        let label_to_pos: HashMap<LabelId, usize> = self
+            .code
+            .iter()
+            .enumerate()
+            .map(|(idx, (a, _, _))| (*a, idx))
+            .collect();
+
+        let mut op_codes = Vec::with_capacity(self.code.len());
+        let mut spans = Vec::with_capacity(self.code.len());
+
+        // Jump offsets are relative to the instruction *after* the jump: the
+        // VM dispatch loop increments `ip` before calling `apply`. So the
+        // offset is `dest - (cur + 1)`.
+        let resolve = |cur_label: LabelId, dest_label: LabelId| -> JumpTarget {
+            let cur = label_to_pos[&cur_label] as isize;
+            let dest = label_to_pos[&dest_label] as isize;
+            JumpTarget::Offset(dest - cur - 1)
+        };
+
+        for (cur_label, opcode, span) in self.code.into_iter() {
+            spans.push(span);
+            let lowered = match opcode {
+                OpCode::Jump(JumpTarget::Label(d)) => OpCode::Jump(resolve(cur_label, d)),
+                OpCode::JumpIfFalse(JumpTarget::Label(d)) => {
+                    OpCode::JumpIfFalse(resolve(cur_label, d))
+                }
+                OpCode::JumpIfTrue(JumpTarget::Label(d)) => {
+                    OpCode::JumpIfTrue(resolve(cur_label, d))
+                }
+                OpCode::IterNext(JumpTarget::Label(d)) => OpCode::IterNext(resolve(cur_label, d)),
+                op => op,
+            };
+            op_codes.push(lowered);
+        }
+
+        Chunk {
+            constants: self.constants,
+            code: op_codes,
+            spans,
+        }
+    }
+
+    pub(crate) fn add_constant(&mut self, value: Value) -> usize {
+        self.constants.push(value);
+        self.constants.len() - 1
+    }
+
+    /// Overwrites the jump operand of a `Jump`, `JumpIfTrue`, `JumpIfFalse`, or
+    /// `IterNext` already written at `idx`. Panics on any other opcode.
+    pub(crate) fn set_jump_offset(&mut self, label: LabelId, target: JumpTarget) {
+        let idx = self
+            .code
+            .iter()
+            .position(|(l, _, _)| *l == label)
+            .expect("invalid label");
+
+        match self.code.get_mut(idx) {
+            Some((
+                _label,
+                OpCode::JumpIfFalse(n)
+                | OpCode::JumpIfTrue(n)
+                | OpCode::Jump(n)
+                | OpCode::IterNext(n),
+                _span,
+            )) => *n = target,
+            _ => panic!("expected a patchable jump instruction at index {idx}"),
+        }
+    }
+
+    pub(crate) fn write(&mut self, op: OpCode, span: Span) -> LabelId {
+        let label = self.next_label();
+        self.code.push((label, op, span));
+        label
+    }
+}
+
 /// A chunk of bytecode along with the constants it references.
 #[derive(Default, Clone)]
 pub struct Chunk {
@@ -204,29 +314,10 @@ impl Chunk {
         self.code.len()
     }
 
-    pub fn add_constant(&mut self, value: Value) -> usize {
-        self.constants.push(value);
-        self.constants.len() - 1
-    }
-
     pub fn write(&mut self, op: OpCode, span: Span) -> usize {
         self.code.push(op);
         self.spans.push(span);
         self.code.len() - 1
-    }
-
-    /// Overwrites the jump operand of a `Jump`, `JumpIfTrue`, `JumpIfFalse`, or
-    /// `IterNext` already written at `idx`. Panics on any other opcode.
-    pub fn set_jump_offset(&mut self, idx: usize, offset: JumpOffset) {
-        match self.code.get_mut(idx) {
-            Some(
-                OpCode::JumpIfFalse(n)
-                | OpCode::JumpIfTrue(n)
-                | OpCode::Jump(n)
-                | OpCode::IterNext(n),
-            ) => *n = offset,
-            _ => panic!("expected a patchable jump instruction at index {idx}"),
-        }
     }
 
     pub fn is_empty(&self) -> bool {
