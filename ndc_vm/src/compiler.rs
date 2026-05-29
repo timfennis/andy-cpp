@@ -41,6 +41,20 @@ impl Compiler {
         Ok(compiler.finish()?.0)
     }
 
+    /// Compile expressions without running the peephole optimizer. Useful
+    /// for tests that want to inspect the raw compiler output, and for
+    /// debugging tools (e.g. a future `--no-optimize` disassembler flag).
+    pub fn compile_unoptimized(
+        expressions: impl Iterator<Item = ExpressionLocation>,
+    ) -> Result<CompiledFunction, CompileError> {
+        let mut compiler = Self::default();
+        compiler.optimize = false;
+        for expr_loc in expressions {
+            compiler.compile_expr(expr_loc)?;
+        }
+        Ok(compiler.finish()?.0)
+    }
+
     /// Compile expressions and return both the finished function and a
     /// checkpoint that can be passed to `resume` to append more code later.
     /// The checkpoint is the compiler state *before* the `Halt` instruction,
