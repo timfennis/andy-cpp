@@ -140,12 +140,11 @@ fn test_or() {
 
 // 5;
 //
-// 0: Constant(0)      push `5`
-// 1: Pop              discard value (it's a statement)
-// 2: Halt
+// Pre-peephole: `Constant(0), Pop, Halt`. The peephole pass elides the dead
+// `Constant; Pop` pair, leaving just `Halt`.
 #[test]
 fn test_statement() {
-    assert_eq!(compile("5;"), [Constant(0), Pop, Halt]);
+    assert_eq!(compile("5;"), [Halt]);
 }
 
 // { 5 }
@@ -159,40 +158,35 @@ fn test_block_with_expression() {
 
 // { 5; }
 //
-// 0: Constant(0)      push `5`
-// 1: Pop              discard (trailing semicolon)
-// 2: Constant(1)      push `()` (block result is unit)
-// 3: Halt
+// Pre-peephole: `Constant(0), Pop, Constant(1), Halt`. The peephole pass
+// elides the dead `Constant(0); Pop`, leaving the unit result.
 #[test]
 fn test_block_with_trailing_statement() {
-    assert_eq!(compile("{ 5; }"), [Constant(0), Pop, Constant(1), Halt]);
+    assert_eq!(compile("{ 5; }"), [Constant(1), Halt]);
 }
 
 // { 5; 6 }
 //
-// 0: Constant(0)      push `5`
-// 1: Pop              discard intermediate statement
-// 2: Constant(1)      push `6` (block result)
-// 3: Halt
+// Pre-peephole: `Constant(0), Pop, Constant(1), Halt`. The peephole elides
+// the intermediate `Constant(0); Pop`, leaving just the block result.
 #[test]
 fn test_block_multiple_statements() {
-    assert_eq!(compile("{ 5; 6 }"), [Constant(0), Pop, Constant(1), Halt]);
+    assert_eq!(compile("{ 5; 6 }"), [Constant(1), Halt]);
 }
 
 // if true { 3 } else { 3; }
 //
-// true branch returns 3, false branch returns ()
+// true branch returns 3, false branch returns (). The peephole pass elides
+// the false branch's `Constant; Pop` (pushing `3` only to discard it).
 //
 // 0: Constant(0)      push `true`
 // 1: JumpIfFalse(3)   jump to false branch (index 5)
 // 2: Pop              pop condition (true path)
 // 3: Constant(1)      push `3`
-// 4: Jump(4)          jump to Halt (index 9)
+// 4: Jump(2)          jump to Halt (index 7)
 // 5: Pop              pop condition (false path)
-// 6: Constant(2)      push `3` (inner of `3;`)
-// 7: Pop              discard (trailing semicolon)
-// 8: Constant(3)      push `()` (block result)
-// 9: Halt
+// 6: Constant(3)      push `()` (block result; constant 2 still in table but unreferenced)
+// 7: Halt
 #[test]
 fn test_if_with_statement_else() {
     assert_eq!(
@@ -202,9 +196,7 @@ fn test_if_with_statement_else() {
             JumpIfFalse(JumpTarget::Offset(3)),
             Pop,
             Constant(1),
-            Jump(JumpTarget::Offset(4)),
-            Pop,
-            Constant(2),
+            Jump(JumpTarget::Offset(2)),
             Pop,
             Constant(3),
             Halt
@@ -214,34 +206,27 @@ fn test_if_with_statement_else() {
 
 // if true { 3; } else { 3; }
 //
-// Both branches return () — result is unit regardless of condition
+// Both branches return () — the peephole elides the `Constant; Pop` in each
+// arm (each branch's `3;` becomes nothing).
 //
 // 0: Constant(0)      push `true`
-// 1: JumpIfFalse(5)   jump to false branch (index 7)
+// 1: JumpIfFalse(3)   jump to false branch (index 5)
 // 2: Pop              pop condition (true path)
-// 3: Constant(1)      push `3`
-// 4: Pop              discard
-// 5: Constant(2)      push `()`
-// 6: Jump(4)          jump to Halt (index 11)
-// 7: Pop              pop condition (false path)
-// 8: Constant(3)      push `3`
-// 9: Pop              discard
-// 10: Constant(4)     push `()`
-// 11: Halt
+// 3: Constant(2)      push `()` (true-branch result; constant 1 unreferenced)
+// 4: Jump(2)          jump to Halt (index 7)
+// 5: Pop              pop condition (false path)
+// 6: Constant(4)      push `()` (false-branch result; constant 3 unreferenced)
+// 7: Halt
 #[test]
 fn test_if_with_statement_branches() {
     assert_eq!(
         compile("if true { 3; } else { 3; }"),
         [
             Constant(0),
-            JumpIfFalse(JumpTarget::Offset(5)),
-            Pop,
-            Constant(1),
+            JumpIfFalse(JumpTarget::Offset(3)),
             Pop,
             Constant(2),
-            Jump(JumpTarget::Offset(4)),
-            Pop,
-            Constant(3),
+            Jump(JumpTarget::Offset(2)),
             Pop,
             Constant(4),
             Halt
@@ -251,25 +236,24 @@ fn test_if_with_statement_branches() {
 
 // while true { 1 }
 //
+// The peephole elides the body's `Constant(1); Pop` (the loop body's value
+// is discarded). The backward jump offset shrinks accordingly.
+//
 // 0: Constant(0)      push `true`  ← loop_start
-// 1: JumpIfFalse(4)   if false, jump past body to exit Pop (index 6)
+// 1: JumpIfFalse(2)   if false, jump past body to exit Pop (index 4)
 // 2: Pop              pop condition (true path)
-// 3: Constant(1)      body: push `1`
-// 4: Pop              discard body value (loops produce no value)
-// 5: Jump(-6)         jump back to loop_start (index 0)
-// 6: Pop              pop condition (false path, loop exit)
-// 7: Halt
+// 3: Jump(-4)         jump back to loop_start (index 0)
+// 4: Pop              pop condition (false path, loop exit)
+// 5: Halt
 #[test]
 fn test_while() {
     assert_eq!(
         compile("while true { 1 }"),
         [
             Constant(0),
-            JumpIfFalse(JumpTarget::Offset(4)),
+            JumpIfFalse(JumpTarget::Offset(2)),
             Pop,
-            Constant(1),
-            Pop,
-            Jump(JumpTarget::Offset(-6)),
+            Jump(JumpTarget::Offset(-4)),
             Pop,
             Halt
         ]
@@ -294,30 +278,21 @@ fn test_declaration() {
 // let a = 1;
 // a = 5;
 //
-// Declaration stores 1 into pre-allocated slot 0.
-// Assignment pushes new value, SetLocal overwrites,
-// push unit as the expression result, Pop discards it.
+// Declaration stores 1 into pre-allocated slot 0. Assignment pushes new
+// value, SetLocal overwrites. The peephole elides the trailing
+// `Constant; Pop` (the assignment expression's unit result, discarded as a
+// statement).
 //
 // 0: Constant(0)   push `1`
 // 1: SetLocal(0)   store in slot 0 (declaration)
 // 2: Constant(1)   push `5`
 // 3: SetLocal(0)   overwrite slot 0 (assignment)
-// 4: Constant(2)   push `()` (assignment result)
-// 5: Pop           discard (statement)
-// 6: Halt
+// 4: Halt
 #[test]
 fn test_assignment() {
     assert_eq!(
         compile_with_analysis("let a = 1;\na = 5;"),
-        [
-            Constant(0),
-            SetLocal(0),
-            Constant(1),
-            SetLocal(0),
-            Constant(2),
-            Pop,
-            Halt
-        ]
+        [Constant(0), SetLocal(0), Constant(1), SetLocal(0), Halt]
     );
 }
 

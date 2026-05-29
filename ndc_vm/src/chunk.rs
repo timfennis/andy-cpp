@@ -1,4 +1,5 @@
 use crate::Value;
+use ahash::AHashSet;
 use ndc_core::hash_map::HashMap;
 use ndc_lexer::Span;
 use ndc_parser::CaptureSource;
@@ -36,7 +37,6 @@ impl JumpTarget {
     /// Advance `ip` by this offset using wrapping signed arithmetic.
     #[inline]
     pub fn apply(self, ip: usize) -> usize {
-        // TODO: is this bad for perf?
         match self {
             JumpTarget::Offset(o) => ip.wrapping_add_signed(o),
             JumpTarget::Label(_) => panic!("cannot apply instruction pointer to unresolved label"),
@@ -264,6 +264,49 @@ impl OptimizerIr {
             constants: self.constants,
             code: op_codes,
             spans,
+        }
+    }
+
+    pub(crate) fn peephole(&mut self) {
+        let targets: AHashSet<LabelId> = self
+            .code
+            .iter()
+            .filter_map(|(_, op, _)| match op {
+                OpCode::Jump(JumpTarget::Label(l))
+                | OpCode::JumpIfFalse(JumpTarget::Label(l))
+                | OpCode::JumpIfTrue(JumpTarget::Label(l))
+                | OpCode::IterNext(JumpTarget::Label(l)) => Some(*l),
+                _ => None,
+            })
+            .collect();
+
+        loop {
+            let mut out = Vec::with_capacity(self.code.len());
+            let mut i = 0;
+            let mut removed = 0;
+            while i < self.code.len() {
+                let elide = i + 1 < self.code.len()
+                    && matches!(
+                        self.code[i].1,
+                        OpCode::Constant(_) | OpCode::GetGlobal(_) | OpCode::GetLocal(_)
+                    )
+                    && matches!(self.code[i + 1].1, OpCode::Pop)
+                    && !targets.contains(&self.code[i].0)
+                    && !targets.contains(&self.code[i + 1].0);
+                if elide {
+                    i += 2;
+                    removed += 2;
+                } else {
+                    out.push(self.code[i].clone());
+                    i += 1;
+                }
+            }
+
+            self.code = out;
+
+            if removed == 0 {
+                break;
+            }
         }
     }
 

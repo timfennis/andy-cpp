@@ -9,29 +9,51 @@ use ndc_parser::{
 };
 use std::rc::Rc;
 
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct Compiler {
     ir: OptimizerIr,
     num_locals: usize,
     loop_stack: Vec<LoopContext>,
     allow_return: bool,
+    optimize: bool,
+}
+
+impl Default for Compiler {
+    fn default() -> Self {
+        Self {
+            ir: OptimizerIr::default(),
+            num_locals: 0,
+            loop_stack: Vec::new(),
+            allow_return: false,
+            optimize: true,
+        }
+    }
 }
 
 impl Compiler {
     pub fn compile(
         expressions: impl Iterator<Item = ExpressionLocation>,
     ) -> Result<CompiledFunction, CompileError> {
-        Ok(Self::compile_resumable(expressions)?.0)
+        let mut compiler = Self::default();
+        for expr_loc in expressions {
+            compiler.compile_expr(expr_loc)?;
+        }
+        Ok(compiler.finish()?.0)
     }
 
     /// Compile expressions and return both the finished function and a
     /// checkpoint that can be passed to `resume` to append more code later.
     /// The checkpoint is the compiler state *before* the `Halt` instruction,
     /// so `resume` can extend the bytecode without re-running old instructions.
+    ///
+    /// Optimization is disabled on this path: the REPL's resume-from-
+    /// halt machinery relies on `halt_ip` matching the position of `Halt` in
+    /// the emitted chunk, and shifting instructions invalidates that.
     pub fn compile_resumable(
         expressions: impl Iterator<Item = ExpressionLocation>,
     ) -> Result<(CompiledFunction, Self), CompileError> {
         let mut compiler = Self::default();
+        compiler.optimize = false;
         for expr_loc in expressions {
             compiler.compile_expr(expr_loc)?;
         }
@@ -71,6 +93,10 @@ impl Compiler {
     fn finish(mut self) -> Result<(CompiledFunction, Self), CompileError> {
         let checkpoint = self.clone();
         self.ir.write(OpCode::Halt, Span::synthetic());
+        if self.optimize {
+            self.ir.peephole();
+        }
+
         let function = CompiledFunction {
             name: None,
             static_type: StaticType::Function {
@@ -722,6 +748,8 @@ impl Compiler {
         };
         fn_compiler.compile_expr(body)?;
         fn_compiler.ir.write(OpCode::Return, Span::synthetic());
+
+        fn_compiler.ir.peephole();
 
         let compiled = CompiledFunction {
             name,
