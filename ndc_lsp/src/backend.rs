@@ -7,28 +7,41 @@ use tokio::sync::RwLock;
 use tower_lsp::jsonrpc::Result as JsonRPCResult;
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionOptions, CompletionParams, CompletionResponse,
-    DidChangeTextDocumentParams, DidOpenTextDocumentParams, InitializeParams, InitializeResult,
-    InitializedParams, InlayHint, InlayHintParams, MessageType, OneOf, ServerCapabilities,
-    TextDocumentSyncCapability, TextDocumentSyncKind, Url, WorkDoneProgressOptions,
+    DidChangeTextDocumentParams, DidOpenTextDocumentParams, DocumentSymbolParams,
+    DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams,
+    HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams, InlayHint,
+    InlayHintParams, MessageType, OneOf, ServerCapabilities, TextDocumentSyncCapability,
+    TextDocumentSyncKind, Url, WorkDoneProgressOptions,
 };
 use tower_lsp::{Client, LanguageServer};
 
 use crate::diagnostics;
-use crate::features::{completion, inlay_hints};
+use crate::features::completion::FunctionInfo;
+use crate::features::{completion, definition, hover, inlay_hints, symbols};
 use crate::state::DocumentState;
 
 pub struct Backend {
     pub client: Client,
     documents: RwLock<HashMap<Url, DocumentState>>,
     configure: fn(&mut FunctionRegistry<Rc<NativeFunction>>),
+    /// Native-function metadata, snapshotted once at startup. The set of native
+    /// functions never changes, so completion and hover read this instead of
+    /// rebuilding an interpreter per request.
+    functions: Vec<FunctionInfo>,
 }
 
 impl Backend {
     pub fn new(client: Client, configure: fn(&mut FunctionRegistry<Rc<NativeFunction>>)) -> Self {
+        let functions = {
+            let mut interpreter = Interpreter::capturing();
+            interpreter.configure(configure);
+            FunctionInfo::collect(&interpreter)
+        };
         Self {
             client,
             documents: RwLock::new(HashMap::new()),
             configure,
+            functions,
         }
     }
 
@@ -43,40 +56,33 @@ impl Backend {
     async fn update_source(&self, uri: &Url, text: &str) {
         let mut docs = self.documents.write().await;
         match docs.get_mut(uri) {
-            Some(state) => state.source = text.to_string(),
+            Some(state) => {
+                state.source = text.to_string();
+                state.line_index = crate::util::LineIndex::new(text);
+            }
             None => {
-                docs.insert(
-                    uri.clone(),
-                    DocumentState {
-                        hints: Vec::new(),
-                        source: text.to_string(),
-                        variable_types: HashMap::new(),
-                        expression_types: HashMap::new(),
-                    },
-                );
+                docs.insert(uri.clone(), DocumentState::from_source(text.to_string()));
             }
         }
     }
 
-    /// Run diagnostics and semantic analysis, updating cached hints and types.
-    /// The source text must already be updated via `update_source` before calling this.
+    /// Run diagnostics and semantic analysis, replacing the cached AST and side
+    /// tables. The source text must already be updated via `update_source`.
     async fn validate(&self, uri: &Url, text: &str) {
         let (mut diagnostics, _ast) = diagnostics::lex_and_parse(text);
 
-        // Run full semantic analysis and collect inlay hints + variable types.
-        // The interpreter uses Rc internally (non-Send), so it must be fully
-        // dropped before the next await point.
-        let analysis = {
+        // Run full semantic analysis. The interpreter uses Rc internally
+        // (non-Send), so it must be fully dropped before the next await point.
+        let analysed = {
             let mut interpreter = self.make_interpreter();
             interpreter
                 .analyse_str(text)
                 .ok()
                 .map(|(expressions, analysis_result)| {
-                    // Convert analysis errors to LSP diagnostics.
                     for err in &analysis_result.errors {
                         diagnostics.push(diagnostics::analysis_error_to_diagnostic(text, err));
                     }
-                    inlay_hints::collect(&expressions, &analysis_result, text)
+                    (expressions, analysis_result)
                 })
         };
 
@@ -84,16 +90,15 @@ impl Backend {
             .publish_diagnostics(uri.clone(), diagnostics, None)
             .await;
 
-        // Only update document state when analysis succeeds. On failure (e.g.
-        // incomplete syntax while typing `x.`), keep the last good hints and
-        // variable types so inlay hints stay visible and dot-completion works.
-        if let Some(info) = analysis {
+        // Only replace document state when analysis succeeds. On failure (e.g.
+        // incomplete syntax while typing `x.`), keep the last good AST and maps
+        // so inlay hints stay visible and dot-completion keeps working.
+        if let Some((ast, analysis)) = analysed {
             let mut docs = self.documents.write().await;
-            if let Some(state) = docs.get_mut(uri) {
-                state.hints = info.hints;
-                state.variable_types = info.variable_types;
-                state.expression_types = info.expression_types;
-            }
+            docs.insert(
+                uri.clone(),
+                DocumentState::from_analysis(text.to_string(), ast, analysis),
+            );
         }
     }
 }
@@ -116,6 +121,9 @@ impl LanguageServer for Backend {
                     completion_item: None,
                 }),
                 inlay_hint_provider: Some(OneOf::Left(true)),
+                hover_provider: Some(HoverProviderCapability::Simple(true)),
+                document_symbol_provider: Some(OneOf::Left(true)),
+                definition_provider: Some(OneOf::Left(true)),
                 ..Default::default()
             },
             ..Default::default()
@@ -149,32 +157,62 @@ impl LanguageServer for Backend {
 
     async fn inlay_hint(&self, params: InlayHintParams) -> JsonRPCResult<Option<Vec<InlayHint>>> {
         let docs = self.documents.read().await;
+        Ok(docs.get(&params.text_document.uri).map(|state| {
+            inlay_hints::collect(
+                &state.ast,
+                &state.analysis,
+                &state.source,
+                &state.line_index,
+            )
+        }))
+    }
+
+    async fn hover(&self, params: HoverParams) -> JsonRPCResult<Option<Hover>> {
+        let docs = self.documents.read().await;
+        let uri = &params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
         Ok(docs
-            .get(&params.text_document.uri)
-            .map(|state| state.hints.clone()))
+            .get(uri)
+            .and_then(|state| hover::hover(state, position, &self.functions)))
+    }
+
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> JsonRPCResult<Option<GotoDefinitionResponse>> {
+        let docs = self.documents.read().await;
+        let uri = &params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+        Ok(docs.get(uri).and_then(|state| {
+            definition::goto_definition(state, position, uri.clone())
+                .map(GotoDefinitionResponse::Scalar)
+        }))
+    }
+
+    async fn document_symbol(
+        &self,
+        params: DocumentSymbolParams,
+    ) -> JsonRPCResult<Option<DocumentSymbolResponse>> {
+        let docs = self.documents.read().await;
+        Ok(docs.get(&params.text_document.uri).map(|state| {
+            DocumentSymbolResponse::Nested(symbols::document_symbols(
+                &state.ast,
+                &state.source,
+                &state.line_index,
+            ))
+        }))
     }
 
     async fn completion(
         &self,
         params: CompletionParams,
     ) -> JsonRPCResult<Option<CompletionResponse>> {
-        let state = {
-            let docs = self.documents.read().await;
-            let uri = &params.text_document_position.text_document.uri;
-            docs.get(uri).map(|s| {
-                // Clone what completion needs so we can drop the lock.
-                DocumentState {
-                    hints: Vec::new(), // not needed for completion
-                    source: s.source.clone(),
-                    variable_types: s.variable_types.clone(),
-                    expression_types: s.expression_types.clone(),
-                }
-            })
-        };
-
-        let interpreter = self.make_interpreter();
+        let docs = self.documents.read().await;
+        let uri = &params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
-        let response = completion::complete(state.as_ref(), position, &interpreter);
+        // Completion is synchronous and never awaits, so we can hold the read
+        // lock and borrow the state directly (no cloning).
+        let response = completion::complete(docs.get(uri), position, &self.functions);
         Ok(Some(response))
     }
 
