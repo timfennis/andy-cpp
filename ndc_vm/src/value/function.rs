@@ -64,6 +64,10 @@ impl CompiledFunction {
     pub fn opcodes(&self) -> &[OpCode] {
         self.body.opcodes()
     }
+
+    pub fn body(&self) -> &Chunk {
+        &self.body
+    }
 }
 impl Function {
     pub fn prototype(&self) -> Option<&Rc<CompiledFunction>> {

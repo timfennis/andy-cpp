@@ -47,8 +47,10 @@ impl Compiler {
     pub fn compile_unoptimized(
         expressions: impl Iterator<Item = ExpressionLocation>,
     ) -> Result<CompiledFunction, CompileError> {
-        let mut compiler = Self::default();
-        compiler.optimize = false;
+        let mut compiler = Self {
+            optimize: false,
+            ..Default::default()
+        };
         for expr_loc in expressions {
             compiler.compile_expr(expr_loc)?;
         }
@@ -66,8 +68,10 @@ impl Compiler {
     pub fn compile_resumable(
         expressions: impl Iterator<Item = ExpressionLocation>,
     ) -> Result<(CompiledFunction, Self), CompileError> {
-        let mut compiler = Self::default();
-        compiler.optimize = false;
+        let mut compiler = Self {
+            optimize: false,
+            ..Default::default()
+        };
         for expr_loc in expressions {
             compiler.compile_expr(expr_loc)?;
         }
@@ -758,12 +762,15 @@ impl Compiler {
         let mut fn_compiler = Self {
             num_locals: num_params,
             allow_return: true,
+            optimize: self.optimize,
             ..Default::default()
         };
         fn_compiler.compile_expr(body)?;
         fn_compiler.ir.write(OpCode::Return, Span::synthetic());
 
-        fn_compiler.ir.peephole();
+        if fn_compiler.optimize {
+            fn_compiler.ir.peephole();
+        }
 
         let compiled = CompiledFunction {
             name,
