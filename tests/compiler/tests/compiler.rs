@@ -5,12 +5,16 @@ use ndc_vm::chunk::OpCode;
 use ndc_vm::chunk::OpCode::*;
 use ndc_vm::compiler::Compiler;
 
+// These helpers compile without the peephole optimizer so the tests
+// document the raw compiler output as a specification. Optimizer behaviour
+// is exercised in `tests/optimizer.rs`.
+
 fn compile(input: &str) -> Vec<OpCode> {
     let tokens = Lexer::new(input, SourceId::SYNTHETIC)
         .collect::<Result<Vec<_>, _>>()
         .expect("lex failed");
     let expressions = Parser::from_tokens(tokens).parse().expect("parse failed");
-    Compiler::compile(expressions.into_iter())
+    Compiler::compile_unoptimized(expressions.into_iter())
         .expect("compile failed")
         .opcodes()
         .to_vec()
@@ -19,7 +23,7 @@ fn compile(input: &str) -> Vec<OpCode> {
 fn compile_with_analysis(input: &str) -> Vec<OpCode> {
     let mut interp = ndc_interpreter::Interpreter::capturing();
     interp
-        .compile_str(input)
+        .compile_str_unoptimized(input)
         .expect("compile failed")
         .opcodes()
         .to_vec()
