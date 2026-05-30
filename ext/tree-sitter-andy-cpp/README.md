@@ -156,17 +156,29 @@ args = ["lsp"]
 
 [[grammar]]
 name = "andy-cpp"
-source = { git = "https://github.com/timfennis/andy-cpp", subpath = "ext/tree-sitter-andy-cpp" }
+# A git source must include `rev`. If you have the repo checked out, a local
+# path is simpler: source = { path = "/abs/path/to/ext/tree-sitter-andy-cpp" }
+source = { git = "https://github.com/timfennis/andy-cpp", rev = "master", subpath = "ext/tree-sitter-andy-cpp" }
 ```
 
-Fetch and build the grammar, then install the queries:
+Build the grammar into Helix's runtime and install the queries. Rather than
+`hx --grammar build` (which rebuilds every grammar and needs the output
+directory to already exist), build just this one with the tree-sitter CLI — the
+output file must be named `andy-cpp.so` to match the grammar name:
 
 ```bash
-hx --grammar fetch
-hx --grammar build
-mkdir -p ~/.config/helix/runtime/queries/andy-cpp
-cp ext/tree-sitter-andy-cpp/queries/*.scm ~/.config/helix/runtime/queries/andy-cpp/
+cd ext/tree-sitter-andy-cpp
+npm install
+mkdir -p ~/.config/helix/runtime/grammars ~/.config/helix/runtime/queries/andy-cpp
+npx tree-sitter build -o ~/.config/helix/runtime/grammars/andy-cpp.so
+cp queries/*.scm ~/.config/helix/runtime/queries/andy-cpp/
 ```
+
+Check it with `hx --health andy-cpp` (Tree-sitter parser, Highlight queries, and
+the `ndc-lsp` server should all be ✓).
+
+> The binary is `hx` in most installs but may be `helix` (e.g. some distro
+> packages); use whichever your install provides.
 
 ## Known limitations
 
