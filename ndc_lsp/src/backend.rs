@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use ahash::AHashMap;
 
 use ndc_core::FunctionRegistry;
 use ndc_interpreter::{Interpreter, NativeFunction};
@@ -22,7 +22,7 @@ use crate::state::DocumentState;
 
 pub struct Backend {
     pub client: Client,
-    documents: RwLock<HashMap<Url, DocumentState>>,
+    documents: RwLock<AHashMap<Url, DocumentState>>,
     configure: fn(&mut FunctionRegistry<Rc<NativeFunction>>),
     /// Native-function metadata, snapshotted once at startup. The set of native
     /// functions never changes, so completion and hover read this instead of
@@ -39,7 +39,7 @@ impl Backend {
         };
         Self {
             client,
-            documents: RwLock::new(HashMap::new()),
+            documents: RwLock::new(AHashMap::new()),
             configure,
             functions,
         }

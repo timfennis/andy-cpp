@@ -1,15 +1,13 @@
-use std::collections::HashMap;
-
+use ahash::AHashMap;
 use ndc_core::StaticType;
 use ndc_interpreter::Interpreter;
-use ndc_lexer::Span;
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionResponse,
     Documentation, MarkupContent, MarkupKind, Position,
 };
 
+use crate::scope_resolve::{collect_declarations, file_scope, is_visible};
 use crate::state::DocumentState;
-use crate::visitor::{AstVisitor, walk_ast};
 
 /// A `Send` snapshot of a registered native function, built once at startup so
 /// completion (and hover) never have to rebuild the interpreter per request.
@@ -143,20 +141,29 @@ fn keyword_completions() -> impl Iterator<Item = CompletionItem> {
     })
 }
 
-/// Collect in-scope local variables (declarations whose span ends at or before
-/// the cursor) from the last successfully analysed AST.
+/// Collect in-scope local variables from the last successfully analysed AST.
+/// Uses lexical-scope visibility (enclosing scope + declared-before-use), so a
+/// local declared in one function is not offered inside another.
 fn local_completions(state: &DocumentState, position: Position) -> Vec<CompletionItem> {
     let Some(offset) = state.line_index.offset(&state.source, position) else {
         return Vec::new();
     };
-    let mut collector = LocalsCollector {
-        cursor: offset,
-        locals: HashMap::new(),
+    let Some(source_id) = state.ast.first().map(|e| e.span.source_id()) else {
+        return Vec::new();
     };
-    walk_ast(&mut collector, &state.ast);
+    let scope = file_scope(source_id, state.source.len());
 
-    collector
-        .locals
+    let mut names: AHashMap<String, Option<StaticType>> = AHashMap::new();
+    for decl in collect_declarations(&state.ast, scope) {
+        if is_visible(&decl, offset) {
+            // Type is a best-effort hint from the name-keyed map (a shadowed name
+            // may show the wrong type until the analyser resolution is exposed).
+            let typ = state.variable_types.get(&decl.name).cloned();
+            names.insert(decl.name, typ);
+        }
+    }
+
+    names
         .into_iter()
         .map(|(name, typ)| CompletionItem {
             label: name,
@@ -168,29 +175,6 @@ fn local_completions(state: &DocumentState, position: Position) -> Vec<Completio
             ..Default::default()
         })
         .collect()
-}
-
-/// Gathers declared variable names visible at the cursor. Approximate: it does
-/// not model block scoping, only "declared earlier in the file", which is enough
-/// for a useful completion list.
-struct LocalsCollector {
-    cursor: usize,
-    locals: HashMap<String, Option<StaticType>>,
-}
-
-impl AstVisitor for LocalsCollector {
-    fn on_declaration(
-        &mut self,
-        identifier: &str,
-        inferred_type: Option<&StaticType>,
-        _has_annotation: bool,
-        span: Span,
-    ) {
-        if span.end() <= self.cursor {
-            self.locals
-                .insert(identifier.to_string(), inferred_type.cloned());
-        }
-    }
 }
 
 fn is_normal_ident(input: &str) -> bool {
@@ -252,8 +236,8 @@ mod tests {
     /// directly, simulating the cached-after-analysis state used by completion.
     fn state_with(
         source: &str,
-        variable_types: HashMap<String, StaticType>,
-        expression_types: HashMap<usize, StaticType>,
+        variable_types: AHashMap<String, StaticType>,
+        expression_types: AHashMap<usize, StaticType>,
     ) -> DocumentState {
         let mut state = DocumentState::from_source(source.to_string());
         state.variable_types = variable_types;
@@ -310,8 +294,8 @@ mod tests {
         // Simulate: user typed `let x = [1,2,3]` then `x.`
         let state = state_with(
             "let x = [1,2,3]\nx.",
-            HashMap::from([("x".to_string(), StaticType::List(Box::new(StaticType::Int)))]),
-            HashMap::new(),
+            AHashMap::from([("x".to_string(), StaticType::List(Box::new(StaticType::Int)))]),
+            AHashMap::new(),
         );
 
         // Cursor is after the dot: line 1, character 2
@@ -339,8 +323,8 @@ mod tests {
         // preserved from a previous successful analysis.
         let state = state_with(
             "let x = 42\nx.",
-            HashMap::from([("x".to_string(), StaticType::Int)]),
-            HashMap::new(),
+            AHashMap::from([("x".to_string(), StaticType::Int)]),
+            AHashMap::new(),
         );
 
         let response = complete(Some(&state), Position::new(1, 2), &functions());
@@ -366,8 +350,8 @@ mod tests {
         // The call expression spans bytes 0..16, so its end offset is 16.
         let state = state_with(
             source,
-            HashMap::new(),
-            HashMap::from([(16, StaticType::String)]),
+            AHashMap::new(),
+            AHashMap::from([(16, StaticType::String)]),
         );
 
         // Cursor is at end: line 0, character 17 (after the dot)
@@ -390,8 +374,8 @@ mod tests {
     fn general_completion_includes_keywords() {
         let state = state_with(
             "let x = 42\n",
-            HashMap::from([("x".to_string(), StaticType::Int)]),
-            HashMap::new(),
+            AHashMap::from([("x".to_string(), StaticType::Int)]),
+            AHashMap::new(),
         );
 
         // No dot — general completion
@@ -429,6 +413,27 @@ mod tests {
                 .iter()
                 .any(|i| i.label == "greeting" && i.kind == Some(CompletionItemKind::VARIABLE)),
             "general completion should include the in-scope local `greeting`"
+        );
+    }
+
+    #[test]
+    fn locals_do_not_leak_across_functions() {
+        let mut interpreter = Interpreter::capturing();
+        interpreter.configure(ndc_stdlib::register);
+        // `foo` is local to `a`; completing inside `b` must not offer it.
+        let source = "fn a() { let foo = 1; }\nfn b() {\n\n}\n";
+        let (ast, analysis) = interpreter.analyse_str(source).expect("analysis succeeds");
+        let state = DocumentState::from_analysis(source.to_string(), ast, analysis);
+
+        // The blank line 2 is inside b's body.
+        let response = complete(Some(&state), Position::new(2, 0), &functions());
+        let CompletionResponse::Array(items) = response else {
+            panic!("expected Array response");
+        };
+
+        assert!(
+            !items.iter().any(|i| i.label == "foo"),
+            "a local from another function must not be suggested"
         );
     }
 }

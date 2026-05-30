@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use ahash::AHashMap;
 
 use ndc_core::StaticType;
 use ndc_interpreter::AnalysisResult;
@@ -25,10 +25,10 @@ pub struct DocumentState {
     /// so that simple `ident.` dot-completion keeps working while the user is
     /// mid-edit and the buffer doesn't parse (the AST is stale then, but the
     /// variable's name and type are not).
-    pub variable_types: HashMap<String, StaticType>,
+    pub variable_types: AHashMap<String, StaticType>,
     /// Expression end offset -> inferred type, for dot-completion on arbitrary
     /// receiver expressions (e.g. `read_file("foo").`). Same resilience rationale.
-    pub expression_types: HashMap<usize, StaticType>,
+    pub expression_types: AHashMap<usize, StaticType>,
 }
 
 impl DocumentState {
@@ -40,8 +40,8 @@ impl DocumentState {
             line_index,
             ast: Vec::new(),
             analysis: AnalysisResult::default(),
-            variable_types: HashMap::new(),
-            expression_types: HashMap::new(),
+            variable_types: AHashMap::new(),
+            expression_types: AHashMap::new(),
         }
     }
 
@@ -55,8 +55,8 @@ impl DocumentState {
         let line_index = LineIndex::new(&source);
         let mut collector = MapCollector {
             analysis: &analysis,
-            variable_types: HashMap::new(),
-            expression_types: HashMap::new(),
+            variable_types: AHashMap::new(),
+            expression_types: AHashMap::new(),
         };
         walk_ast(&mut collector, &ast);
         Self {
@@ -73,8 +73,8 @@ impl DocumentState {
 /// Collects the flat lookup maps used by dot-completion from an analysed AST.
 struct MapCollector<'a> {
     analysis: &'a AnalysisResult,
-    variable_types: HashMap<String, StaticType>,
-    expression_types: HashMap<usize, StaticType>,
+    variable_types: AHashMap<String, StaticType>,
+    expression_types: AHashMap<usize, StaticType>,
 }
 
 impl AstVisitor for MapCollector<'_> {

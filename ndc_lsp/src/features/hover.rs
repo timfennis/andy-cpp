@@ -1,6 +1,6 @@
 use ndc_core::StaticType;
 use ndc_lexer::Span;
-use ndc_parser::Expression;
+use ndc_parser::{Binding, Expression, ResolvedVar};
 use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position};
 
 use crate::features::completion::FunctionInfo;
@@ -11,8 +11,9 @@ use crate::visitor::{AstVisitor, node_at_offset, walk_ast};
 ///
 /// When the cursor is on a declaration's name, shows the declared variable's
 /// type. Otherwise resolves the innermost expression under the cursor and shows
-/// its inferred type — or, for an identifier naming a built-in function, the
-/// function's signature and documentation.
+/// its inferred type. An identifier is only shown as a built-in function when the
+/// analyser resolved it to a global — so a local that shadows a built-in (e.g.
+/// `let len = 1; len`) shows the local's type, not the built-in's docs.
 pub fn hover(
     state: &DocumentState,
     position: Position,
@@ -27,13 +28,28 @@ pub fn hover(
     }
 
     let node = node_at_offset(&state.ast, offset)?;
-    let markdown = if let Expression::Identifier { name, .. } = &node.expression {
-        function_hover(name, functions).or_else(|| type_hover(state, node.id))
-    } else {
-        type_hover(state, node.id)
+    let markdown = match &node.expression {
+        Expression::Identifier { name, resolved } if resolves_to_global(resolved) => {
+            function_hover(name, functions).or_else(|| type_hover(state, node.id))
+        }
+        _ => type_hover(state, node.id),
     }?;
 
     Some(markup(state, node.span, markdown))
+}
+
+/// Did the analyser resolve this identifier to a global (a native function)?
+/// Locals and parameters that shadow a built-in resolve to `Local`/`Upvalue`.
+fn resolves_to_global(binding: &Binding) -> bool {
+    let is_global = |v: ResolvedVar| matches!(v, ResolvedVar::Global { .. });
+    match binding {
+        Binding::Resolved(candidate) => is_global(candidate.var()),
+        // Dynamic dispatch is a global native only if every candidate is global.
+        Binding::Dynamic(candidates) => {
+            !candidates.is_empty() && candidates.iter().all(|c| is_global(c.var()))
+        }
+        Binding::None => false,
+    }
 }
 
 fn markup(state: &DocumentState, span: Span, value: String) -> Hover {
@@ -171,5 +187,29 @@ mod tests {
         let (state, functions) = analyse("let n = 1;");
         // Way past the end of the document.
         assert!(hover(&state, Position::new(5, 0), &functions).is_none());
+    }
+
+    #[test]
+    fn local_shadowing_builtin_shows_local_type_not_signature() {
+        // `len` is a built-in, but here it's shadowed by a local Int. Hover on the
+        // *use* of `len` must show the local's type, not the built-in's signature.
+        let src = "let len = 1;\nlen;";
+        let (state, functions) = analyse(src);
+        let use_offset = src.rfind("len").unwrap();
+        let pos = state.line_index.position(&state.source, use_offset);
+        let hover = hover(&state, pos, &functions).expect("hover present");
+        let HoverContents::Markup(content) = hover.contents else {
+            panic!("expected markup");
+        };
+        assert!(
+            content.value.contains("Int"),
+            "expected the local Int type, got: {}",
+            content.value
+        );
+        assert!(
+            !content.value.contains("len("),
+            "must not show the built-in signature for a shadowing local, got: {}",
+            content.value
+        );
     }
 }
