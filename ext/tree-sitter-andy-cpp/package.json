@@ -1,0 +1,31 @@
+{
+  "name": "tree-sitter-andy-cpp",
+  "version": "0.1.0",
+  "description": "Tree-sitter grammar for the Andy C++ (.ndc) language",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/timfennis/andy-cpp.git"
+  },
+  "license": "MIT",
+  "keywords": [
+    "tree-sitter",
+    "parser",
+    "andy-cpp",
+    "ndc"
+  ],
+  "files": [
+    "grammar.js",
+    "queries/*",
+    "src/**",
+    "bindings/**",
+    "binding.gyp"
+  ],
+  "devDependencies": {
+    "tree-sitter-cli": "^0.24.0"
+  },
+  "scripts": {
+    "generate": "tree-sitter generate",
+    "test": "tree-sitter test",
+    "parse": "tree-sitter parse"
+  }
+}

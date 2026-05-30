@@ -1,0 +1,95 @@
+==================
+function definition
+==================
+
+fn add(a, b) { a + b }
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    parameters: (parameters
+      (parameter
+        name: (identifier))
+      (parameter
+        name: (identifier)))
+    body: (block
+      (binary_expression
+        left: (identifier)
+        right: (identifier)))))
+
+==================
+typed let with arithmetic precedence
+==================
+
+let x: Int = 3 + 4 * 2;
+
+---
+
+(source_file
+  (variable_declaration
+    name: (identifier)
+    type: (type_identifier)
+    value: (binary_expression
+      left: (integer)
+      right: (binary_expression
+        left: (integer)
+        right: (integer)))))
+
+==================
+anonymous fat-arrow function
+==================
+
+let sq = fn(x) => x * x;
+
+---
+
+(source_file
+  (variable_declaration
+    name: (identifier)
+    value: (function_definition
+      parameters: (parameters
+        (parameter
+          name: (identifier)))
+      body: (binary_expression
+        left: (identifier)
+        right: (identifier)))))
+
+==================
+while loop
+==================
+
+while x < 10 { x = x + 1; }
+
+---
+
+(source_file
+  (while_expression
+    condition: (binary_expression
+      left: (identifier)
+      right: (integer))
+    body: (block
+      (assignment
+        left: (identifier)
+        right: (binary_expression
+          left: (identifier)
+          right: (integer))))))
+
+==================
+map with default and entry
+==================
+
+let m = %{:0, "a": 1};
+
+---
+
+(source_file
+  (variable_declaration
+    name: (identifier)
+    value: (map
+      (map_default
+        value: (integer))
+      (map_entry
+        key: (string)
+        value: (integer)))))

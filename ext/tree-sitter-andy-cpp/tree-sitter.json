@@ -1,0 +1,32 @@
+{
+  "grammars": [
+    {
+      "name": "andy-cpp",
+      "camelcase": "AndyCpp",
+      "scope": "source.andy-cpp",
+      "path": ".",
+      "file-types": [
+        "ndc"
+      ],
+      "highlights": "queries/highlights.scm",
+      "injections": "queries/injections.scm",
+      "locals": "queries/locals.scm"
+    }
+  ],
+  "metadata": {
+    "version": "0.1.0",
+    "license": "MIT",
+    "description": "Tree-sitter grammar for the Andy C++ (.ndc) language",
+    "links": {
+      "repository": "https://github.com/timfennis/andy-cpp.git"
+    }
+  },
+  "bindings": {
+    "c": true,
+    "go": true,
+    "node": true,
+    "python": true,
+    "rust": true,
+    "swift": true
+  }
+}

@@ -1,5 +1,12 @@
 # Change Log
 
+## [Unreleased]
+
+- Syntax highlighting for type annotations: built-in type names (`Int`, `String`, `List`, `Map`, …), the return-type arrow `->`, and `:` annotation separators
+- Highlight parameter names and type annotations inside function signatures
+- Detect the `continue` keyword and the `NaN` constant
+- Fixed augmented assignment: `^=` was mis-detected and `\=` (floor-division assign) was missing
+
 ## [v0.3.0] (2026-02-28)
 
 - Added configurable `andy-cpp.ndcPath` setting for specifying the path to the `ndc` binary (useful when `ndc` is not on the PATH used by VSCode, e.g. when installed via cargo in a fish shell)
