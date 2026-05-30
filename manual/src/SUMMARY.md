@@ -34,5 +34,8 @@
 - [Memoization](./features/memoization.md)
 - [Tracing](./features/tracing.md)
 
+# Tooling
+- [Editor support](./tooling/editor-support.md)
+
 # Troubleshooting
 - [Overload dispatch with collections](./troubleshooting/overload-dispatch-collections.md)

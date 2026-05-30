@@ -1216,6 +1216,7 @@ dependencies = [
 name = "ndc_lsp"
 version = "0.3.0"
 dependencies = [
+ "ahash",
  "ndc_analyser",
  "ndc_core",
  "ndc_interpreter",

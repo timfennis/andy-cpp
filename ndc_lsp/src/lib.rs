@@ -1,6 +1,7 @@
 mod backend;
 mod diagnostics;
 mod features;
+mod scope_resolve;
 mod state;
 mod util;
 mod visitor;

@@ -1,3 +1,4 @@
+use ahash::AHashMap;
 use ndc_core::StaticType;
 use ndc_interpreter::Interpreter;
 use tower_lsp::lsp_types::{
@@ -5,17 +6,40 @@ use tower_lsp::lsp_types::{
     Documentation, MarkupContent, MarkupKind, Position,
 };
 
+use crate::scope_resolve::{collect_declarations, file_scope, is_visible};
 use crate::state::DocumentState;
-use crate::util::offset_from_position;
+
+/// A `Send` snapshot of a registered native function, built once at startup so
+/// completion (and hover) never have to rebuild the interpreter per request.
+#[derive(Debug, Clone)]
+pub struct FunctionInfo {
+    pub name: String,
+    pub static_type: StaticType,
+    pub documentation: Option<String>,
+}
+
+impl FunctionInfo {
+    /// Snapshot every function registered in an interpreter.
+    pub fn collect(interpreter: &Interpreter) -> Vec<Self> {
+        interpreter
+            .functions()
+            .map(|fun| Self {
+                name: fun.name.clone(),
+                static_type: fun.static_type.clone(),
+                documentation: fun.documentation.clone(),
+            })
+            .collect()
+    }
+}
 
 /// Build completion response for the given cursor position and document state.
 pub fn complete(
     state: Option<&DocumentState>,
     position: Position,
-    interpreter: &Interpreter,
+    functions: &[FunctionInfo],
 ) -> CompletionResponse {
     let receiver_type = state.and_then(|s| {
-        let offset = offset_from_position(&s.source, position)?;
+        let offset = s.line_index.offset(&s.source, position)?;
         let dot_offset = find_dot_before(s.source.as_bytes(), offset)?;
         // Try expression type map first (handles `func(args).` and any expression),
         // then fall back to variable name lookup for simple `ident.` cases.
@@ -27,7 +51,7 @@ pub fn complete(
 
     let is_dot = receiver_type.is_some();
 
-    let items = interpreter.functions().filter_map(|fun| {
+    let function_items = functions.iter().filter_map(|fun| {
         if !is_normal_ident(&fun.name) {
             return None;
         }
@@ -68,12 +92,22 @@ pub fn complete(
         })
     });
 
-    let items: Vec<_> = if is_dot {
-        items.collect()
-    } else {
-        items.chain(keyword_completions()).collect()
-    };
+    if is_dot {
+        return CompletionResponse::Array(function_items.collect());
+    }
 
+    // General (non-dot) completion: functions + in-scope locals + keywords.
+    let mut items: Vec<CompletionItem> = function_items.collect();
+    if let Some(state) = state {
+        // Locals come from walking the AST's declaration spans, so they are only
+        // trustworthy when the AST matches the current source. Mid-edit (last
+        // parse failed) the spans are stale, so skip them — the resilient
+        // dot-completion caches above are unaffected.
+        if state.analysis_matches_source {
+            items.extend(local_completions(state, position));
+        }
+    }
+    items.extend(keyword_completions());
     CompletionResponse::Array(items)
 }
 
@@ -100,12 +134,53 @@ fn format_function_signature(typ: &StaticType, is_dot: bool) -> (String, String)
     }
 }
 
+/// Language keywords offered in general (non-dot) completion.
+const KEYWORDS: &[&str] = &[
+    "let", "fn", "if", "else", "while", "for", "in", "return", "break", "continue", "true", "false",
+];
+
 fn keyword_completions() -> impl Iterator<Item = CompletionItem> {
-    ["true", "false"].into_iter().map(|kw| CompletionItem {
-        label: String::from(kw),
-        kind: Some(CompletionItemKind::VALUE),
+    KEYWORDS.iter().map(|kw| CompletionItem {
+        label: String::from(*kw),
+        kind: Some(CompletionItemKind::KEYWORD),
         ..Default::default()
     })
+}
+
+/// Collect in-scope local variables from the last successfully analysed AST.
+/// Uses lexical-scope visibility (enclosing scope + declared-before-use), so a
+/// local declared in one function is not offered inside another.
+fn local_completions(state: &DocumentState, position: Position) -> Vec<CompletionItem> {
+    let Some(offset) = state.line_index.offset(&state.source, position) else {
+        return Vec::new();
+    };
+    let Some(source_id) = state.ast.first().map(|e| e.span.source_id()) else {
+        return Vec::new();
+    };
+    let scope = file_scope(source_id, state.source.len());
+
+    let mut names: AHashMap<String, Option<StaticType>> = AHashMap::new();
+    for decl in collect_declarations(&state.ast, scope) {
+        if is_visible(&decl, offset) {
+            // Type is a best-effort hint from the name-keyed map (a shadowed name
+            // may show the wrong type until the analyser resolution is exposed).
+            let typ = state.variable_types.get(&decl.name).cloned();
+            names.insert(decl.name, typ);
+        }
+    }
+
+    names
+        .into_iter()
+        .map(|(name, typ)| CompletionItem {
+            label: name,
+            label_details: typ.as_ref().map(|t| CompletionItemLabelDetails {
+                detail: None,
+                description: Some(t.to_string()),
+            }),
+            kind: Some(CompletionItemKind::VARIABLE),
+            ..Default::default()
+        })
+        .collect()
 }
 
 fn is_normal_ident(input: &str) -> bool {
@@ -156,8 +231,25 @@ fn identifier_before_dot(text: &str, offset: usize) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::DocumentState;
-    use std::collections::HashMap;
+
+    fn functions() -> Vec<FunctionInfo> {
+        let mut interpreter = Interpreter::capturing();
+        interpreter.configure(ndc_stdlib::register);
+        FunctionInfo::collect(&interpreter)
+    }
+
+    /// Build a document state whose `variable_types` / `expression_types` are set
+    /// directly, simulating the cached-after-analysis state used by completion.
+    fn state_with(
+        source: &str,
+        variable_types: AHashMap<String, StaticType>,
+        expression_types: AHashMap<usize, StaticType>,
+    ) -> DocumentState {
+        let mut state = DocumentState::from_source(source.to_string());
+        state.variable_types = variable_types;
+        state.expression_types = expression_types;
+        state
+    }
 
     #[test]
     fn identifier_before_dot_simple() {
@@ -205,23 +297,15 @@ mod tests {
 
     #[test]
     fn dot_completion_filters_by_receiver_type() {
-        let mut interpreter = Interpreter::capturing();
-        interpreter.configure(ndc_stdlib::register);
-
         // Simulate: user typed `let x = [1,2,3]` then `x.`
-        // variable_types has x as List(Int), source has the dot
-        let state = DocumentState {
-            hints: Vec::new(),
-            source: "let x = [1,2,3]\nx.".to_string(),
-            variable_types: HashMap::from([(
-                "x".to_string(),
-                StaticType::List(Box::new(StaticType::Int)),
-            )]),
-            expression_types: HashMap::new(),
-        };
+        let state = state_with(
+            "let x = [1,2,3]\nx.",
+            AHashMap::from([("x".to_string(), StaticType::List(Box::new(StaticType::Int)))]),
+            AHashMap::new(),
+        );
 
         // Cursor is after the dot: line 1, character 2
-        let response = complete(Some(&state), Position::new(1, 2), &interpreter);
+        let response = complete(Some(&state), Position::new(1, 2), &functions());
         let CompletionResponse::Array(items) = response else {
             panic!("expected Array response");
         };
@@ -241,32 +325,23 @@ mod tests {
 
     #[test]
     fn dot_completion_works_with_preserved_types_after_parse_failure() {
-        // This tests the key scenario: source has been updated to contain the dot,
-        // but variable_types are preserved from a previous successful analysis.
-        let mut interpreter = Interpreter::capturing();
-        interpreter.configure(ndc_stdlib::register);
+        // Source has been updated to contain the dot, but variable_types are
+        // preserved from a previous successful analysis.
+        let state = state_with(
+            "let x = 42\nx.",
+            AHashMap::from([("x".to_string(), StaticType::Int)]),
+            AHashMap::new(),
+        );
 
-        let state = DocumentState {
-            hints: Vec::new(),
-            // Current source is invalid (has trailing dot)
-            source: "let x = 42\nx.".to_string(),
-            // Types from the last successful analysis
-            variable_types: HashMap::from([("x".to_string(), StaticType::Int)]),
-            expression_types: HashMap::new(),
-        };
-
-        let response = complete(Some(&state), Position::new(1, 2), &interpreter);
+        let response = complete(Some(&state), Position::new(1, 2), &functions());
         let CompletionResponse::Array(items) = response else {
             panic!("expected Array response");
         };
 
-        // Should be dot-completion (no keywords)
         assert!(
             !items.iter().any(|i| i.label == "true"),
             "should be dot-completion, not general"
         );
-
-        // Should include functions that accept Int
         assert!(
             items.iter().any(|i| i.label == "abs"),
             "dot-completion on Int should include `abs`"
@@ -277,34 +352,24 @@ mod tests {
     fn dot_completion_on_call_expression_via_expression_types() {
         // Simulates `read_file("foo").` where the expression type map knows
         // that the call expression `read_file("foo")` returns String.
-        let mut interpreter = Interpreter::capturing();
-        interpreter.configure(ndc_stdlib::register);
-
-        //                0         1
-        //                0123456789012345678
         let source = r#"read_file("foo")."#;
-        // The call expression `read_file("foo")` spans bytes 0..16,
-        // so its end offset is 16 (just before the dot at byte 16).
-        let state = DocumentState {
-            hints: Vec::new(),
-            source: source.to_string(),
-            variable_types: HashMap::new(),
-            expression_types: HashMap::from([(16, StaticType::String)]),
-        };
+        // The call expression spans bytes 0..16, so its end offset is 16.
+        let state = state_with(
+            source,
+            AHashMap::new(),
+            AHashMap::from([(16, StaticType::String)]),
+        );
 
         // Cursor is at end: line 0, character 17 (after the dot)
-        let response = complete(Some(&state), Position::new(0, 17), &interpreter);
+        let response = complete(Some(&state), Position::new(0, 17), &functions());
         let CompletionResponse::Array(items) = response else {
             panic!("expected Array response");
         };
 
-        // Should be dot-completion (no keywords)
         assert!(
             !items.iter().any(|i| i.label == "true"),
             "should be dot-completion, not general"
         );
-
-        // Should include string-compatible functions like `len`
         assert!(
             items.iter().any(|i| i.label == "len"),
             "dot-completion on String should include `len`"
@@ -313,18 +378,14 @@ mod tests {
 
     #[test]
     fn general_completion_includes_keywords() {
-        let mut interpreter = Interpreter::capturing();
-        interpreter.configure(ndc_stdlib::register);
-
-        let state = DocumentState {
-            hints: Vec::new(),
-            source: "let x = 42\n".to_string(),
-            variable_types: HashMap::from([("x".to_string(), StaticType::Int)]),
-            expression_types: HashMap::new(),
-        };
+        let state = state_with(
+            "let x = 42\n",
+            AHashMap::from([("x".to_string(), StaticType::Int)]),
+            AHashMap::new(),
+        );
 
         // No dot — general completion
-        let response = complete(Some(&state), Position::new(1, 0), &interpreter);
+        let response = complete(Some(&state), Position::new(1, 0), &functions());
         let CompletionResponse::Array(items) = response else {
             panic!("expected Array response");
         };
@@ -332,6 +393,78 @@ mod tests {
         assert!(
             items.iter().any(|i| i.label == "true"),
             "general completion should include keywords"
+        );
+        assert!(
+            items.iter().any(|i| i.label == "fn"),
+            "general completion should include the `fn` keyword"
+        );
+    }
+
+    #[test]
+    fn general_completion_includes_in_scope_locals() {
+        let mut interpreter = Interpreter::capturing();
+        interpreter.configure(ndc_stdlib::register);
+        let source = "let greeting = \"hi\";\n";
+        let (ast, analysis) = interpreter.analyse_str(source).expect("analysis succeeds");
+        let state = DocumentState::from_analysis(source.to_string(), ast, analysis);
+
+        // Cursor on the (empty) second line — `greeting` is in scope.
+        let response = complete(Some(&state), Position::new(1, 0), &functions());
+        let CompletionResponse::Array(items) = response else {
+            panic!("expected Array response");
+        };
+
+        assert!(
+            items
+                .iter()
+                .any(|i| i.label == "greeting" && i.kind == Some(CompletionItemKind::VARIABLE)),
+            "general completion should include the in-scope local `greeting`"
+        );
+    }
+
+    #[test]
+    fn locals_do_not_leak_across_functions() {
+        let mut interpreter = Interpreter::capturing();
+        interpreter.configure(ndc_stdlib::register);
+        // `foo` is local to `a`; completing inside `b` must not offer it.
+        let source = "fn a() { let foo = 1; }\nfn b() {\n\n}\n";
+        let (ast, analysis) = interpreter.analyse_str(source).expect("analysis succeeds");
+        let state = DocumentState::from_analysis(source.to_string(), ast, analysis);
+
+        // The blank line 2 is inside b's body.
+        let response = complete(Some(&state), Position::new(2, 0), &functions());
+        let CompletionResponse::Array(items) = response else {
+            panic!("expected Array response");
+        };
+
+        assert!(
+            !items.iter().any(|i| i.label == "foo"),
+            "a local from another function must not be suggested"
+        );
+    }
+
+    #[test]
+    fn stale_analysis_suppresses_locals_but_keeps_keywords() {
+        let mut interpreter = Interpreter::capturing();
+        interpreter.configure(ndc_stdlib::register);
+        let source = "let greeting = \"hi\";\n";
+        let (ast, analysis) = interpreter.analyse_str(source).expect("analysis succeeds");
+        let mut state = DocumentState::from_analysis(source.to_string(), ast, analysis);
+        // Simulate a mid-edit buffer whose last parse failed: the AST is stale.
+        state.analysis_matches_source = false;
+
+        let response = complete(Some(&state), Position::new(1, 0), &functions());
+        let CompletionResponse::Array(items) = response else {
+            panic!("expected Array response");
+        };
+
+        assert!(
+            !items.iter().any(|i| i.label == "greeting"),
+            "stale AST must not contribute local suggestions"
+        );
+        assert!(
+            items.iter().any(|i| i.label == "fn"),
+            "keywords should still be offered while mid-edit"
         );
     }
 }
