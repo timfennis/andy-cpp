@@ -24,6 +24,7 @@ queries/
   injections.scm      # `#!` shebang line highlighted as bash
 test/corpus/          # tree-sitter test cases
 src/                  # generated parser (run `tree-sitter generate`)
+  scanner.c           # external scanner: named op-assign (e.g. `multiply=`)
 ```
 
 ## Developing
@@ -175,6 +176,3 @@ cp ext/tree-sitter-andy-cpp/queries/*.scm ~/.config/helix/runtime/queries/andy-c
 - **Doubly-nested generics** in type annotations (`List<List<Int>>`) can
   mis-tokenize the closing `>>`. Single-level generics (`Map<String, Int>`,
   `Option<Any>`) are fine.
-- **Named augmented assignment** (`acc max= x`) is not highlighted specially, to
-  avoid mis-tokenizing space-free comparisons like `a==b`. Symbolic compound
-  operators (`+=`, `%%=`, `<>=`, …) are fully supported.

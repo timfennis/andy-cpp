@@ -907,6 +907,10 @@
                 {
                   "type": "STRING",
                   "value": ">>="
+                },
+                {
+                  "type": "SYMBOL",
+                  "name": "named_op_assign"
                 }
               ]
             }
@@ -2722,7 +2726,12 @@
     ]
   ],
   "precedences": [],
-  "externals": [],
+  "externals": [
+    {
+      "type": "SYMBOL",
+      "name": "named_op_assign"
+    }
+  ],
   "inline": [],
   "supertypes": []
 }

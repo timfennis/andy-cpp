@@ -611,6 +611,10 @@
             "named": false
           },
           {
+            "type": "named_op_assign",
+            "named": true
+          },
+          {
             "type": "|=",
             "named": false
           },
@@ -5540,6 +5544,10 @@
   {
     "type": "let",
     "named": false
+  },
+  {
+    "type": "named_op_assign",
+    "named": true
   },
   {
     "type": "not",

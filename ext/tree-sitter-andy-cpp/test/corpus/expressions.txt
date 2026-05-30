@@ -80,6 +80,20 @@ xs.map(f)[0].len();
     arguments: (arguments)))
 
 ==================
+named augmented assignment
+==================
+
+x multiply= 10;
+
+---
+
+(source_file
+  (augmented_assignment
+    left: (identifier)
+    operator: (named_op_assign)
+    right: (integer)))
+
+==================
 exponent is right associative
 ==================
 

@@ -52,6 +52,8 @@ module.exports = grammar({
 
   word: $ => $.identifier,
 
+  externals: $ => [$.named_op_assign],
+
   extras: $ => [/\s/, $.comment],
 
   conflicts: $ => [
@@ -217,6 +219,8 @@ module.exports = grammar({
       field('operator', choice(
         '+=', '-=', '*=', '/=', '\\=', '%=', '%%=', '^=',
         '&=', '|=', '~=', '++=', '<>=', '<<=', '>>=',
+        // Named op-assign like `multiply=` (recognised by the external scanner).
+        $.named_op_assign,
       )),
       field('right', $._expression_or_sequence),
     )),

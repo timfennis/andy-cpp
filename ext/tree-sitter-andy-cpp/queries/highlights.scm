@@ -70,6 +70,8 @@
   "&=" "|=" "~=" "++=" "<>=" "<<=" ">>="
 ] @operator
 
+(named_op_assign) @operator
+
 ; Punctuation
 [ "(" ")" "[" "]" "{" "}" "%{" ] @punctuation.bracket
 [ "," ";" ] @punctuation.delimiter
