@@ -5,8 +5,10 @@ use tower_lsp::lsp_types::{Position, Range};
 /// offset<->position conversion instead of rescanning the text from the start
 /// on every call.
 ///
-/// The character column is counted in Unicode scalar values (matching the rest
-/// of the server), not UTF-16 code units.
+/// Character columns are counted in UTF-16 code units, which is the default LSP
+/// position encoding (we advertise no alternative). A BMP scalar is one unit; an
+/// astral scalar (e.g. an emoji) is two. Counting scalar values instead would
+/// resolve positions after such characters to the wrong byte offset.
 #[derive(Debug, Clone, Default)]
 pub struct LineIndex {
     /// Byte offset of the first character of each line. Always starts with `0`.
@@ -31,7 +33,7 @@ impl LineIndex {
         // Largest line whose start offset is <= `offset`.
         let line = self.line_starts.partition_point(|&start| start <= offset) - 1;
         let line_start = self.line_starts[line];
-        let character = text[line_start..offset].chars().count();
+        let character: usize = text[line_start..offset].chars().map(char::len_utf16).sum();
         Position {
             line: line as u32,
             character: character as u32,
@@ -49,12 +51,22 @@ impl LineIndex {
             .get(line + 1)
             .map_or(text.len(), |&next| next);
 
+        // `col` accumulates UTF-16 code units, matching `position`. A column that
+        // lands inside an astral character's surrogate pair clamps to that
+        // character's start boundary.
         let mut offset = line_start;
-        for (col, c) in text[line_start..line_end].chars().enumerate() {
-            if col as u32 == pos.character || c == '\n' {
+        let mut col = 0u32;
+        for c in text[line_start..line_end].chars() {
+            if c == '\n' || col >= pos.character {
+                return Some(offset);
+            }
+            let width = c.len_utf16() as u32;
+            if col + width > pos.character {
+                // Target splits this character's surrogate pair → clamp to its start.
                 return Some(offset);
             }
             offset += c.len_utf8();
+            col += width;
         }
         Some(offset)
     }
@@ -126,12 +138,39 @@ mod tests {
     }
 
     #[test]
-    fn multibyte_columns_count_scalar_values() {
-        // "héllo" — é is two UTF-8 bytes. Column counts scalar values, not bytes.
+    fn bmp_char_is_one_utf16_unit() {
+        // "héllo" — é is two UTF-8 bytes but a single UTF-16 unit (BMP).
         let text = "héllo";
         let index = LineIndex::new(text);
-        // offset 3 is just after "hé" (1 + 2 bytes)
+        // byte offset 3 is just after "hé" (1 + 2 bytes) → column 2.
         assert_eq!(index.position(text, 3), Position::new(0, 2));
         assert_eq!(index.offset(text, Position::new(0, 2)), Some(3));
+    }
+
+    #[test]
+    fn astral_char_is_two_utf16_units() {
+        // 😀 is U+1F600: 4 UTF-8 bytes, 2 UTF-16 units (a surrogate pair).
+        let text = "a😀b";
+        let index = LineIndex::new(text);
+        // `b` is at byte 5; in UTF-16 columns that is a(1) + 😀(2) = 3.
+        assert_eq!(index.position(text, 5), Position::new(0, 3));
+        assert_eq!(index.offset(text, Position::new(0, 3)), Some(5));
+        // A column landing inside the surrogate pair clamps to the char boundary.
+        assert_eq!(index.offset(text, Position::new(0, 2)), Some(1));
+    }
+
+    #[test]
+    fn position_to_offset_roundtrip_with_astral() {
+        // Round-trip every char-boundary offset through UTF-16 columns.
+        let text = "x = 😀\ny";
+        let index = LineIndex::new(text);
+        for (offset, _) in text.char_indices().chain([(text.len(), ' ')]) {
+            let pos = index.position(text, offset);
+            assert_eq!(
+                index.offset(text, pos),
+                Some(offset),
+                "roundtrip failed for offset {offset}"
+            );
+        }
     }
 }
