@@ -52,7 +52,7 @@ module.exports = grammar({
 
   word: $ => $.identifier,
 
-  externals: $ => [$.named_op_assign],
+  externals: $ => [$.named_op_assign, $.raw_string],
 
   extras: $ => [/\s/, $.comment],
 
@@ -462,10 +462,8 @@ module.exports = grammar({
 
     escape_sequence: _ => token.immediate(/\\[nrt0\\"]/),
 
-    // Raw strings: `r"..."`, `r#"..."#`, ... Approximation: content may not
-    // contain a double quote. The real lexer supports embedded quotes via
-    // balanced `#` fences; that rare form is not modelled here.
-    raw_string: _ => token(/r#*"[^"]*"#*/),
+    // `raw_string` (`r"..."`, `r#"..."#`, `r###"..."###`, …) is recognised by
+    // the external scanner so its balanced `#` fence can contain quotes.
 
     // ------------------------------------------------------------------
     // Identifiers & comments

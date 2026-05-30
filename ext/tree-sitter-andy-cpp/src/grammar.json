@@ -2668,13 +2668,6 @@
         "value": "\\\\[nrt0\\\\\"]"
       }
     },
-    "raw_string": {
-      "type": "TOKEN",
-      "content": {
-        "type": "PATTERN",
-        "value": "r#*\"[^\"]*\"#*"
-      }
-    },
     "identifier": {
       "type": "PATTERN",
       "value": "[A-Za-z_][A-Za-z0-9_]*\\??"
@@ -2730,6 +2723,10 @@
     {
       "type": "SYMBOL",
       "name": "named_op_assign"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "raw_string"
     }
   ],
   "inline": [],

@@ -77,6 +77,19 @@ while x < 10 { x = x + 1; }
           right: (integer))))))
 
 ==================
+raw string with embedded quotes and fences
+==================
+
+let s = r###"a r#"b"# c"###;
+
+---
+
+(source_file
+  (variable_declaration
+    name: (identifier)
+    value: (raw_string)))
+
+==================
 map with default and entry
 ==================
 

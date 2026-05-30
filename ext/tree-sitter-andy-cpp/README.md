@@ -24,7 +24,7 @@ queries/
   injections.scm      # `#!` shebang line highlighted as bash
 test/corpus/          # tree-sitter test cases
 src/                  # generated parser (run `tree-sitter generate`)
-  scanner.c           # external scanner: named op-assign (e.g. `multiply=`)
+  scanner.c           # external scanner: named op-assign + raw strings
 ```
 
 ## Developing
@@ -170,9 +170,6 @@ cp ext/tree-sitter-andy-cpp/queries/*.scm ~/.config/helix/runtime/queries/andy-c
 
 ## Known limitations
 
-- **Raw strings with embedded quotes** (`r#"he said "hi""#`) are not modelled;
-  the token stops at the first `"`. Plain raw strings (`r"..."`, `r#"..."#`
-  without inner quotes) work. None appear in the current corpus.
 - **Doubly-nested generics** in type annotations (`List<List<Int>>`) can
   mis-tokenize the closing `>>`. Single-level generics (`Map<String, Int>`,
   `Option<Any>`) are fine.
