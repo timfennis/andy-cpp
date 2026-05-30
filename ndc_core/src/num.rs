@@ -314,7 +314,71 @@ macro_rules! impl_binary_operator_all {
 impl_binary_operator_all!(Add, add, Add::add, Add::add, Add::add, Add::add);
 impl_binary_operator_all!(Sub, sub, Sub::sub, Sub::sub, Sub::sub, Sub::sub);
 impl_binary_operator_all!(Mul, mul, Mul::mul, Mul::mul, Mul::mul, Mul::mul);
-impl_binary_operator_all!(Rem, rem, Rem::rem, Rem::rem, Rem::rem, Rem::rem);
+
+/// Returns `true` for the number kinds that use exact (integer/rational)
+/// arithmetic. Remainder of an exact value by zero panics in `num` and
+/// `num-bigint`; floats and complex numbers produce `NaN` instead, so they
+/// are handled by the normal arithmetic path.
+fn is_exact(n: &Number) -> bool {
+    matches!(n, Number::Int(_) | Number::Rational(_))
+}
+
+impl Rem<Self> for Number {
+    type Output = Result<Self, BinaryOperatorError>;
+
+    fn rem(self, rhs: Self) -> Self::Output {
+        // Reject exact remainder by zero up front; without this the integer
+        // and rational arms below panic ("attempt to divide by zero").
+        if is_exact(&self) && is_exact(&rhs) && rhs.is_zero() {
+            return Err(BinaryOperatorError::new("division by zero".to_string()));
+        }
+        Ok(match (self, rhs) {
+            // Integer
+            (Self::Int(left), Self::Int(right)) => Self::Int(left % right),
+            // Complex
+            (Self::Complex(left), right) => Self::Complex(left % right.to_complex()),
+            (left, Self::Complex(right)) => Self::Complex(left.to_complex() % right),
+            // Float
+            (Self::Float(left), right) => {
+                Self::Float(left % right.to_f64().expect("cannot convert complex to float"))
+            }
+            (left, Self::Float(right)) => {
+                Self::Float(left.to_f64().expect("cannot convert complex to float") % right)
+            }
+            // Rational
+            (left, Self::Rational(right)) => Self::rational(
+                left.to_rational().expect("cannot convert to rational") % right.unbox(),
+            ),
+            (Self::Rational(left), right) => Self::rational(
+                left.unbox() % right.to_rational().expect("cannot convert to rational"),
+            ),
+        })
+    }
+}
+
+impl Rem<&Self> for Number {
+    type Output = Result<Self, BinaryOperatorError>;
+
+    fn rem(self, rhs: &Self) -> Self::Output {
+        self % rhs.clone()
+    }
+}
+
+impl Rem<Number> for &Number {
+    type Output = Result<Number, BinaryOperatorError>;
+
+    fn rem(self, rhs: Number) -> Self::Output {
+        self.clone() % rhs
+    }
+}
+
+impl Rem<&Number> for &Number {
+    type Output = Result<Number, BinaryOperatorError>;
+
+    fn rem(self, rhs: &Number) -> Self::Output {
+        self.clone() % rhs.clone()
+    }
+}
 
 impl Div<&Number> for &Number {
     type Output = Number;
@@ -377,12 +441,26 @@ impl Number {
         }
     }
 
+    #[must_use]
+    pub fn is_zero(&self) -> bool {
+        match self {
+            Self::Int(i) => i.is_zero(),
+            Self::Float(f) => *f == 0.0,
+            Self::Rational(r) => r.is_zero(),
+            Self::Complex(c) => c.is_zero(),
+        }
+    }
+
     pub fn checked_rem_euclid(self, rhs: Self) -> Result<Self, BinaryOperatorError> {
         match (self, rhs) {
-            (Self::Int(p1), Self::Int(p2)) => p1
-                .checked_rem_euclid(&p2)
-                .ok_or(BinaryOperatorError::new("operation failed".to_string()))
-                .map(Self::Int),
+            (Self::Int(p1), Self::Int(p2)) => {
+                if p2.is_zero() {
+                    return Err(BinaryOperatorError::new("division by zero".to_string()));
+                }
+                p1.checked_rem_euclid(&p2)
+                    .ok_or(BinaryOperatorError::new("operation failed".to_string()))
+                    .map(Self::Int)
+            }
 
             (Self::Float(p1), Self::Float(p2)) => Ok(Self::Float(p1.rem_euclid(p2))),
             (left, right) => Err(BinaryOperatorError::undefined_operation(
@@ -394,6 +472,11 @@ impl Number {
     }
 
     pub fn floor_div(self, rhs: Self) -> Result<Self, BinaryOperatorError> {
+        // Floor division of an exact value by zero panics (`i64::div_euclid`
+        // and the bigint path), so reject it the same way remainder does.
+        if is_exact(&self) && is_exact(&rhs) && rhs.is_zero() {
+            return Err(BinaryOperatorError::new("division by zero".to_string()));
+        }
         match (self, rhs) {
             // Handle this case separately because it's faster??
             (Self::Int(Int::Int64(l)), Self::Int(Int::Int64(r))) => {

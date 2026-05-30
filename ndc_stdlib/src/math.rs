@@ -301,12 +301,46 @@ pub mod f64 {
             std::ops::Mul::mul,
             "Multiplies two integers."
         );
-        implement_binary_operator_on_int!(
-            "%",
-            checked_rem,
-            std::ops::Rem::rem,
-            "Returns the remainder of dividing two integers."
-        );
+        // Integer remainder needs an explicit division-by-zero guard: the
+        // generic fast-path fallback (`Int % Int`) panics on a zero divisor.
+        env.declare_global_fn(Rc::new(NativeFunction {
+            name: "%".to_string(),
+            documentation: Some("Returns the remainder of dividing two integers.".to_string()),
+            static_type: StaticType::Function {
+                parameters: Some(vec![StaticType::Int, StaticType::Int]),
+                return_type: Box::new(StaticType::Int),
+            },
+            func: NativeFunc::Simple(Box::new(|args| match args {
+                [Value::Int(l), Value::Int(r)] => {
+                    if *r == 0 {
+                        return Err(VmError::native("division by zero".to_string()));
+                    }
+                    if let Some(result) = l.checked_rem(*r) {
+                        Ok(Value::Int(result))
+                    } else {
+                        // The fast path only overflows for `i64::MIN % -1`,
+                        // whose mathematical result is 0; fall back to Int.
+                        Ok(Value::from_int(Int::Int64(*l) % Int::Int64(*r)))
+                    }
+                }
+                [left, right] => {
+                    let l = left.to_int().ok_or_else(|| {
+                        VmError::native(format!("expected int, got {}", left.static_type()))
+                    })?;
+                    let r = right.to_int().ok_or_else(|| {
+                        VmError::native(format!("expected int, got {}", right.static_type()))
+                    })?;
+                    if r.is_zero() {
+                        return Err(VmError::native("division by zero".to_string()));
+                    }
+                    Ok(Value::from_int(l % r))
+                }
+                _ => Err(VmError::native(format!(
+                    "expected 2 arguments, got {}",
+                    args.len()
+                ))),
+            })),
+        }));
 
         // Float-specific overloads: operate directly on f64.
         macro_rules! implement_binary_operator_on_float {

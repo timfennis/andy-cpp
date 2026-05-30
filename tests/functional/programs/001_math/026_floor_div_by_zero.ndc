@@ -1,0 +1,2 @@
+// expect-error: division by zero
+print(5 \ 0);
