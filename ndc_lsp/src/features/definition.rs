@@ -116,4 +116,16 @@ mod tests {
         let loc = def_at(&state, use_offset).expect("definition found");
         assert_eq!(start_offset(&state, &loc), outer_decl);
     }
+
+    #[test]
+    fn let_binding_invisible_in_its_own_initializer() {
+        // The RHS `x` must resolve to the outer (first) `x`, not the binding
+        // currently being declared — the analyser binds after the initializer.
+        let src = "let x = 1;\nlet x = x;";
+        let state = analyse(src);
+        let outer_decl = src.find("x").unwrap(); // first `x` at byte 4
+        let rhs_use = src.rfind('x').unwrap(); // the `x` on the RHS of line 2
+        let loc = def_at(&state, rhs_use).expect("definition found");
+        assert_eq!(start_offset(&state, &loc), outer_decl);
+    }
 }

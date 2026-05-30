@@ -106,22 +106,28 @@ impl Backend {
                 })
         };
 
-        {
-            let mut docs = self.documents.write().await;
-            let Some(state) = docs.get_mut(uri) else {
-                return;
-            };
-            // A later edit already moved the buffer on — drop this stale run
-            // rather than committing old AST or publishing old diagnostics.
-            if state.version != version {
-                return;
-            }
-            // On success, commit in place (keeps the current source/line_index).
-            // On parse failure, keep the last good AST; `analysis_matches_source`
-            // is already false, so AST-backed features stay disabled.
-            if let Some((ast, analysis)) = analysed {
-                state.set_analysis(ast, analysis);
-            }
+        // Hold the write lock across the commit AND the publish. `did_close`
+        // also takes this lock to remove state + clear diagnostics, so holding
+        // it here serializes the two: either close runs first (and we then see
+        // the document gone and skip), or we publish first and close clears it
+        // afterwards. Without this, a close could slip between an unlocked
+        // version check and the publish, leaving stale diagnostics on a closed
+        // file. The publish is a fire-and-forget notification, so the lock is
+        // held only briefly.
+        let mut docs = self.documents.write().await;
+        let Some(state) = docs.get_mut(uri) else {
+            return;
+        };
+        // A later edit already moved the buffer on — drop this stale run
+        // rather than committing old AST or publishing old diagnostics.
+        if state.version != version {
+            return;
+        }
+        // On success, commit in place (keeps the current source/line_index).
+        // On parse failure, keep the last good AST; `analysis_matches_source`
+        // is already false, so AST-backed features stay disabled.
+        if let Some((ast, analysis)) = analysed {
+            state.set_analysis(ast, analysis);
         }
 
         self.client
@@ -189,8 +195,10 @@ impl LanguageServer for Backend {
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri;
         // Drop cached state so the map doesn't grow unbounded, and clear the
-        // document's diagnostics.
-        self.documents.write().await.remove(&uri);
+        // document's diagnostics. Hold the lock across the publish so it can't
+        // interleave with a `validate` publish (see the note in `validate`).
+        let mut docs = self.documents.write().await;
+        docs.remove(&uri);
         self.client.publish_diagnostics(uri, Vec::new(), None).await;
     }
 

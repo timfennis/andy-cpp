@@ -22,6 +22,12 @@ pub struct Decl {
     pub name_span: Span,
     /// Region of source in which this binding is visible.
     pub scope_span: Span,
+    /// Byte offset from which the binding is in scope. For `let`/for-loop
+    /// bindings this is the END of the initializer (RHS / sequence), so the
+    /// binding is not visible inside its own initializer — matching the analyser,
+    /// which resolves the initializer before creating the binding (`let x = x`
+    /// must resolve the RHS to an outer `x`). Ignored for hoisted functions.
+    pub visible_from: usize,
     /// Functions are hoisted: visible throughout their scope regardless of
     /// whether the use textually precedes the declaration.
     pub is_function: bool,
@@ -44,9 +50,9 @@ pub fn collect_declarations(ast: &[ExpressionLocation], file_scope: Span) -> Vec
 }
 
 /// Is `decl` visible at `offset`? It must be in an enclosing scope, and — unless
-/// it is a hoisted function — declared at or before the use.
+/// it is a hoisted function — the use must come at or after `visible_from`.
 pub fn is_visible(decl: &Decl, offset: usize) -> bool {
-    contains(decl.scope_span, offset) && (decl.is_function || decl.name_span.offset() <= offset)
+    contains(decl.scope_span, offset) && (decl.is_function || decl.visible_from <= offset)
 }
 
 pub fn contains(span: Span, offset: usize) -> bool {
@@ -60,7 +66,9 @@ pub fn scope_len(span: Span) -> usize {
 fn collect(expr: &ExpressionLocation, scope: Span, out: &mut Vec<Decl>) {
     match &expr.expression {
         Expression::VariableDeclaration { l_value, value, .. } => {
-            push_lvalue(l_value, scope, out);
+            // Visible only after the initializer, so `let x = x` resolves the RHS
+            // to an outer binding rather than itself.
+            push_lvalue(l_value, scope, value.span.end(), out);
             collect(value, scope, out);
         }
         Expression::FunctionDeclaration {
@@ -76,13 +84,15 @@ fn collect(expr: &ExpressionLocation, scope: Span, out: &mut Vec<Decl>) {
                     name: name.clone(),
                     name_span: expr.span,
                     scope_span: scope,
+                    visible_from: expr.span.offset(),
                     is_function: true,
                 });
             }
-            // Parameters and body locals are scoped to the body.
+            // Parameters and body locals are scoped to the body; parameters are
+            // visible throughout it (the body follows the parameter list).
             let body_scope = body.span;
             for p in parameters {
-                push_lvalue(&p.lvalue, body_scope, out);
+                push_lvalue(&p.lvalue, body_scope, p.span.offset(), out);
             }
             collect(body, body_scope, out);
         }
@@ -111,12 +121,14 @@ fn collect(expr: &ExpressionLocation, scope: Span, out: &mut Vec<Decl>) {
             collect(loop_body, scope, out);
         }
         Expression::For { iterations, body } => {
-            // For-loop bindings are visible across the whole loop expression.
+            // For-loop bindings are visible across the loop expression, but only
+            // after their own sequence (so `for x in x` resolves the sequence to
+            // an outer `x`; later iterations/guards/body still see the binding).
             let loop_scope = expr.span;
             for iteration in iterations {
                 match iteration {
                     ForIteration::Iteration { l_value, sequence } => {
-                        push_lvalue(l_value, loop_scope, out);
+                        push_lvalue(l_value, loop_scope, sequence.span.end(), out);
                         collect(sequence, scope, out);
                     }
                     ForIteration::Guard(e) => collect(e, loop_scope, out),
@@ -197,7 +209,7 @@ fn collect(expr: &ExpressionLocation, scope: Span, out: &mut Vec<Decl>) {
     }
 }
 
-fn push_lvalue(lvalue: &Lvalue, scope: Span, out: &mut Vec<Decl>) {
+fn push_lvalue(lvalue: &Lvalue, scope: Span, visible_from: usize, out: &mut Vec<Decl>) {
     match lvalue {
         Lvalue::Identifier {
             identifier, span, ..
@@ -205,11 +217,12 @@ fn push_lvalue(lvalue: &Lvalue, scope: Span, out: &mut Vec<Decl>) {
             name: identifier.clone(),
             name_span: *span,
             scope_span: scope,
+            visible_from,
             is_function: false,
         }),
         Lvalue::Sequence(lvalues) => {
             for lv in lvalues {
-                push_lvalue(lv, scope, out);
+                push_lvalue(lv, scope, visible_from, out);
             }
         }
         Lvalue::Index { .. } => {}
