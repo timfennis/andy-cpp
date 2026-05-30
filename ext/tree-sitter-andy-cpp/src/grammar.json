@@ -2008,7 +2008,7 @@
           "name": "body",
           "content": {
             "type": "SYMBOL",
-            "name": "_expression"
+            "name": "_expression_or_sequence"
           }
         },
         {

@@ -80,6 +80,31 @@ xs.map(f)[0].len();
     arguments: (arguments)))
 
 ==================
+list comprehension with tuple body
+==================
+
+[x, y for x in 1..10, y in 1..10]
+
+---
+
+(source_file
+  (list_comprehension
+    body: (tuple_expression
+      (identifier)
+      (identifier))
+    (comprehension_clauses
+      (for_binding
+        pattern: (identifier)
+        sequence: (range_expression
+          start: (integer)
+          end: (integer)))
+      (for_binding
+        pattern: (identifier)
+        sequence: (range_expression
+          start: (integer)
+          end: (integer))))))
+
+==================
 named augmented assignment
 ==================
 

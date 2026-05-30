@@ -328,7 +328,8 @@ module.exports = grammar({
 
     list_comprehension: $ => seq(
       '[',
-      field('body', $._expression),
+      // The yielded value may be a bare comma tuple, e.g. `[x, y for …]`.
+      field('body', $._expression_or_sequence),
       $.comprehension_clauses,
       ']',
     ),

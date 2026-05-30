@@ -2723,6 +2723,10 @@
             "named": true
           },
           {
+            "type": "tuple_expression",
+            "named": true
+          },
+          {
             "type": "unary_expression",
             "named": true
           },
