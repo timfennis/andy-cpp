@@ -7,11 +7,11 @@ use tokio::sync::RwLock;
 use tower_lsp::jsonrpc::Result as JsonRPCResult;
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionOptions, CompletionParams, CompletionResponse,
-    DidChangeTextDocumentParams, DidOpenTextDocumentParams, DocumentSymbolParams,
-    DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams,
-    HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams, InlayHint,
-    InlayHintParams, MessageType, OneOf, ServerCapabilities, TextDocumentSyncCapability,
-    TextDocumentSyncKind, Url, WorkDoneProgressOptions,
+    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
+    DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse,
+    Hover, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult,
+    InitializedParams, InlayHint, InlayHintParams, MessageType, OneOf, ServerCapabilities,
+    TextDocumentSyncCapability, TextDocumentSyncKind, Url, WorkDoneProgressOptions,
 };
 use tower_lsp::{Client, LanguageServer};
 
@@ -51,28 +51,44 @@ impl Backend {
         interpreter
     }
 
-    /// Update the source text immediately so concurrent requests (e.g. completion
-    /// triggered by `.`) always see the latest document content.
-    async fn update_source(&self, uri: &Url, text: &str) {
+    // Staleness & concurrency model
+    // ------------------------------
+    // `didChange` notifications can interleave at await points, so any cached
+    // state is tagged with the client's monotonic document `version`. Two rules
+    // keep async edits sound:
+    //   1. `update_source` runs synchronously under the lock and bumps `version`,
+    //      so completion (triggered by `.`) always sees the latest text.
+    //   2. `validate` runs analysis off the lock, then commits/publishes only if
+    //      the stored `version` still equals the one it analysed — a slow run
+    //      can't roll the buffer back to older text.
+    // AST-backed features (hover, go-to-def, symbols, inlay hints) additionally
+    // gate on `analysis_matches_source`, so they never map stale spans onto
+    // edited text. The completion caches (`variable_types` by name,
+    // `expression_types` by end-offset) are intentionally resilient: dot
+    // completion fires on a buffer that doesn't parse (`x.`), and the data it
+    // reads sits at the cursor where offsets are stable for the appended `.`.
+
+    /// Update the cached source text immediately and bump the document version.
+    async fn update_source(&self, uri: &Url, text: &str, version: i32) {
         let mut docs = self.documents.write().await;
-        match docs.get_mut(uri) {
-            Some(state) => {
-                state.source = text.to_string();
-                state.line_index = crate::util::LineIndex::new(text);
-                // The AST now predates this edit; `validate` re-sets this to true
-                // if the new source parses. Until then, AST-backed features must
-                // not run against the stale spans.
-                state.analysis_matches_source = false;
-            }
-            None => {
-                docs.insert(uri.clone(), DocumentState::from_source(text.to_string()));
-            }
+        if let Some(state) = docs.get_mut(uri) {
+            state.source = text.to_string();
+            state.line_index = crate::util::LineIndex::new(text);
+            state.version = version;
+            // The AST now predates this edit; `validate` re-sets this to true
+            // if the new source parses.
+            state.analysis_matches_source = false;
+        } else {
+            let mut state = DocumentState::from_source(text.to_string());
+            state.version = version;
+            docs.insert(uri.clone(), state);
         }
     }
 
-    /// Run diagnostics and semantic analysis, replacing the cached AST and side
-    /// tables. The source text must already be updated via `update_source`.
-    async fn validate(&self, uri: &Url, text: &str) {
+    /// Run diagnostics and semantic analysis for `version` of the document, then
+    /// commit the analysis and publish diagnostics only if no later edit has
+    /// superseded it. `update_source` must have run for this `version` first.
+    async fn validate(&self, uri: &Url, text: &str, version: i32) {
         let (mut diagnostics, _ast) = diagnostics::lex_and_parse(text);
 
         // Run full semantic analysis. The interpreter uses Rc internally
@@ -90,20 +106,27 @@ impl Backend {
                 })
         };
 
-        self.client
-            .publish_diagnostics(uri.clone(), diagnostics, None)
-            .await;
-
-        // Only replace document state when analysis succeeds. On failure (e.g.
-        // incomplete syntax while typing `x.`), keep the last good AST and maps
-        // so inlay hints stay visible and dot-completion keeps working.
-        if let Some((ast, analysis)) = analysed {
+        {
             let mut docs = self.documents.write().await;
-            docs.insert(
-                uri.clone(),
-                DocumentState::from_analysis(text.to_string(), ast, analysis),
-            );
+            let Some(state) = docs.get_mut(uri) else {
+                return;
+            };
+            // A later edit already moved the buffer on — drop this stale run
+            // rather than committing old AST or publishing old diagnostics.
+            if state.version != version {
+                return;
+            }
+            // On success, commit in place (keeps the current source/line_index).
+            // On parse failure, keep the last good AST; `analysis_matches_source`
+            // is already false, so AST-backed features stay disabled.
+            if let Some((ast, analysis)) = analysed {
+                state.set_analysis(ast, analysis);
+            }
         }
+
+        self.client
+            .publish_diagnostics(uri.clone(), diagnostics, Some(version))
+            .await;
     }
 }
 
@@ -147,16 +170,28 @@ impl LanguageServer for Backend {
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let uri = params.text_document.uri;
         let text = params.text_document.text;
-        self.update_source(&uri, &text).await;
-        self.validate(&uri, &text).await;
+        let version = params.text_document.version;
+        self.update_source(&uri, &text, version).await;
+        self.validate(&uri, &text, version).await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let uri = params.text_document.uri;
-        for change in params.content_changes {
-            self.update_source(&uri, &change.text).await;
-            self.validate(&uri, &change.text).await;
+        let version = params.text_document.version;
+        // Full-document sync: the last change carries the whole buffer, so only
+        // the final one matters.
+        if let Some(change) = params.content_changes.into_iter().next_back() {
+            self.update_source(&uri, &change.text, version).await;
+            self.validate(&uri, &change.text, version).await;
         }
+    }
+
+    async fn did_close(&self, params: DidCloseTextDocumentParams) {
+        let uri = params.text_document.uri;
+        // Drop cached state so the map doesn't grow unbounded, and clear the
+        // document's diagnostics.
+        self.documents.write().await.remove(&uri);
+        self.client.publish_diagnostics(uri, Vec::new(), None).await;
     }
 
     async fn inlay_hint(&self, params: InlayHintParams) -> JsonRPCResult<Option<Vec<InlayHint>>> {

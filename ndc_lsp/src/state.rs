@@ -16,6 +16,10 @@ use crate::visitor::{AstVisitor, walk_ast};
 pub struct DocumentState {
     pub source: String,
     pub line_index: LineIndex,
+    /// Monotonic document version from the client (LSP `didChange`). Used to
+    /// discard the result of a `validate` that an overlapping later edit has
+    /// already superseded, so a slow analysis can't roll the buffer back.
+    pub version: i32,
     /// Whether `ast`/`analysis` were produced from the current `source`. False
     /// while the buffer is mid-edit and the last parse failed: the AST and its
     /// spans are then stale relative to `source`, so AST-backed features (hover,
@@ -45,6 +49,7 @@ impl DocumentState {
         Self {
             source,
             line_index,
+            version: 0,
             analysis_matches_source: false,
             ast: Vec::new(),
             analysis: AnalysisResult::default(),
@@ -53,29 +58,35 @@ impl DocumentState {
         }
     }
 
-    /// Build a state from a successful analysis, deriving the completion-support
-    /// maps in a single AST walk.
+    /// Build a state from a successful analysis. Test-only convenience; the
+    /// server commits analysis in place via [`set_analysis`].
+    #[cfg(test)]
     pub fn from_analysis(
         source: String,
         ast: Vec<ExpressionLocation>,
         analysis: AnalysisResult,
     ) -> Self {
-        let line_index = LineIndex::new(&source);
+        let mut state = Self::from_source(source);
+        state.set_analysis(ast, analysis);
+        state
+    }
+
+    /// Replace the analysis (AST + side tables + derived completion caches) in
+    /// place, leaving `source`/`line_index`/`version` untouched, and mark the
+    /// analysis as matching the current source. Callers must ensure `ast` was
+    /// produced from the current `source`.
+    pub fn set_analysis(&mut self, ast: Vec<ExpressionLocation>, analysis: AnalysisResult) {
         let mut collector = MapCollector {
             analysis: &analysis,
             variable_types: AHashMap::new(),
             expression_types: AHashMap::new(),
         };
         walk_ast(&mut collector, &ast);
-        Self {
-            source,
-            line_index,
-            analysis_matches_source: true,
-            variable_types: collector.variable_types,
-            expression_types: collector.expression_types,
-            ast,
-            analysis,
-        }
+        self.variable_types = collector.variable_types;
+        self.expression_types = collector.expression_types;
+        self.ast = ast;
+        self.analysis = analysis;
+        self.analysis_matches_source = true;
     }
 }
 
