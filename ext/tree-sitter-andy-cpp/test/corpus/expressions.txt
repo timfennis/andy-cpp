@@ -105,6 +105,23 @@ list comprehension with tuple body
           end: (integer))))))
 
 ==================
+keyword operators survive the op-assign scanner
+==================
+
+let z = a and b not in c;
+
+---
+
+(source_file
+  (variable_declaration
+    name: (identifier)
+    value: (binary_expression
+      left: (identifier)
+      right: (binary_expression
+        left: (identifier)
+        right: (identifier)))))
+
+==================
 named augmented assignment
 ==================
 
