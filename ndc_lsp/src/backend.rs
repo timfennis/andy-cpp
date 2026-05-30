@@ -59,6 +59,10 @@ impl Backend {
             Some(state) => {
                 state.source = text.to_string();
                 state.line_index = crate::util::LineIndex::new(text);
+                // The AST now predates this edit; `validate` re-sets this to true
+                // if the new source parses. Until then, AST-backed features must
+                // not run against the stale spans.
+                state.analysis_matches_source = false;
             }
             None => {
                 docs.insert(uri.clone(), DocumentState::from_source(text.to_string()));
@@ -158,6 +162,9 @@ impl LanguageServer for Backend {
     async fn inlay_hint(&self, params: InlayHintParams) -> JsonRPCResult<Option<Vec<InlayHint>>> {
         let docs = self.documents.read().await;
         Ok(docs.get(&params.text_document.uri).map(|state| {
+            if !state.analysis_matches_source {
+                return Vec::new();
+            }
             inlay_hints::collect(
                 &state.ast,
                 &state.analysis,
@@ -173,6 +180,7 @@ impl LanguageServer for Backend {
         let position = params.text_document_position_params.position;
         Ok(docs
             .get(uri)
+            .filter(|state| state.analysis_matches_source)
             .and_then(|state| hover::hover(state, position, &self.functions)))
     }
 
@@ -183,10 +191,13 @@ impl LanguageServer for Backend {
         let docs = self.documents.read().await;
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
-        Ok(docs.get(uri).and_then(|state| {
-            definition::goto_definition(state, position, uri.clone())
-                .map(GotoDefinitionResponse::Scalar)
-        }))
+        Ok(docs
+            .get(uri)
+            .filter(|state| state.analysis_matches_source)
+            .and_then(|state| {
+                definition::goto_definition(state, position, uri.clone())
+                    .map(GotoDefinitionResponse::Scalar)
+            }))
     }
 
     async fn document_symbol(
@@ -194,13 +205,16 @@ impl LanguageServer for Backend {
         params: DocumentSymbolParams,
     ) -> JsonRPCResult<Option<DocumentSymbolResponse>> {
         let docs = self.documents.read().await;
-        Ok(docs.get(&params.text_document.uri).map(|state| {
-            DocumentSymbolResponse::Nested(symbols::document_symbols(
-                &state.ast,
-                &state.source,
-                &state.line_index,
-            ))
-        }))
+        Ok(docs
+            .get(&params.text_document.uri)
+            .filter(|state| state.analysis_matches_source)
+            .map(|state| {
+                DocumentSymbolResponse::Nested(symbols::document_symbols(
+                    &state.ast,
+                    &state.source,
+                    &state.line_index,
+                ))
+            }))
     }
 
     async fn completion(

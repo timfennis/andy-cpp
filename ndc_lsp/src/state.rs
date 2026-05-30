@@ -16,6 +16,13 @@ use crate::visitor::{AstVisitor, walk_ast};
 pub struct DocumentState {
     pub source: String,
     pub line_index: LineIndex,
+    /// Whether `ast`/`analysis` were produced from the current `source`. False
+    /// while the buffer is mid-edit and the last parse failed: the AST and its
+    /// spans are then stale relative to `source`, so AST-backed features (hover,
+    /// go-to-definition, document symbols, inlay hints) must not run against it —
+    /// they would map old spans onto edited text. The completion caches
+    /// (`variable_types`/`expression_types`) stay usable regardless.
+    pub analysis_matches_source: bool,
     /// Analysed AST from the last successful analysis.
     pub ast: Vec<ExpressionLocation>,
     /// Side tables (per-expression types, declaration spans, ...) from the last
@@ -38,6 +45,7 @@ impl DocumentState {
         Self {
             source,
             line_index,
+            analysis_matches_source: false,
             ast: Vec::new(),
             analysis: AnalysisResult::default(),
             variable_types: AHashMap::new(),
@@ -62,6 +70,7 @@ impl DocumentState {
         Self {
             source,
             line_index,
+            analysis_matches_source: true,
             variable_types: collector.variable_types,
             expression_types: collector.expression_types,
             ast,
@@ -95,5 +104,27 @@ impl AstVisitor for MapCollector<'_> {
             self.variable_types
                 .insert(identifier.to_string(), typ.clone());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndc_interpreter::Interpreter;
+
+    #[test]
+    fn from_source_is_not_fresh_until_analysed() {
+        let state = DocumentState::from_source("let x = 1;".to_string());
+        assert!(!state.analysis_matches_source);
+    }
+
+    #[test]
+    fn from_analysis_is_fresh() {
+        let mut interpreter = Interpreter::capturing();
+        interpreter.configure(ndc_stdlib::register);
+        let source = "let x = 1;";
+        let (ast, analysis) = interpreter.analyse_str(source).expect("analysis succeeds");
+        let state = DocumentState::from_analysis(source.to_string(), ast, analysis);
+        assert!(state.analysis_matches_source);
     }
 }
