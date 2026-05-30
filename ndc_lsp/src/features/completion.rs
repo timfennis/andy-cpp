@@ -99,7 +99,13 @@ pub fn complete(
     // General (non-dot) completion: functions + in-scope locals + keywords.
     let mut items: Vec<CompletionItem> = function_items.collect();
     if let Some(state) = state {
-        items.extend(local_completions(state, position));
+        // Locals come from walking the AST's declaration spans, so they are only
+        // trustworthy when the AST matches the current source. Mid-edit (last
+        // parse failed) the spans are stale, so skip them — the resilient
+        // dot-completion caches above are unaffected.
+        if state.analysis_matches_source {
+            items.extend(local_completions(state, position));
+        }
     }
     items.extend(keyword_completions());
     CompletionResponse::Array(items)
@@ -434,6 +440,31 @@ mod tests {
         assert!(
             !items.iter().any(|i| i.label == "foo"),
             "a local from another function must not be suggested"
+        );
+    }
+
+    #[test]
+    fn stale_analysis_suppresses_locals_but_keeps_keywords() {
+        let mut interpreter = Interpreter::capturing();
+        interpreter.configure(ndc_stdlib::register);
+        let source = "let greeting = \"hi\";\n";
+        let (ast, analysis) = interpreter.analyse_str(source).expect("analysis succeeds");
+        let mut state = DocumentState::from_analysis(source.to_string(), ast, analysis);
+        // Simulate a mid-edit buffer whose last parse failed: the AST is stale.
+        state.analysis_matches_source = false;
+
+        let response = complete(Some(&state), Position::new(1, 0), &functions());
+        let CompletionResponse::Array(items) = response else {
+            panic!("expected Array response");
+        };
+
+        assert!(
+            !items.iter().any(|i| i.label == "greeting"),
+            "stale AST must not contribute local suggestions"
+        );
+        assert!(
+            items.iter().any(|i| i.label == "fn"),
+            "keywords should still be offered while mid-edit"
         );
     }
 }
