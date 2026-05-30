@@ -19,6 +19,9 @@
           "include": "#functions"
         },
         {
+          "include": "#types"
+        },
+        {
           "include": "#call"
         },
         {
@@ -47,12 +50,26 @@
         }
       ]
     },
+    "types": {
+      "patterns": [
+        {
+          "comment": "built-in type names used in annotations like `let x: Int` or `-> List<Int>`",
+          "name": "support.type.andy-cpp",
+          "match": "\\b(Any|Never|Bool|Number|Float|Int|Rational|Complex|String|Option|Sequence|List|Iterator|MinHeap|MaxHeap|Deque|Tuple|Map)\\b"
+        }
+      ]
+    },
     "functions": {
       "patterns": [
         {
           "comment": "function definition",
           "name": "meta.function.definition.andy-cpp",
           "begin": "\\b((pure)\\s)?(fn)\\s+([A-Za-z_][A-Za-z_0-9]*)",
+          "patterns": [
+            {
+              "include": "#expression"
+            }
+          ],
           "beginCaptures": {
             "2": {
               "name": "keyword.other.pure.andy-cpp"
@@ -78,6 +95,11 @@
           "comment": "anonymous function definition",
           "name": "meta.function.definition.anonymous.andy-cpp",
           "begin": "\\b((pure)\\s)?(fn)",
+          "patterns": [
+            {
+              "include": "#expression"
+            }
+          ],
           "beginCaptures": {
             "2": {
               "name": "keyword.other.pure.andy-cpp"
@@ -145,6 +167,11 @@
           "name": "constant.numeric.infinity.andy-cpp"
         },
         {
+          "comment": "Not a Number",
+          "match": "\\bNaN\\b",
+          "name": "constant.numeric.nan.andy-cpp"
+        },
+        {
           "comment": "booleans",
           "name": "constant.language.bool.andy-cpp",
           "match": "\\b(true|false)\\b"
@@ -193,7 +220,7 @@
         {
           "comment": "control flow keywords",
           "name": "keyword.control.andy-cpp",
-          "match": "\\b(break|if|else|while|for|return)\\b"
+          "match": "\\b(break|continue|if|else|while|for|return)\\b"
         },
         {
           "comment": "storage keywords",
@@ -215,6 +242,11 @@
     "operators": {
       "patterns": [
         {
+          "comment": "arrow operators (return type and short function body)",
+          "name": "keyword.operator.arrow.andy-cpp",
+          "match": "(->|=>)"
+        },
+        {
           "comment": "logical operators",
           "name": "keyword.operator.logical.andy-cpp",
           "match": "\\b(not|or|and)\\b"
@@ -227,7 +259,7 @@
         {
           "comment": "augmented assignment operators",
           "name": "keyword.operator.assignment.andy-cpp",
-          "match": "((\\+\\+?|-|\\*|/|\\|\\^|&|\\||%%?|<<|>>|~|<>)=)"
+          "match": "((\\+\\+?|-|\\*|/|\\\\|\\^|&|\\||%%?|<<|>>|~|<>)=)"
         },
         {
           "comment": "function augmented assignment opreators",
@@ -377,6 +409,11 @@
           "comment": "comma",
           "name": "punctuation.comma.andy-cpp",
           "match": ","
+        },
+        {
+          "comment": "colon (type annotation / key separator)",
+          "name": "punctuation.separator.colon.andy-cpp",
+          "match": ":"
         }
       ]
     }

@@ -1,0 +1,13 @@
+# Node
+node_modules/
+
+# Build artifacts (the generated parser in src/ IS committed)
+build/
+*.o
+*.so
+*.dylib
+*.wasm
+*.node
+
+# Editor / OS
+.DS_Store

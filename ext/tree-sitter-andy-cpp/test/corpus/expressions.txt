@@ -1,0 +1,151 @@
+==================
+list comprehension with guard
+==================
+
+[x * 2 for x in 0..10, if x != 3]
+
+---
+
+(source_file
+  (list_comprehension
+    body: (binary_expression
+      left: (identifier)
+      right: (integer))
+    (comprehension_clauses
+      (for_binding
+        pattern: (identifier)
+        sequence: (range_expression
+          start: (integer)
+          end: (integer)))
+      (if_guard
+        condition: (binary_expression
+          left: (identifier)
+          right: (integer))))))
+
+==================
+not in operator
+==================
+
+assert(8 not in nums);
+
+---
+
+(source_file
+  (call
+    function: (identifier)
+    arguments: (arguments
+      (binary_expression
+        left: (integer)
+        right: (identifier)))))
+
+==================
+destructuring for loop
+==================
+
+for key, value in map { print(key); }
+
+---
+
+(source_file
+  (for_expression
+    (for_binding
+      pattern: (pattern_sequence
+        (identifier)
+        (identifier))
+      sequence: (identifier))
+    body: (block
+      (call
+        function: (identifier)
+        arguments: (arguments
+          (identifier))))))
+
+==================
+method chaining and indexing
+==================
+
+xs.map(f)[0].len();
+
+---
+
+(source_file
+  (member_expression
+    object: (index
+      value: (member_expression
+        object: (identifier)
+        method: (identifier)
+        arguments: (arguments
+          (identifier)))
+      index: (integer))
+    method: (identifier)
+    arguments: (arguments)))
+
+==================
+list comprehension with tuple body
+==================
+
+[x, y for x in 1..10, y in 1..10]
+
+---
+
+(source_file
+  (list_comprehension
+    body: (tuple_expression
+      (identifier)
+      (identifier))
+    (comprehension_clauses
+      (for_binding
+        pattern: (identifier)
+        sequence: (range_expression
+          start: (integer)
+          end: (integer)))
+      (for_binding
+        pattern: (identifier)
+        sequence: (range_expression
+          start: (integer)
+          end: (integer))))))
+
+==================
+keyword operators survive the op-assign scanner
+==================
+
+let z = a and b not in c;
+
+---
+
+(source_file
+  (variable_declaration
+    name: (identifier)
+    value: (binary_expression
+      left: (identifier)
+      right: (binary_expression
+        left: (identifier)
+        right: (identifier)))))
+
+==================
+named augmented assignment
+==================
+
+x multiply= 10;
+
+---
+
+(source_file
+  (augmented_assignment
+    left: (identifier)
+    operator: (named_op_assign)
+    right: (integer)))
+
+==================
+exponent is right associative
+==================
+
+2 ^ 3 ^ 2;
+
+---
+
+(source_file
+  (binary_expression
+    left: (integer)
+    right: (binary_expression
+      left: (integer)
+      right: (integer))))
