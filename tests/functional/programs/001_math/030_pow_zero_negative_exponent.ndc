@@ -1,0 +1,5 @@
+// `0 ^ negative` is division by zero. Raising zero to a negative power
+// used to build a rational with a zero denominator, which panicked in
+// num-rational ("denominator == 0"). It now reports a recoverable error.
+// expect-error: division by zero
+print(0 ^ -1);

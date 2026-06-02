@@ -1,0 +1,7 @@
+// A negative *integer* exponent that arrives as a rational (e.g. the
+// result of `1 / -1`) used to call `Int::pow` with a negative right-hand
+// side, which panicked unconditionally ("right hand side must not be
+// negative") and aborted the whole process. It now computes the
+// reciprocal, exactly like a plain negative integer exponent.
+// expect-output: 1/2
+print(2 ^ (1/-1));
