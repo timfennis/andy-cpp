@@ -1,0 +1,8 @@
+// expect-error: 1..0 out of bounds
+// A reversed range on a deque used to panic with "attempt to subtract with
+// overflow"; it must now error gracefully.
+let d = Deque();
+d.push_back(1);
+d.push_back(2);
+d.push_back(3);
+d[1..0]

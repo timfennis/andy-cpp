@@ -230,6 +230,11 @@ fn extract_vm_offset(index_value: &Value, size: usize) -> Result<VmOffset, VmErr
             } else {
                 to_idx
             };
+            if to_idx < from_idx {
+                return Err(VmError::native(format!(
+                    "{from_idx}..{to_idx} out of bounds"
+                )));
+            }
             return Ok(VmOffset::Range(from_idx, to_idx));
         }
         if let Some(start) = iter_ref.unbounded_range_start() {

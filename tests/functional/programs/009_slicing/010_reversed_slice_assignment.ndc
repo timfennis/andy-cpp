@@ -1,0 +1,5 @@
+// expect-error: 3..1 out of bounds
+// Assigning into a reversed slice used to panic with "attempt to subtract with
+// overflow"; it must now error gracefully.
+let x = [1, 2, 3, 4];
+x[3..1] = [9]
