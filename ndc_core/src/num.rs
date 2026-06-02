@@ -487,6 +487,26 @@ impl Number {
         }
     }
 
+    /// Raise an integer base to a (possibly negative) integer exponent.
+    /// A negative exponent yields the reciprocal as a rational, except
+    /// `0 ^ negative`, which is division by zero and returns an error
+    /// instead of panicking with a zero denominator.
+    fn int_pow(base: &Int, exponent: &Int) -> Result<Self, BinaryOperatorError> {
+        if exponent.is_negative() {
+            if base.is_zero() {
+                return Err(BinaryOperatorError::new("division by zero".to_string()));
+            }
+            let exponent = exponent.to_bigint();
+            let denominator = num::pow::Pow::pow(base.to_bigint(), exponent.magnitude());
+            Ok(Self::Rational(Box::new(BigRational::new(
+                BigInt::from(1),
+                denominator,
+            ))))
+        } else {
+            Ok(Self::Int(base.pow(exponent)))
+        }
+    }
+
     pub fn pow(self, rhs: Self) -> Result<Self, BinaryOperatorError> {
         // Reject astronomically large integer exponents up front: an exponent
         // that doesn't fit in u32 would produce a result too large to compute
@@ -505,23 +525,14 @@ impl Number {
 
         Ok(match (self, rhs) {
             // Int vs others
-            (Self::Int(p1), Self::Int(p2)) => {
-                if p2.is_negative() {
-                    let p2 = p2.to_bigint();
-                    let p2 = p2.magnitude();
-                    let ans = num::pow::Pow::pow(p1.to_bigint(), p2);
-                    Self::Rational(Box::new(BigRational::new(BigInt::from(1), ans)))
-                } else {
-                    Self::Int(p1.pow(&p2))
-                }
-            }
+            (Self::Int(p1), Self::Int(p2)) => return Self::int_pow(&p1, &p2),
             (Self::Int(p1), Self::Float(p2)) => Self::Float(f64::from(p1).powf(p2)),
             (Self::Int(p1), Self::Complex(p2)) => {
                 Self::Complex(Complex::from(f64::from(p1)).powc(p2))
             }
             (Self::Int(p1), Self::Rational(p2)) => {
                 if p2.is_integer() {
-                    return Ok(Self::Int(p1.pow(&Int::BigInt(p2.to_integer()))));
+                    return Self::int_pow(&p1, &Int::BigInt(p2.to_integer()));
                 }
 
                 Self::Float(f64::from(p1).powf(rational_to_float(&p2)))

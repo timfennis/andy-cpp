@@ -1,0 +1,5 @@
+// Same division-by-zero as `0 ^ -1`, but reached through the rational
+// exponent path (`2/-1` is an integer-valued rational). Used to panic
+// with "right hand side must not be negative"; now a recoverable error.
+// expect-error: division by zero
+print(0 ^ (2/-1));
