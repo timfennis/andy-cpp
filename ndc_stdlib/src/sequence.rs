@@ -560,8 +560,7 @@ mod inner {
 
     /// Returns the `k` sized combinations of the given sequence `seq` as a lazy iterator of tuples.
     #[function(return_type = Iterator<Value>)]
-    pub fn combinations(seq: SeqValue, k: i64) -> anyhow::Result<Value> {
-        let k = k as usize;
+    pub fn combinations(seq: SeqValue, k: usize) -> anyhow::Result<Value> {
         let iter = CombinationsIter::new(seq, k)
             .ok_or_else(|| anyhow!("combinations requires a sequence"))?;
         Ok(Value::iterator(iter.into_shared()))
@@ -576,8 +575,7 @@ mod inner {
 
     /// Returns the `k` sized permutations of the given sequence `seq` as a list of tuples.
     #[function(return_type = Vec<_>)]
-    pub fn permutations(seq: SeqValue, k: i64) -> anyhow::Result<Value> {
-        let k = k as usize;
+    pub fn permutations(seq: SeqValue, k: usize) -> anyhow::Result<Value> {
         Ok(Value::list(
             seq.try_into_iter()
                 .ok_or_else(|| anyhow!("permutations requires a sequence"))?
@@ -738,8 +736,7 @@ mod inner {
 
     /// Return a list that represents the powerset of the elements of `seq` that are exactly `length` long.
     #[function(name = "subsequences", return_type = Vec<_>)]
-    pub fn subsequences_len(seq: SeqValue, length: i64) -> anyhow::Result<Value> {
-        let length = length as usize;
+    pub fn subsequences_len(seq: SeqValue, length: usize) -> anyhow::Result<Value> {
         Ok(Value::list(
             seq.try_into_iter()
                 .ok_or_else(|| anyhow!("subsequences requires a sequence"))?

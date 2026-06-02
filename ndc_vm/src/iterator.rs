@@ -398,6 +398,11 @@ pub struct CombinationsIter {
     buffer: Vec<Value>,
     /// `Some` only for lazy (Shared) sources; set to `None` once exhausted.
     source: Option<ValueIter>,
+    /// Combination size. The `indices` vector is only allocated once the
+    /// buffer is confirmed to hold at least `k` elements, so an absurdly
+    /// large `k` (e.g. `i64::MAX`) over a short source yields nothing
+    /// instead of overflowing the allocator with `(0..k).collect()`.
+    k: usize,
     indices: Vec<usize>,
     first: bool,
 }
@@ -413,7 +418,8 @@ impl CombinationsIter {
         Some(Self {
             buffer,
             source,
-            indices: (0..k).collect(),
+            k,
+            indices: Vec::new(),
             first: true,
         })
     }
@@ -445,7 +451,7 @@ impl CombinationsIter {
 
 impl VmIterator for CombinationsIter {
     fn next(&mut self) -> Option<Value> {
-        let k = self.indices.len();
+        let k = self.k;
 
         if k == 0 {
             return if self.first {
@@ -461,6 +467,10 @@ impl VmIterator for CombinationsIter {
             if !self.ensure_index(k - 1) {
                 return None;
             }
+            // The buffer now holds at least `k` elements, so this allocation
+            // is bounded by data we actually materialised — no capacity
+            // overflow even when `k` is enormous.
+            self.indices = (0..k).collect();
         } else {
             // For lazy sources: pull one more element before choosing the
             // pivot. Without this, when `indices[k-1]` reaches the end of
@@ -510,6 +520,7 @@ impl VmIterator for CombinationsIter {
         Some(Rc::new(RefCell::new(Self {
             buffer: self.buffer.clone(),
             source: source_copy,
+            k: self.k,
             indices: self.indices.clone(),
             first: self.first,
         })))

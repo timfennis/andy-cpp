@@ -1,0 +1,7 @@
+// `combinations(seq, k)` took `k` as an `i64` and cast it with `k as usize`,
+// turning a negative `k` into `usize::MAX` and aborting with "capacity
+// overflow" while building the index vector. `k` is now a `usize` argument,
+// so a negative value is rejected by argument conversion with a graceful
+// error — matching the sibling `windows`/`chunks`/`take` functions.
+// expect-error: expected a non-negative integer, but the value was negative
+combinations([1, 2, 3], -1);
