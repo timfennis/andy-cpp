@@ -110,6 +110,19 @@ mod inner {
         list.remove(0)
     }
 
+    /// Returns a copy of the element at `index`, or `None` if the index is out of bounds.
+    /// A negative index is always out of bounds.
+    #[function(name = "get?", return_type = Option<_>)]
+    pub fn maybe_get(list: &[Value], index: i64) -> Value {
+        let Ok(idx) = usize::try_from(index) else {
+            return Value::None;
+        };
+        match list.get(idx) {
+            None => Value::None,
+            Some(v) => Value::Object(Rc::new(Object::Some(v.clone()))),
+        }
+    }
+
     /// Creates a copy of the list with its elements in reverse order
     #[function(return_type = Vec<_>)]
     pub fn reversed(list: &[Value]) -> Value {
