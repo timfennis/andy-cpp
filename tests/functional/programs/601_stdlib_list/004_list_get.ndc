@@ -4,11 +4,8 @@ let list = [10, 20, 30];
 assert_eq(list.get?(0), Some(10));
 assert_eq(list.get?(2), Some(30));
 
-// out of bounds returns None
+// a valid index past the end returns None
 assert_eq(list.get?(3), None);
-
-// negative indices are always out of bounds (no wrap-around)
-assert_eq(list.get?(-1), None);
 
 // empty list
 assert_eq([].get?(0), None);

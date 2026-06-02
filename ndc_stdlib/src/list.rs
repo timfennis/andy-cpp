@@ -6,6 +6,7 @@ mod inner {
     use std::rc::Rc;
 
     use anyhow::anyhow;
+    use num::{BigInt, ToPrimitive};
 
     /// Converts any sequence into a list
     #[function(return_type = Vec<_>)]
@@ -110,16 +111,57 @@ mod inner {
         list.remove(0)
     }
 
-    /// Returns a copy of the element at `index`, or `None` if the index is out of bounds.
-    /// A negative index is always out of bounds.
+    /// Resolves a possibly-negative index against `len`, wrapping negative
+    /// indices from the end (Python-style: `-1` is the last element). Returns
+    /// `None` when the index is out of bounds in either direction.
+    fn wrap_index(i: &BigInt, len: usize) -> Option<usize> {
+        let i = i.to_i64()?; // too large for i64 => out of bounds
+        if i >= 0 {
+            let idx = usize::try_from(i).ok()?;
+            (idx < len).then_some(idx)
+        } else {
+            // -1 => len - 1, -len => 0, anything more negative => out of bounds
+            len.checked_sub(usize::try_from(i.unsigned_abs()).ok()?)
+        }
+    }
+
+    /// Returns a copy of the element at `index`, or an error if the index is out
+    /// of bounds. The index must be non-negative; use `index` for indexing from
+    /// the end.
+    pub fn get(list: &[Value], index: usize) -> anyhow::Result<Value> {
+        list.get(index)
+            .cloned()
+            .ok_or_else(|| anyhow!("index {index} is out of bounds"))
+    }
+
+    /// Returns a copy of the element at `index`, or `None` if `index` is past
+    /// the end of the list. A negative or oversized index is a conversion error,
+    /// not `None`; use `index?` for indexing from the end.
     #[function(name = "get?", return_type = Option<_>)]
-    pub fn maybe_get(list: &[Value], index: i64) -> Value {
-        let Ok(idx) = usize::try_from(index) else {
-            return Value::None;
-        };
-        match list.get(idx) {
+    pub fn maybe_get(list: &[Value], index: usize) -> Value {
+        match list.get(index) {
             None => Value::None,
             Some(v) => Value::Object(Rc::new(Object::Some(v.clone()))),
+        }
+    }
+
+    /// Returns a copy of the element at `i`, wrapping negative indices from the
+    /// end of the list; errors if the index is out of bounds. The named form of
+    /// the `[]` operator.
+    pub fn index(list: &[Value], i: &BigInt) -> anyhow::Result<Value> {
+        wrap_index(i, list.len())
+            .map(|idx| list[idx].clone())
+            .ok_or_else(|| anyhow!("index out of bounds"))
+    }
+
+    /// Returns a copy of the element at `i`, wrapping negative indices from the
+    /// end of the list; returns `None` if the index is out of bounds. The
+    /// non-throwing twin of the `[]` operator.
+    #[function(name = "index?", return_type = Option<_>)]
+    pub fn maybe_index(list: &[Value], i: &BigInt) -> Value {
+        match wrap_index(i, list.len()) {
+            Some(idx) => Value::Object(Rc::new(Object::Some(list[idx].clone()))),
+            None => Value::None,
         }
     }
 

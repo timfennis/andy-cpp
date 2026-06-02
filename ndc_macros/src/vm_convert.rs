@@ -160,9 +160,11 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
             let err = arg_error(position, "int");
             VmInputArg {
                 extract: quote! {
-                    let #temp = match #raw {
-                        ndc_vm::value::Value::Int(i) => *i as usize,
-                        _ => return Err(#err),
+                    let #temp = {
+                        let num = #raw.to_number().ok_or_else(|| #err)?;
+                        usize::try_from(num).map_err(|e| {
+                            ndc_vm::error::VmError::native(format!("arg {}: {}", #position, e))
+                        })?
                     };
                 },
                 pass: quote! { #temp },

@@ -608,11 +608,11 @@ implement_rounding!(round);
 
 #[derive(thiserror::Error, Debug)]
 pub enum NumberToUsizeError {
-    #[error("cannot convert from {0} to usize")]
+    #[error("expected a non-negative integer, got {0}")]
     UnsupportedVariant(StaticType),
-    #[error("expected non-negative integer for indexing")]
+    #[error("expected a non-negative integer, but the value was negative")]
     FromIntError(#[from] TryFromIntError),
-    #[error("failed to convert from bigint to number because of: '{0}'")]
+    #[error("this integer is out of range (must be non-negative and small enough to be an index)")]
     FromBigIntError(#[from] TryFromBigIntError<BigInt>),
 }
 

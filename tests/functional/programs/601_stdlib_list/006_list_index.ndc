@@ -1,0 +1,7 @@
+let list = [10, 20, 30];
+
+// `index` reads an element, wrapping negative indices from the end
+assert_eq(list.index(0), 10);
+assert_eq(list.index(2), 30);
+assert_eq(list.index(-1), 30);
+assert_eq(list.index(-3), 10);

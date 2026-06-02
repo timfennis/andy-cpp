@@ -1,0 +1,3 @@
+// strict `get` errors when the index is past the end
+// expect-error: out of bounds
+[10, 20, 30].get(5);

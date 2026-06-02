@@ -1,0 +1,14 @@
+let list = [10, 20, 30];
+
+// `index?` wraps negative indices like `index`, but returns None when out of bounds
+assert_eq(list.index?(0), Some(10));
+assert_eq(list.index?(-1), Some(30));
+assert_eq(list.index?(-3), Some(10));
+
+// out of bounds in either direction is None
+assert_eq(list.index?(3), None);
+assert_eq(list.index?(-4), None);
+
+// an index too large to address the list is also None (no error)
+assert_eq(list.index?(10^40), None);
+assert_eq(list.index?(-(10^40)), None);
