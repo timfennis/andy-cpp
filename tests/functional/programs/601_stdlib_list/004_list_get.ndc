@@ -1,0 +1,18 @@
+let list = [10, 20, 30];
+
+// in-bounds returns Some
+assert_eq(list.get?(0), Some(10));
+assert_eq(list.get?(2), Some(30));
+
+// out of bounds returns None
+assert_eq(list.get?(3), None);
+
+// negative indices are always out of bounds (no wrap-around)
+assert_eq(list.get?(-1), None);
+
+// empty list
+assert_eq([].get?(0), None);
+
+// unwrap_or extracts or falls back to the default
+assert_eq(list.get?(1).unwrap_or(99), 20);
+assert_eq(list.get?(5).unwrap_or(99), 99);

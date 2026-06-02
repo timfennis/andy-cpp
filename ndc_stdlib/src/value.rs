@@ -70,6 +70,18 @@ mod inner {
         }
     }
 
+    /// Extracts the value from an Option, returning `default` when it is `None`.
+    pub fn unwrap_or(value: Value, default: Value) -> anyhow::Result<Value> {
+        match value {
+            Value::Object(obj) => match obj.as_ref() {
+                Object::Some(inner) => Ok(inner.clone()),
+                _ => Err(anyhow::anyhow!("incorrect argument to unwrap_or")),
+            },
+            Value::None => Ok(default),
+            _ => Err(anyhow::anyhow!("incorrect argument to unwrap_or")),
+        }
+    }
+
     /// Returns a shallow copy of the given value.
     pub fn clone(value: Value) -> Value {
         value.shallow_clone()
