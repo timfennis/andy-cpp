@@ -30,6 +30,15 @@ Andy C++ has four number types:
 | `>=<` | Reverse compare | `false` | `false` |
 | `<>` | Concatenate string values | `true` | `false` |
 
+### Division by zero
+
+Dividing by zero with `/` or `\` (floor division) follows floating-point
+semantics: the result is promoted to a float and yields infinity (for example
+`1 / 0` and `1 \ 0` are both `inf`). The remainder operators `%` (modulo) and
+`%%` (euclidean remainder) have no meaningful result for a zero divisor, so they
+raise a runtime error (`division by zero`). Floating-point `%` follows IEEE
+semantics and returns `NaN`.
+
 Integers also support these operations:
 
 | Operator | Function | Support augmented assignment <sup>[[1]](../../features/augmented-assignment.md)</sup> | Augmentable with `not` |

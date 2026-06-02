@@ -1,0 +1,2 @@
+// expect-error: division by zero
+print(170141183460469231731687303715884105727 % 0);
