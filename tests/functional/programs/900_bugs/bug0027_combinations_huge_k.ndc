@@ -1,0 +1,23 @@
+// `combinations(seq, k)` built its index vector eagerly with
+// `(0..k).collect()`. A huge `k` (e.g. `i64::MAX`) over a short source
+// asked the allocator for an `i64::MAX`-element `Vec<usize>` and aborted
+// with "capacity overflow". The index vector is now only allocated once
+// the buffer is confirmed to hold at least `k` elements, so an
+// over-large `k` simply yields no combinations instead of panicking.
+assert_eq(combinations([1, 2, 3], 9223372036854775807).list(), []);
+
+// `k` larger than the source length yields nothing (boundary just above n).
+assert_eq(combinations([1, 2, 3], 4).list(), []);
+
+// Re-polling an exhausted over-large combination stays empty rather than
+// indexing a never-initialised index vector. Covers both eager and lazy
+// (enumerate) sources, drained twice.
+let eager = combinations([1, 2, 3], 5);
+assert_eq(eager.list(), []);
+assert_eq(eager.list(), []);
+let lazy = combinations([1, 2, 3].enumerate(), 5);
+assert_eq(lazy.list(), []);
+assert_eq(lazy.list(), []);
+
+// Valid combinations are still produced correctly.
+assert_eq([1, 2, 3, 4].combinations(2).list(), [(1, 2), (1, 3), (1, 4), (2, 3), (2, 4), (3, 4)]);

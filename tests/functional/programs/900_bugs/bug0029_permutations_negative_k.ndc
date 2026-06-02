@@ -1,0 +1,5 @@
+// `permutations(seq, k)` cast `k as usize`, silently turning a negative `k`
+// into `usize::MAX` and returning an empty list. `k` is now a `usize`
+// argument, so a negative value is rejected with a graceful error instead.
+// expect-error: expected a non-negative integer, but the value was negative
+permutations([1, 2, 3], -1);

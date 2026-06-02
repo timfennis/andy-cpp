@@ -1,0 +1,6 @@
+// `subsequences(seq, length)` cast `length as usize`, silently turning a
+// negative `length` into `usize::MAX` and returning an empty list. `length`
+// is now a `usize` argument, so a negative value is rejected with a graceful
+// error instead.
+// expect-error: expected a non-negative integer, but the value was negative
+subsequences([1, 2, 3], -1);
