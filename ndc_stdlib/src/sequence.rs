@@ -707,8 +707,10 @@ mod inner {
 
     /// Returns a list of all contiguous windows of `length` size. The windows overlap. If the `seq` is shorter than size, the iterator returns no values.
     #[function(return_type = Vec<_>)]
-    pub fn windows(seq: SeqValue, length: i64) -> anyhow::Result<Value> {
-        let length = length as usize;
+    pub fn windows(seq: SeqValue, length: usize) -> anyhow::Result<Value> {
+        if length == 0 {
+            return Err(anyhow!("window size must be non-zero"));
+        }
         Ok(Value::list(
             seq.try_into_iter()
                 .ok_or_else(|| anyhow!("windows requires a sequence"))?

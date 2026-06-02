@@ -1,0 +1,5 @@
+// `windows(seq, 0)` used to reach `slice::windows(0)`, which panics with
+// "window size must be non-zero". It now returns a graceful error, matching
+// the sibling `chunks` function.
+// expect-error: window size must be non-zero
+windows([1, 2, 3], 0);
