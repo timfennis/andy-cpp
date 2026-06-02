@@ -1,0 +1,3 @@
+// `get?` takes a usize, so a negative index is a conversion error, not None
+// expect-error: non-negative integer
+[10, 20, 30].get?(-1);

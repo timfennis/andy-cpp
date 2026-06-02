@@ -1,0 +1,3 @@
+// an index that does not fit a usize is a conversion error
+// expect-error: out of range
+[10, 20, 30].get?(10^40);
