@@ -149,7 +149,10 @@ impl Int {
     #[must_use]
     pub fn abs(&self) -> Self {
         match self {
-            Self::Int64(i) => Self::from(i.abs()),
+            // `i64::MIN.abs()` overflows, so promote to BigInt in that case.
+            Self::Int64(i) => i
+                .checked_abs()
+                .map_or_else(|| Self::from(BigInt::from(*i).abs()), Self::Int64),
             Self::BigInt(b) => Self::from(b.abs()),
         }
     }
@@ -218,7 +221,10 @@ impl Neg for Int {
 
     fn neg(self) -> Self::Output {
         match self {
-            Self::Int64(i) => Self::Int64(i.neg()),
+            // `-i64::MIN` overflows, so promote to BigInt in that case.
+            Self::Int64(i) => i
+                .checked_neg()
+                .map_or_else(|| Self::BigInt(BigInt::from(i).neg()), Self::Int64),
             Self::BigInt(i) => Self::BigInt(i.neg()),
         }
     }

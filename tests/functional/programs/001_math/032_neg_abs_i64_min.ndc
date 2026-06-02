@@ -1,0 +1,8 @@
+// Negating or taking the absolute value of `i64::MIN` overflows the i64
+// range (`-i64::MIN` does not fit in an i64). `Int::neg` and `Int::abs` used
+// to call `i.neg()` / `i.abs()` directly, which panics in debug builds and
+// silently wraps in release. They now promote to BigInt, yielding the correct
+// positive magnitude.
+// expect-output: 9223372036854775808 9223372036854775808 9223372036854775808
+let min = -9223372036854775807 - 1;
+print(-min, abs(min), abs(-min));
