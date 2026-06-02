@@ -1,0 +1,6 @@
+// `abs(i64::MIN)` and `-(i64::MIN)` overflow the i64 range because the
+// positive magnitude `2^63` does not fit in an i64. `Int::abs`/`Int::neg`
+// used to evaluate `i.abs()`/`i.neg()` directly, panicking with "attempt to
+// negate with overflow" in debug builds. They now promote to BigInt.
+// expect-output: 9223372036854775808
+print(abs(-9223372036854775807 - 1));
