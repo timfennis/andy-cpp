@@ -212,6 +212,14 @@ fn to_forward_index(i: i64, size: usize, for_slice: bool) -> Result<usize, VmErr
     }
 }
 
+/// Resolves a (possibly negative) slice endpoint to a forward position without
+/// clamping it into `0..=size`. Used purely to detect reversed ranges: clamping
+/// would collapse out-of-range endpoints to the boundary (e.g. `6` and `5` both
+/// becoming `size` on a 5-element string), masking a reversal like `6..=5`.
+fn unclamped_slice_index(i: i64, size: usize) -> i64 {
+    if i < 0 { size as i64 + i } else { i }
+}
+
 enum VmOffset {
     Element(usize),
     Range(usize, usize),
@@ -223,16 +231,19 @@ fn extract_vm_offset(index_value: &Value, size: usize) -> Result<VmOffset, VmErr
     {
         let iter_ref = iter.borrow();
         if let Some((start, end, inclusive)) = iter_ref.range_bounds() {
-            let from_idx = to_forward_index(start, size, true)?;
-            let to_idx = to_forward_index(end, size, true)?;
-            // Reject reversed ranges before widening an inclusive end, otherwise
-            // an off-by-one inclusive range like `1..=0` would survive the `+1`
-            // and silently produce an empty slice instead of an error.
-            if to_idx < from_idx {
+            // Detect reversal from the unclamped endpoints, so an out-of-range
+            // reversed range can't collapse to equality once clamped (e.g.
+            // `6..=5` on a 5-element string would otherwise clamp both ends to
+            // 5 and silently yield an empty slice instead of an error).
+            let from_unclamped = unclamped_slice_index(start, size);
+            let end_unclamped = unclamped_slice_index(end, size);
+            if end_unclamped < from_unclamped {
                 return Err(VmError::native(format!(
-                    "{from_idx}..{to_idx} out of bounds"
+                    "{from_unclamped}..{end_unclamped} out of bounds"
                 )));
             }
+            let from_idx = to_forward_index(start, size, true)?;
+            let to_idx = to_forward_index(end, size, true)?;
             let to_idx = if inclusive {
                 (to_idx + 1).min(size)
             } else {
