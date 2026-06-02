@@ -225,16 +225,19 @@ fn extract_vm_offset(index_value: &Value, size: usize) -> Result<VmOffset, VmErr
         if let Some((start, end, inclusive)) = iter_ref.range_bounds() {
             let from_idx = to_forward_index(start, size, true)?;
             let to_idx = to_forward_index(end, size, true)?;
-            let to_idx = if inclusive {
-                (to_idx + 1).min(size)
-            } else {
-                to_idx
-            };
+            // Reject reversed ranges before widening an inclusive end, otherwise
+            // an off-by-one inclusive range like `1..=0` would survive the `+1`
+            // and silently produce an empty slice instead of an error.
             if to_idx < from_idx {
                 return Err(VmError::native(format!(
                     "{from_idx}..{to_idx} out of bounds"
                 )));
             }
+            let to_idx = if inclusive {
+                (to_idx + 1).min(size)
+            } else {
+                to_idx
+            };
             return Ok(VmOffset::Range(from_idx, to_idx));
         }
         if let Some(start) = iter_ref.unbounded_range_start() {
