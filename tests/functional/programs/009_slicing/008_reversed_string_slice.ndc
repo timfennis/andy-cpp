@@ -1,0 +1,4 @@
+// expect-error: 3..1 out of bounds
+// A reversed range on a string used to panic with "attempt to subtract with
+// overflow"; it must now error gracefully like list/tuple slices do.
+"hello"[3..1]

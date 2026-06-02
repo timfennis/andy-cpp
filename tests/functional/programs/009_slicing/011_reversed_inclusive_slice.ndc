@@ -1,0 +1,4 @@
+// expect-error: 2..1 out of bounds
+// An inclusive range whose start is after its end (off-by-one, so the `+1`
+// widening would otherwise mask it) must error, not return an empty slice.
+"hello"[2..=1]

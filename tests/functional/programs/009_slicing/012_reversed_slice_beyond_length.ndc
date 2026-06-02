@@ -1,0 +1,5 @@
+// expect-error: 6..5 out of bounds
+// A reversed range whose endpoints are both at or beyond the length used to
+// clamp to equal indices and return an empty slice. Reversal is now detected
+// from the unclamped endpoints, so it errors.
+"hello"[6..=5]
