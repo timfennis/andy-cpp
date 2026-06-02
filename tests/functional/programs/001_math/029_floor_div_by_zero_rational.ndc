@@ -1,0 +1,6 @@
+// Regression: rational and BigInt floor division by zero yields infinity,
+// not an error (matches `/`).
+print((1 / 3) \ 0);
+print(170141183460469231731687303715884105727 \ 0);
+// expect-output: inf
+// expect-output: inf

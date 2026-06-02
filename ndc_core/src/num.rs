@@ -472,16 +472,17 @@ impl Number {
     }
 
     pub fn floor_div(self, rhs: Self) -> Result<Self, BinaryOperatorError> {
-        // Floor division of an exact value by zero panics (`i64::div_euclid`
-        // and the bigint path), so reject it the same way remainder does.
-        if is_exact(&self) && is_exact(&rhs) && rhs.is_zero() {
-            return Err(BinaryOperatorError::new("division by zero".to_string()));
-        }
         match (self, rhs) {
-            // Handle this case separately because it's faster??
-            (Self::Int(Int::Int64(l)), Self::Int(Int::Int64(r))) => {
-                Ok(Self::Int(Int::Int64(l.div_euclid(r))))
-            }
+            // Fast path for two i64s. `div_euclid` panics on a zero divisor
+            // (and on `i64::MIN / -1`), so fall back to the general path in
+            // those cases — it promotes to a float and yields infinity for a
+            // zero divisor, matching `/` and the BigInt/rational paths.
+            (Self::Int(Int::Int64(l)), Self::Int(Int::Int64(r))) => match l.checked_div_euclid(r) {
+                Some(q) => Ok(Self::Int(Int::Int64(q))),
+                None => Self::Int(Int::Int64(l))
+                    .div(Self::Int(Int::Int64(r)))
+                    .map(|n| n.floor()),
+            },
             (l, r) => Ok(l.div(r)?.floor()),
         }
     }
