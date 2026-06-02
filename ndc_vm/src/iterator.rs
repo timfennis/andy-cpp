@@ -463,14 +463,19 @@ impl VmIterator for CombinationsIter {
         }
 
         if self.first {
-            self.first = false;
             if !self.ensure_index(k - 1) {
+                // Source can't supply `k` elements: stay exhausted. `first`
+                // is left set so a re-poll returns `None` again instead of
+                // falling into the else branch and indexing the still-empty
+                // `indices`.
                 return None;
             }
             // The buffer now holds at least `k` elements, so this allocation
             // is bounded by data we actually materialised — no capacity
-            // overflow even when `k` is enormous.
+            // overflow even when `k` is enormous. Only now is it safe to
+            // leave the first-call branch.
             self.indices = (0..k).collect();
+            self.first = false;
         } else {
             // For lazy sources: pull one more element before choosing the
             // pivot. Without this, when `indices[k-1]` reaches the end of
