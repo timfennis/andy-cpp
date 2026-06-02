@@ -1,0 +1,5 @@
+let list = [10, 20, 30];
+
+// `get` returns the element directly when the index is in bounds
+assert_eq(list.get(0), 10);
+assert_eq(list.get(2), 30);
