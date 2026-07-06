@@ -1,0 +1,12 @@
+// This test only checks that a struct can be defined without crashing the parser.
+struct Person {
+    name: String,
+    age: Int,
+    locations: List<String>
+}
+
+// Check that it supports trailing commas
+struct Test {
+    a: Int,
+    b: Int,
+}

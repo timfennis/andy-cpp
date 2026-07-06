@@ -206,6 +206,9 @@ fn collect(expr: &ExpressionLocation, scope: Span, out: &mut Vec<Decl>) {
         | Expression::ComplexLiteral(_)
         | Expression::Break
         | Expression::Continue => {}
+        Expression::StructDeclaration { .. } => {
+            // TODO: @Claude do we deal with structs here?
+        }
     }
 }
 

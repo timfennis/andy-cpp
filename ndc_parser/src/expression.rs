@@ -123,6 +123,10 @@ pub enum Expression {
         captures: Vec<CaptureSource>,
         pure: bool,
     },
+    StructDeclaration {
+        name: String,
+        fields: Vec<StructField>,
+    },
     Block {
         statements: Vec<ExpressionLocation>,
     },
@@ -201,6 +205,12 @@ pub enum ForBody {
         accumulator_slot: Option<usize>,
     },
 }
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct StructField {
+    pub lvalue: Lvalue,
+    pub annotation: StaticType,
+    pub span: Span,
+}
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct FunctionParameter {
@@ -273,6 +283,13 @@ impl ExpressionLocation {
 
     pub fn as_identifier(&self) -> &str {
         match &self.expression {
+            Expression::Identifier { name, resolved: _ } => name,
+            _ => panic!("the parser should have guaranteed us the right type of expression"),
+        }
+    }
+
+    pub fn to_identifier(self) -> String {
+        match self.expression {
             Expression::Identifier { name, resolved: _ } => name,
             _ => panic!("the parser should have guaranteed us the right type of expression"),
         }
