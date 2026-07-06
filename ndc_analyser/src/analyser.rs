@@ -466,6 +466,10 @@ impl Analyser {
 
                 Ok(StaticType::Iterator(Box::new(StaticType::Int)))
             }
+            Expression::StructDeclaration { name: _, fields: _ } => {
+                // TODO: we must probably register the type somewhere so the analyser knows about it later
+                Ok(StaticType::unit())
+            }
         }
     }
 

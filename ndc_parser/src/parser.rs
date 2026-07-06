@@ -1,9 +1,9 @@
 use std::fmt::Write;
 
-use crate::expression::Expression;
 use crate::expression::{
     Binding, ExpressionLocation, ForBody, ForIteration, FunctionParameter, Lvalue, NodeId,
 };
+use crate::expression::{Expression, StructField};
 use crate::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
 use ndc_core::{Parameter, StaticType, TypeSignature};
 use ndc_lexer::{Span, Token, TokenLocation};
@@ -33,6 +33,7 @@ impl Parser {
                     | Expression::For { .. }
                     | Expression::FunctionDeclaration { .. }
                     | Expression::VariableDeclaration { .. }
+                    | Expression::StructDeclaration { .. }
             )
         };
         let mut expressions = Vec::new();
@@ -950,6 +951,10 @@ impl Parser {
         else if self.match_token(&[Token::Fn, Token::Pure]).is_some() {
             return self.function_declaration();
         }
+        // Matches the start of a struct declaration
+        else if self.match_token(&[Token::Struct]).is_some() {
+            return self.struct_declaration();
+        }
         // matches `return;` and `return (expression);`
         else if let Some(return_token_location) = self.consume_token_if(&[Token::Return]) {
             let expr_loc = if self.match_token(&[Token::Semicolon]).is_some() {
@@ -1233,6 +1238,27 @@ impl Parser {
         })
     }
 
+    fn struct_declaration(&mut self) -> Result<ExpressionLocation, Error> {
+        let struct_start = self.require_token(&[Token::Struct])?;
+        let identifier = self.require_identifier()?;
+
+        let (fields, field_span) = self.delimited_comma_separated(
+            &Token::LeftCurlyBracket,
+            &Token::RightCurlyBracket,
+            Self::struct_field,
+            false,
+        )?;
+
+        Ok(ExpressionLocation {
+            id: NodeId::next(),
+            expression: Expression::StructDeclaration {
+                name: identifier.to_identifier(),
+                fields,
+            },
+            span: struct_start.merge(field_span),
+        })
+    }
+
     /// Parses a block expression including the block delimiters `{` and `}`
     fn block(&mut self) -> Result<ExpressionLocation, Error> {
         let left_curly_span = self.require_token(&[Token::LeftCurlyBracket])?;
@@ -1442,6 +1468,36 @@ impl Parser {
         Ok(StaticType::Tuple(types))
     }
 
+    fn struct_field(&mut self) -> Result<StructField, Error> {
+        let maybe_lvalue = self.single_expression()?;
+        let lvalue_span = maybe_lvalue.span;
+
+        let Ok(lvalue) = Lvalue::try_from(maybe_lvalue) else {
+            return Err(Error::with_help(
+                "Expected field name".to_string(),
+                lvalue_span,
+                "Struct field must be identifiers followed by a type annotation (e.g. `x: Int`)."
+                    .to_string(),
+            ));
+        };
+
+        let annotation = if self.peek_current_token() == Some(&Token::Colon) {
+            self.advance();
+            self.static_type()?
+        } else {
+            return Err(Error::with_help(
+                "Expected field type".to_string(),
+                lvalue_span,
+                "Struct fields must have a type annotation".to_string(),
+            ));
+        };
+
+        Ok(StructField {
+            lvalue,
+            annotation,
+            span: lvalue_span.merge(self.tokens[self.current - 1].span),
+        })
+    }
     fn named_parameter(&mut self) -> Result<FunctionParameter, Error> {
         let maybe_lvalue = self.single_expression()?;
         let lvalue_span = maybe_lvalue.span;
