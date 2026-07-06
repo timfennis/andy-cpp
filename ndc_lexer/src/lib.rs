@@ -93,6 +93,7 @@ impl Iterator for Lexer<'_> {
 
                 return Some(Ok(self.lex_op_assign(operator_token, start_offset)));
             }
+
             // Check for double character tokens
             if let Ok(token) = Token::try_from((first, second)) {
                 self.source.consume(2);
