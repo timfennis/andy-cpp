@@ -189,6 +189,9 @@ fn child_expressions(expr: &ExpressionLocation) -> Vec<&ExpressionLocation> {
         | Expression::ComplexLiteral(_)
         | Expression::Break
         | Expression::Continue => {}
+        Expression::StructDeclaration { .. } => {
+            // TODO: @Claude do we deal with structs here?
+        }
     }
     out
 }
@@ -352,6 +355,9 @@ fn walk_expression(visitor: &mut impl AstVisitor, expr: &ExpressionLocation) {
         | Expression::ComplexLiteral(_)
         | Expression::Break
         | Expression::Continue => {}
+        Expression::StructDeclaration { .. } => {
+            // TODO: @Claude do we deal with structs here
+        }
     }
 }
 

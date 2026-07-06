@@ -236,6 +236,7 @@ fn collect_function_spans(expr: &ExpressionLocation, spans: &mut AHashSet<usize>
         | Expression::BigIntLiteral(_)
         | Expression::ComplexLiteral(_)
         | Expression::Identifier { .. }
+        | Expression::StructDeclaration { .. }
         | Expression::Break
         | Expression::Continue => {}
     }

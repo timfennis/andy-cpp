@@ -317,6 +317,9 @@ impl Compiler {
                     span,
                 )?;
             }
+            Expression::StructDeclaration { .. } => {
+                // TODO: skip, the compiler doesn't care?
+            }
             Expression::Grouping(statements) => {
                 self.compile_expr(*statements)?;
             }
