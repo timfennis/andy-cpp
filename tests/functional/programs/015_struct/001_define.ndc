@@ -1,4 +1,0 @@
-struct Person {
-    name: String,
-    age: Int
-}
