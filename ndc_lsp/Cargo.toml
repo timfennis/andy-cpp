@@ -5,7 +5,7 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
-tokio = { version = "1.49.0", features = ["full"] }
+tokio = { version = "1.52.3", features = ["full"] }
 ahash.workspace = true
 ndc_analyser.workspace = true
 ndc_lexer.workspace = true

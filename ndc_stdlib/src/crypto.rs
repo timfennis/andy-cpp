@@ -15,6 +15,6 @@ mod internal {
         let mut hasher = sha1::Sha1::new();
         hasher.update(val);
         let digest = hasher.finalize();
-        format!("{:x}", digest)
+        digest.iter().map(|byte| format!("{byte:02x}")).collect()
     }
 }

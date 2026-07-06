@@ -125,6 +125,6 @@ pub fn emit_error(source_db: &SourceDb, err: InterpreterError) {
     let writer = StandardStream::stderr(ColorChoice::Auto);
     let config = term::Config::default();
     for diagnostic in &diagnostics {
-        let _ = term::emit(&mut writer.lock(), &config, &files, diagnostic);
+        let _ = term::emit_to_write_style(&mut writer.lock(), &config, &files, diagnostic);
     }
 }
