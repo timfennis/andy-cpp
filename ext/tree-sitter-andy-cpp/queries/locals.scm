@@ -21,6 +21,10 @@
 (function_definition
   name: (identifier) @local.definition.function)
 
+; A struct declaration binds its constructor by the struct's name.
+(struct_definition
+  name: (type_identifier) @local.definition.type)
+
 (parameter
   name: (identifier) @local.definition.parameter)
 (parameter

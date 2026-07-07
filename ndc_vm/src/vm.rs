@@ -674,6 +674,28 @@ impl Vm {
                     "Memoized function should have been unwrapped before dispatch_call_with_memo"
                 )
             }
+            Function::Constructor(i) => {
+                if args != i.fields.len() {
+                    return Err(VmError::new(
+                        "incorrect number of arguments to constructor",
+                        Span::synthetic(), // TODO: figure out the real span here
+                    ));
+                }
+
+                let values = self.stack.drain((self.stack.len() - args)..).collect();
+                self.stack.pop(); // slot with the constructor
+                let result = Value::Object(Rc::new(Object::Struct {
+                    info: i,
+                    fields: RefCell::new(values),
+                }));
+
+                if let Some((cache, key)) = memo {
+                    cache.borrow_mut().insert(key, result.clone());
+                }
+
+                self.stack.push(result);
+                return Ok(());
+            }
         };
         let num_locals = closure.prototype.num_locals;
         self.frames.push(CallFrame {

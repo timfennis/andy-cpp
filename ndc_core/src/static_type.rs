@@ -1,5 +1,7 @@
+use crate::r#struct::StructId;
 use itertools::Itertools;
 use std::fmt;
+use std::rc::Rc;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum TypeSignature {
@@ -94,6 +96,10 @@ pub enum StaticType {
     Function {
         parameters: Option<Vec<Self>>,
         return_type: Box<Self>,
+    },
+    Struct {
+        id: StructId,
+        name: Box<str>,
     },
     Option(Box<Self>),
 
@@ -641,6 +647,7 @@ impl StaticType {
             | Self::Rational
             | Self::Complex
             | Self::Map { .. }
+            | Self::Struct { .. } // for now, we won't have positional unpacking
             | Self::Never => None,
         }
     }
@@ -662,6 +669,7 @@ impl fmt::Display for StaticType {
                     .as_deref()
                     .map_or(String::from("*"), |p| p.iter().join(", "))
             ),
+            Self::Struct { name, .. } => write!(f, "{name}"),
             Self::Option(elem) => write!(f, "Option<{elem}>"),
             Self::Number => write!(f, "Number"),
             Self::Float => write!(f, "Float"),

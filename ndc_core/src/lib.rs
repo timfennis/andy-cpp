@@ -4,6 +4,7 @@ pub mod hash_map;
 pub mod int;
 pub mod num;
 pub mod static_type;
+pub mod r#struct;
 
 pub use static_type::{Parameter, StaticType, TypeSignature};
 use std::slice::Iter;

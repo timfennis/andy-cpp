@@ -180,6 +180,8 @@ fn child_expressions(expr: &ExpressionLocation) -> Vec<&ExpressionLocation> {
                 out.push(e);
             }
         }
+        // Leaves with no sub-expressions. Struct declarations belong here:
+        // fields are names + type annotations, not expressions.
         Expression::Identifier { .. }
         | Expression::BoolLiteral(_)
         | Expression::StringLiteral(_)
@@ -188,10 +190,8 @@ fn child_expressions(expr: &ExpressionLocation) -> Vec<&ExpressionLocation> {
         | Expression::BigIntLiteral(_)
         | Expression::ComplexLiteral(_)
         | Expression::Break
-        | Expression::Continue => {}
-        Expression::StructDeclaration { .. } => {
-            // TODO: @Claude do we deal with structs here?
-        }
+        | Expression::Continue
+        | Expression::StructDeclaration { .. } => {}
     }
     out
 }
@@ -342,6 +342,8 @@ fn walk_expression(visitor: &mut impl AstVisitor, expr: &ExpressionLocation) {
                 walk_expression(visitor, e);
             }
         }
+        // Leaves with no sub-expressions. Struct declarations belong here:
+        // fields are names + type annotations, not expressions.
         Expression::Identifier { .. }
         | Expression::BoolLiteral(_)
         | Expression::StringLiteral(_)
@@ -350,10 +352,8 @@ fn walk_expression(visitor: &mut impl AstVisitor, expr: &ExpressionLocation) {
         | Expression::BigIntLiteral(_)
         | Expression::ComplexLiteral(_)
         | Expression::Break
-        | Expression::Continue => {}
-        Expression::StructDeclaration { .. } => {
-            // TODO: @Claude do we deal with structs here
-        }
+        | Expression::Continue
+        | Expression::StructDeclaration { .. } => {}
     }
 }
 

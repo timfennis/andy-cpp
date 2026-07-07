@@ -1254,6 +1254,8 @@ impl Parser {
             expression: Expression::StructDeclaration {
                 name: identifier.to_identifier(),
                 fields,
+                resolved_name: None,
+                resolved: None,
             },
             span: struct_start.merge(field_span),
         })
@@ -1469,13 +1471,19 @@ impl Parser {
     }
 
     fn struct_field(&mut self) -> Result<StructField, Error> {
-        let maybe_lvalue = self.single_expression()?;
-        let lvalue_span = maybe_lvalue.span;
+        let ExpressionLocation {
+            expression,
+            span: identifier_span,
+            ..
+        } = self.single_expression()?;
 
-        let Ok(lvalue) = Lvalue::try_from(maybe_lvalue) else {
+        let Expression::Identifier {
+            name: identifier, ..
+        } = expression
+        else {
             return Err(Error::with_help(
                 "Expected field name".to_string(),
-                lvalue_span,
+                identifier_span,
                 "Struct field must be identifiers followed by a type annotation (e.g. `x: Int`)."
                     .to_string(),
             ));
@@ -1487,15 +1495,15 @@ impl Parser {
         } else {
             return Err(Error::with_help(
                 "Expected field type".to_string(),
-                lvalue_span,
+                identifier_span,
                 "Struct fields must have a type annotation".to_string(),
             ));
         };
 
         Ok(StructField {
-            lvalue,
+            identifier,
             annotation,
-            span: lvalue_span.merge(self.tokens[self.current - 1].span),
+            span: identifier_span.merge(self.tokens[self.current - 1].span),
         })
     }
     fn named_parameter(&mut self) -> Result<FunctionParameter, Error> {

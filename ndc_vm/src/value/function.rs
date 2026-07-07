@@ -3,6 +3,7 @@ use crate::chunk::{Chunk, OpCode};
 use crate::error::VmError;
 use ndc_core::StaticType;
 use ndc_core::hash_map::HashMap;
+use ndc_core::r#struct::StructInfo;
 use std::cell::RefCell;
 use std::fmt;
 use std::fmt::Formatter;
@@ -21,6 +22,8 @@ pub enum Function {
         cache: Rc<RefCell<HashMap<u64, Value>>>,
         function: Rc<Self>,
     },
+
+    Constructor(Rc<StructInfo>),
 }
 
 pub struct NativeFunction {
@@ -72,10 +75,11 @@ impl CompiledFunction {
 impl Function {
     pub fn prototype(&self) -> Option<&Rc<CompiledFunction>> {
         match self {
-            Self::Compiled(f) => Some(f),
             Self::Closure(c) => Some(&c.prototype),
-            Self::Native(_) => None,
+            Self::Compiled(f) => Some(f),
+            Self::Constructor(_) => None,
             Self::Memoized { function, .. } => function.prototype(),
+            Self::Native(_) => None,
         }
     }
 
@@ -105,6 +109,7 @@ impl Function {
             Self::Native(f) => Some(&f.name),
             Self::Closure(c) => c.prototype.name.as_deref(),
             Self::Memoized { function, .. } => function.name(),
+            Self::Constructor(info) => Some(info.name.as_ref()),
         }
     }
 
@@ -114,6 +119,7 @@ impl Function {
             Self::Native(f) => f.static_type.clone(),
             Self::Closure(c) => c.prototype.static_type.clone(),
             Self::Memoized { function, .. } => function.static_type(),
+            Self::Constructor(f) => f.constructor_type(),
         }
     }
 
@@ -125,6 +131,7 @@ impl Function {
             Self::Compiled(f) => &f.static_type,
             Self::Closure(c) => &c.prototype.static_type,
             Self::Memoized { function, .. } => return function.matches_arg_types(arg_types),
+            Function::Constructor(i) => &i.constructor_type(),
         };
         let StaticType::Function { parameters, .. } = st else {
             return false;
@@ -150,6 +157,7 @@ impl Function {
             Self::Compiled(f) => &f.static_type,
             Self::Closure(c) => &c.prototype.static_type,
             Self::Memoized { function, .. } => return function.matches_value_args(args),
+            Self::Constructor(i) => &i.constructor_type(),
         };
         let StaticType::Function { parameters, .. } = st else {
             return false;
@@ -174,6 +182,7 @@ impl fmt::Debug for Function {
             Self::Native(native) => write!(f, "<native function {:?}>", native.static_type),
             Self::Closure(closure) => write!(f, "<closure over {:?}>", closure.prototype.name),
             Self::Memoized { function, .. } => write!(f, "<memoized {:?}>", function),
+            Self::Constructor(i) => write!(f, "function {:?}", i.name),
         }
     }
 }
@@ -188,6 +197,7 @@ impl fmt::Display for Function {
             Self::Native(native) => write!(f, "<native fn {:?}>", native.static_type),
             Self::Closure(closure) => write!(f, "<closure over {:?}>", closure.prototype.name),
             Self::Memoized { function, .. } => write!(f, "<memoized {function}>"),
+            Self::Constructor(i) => write!(f, "<fn {}>", i.name),
         }
     }
 }

@@ -5,10 +5,12 @@ use ndc_parser::ExpressionLocation;
 use ndc_vm::compiler::Compiler;
 use ndc_vm::value::CompiledFunction;
 use ndc_vm::{OutputSink, Vm};
+use std::cell::RefCell;
 use std::rc::Rc;
 use timing::{Phase, measure};
 
 pub use ndc_analyser::AnalysisResult;
+use ndc_core::r#struct::StructRegistry;
 #[cfg(feature = "trace")]
 pub use ndc_vm::tracer;
 pub use ndc_vm::{NativeFunction, Value};
@@ -17,7 +19,8 @@ pub use timing::ExecutionTimings;
 mod timing;
 
 pub struct Interpreter {
-    registry: FunctionRegistry<Rc<NativeFunction>>,
+    function_registry: FunctionRegistry<Rc<NativeFunction>>,
+    struct_registry: Rc<RefCell<StructRegistry>>,
     capturing: bool,
     analyser: Analyser,
     source_db: SourceDb,
@@ -44,10 +47,15 @@ impl Interpreter {
     }
 
     fn from_capturing(capturing: bool) -> Self {
+        let struct_registry: Rc<RefCell<StructRegistry>> = Default::default();
         Self {
-            registry: FunctionRegistry::default(),
+            function_registry: FunctionRegistry::default(),
+            struct_registry: Rc::clone(&struct_registry),
             capturing,
-            analyser: Analyser::from_scope_tree(ScopeTree::from_global_scope(vec![])),
+            analyser: Analyser::from_scope_tree(
+                ScopeTree::from_global_scope(vec![]),
+                struct_registry,
+            ),
             source_db: SourceDb::new(),
             repl_state: None,
             #[cfg(feature = "trace")]
@@ -56,14 +64,17 @@ impl Interpreter {
     }
 
     pub fn configure<F: FnOnce(&mut FunctionRegistry<Rc<NativeFunction>>)>(&mut self, f: F) {
-        f(&mut self.registry);
+        f(&mut self.function_registry);
         let functions = self
-            .registry
+            .function_registry
             .iter()
             .map(|fun| (fun.name.clone(), fun.static_type.clone()))
             .collect();
 
-        self.analyser = Analyser::from_scope_tree(ScopeTree::from_global_scope(functions));
+        self.analyser = Analyser::from_scope_tree(
+            ScopeTree::from_global_scope(functions),
+            Rc::clone(&self.struct_registry),
+        );
     }
 
     #[cfg(feature = "trace")]
@@ -72,7 +83,7 @@ impl Interpreter {
     }
 
     pub fn functions(&self) -> impl Iterator<Item = &Rc<NativeFunction>> {
-        self.registry.iter()
+        self.function_registry.iter()
     }
 
     /// Returns the captured output, or `None` if this interpreter writes to stdout.
@@ -122,7 +133,10 @@ impl Interpreter {
     pub fn compile_str(&mut self, input: &str) -> Result<CompiledFunction, InterpreterError> {
         let source_id = self.source_db.add("<input>", input);
         let (expressions, _) = self.parse_and_analyse(input, source_id)?;
-        Ok(Compiler::compile(expressions.into_iter())?)
+        Ok(Compiler::compile(
+            expressions.into_iter(),
+            Rc::clone(&self.struct_registry),
+        )?)
     }
 
     /// Like [`Self::compile_str`] but skips the peephole optimizer.
@@ -133,7 +147,10 @@ impl Interpreter {
     ) -> Result<CompiledFunction, InterpreterError> {
         let source_id = self.source_db.add("<input>", input);
         let (expressions, _) = self.parse_and_analyse(input, source_id)?;
-        Ok(Compiler::compile_unoptimized(expressions.into_iter())?)
+        Ok(Compiler::compile_unoptimized(
+            expressions.into_iter(),
+            Rc::clone(&self.struct_registry),
+        )?)
     }
 
     pub fn disassemble_str(&mut self, input: &str) -> Result<String, InterpreterError> {
@@ -230,7 +247,7 @@ impl Interpreter {
         use ndc_vm::{Function as VmFunction, Object as VmObject, Value as VmValue};
 
         let globals: Vec<VmValue> = self
-            .registry
+            .function_registry
             .iter()
             .map(|native| {
                 VmValue::Object(Rc::new(VmObject::Function(VmFunction::Native(Rc::clone(
@@ -248,7 +265,7 @@ impl Interpreter {
                     OutputSink::Stdout
                 };
                 let (code, checkpoint) = measure(&mut timings, Phase::Compiling, || {
-                    Compiler::compile_resumable(expressions)
+                    Compiler::compile_resumable(expressions, Rc::clone(&self.struct_registry))
                 })?;
                 let mut vm = Vm::new(code, globals).with_output(output);
                 #[cfg(feature = "trace")]

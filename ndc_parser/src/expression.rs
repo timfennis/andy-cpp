@@ -1,9 +1,11 @@
 use crate::operator::LogicalOperator;
 use crate::parser::Error as ParseError;
+use ndc_core::r#struct::{StructId, StructInfo};
 use ndc_core::{StaticType, TypeSignature};
 use ndc_lexer::Span;
 use num::BigInt;
 use num::complex::Complex64;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 /// Unique identity for an AST node. Used as a key in side tables (e.g. the
@@ -126,6 +128,8 @@ pub enum Expression {
     StructDeclaration {
         name: String,
         fields: Vec<StructField>,
+        resolved: Option<StructId>,
+        resolved_name: Option<ResolvedVar>,
     },
     Block {
         statements: Vec<ExpressionLocation>,
@@ -207,7 +211,7 @@ pub enum ForBody {
 }
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct StructField {
-    pub lvalue: Lvalue,
+    pub identifier: String,
     pub annotation: StaticType,
     pub span: Span,
 }

@@ -1,9 +1,12 @@
+use ndc_core::r#struct::StructRegistry;
 use ndc_lexer::{Lexer, SourceId};
 use ndc_parser::Parser;
 use ndc_vm::chunk::JumpTarget;
 use ndc_vm::chunk::OpCode;
 use ndc_vm::chunk::OpCode::*;
 use ndc_vm::compiler::Compiler;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 // These helpers compile without the peephole optimizer so the tests
 // document the raw compiler output as a specification. Optimizer behaviour
@@ -14,10 +17,13 @@ fn compile(input: &str) -> Vec<OpCode> {
         .collect::<Result<Vec<_>, _>>()
         .expect("lex failed");
     let expressions = Parser::from_tokens(tokens).parse().expect("parse failed");
-    Compiler::compile_unoptimized(expressions.into_iter())
-        .expect("compile failed")
-        .opcodes()
-        .to_vec()
+    Compiler::compile_unoptimized(
+        expressions.into_iter(),
+        Rc::new(RefCell::new(StructRegistry::default())),
+    )
+    .expect("compile failed")
+    .opcodes()
+    .to_vec()
 }
 
 fn compile_with_analysis(input: &str) -> Vec<OpCode> {
