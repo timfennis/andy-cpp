@@ -13,8 +13,8 @@ use std::str::FromStr;
 /// with an error. In lossy mode every value that can be reasonably represented
 /// is accepted: rationals become floats, complex numbers become strings,
 /// options are unwrapped, tuples and deques become arrays, heaps become arrays
-/// in priority order, iterators are drained, non-string map keys are
-/// stringified, and `None` and non-finite floats become null.
+/// in priority order, iterators are drained, structs become objects, non-string
+/// map keys are stringified, and `None` and non-finite floats become null.
 ///
 /// `active` holds the containers currently being converted on the recursion
 /// path, so a value that (transitively) contains itself is detected instead of
@@ -44,6 +44,7 @@ fn value_to_json(
                     | Object::MaxHeap(_)
                     | Object::MinHeap(_)
                     | Object::Iterator(_)
+                    | Object::Struct { .. }
             );
             if cycle_guard && !active.insert(Rc::as_ptr(obj)) {
                 bail!("cannot convert a value that contains itself to JSON");
@@ -139,6 +140,18 @@ fn object_to_json(
                 .collect::<Result<Map<String, JsonValue>, _>>()
                 .map(JsonValue::Object)
         }
+        Object::Struct { info, fields } if lossy => Ok(JsonValue::Object(
+            info.fields
+                .iter()
+                .zip(fields.borrow().iter())
+                .map(|((name, _), value)| {
+                    value_to_json(value, lossy, active).map(|value| (name.clone(), value))
+                })
+                .collect::<Result<Map<String, JsonValue>, _>>()?,
+        )),
+        Object::Struct { .. } => bail!(
+            "cannot convert a struct to JSON, use json_encode_lossy to convert it to a JSON object"
+        ),
     }
 }
 
@@ -197,8 +210,8 @@ mod inner {
     /// `null`; sets convert to objects whose values are all `null`. Anything
     /// else is rejected with an error: rationals, complex numbers, non-finite
     /// floats, options (both `Some` and `None`), tuples, deques, iterators,
-    /// heaps, functions, maps with non-string keys or a default value, and
-    /// values that contain themselves. Use `json_encode_lossy` to convert
+    /// heaps, structs, functions, maps with non-string keys or a default value,
+    /// and values that contain themselves. Use `json_encode_lossy` to convert
     /// those anyway.
     pub fn json_encode(input: Value) -> anyhow::Result<String> {
         let v = value_to_json(&input, false, &mut HashSet::new())?;
@@ -210,11 +223,11 @@ mod inner {
     ///
     /// Rationals become floats, complex numbers become strings, `Some(x)` is
     /// unwrapped to `x`, tuples and deques become arrays, heaps become arrays
-    /// in priority order, iterators are drained, non-string map keys are
-    /// stringified, and `None` and non-finite floats become `null`. There is
-    /// no lossy counterpart for `json_decode` because these conversions cannot
-    /// be reversed. Functions and values that contain themselves are still
-    /// errors.
+    /// in priority order, iterators are drained, structs become objects with
+    /// their field names as keys, non-string map keys are stringified, and
+    /// `None` and non-finite floats become `null`. There is no lossy
+    /// counterpart for `json_decode` because these conversions cannot be
+    /// reversed. Functions and values that contain themselves are still errors.
     pub fn json_encode_lossy(input: Value) -> anyhow::Result<String> {
         let v = value_to_json(&input, true, &mut HashSet::new())?;
         Ok(v.to_string())

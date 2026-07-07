@@ -55,6 +55,33 @@ fn collect_symbol(
             // A lambda bound to a variable should still appear in the outline.
             collect_symbol(value, text, line_index, out);
         }
+        Expression::StructDeclaration { name, fields, .. } => {
+            let children = fields
+                .iter()
+                .map(|field| {
+                    make_symbol(
+                        field.identifier.clone(),
+                        Some(field.annotation.to_string()),
+                        SymbolKind::FIELD,
+                        field.span,
+                        field.span,
+                        text,
+                        line_index,
+                        Vec::new(),
+                    )
+                })
+                .collect();
+            out.push(make_symbol(
+                name.clone(),
+                None,
+                SymbolKind::STRUCT,
+                expr.span,
+                expr.span,
+                text,
+                line_index,
+                children,
+            ));
+        }
         _ => {}
     }
 }
@@ -195,5 +222,23 @@ mod tests {
             .expect("add symbol present");
         let detail = func.detail.as_deref().unwrap_or_default();
         assert!(detail.contains("a, b"), "got detail: {detail}");
+    }
+
+    #[test]
+    fn struct_with_fields_in_outline() {
+        let syms = symbols("struct Point {\n    x: Int,\n    y: Int,\n}\n");
+        let point = syms
+            .iter()
+            .find(|s| s.name == "Point" && s.kind == SymbolKind::STRUCT)
+            .expect("Point struct symbol present");
+        let children = point.children.as_deref().unwrap_or_default();
+        assert!(
+            children
+                .iter()
+                .any(|c| c.name == "x" && c.kind == SymbolKind::FIELD),
+            "expected field `x` in {children:?}"
+        );
+        assert_eq!(children.len(), 2);
+        assert_eq!(children[1].detail.as_deref(), Some("Int"));
     }
 }
