@@ -150,7 +150,33 @@ impl TryFrom<Command> for Action {
     }
 }
 
+/// Stack size for the worker thread that runs the interpreter.
+///
+/// The parser, analyser, compiler, and VM all walk the AST recursively, one
+/// native frame per nesting level. The default main-thread stack is small
+/// enough that deeply (but legitimately) nested programs overflow it and abort
+/// the process. A generous stack keeps that from happening for any realistic
+/// source. The reservation is virtual address space; only the pages actually
+/// touched cost memory.
+const INTERPRETER_STACK_SIZE: usize = 512 * 1024 * 1024;
+
 fn main() -> anyhow::Result<()> {
+    // Run everything on a worker thread with a large explicit stack. The
+    // interpreter uses `Rc` and is not `Send`, but it is created, used, and
+    // dropped entirely inside this closure, so nothing crosses the boundary.
+    let worker = std::thread::Builder::new()
+        .name("ndc-interpreter".into())
+        .stack_size(INTERPRETER_STACK_SIZE)
+        .spawn(run)
+        .expect("failed to spawn interpreter thread");
+
+    match worker.join() {
+        Ok(result) => result,
+        Err(panic) => std::panic::resume_unwind(panic),
+    }
+}
+
+fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     let action: Action = cli.command.unwrap_or_default().try_into()?;
