@@ -59,6 +59,14 @@ The extension launches the LSP automatically using the `ndc` binary. If `ndc` is
 that VS Code uses (common when installed via a shell like fish), set the `andy-cpp.ndcPath` setting
 to the full path of the binary.
 
+### JetBrains IDEs (RustRover, IntelliJ, …)
+
+JetBrains IDEs are supported through a TextMate bundle (syntax highlighting) and the
+LSP4IJ plugin (diagnostics, hover, completion, inlay type hints, go to definition).
+See [ext/textmate-ndc/README.md](ext/textmate-ndc/README.md) for setup instructions.
+
+### Other editors
+
 If you prefer a different editor, you can start the language server manually over stdio:
 
 ```bash

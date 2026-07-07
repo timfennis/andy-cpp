@@ -1,0 +1,17 @@
+{
+  "name": "Andy C++ (ndc)",
+  "programArgs": {
+    "default": "ndc lsp --stdio"
+  },
+  "fileTypeMappings": [
+    {
+      "fileType": {
+        "name": "ndc",
+        "patterns": [
+          "*.ndc"
+        ]
+      },
+      "languageId": "ndc"
+    }
+  ]
+}
