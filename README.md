@@ -61,9 +61,11 @@ to the full path of the binary.
 
 ### JetBrains IDEs (RustRover, IntelliJ, …)
 
-JetBrains IDEs are supported through a TextMate bundle (syntax highlighting) and the
-LSP4IJ plugin (diagnostics, hover, completion, inlay type hints, go to definition).
-See [ext/textmate-ndc/README.md](ext/textmate-ndc/README.md) for setup instructions.
+JetBrains IDEs are supported by importing `ext/andy-cpp` as a TextMate bundle (syntax
+highlighting) and connecting the LSP4IJ plugin to `ndc lsp` (diagnostics, hover,
+completion, inlay type hints, go to definition). See the
+[editor support page](https://timfennis.github.io/andy-cpp/tooling/editor-support.html)
+in the manual for setup instructions.
 
 ### Other editors
 
