@@ -1,0 +1,12 @@
+struct Point {
+    x: Int,
+    y: Int,
+}
+
+let point = Point(1,2);
+assert_eq(point.x, 1);
+assert_eq(point.y, 2);
+
+// nothing special!!
+assert_eq(x(point), 1);
+assert_eq(y(point), 2);
