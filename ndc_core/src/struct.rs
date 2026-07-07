@@ -1,5 +1,4 @@
 use crate::StaticType;
-use crate::StaticType::Struct;
 use std::ops::Index;
 use std::rc::Rc;
 
@@ -25,6 +24,26 @@ impl StructInfo {
         StaticType::Function {
             parameters: Some(self.fields.iter().cloned().map(|f| f.1).collect()),
             return_type: Box::new(self.static_type()),
+        }
+    }
+
+    pub fn field_name(&self, index: usize) -> &str {
+        &self.fields[index].0
+    }
+
+    /// Type of the synthetic getter for field `index`: `(Self) -> FieldType`.
+    pub fn getter_type(&self, index: usize) -> StaticType {
+        StaticType::Function {
+            parameters: Some(vec![self.static_type()]),
+            return_type: Box::new(self.fields[index].1.clone()),
+        }
+    }
+
+    /// Type of the synthetic setter for field `index`: `(Self, FieldType) -> ()`.
+    pub fn setter_type(&self, index: usize) -> StaticType {
+        StaticType::Function {
+            parameters: Some(vec![self.static_type(), self.fields[index].1.clone()]),
+            return_type: Box::new(StaticType::unit()),
         }
     }
 }
