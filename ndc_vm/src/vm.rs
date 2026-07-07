@@ -676,10 +676,12 @@ impl Vm {
             }
             Function::Constructor(i) => {
                 if args != i.fields.len() {
-                    return Err(VmError::new(
-                        "incorrect number of arguments to constructor",
-                        Span::synthetic(), // TODO: figure out the real span here
-                    ));
+                    // No span: the Call opcode arm patches in the call-site span.
+                    return Err(VmError::native(format!(
+                        "constructor {} expects {} arguments, got {args}",
+                        i.name,
+                        i.fields.len(),
+                    )));
                 }
 
                 let values = self.stack.drain((self.stack.len() - args)..).collect();
@@ -694,6 +696,91 @@ impl Vm {
                 }
 
                 self.stack.push(result);
+                return Ok(());
+            }
+            Function::GetField(info, idx) => {
+                if args != 1 {
+                    return Err(VmError::native(format!(
+                        "field access {}.{} expects 1 argument, got {args}",
+                        info.name,
+                        info.field_name(idx),
+                    )));
+                }
+
+                let receiver = self.stack.pop().expect("must not be empty");
+                self.stack.pop(); // the getter function
+
+                let result = match &receiver {
+                    Value::Object(obj) => match obj.as_ref() {
+                        // The pointer comparison is the nominal type check: another
+                        // struct type may share the field name at a different index.
+                        Object::Struct {
+                            info: actual,
+                            fields,
+                        } if Rc::ptr_eq(actual, &info) => fields.borrow()[idx].clone(),
+                        _ => {
+                            return Err(VmError::native(format!(
+                                "cannot read field {} of {receiver:?}",
+                                info.field_name(idx),
+                            )));
+                        }
+                    },
+                    _ => {
+                        return Err(VmError::native(format!(
+                            "cannot read field {} of {receiver:?}",
+                            info.field_name(idx),
+                        )));
+                    }
+                };
+
+                if let Some((cache, key)) = memo {
+                    cache.borrow_mut().insert(key, result.clone());
+                }
+
+                self.stack.push(result);
+                return Ok(());
+            }
+            Function::SetField(info, idx) => {
+                if args != 2 {
+                    return Err(VmError::native(format!(
+                        "field assignment {}.{} expects 2 arguments, got {args}",
+                        info.name,
+                        info.field_name(idx),
+                    )));
+                }
+
+                let value = self.stack.pop().expect("must not be empty");
+                let receiver = self.stack.pop().expect("must not be empty");
+                self.stack.pop(); // the setter function
+
+                match &receiver {
+                    Value::Object(obj) => match obj.as_ref() {
+                        Object::Struct {
+                            info: actual,
+                            fields,
+                        } if Rc::ptr_eq(actual, &info) => {
+                            fields.borrow_mut()[idx] = value;
+                        }
+                        _ => {
+                            return Err(VmError::native(format!(
+                                "cannot assign field {} of {receiver:?}",
+                                info.field_name(idx),
+                            )));
+                        }
+                    },
+                    _ => {
+                        return Err(VmError::native(format!(
+                            "cannot assign field {} of {receiver:?}",
+                            info.field_name(idx),
+                        )));
+                    }
+                }
+
+                if let Some((cache, key)) = memo {
+                    cache.borrow_mut().insert(key, Value::unit());
+                }
+
+                self.stack.push(Value::unit());
                 return Ok(());
             }
         };

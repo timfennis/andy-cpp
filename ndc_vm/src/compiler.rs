@@ -394,6 +394,7 @@ impl Compiler {
                 )?;
             }
             Expression::StructDeclaration {
+                fields,
                 resolved,
                 resolved_name,
                 ..
@@ -405,7 +406,7 @@ impl Compiler {
 
                 let idx = self
                     .ir
-                    .add_constant(Value::function(Function::Constructor(info)));
+                    .add_constant(Value::function(Function::Constructor(Rc::clone(&info))));
 
                 self.ir.write(OpCode::Constant(idx), span);
 
@@ -416,6 +417,36 @@ impl Compiler {
                     Some(_) => unreachable!("declarations always bind locally"),
                     None => unreachable!("resolved_name should have been resolved"),
                 };
+
+                for (field_offset, field) in fields.iter().enumerate() {
+                    // GET
+                    let get_idx = self.ir.add_constant(Value::function(Function::GetField(
+                        Rc::clone(&info),
+                        field_offset,
+                    )));
+                    self.ir.write(OpCode::Constant(get_idx), span);
+                    match field.resolved_getter {
+                        Some(var @ ResolvedVar::Local { .. }) => {
+                            self.emit_set_var(var, span);
+                        }
+                        Some(_) => unreachable!("declarations always bind locally"),
+                        None => unreachable!("resolved_name should have been resolved"),
+                    }
+
+                    // SET
+                    let set_idx = self.ir.add_constant(Value::function(Function::SetField(
+                        Rc::clone(&info),
+                        field_offset,
+                    )));
+                    self.ir.write(OpCode::Constant(set_idx), span);
+                    match field.resolved_setter {
+                        Some(var @ ResolvedVar::Local { .. }) => {
+                            self.emit_set_var(var, span);
+                        }
+                        Some(_) => unreachable!("declarations always bind locally"),
+                        None => unreachable!("resolved_name should have been resolved"),
+                    }
+                }
             }
             Expression::Grouping(statements) => {
                 self.compile_expr(*statements)?;

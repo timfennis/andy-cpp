@@ -508,6 +508,30 @@ impl Analyser {
                     ),
                 );
 
+                for field in fields {
+                    // Getter
+                    field.resolved_getter = Some(self.scope_tree.create_local_binding(
+                        field.identifier.clone(),
+                        TypeBinding::Annotated(StaticType::Function {
+                            parameters: Some(vec![
+                                self.struct_registry.borrow()[struct_id].static_type(),
+                            ]),
+                            return_type: Box::new(field.annotation.clone()),
+                        }),
+                    ));
+
+                    field.resolved_setter = Some(self.scope_tree.create_local_binding(
+                        format!("{}=", field.identifier),
+                        TypeBinding::Annotated(StaticType::Function {
+                            parameters: Some(vec![
+                                self.struct_registry.borrow()[struct_id].static_type(),
+                                field.annotation.clone(),
+                            ]),
+                            return_type: Box::new(StaticType::unit()),
+                        }),
+                    ));
+                }
+
                 Ok(StaticType::unit())
             }
         }

@@ -852,6 +852,10 @@ impl PartialEq for Object {
                         Rc::ptr_eq(a, b)
                     }
                     (Function::Constructor(a), Function::Constructor(b)) => Rc::ptr_eq(a, b),
+                    (Function::GetField(a, i), Function::GetField(b, j))
+                    | (Function::SetField(a, i), Function::SetField(b, j)) => {
+                        Rc::ptr_eq(a, b) && i == j
+                    }
                     _ => false,
                 }
             }
@@ -963,6 +967,12 @@ impl Hash for Object {
                     Function::Constructor(i) => {
                         state.write_u8(1); // 1 for constructor
                         Rc::as_ptr(i).hash(state);
+                    }
+                    Function::GetField { .. } => {
+                        todo!("implement this");
+                    }
+                    Function::SetField { .. } => {
+                        todo!("implement this");
                     }
                 }
             }

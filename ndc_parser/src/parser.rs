@@ -1503,6 +1503,8 @@ impl Parser {
         Ok(StructField {
             identifier,
             annotation,
+            resolved_getter: None,
+            resolved_setter: None,
             span: identifier_span.merge(self.tokens[self.current - 1].span),
         })
     }

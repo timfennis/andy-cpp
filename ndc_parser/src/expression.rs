@@ -213,6 +213,8 @@ pub enum ForBody {
 pub struct StructField {
     pub identifier: String,
     pub annotation: StaticType,
+    pub resolved_getter: Option<ResolvedVar>,
+    pub resolved_setter: Option<ResolvedVar>,
     pub span: Span,
 }
 
