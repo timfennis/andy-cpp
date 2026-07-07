@@ -64,7 +64,7 @@
         {
           "comment": "function definition",
           "name": "meta.function.definition.andy-cpp",
-          "begin": "\\b((pure)\\s)?(fn)\\s+([A-Za-z_][A-Za-z_0-9]*)",
+          "begin": "\\b((pure)\\s)?(fn)\\s+([A-Za-z_][A-Za-z_0-9]*\\??)",
           "patterns": [
             {
               "include": "#expression"
@@ -126,11 +126,21 @@
           "begin": "(//)",
           "end": "$",
           "name": "comment.line.double-slash.andy-cpp"
+        },
+        {
+          "begin": "(#!)",
+          "end": "$",
+          "name": "comment.line.shebang.andy-cpp"
         }
       ]
     },
     "numbers": {
       "patterns": [
+        {
+          "comment": "Complex literals (imaginary part), e.g. `3i` or `2.5j`",
+          "match": "\\b([0-9][0-9_]*(\\.[0-9][0-9_]*)?[ij])\\b",
+          "name": "constant.numeric.complex.andy-cpp"
+        },
         {
           "comment": "Floats",
           "match": "\\b([0-9][0-9_]*\\.[0-9][0-9_]*)\\b",

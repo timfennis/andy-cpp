@@ -59,6 +59,16 @@ The extension launches the LSP automatically using the `ndc` binary. If `ndc` is
 that VS Code uses (common when installed via a shell like fish), set the `andy-cpp.ndcPath` setting
 to the full path of the binary.
 
+### JetBrains IDEs (RustRover, IntelliJ, …)
+
+JetBrains IDEs are supported by importing `ext/andy-cpp` as a TextMate bundle (syntax
+highlighting) and connecting the LSP4IJ plugin to `ndc lsp` (diagnostics, hover,
+completion, inlay type hints, go to definition). See the
+[editor support page](https://timfennis.github.io/andy-cpp/tooling/editor-support.html)
+in the manual for setup instructions.
+
+### Other editors
+
 If you prefer a different editor, you can start the language server manually over stdio:
 
 ```bash
