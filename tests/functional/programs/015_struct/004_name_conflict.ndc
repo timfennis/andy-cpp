@@ -1,0 +1,13 @@
+struct Foo {
+    xyz: Int
+}
+
+struct Bar {
+    xyz: Int
+}
+
+let f = Foo(1);
+let b = Bar(10);
+
+assert_eq(f.xyz(), 1);
+assert_eq(b.xyz(), 10);

@@ -24,6 +24,8 @@ pub enum Function {
     },
 
     Constructor(Rc<StructInfo>),
+    GetField(Rc<StructInfo>, usize),
+    SetField(Rc<StructInfo>, usize),
 }
 
 pub struct NativeFunction {
@@ -77,9 +79,11 @@ impl Function {
         match self {
             Self::Closure(c) => Some(&c.prototype),
             Self::Compiled(f) => Some(f),
-            Self::Constructor(_) => None,
             Self::Memoized { function, .. } => function.prototype(),
-            Self::Native(_) => None,
+            Self::Native(_)
+            | Self::Constructor(_)
+            | Self::GetField(_, _)
+            | Self::SetField(_, _) => None,
         }
     }
 
@@ -110,6 +114,9 @@ impl Function {
             Self::Closure(c) => c.prototype.name.as_deref(),
             Self::Memoized { function, .. } => function.name(),
             Self::Constructor(info) => Some(info.name.as_ref()),
+            Self::GetField(info, index) | Self::SetField(info, index) => {
+                Some(info.field_name(*index))
+            }
         }
     }
 
@@ -120,6 +127,8 @@ impl Function {
             Self::Closure(c) => c.prototype.static_type.clone(),
             Self::Memoized { function, .. } => function.static_type(),
             Self::Constructor(f) => f.constructor_type(),
+            Self::GetField(info, index) => info.getter_type(*index),
+            Self::SetField(info, index) => info.setter_type(*index),
         }
     }
 
@@ -131,7 +140,9 @@ impl Function {
             Self::Compiled(f) => &f.static_type,
             Self::Closure(c) => &c.prototype.static_type,
             Self::Memoized { function, .. } => return function.matches_arg_types(arg_types),
-            Function::Constructor(i) => &i.constructor_type(),
+            Self::Constructor(i) => &i.constructor_type(),
+            Self::GetField(info, index) => &info.getter_type(*index),
+            Self::SetField(info, index) => &info.setter_type(*index),
         };
         let StaticType::Function { parameters, .. } = st else {
             return false;
@@ -158,6 +169,8 @@ impl Function {
             Self::Closure(c) => &c.prototype.static_type,
             Self::Memoized { function, .. } => return function.matches_value_args(args),
             Self::Constructor(i) => &i.constructor_type(),
+            Self::GetField(info, index) => &info.getter_type(*index),
+            Self::SetField(info, index) => &info.setter_type(*index),
         };
         let StaticType::Function { parameters, .. } = st else {
             return false;
@@ -183,6 +196,12 @@ impl fmt::Debug for Function {
             Self::Closure(closure) => write!(f, "<closure over {:?}>", closure.prototype.name),
             Self::Memoized { function, .. } => write!(f, "<memoized {:?}>", function),
             Self::Constructor(i) => write!(f, "function {:?}", i.name),
+            Self::GetField(info, index) => {
+                write!(f, "<getter {}.{}>", info.name, info.field_name(*index))
+            }
+            Self::SetField(info, index) => {
+                write!(f, "<setter {}.{}>", info.name, info.field_name(*index))
+            }
         }
     }
 }
@@ -198,6 +217,9 @@ impl fmt::Display for Function {
             Self::Closure(closure) => write!(f, "<closure over {:?}>", closure.prototype.name),
             Self::Memoized { function, .. } => write!(f, "<memoized {function}>"),
             Self::Constructor(i) => write!(f, "<fn {}>", i.name),
+            Self::GetField(info, index) | Self::SetField(info, index) => {
+                write!(f, "<fn {}.{}>", info.name, info.field_name(*index))
+            }
         }
     }
 }
