@@ -16,6 +16,9 @@
           "include": "#dictionary"
         },
         {
+          "include": "#structs"
+        },
+        {
           "include": "#functions"
         },
         {
@@ -56,6 +59,61 @@
           "comment": "built-in type names used in annotations like `let x: Int` or `-> List<Int>`",
           "name": "support.type.andy-cpp",
           "match": "\\b(Any|Never|Bool|Number|Float|Int|Rational|Complex|String|Option|Sequence|List|Iterator|MinHeap|MaxHeap|Deque|Tuple|Map)\\b"
+        }
+      ]
+    },
+    "structs": {
+      "comment": "struct definition, e.g. `struct Point { x: Int, y: Int }`",
+      "name": "meta.struct.definition.andy-cpp",
+      "begin": "\\b(struct)\\s+([A-Za-z_][A-Za-z_0-9]*)\\s*(\\{)",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.other.struct.andy-cpp"
+        },
+        "2": {
+          "name": "entity.name.type.struct.andy-cpp"
+        },
+        "3": {
+          "name": "punctuation.brackets.curly.andy-cpp"
+        }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.brackets.curly.andy-cpp"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#comment"
+        },
+        {
+          "comment": "field name followed by a type annotation",
+          "match": "\\b([A-Za-z_][A-Za-z_0-9]*)\\s*(:)",
+          "captures": {
+            "1": {
+              "name": "variable.other.member.andy-cpp"
+            },
+            "2": {
+              "name": "punctuation.separator.colon.andy-cpp"
+            }
+          }
+        },
+        {
+          "include": "#types"
+        },
+        {
+          "comment": "user-defined type names in field annotations",
+          "name": "entity.name.type.andy-cpp",
+          "match": "\\b[A-Z][A-Za-z_0-9]*\\b"
+        },
+        {
+          "name": "punctuation.brackets.angle.andy-cpp",
+          "match": "[<>]"
+        },
+        {
+          "name": "punctuation.comma.andy-cpp",
+          "match": ","
         }
       ]
     },
@@ -241,6 +299,11 @@
           "comment": "fn",
           "name": "keyword.other.fn.andy-cpp",
           "match": "\\bfn\\b"
+        },
+        {
+          "comment": "struct (fallback while a definition is incomplete)",
+          "name": "keyword.other.struct.andy-cpp",
+          "match": "\\bstruct\\b"
         },
         {
           "comment": "other keywords",
