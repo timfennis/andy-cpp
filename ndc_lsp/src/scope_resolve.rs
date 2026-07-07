@@ -206,8 +206,19 @@ fn collect(expr: &ExpressionLocation, scope: Span, out: &mut Vec<Decl>) {
         | Expression::ComplexLiteral(_)
         | Expression::Break
         | Expression::Continue => {}
-        Expression::StructDeclaration { .. } => {
-            // TODO: @Claude do we deal with structs here?
+        Expression::StructDeclaration { name, .. } => {
+            // The declaration binds the constructor, visible from the
+            // declaration onward (structs are not hoisted, matching the
+            // analyser). Fields are names + type annotations, not expressions,
+            // so there is nothing to descend into. No dedicated name span
+            // exists yet (the parser keeps only the whole-declaration span).
+            out.push(Decl {
+                name: name.clone(),
+                name_span: expr.span,
+                scope_span: scope,
+                visible_from: expr.span.offset(),
+                is_function: false,
+            });
         }
     }
 }

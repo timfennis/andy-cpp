@@ -1,0 +1,7 @@
+// For now we'll just have simple positional constructor functions
+struct Point {
+    x: Int,
+    y: Int,
+}
+
+let origin = Point(5, 25);

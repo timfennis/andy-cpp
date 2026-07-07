@@ -125,6 +125,20 @@ module.exports = grammar({
       optional(seq(':', field('type', $._type))),
     ),
 
+    struct_definition: $ => seq(
+      'struct',
+      field('name', $.type_identifier),
+      '{',
+      optional(seq(commaSep1($.struct_field), optional(','))),
+      '}',
+    ),
+
+    struct_field: $ => seq(
+      field('name', $.identifier),
+      ':',
+      field('type', $._type),
+    ),
+
     // ------------------------------------------------------------------
     // Type annotations
     // ------------------------------------------------------------------
@@ -187,6 +201,7 @@ module.exports = grammar({
       $.map,
       $.map_comprehension,
       $.function_definition,
+      $.struct_definition,
       $.if_expression,
       $.while_expression,
       $.for_expression,
