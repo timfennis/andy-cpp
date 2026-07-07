@@ -1,12 +1,14 @@
 use crate::chunk::{JumpTarget, LabelId, OpCode, OptimizerIr};
 use crate::value::{CompiledFunction, Function};
 use crate::{Object, Value};
+use ndc_core::r#struct::StructRegistry;
 use ndc_core::{StaticType, TypeSignature};
 use ndc_lexer::Span;
 use ndc_parser::{
     Binding, Candidate, CaptureSource, Expression, ExpressionLocation, ForBody, ForIteration,
     FunctionParameter, LogicalOperator, Lvalue, ResolvedVar,
 };
+use std::cell::RefCell;
 use std::rc::Rc;
 
 #[derive(Clone)]
@@ -16,25 +18,36 @@ pub struct Compiler {
     loop_stack: Vec<LoopContext>,
     allow_return: bool,
     optimize: bool,
-}
-
-impl Default for Compiler {
-    fn default() -> Self {
-        Self {
-            ir: OptimizerIr::default(),
-            num_locals: 0,
-            loop_stack: Vec::new(),
-            allow_return: false,
-            optimize: true,
-        }
-    }
+    struct_registry: Rc<RefCell<StructRegistry>>,
 }
 
 impl Compiler {
+    pub fn new(struct_registry: Rc<RefCell<StructRegistry>>) -> Self {
+        Self {
+            ir: Default::default(),
+            num_locals: 0,
+            loop_stack: vec![],
+            allow_return: false,
+            optimize: true,
+            struct_registry,
+        }
+    }
+
+    pub fn new_without_optimization(struct_registry: Rc<RefCell<StructRegistry>>) -> Self {
+        Self {
+            ir: Default::default(),
+            num_locals: 0,
+            loop_stack: vec![],
+            allow_return: false,
+            optimize: false,
+            struct_registry,
+        }
+    }
     pub fn compile(
         expressions: impl Iterator<Item = ExpressionLocation>,
+        struct_registry: Rc<RefCell<StructRegistry>>,
     ) -> Result<CompiledFunction, CompileError> {
-        let mut compiler = Self::default();
+        let mut compiler = Self::new(struct_registry);
         for expr_loc in expressions {
             compiler.compile_expr(expr_loc)?;
         }
@@ -46,11 +59,10 @@ impl Compiler {
     /// debugging tools (e.g. a future `--no-optimize` disassembler flag).
     pub fn compile_unoptimized(
         expressions: impl Iterator<Item = ExpressionLocation>,
+        struct_registry: Rc<RefCell<StructRegistry>>,
     ) -> Result<CompiledFunction, CompileError> {
-        let mut compiler = Self {
-            optimize: false,
-            ..Default::default()
-        };
+        let mut compiler = Self::new_without_optimization(struct_registry);
+
         for expr_loc in expressions {
             compiler.compile_expr(expr_loc)?;
         }
@@ -67,11 +79,9 @@ impl Compiler {
     /// the emitted chunk, and shifting instructions invalidates that.
     pub fn compile_resumable(
         expressions: impl Iterator<Item = ExpressionLocation>,
+        struct_registry: Rc<RefCell<StructRegistry>>,
     ) -> Result<(CompiledFunction, Self), CompileError> {
-        let mut compiler = Self {
-            optimize: false,
-            ..Default::default()
-        };
+        let mut compiler = Self::new_without_optimization(struct_registry);
         for expr_loc in expressions {
             compiler.compile_expr(expr_loc)?;
         }
@@ -383,8 +393,29 @@ impl Compiler {
                     span,
                 )?;
             }
-            Expression::StructDeclaration { .. } => {
-                // TODO: skip, the compiler doesn't care?
+            Expression::StructDeclaration {
+                resolved,
+                resolved_name,
+                ..
+            } => {
+                let info = Rc::clone(
+                    &self.struct_registry.borrow()
+                        [resolved.expect("must be resolved by the analyser")],
+                );
+
+                let idx = self
+                    .ir
+                    .add_constant(Value::function(Function::Constructor(info)));
+
+                self.ir.write(OpCode::Constant(idx), span);
+
+                match resolved_name {
+                    Some(var @ ResolvedVar::Local { .. }) => {
+                        self.emit_set_var(var, span);
+                    }
+                    Some(_) => unreachable!("declarations always bind locally"),
+                    None => unreachable!("resolved_name should have been resolved"),
+                };
             }
             Expression::Grouping(statements) => {
                 self.compile_expr(*statements)?;
@@ -629,10 +660,15 @@ impl Compiler {
 
     fn emit_set_var(&mut self, var: ResolvedVar, span: Span) {
         match var {
-            ResolvedVar::Local { slot } => self.ir.write(OpCode::SetLocal(slot), span),
-            ResolvedVar::Upvalue { slot } => self.ir.write(OpCode::SetUpvalue(slot), span),
+            ResolvedVar::Local { slot } => {
+                self.ir.write(OpCode::SetLocal(slot), span);
+                self.num_locals = self.num_locals.max(slot + 1);
+            }
+            ResolvedVar::Upvalue { slot } => {
+                self.ir.write(OpCode::SetUpvalue(slot), span);
+            }
             ResolvedVar::Global { .. } => unreachable!("globals are native, never assigned"),
-        };
+        }
     }
 
     /// Backpatches a forward jump at `op_idx` to land just after the most recently
@@ -763,10 +799,12 @@ impl Compiler {
             return_type: Box::new(return_type.clone()),
         };
         let mut fn_compiler = Self {
+            ir: Default::default(),
             num_locals: num_params,
+            loop_stack: vec![],
             allow_return: true,
             optimize: self.optimize,
-            ..Default::default()
+            struct_registry: Rc::clone(&self.struct_registry),
         };
         fn_compiler.compile_expr(body)?;
         fn_compiler.ir.write(OpCode::Return, Span::synthetic());
@@ -1028,6 +1066,7 @@ fn min_lvalue_slot(lv: &Lvalue) -> Option<usize> {
 fn produces_value(expr: &Expression) -> bool {
     match expr {
         Expression::Statement(_)
+        | Expression::StructDeclaration { .. }
         | Expression::VariableDeclaration { .. }
         | Expression::FunctionDeclaration {
             resolved_name: Some(_),
@@ -1040,7 +1079,30 @@ fn produces_value(expr: &Expression) -> bool {
         Expression::For { body, .. } => {
             matches!(**body, ForBody::List { .. } | ForBody::Map { .. })
         }
-        _ => true,
+        Expression::BoolLiteral(_)
+        | Expression::StringLiteral(_)
+        | Expression::Int64Literal(_)
+        | Expression::Float64Literal(_)
+        | Expression::BigIntLiteral(_)
+        | Expression::ComplexLiteral(_)
+        | Expression::FunctionDeclaration {
+            resolved_name: None,
+            ..
+        }
+        | Expression::Identifier { .. }
+        | Expression::Logical { .. }
+        | Expression::Grouping(_)
+        | Expression::Assignment { .. }
+        | Expression::OpAssignment { .. }
+        | Expression::Block { .. }
+        | Expression::If { .. }
+        | Expression::Call { .. }
+        | Expression::OperatorCall { .. }
+        | Expression::Tuple { .. }
+        | Expression::List { .. }
+        | Expression::Map { .. }
+        | Expression::RangeInclusive { .. }
+        | Expression::RangeExclusive { .. } => true,
     }
 }
 

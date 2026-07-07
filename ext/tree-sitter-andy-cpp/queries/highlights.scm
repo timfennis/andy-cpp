@@ -28,11 +28,15 @@
 ; Parameters
 (parameter name: (identifier) @variable.parameter)
 
+; Struct fields
+(struct_field name: (identifier) @variable.member)
+
 ; Keywords
 [
   "let"
   "fn"
   "pure"
+  "struct"
 ] @keyword
 
 [

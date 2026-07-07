@@ -162,6 +162,24 @@ mod tests {
     }
 
     #[test]
+    fn jump_from_constructor_call_to_struct_declaration() {
+        let src = "struct Point {\n    x: Int,\n    y: Int,\n}\nlet p = Point(1, 2);";
+        let state = analyse(src);
+        let loc = def_at(&state, src.rfind("Point").unwrap()).expect("definition found");
+        // Resolves to the whole declaration until a dedicated name span exists.
+        assert_eq!(start_offset(&state, &loc), 0);
+    }
+
+    #[test]
+    fn struct_not_visible_before_declaration() {
+        let src = "let p = Point(1, 2);\nstruct Point { x: Int }";
+        let state = analyse(src);
+        // Analysis reports an error, but go-to-def is structural: the struct
+        // is not hoisted, so the use before the declaration finds nothing.
+        assert!(def_at(&state, src.find("Point").unwrap()).is_none());
+    }
+
+    #[test]
     fn let_binding_invisible_in_its_own_initializer() {
         // The RHS `x` must resolve to the outer (first) `x`, not the binding
         // currently being declared — the analyser binds after the initializer.

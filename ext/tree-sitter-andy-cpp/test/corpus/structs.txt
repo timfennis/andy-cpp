@@ -1,0 +1,87 @@
+==================
+struct definition
+==================
+
+struct Point {
+    x: Int,
+    y: Int,
+}
+
+---
+
+(source_file
+  (struct_definition
+    name: (type_identifier)
+    (struct_field
+      name: (identifier)
+      type: (type_identifier))
+    (struct_field
+      name: (identifier)
+      type: (type_identifier))))
+
+==================
+struct definition without trailing comma
+==================
+
+struct Point { x: Int, y: Int }
+
+---
+
+(source_file
+  (struct_definition
+    name: (type_identifier)
+    (struct_field
+      name: (identifier)
+      type: (type_identifier))
+    (struct_field
+      name: (identifier)
+      type: (type_identifier))))
+
+==================
+struct with generic field type
+==================
+
+struct Person {
+    name: String,
+    locations: List<String>,
+}
+
+---
+
+(source_file
+  (struct_definition
+    name: (type_identifier)
+    (struct_field
+      name: (identifier)
+      type: (type_identifier))
+    (struct_field
+      name: (identifier)
+      type: (generic_type
+        name: (type_identifier)
+        (type_identifier)))))
+
+==================
+struct declaration followed by construction
+==================
+
+struct Point { x: Int, y: Int }
+let origin = Point(5, 25);
+
+---
+
+(source_file
+  (struct_definition
+    name: (type_identifier)
+    (struct_field
+      name: (identifier)
+      type: (type_identifier))
+    (struct_field
+      name: (identifier)
+      type: (type_identifier)))
+  (variable_declaration
+    name: (identifier)
+    value: (call
+      function: (identifier)
+      arguments: (arguments
+        (integer)
+        (integer)))))

@@ -1,14 +1,16 @@
-use std::collections::HashMap;
-use std::fmt::Debug;
-
 use crate::scope::{CallKind, ResolvedCall, ScopeTree, TypeBinding};
 use itertools::{Itertools, izip};
+use ndc_core::r#struct::{StructInfo, StructRegistry};
 use ndc_core::{StaticType, TypeSignature};
 use ndc_lexer::Span;
 use ndc_parser::{
     Binding, Candidate, Expression, ExpressionLocation, ForBody, ForIteration, FunctionParameter,
     Lvalue, NodeId,
 };
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::fmt::Debug;
+use std::rc::Rc;
 
 /// Side table holding semantic information keyed by AST node identity.
 /// Keeps tooling-specific data (like per-expression types) out of the AST.
@@ -26,6 +28,7 @@ pub struct AnalysisResult {
 
 #[derive(Debug)]
 pub struct Analyser {
+    struct_registry: Rc<RefCell<StructRegistry>>,
     scope_tree: ScopeTree,
     /// Stack of explicit `return` types for each enclosing function scope.
     /// Pushed on function entry, popped on exit. The value accumulates the
@@ -38,9 +41,13 @@ pub struct Analyser {
 }
 
 impl Analyser {
-    pub fn from_scope_tree(scope_tree: ScopeTree) -> Self {
+    pub fn from_scope_tree(
+        scope_tree: ScopeTree,
+        struct_registry: Rc<RefCell<StructRegistry>>,
+    ) -> Self {
         Self {
             scope_tree,
+            struct_registry,
             return_type_stack: Vec::new(),
             result: AnalysisResult::default(),
             errors: Vec::new(),
@@ -290,7 +297,7 @@ impl Analyser {
             } => {
                 let type_signature = FunctionParameter::from_params(parameters);
 
-                // Pre-register the function before analysing its body so recursive calls can
+                // Pre-register the function before analyzing its body so recursive calls can
                 // resolve the name. The return type is unknown at this point so we use Any.
                 let pre_slot =
                     if let Some(name) = name {
@@ -466,8 +473,41 @@ impl Analyser {
 
                 Ok(StaticType::Iterator(Box::new(StaticType::Int)))
             }
-            Expression::StructDeclaration { name: _, fields: _ } => {
-                // TODO: we must probably register the type somewhere so the analyser knows about it later
+            Expression::StructDeclaration {
+                name,
+                fields,
+                resolved,
+                resolved_name,
+            } => {
+                let struct_id = self.struct_registry.borrow_mut().register(
+                    &*name,
+                    fields
+                        .iter()
+                        .cloned()
+                        .map(|f| (f.identifier, f.annotation))
+                        .collect(),
+                );
+                *resolved = Some(struct_id);
+
+                // Create a constructor
+                *resolved_name = Some(
+                    self.scope_tree.create_local_binding(
+                        name.clone(),
+                        TypeBinding::Annotated(StaticType::Function {
+                            parameters: Some(
+                                fields
+                                    .iter()
+                                    .map(|thing| thing.annotation.clone())
+                                    .collect(),
+                            ),
+                            return_type: Box::new(StaticType::Struct {
+                                id: struct_id,
+                                name: Box::from(name.as_str()),
+                            }),
+                        }),
+                    ),
+                );
+
                 Ok(StaticType::unit())
             }
         }

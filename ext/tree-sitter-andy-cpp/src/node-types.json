@@ -120,6 +120,10 @@
           "named": true
         },
         {
+          "type": "struct_definition",
+          "named": true
+        },
+        {
           "type": "tuple",
           "named": true
         },
@@ -259,6 +263,10 @@
             "named": true
           },
           {
+            "type": "struct_definition",
+            "named": true
+          },
+          {
             "type": "tuple",
             "named": true
           },
@@ -390,6 +398,10 @@
           },
           {
             "type": "string",
+            "named": true
+          },
+          {
+            "type": "struct_definition",
             "named": true
           },
           {
@@ -534,6 +546,10 @@
           },
           {
             "type": "string",
+            "named": true
+          },
+          {
+            "type": "struct_definition",
             "named": true
           },
           {
@@ -741,6 +757,10 @@
             "named": true
           },
           {
+            "type": "struct_definition",
+            "named": true
+          },
+          {
             "type": "tuple",
             "named": true
           },
@@ -882,6 +902,10 @@
           },
           {
             "type": "string",
+            "named": true
+          },
+          {
+            "type": "struct_definition",
             "named": true
           },
           {
@@ -1129,6 +1153,10 @@
             "named": true
           },
           {
+            "type": "struct_definition",
+            "named": true
+          },
+          {
             "type": "tuple",
             "named": true
           },
@@ -1266,6 +1294,10 @@
         },
         {
           "type": "string",
+          "named": true
+        },
+        {
+          "type": "struct_definition",
           "named": true
         },
         {
@@ -1428,6 +1460,10 @@
           },
           {
             "type": "string",
+            "named": true
+          },
+          {
+            "type": "struct_definition",
             "named": true
           },
           {
@@ -1620,6 +1656,10 @@
             "named": true
           },
           {
+            "type": "struct_definition",
+            "named": true
+          },
+          {
             "type": "tuple",
             "named": true
           },
@@ -1787,6 +1827,10 @@
           },
           {
             "type": "string",
+            "named": true
+          },
+          {
+            "type": "struct_definition",
             "named": true
           },
           {
@@ -2016,6 +2060,10 @@
             "named": true
           },
           {
+            "type": "struct_definition",
+            "named": true
+          },
+          {
             "type": "tuple",
             "named": true
           },
@@ -2166,6 +2214,10 @@
             "named": true
           },
           {
+            "type": "struct_definition",
+            "named": true
+          },
+          {
             "type": "tuple",
             "named": true
           },
@@ -2306,6 +2358,10 @@
             "named": true
           },
           {
+            "type": "struct_definition",
+            "named": true
+          },
+          {
             "type": "tuple",
             "named": true
           },
@@ -2437,6 +2493,10 @@
           },
           {
             "type": "string",
+            "named": true
+          },
+          {
+            "type": "struct_definition",
             "named": true
           },
           {
@@ -2580,6 +2640,10 @@
           "named": true
         },
         {
+          "type": "struct_definition",
+          "named": true
+        },
+        {
           "type": "tuple",
           "named": true
         },
@@ -2716,6 +2780,10 @@
           },
           {
             "type": "string",
+            "named": true
+          },
+          {
+            "type": "struct_definition",
             "named": true
           },
           {
@@ -2922,6 +2990,10 @@
             "named": true
           },
           {
+            "type": "struct_definition",
+            "named": true
+          },
+          {
             "type": "tuple",
             "named": true
           },
@@ -3062,6 +3134,10 @@
             "named": true
           },
           {
+            "type": "struct_definition",
+            "named": true
+          },
+          {
             "type": "tuple",
             "named": true
           },
@@ -3193,6 +3269,10 @@
           },
           {
             "type": "string",
+            "named": true
+          },
+          {
+            "type": "struct_definition",
             "named": true
           },
           {
@@ -3328,6 +3408,10 @@
         },
         {
           "type": "string",
+          "named": true
+        },
+        {
+          "type": "struct_definition",
           "named": true
         },
         {
@@ -3490,6 +3574,10 @@
             "named": true
           },
           {
+            "type": "struct_definition",
+            "named": true
+          },
+          {
             "type": "tuple",
             "named": true
           },
@@ -3627,6 +3715,10 @@
           },
           {
             "type": "string",
+            "named": true
+          },
+          {
+            "type": "struct_definition",
             "named": true
           },
           {
@@ -3837,6 +3929,10 @@
           "named": true
         },
         {
+          "type": "struct_definition",
+          "named": true
+        },
+        {
           "type": "tuple",
           "named": true
         },
@@ -4007,6 +4103,10 @@
             "named": true
           },
           {
+            "type": "struct_definition",
+            "named": true
+          },
+          {
             "type": "tuple",
             "named": true
           },
@@ -4138,6 +4238,10 @@
           },
           {
             "type": "string",
+            "named": true
+          },
+          {
+            "type": "struct_definition",
             "named": true
           },
           {
@@ -4278,6 +4382,10 @@
         },
         {
           "type": "string",
+          "named": true
+        },
+        {
+          "type": "struct_definition",
           "named": true
         },
         {
@@ -4425,6 +4533,10 @@
           "named": true
         },
         {
+          "type": "struct_definition",
+          "named": true
+        },
+        {
           "type": "tuple",
           "named": true
         },
@@ -4469,6 +4581,66 @@
           "named": true
         }
       ]
+    }
+  },
+  {
+    "type": "struct_definition",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "type_identifier",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "struct_field",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "struct_field",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "type": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "generic_type",
+            "named": true
+          },
+          {
+            "type": "tuple_type",
+            "named": true
+          },
+          {
+            "type": "type_identifier",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {
@@ -4589,6 +4761,10 @@
         },
         {
           "type": "string",
+          "named": true
+        },
+        {
+          "type": "struct_definition",
           "named": true
         },
         {
@@ -4728,6 +4904,10 @@
         },
         {
           "type": "string",
+          "named": true
+        },
+        {
+          "type": "struct_definition",
           "named": true
         },
         {
@@ -4890,6 +5070,10 @@
           },
           {
             "type": "string",
+            "named": true
+          },
+          {
+            "type": "struct_definition",
             "named": true
           },
           {
@@ -5104,6 +5288,10 @@
             "named": true
           },
           {
+            "type": "struct_definition",
+            "named": true
+          },
+          {
             "type": "tuple",
             "named": true
           },
@@ -5255,6 +5443,10 @@
           },
           {
             "type": "string",
+            "named": true
+          },
+          {
+            "type": "struct_definition",
             "named": true
           },
           {
@@ -5571,6 +5763,10 @@
   },
   {
     "type": "return",
+    "named": false
+  },
+  {
+    "type": "struct",
     "named": false
   },
   {
