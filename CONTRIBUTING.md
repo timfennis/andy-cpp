@@ -107,7 +107,7 @@ cargo test
 ```
 
 If you find yourself writing a `TODO` comment, please open a GitHub
-issue instead and record it in [`TODO.md`](TODO.md).
+issue instead.
 
 ## Git conventions
 

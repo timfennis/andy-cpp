@@ -1,0 +1,2 @@
+# Tree-sitter C sources are generated from ext/tree-sitter-andy-cpp/grammar.js.
+ext/tree-sitter-andy-cpp/src/*.c linguist-generated=true
