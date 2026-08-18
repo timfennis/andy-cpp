@@ -953,26 +953,34 @@ impl Hash for Object {
                 state.write_u8(9);
                 match f {
                     Function::Compiled(func) => {
+                        state.write_u8(1);
                         Rc::as_ptr(func).hash(state);
                     }
                     Function::Native(native) => {
+                        state.write_u8(2);
                         Rc::as_ptr(native).hash(state);
                     }
                     Function::Closure(closure) => {
+                        state.write_u8(3);
                         Rc::as_ptr(&closure.prototype).hash(state);
                     }
                     Function::Memoized { cache, .. } => {
+                        state.write_u8(4);
                         Rc::as_ptr(cache).hash(state);
                     }
                     Function::Constructor(i) => {
-                        state.write_u8(1); // 1 for constructor
+                        state.write_u8(5);
                         Rc::as_ptr(i).hash(state);
                     }
-                    Function::GetField { .. } => {
-                        todo!("implement this");
+                    Function::GetField(info, index) => {
+                        state.write_u8(6);
+                        Rc::as_ptr(info).hash(state);
+                        state.write_usize(*index);
                     }
-                    Function::SetField { .. } => {
-                        todo!("implement this");
+                    Function::SetField(info, index) => {
+                        state.write_u8(7);
+                        Rc::as_ptr(info).hash(state);
+                        state.write_usize(*index);
                     }
                 }
             }

@@ -1,0 +1,7 @@
+struct Point {
+    x: Int,
+}
+
+let getters = %{x: "point getter"};
+
+assert_eq(getters[x], "point getter");
