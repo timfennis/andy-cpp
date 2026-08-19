@@ -584,6 +584,10 @@ impl StaticType {
             Self::MinHeap(_) => Self::MinHeap(Box::new(new_elem)),
             Self::MaxHeap(_) => Self::MaxHeap(Box::new(new_elem)),
             Self::Deque(_) => Self::Deque(Box::new(new_elem)),
+            Self::Map { key, .. } => Self::Map {
+                key: key.clone(),
+                value: Box::new(new_elem),
+            },
             _ => self.clone(),
         }
     }

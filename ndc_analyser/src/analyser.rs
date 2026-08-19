@@ -169,25 +169,7 @@ impl Analyser {
             Expression::Assignment { l_value, r_value } => {
                 let old_type = self.resolve_lvalue_or_any(l_value, *span);
                 let new_type = self.analyse_or_any(r_value);
-
-                if let Lvalue::Identifier {
-                    resolved: Some(target),
-                    ..
-                } = l_value
-                {
-                    let widened = old_type.lub(&new_type);
-                    if widened != old_type
-                        && let Err(annotated_type) =
-                            self.scope_tree.update_binding_type(*target, widened)
-                        && !new_type.is_subtype(&annotated_type)
-                    {
-                        self.emit(AnalysisError::mismatched_types(
-                            &new_type,
-                            &annotated_type,
-                            *span,
-                        ));
-                    }
-                }
+                self.validate_lvalue_write(l_value, &old_type, &new_type, *span);
 
                 Ok(StaticType::unit())
             }
@@ -276,45 +258,7 @@ impl Analyser {
                 };
 
                 if let Some(result_type) = writeback_type {
-                    match l_value {
-                        Lvalue::Identifier {
-                            resolved: Some(target),
-                            ..
-                        } => {
-                            let widened = arg_types[0].lub(&result_type);
-                            if widened != arg_types[0]
-                                && let Err(annotated_type) =
-                                    self.scope_tree.update_binding_type(*target, widened)
-                                && !result_type.is_subtype(&annotated_type)
-                            {
-                                self.emit(AnalysisError::mismatched_types(
-                                    &result_type,
-                                    &annotated_type,
-                                    *span,
-                                ));
-                            }
-                        }
-                        Lvalue::Index { value, .. } => {
-                            if let Expression::Identifier {
-                                resolved: Binding::Resolved(Candidate::Scalar(target)),
-                                ..
-                            } = &value.expression
-                            {
-                                let container_type = self.scope_tree.get_type(*target).clone();
-                                if let Some(elem_type) = container_type.index_element_type() {
-                                    let widened_elem = elem_type.lub(&result_type);
-                                    if widened_elem != elem_type {
-                                        let new_container =
-                                            container_type.with_element_type(widened_elem);
-                                        let _ = self
-                                            .scope_tree
-                                            .update_binding_type(*target, new_container);
-                                    }
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
+                    self.validate_lvalue_write(l_value, &left_type, &result_type, *span);
                 }
 
                 Ok(StaticType::unit())
@@ -752,6 +696,66 @@ impl Analyser {
         }
     }
 
+    /// Validate a value that will be stored through an lvalue, widening an
+    /// inferred binding when the location has a stable variable to update.
+    fn validate_lvalue_write(
+        &mut self,
+        lvalue: &Lvalue,
+        stored_type: &StaticType,
+        value_type: &StaticType,
+        span: Span,
+    ) {
+        match lvalue {
+            Lvalue::Identifier {
+                resolved: Some(target),
+                ..
+            } => {
+                let widened = stored_type.lub(value_type);
+                if widened != *stored_type
+                    && let Err(annotated_type) =
+                        self.scope_tree.update_binding_type(*target, widened)
+                    && !value_type.is_subtype(&annotated_type)
+                {
+                    self.emit(AnalysisError::mismatched_types(
+                        value_type,
+                        &annotated_type,
+                        span,
+                    ));
+                }
+            }
+            Lvalue::Index { value, .. } => {
+                if value_type.is_subtype(stored_type) {
+                    return;
+                }
+
+                if let Expression::Identifier {
+                    resolved: Binding::Resolved(Candidate::Scalar(target)),
+                    ..
+                } = &value.expression
+                {
+                    let container_type = self.scope_tree.get_type(*target).clone();
+                    let widened_container =
+                        container_type.with_element_type(stored_type.lub(value_type));
+                    if widened_container != container_type
+                        && self
+                            .scope_tree
+                            .update_binding_type(*target, widened_container)
+                            .is_ok()
+                    {
+                        return;
+                    }
+                }
+
+                self.emit(AnalysisError::mismatched_types(
+                    value_type,
+                    stored_type,
+                    span,
+                ));
+            }
+            Lvalue::Identifier { resolved: None, .. } | Lvalue::Sequence(_) => {}
+        }
+    }
+
     /// Resolve expressions as arguments to a function and return the function arity
     fn resolve_parameters_declarative(
         &mut self,
@@ -994,5 +998,134 @@ impl AnalysisError {
             text: format!("Identifier {ident} has not previously been declared"),
             span,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndc_lexer::{Lexer, SourceId};
+    use ndc_parser::Parser;
+
+    fn analyse_with_globals(
+        source: &str,
+        globals: Vec<(String, StaticType)>,
+    ) -> (StaticType, AnalysisResult) {
+        let tokens = Lexer::new(source, SourceId::SYNTHETIC)
+            .collect::<Result<Vec<_>, _>>()
+            .expect("lex failed");
+        let mut expressions = Parser::from_tokens(tokens).parse().expect("parse failed");
+        let mut analyser = Analyser::from_scope_tree(ScopeTree::from_global_scope(globals));
+        let mut last_type = StaticType::unit();
+        for expression in &mut expressions {
+            last_type = analyser.analyse(expression).expect("analysis failed");
+        }
+        (last_type, analyser.take_result())
+    }
+
+    fn analyse_last_type_with_globals(
+        source: &str,
+        globals: Vec<(String, StaticType)>,
+    ) -> StaticType {
+        let (last_type, result) = analyse_with_globals(source, globals);
+        assert!(
+            result.errors.is_empty(),
+            "analysis errors: {:?}",
+            result.errors
+        );
+        last_type
+    }
+
+    fn analyse_last_type(source: &str) -> StaticType {
+        analyse_last_type_with_globals(source, vec![])
+    }
+
+    fn assert_analysis_error(source: &str, globals: Vec<(String, StaticType)>, expected: &str) {
+        let (_, result) = analyse_with_globals(source, globals);
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|error| error.to_string().contains(expected)),
+            "expected an error containing {expected:?}, got {:?}",
+            result.errors,
+        );
+    }
+
+    #[test]
+    fn inferred_list_index_assignment_widens_element_type() {
+        assert_eq!(
+            analyse_last_type("let values = [1]; values[0] = \"two\"; values"),
+            StaticType::List(Box::new(StaticType::Any)),
+        );
+    }
+
+    #[test]
+    fn inferred_map_index_assignment_widens_value_and_preserves_key_type() {
+        assert_eq!(
+            analyse_last_type("let values = %{\"one\": 1}; values[\"two\"] = \"two\"; values"),
+            StaticType::Map {
+                key: Box::new(StaticType::String),
+                value: Box::new(StaticType::Any),
+            },
+        );
+    }
+
+    #[test]
+    fn inferred_index_augmented_assignment_widens_element_type() {
+        let add = StaticType::Function {
+            parameters: Some(vec![StaticType::Int, StaticType::Float]),
+            return_type: Box::new(StaticType::Number),
+        };
+        assert_eq!(
+            analyse_last_type_with_globals(
+                "let values = [1]; values[0] += 0.5; values",
+                vec![("+".to_string(), add)],
+            ),
+            StaticType::List(Box::new(StaticType::Number)),
+        );
+    }
+
+    #[test]
+    fn compatible_specialized_assignment_preserves_left_type() {
+        let list_any = StaticType::List(Box::new(StaticType::Any));
+        let append = StaticType::Function {
+            parameters: Some(vec![list_any.clone(), list_any.clone()]),
+            return_type: Box::new(list_any),
+        };
+
+        assert_eq!(
+            analyse_last_type_with_globals(
+                "let values = [1]; values ++= [2]; values",
+                vec![("++=".to_string(), append)],
+            ),
+            StaticType::List(Box::new(StaticType::Int)),
+        );
+    }
+
+    #[test]
+    fn incompatible_specialized_assignment_is_rejected() {
+        let list_any = StaticType::List(Box::new(StaticType::Any));
+        let concat = StaticType::Function {
+            parameters: Some(vec![list_any.clone(), list_any.clone()]),
+            return_type: Box::new(list_any),
+        };
+
+        assert_analysis_error(
+            "let values = [1]; values ++= [\"two\"];",
+            vec![
+                ("++=".to_string(), concat.clone()),
+                ("++".to_string(), concat.clone()),
+            ],
+            "mismatched types: found List<String> but expected List<Int>",
+        );
+        assert_analysis_error(
+            "let values: List<Int> = [1]; values ++= [\"two\"];",
+            vec![
+                ("++=".to_string(), concat.clone()),
+                ("++".to_string(), concat),
+            ],
+            "mismatched types: found List<String> but expected List<Int>",
+        );
     }
 }
