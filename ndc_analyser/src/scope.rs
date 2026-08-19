@@ -868,18 +868,6 @@ impl ScopeTree {
         self.scopes[self.current_scope_idx].has_function_with_arity(name, arity)
     }
 
-    /// Reserve a slot in the current scope without creating a named binding.
-    /// Used to allocate the list/map accumulator before analysing the body of a
-    /// for-comprehension, so that any nested comprehensions receive strictly
-    /// higher slot numbers and cannot collide with this accumulator.
-    ///
-    /// Uses `"\x00"` as a sentinel name that can never collide with user identifiers
-    /// since the lexer never produces null bytes.
-    pub(crate) fn reserve_anonymous_slot(&mut self) -> usize {
-        self.scopes[self.current_scope_idx]
-            .allocate("\x00".to_string(), TypeBinding::Inferred(StaticType::Any))
-    }
-
     /// Try to update a binding's type. Returns `Err` with the annotated type
     /// if the binding has an explicit type annotation and cannot be widened.
     pub(crate) fn update_binding_type(

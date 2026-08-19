@@ -60,3 +60,31 @@ assert_eq(typed_values, [1, 2]);
 let mixed_values: List<Any> = [1];
 mixed_values ++= ["two"];
 assert_eq(mixed_values, [1, "two"]);
+
+// Compiler temporaries must live beyond every analyser-assigned local whose
+// lifetime overlaps them. Block-local slots are deliberately reused across
+// the target, index, and rhs expressions here.
+let block_values = [1];
+({
+    let target_alias = block_values;
+    target_alias
+})[{
+    let block_index = 0;
+    block_index
+}] += {
+    let delta = 2;
+    delta
+};
+assert_eq(block_values, [3]);
+
+// Nested functions have an independent local-slot namespace and need their
+// own source-local high-water mark before compiler temporaries are allocated.
+fn update_in_function() {
+    let values = [1];
+    values[0] += {
+        let delta = 2;
+        delta
+    };
+    values
+}
+assert_eq(update_in_function(), [3]);

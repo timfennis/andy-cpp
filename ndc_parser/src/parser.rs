@@ -850,7 +850,6 @@ impl Parser {
             Some(Token::For) => {
                 let result = ForBody::List {
                     expr: expr.simplify(),
-                    accumulator_slot: None,
                 };
                 self.for_comprehension(left_square_bracket_span, result, &Token::RightSquareBracket)
             }
@@ -1321,7 +1320,6 @@ impl Parser {
                         key: key_expr,
                         value: value_expr,
                         default,
-                        accumulator_slot: None,
                     },
                     &Token::RightCurlyBracket,
                 );

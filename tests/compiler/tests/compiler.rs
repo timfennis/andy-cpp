@@ -375,6 +375,23 @@ fn test_augmented_assignment_writeback_uses_target_store_shape() {
     );
 }
 
+#[test]
+fn test_augmented_assignment_temporaries_follow_source_locals() {
+    let ops =
+        compile_with_stdlib_unoptimized("let values = [1]; values[0] += { let delta = 2; delta };");
+
+    assert!(
+        ops.iter().any(|op| matches!(op, SetLocal(1))),
+        "the rhs block local should retain analyser-assigned slot 1: {ops:?}",
+    );
+    assert!(
+        ops.iter().any(|op| matches!(op, SetLocal(2)))
+            && ops.iter().any(|op| matches!(op, SetLocal(3)))
+            && ops.iter().any(|op| matches!(op, SetLocal(4))),
+        "prepared-target temporaries must be allocated after both source locals: {ops:?}",
+    );
+}
+
 // { let a = 3; a }
 //
 // Declaration stores 3 into pre-allocated slot 0.

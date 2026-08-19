@@ -35,9 +35,7 @@ impl Compiler {
         expressions: impl Iterator<Item = ExpressionLocation>,
     ) -> Result<CompiledFunction, CompileError> {
         let mut compiler = Self::default();
-        for expr_loc in expressions {
-            compiler.compile_expr(expr_loc)?;
-        }
+        compiler.compile_batch(expressions.collect())?;
         Ok(compiler.finish()?.0)
     }
 
@@ -51,9 +49,7 @@ impl Compiler {
             optimize: false,
             ..Default::default()
         };
-        for expr_loc in expressions {
-            compiler.compile_expr(expr_loc)?;
-        }
+        compiler.compile_batch(expressions.collect())?;
         Ok(compiler.finish()?.0)
     }
 
@@ -72,9 +68,7 @@ impl Compiler {
             optimize: false,
             ..Default::default()
         };
-        for expr_loc in expressions {
-            compiler.compile_expr(expr_loc)?;
-        }
+        compiler.compile_batch(expressions.collect())?;
         compiler.finish()
     }
 
@@ -90,10 +84,26 @@ impl Compiler {
         new_expressions: impl Iterator<Item = ExpressionLocation>,
     ) -> Result<(CompiledFunction, Self), CompileError> {
         let mut compiler = self; // checkpoint has no trailing Halt
-        for expr_loc in new_expressions {
-            compiler.compile_expr(expr_loc)?;
-        }
+        compiler.compile_batch(new_expressions.collect())?;
         compiler.finish()
+    }
+
+    /// Reserve every analyser-assigned source slot before allocating hidden
+    /// compiler temporaries. The analyser resolves an entire function before
+    /// bytecode emission, so source declarations compiled later may otherwise
+    /// collide with a temporary allocated earlier.
+    fn compile_batch(&mut self, expressions: Vec<ExpressionLocation>) -> Result<(), CompileError> {
+        self.num_locals = self.num_locals.max(source_local_count(&expressions));
+        for expression in expressions {
+            self.compile_expr(expression)?;
+        }
+        Ok(())
+    }
+
+    fn allocate_temp(&mut self) -> usize {
+        let slot = self.num_locals;
+        self.num_locals += 1;
+        slot
     }
 
     /// The instruction index where the trailing `Halt` was written.
@@ -424,8 +434,7 @@ impl Compiler {
                 // 4. Call []= function
                 // 5. Pop the return value
 
-                let tmp_value = self.num_locals;
-                self.num_locals += 1;
+                let tmp_value = self.allocate_temp();
                 self.ir.write(OpCode::SetLocal(tmp_value), span);
 
                 self.compile_binding(resolved_set.expect("[]= must be resolved"), span)?;
@@ -659,8 +668,9 @@ impl Compiler {
             },
             return_type: Box::new(return_type.clone()),
         };
+        let function_source_locals = source_local_count(std::slice::from_ref(&body));
         let mut fn_compiler = Self {
-            num_locals: num_params,
+            num_locals: num_params.max(function_source_locals),
             allow_return: true,
             optimize: self.optimize,
             ..Default::default()
@@ -732,13 +742,8 @@ impl Compiler {
                 })?;
                 Ok(())
             }
-            ForBody::List {
-                expr,
-                accumulator_slot,
-            } => {
-                let tmp_list = accumulator_slot
-                    .ok_or_else(|| CompileError::unresolved_accumulator_slot(span))?;
-                self.num_locals = self.num_locals.max(tmp_list + 1);
+            ForBody::List { expr } => {
+                let tmp_list = self.allocate_temp();
                 self.ir.write(OpCode::MakeList(0), span);
                 self.ir.write(OpCode::SetLocal(tmp_list), span);
                 self.compile_for_iterations(iterations, span, &mut |this| {
@@ -753,11 +758,8 @@ impl Compiler {
                 key,
                 value,
                 default,
-                accumulator_slot,
             } => {
-                let tmp_map = accumulator_slot
-                    .ok_or_else(|| CompileError::unresolved_accumulator_slot(span))?;
-                self.num_locals = self.num_locals.max(tmp_map + 1);
+                let tmp_map = self.allocate_temp();
                 let has_default = default.is_some();
                 if let Some(default) = default {
                     self.compile_expr(*default)?;
@@ -914,9 +916,8 @@ impl PreparedAssignmentTarget {
             } => {
                 let container_span = value.span;
                 let index_span = index.span;
-                let cached_container = compiler.num_locals;
-                let cached_index = compiler.num_locals + 1;
-                compiler.num_locals += 2;
+                let cached_container = compiler.allocate_temp();
+                let cached_index = compiler.allocate_temp();
 
                 compiler.compile_expr(*value)?;
                 compiler
@@ -977,8 +978,7 @@ impl PreparedAssignmentTarget {
                 setter,
                 ..
             } => {
-                let cached_value = compiler.num_locals;
-                compiler.num_locals += 1;
+                let cached_value = compiler.allocate_temp();
                 let target_span = container_span.merge(*index_span);
 
                 compiler
@@ -999,6 +999,215 @@ impl PreparedAssignmentTarget {
             }
         }
         Ok(())
+    }
+}
+
+/// Number of analyser-assigned local slots in the current function.
+///
+/// Nested function bodies use their own slot namespace and are deliberately
+/// skipped; their compiler performs the same scan when that body is lowered.
+fn source_local_count(expressions: &[ExpressionLocation]) -> usize {
+    expressions
+        .iter()
+        .filter_map(max_source_local_in_expression)
+        .max()
+        .map_or(0, |slot| slot + 1)
+}
+
+fn max_source_local_in_expression(location: &ExpressionLocation) -> Option<usize> {
+    let expression = &location.expression;
+    match expression {
+        Expression::BoolLiteral(_)
+        | Expression::StringLiteral(_)
+        | Expression::Int64Literal(_)
+        | Expression::Float64Literal(_)
+        | Expression::BigIntLiteral(_)
+        | Expression::ComplexLiteral(_)
+        | Expression::Break
+        | Expression::Continue => None,
+        Expression::Identifier { resolved, .. } => max_source_local_in_binding(resolved),
+        Expression::Statement(inner) | Expression::Grouping(inner) => {
+            max_source_local_in_expression(inner)
+        }
+        Expression::Logical { left, right, .. } => [
+            max_source_local_in_expression(left),
+            max_source_local_in_expression(right),
+        ]
+        .into_iter()
+        .flatten()
+        .max(),
+        Expression::VariableDeclaration { l_value, value, .. }
+        | Expression::Assignment {
+            l_value,
+            r_value: value,
+        } => [
+            max_source_local_in_lvalue(l_value),
+            max_source_local_in_expression(value),
+        ]
+        .into_iter()
+        .flatten()
+        .max(),
+        Expression::OpAssignment {
+            l_value,
+            r_value,
+            plan,
+            ..
+        } => {
+            let operation = match plan {
+                AugmentedAssignmentPlan::Unresolved => None,
+                AugmentedAssignmentPlan::Resolved(binding) => max_source_local_in_binding(binding),
+            };
+            [
+                max_source_local_in_lvalue(l_value),
+                max_source_local_in_expression(r_value),
+                operation,
+            ]
+            .into_iter()
+            .flatten()
+            .max()
+        }
+        Expression::FunctionDeclaration {
+            resolved_name,
+            captures,
+            ..
+        } => resolved_name
+            .iter()
+            .filter_map(max_source_local_in_var)
+            .chain(captures.iter().filter_map(|capture| match capture {
+                CaptureSource::Local(slot) => Some(*slot),
+                CaptureSource::Upvalue(_) => None,
+            }))
+            .max(),
+        Expression::Block { statements } => statements
+            .iter()
+            .filter_map(max_source_local_in_expression)
+            .max(),
+        Expression::If {
+            condition,
+            on_true,
+            on_false,
+        } => [
+            max_source_local_in_expression(condition),
+            max_source_local_in_expression(on_true),
+            on_false.as_deref().and_then(max_source_local_in_expression),
+        ]
+        .into_iter()
+        .flatten()
+        .max(),
+        Expression::While {
+            expression,
+            loop_body,
+        } => [
+            max_source_local_in_expression(expression),
+            max_source_local_in_expression(loop_body),
+        ]
+        .into_iter()
+        .flatten()
+        .max(),
+        Expression::For { iterations, body } => iterations
+            .iter()
+            .filter_map(|iteration| match iteration {
+                ForIteration::Iteration { l_value, sequence } => [
+                    max_source_local_in_lvalue(l_value),
+                    max_source_local_in_expression(sequence),
+                ]
+                .into_iter()
+                .flatten()
+                .max(),
+                ForIteration::Guard(guard) => max_source_local_in_expression(guard),
+            })
+            .chain(max_source_local_in_for_body(body))
+            .max(),
+        Expression::Call {
+            function,
+            arguments,
+        }
+        | Expression::OperatorCall {
+            function,
+            arguments,
+        } => std::iter::once(max_source_local_in_expression(function))
+            .chain(arguments.iter().map(max_source_local_in_expression))
+            .flatten()
+            .max(),
+        Expression::Tuple { values } | Expression::List { values } => values
+            .iter()
+            .filter_map(max_source_local_in_expression)
+            .max(),
+        Expression::Map { values, default } => values
+            .iter()
+            .flat_map(|(key, value)| {
+                std::iter::once(max_source_local_in_expression(key))
+                    .chain(value.as_ref().map(max_source_local_in_expression))
+            })
+            .chain(default.as_deref().map(max_source_local_in_expression))
+            .flatten()
+            .max(),
+        Expression::Return { value } => max_source_local_in_expression(value),
+        Expression::RangeInclusive { start, end } | Expression::RangeExclusive { start, end } => {
+            start
+                .as_deref()
+                .map(max_source_local_in_expression)
+                .into_iter()
+                .chain(end.as_deref().map(max_source_local_in_expression))
+                .flatten()
+                .max()
+        }
+    }
+}
+
+fn max_source_local_in_for_body(body: &ForBody) -> Option<usize> {
+    match body {
+        ForBody::Block(block) | ForBody::List { expr: block } => {
+            max_source_local_in_expression(block)
+        }
+        ForBody::Map {
+            key,
+            value,
+            default,
+        } => std::iter::once(max_source_local_in_expression(key))
+            .chain(value.as_ref().map(max_source_local_in_expression))
+            .chain(default.as_deref().map(max_source_local_in_expression))
+            .flatten()
+            .max(),
+    }
+}
+
+fn max_source_local_in_lvalue(lvalue: &Lvalue) -> Option<usize> {
+    match lvalue {
+        Lvalue::Identifier { resolved, .. } => resolved.as_ref().and_then(max_source_local_in_var),
+        Lvalue::Index {
+            value,
+            index,
+            resolved_set,
+            resolved_get,
+        } => [
+            max_source_local_in_expression(value),
+            max_source_local_in_expression(index),
+            resolved_set.as_ref().and_then(max_source_local_in_binding),
+            resolved_get.as_ref().and_then(max_source_local_in_binding),
+        ]
+        .into_iter()
+        .flatten()
+        .max(),
+        Lvalue::Sequence(lvalues) => lvalues.iter().filter_map(max_source_local_in_lvalue).max(),
+    }
+}
+
+fn max_source_local_in_binding(binding: &Binding) -> Option<usize> {
+    match binding {
+        Binding::None => None,
+        Binding::Resolved(candidate) => max_source_local_in_var(&candidate.var()),
+        Binding::Dynamic(candidates) => candidates
+            .iter()
+            .filter_map(|candidate| max_source_local_in_var(&candidate.var()))
+            .max(),
+    }
+}
+
+fn max_source_local_in_var(variable: &ResolvedVar) -> Option<usize> {
+    match variable {
+        ResolvedVar::Local { slot } => Some(*slot),
+        ResolvedVar::Upvalue { .. } | ResolvedVar::Global { .. } => None,
     }
 }
 
@@ -1072,14 +1281,6 @@ impl CompileError {
     fn lvalue_required_to_be_single_identifier(span: Span) -> Self {
         Self {
             text: "This lvalue is required to be a single identifier".to_string(),
-            span,
-        }
-    }
-
-    fn unresolved_accumulator_slot(span: Span) -> Self {
-        Self {
-            text: "accumulator slot was not assigned by the analyser; this is an internal error"
-                .to_string(),
             span,
         }
     }

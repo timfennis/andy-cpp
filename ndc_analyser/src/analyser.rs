@@ -538,25 +538,12 @@ impl Analyser {
                     self.analyse_or_any(block);
                     StaticType::unit()
                 }
-                ForBody::List {
-                    expr,
-                    accumulator_slot,
-                    ..
-                } => {
-                    // Reserve the accumulator slot BEFORE analysing the body so
-                    // that nested for-comprehensions receive strictly higher slot
-                    // numbers and cannot collide with this accumulator.
-                    *accumulator_slot = Some(self.scope_tree.reserve_anonymous_slot());
-                    StaticType::List(Box::new(self.analyse_or_any(expr)))
-                }
+                ForBody::List { expr } => StaticType::List(Box::new(self.analyse_or_any(expr))),
                 ForBody::Map {
                     key,
                     value,
                     default,
-                    accumulator_slot,
-                    ..
                 } => {
-                    *accumulator_slot = Some(self.scope_tree.reserve_anonymous_slot());
                     let key_type = self.analyse_or_any(key);
                     let value_type = if let Some(value) = value {
                         self.analyse_or_any(value)

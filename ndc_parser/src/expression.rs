@@ -202,13 +202,11 @@ pub enum ForBody {
     Block(ExpressionLocation),
     List {
         expr: ExpressionLocation,
-        accumulator_slot: Option<usize>,
     },
     Map {
         key: ExpressionLocation,
         value: Option<ExpressionLocation>,
         default: Option<Box<ExpressionLocation>>,
-        accumulator_slot: Option<usize>,
     },
 }
 
