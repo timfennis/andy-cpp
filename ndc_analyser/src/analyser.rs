@@ -6,8 +6,8 @@ use itertools::{Itertools, izip};
 use ndc_core::{StaticType, TypeSignature};
 use ndc_lexer::Span;
 use ndc_parser::{
-    Binding, Candidate, Expression, ExpressionLocation, ForBody, ForIteration, FunctionParameter,
-    Lvalue, NodeId,
+    AugmentedAssignmentPlan, Binding, Candidate, Expression, ExpressionLocation, ForBody,
+    ForIteration, FunctionParameter, Lvalue, NodeId,
 };
 
 /// Side table holding semantic information keyed by AST node identity.
@@ -195,18 +195,15 @@ impl Analyser {
                 l_value,
                 r_value,
                 operation,
-                resolved_assign_operation,
-                resolved_operation,
+                plan,
             } => {
                 let left_type = self.resolve_single_lvalue(l_value, *span)?;
                 let right_type = self.analyse_or_any(r_value);
-                let arg_types = vec![left_type, right_type];
+                let arg_types = vec![left_type.clone(), right_type.clone()];
 
-                // Resolve both `op=` and `op` so we can widen the lvalue
-                // by the result type of whichever one actually fires.
                 let ResolvedCall {
                     binding: assign_binding,
-                    ..
+                    return_type: assign_return,
                 } = self.scope_tree.resolve_call(
                     &format!("{operation}="),
                     &arg_types,
@@ -218,24 +215,67 @@ impl Analyser {
                 } = self
                     .scope_tree
                     .resolve_call(operation, &arg_types, CallKind::Operator);
+                let has_op_binding = !matches!(op_binding, Binding::None);
+                let assign_is_eligible = Self::augmented_rhs_is_compatible(&left_type, &right_type);
 
-                *resolved_assign_operation = assign_binding;
-                *resolved_operation = op_binding;
+                let writeback_type = match assign_binding {
+                    Binding::Resolved(candidate) if assign_is_eligible => {
+                        *plan = AugmentedAssignmentPlan::Resolved(Binding::Resolved(candidate));
+                        None
+                    }
+                    Binding::Dynamic(mut assign_candidates) if assign_is_eligible => {
+                        match op_binding.clone() {
+                            Binding::Resolved(candidate) => {
+                                if !assign_candidates.contains(&candidate) {
+                                    assign_candidates.push(candidate);
+                                }
+                            }
+                            Binding::Dynamic(op_candidates) => {
+                                for candidate in op_candidates {
+                                    if !assign_candidates.contains(&candidate) {
+                                        assign_candidates.push(candidate);
+                                    }
+                                }
+                            }
+                            Binding::None => {}
+                        }
 
-                // Either form satisfies the call: `op=` mutates in place;
-                // `op` falls back through `a = a op b`. Only error when both
-                // are missing — e.g. `Map -= Map` is fine via `-=` even when
-                // `-` itself has no Map overload.
-                if matches!(resolved_assign_operation, Binding::None)
-                    && matches!(resolved_operation, Binding::None)
-                {
-                    self.emit(AnalysisError::function_not_found(
-                        operation, &arg_types, *span,
-                    ));
-                }
+                        let result_type = if has_op_binding {
+                            assign_return.lub(&op_return)
+                        } else {
+                            assign_return
+                        };
+                        *plan =
+                            AugmentedAssignmentPlan::Resolved(Binding::Dynamic(assign_candidates));
+                        Some(result_type)
+                    }
+                    Binding::Resolved(_) | Binding::Dynamic(_) => {
+                        // A specialized mutation exists, but using it would
+                        // change the concrete left type. Reject it here rather
+                        // than falling through to an ordinary operation whose
+                        // erased return type could widen the same target.
+                        self.emit(AnalysisError::mismatched_types(
+                            &right_type,
+                            &left_type,
+                            *span,
+                        ));
+                        *plan = AugmentedAssignmentPlan::Unresolved;
+                        None
+                    }
+                    _ if has_op_binding => {
+                        *plan = AugmentedAssignmentPlan::Resolved(op_binding);
+                        Some(op_return)
+                    }
+                    _ => {
+                        self.emit(AnalysisError::function_not_found(
+                            operation, &arg_types, *span,
+                        ));
+                        *plan = AugmentedAssignmentPlan::Unresolved;
+                        None
+                    }
+                };
 
-                if !matches!(resolved_operation, Binding::None) {
-                    let result_type = op_return;
+                if let Some(result_type) = writeback_type {
                     match l_value {
                         Lvalue::Identifier {
                             resolved: Some(target),
@@ -640,7 +680,11 @@ impl Analyser {
                 let type_of_index_target = self.analyse_or_any(value);
 
                 let get_args = [type_of_index_target.clone(), index_type.clone()];
-                let set_args = [type_of_index_target.clone(), index_type, StaticType::Any];
+                let set_args = [
+                    type_of_index_target.clone(),
+                    index_type.clone(),
+                    StaticType::Any,
+                ];
 
                 // Indexing isn't operator-form for vec purposes: there's no
                 // natural broadcast story for `(list_a, list_b)[i]`.
@@ -654,6 +698,13 @@ impl Analyser {
                         .resolve_call("[]=", &set_args, CallKind::Regular)
                         .binding,
                 );
+
+                let range_type = StaticType::Iterator(Box::new(StaticType::Int));
+                if index_type.is_subtype(&range_type)
+                    && let StaticType::List(element) = &type_of_index_target
+                {
+                    return Ok(StaticType::List(element.clone()));
+                }
 
                 if let Some(t) = type_of_index_target.index_element_type() {
                     Ok(t)
@@ -681,6 +732,23 @@ impl Analyser {
                 self.emit(e);
                 StaticType::Any
             }
+        }
+    }
+
+    /// Specialized `op=` implementations preserve the concrete left type.
+    /// A tuple left-hand side represents vector dispatch, so a scalar right
+    /// operand must be compatible with every concrete tuple element.
+    fn augmented_rhs_is_compatible(left_type: &StaticType, right_type: &StaticType) -> bool {
+        match (left_type, right_type) {
+            (StaticType::Tuple(left), StaticType::Tuple(right)) => {
+                left.len() == right.len()
+                    && right
+                        .iter()
+                        .zip(left)
+                        .all(|(right, left)| right.is_subtype(left))
+            }
+            (StaticType::Tuple(left), right) => left.iter().all(|left| right.is_subtype(left)),
+            (left, right) => right.is_subtype(left),
         }
     }
 

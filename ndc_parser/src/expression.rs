@@ -26,6 +26,17 @@ pub enum Binding {
     Dynamic(Vec<Candidate>), // figure it out at runtime
 }
 
+/// The operation selected by the analyser for an augmented assignment.
+///
+/// Every selected operation returns the updated left value internally. The
+/// compiler writes that value back through the assignment target, while the
+/// augmented-assignment expression itself evaluates to unit.
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub enum AugmentedAssignmentPlan {
+    Unresolved,
+    Resolved(Binding),
+}
+
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub enum ResolvedVar {
     Local { slot: usize },
@@ -110,8 +121,7 @@ pub enum Expression {
         l_value: Lvalue,
         r_value: Box<ExpressionLocation>,
         operation: String,
-        resolved_assign_operation: Binding,
-        resolved_operation: Binding,
+        plan: AugmentedAssignmentPlan,
     },
     FunctionDeclaration {
         name: Option<String>,

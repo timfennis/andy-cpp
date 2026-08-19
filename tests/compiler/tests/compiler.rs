@@ -42,6 +42,16 @@ fn compile_with_stdlib(input: &str) -> Vec<OpCode> {
         .to_vec()
 }
 
+fn compile_with_stdlib_unoptimized(input: &str) -> Vec<OpCode> {
+    let mut interp = ndc_interpreter::Interpreter::capturing();
+    interp.configure(ndc_stdlib::register);
+    interp
+        .compile_str_unoptimized(input)
+        .expect("compile failed")
+        .opcodes()
+        .to_vec()
+}
+
 // if true { 1 }
 //
 // 0: Constant(0)      push `true`
@@ -322,6 +332,46 @@ fn test_assignment() {
             Pop,
             Halt
         ]
+    );
+}
+
+#[test]
+fn test_augmented_assignment_always_writes_back() {
+    let variable = compile_with_stdlib_unoptimized("let value = [1]; value ++= [2];");
+    assert!(
+        variable
+            .windows(4)
+            .any(|ops| matches!(ops, [Call(2), SetLocal(0), Constant(_), Pop])),
+        "specialized variable augmentation must write back its result and push unit: {variable:?}",
+    );
+
+    let index = compile_with_stdlib_unoptimized(
+        "let value = [1]; let values = [value]; values[0] ++= [2];",
+    );
+    assert!(
+        index
+            .windows(3)
+            .any(|ops| matches!(ops, [Call(3), Pop, Constant(_)])),
+        "specialized indexed augmentation must write back through []= and push unit: {index:?}",
+    );
+}
+
+#[test]
+fn test_augmented_assignment_writeback_uses_target_store_shape() {
+    let variable = compile_with_stdlib_unoptimized("let value = 1; value += 2;");
+    assert!(
+        variable
+            .windows(4)
+            .any(|ops| matches!(ops, [Call(2), SetLocal(0), Constant(_), Pop])),
+        "writeback variable augmentation must store the operation result and push unit: {variable:?}",
+    );
+
+    let index = compile_with_stdlib_unoptimized("let values = [1]; values[0] += 2;");
+    assert!(
+        index
+            .windows(3)
+            .any(|ops| matches!(ops, [Call(3), Pop, Constant(_)])),
+        "writeback index augmentation must discard the setter result before pushing unit: {index:?}",
     );
 }
 

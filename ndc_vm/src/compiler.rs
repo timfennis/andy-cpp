@@ -4,8 +4,8 @@ use crate::{Object, Value};
 use ndc_core::{StaticType, TypeSignature};
 use ndc_lexer::Span;
 use ndc_parser::{
-    Binding, Candidate, CaptureSource, Expression, ExpressionLocation, ForBody, ForIteration,
-    FunctionParameter, LogicalOperator, Lvalue, ResolvedVar,
+    AugmentedAssignmentPlan, Binding, Candidate, CaptureSource, Expression, ExpressionLocation,
+    ForBody, ForIteration, FunctionParameter, LogicalOperator, Lvalue, ResolvedVar,
 };
 use std::rc::Rc;
 
@@ -240,124 +240,24 @@ impl Compiler {
             Expression::OpAssignment {
                 l_value,
                 r_value,
-                resolved_assign_operation,
-                resolved_operation,
+                plan,
                 ..
             } => {
-                match l_value {
-                    Lvalue::Identifier {
-                        resolved,
-                        span: lv_span,
-                        ..
-                    } => {
-                        let var = resolved.expect("lvalue must be resolved");
-                        match Self::op_assign_strategy(&resolved_assign_operation) {
-                            OpAssignStrategy::InPlaceScalar => {
-                                // `|=`, `&=`, `++=` over a List/Map/String:
-                                // the in-place op mutates the value's Rc and
-                                // returns unit (or the lhs). The slot already
-                                // points at the shared Rc, so just discard.
-                                self.compile_binding(resolved_assign_operation, span)?;
-                                self.emit_get_var(var, lv_span);
-                                self.compile_expr(*r_value)?;
-                                self.ir.write(OpCode::Call(2), span);
-                                self.ir.write(OpCode::Pop, span);
-                            }
-                            OpAssignStrategy::DynamicMerge => {
-                                // `op=` exists but either dispatches to
-                                // multiple candidates at runtime, or resolved
-                                // to a single vec candidate that produces a
-                                // fresh tuple. Either way the result must be
-                                // stored back via SetVar — `op=` returns lhs
-                                // when it mutates in place, or a fresh value
-                                // when vec'd.
-                                let (opcode, callee_binding): (OpCode, Binding) =
-                                    match resolved_assign_operation {
-                                        Binding::Resolved(Candidate::Vec(_)) => {
-                                            (OpCode::CallVec(2), resolved_assign_operation)
-                                        }
-                                        Binding::Dynamic(assign_candidates) => {
-                                            // Merge with `op` candidates so the runtime
-                                            // dispatcher can fall back to `a op b` shape
-                                            // for arg types `op=` doesn't accept.
-                                            let mut merged = assign_candidates;
-                                            match resolved_operation {
-                                                Binding::Dynamic(c) => merged.extend(c),
-                                                Binding::Resolved(c) => merged.push(c),
-                                                Binding::None => {}
-                                            }
-                                            (OpCode::Call(2), Binding::Dynamic(merged))
-                                        }
-                                        _ => unreachable!(
-                                            "DynamicMerge fires only for Resolved(Vec) or Dynamic op="
-                                        ),
-                                    };
-                                self.compile_binding(callee_binding, span)?;
-                                self.emit_get_var(var, lv_span);
-                                self.compile_expr(*r_value)?;
-                                self.ir.write(opcode, span);
-                                self.emit_set_var(var, lv_span);
-                            }
-                            OpAssignStrategy::FallbackToOp => {
-                                // No `op=` overload: lower to `lhs = lhs op rhs`.
-                                // Vec-resolved `op` (e.g. `a += (3, 4)` on
-                                // `Tuple<Int, Int>`) goes through `CallVec`
-                                // for the speed-up; everything else is `Call`.
-                                let opcode = Self::call_opcode_for(&resolved_operation, 2);
-                                self.compile_binding(resolved_operation, span)?;
-                                self.emit_get_var(var, lv_span);
-                                self.compile_expr(*r_value)?;
-                                self.ir.write(opcode, span);
-                                self.emit_set_var(var, lv_span);
-                            }
-                        }
+                let target = PreparedAssignmentTarget::prepare(self, l_value, span)?;
+                let binding = match plan {
+                    AugmentedAssignmentPlan::Resolved(binding) => binding,
+                    AugmentedAssignmentPlan::Unresolved => {
+                        return Err(CompileError::unresolved_binding(span));
                     }
-                    Lvalue::Index {
-                        value,
-                        index,
-                        resolved_get,
-                        resolved_set,
-                    } => {
-                        let container_span = value.span;
-                        let index_span = index.span;
+                };
 
-                        let tmp_container = self.num_locals;
-                        let tmp_index = self.num_locals + 1;
-                        self.num_locals += 2;
+                let opcode = Self::call_opcode_for(&binding, 2);
+                self.compile_binding(binding, span)?;
+                target.emit_read(self)?;
+                self.compile_expr(*r_value)?;
+                self.ir.write(opcode, span);
+                target.emit_store(self)?;
 
-                        self.compile_expr(*value)?;
-                        self.ir
-                            .write(OpCode::SetLocal(tmp_container), container_span);
-                        self.compile_expr(*index)?;
-                        self.ir.write(OpCode::SetLocal(tmp_index), index_span);
-
-                        self.compile_binding(
-                            resolved_set.expect("[]= must be resolved"),
-                            container_span.merge(index_span),
-                        )?;
-                        self.ir
-                            .write(OpCode::GetLocal(tmp_container), container_span);
-                        self.ir.write(OpCode::GetLocal(tmp_index), index_span);
-
-                        let op_opcode = Self::call_opcode_for(&resolved_operation, 2);
-                        self.compile_binding(resolved_operation, span)?;
-                        self.compile_binding(
-                            resolved_get.expect("[] must be resolved"),
-                            index_span,
-                        )?;
-                        self.ir
-                            .write(OpCode::GetLocal(tmp_container), container_span);
-                        self.ir.write(OpCode::GetLocal(tmp_index), index_span);
-                        self.ir.write(OpCode::Call(2), span); // [](container, index) → current_value
-                        self.compile_expr(*r_value)?;
-                        self.ir.write(op_opcode, span); // op(current_value, r_value) → new_value
-                        self.ir.write(OpCode::Call(3), span); // []=(container, index, new_value)
-                        self.ir.write(OpCode::Pop, span); // discard []= result; common code below pushes unit
-                    }
-                    Lvalue::Sequence(_) => {
-                        return Err(CompileError::lvalue_required_to_be_single_identifier(span));
-                    }
-                }
                 let idx = self.ir.add_constant(Value::unit());
                 self.ir.write(OpCode::Constant(idx), span);
             }
@@ -981,31 +881,124 @@ struct LoopContext {
     break_instructions: Vec<LabelId>,
 }
 
-/// Which lowering shape an `op=` site takes.
-enum OpAssignStrategy {
-    /// A scalar `op=` overload exists and was resolved exactly. The op
-    /// mutates the value's Rc in place; the result is discarded.
-    InPlaceScalar,
-    /// `op=` resolved to multiple candidates. Merge with `op` candidates and
-    /// dispatch at runtime; store the result back.
-    DynamicMerge,
-    /// No `op=` overload — lower to `lhs = lhs op rhs`.
-    FallbackToOp,
+/// An assignment location whose side-effecting components have already been
+/// evaluated and cached. This lets augmented assignment use one lowering for
+/// every target without evaluating an index expression more than once.
+enum PreparedAssignmentTarget {
+    Variable {
+        variable: ResolvedVar,
+        span: Span,
+    },
+    Index {
+        cached_container: usize,
+        cached_index: usize,
+        container_span: Span,
+        index_span: Span,
+        getter: Binding,
+        setter: Binding,
+    },
 }
 
-impl Compiler {
-    fn op_assign_strategy(op_assign: &Binding) -> OpAssignStrategy {
-        match op_assign {
-            Binding::Resolved(Candidate::Scalar(_)) => OpAssignStrategy::InPlaceScalar,
-            // A vec-resolved op= would produce a fresh tuple result that must
-            // be stored back; the merge path handles that correctly via
-            // SetVar after the call. (In practice the stdlib has no such
-            // overload, but this keeps the contract uniform.)
-            Binding::Resolved(Candidate::Vec(_)) | Binding::Dynamic(_) => {
-                OpAssignStrategy::DynamicMerge
+impl PreparedAssignmentTarget {
+    fn prepare(compiler: &mut Compiler, l_value: Lvalue, span: Span) -> Result<Self, CompileError> {
+        match l_value {
+            Lvalue::Identifier { resolved, span, .. } => Ok(Self::Variable {
+                variable: resolved.expect("lvalue must be resolved"),
+                span,
+            }),
+            Lvalue::Index {
+                value,
+                index,
+                resolved_get,
+                resolved_set,
+            } => {
+                let container_span = value.span;
+                let index_span = index.span;
+                let cached_container = compiler.num_locals;
+                let cached_index = compiler.num_locals + 1;
+                compiler.num_locals += 2;
+
+                compiler.compile_expr(*value)?;
+                compiler
+                    .ir
+                    .write(OpCode::SetLocal(cached_container), container_span);
+                compiler.compile_expr(*index)?;
+                compiler
+                    .ir
+                    .write(OpCode::SetLocal(cached_index), index_span);
+
+                Ok(Self::Index {
+                    cached_container,
+                    cached_index,
+                    container_span,
+                    index_span,
+                    getter: resolved_get.expect("[] must be resolved"),
+                    setter: resolved_set.expect("[]= must be resolved"),
+                })
             }
-            Binding::None => OpAssignStrategy::FallbackToOp,
+            Lvalue::Sequence(_) => Err(CompileError::lvalue_required_to_be_single_identifier(span)),
         }
+    }
+
+    fn emit_read(&self, compiler: &mut Compiler) -> Result<(), CompileError> {
+        match self {
+            Self::Variable { variable, span } => compiler.emit_get_var(*variable, *span),
+            Self::Index {
+                cached_container,
+                cached_index,
+                container_span,
+                index_span,
+                getter,
+                ..
+            } => {
+                compiler.compile_binding(getter.clone(), *index_span)?;
+                compiler
+                    .ir
+                    .write(OpCode::GetLocal(*cached_container), *container_span);
+                compiler
+                    .ir
+                    .write(OpCode::GetLocal(*cached_index), *index_span);
+                compiler
+                    .ir
+                    .write(OpCode::Call(2), container_span.merge(*index_span));
+            }
+        }
+        Ok(())
+    }
+
+    fn emit_store(&self, compiler: &mut Compiler) -> Result<(), CompileError> {
+        match self {
+            Self::Variable { variable, span } => compiler.emit_set_var(*variable, *span),
+            Self::Index {
+                cached_container,
+                cached_index,
+                container_span,
+                index_span,
+                setter,
+                ..
+            } => {
+                let cached_value = compiler.num_locals;
+                compiler.num_locals += 1;
+                let target_span = container_span.merge(*index_span);
+
+                compiler
+                    .ir
+                    .write(OpCode::SetLocal(cached_value), target_span);
+                compiler.compile_binding(setter.clone(), target_span)?;
+                compiler
+                    .ir
+                    .write(OpCode::GetLocal(*cached_container), *container_span);
+                compiler
+                    .ir
+                    .write(OpCode::GetLocal(*cached_index), *index_span);
+                compiler
+                    .ir
+                    .write(OpCode::GetLocal(cached_value), target_span);
+                compiler.ir.write(OpCode::Call(3), target_span);
+                compiler.ir.write(OpCode::Pop, target_span);
+            }
+        }
+        Ok(())
     }
 }
 
