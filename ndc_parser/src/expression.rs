@@ -350,15 +350,31 @@ impl Lvalue {
     pub fn can_build_from_expression(expression: &Expression) -> bool {
         match expression {
             Expression::Identifier { .. } => true,
+            Expression::MemberAccess { .. } => true,
             Expression::Call {
                 function,
                 arguments,
             } if is_index_call(function, arguments) => true,
             Expression::List { values } | Expression::Tuple { values } => values
                 .iter()
-                .all(|el| Self::can_build_from_expression(&el.expression)),
-            Expression::Grouping(inner) => Self::can_build_from_expression(&inner.expression),
+                .all(|el| Self::can_build_destructure_from_expression(&el.expression)),
+            Expression::Grouping(inner) => {
+                Self::can_build_destructure_from_expression(&inner.expression)
+            }
             _ => false,
+        }
+    }
+
+    fn can_build_destructure_from_expression(expression: &Expression) -> bool {
+        match expression {
+            Expression::MemberAccess { .. } => false,
+            Expression::List { values } | Expression::Tuple { values } => values
+                .iter()
+                .all(|el| Self::can_build_destructure_from_expression(&el.expression)),
+            Expression::Grouping(inner) => {
+                Self::can_build_destructure_from_expression(&inner.expression)
+            }
+            expression => Self::can_build_from_expression(expression),
         }
     }
 
@@ -391,6 +407,18 @@ impl TryFrom<ExpressionLocation> for Lvalue {
                     resolved_get: None,
                 })
             }
+            Expression::MemberAccess {
+                receiver,
+                member,
+                member_span,
+                ..
+            } => Ok(Self::Member {
+                receiver,
+                member,
+                member_span,
+                resolved_getter: None,
+                resolved_setter: None,
+            }),
             Expression::List { values } | Expression::Tuple { values } => Ok(Self::Sequence(
                 values
                     .into_iter()

@@ -1,0 +1,7 @@
+// expect-error: mismatched types: found String but expected Int
+struct Point {
+    x: Int,
+}
+
+let point = Point(1);
+point.x = "wrong";
