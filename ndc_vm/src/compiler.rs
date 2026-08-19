@@ -246,6 +246,7 @@ impl Compiler {
                     let idx = self.ir.add_constant(Value::unit());
                     self.ir.write(OpCode::Constant(idx), Span::synthetic());
                 }
+                Lvalue::Member { .. } => todo!("this is the 'draw the rest of the owl'"),
             },
             Expression::OpAssignment {
                 l_value,
@@ -367,6 +368,7 @@ impl Compiler {
                     Lvalue::Sequence(_) => {
                         return Err(CompileError::lvalue_required_to_be_single_identifier(span));
                     }
+                    Lvalue::Member { .. } => todo!("this is the rest of the owl"),
                 }
                 let idx = self.ir.add_constant(Value::unit());
                 self.ir.write(OpCode::Constant(idx), span);
@@ -493,6 +495,16 @@ impl Compiler {
 
                 self.ir.write(opcode, function_span);
             }
+            Expression::MemberAccess {
+                receiver,
+                member_span,
+                resolved_getter,
+                ..
+            } => {
+                self.compile_binding(resolved_getter, member_span)?;
+                self.compile_expr(*receiver)?;
+                self.ir.write(OpCode::Call(1), member_span);
+            }
             Expression::Tuple { values } => {
                 let size = values.len();
                 for expression in values {
@@ -606,6 +618,7 @@ impl Compiler {
                     self.compile_lvalue(lv, span)?;
                 }
             }
+            Lvalue::Member { .. } => todo!(),
         }
 
         Ok(())
@@ -628,6 +641,7 @@ impl Compiler {
                     self.compile_declare_lvalue(lv, span)?;
                 }
             }
+            Lvalue::Member { .. } => todo!(),
         }
         Ok(())
     }
@@ -1129,6 +1143,7 @@ fn produces_value(expr: &Expression) -> bool {
         | Expression::If { .. }
         | Expression::Call { .. }
         | Expression::OperatorCall { .. }
+        | Expression::MemberAccess { .. }
         | Expression::Tuple { .. }
         | Expression::List { .. }
         | Expression::Map { .. }

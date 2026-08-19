@@ -1,7 +1,6 @@
 use crate::r#struct::StructId;
 use itertools::Itertools;
 use std::fmt;
-use std::rc::Rc;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum TypeSignature {

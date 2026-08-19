@@ -1,6 +1,6 @@
 use crate::scope::{CallKind, ResolvedCall, ScopeTree, TypeBinding};
 use itertools::{Itertools, izip};
-use ndc_core::r#struct::{StructInfo, StructRegistry};
+use ndc_core::r#struct::StructRegistry;
 use ndc_core::{StaticType, TypeSignature};
 use ndc_lexer::Span;
 use ndc_parser::{
@@ -421,6 +421,33 @@ impl Analyser {
                 function,
                 arguments,
             } => self.analyse_call(function, arguments, CallKind::Operator, *span),
+            Expression::MemberAccess {
+                receiver,
+                member,
+                member_span,
+                resolved_getter,
+            } => {
+                let receiver_type = self.analyse_or_any(receiver);
+                let ResolvedCall {
+                    binding,
+                    return_type,
+                } = self.scope_tree.resolve_call(
+                    member,
+                    &[receiver_type.clone()],
+                    CallKind::Regular,
+                );
+
+                if matches!(binding, Binding::None) {
+                    self.emit(AnalysisError::function_not_found(
+                        member,
+                        &[receiver_type],
+                        *member_span,
+                    ));
+                }
+
+                *resolved_getter = binding;
+                Ok(return_type)
+            }
             Expression::Tuple { values } => {
                 let mut types = Vec::with_capacity(values.len());
                 for v in values {
@@ -739,6 +766,7 @@ impl Analyser {
                 }
                 Ok(StaticType::unit())
             }
+            Lvalue::Member { .. } => todo!(),
         }
     }
 
@@ -884,6 +912,7 @@ impl Analyser {
                     self.emit(AnalysisError::unable_to_unpack_type(&found_type, span));
                 }
             }
+            Lvalue::Member { .. } => todo!(),
         }
     }
     fn analyse_multiple_expression_with_same_type(
