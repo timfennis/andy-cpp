@@ -246,7 +246,18 @@ impl Compiler {
                     let idx = self.ir.add_constant(Value::unit());
                     self.ir.write(OpCode::Constant(idx), Span::synthetic());
                 }
-                Lvalue::Member { .. } => todo!("this is the 'draw the rest of the owl'"),
+                Lvalue::Member {
+                    receiver,
+                    member_span,
+                    resolved_setter,
+                    ..
+                } => {
+                    let setter = resolved_setter.expect("member setter must be resolved");
+                    self.compile_binding(setter, member_span)?;
+                    self.compile_expr(*receiver)?;
+                    self.compile_expr(*value)?;
+                    self.ir.write(OpCode::Call(2), member_span);
+                }
             },
             Expression::OpAssignment {
                 l_value,

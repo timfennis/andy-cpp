@@ -177,23 +177,28 @@ impl Analyser {
                 let old_type = self.resolve_lvalue_or_any(l_value, *span);
                 let new_type = self.analyse_or_any(r_value);
 
-                if let Lvalue::Identifier {
-                    resolved: Some(target),
-                    ..
-                } = l_value
-                {
-                    let widened = old_type.lub(&new_type);
-                    if widened != old_type
-                        && let Err(annotated_type) =
-                            self.scope_tree.update_binding_type(*target, widened)
-                        && !new_type.is_subtype(&annotated_type)
-                    {
-                        self.emit(AnalysisError::mismatched_types(
-                            &new_type,
-                            &annotated_type,
-                            *span,
-                        ));
+                match l_value {
+                    Lvalue::Identifier {
+                        resolved: Some(target),
+                        ..
+                    } => {
+                        let widened = old_type.lub(&new_type);
+                        if widened != old_type
+                            && let Err(annotated_type) =
+                                self.scope_tree.update_binding_type(*target, widened)
+                            && !new_type.is_subtype(&annotated_type)
+                        {
+                            self.emit(AnalysisError::mismatched_types(
+                                &new_type,
+                                &annotated_type,
+                                *span,
+                            ));
+                        }
                     }
+                    Lvalue::Member { .. } if !new_type.is_subtype(&old_type) => {
+                        self.emit(AnalysisError::mismatched_types(&new_type, &old_type, *span));
+                    }
+                    _ => {}
                 }
 
                 Ok(StaticType::unit())
@@ -766,7 +771,46 @@ impl Analyser {
                 }
                 Ok(StaticType::unit())
             }
-            Lvalue::Member { .. } => todo!(),
+            Lvalue::Member {
+                receiver,
+                member,
+                member_span,
+                resolved_getter,
+                resolved_setter,
+            } => {
+                let receiver_type = self.analyse_or_any(receiver);
+                let getter_args = [receiver_type.clone()];
+                let setter_args = [receiver_type, StaticType::Any];
+                let getter = self
+                    .scope_tree
+                    .resolve_call(member, &getter_args, CallKind::Regular);
+                let setter_name = format!("{member}=");
+                let setter =
+                    self.scope_tree
+                        .resolve_call(&setter_name, &setter_args, CallKind::Regular);
+                let getter_missing = matches!(getter.binding, Binding::None);
+                let setter_missing = matches!(setter.binding, Binding::None);
+
+                *resolved_getter = Some(getter.binding);
+                *resolved_setter = Some(setter.binding);
+
+                if getter_missing {
+                    return Err(AnalysisError::function_not_found(
+                        member,
+                        &getter_args,
+                        *member_span,
+                    ));
+                }
+                if setter_missing {
+                    return Err(AnalysisError::function_not_found(
+                        &setter_name,
+                        &setter_args,
+                        *member_span,
+                    ));
+                }
+
+                Ok(getter.return_type)
+            }
         }
     }
 

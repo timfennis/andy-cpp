@@ -428,3 +428,14 @@ fn test_regular_call_with_tuple_arg_does_not_vec() {
         "expected a Call(1) for id((1, 2, 3)), got: {ops:?}",
     );
 }
+
+#[test]
+fn test_member_assignment_calls_setter_with_receiver_and_value() {
+    let ops = compile_with_analysis("struct Point { x: Int }\nlet point = Point(1);\npoint.x = 2;");
+
+    assert!(
+        ops.windows(4)
+            .any(|window| matches!(window, [Constant(_), GetLocal(_), Constant(_), Call(2)])),
+        "expected setter, receiver, value, Call(2); got: {ops:?}",
+    );
+}
