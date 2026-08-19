@@ -136,7 +136,7 @@ fn push_lvalue_symbols(
                 push_lvalue_symbols(lv, decl_span, text, line_index, out);
             }
         }
-        Lvalue::Index { .. } => {}
+        Lvalue::Index { .. } | Lvalue::Member { .. } => {}
     }
 }
 
