@@ -656,7 +656,7 @@ impl Parser {
         //    * `identifier()` <-- call
         //    * `identifier[idx]` <-- idx
         //    * `identifier.ident()` <-- dot call
-        //    * `identifier.ident` <-- dot call w/o parentheses
+        //    * `identifier.ident` <-- member access
         while let Some(current) =
             self.match_token(&[Token::LeftParentheses, Token::LeftSquareBracket, Token::Dot])
         {
@@ -665,15 +665,46 @@ impl Parser {
                 Token::LeftParentheses => {
                     let arguments = self.delimited_tuple(Self::single_expression)?;
                     let arguments_span = arguments.span;
-                    let Expression::Tuple { values: arguments } = arguments.expression else {
+                    let Expression::Tuple {
+                        values: mut arguments,
+                    } = arguments.expression
+                    else {
                         unreachable!("self.tuple() must always produce a tuple");
                     };
 
                     let span = expr.span;
+                    let (function, arguments) = match expr.expression {
+                        Expression::MemberAccess {
+                            receiver,
+                            member,
+                            member_span,
+                            ..
+                        } => {
+                            arguments.insert(0, *receiver);
+                            (
+                                Box::new(
+                                    Expression::Identifier {
+                                        name: member,
+                                        resolved: Binding::None,
+                                    }
+                                    .to_location(member_span),
+                                ),
+                                arguments,
+                            )
+                        }
+                        expression => (
+                            Box::new(ExpressionLocation {
+                                expression,
+                                span: expr.span,
+                                id: expr.id,
+                            }),
+                            arguments,
+                        ),
+                    };
 
                     expr = ExpressionLocation {
                         expression: Expression::Call {
-                            function: Box::new(expr),
+                            function,
                             arguments,
                         },
                         span: span.merge(arguments_span),
@@ -684,48 +715,19 @@ impl Parser {
                     self.require_current_token_matches(&Token::Dot)?; // consume matched token
                     let l_value = self.require_identifier()?;
                     let identifier_span = l_value.span;
-                    let first_argument_span = expr.span;
                     let identifier = Lvalue::try_from(l_value)?;
                     let Lvalue::Identifier { identifier, .. } = identifier else {
                         unreachable!("Guaranteed to match by previous call to require_identifier")
                     };
 
-                    // () is now optional?
-                    let (mut arguments, tuple_span) =
-                        if self.match_token(&[Token::LeftParentheses]).is_some() {
-                            let tuple_expression = self.delimited_tuple(Self::single_expression)?;
-
-                            if let Expression::Tuple { values: arguments } =
-                                tuple_expression.expression
-                            {
-                                (arguments, Some(tuple_expression.span))
-                            } else {
-                                unreachable!("self.tuple() must always produce a tuple");
-                            }
-                        } else {
-                            (Vec::new(), None)
-                        };
-
-                    arguments.insert(0, expr);
-
-                    expr = ExpressionLocation {
-                        expression: Expression::Call {
-                            function: Box::new(
-                                Expression::Identifier {
-                                    name: identifier,
-                                    resolved: Binding::None,
-                                }
-                                .to_location(identifier_span),
-                            ),
-                            arguments,
-                        },
-                        span: tuple_span
-                            .unwrap_or(identifier_span)
-                            .merge(first_argument_span),
-                        id: NodeId::next(),
+                    let span = expr.span.merge(identifier_span);
+                    expr = Expression::MemberAccess {
+                        receiver: Box::new(expr),
+                        member: identifier,
+                        member_span: identifier_span,
+                        resolved_getter: Binding::None,
                     }
-
-                    // for now, we require parentheses
+                    .to_location(span);
                 }
                 Token::LeftSquareBracket => {
                     let bracket_span = current.span;

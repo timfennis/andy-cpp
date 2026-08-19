@@ -1,12 +1,11 @@
 use crate::operator::LogicalOperator;
 use crate::parser::Error as ParseError;
 use crate::type_expr::TypeExpr;
-use ndc_core::r#struct::{StructId, StructInfo};
+use ndc_core::r#struct::StructId;
 use ndc_core::{StaticType, TypeSignature};
 use ndc_lexer::Span;
 use num::BigInt;
 use num::complex::Complex64;
-use std::rc::Rc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 /// Unique identity for an AST node. Used as a key in side tables (e.g. the
@@ -160,17 +159,19 @@ pub enum Expression {
         body: Box<ForBody>,
     },
     Call {
-        /// The function to call, could be an identifier, or any expression that produces a function as its value
         function: Box<ExpressionLocation>,
         arguments: Vec<ExpressionLocation>,
     },
-    /// Desugared operator syntax: `a + b`, `-x`, `not x`, etc. Distinguished
-    /// from `Call` so the analyser can apply tuple-broadcast (vec) dispatch
-    /// rules without leaking the curated list of operator names downstream.
-    /// Regular function calls never broadcast.
     OperatorCall {
         function: Box<ExpressionLocation>,
         arguments: Vec<ExpressionLocation>,
+    },
+    // Example: reading from `foo.bar`
+    MemberAccess {
+        receiver: Box<ExpressionLocation>,
+        member: String,
+        member_span: Span,
+        resolved_getter: Binding,
     },
     Tuple {
         values: Vec<ExpressionLocation>,
@@ -273,6 +274,14 @@ pub enum Lvalue {
     },
     // Example: `let a, b = ...`
     Sequence(Vec<Self>),
+    // Example: `a.b = ...`
+    Member {
+        receiver: Box<ExpressionLocation>,
+        member: String,
+        member_span: Span,
+        resolved_getter: Option<Binding>,
+        resolved_setter: Option<Binding>,
+    },
 }
 
 impl Eq for Expression {}
@@ -337,15 +346,6 @@ impl ExpressionLocation {
 }
 
 impl Lvalue {
-    #[must_use]
-    pub fn expression_type_name(&self) -> &str {
-        match self {
-            Self::Identifier { .. } => "variable",
-            Self::Index { .. } => "index expression",
-            Self::Sequence(_) => "destructure pattern", // ??
-        }
-    }
-
     #[must_use]
     pub fn can_build_from_expression(expression: &Expression) -> bool {
         match expression {

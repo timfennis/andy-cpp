@@ -173,6 +173,7 @@ fn collect(expr: &ExpressionLocation, scope: Span, out: &mut Vec<Decl>) {
                 collect(arg, scope, out);
             }
         }
+        Expression::MemberAccess { receiver, .. } => collect(receiver, scope, out),
         Expression::Tuple { values } | Expression::List { values } => {
             for v in values {
                 collect(v, scope, out);
@@ -239,6 +240,6 @@ fn push_lvalue(lvalue: &Lvalue, scope: Span, visible_from: usize, out: &mut Vec<
                 push_lvalue(lv, scope, visible_from, out);
             }
         }
-        Lvalue::Index { .. } => {}
+        Lvalue::Index { .. } | Lvalue::Member { .. } => {}
     }
 }
