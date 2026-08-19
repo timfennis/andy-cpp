@@ -783,7 +783,46 @@ impl Analyser {
                 }
                 Ok(StaticType::unit())
             }
-            Lvalue::Member { .. } => todo!(),
+            Lvalue::Member {
+                receiver,
+                member,
+                member_span,
+                resolved_getter,
+                resolved_setter,
+            } => {
+                let receiver_type = self.analyse_or_any(receiver);
+                let getter_args = [receiver_type.clone()];
+                let setter_args = [receiver_type, StaticType::Any];
+                let getter = self
+                    .scope_tree
+                    .resolve_call(member, &getter_args, CallKind::Regular);
+                let setter_name = format!("{member}=");
+                let setter =
+                    self.scope_tree
+                        .resolve_call(&setter_name, &setter_args, CallKind::Regular);
+                let getter_missing = matches!(getter.binding, Binding::None);
+                let setter_missing = matches!(setter.binding, Binding::None);
+
+                *resolved_getter = Some(getter.binding);
+                *resolved_setter = Some(setter.binding);
+
+                if getter_missing {
+                    return Err(AnalysisError::function_not_found(
+                        member,
+                        &getter_args,
+                        *member_span,
+                    ));
+                }
+                if setter_missing {
+                    return Err(AnalysisError::function_not_found(
+                        &setter_name,
+                        &setter_args,
+                        *member_span,
+                    ));
+                }
+
+                Ok(getter.return_type)
+            }
         }
     }
 
@@ -847,7 +886,15 @@ impl Analyser {
                     ));
                 }
             }
-            Lvalue::Member { .. } => todo!(),
+            Lvalue::Member { .. } => {
+                if !value_type.is_subtype(stored_type) {
+                    self.emit(AnalysisError::mismatched_types(
+                        value_type,
+                        stored_type,
+                        span,
+                    ));
+                }
+            }
             Lvalue::Index { value, index, .. } => {
                 if value_type.is_subtype(stored_type) {
                     return;
