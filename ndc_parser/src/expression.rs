@@ -4,6 +4,7 @@ use ndc_core::{StaticType, TypeSignature};
 use ndc_lexer::Span;
 use num::BigInt;
 use num::complex::Complex64;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 /// Unique identity for an AST node. Used as a key in side tables (e.g. the
@@ -17,6 +18,23 @@ impl NodeId {
     pub fn next() -> Self {
         Self(NEXT_NODE_ID.fetch_add(1, Ordering::Relaxed))
     }
+}
+
+/// Analyser-assigned source-local high-water marks for each compilation frame.
+///
+/// The top-level count remains monotonic across REPL analysis batches. Nested
+/// functions use independent slot namespaces and are keyed by their declaration
+/// node so the compiler can reserve their source slots before hidden temporaries.
+///
+/// This is transitional metadata while the compiler consumes the resolved AST
+/// directly. When HIR is introduced, lowering should represent source locals
+/// and generated temporaries as logical local IDs. A frame-layout pass can then
+/// assign slots and store `num_locals` directly on each HIR module or function,
+/// replacing this top-level count and `NodeId` side table.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SourceLocalCounts {
+    pub top_level: usize,
+    pub functions: HashMap<NodeId, usize>,
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]

@@ -5,7 +5,8 @@ use ndc_core::{StaticType, TypeSignature};
 use ndc_lexer::Span;
 use ndc_parser::{
     AugmentedAssignmentPlan, Binding, Candidate, CaptureSource, Expression, ExpressionLocation,
-    ForBody, ForIteration, FunctionParameter, LogicalOperator, Lvalue, ResolvedVar,
+    ForBody, ForIteration, FunctionParameter, LogicalOperator, Lvalue, NodeId, ResolvedVar,
+    SourceLocalCounts,
 };
 use std::rc::Rc;
 
@@ -16,6 +17,7 @@ pub struct Compiler {
     loop_stack: Vec<LoopContext>,
     allow_return: bool,
     optimize: bool,
+    source_local_counts: Rc<SourceLocalCounts>,
 }
 
 impl Default for Compiler {
@@ -26,6 +28,7 @@ impl Default for Compiler {
             loop_stack: Vec::new(),
             allow_return: false,
             optimize: true,
+            source_local_counts: Rc::new(SourceLocalCounts::default()),
         }
     }
 }
@@ -33,8 +36,9 @@ impl Default for Compiler {
 impl Compiler {
     pub fn compile(
         expressions: impl Iterator<Item = ExpressionLocation>,
+        source_local_counts: SourceLocalCounts,
     ) -> Result<CompiledFunction, CompileError> {
-        let mut compiler = Self::default();
+        let mut compiler = Self::with_source_local_counts(true, source_local_counts);
         compiler.compile_batch(expressions.collect())?;
         Ok(compiler.finish()?.0)
     }
@@ -44,11 +48,9 @@ impl Compiler {
     /// debugging tools (e.g. a future `--no-optimize` disassembler flag).
     pub fn compile_unoptimized(
         expressions: impl Iterator<Item = ExpressionLocation>,
+        source_local_counts: SourceLocalCounts,
     ) -> Result<CompiledFunction, CompileError> {
-        let mut compiler = Self {
-            optimize: false,
-            ..Default::default()
-        };
+        let mut compiler = Self::with_source_local_counts(false, source_local_counts);
         compiler.compile_batch(expressions.collect())?;
         Ok(compiler.finish()?.0)
     }
@@ -63,11 +65,9 @@ impl Compiler {
     /// the emitted chunk, and shifting instructions invalidates that.
     pub fn compile_resumable(
         expressions: impl Iterator<Item = ExpressionLocation>,
+        source_local_counts: SourceLocalCounts,
     ) -> Result<(CompiledFunction, Self), CompileError> {
-        let mut compiler = Self {
-            optimize: false,
-            ..Default::default()
-        };
+        let mut compiler = Self::with_source_local_counts(false, source_local_counts);
         compiler.compile_batch(expressions.collect())?;
         compiler.finish()
     }
@@ -82,18 +82,25 @@ impl Compiler {
     pub fn resume(
         self,
         new_expressions: impl Iterator<Item = ExpressionLocation>,
+        source_local_counts: SourceLocalCounts,
     ) -> Result<(CompiledFunction, Self), CompileError> {
         let mut compiler = self; // checkpoint has no trailing Halt
+        compiler.num_locals = compiler.num_locals.max(source_local_counts.top_level);
+        compiler.source_local_counts = Rc::new(source_local_counts);
         compiler.compile_batch(new_expressions.collect())?;
         compiler.finish()
     }
 
-    /// Reserve every analyser-assigned source slot before allocating hidden
-    /// compiler temporaries. The analyser resolves an entire function before
-    /// bytecode emission, so source declarations compiled later may otherwise
-    /// collide with a temporary allocated earlier.
+    fn with_source_local_counts(optimize: bool, source_local_counts: SourceLocalCounts) -> Self {
+        Self {
+            num_locals: source_local_counts.top_level,
+            optimize,
+            source_local_counts: Rc::new(source_local_counts),
+            ..Default::default()
+        }
+    }
+
     fn compile_batch(&mut self, expressions: Vec<ExpressionLocation>) -> Result<(), CompileError> {
-        self.num_locals = self.num_locals.max(source_local_count(&expressions));
         for expression in expressions {
             self.compile_expr(expression)?;
         }
@@ -142,7 +149,9 @@ impl Compiler {
         expression_location: ExpressionLocation,
     ) -> Result<(), CompileError> {
         let ExpressionLocation {
-            expression, span, ..
+            expression,
+            span,
+            id,
         } = expression_location;
         match expression {
             Expression::BoolLiteral(b) => {
@@ -283,6 +292,7 @@ impl Compiler {
             } => {
                 let type_signature = FunctionParameter::from_params(&parameters);
                 self.compile_function_decl(
+                    id,
                     name,
                     resolved_name,
                     *body,
@@ -645,6 +655,7 @@ impl Compiler {
     #[allow(clippy::too_many_arguments)]
     fn compile_function_decl(
         &mut self,
+        node_id: NodeId,
         name: Option<String>,
         resolved_name: Option<ResolvedVar>,
         body: ExpressionLocation,
@@ -668,11 +679,17 @@ impl Compiler {
             },
             return_type: Box::new(return_type.clone()),
         };
-        let function_source_locals = source_local_count(std::slice::from_ref(&body));
+        let function_source_locals = self
+            .source_local_counts
+            .functions
+            .get(&node_id)
+            .copied()
+            .ok_or_else(|| CompileError::missing_source_local_count(node_id, span))?;
         let mut fn_compiler = Self {
             num_locals: num_params.max(function_source_locals),
             allow_return: true,
             optimize: self.optimize,
+            source_local_counts: Rc::clone(&self.source_local_counts),
             ..Default::default()
         };
         fn_compiler.compile_expr(body)?;
@@ -1002,215 +1019,6 @@ impl PreparedAssignmentTarget {
     }
 }
 
-/// Number of analyser-assigned local slots in the current function.
-///
-/// Nested function bodies use their own slot namespace and are deliberately
-/// skipped; their compiler performs the same scan when that body is lowered.
-fn source_local_count(expressions: &[ExpressionLocation]) -> usize {
-    expressions
-        .iter()
-        .filter_map(max_source_local_in_expression)
-        .max()
-        .map_or(0, |slot| slot + 1)
-}
-
-fn max_source_local_in_expression(location: &ExpressionLocation) -> Option<usize> {
-    let expression = &location.expression;
-    match expression {
-        Expression::BoolLiteral(_)
-        | Expression::StringLiteral(_)
-        | Expression::Int64Literal(_)
-        | Expression::Float64Literal(_)
-        | Expression::BigIntLiteral(_)
-        | Expression::ComplexLiteral(_)
-        | Expression::Break
-        | Expression::Continue => None,
-        Expression::Identifier { resolved, .. } => max_source_local_in_binding(resolved),
-        Expression::Statement(inner) | Expression::Grouping(inner) => {
-            max_source_local_in_expression(inner)
-        }
-        Expression::Logical { left, right, .. } => [
-            max_source_local_in_expression(left),
-            max_source_local_in_expression(right),
-        ]
-        .into_iter()
-        .flatten()
-        .max(),
-        Expression::VariableDeclaration { l_value, value, .. }
-        | Expression::Assignment {
-            l_value,
-            r_value: value,
-        } => [
-            max_source_local_in_lvalue(l_value),
-            max_source_local_in_expression(value),
-        ]
-        .into_iter()
-        .flatten()
-        .max(),
-        Expression::OpAssignment {
-            l_value,
-            r_value,
-            plan,
-            ..
-        } => {
-            let operation = match plan {
-                AugmentedAssignmentPlan::Unresolved => None,
-                AugmentedAssignmentPlan::Resolved(binding) => max_source_local_in_binding(binding),
-            };
-            [
-                max_source_local_in_lvalue(l_value),
-                max_source_local_in_expression(r_value),
-                operation,
-            ]
-            .into_iter()
-            .flatten()
-            .max()
-        }
-        Expression::FunctionDeclaration {
-            resolved_name,
-            captures,
-            ..
-        } => resolved_name
-            .iter()
-            .filter_map(max_source_local_in_var)
-            .chain(captures.iter().filter_map(|capture| match capture {
-                CaptureSource::Local(slot) => Some(*slot),
-                CaptureSource::Upvalue(_) => None,
-            }))
-            .max(),
-        Expression::Block { statements } => statements
-            .iter()
-            .filter_map(max_source_local_in_expression)
-            .max(),
-        Expression::If {
-            condition,
-            on_true,
-            on_false,
-        } => [
-            max_source_local_in_expression(condition),
-            max_source_local_in_expression(on_true),
-            on_false.as_deref().and_then(max_source_local_in_expression),
-        ]
-        .into_iter()
-        .flatten()
-        .max(),
-        Expression::While {
-            expression,
-            loop_body,
-        } => [
-            max_source_local_in_expression(expression),
-            max_source_local_in_expression(loop_body),
-        ]
-        .into_iter()
-        .flatten()
-        .max(),
-        Expression::For { iterations, body } => iterations
-            .iter()
-            .filter_map(|iteration| match iteration {
-                ForIteration::Iteration { l_value, sequence } => [
-                    max_source_local_in_lvalue(l_value),
-                    max_source_local_in_expression(sequence),
-                ]
-                .into_iter()
-                .flatten()
-                .max(),
-                ForIteration::Guard(guard) => max_source_local_in_expression(guard),
-            })
-            .chain(max_source_local_in_for_body(body))
-            .max(),
-        Expression::Call {
-            function,
-            arguments,
-        }
-        | Expression::OperatorCall {
-            function,
-            arguments,
-        } => std::iter::once(max_source_local_in_expression(function))
-            .chain(arguments.iter().map(max_source_local_in_expression))
-            .flatten()
-            .max(),
-        Expression::Tuple { values } | Expression::List { values } => values
-            .iter()
-            .filter_map(max_source_local_in_expression)
-            .max(),
-        Expression::Map { values, default } => values
-            .iter()
-            .flat_map(|(key, value)| {
-                std::iter::once(max_source_local_in_expression(key))
-                    .chain(value.as_ref().map(max_source_local_in_expression))
-            })
-            .chain(default.as_deref().map(max_source_local_in_expression))
-            .flatten()
-            .max(),
-        Expression::Return { value } => max_source_local_in_expression(value),
-        Expression::RangeInclusive { start, end } | Expression::RangeExclusive { start, end } => {
-            start
-                .as_deref()
-                .map(max_source_local_in_expression)
-                .into_iter()
-                .chain(end.as_deref().map(max_source_local_in_expression))
-                .flatten()
-                .max()
-        }
-    }
-}
-
-fn max_source_local_in_for_body(body: &ForBody) -> Option<usize> {
-    match body {
-        ForBody::Block(block) | ForBody::List { expr: block } => {
-            max_source_local_in_expression(block)
-        }
-        ForBody::Map {
-            key,
-            value,
-            default,
-        } => std::iter::once(max_source_local_in_expression(key))
-            .chain(value.as_ref().map(max_source_local_in_expression))
-            .chain(default.as_deref().map(max_source_local_in_expression))
-            .flatten()
-            .max(),
-    }
-}
-
-fn max_source_local_in_lvalue(lvalue: &Lvalue) -> Option<usize> {
-    match lvalue {
-        Lvalue::Identifier { resolved, .. } => resolved.as_ref().and_then(max_source_local_in_var),
-        Lvalue::Index {
-            value,
-            index,
-            resolved_set,
-            resolved_get,
-        } => [
-            max_source_local_in_expression(value),
-            max_source_local_in_expression(index),
-            resolved_set.as_ref().and_then(max_source_local_in_binding),
-            resolved_get.as_ref().and_then(max_source_local_in_binding),
-        ]
-        .into_iter()
-        .flatten()
-        .max(),
-        Lvalue::Sequence(lvalues) => lvalues.iter().filter_map(max_source_local_in_lvalue).max(),
-    }
-}
-
-fn max_source_local_in_binding(binding: &Binding) -> Option<usize> {
-    match binding {
-        Binding::None => None,
-        Binding::Resolved(candidate) => max_source_local_in_var(&candidate.var()),
-        Binding::Dynamic(candidates) => candidates
-            .iter()
-            .filter_map(|candidate| max_source_local_in_var(&candidate.var()))
-            .max(),
-    }
-}
-
-fn max_source_local_in_var(variable: &ResolvedVar) -> Option<usize> {
-    match variable {
-        ResolvedVar::Local { slot } => Some(*slot),
-        ResolvedVar::Upvalue { .. } | ResolvedVar::Global { .. } => None,
-    }
-}
-
 /// Returns the minimum local slot referenced by an lvalue, used to determine
 /// which upvalues to close at the end of a loop iteration.
 fn min_lvalue_slot(lv: &Lvalue) -> Option<usize> {
@@ -1251,6 +1059,15 @@ pub struct CompileError {
 }
 
 impl CompileError {
+    fn missing_source_local_count(node_id: NodeId, span: Span) -> Self {
+        Self {
+            text: format!(
+                "missing source-local count for function node {node_id:?}; analysed AST and metadata must be compiled together"
+            ),
+            span,
+        }
+    }
+
     fn unresolved_binding(span: Span) -> Self {
         Self {
             text: "encountered unresolved binding during compilation, this is probably an internal error".to_string(),

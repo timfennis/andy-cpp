@@ -14,7 +14,7 @@ fn compile(input: &str) -> Vec<OpCode> {
         .collect::<Result<Vec<_>, _>>()
         .expect("lex failed");
     let expressions = Parser::from_tokens(tokens).parse().expect("parse failed");
-    Compiler::compile_unoptimized(expressions.into_iter())
+    Compiler::compile_unoptimized(expressions.into_iter(), Default::default())
         .expect("compile failed")
         .opcodes()
         .to_vec()
@@ -432,6 +432,25 @@ fn test_augmented_assignment_temporaries_follow_source_locals() {
             && ops.iter().any(|op| matches!(op, SetLocal(3)))
             && ops.iter().any(|op| matches!(op, SetLocal(4))),
         "prepared-target temporaries must be allocated after both source locals: {ops:?}",
+    );
+}
+
+// Resolved function AST and its analyser metadata form one compilation unit.
+// Omitting the per-function frame size must fail instead of silently reserving
+// only parameter slots and allowing hidden temporaries to overlap body locals.
+#[test]
+fn test_missing_function_source_local_count_is_rejected() {
+    let mut interp = ndc_interpreter::Interpreter::capturing();
+    let (expressions, _) = interp
+        .analyse_str("fn f() { let local = 1; local }")
+        .expect("analysis failed");
+
+    let Err(error) = Compiler::compile(expressions.into_iter(), Default::default()) else {
+        panic!("compilation should reject missing source-local metadata");
+    };
+    assert!(
+        error.to_string().contains("missing source-local count"),
+        "unexpected compile error: {error}",
     );
 }
 

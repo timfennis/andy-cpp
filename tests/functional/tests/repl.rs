@@ -63,6 +63,18 @@ fn multiple_variables_persist() {
 }
 
 #[test]
+fn resumed_compilation_reserves_new_source_locals_before_temporaries() {
+    // The second batch assigns `delta` slot 1. Indexed augmentation must move
+    // its hidden temporaries beyond the analyser's updated high-water mark.
+    let out = repl_output(&[
+        "let values = [1];",
+        "values[0] += { let delta = 2; delta };",
+        "print(values)",
+    ]);
+    assert_eq!(out.trim(), "[3]");
+}
+
+#[test]
 fn function_defined_on_earlier_line_is_callable() {
     let out = repl_output(&["fn double(x) => x * 2", "print(double(7))"]);
     assert_eq!(out.trim(), "14");

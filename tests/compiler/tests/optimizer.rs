@@ -13,14 +13,14 @@ fn parse(input: &str) -> Vec<ndc_parser::ExpressionLocation> {
 }
 
 fn unoptimized(input: &str) -> Vec<OpCode> {
-    Compiler::compile_unoptimized(parse(input).into_iter())
+    Compiler::compile_unoptimized(parse(input).into_iter(), Default::default())
         .expect("compile failed")
         .opcodes()
         .to_vec()
 }
 
 fn optimized(input: &str) -> Vec<OpCode> {
-    Compiler::compile(parse(input).into_iter())
+    Compiler::compile(parse(input).into_iter(), Default::default())
         .expect("compile failed")
         .opcodes()
         .to_vec()
