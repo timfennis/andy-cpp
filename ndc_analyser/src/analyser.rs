@@ -710,10 +710,38 @@ impl Analyser {
                     ));
                 }
             }
-            Lvalue::Index { value, .. } => {
+            Lvalue::Index { value, index, .. } => {
                 if value_type.is_subtype(stored_type) {
                     return;
                 }
+
+                let range_type = StaticType::Iterator(Box::new(StaticType::Int));
+                let is_slice = self
+                    .result
+                    .expr_types
+                    .get(&index.id)
+                    .is_some_and(|index_type| index_type.is_subtype(&range_type));
+                let (stored_element_type, value_element_type) = if is_slice {
+                    let Some(stored_element_type) = stored_type.index_element_type() else {
+                        self.emit(AnalysisError::mismatched_types(
+                            value_type,
+                            stored_type,
+                            span,
+                        ));
+                        return;
+                    };
+                    let Some(value_element_type) = value_type.sequence_element_type() else {
+                        self.emit(AnalysisError::mismatched_types(
+                            value_type,
+                            stored_type,
+                            span,
+                        ));
+                        return;
+                    };
+                    (stored_element_type, value_element_type)
+                } else {
+                    (stored_type.clone(), value_type.clone())
+                };
 
                 if let Expression::Identifier {
                     resolved: Binding::Resolved(Candidate::Scalar(target)),
@@ -721,8 +749,8 @@ impl Analyser {
                 } = &value.expression
                 {
                     let container_type = self.scope_tree.get_type(*target).clone();
-                    let widened_container =
-                        container_type.with_element_type(stored_type.lub(value_type));
+                    let widened_container = container_type
+                        .with_element_type(stored_element_type.lub(&value_element_type));
                     if widened_container != container_type
                         && self
                             .scope_tree
@@ -1043,6 +1071,14 @@ mod tests {
     fn inferred_list_index_assignment_widens_element_type() {
         assert_eq!(
             analyse_last_type("let values = [1]; values[0] = \"two\"; values"),
+            StaticType::List(Box::new(StaticType::Any)),
+        );
+    }
+
+    #[test]
+    fn inferred_list_slice_assignment_widens_element_type() {
+        assert_eq!(
+            analyse_last_type("let values = [1]; values[0..1] = [\"two\"]; values"),
             StaticType::List(Box::new(StaticType::Any)),
         );
     }

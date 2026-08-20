@@ -1,7 +1,11 @@
 let values = [1];
 values[0] = "two";
-assert_eq(values[0], "two");
+// The concatenation requires values[0] to have widened from Int to Any so
+// that operator dispatch is deferred until runtime.
+assert_eq(values[0] ++ "!", "two!");
 
 let mapped = %{"one": 1};
 mapped["two"] = "two";
-assert_eq(mapped["two"], "two");
+// Map value inference must widen for the same reason while preserving the
+// String key type.
+assert_eq(mapped["two"] ++ "!", "two!");

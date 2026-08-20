@@ -335,6 +335,20 @@ fn test_assignment() {
     );
 }
 
+// let value = [1];
+// value ++= [2];
+//
+// A specialized `++=` mutates and returns the left value. Even though the
+// mutation is visible through aliases, SetLocal must write the returned value
+// back before the compiler pushes unit for the assignment expression:
+//
+// Call(2), SetLocal(0), Constant(_), Pop
+//
+// The indexed form prepares the container and index in temporary locals,
+// calls `++=`, then passes its result to `[]=`. The setter's unit result is
+// discarded before the assignment's own unit is pushed:
+//
+// Call(3), Pop, Constant(_)
 #[test]
 fn test_augmented_assignment_always_writes_back() {
     let variable = compile_with_stdlib_unoptimized("let value = [1]; value ++= [2];");
@@ -356,6 +370,21 @@ fn test_augmented_assignment_always_writes_back() {
     );
 }
 
+// let value = 1;
+// value += 2;
+//
+// Ordinary `+` produces a replacement value, so variable augmentation stores
+// the result and then produces unit:
+//
+// Call(2), SetLocal(0), Constant(_), Pop
+//
+// let values = [1];
+// values[0] += 2;
+//
+// Indexed augmentation instead sends the replacement through `[]=`. Its unit
+// result is popped before the assignment expression's unit is produced:
+//
+// Call(3), Pop, Constant(_)
 #[test]
 fn test_augmented_assignment_writeback_uses_target_store_shape() {
     let variable = compile_with_stdlib_unoptimized("let value = 1; value += 2;");
@@ -375,6 +404,20 @@ fn test_augmented_assignment_writeback_uses_target_store_shape() {
     );
 }
 
+// let values = [1];
+// values[0] += { let delta = 2; delta };
+//
+// Source locals are assigned first:
+//
+// slot 0: values
+// slot 1: delta
+//
+// Preparing an indexed assignment then reserves non-overlapping compiler
+// temporaries after the source-local high-water mark:
+//
+// slot 2: cached container
+// slot 3: cached index
+// slot 4: operation result passed to `[]=`
 #[test]
 fn test_augmented_assignment_temporaries_follow_source_locals() {
     let ops =
