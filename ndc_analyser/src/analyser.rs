@@ -6,8 +6,8 @@ use itertools::{Itertools, izip};
 use ndc_core::{StaticType, TypeSignature};
 use ndc_lexer::Span;
 use ndc_parser::{
-    Binding, Candidate, Expression, ExpressionLocation, ForBody, ForIteration, FunctionParameter,
-    Lvalue, NodeId,
+    AugmentedAssignmentPlan, Binding, Candidate, Expression, ExpressionLocation, ForBody,
+    ForIteration, FunctionParameter, Lvalue, NodeId, SourceLocalCounts,
 };
 
 /// Side table holding semantic information keyed by AST node identity.
@@ -19,6 +19,9 @@ pub struct AnalysisResult {
     /// Inferred return types for functions without explicit annotations.
     /// Keyed by the FunctionDeclaration's `NodeId`.
     pub inferred_return_types: HashMap<NodeId, StaticType>,
+    /// Analyser-assigned source-local high-water marks consumed by the compiler
+    /// before it allocates hidden temporaries.
+    pub source_local_counts: SourceLocalCounts,
     /// Errors accumulated during analysis. Non-empty when the analyser
     /// encountered problems but was able to continue with fallback types.
     pub errors: Vec<AnalysisError>,
@@ -86,6 +89,13 @@ impl Analyser {
     ) -> Result<StaticType, AnalysisError> {
         let typ = self.analyse_inner(expr_loc)?;
         self.result.expr_types.insert(expr_loc.id, typ.clone());
+        if self.scope_tree.current_function_is_top_level() {
+            self.result.source_local_counts.top_level = self
+                .result
+                .source_local_counts
+                .top_level
+                .max(self.scope_tree.current_function_local_count());
+        }
         Ok(typ)
     }
 
@@ -169,25 +179,7 @@ impl Analyser {
             Expression::Assignment { l_value, r_value } => {
                 let old_type = self.resolve_lvalue_or_any(l_value, *span);
                 let new_type = self.analyse_or_any(r_value);
-
-                if let Lvalue::Identifier {
-                    resolved: Some(target),
-                    ..
-                } = l_value
-                {
-                    let widened = old_type.lub(&new_type);
-                    if widened != old_type
-                        && let Err(annotated_type) =
-                            self.scope_tree.update_binding_type(*target, widened)
-                        && !new_type.is_subtype(&annotated_type)
-                    {
-                        self.emit(AnalysisError::mismatched_types(
-                            &new_type,
-                            &annotated_type,
-                            *span,
-                        ));
-                    }
-                }
+                self.validate_lvalue_write(l_value, &old_type, &new_type, *span);
 
                 Ok(StaticType::unit())
             }
@@ -195,18 +187,15 @@ impl Analyser {
                 l_value,
                 r_value,
                 operation,
-                resolved_assign_operation,
-                resolved_operation,
+                plan,
             } => {
                 let left_type = self.resolve_single_lvalue(l_value, *span)?;
                 let right_type = self.analyse_or_any(r_value);
-                let arg_types = vec![left_type, right_type];
+                let arg_types = vec![left_type.clone(), right_type.clone()];
 
-                // Resolve both `op=` and `op` so we can widen the lvalue
-                // by the result type of whichever one actually fires.
                 let ResolvedCall {
                     binding: assign_binding,
-                    ..
+                    return_type: assign_return,
                 } = self.scope_tree.resolve_call(
                     &format!("{operation}="),
                     &arg_types,
@@ -218,63 +207,68 @@ impl Analyser {
                 } = self
                     .scope_tree
                     .resolve_call(operation, &arg_types, CallKind::Operator);
+                let has_op_binding = !matches!(op_binding, Binding::None);
+                let assign_is_eligible = Self::augmented_rhs_is_compatible(&left_type, &right_type);
 
-                *resolved_assign_operation = assign_binding;
-                *resolved_operation = op_binding;
-
-                // Either form satisfies the call: `op=` mutates in place;
-                // `op` falls back through `a = a op b`. Only error when both
-                // are missing — e.g. `Map -= Map` is fine via `-=` even when
-                // `-` itself has no Map overload.
-                if matches!(resolved_assign_operation, Binding::None)
-                    && matches!(resolved_operation, Binding::None)
-                {
-                    self.emit(AnalysisError::function_not_found(
-                        operation, &arg_types, *span,
-                    ));
-                }
-
-                if !matches!(resolved_operation, Binding::None) {
-                    let result_type = op_return;
-                    match l_value {
-                        Lvalue::Identifier {
-                            resolved: Some(target),
-                            ..
-                        } => {
-                            let widened = arg_types[0].lub(&result_type);
-                            if widened != arg_types[0]
-                                && let Err(annotated_type) =
-                                    self.scope_tree.update_binding_type(*target, widened)
-                                && !result_type.is_subtype(&annotated_type)
-                            {
-                                self.emit(AnalysisError::mismatched_types(
-                                    &result_type,
-                                    &annotated_type,
-                                    *span,
-                                ));
+                let writeback_type = match assign_binding {
+                    Binding::Resolved(candidate) if assign_is_eligible => {
+                        *plan = AugmentedAssignmentPlan::Resolved(Binding::Resolved(candidate));
+                        None
+                    }
+                    Binding::Dynamic(mut assign_candidates) if assign_is_eligible => {
+                        match op_binding.clone() {
+                            Binding::Resolved(candidate) => {
+                                if !assign_candidates.contains(&candidate) {
+                                    assign_candidates.push(candidate);
+                                }
                             }
-                        }
-                        Lvalue::Index { value, .. } => {
-                            if let Expression::Identifier {
-                                resolved: Binding::Resolved(Candidate::Scalar(target)),
-                                ..
-                            } = &value.expression
-                            {
-                                let container_type = self.scope_tree.get_type(*target).clone();
-                                if let Some(elem_type) = container_type.index_element_type() {
-                                    let widened_elem = elem_type.lub(&result_type);
-                                    if widened_elem != elem_type {
-                                        let new_container =
-                                            container_type.with_element_type(widened_elem);
-                                        let _ = self
-                                            .scope_tree
-                                            .update_binding_type(*target, new_container);
+                            Binding::Dynamic(op_candidates) => {
+                                for candidate in op_candidates {
+                                    if !assign_candidates.contains(&candidate) {
+                                        assign_candidates.push(candidate);
                                     }
                                 }
                             }
+                            Binding::None => {}
                         }
-                        _ => {}
+
+                        let result_type = if has_op_binding {
+                            assign_return.lub(&op_return)
+                        } else {
+                            assign_return
+                        };
+                        *plan =
+                            AugmentedAssignmentPlan::Resolved(Binding::Dynamic(assign_candidates));
+                        Some(result_type)
                     }
+                    Binding::Resolved(_) | Binding::Dynamic(_) => {
+                        // A specialized mutation exists, but using it would
+                        // change the concrete left type. Reject it here rather
+                        // than falling through to an ordinary operation whose
+                        // erased return type could widen the same target.
+                        self.emit(AnalysisError::mismatched_types(
+                            &right_type,
+                            &left_type,
+                            *span,
+                        ));
+                        *plan = AugmentedAssignmentPlan::Unresolved;
+                        None
+                    }
+                    _ if has_op_binding => {
+                        *plan = AugmentedAssignmentPlan::Resolved(op_binding);
+                        Some(op_return)
+                    }
+                    _ => {
+                        self.emit(AnalysisError::function_not_found(
+                            operation, &arg_types, *span,
+                        ));
+                        *plan = AugmentedAssignmentPlan::Unresolved;
+                        None
+                    }
+                };
+
+                if let Some(result_type) = writeback_type {
+                    self.validate_lvalue_write(l_value, &left_type, &result_type, *span);
                 }
 
                 Ok(StaticType::unit())
@@ -329,6 +323,10 @@ impl Analyser {
                 let implicit_return = self.analyse_or_any(body);
                 let explicit_return = self.return_type_stack.pop().unwrap();
                 *captures = self.scope_tree.current_scope_captures();
+                self.result
+                    .source_local_counts
+                    .functions
+                    .insert(*id, self.scope_tree.current_function_local_count());
                 self.scope_tree.destroy_scope();
 
                 // Combine explicit `return` types with the block's implicit return type.
@@ -554,25 +552,12 @@ impl Analyser {
                     self.analyse_or_any(block);
                     StaticType::unit()
                 }
-                ForBody::List {
-                    expr,
-                    accumulator_slot,
-                    ..
-                } => {
-                    // Reserve the accumulator slot BEFORE analysing the body so
-                    // that nested for-comprehensions receive strictly higher slot
-                    // numbers and cannot collide with this accumulator.
-                    *accumulator_slot = Some(self.scope_tree.reserve_anonymous_slot());
-                    StaticType::List(Box::new(self.analyse_or_any(expr)))
-                }
+                ForBody::List { expr } => StaticType::List(Box::new(self.analyse_or_any(expr))),
                 ForBody::Map {
                     key,
                     value,
                     default,
-                    accumulator_slot,
-                    ..
                 } => {
-                    *accumulator_slot = Some(self.scope_tree.reserve_anonymous_slot());
                     let key_type = self.analyse_or_any(key);
                     let value_type = if let Some(value) = value {
                         self.analyse_or_any(value)
@@ -640,7 +625,11 @@ impl Analyser {
                 let type_of_index_target = self.analyse_or_any(value);
 
                 let get_args = [type_of_index_target.clone(), index_type.clone()];
-                let set_args = [type_of_index_target.clone(), index_type, StaticType::Any];
+                let set_args = [
+                    type_of_index_target.clone(),
+                    index_type.clone(),
+                    StaticType::Any,
+                ];
 
                 // Indexing isn't operator-form for vec purposes: there's no
                 // natural broadcast story for `(list_a, list_b)[i]`.
@@ -654,6 +643,13 @@ impl Analyser {
                         .resolve_call("[]=", &set_args, CallKind::Regular)
                         .binding,
                 );
+
+                let range_type = StaticType::Iterator(Box::new(StaticType::Int));
+                if index_type.is_subtype(&range_type)
+                    && let StaticType::List(element) = &type_of_index_target
+                {
+                    return Ok(StaticType::List(element.clone()));
+                }
 
                 if let Some(t) = type_of_index_target.index_element_type() {
                     Ok(t)
@@ -681,6 +677,111 @@ impl Analyser {
                 self.emit(e);
                 StaticType::Any
             }
+        }
+    }
+
+    /// Specialized `op=` implementations preserve the concrete left type.
+    /// A tuple left-hand side represents vector dispatch, so a scalar right
+    /// operand must be compatible with every concrete tuple element.
+    fn augmented_rhs_is_compatible(left_type: &StaticType, right_type: &StaticType) -> bool {
+        match (left_type, right_type) {
+            (StaticType::Tuple(left), StaticType::Tuple(right)) => {
+                left.len() == right.len()
+                    && right
+                        .iter()
+                        .zip(left)
+                        .all(|(right, left)| right.is_subtype(left))
+            }
+            (StaticType::Tuple(left), right) => left.iter().all(|left| right.is_subtype(left)),
+            (left, right) => right.is_subtype(left),
+        }
+    }
+
+    /// Validate a value that will be stored through an lvalue, widening an
+    /// inferred binding when the location has a stable variable to update.
+    fn validate_lvalue_write(
+        &mut self,
+        lvalue: &Lvalue,
+        stored_type: &StaticType,
+        value_type: &StaticType,
+        span: Span,
+    ) {
+        match lvalue {
+            Lvalue::Identifier {
+                resolved: Some(target),
+                ..
+            } => {
+                let widened = stored_type.lub(value_type);
+                if widened != *stored_type
+                    && let Err(annotated_type) =
+                        self.scope_tree.update_binding_type(*target, widened)
+                    && !value_type.is_subtype(&annotated_type)
+                {
+                    self.emit(AnalysisError::mismatched_types(
+                        value_type,
+                        &annotated_type,
+                        span,
+                    ));
+                }
+            }
+            Lvalue::Index { value, index, .. } => {
+                if value_type.is_subtype(stored_type) {
+                    return;
+                }
+
+                let range_type = StaticType::Iterator(Box::new(StaticType::Int));
+                let is_slice = self
+                    .result
+                    .expr_types
+                    .get(&index.id)
+                    .is_some_and(|index_type| index_type.is_subtype(&range_type));
+                let (stored_element_type, value_element_type) = if is_slice {
+                    let Some(stored_element_type) = stored_type.index_element_type() else {
+                        self.emit(AnalysisError::mismatched_types(
+                            value_type,
+                            stored_type,
+                            span,
+                        ));
+                        return;
+                    };
+                    let Some(value_element_type) = value_type.sequence_element_type() else {
+                        self.emit(AnalysisError::mismatched_types(
+                            value_type,
+                            stored_type,
+                            span,
+                        ));
+                        return;
+                    };
+                    (stored_element_type, value_element_type)
+                } else {
+                    (stored_type.clone(), value_type.clone())
+                };
+
+                if let Expression::Identifier {
+                    resolved: Binding::Resolved(Candidate::Scalar(target)),
+                    ..
+                } = &value.expression
+                {
+                    let container_type = self.scope_tree.get_type(*target).clone();
+                    let widened_container = container_type
+                        .with_element_type(stored_element_type.lub(&value_element_type));
+                    if widened_container != container_type
+                        && self
+                            .scope_tree
+                            .update_binding_type(*target, widened_container)
+                            .is_ok()
+                    {
+                        return;
+                    }
+                }
+
+                self.emit(AnalysisError::mismatched_types(
+                    value_type,
+                    stored_type,
+                    span,
+                ));
+            }
+            Lvalue::Identifier { resolved: None, .. } | Lvalue::Sequence(_) => {}
         }
     }
 
@@ -926,5 +1027,203 @@ impl AnalysisError {
             text: format!("Identifier {ident} has not previously been declared"),
             span,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndc_lexer::{Lexer, SourceId};
+    use ndc_parser::Parser;
+
+    fn analyse_with_globals(
+        source: &str,
+        globals: Vec<(String, StaticType)>,
+    ) -> (StaticType, AnalysisResult) {
+        let tokens = Lexer::new(source, SourceId::SYNTHETIC)
+            .collect::<Result<Vec<_>, _>>()
+            .expect("lex failed");
+        let mut expressions = Parser::from_tokens(tokens).parse().expect("parse failed");
+        let mut analyser = Analyser::from_scope_tree(ScopeTree::from_global_scope(globals));
+        let mut last_type = StaticType::unit();
+        for expression in &mut expressions {
+            last_type = analyser.analyse(expression).expect("analysis failed");
+        }
+        (last_type, analyser.take_result())
+    }
+
+    fn analyse_last_type_with_globals(
+        source: &str,
+        globals: Vec<(String, StaticType)>,
+    ) -> StaticType {
+        let (last_type, result) = analyse_with_globals(source, globals);
+        assert!(
+            result.errors.is_empty(),
+            "analysis errors: {:?}",
+            result.errors
+        );
+        last_type
+    }
+
+    fn analyse_last_type(source: &str) -> StaticType {
+        analyse_last_type_with_globals(source, vec![])
+    }
+
+    fn assert_analysis_error(source: &str, globals: Vec<(String, StaticType)>, expected: &str) {
+        let (_, result) = analyse_with_globals(source, globals);
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|error| error.to_string().contains(expected)),
+            "expected an error containing {expected:?}, got {:?}",
+            result.errors,
+        );
+    }
+
+    #[test]
+    fn inferred_list_index_assignment_widens_element_type() {
+        assert_eq!(
+            analyse_last_type("let values = [1]; values[0] = \"two\"; values"),
+            StaticType::List(Box::new(StaticType::Any)),
+        );
+    }
+
+    #[test]
+    fn source_local_counts_are_recorded_per_function_frame() {
+        let (_, result) = analyse_with_globals(
+            r#"
+                let top = 0;
+                { let scoped = 1; scoped };
+                fn outer(arg) {
+                    let local = arg;
+                    fn inner(inner_arg) {
+                        let nested = inner_arg;
+                        nested
+                    };
+                    local
+                };
+            "#,
+            vec![],
+        );
+
+        assert!(
+            result.errors.is_empty(),
+            "analysis errors: {:?}",
+            result.errors
+        );
+        assert_eq!(result.source_local_counts.top_level, 2);
+        let mut function_counts: Vec<_> = result
+            .source_local_counts
+            .functions
+            .values()
+            .copied()
+            .collect();
+        function_counts.sort_unstable();
+        assert_eq!(function_counts, [2, 3]);
+    }
+
+    #[test]
+    fn top_level_source_local_count_is_monotonic_across_batches() {
+        let mut analyser = Analyser::from_scope_tree(ScopeTree::from_global_scope(vec![]));
+
+        for (source, expected) in [
+            ("{ let first = 1; let second = 2; second };", 2),
+            ("let root = 0;", 2),
+            ("let next = 1; let last = 2;", 3),
+        ] {
+            let tokens = Lexer::new(source, SourceId::SYNTHETIC)
+                .collect::<Result<Vec<_>, _>>()
+                .expect("lex failed");
+            let mut expressions = Parser::from_tokens(tokens).parse().expect("parse failed");
+            for expression in &mut expressions {
+                analyser.analyse(expression).expect("analysis failed");
+            }
+
+            let result = analyser.take_result();
+            assert!(
+                result.errors.is_empty(),
+                "analysis errors: {:?}",
+                result.errors
+            );
+            assert_eq!(result.source_local_counts.top_level, expected);
+        }
+    }
+
+    #[test]
+    fn inferred_list_slice_assignment_widens_element_type() {
+        assert_eq!(
+            analyse_last_type("let values = [1]; values[0..1] = [\"two\"]; values"),
+            StaticType::List(Box::new(StaticType::Any)),
+        );
+    }
+
+    #[test]
+    fn inferred_map_index_assignment_widens_value_and_preserves_key_type() {
+        assert_eq!(
+            analyse_last_type("let values = %{\"one\": 1}; values[\"two\"] = \"two\"; values"),
+            StaticType::Map {
+                key: Box::new(StaticType::String),
+                value: Box::new(StaticType::Any),
+            },
+        );
+    }
+
+    #[test]
+    fn inferred_index_augmented_assignment_widens_element_type() {
+        let add = StaticType::Function {
+            parameters: Some(vec![StaticType::Int, StaticType::Float]),
+            return_type: Box::new(StaticType::Number),
+        };
+        assert_eq!(
+            analyse_last_type_with_globals(
+                "let values = [1]; values[0] += 0.5; values",
+                vec![("+".to_string(), add)],
+            ),
+            StaticType::List(Box::new(StaticType::Number)),
+        );
+    }
+
+    #[test]
+    fn compatible_specialized_assignment_preserves_left_type() {
+        let list_any = StaticType::List(Box::new(StaticType::Any));
+        let append = StaticType::Function {
+            parameters: Some(vec![list_any.clone(), list_any.clone()]),
+            return_type: Box::new(list_any),
+        };
+
+        assert_eq!(
+            analyse_last_type_with_globals(
+                "let values = [1]; values ++= [2]; values",
+                vec![("++=".to_string(), append)],
+            ),
+            StaticType::List(Box::new(StaticType::Int)),
+        );
+    }
+
+    #[test]
+    fn incompatible_specialized_assignment_is_rejected() {
+        let list_any = StaticType::List(Box::new(StaticType::Any));
+        let concat = StaticType::Function {
+            parameters: Some(vec![list_any.clone(), list_any.clone()]),
+            return_type: Box::new(list_any),
+        };
+
+        assert_analysis_error(
+            "let values = [1]; values ++= [\"two\"];",
+            vec![
+                ("++=".to_string(), concat.clone()),
+                ("++".to_string(), concat.clone()),
+            ],
+            "mismatched types: found List<String> but expected List<Int>",
+        );
+        assert_analysis_error(
+            "let values: List<Int> = [1]; values ++= [\"two\"];",
+            vec![
+                ("++=".to_string(), concat.clone()),
+                ("++".to_string(), concat),
+            ],
+            "mismatched types: found List<String> but expected List<Int>",
+        );
     }
 }

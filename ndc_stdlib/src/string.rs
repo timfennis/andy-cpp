@@ -36,7 +36,7 @@ mod inner {
     }
 
     /// Appends the right string to the left string in place.
-    #[function(name = "++=")]
+    #[function(name = "++=", return_type = String)]
     pub fn op_list_concat(left: &mut StringRepr, right: &mut StringRepr) -> Value {
         if Rc::ptr_eq(left, right) {
             let new = right.borrow().repeat(2).clone();

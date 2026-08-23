@@ -1,0 +1,3 @@
+// expect-error: mismatched types: found List<String> but expected List<Int>
+let values = [1];
+values ++= ["two"];

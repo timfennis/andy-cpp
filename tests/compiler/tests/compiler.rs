@@ -14,7 +14,7 @@ fn compile(input: &str) -> Vec<OpCode> {
         .collect::<Result<Vec<_>, _>>()
         .expect("lex failed");
     let expressions = Parser::from_tokens(tokens).parse().expect("parse failed");
-    Compiler::compile_unoptimized(expressions.into_iter())
+    Compiler::compile_unoptimized(expressions.into_iter(), Default::default())
         .expect("compile failed")
         .opcodes()
         .to_vec()
@@ -37,6 +37,16 @@ fn compile_with_stdlib(input: &str) -> Vec<OpCode> {
     interp.configure(ndc_stdlib::register);
     interp
         .compile_str(input)
+        .expect("compile failed")
+        .opcodes()
+        .to_vec()
+}
+
+fn compile_with_stdlib_unoptimized(input: &str) -> Vec<OpCode> {
+    let mut interp = ndc_interpreter::Interpreter::capturing();
+    interp.configure(ndc_stdlib::register);
+    interp
+        .compile_str_unoptimized(input)
         .expect("compile failed")
         .opcodes()
         .to_vec()
@@ -322,6 +332,125 @@ fn test_assignment() {
             Pop,
             Halt
         ]
+    );
+}
+
+// let value = [1];
+// value ++= [2];
+//
+// A specialized `++=` mutates and returns the left value. Even though the
+// mutation is visible through aliases, SetLocal must write the returned value
+// back before the compiler pushes unit for the assignment expression:
+//
+// Call(2), SetLocal(0), Constant(_), Pop
+//
+// The indexed form prepares the container and index in temporary locals,
+// calls `++=`, then passes its result to `[]=`. The setter's unit result is
+// discarded before the assignment's own unit is pushed:
+//
+// Call(3), Pop, Constant(_)
+#[test]
+fn test_augmented_assignment_always_writes_back() {
+    let variable = compile_with_stdlib_unoptimized("let value = [1]; value ++= [2];");
+    assert!(
+        variable
+            .windows(4)
+            .any(|ops| matches!(ops, [Call(2), SetLocal(0), Constant(_), Pop])),
+        "specialized variable augmentation must write back its result and push unit: {variable:?}",
+    );
+
+    let index = compile_with_stdlib_unoptimized(
+        "let value = [1]; let values = [value]; values[0] ++= [2];",
+    );
+    assert!(
+        index
+            .windows(3)
+            .any(|ops| matches!(ops, [Call(3), Pop, Constant(_)])),
+        "specialized indexed augmentation must write back through []= and push unit: {index:?}",
+    );
+}
+
+// let value = 1;
+// value += 2;
+//
+// Ordinary `+` produces a replacement value, so variable augmentation stores
+// the result and then produces unit:
+//
+// Call(2), SetLocal(0), Constant(_), Pop
+//
+// let values = [1];
+// values[0] += 2;
+//
+// Indexed augmentation instead sends the replacement through `[]=`. Its unit
+// result is popped before the assignment expression's unit is produced:
+//
+// Call(3), Pop, Constant(_)
+#[test]
+fn test_augmented_assignment_writeback_uses_target_store_shape() {
+    let variable = compile_with_stdlib_unoptimized("let value = 1; value += 2;");
+    assert!(
+        variable
+            .windows(4)
+            .any(|ops| matches!(ops, [Call(2), SetLocal(0), Constant(_), Pop])),
+        "writeback variable augmentation must store the operation result and push unit: {variable:?}",
+    );
+
+    let index = compile_with_stdlib_unoptimized("let values = [1]; values[0] += 2;");
+    assert!(
+        index
+            .windows(3)
+            .any(|ops| matches!(ops, [Call(3), Pop, Constant(_)])),
+        "writeback index augmentation must discard the setter result before pushing unit: {index:?}",
+    );
+}
+
+// let values = [1];
+// values[0] += { let delta = 2; delta };
+//
+// Source locals are assigned first:
+//
+// slot 0: values
+// slot 1: delta
+//
+// Preparing an indexed assignment then reserves non-overlapping compiler
+// temporaries after the source-local high-water mark:
+//
+// slot 2: cached container
+// slot 3: cached index
+// slot 4: operation result passed to `[]=`
+#[test]
+fn test_augmented_assignment_temporaries_follow_source_locals() {
+    let ops =
+        compile_with_stdlib_unoptimized("let values = [1]; values[0] += { let delta = 2; delta };");
+
+    assert!(
+        ops.iter().any(|op| matches!(op, SetLocal(1))),
+        "the rhs block local should retain analyser-assigned slot 1: {ops:?}",
+    );
+    assert!(
+        ops.iter().any(|op| matches!(op, SetLocal(2)))
+            && ops.iter().any(|op| matches!(op, SetLocal(3)))
+            && ops.iter().any(|op| matches!(op, SetLocal(4))),
+        "prepared-target temporaries must be allocated after both source locals: {ops:?}",
+    );
+}
+
+// Resolved function AST and its analyser metadata form one compilation unit.
+// Omitting the per-function frame size must fail instead of silently reserving
+// only parameter slots and allowing hidden temporaries to overlap body locals.
+#[test]
+fn test_missing_function_source_local_count_is_rejected() {
+    let mut interp = ndc_interpreter::Interpreter::capturing();
+    let (expressions, _) = interp
+        .analyse_str("fn f() { let local = 1; local }")
+        .expect("analysis failed");
+
+    let Err(error) = Compiler::compile(expressions.into_iter(), Default::default()) else {
+        panic!("compilation should reject missing source-local metadata");
+    };
+    assert!(
+        error.to_string().contains("missing source-local count"),
+        "unexpected compile error: {error}",
     );
 }
 

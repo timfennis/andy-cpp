@@ -2,7 +2,8 @@ use std::fmt::Write;
 
 use crate::expression::Expression;
 use crate::expression::{
-    Binding, ExpressionLocation, ForBody, ForIteration, FunctionParameter, Lvalue, NodeId,
+    AugmentedAssignmentPlan, Binding, ExpressionLocation, ForBody, ForIteration, FunctionParameter,
+    Lvalue, NodeId,
 };
 use crate::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
 use ndc_core::{Parameter, StaticType, TypeSignature};
@@ -376,8 +377,7 @@ impl Parser {
                         .expect("guaranteed to produce an lvalue"),
                     r_value: Box::new(expression),
                     operation: operation_identifier,
-                    resolved_assign_operation: Binding::None,
-                    resolved_operation: Binding::None,
+                    plan: AugmentedAssignmentPlan::Unresolved,
                 };
 
                 Ok(op_assign.to_location(start.merge(end)))
@@ -850,7 +850,6 @@ impl Parser {
             Some(Token::For) => {
                 let result = ForBody::List {
                     expr: expr.simplify(),
-                    accumulator_slot: None,
                 };
                 self.for_comprehension(left_square_bracket_span, result, &Token::RightSquareBracket)
             }
@@ -1321,7 +1320,6 @@ impl Parser {
                         key: key_expr,
                         value: value_expr,
                         default,
-                        accumulator_slot: None,
                     },
                     &Token::RightCurlyBracket,
                 );

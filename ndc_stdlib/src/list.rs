@@ -325,7 +325,7 @@ pub mod ops {
                     StaticType::List(Box::new(StaticType::Any)),
                     StaticType::List(Box::new(StaticType::Any)),
                 ]),
-                return_type: Box::new(StaticType::Tuple(vec![])),
+                return_type: Box::new(StaticType::List(Box::new(StaticType::Any))),
             },
             func: NativeFunc::Simple(Box::new(|args| {
                 let [left, right] = args else {

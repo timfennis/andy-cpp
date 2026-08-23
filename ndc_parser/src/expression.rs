@@ -4,6 +4,7 @@ use ndc_core::{StaticType, TypeSignature};
 use ndc_lexer::Span;
 use num::BigInt;
 use num::complex::Complex64;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 /// Unique identity for an AST node. Used as a key in side tables (e.g. the
@@ -19,11 +20,39 @@ impl NodeId {
     }
 }
 
+/// Analyser-assigned source-local high-water marks for each compilation frame.
+///
+/// The top-level count remains monotonic across REPL analysis batches. Nested
+/// functions use independent slot namespaces and are keyed by their declaration
+/// node so the compiler can reserve their source slots before hidden temporaries.
+///
+/// This is transitional metadata while the compiler consumes the resolved AST
+/// directly. When HIR is introduced, lowering should represent source locals
+/// and generated temporaries as logical local IDs. A frame-layout pass can then
+/// assign slots and store `num_locals` directly on each HIR module or function,
+/// replacing this top-level count and `NodeId` side table.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SourceLocalCounts {
+    pub top_level: usize,
+    pub functions: HashMap<NodeId, usize>,
+}
+
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Binding {
     None,
     Resolved(Candidate),
     Dynamic(Vec<Candidate>), // figure it out at runtime
+}
+
+/// The operation selected by the analyser for an augmented assignment.
+///
+/// Every selected operation returns the updated left value internally. The
+/// compiler writes that value back through the assignment target, while the
+/// augmented-assignment expression itself evaluates to unit.
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub enum AugmentedAssignmentPlan {
+    Unresolved,
+    Resolved(Binding),
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
@@ -110,8 +139,7 @@ pub enum Expression {
         l_value: Lvalue,
         r_value: Box<ExpressionLocation>,
         operation: String,
-        resolved_assign_operation: Binding,
-        resolved_operation: Binding,
+        plan: AugmentedAssignmentPlan,
     },
     FunctionDeclaration {
         name: Option<String>,
@@ -192,13 +220,11 @@ pub enum ForBody {
     Block(ExpressionLocation),
     List {
         expr: ExpressionLocation,
-        accumulator_slot: Option<usize>,
     },
     Map {
         key: ExpressionLocation,
         value: Option<ExpressionLocation>,
         default: Option<Box<ExpressionLocation>>,
-        accumulator_slot: Option<usize>,
     },
 }
 
