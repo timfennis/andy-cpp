@@ -1087,7 +1087,9 @@ impl Analyser {
                     self.emit(AnalysisError::unable_to_unpack_type(&found_type, span));
                 }
             }
-            Lvalue::Member { .. } => todo!(),
+            Lvalue::Member { receiver, .. } => {
+                self.analyse_or_any(receiver);
+            }
         }
     }
     fn analyse_multiple_expression_with_same_type(

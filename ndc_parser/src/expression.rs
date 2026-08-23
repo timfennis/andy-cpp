@@ -284,6 +284,14 @@ pub enum Lvalue {
     },
 }
 
+/// A target that writes through an existing value instead of introducing a new
+/// binding, and so cannot appear in a `let`.
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
+pub enum NonBindingTarget {
+    Index,
+    Member,
+}
+
 impl Eq for Expression {}
 
 impl Expression {
@@ -375,6 +383,18 @@ impl Lvalue {
                 Self::can_build_destructure_from_expression(&inner.expression)
             }
             expression => Self::can_build_from_expression(expression),
+        }
+    }
+
+    /// The first target in this lvalue that writes through an existing value
+    /// rather than binding a new name, if any.
+    #[must_use]
+    pub fn non_binding_target(&self) -> Option<NonBindingTarget> {
+        match self {
+            Self::Identifier { .. } => None,
+            Self::Index { .. } => Some(NonBindingTarget::Index),
+            Self::Member { .. } => Some(NonBindingTarget::Member),
+            Self::Sequence(items) => items.iter().find_map(Self::non_binding_target),
         }
     }
 
