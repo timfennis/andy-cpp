@@ -7,7 +7,7 @@ use ndc_core::{StaticType, TypeSignature};
 use ndc_lexer::Span;
 use ndc_parser::{
     AugmentedAssignmentPlan, Binding, Candidate, Expression, ExpressionLocation, ForBody,
-    ForIteration, FunctionParameter, Lvalue, NodeId, SourceLocalCounts,
+    ForIteration, FunctionParameter, Lvalue, NodeId,
 };
 
 /// Side table holding semantic information keyed by AST node identity.
@@ -19,9 +19,6 @@ pub struct AnalysisResult {
     /// Inferred return types for functions without explicit annotations.
     /// Keyed by the FunctionDeclaration's `NodeId`.
     pub inferred_return_types: HashMap<NodeId, StaticType>,
-    /// Analyser-assigned source-local high-water marks consumed by the compiler
-    /// before it allocates hidden temporaries.
-    pub source_local_counts: SourceLocalCounts,
     /// Errors accumulated during analysis. Non-empty when the analyser
     /// encountered problems but was able to continue with fallback types.
     pub errors: Vec<AnalysisError>,
@@ -89,13 +86,6 @@ impl Analyser {
     ) -> Result<StaticType, AnalysisError> {
         let typ = self.analyse_inner(expr_loc)?;
         self.result.expr_types.insert(expr_loc.id, typ.clone());
-        if self.scope_tree.current_function_is_top_level() {
-            self.result.source_local_counts.top_level = self
-                .result
-                .source_local_counts
-                .top_level
-                .max(self.scope_tree.current_function_local_count());
-        }
         Ok(typ)
     }
 
@@ -323,10 +313,6 @@ impl Analyser {
                 let implicit_return = self.analyse_or_any(body);
                 let explicit_return = self.return_type_stack.pop().unwrap();
                 *captures = self.scope_tree.current_scope_captures();
-                self.result
-                    .source_local_counts
-                    .functions
-                    .insert(*id, self.scope_tree.current_function_local_count());
                 self.scope_tree.destroy_scope();
 
                 // Combine explicit `return` types with the block's implicit return type.
@@ -1087,67 +1073,6 @@ mod tests {
             analyse_last_type("let values = [1]; values[0] = \"two\"; values"),
             StaticType::List(Box::new(StaticType::Any)),
         );
-    }
-
-    #[test]
-    fn source_local_counts_are_recorded_per_function_frame() {
-        let (_, result) = analyse_with_globals(
-            r#"
-                let top = 0;
-                { let scoped = 1; scoped };
-                fn outer(arg) {
-                    let local = arg;
-                    fn inner(inner_arg) {
-                        let nested = inner_arg;
-                        nested
-                    };
-                    local
-                };
-            "#,
-            vec![],
-        );
-
-        assert!(
-            result.errors.is_empty(),
-            "analysis errors: {:?}",
-            result.errors
-        );
-        assert_eq!(result.source_local_counts.top_level, 2);
-        let mut function_counts: Vec<_> = result
-            .source_local_counts
-            .functions
-            .values()
-            .copied()
-            .collect();
-        function_counts.sort_unstable();
-        assert_eq!(function_counts, [2, 3]);
-    }
-
-    #[test]
-    fn top_level_source_local_count_is_monotonic_across_batches() {
-        let mut analyser = Analyser::from_scope_tree(ScopeTree::from_global_scope(vec![]));
-
-        for (source, expected) in [
-            ("{ let first = 1; let second = 2; second };", 2),
-            ("let root = 0;", 2),
-            ("let next = 1; let last = 2;", 3),
-        ] {
-            let tokens = Lexer::new(source, SourceId::SYNTHETIC)
-                .collect::<Result<Vec<_>, _>>()
-                .expect("lex failed");
-            let mut expressions = Parser::from_tokens(tokens).parse().expect("parse failed");
-            for expression in &mut expressions {
-                analyser.analyse(expression).expect("analysis failed");
-            }
-
-            let result = analyser.take_result();
-            assert!(
-                result.errors.is_empty(),
-                "analysis errors: {:?}",
-                result.errors
-            );
-            assert_eq!(result.source_local_counts.top_level, expected);
-        }
     }
 
     #[test]

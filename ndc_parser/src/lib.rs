@@ -4,7 +4,7 @@ mod parser;
 
 pub use expression::{
     AugmentedAssignmentPlan, Binding, Candidate, CaptureSource, Expression, ExpressionLocation,
-    ForBody, ForIteration, FunctionParameter, Lvalue, NodeId, ResolvedVar, SourceLocalCounts,
+    ForBody, ForIteration, FunctionParameter, Lvalue, NodeId, ResolvedVar,
 };
 pub use operator::{BinaryOperator, LogicalOperator, UnaryOperator};
 pub use parser::Error;

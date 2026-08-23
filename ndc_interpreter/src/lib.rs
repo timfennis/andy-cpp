@@ -1,7 +1,7 @@
 use ndc_analyser::{Analyser, ScopeTree};
 use ndc_core::FunctionRegistry;
 use ndc_lexer::{Lexer, SourceDb, SourceId, TokenLocation};
-use ndc_parser::{ExpressionLocation, SourceLocalCounts};
+use ndc_parser::ExpressionLocation;
 use ndc_vm::compiler::Compiler;
 use ndc_vm::value::CompiledFunction;
 use ndc_vm::{OutputSink, Vm};
@@ -121,11 +121,8 @@ impl Interpreter {
 
     pub fn compile_str(&mut self, input: &str) -> Result<CompiledFunction, InterpreterError> {
         let source_id = self.source_db.add("<input>", input);
-        let (expressions, analysis, _) = self.parse_and_analyse(input, source_id)?;
-        Ok(Compiler::compile(
-            expressions.into_iter(),
-            analysis.source_local_counts,
-        )?)
+        let (expressions, _, _) = self.parse_and_analyse(input, source_id)?;
+        Ok(Compiler::compile(expressions.into_iter())?)
     }
 
     /// Like [`Self::compile_str`] but skips the peephole optimizer.
@@ -135,11 +132,8 @@ impl Interpreter {
         input: &str,
     ) -> Result<CompiledFunction, InterpreterError> {
         let source_id = self.source_db.add("<input>", input);
-        let (expressions, analysis, _) = self.parse_and_analyse(input, source_id)?;
-        Ok(Compiler::compile_unoptimized(
-            expressions.into_iter(),
-            analysis.source_local_counts,
-        )?)
+        let (expressions, _, _) = self.parse_and_analyse(input, source_id)?;
+        Ok(Compiler::compile_unoptimized(expressions.into_iter())?)
     }
 
     pub fn disassemble_str(&mut self, input: &str) -> Result<String, InterpreterError> {
@@ -177,9 +171,8 @@ impl Interpreter {
         // fails — otherwise the analyser would remember declarations from a line
         // that never actually ran.
         let analyser_checkpoint = self.analyser.checkpoint();
-        let (expressions, analysis, mut timings) = self.parse_and_analyse(input, source_id)?;
-        let vm_result =
-            self.interpret_vm(input, expressions.into_iter(), analysis.source_local_counts);
+        let (expressions, _, mut timings) = self.parse_and_analyse(input, source_id)?;
+        let vm_result = self.interpret_vm(input, expressions.into_iter());
         if vm_result.is_err() {
             self.analyser.restore(analyser_checkpoint);
         }
@@ -235,7 +228,6 @@ impl Interpreter {
         #[cfg(feature = "trace")] input: &str,
         #[cfg(not(feature = "trace"))] _input: &str,
         expressions: impl Iterator<Item = ExpressionLocation>,
-        source_local_counts: SourceLocalCounts,
     ) -> Result<(Value, ExecutionTimings), InterpreterError> {
         use ndc_vm::{Function as VmFunction, Object as VmObject, Value as VmValue};
 
@@ -258,7 +250,7 @@ impl Interpreter {
                     OutputSink::Stdout
                 };
                 let (code, checkpoint) = measure(&mut timings, Phase::Compiling, || {
-                    Compiler::compile_resumable(expressions, source_local_counts)
+                    Compiler::compile_resumable(expressions)
                 })?;
                 let mut vm = Vm::new(code, globals).with_output(output);
                 #[cfg(feature = "trace")]
@@ -281,7 +273,7 @@ impl Interpreter {
                 // find their locals on the stack.
                 let old_checkpoint = checkpoint.clone();
                 let (code, new_checkpoint) = measure(&mut timings, Phase::Compiling, || {
-                    checkpoint.resume(expressions, source_local_counts)
+                    checkpoint.resume(expressions)
                 })?;
                 vm.resume_from_halt(code, globals, resume_ip, prev_num_locals);
                 #[cfg(feature = "trace")]

@@ -130,9 +130,6 @@ pub(crate) struct Scope {
     creates_environment: bool, // Only true for function scopes and for-loop iterations
     base_offset: usize,
     function_scope_idx: usize,
-    /// Source-local high-water mark for this function frame. Only meaningful
-    /// on the function scope itself; child scopes update their owning frame.
-    local_count: usize,
     identifiers: Vec<ScopeBinding>,
     upvalues: Vec<(String, CaptureSource)>,
 }
@@ -148,7 +145,6 @@ impl Scope {
             creates_environment: true,
             base_offset: 0,
             function_scope_idx,
-            local_count: 0,
             identifiers: Vec::default(),
             upvalues: Vec::default(),
         }
@@ -164,7 +160,6 @@ impl Scope {
             creates_environment: false,
             base_offset,
             function_scope_idx,
-            local_count: 0,
             identifiers: Vec::default(),
             upvalues: Vec::default(),
         }
@@ -482,18 +477,6 @@ impl ScopeTree {
             .iter()
             .map(|(_, source)| source.clone())
             .collect()
-    }
-
-    /// Highest source-local slot used by the current function frame, plus one.
-    /// Child scopes update this value as bindings are allocated, so destroyed
-    /// block and iteration scopes remain represented in the high-water mark.
-    pub(crate) fn current_function_local_count(&self) -> usize {
-        let function_scope_idx = self.scopes[self.current_scope_idx].function_scope_idx;
-        self.scopes[function_scope_idx].local_count
-    }
-
-    pub(crate) fn current_function_is_top_level(&self) -> bool {
-        self.scopes[self.current_scope_idx].function_scope_idx == 0
     }
 
     // When the Analyser encounters an identifier as the rhs of an expression during resolution it
@@ -874,11 +857,9 @@ impl ScopeTree {
         ident: String,
         binding: TypeBinding,
     ) -> ResolvedVar {
-        let function_scope_idx = self.scopes[self.current_scope_idx].function_scope_idx;
-        let slot = self.scopes[self.current_scope_idx].allocate(ident, binding);
-        self.scopes[function_scope_idx].local_count =
-            self.scopes[function_scope_idx].local_count.max(slot + 1);
-        ResolvedVar::Local { slot }
+        ResolvedVar::Local {
+            slot: self.scopes[self.current_scope_idx].allocate(ident, binding),
+        }
     }
 
     /// Check whether the current scope already has a `fn` declaration with

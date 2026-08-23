@@ -5,30 +5,31 @@ use ndc_core::{StaticType, TypeSignature};
 use ndc_lexer::Span;
 use ndc_parser::{
     AugmentedAssignmentPlan, Binding, Candidate, CaptureSource, Expression, ExpressionLocation,
-    ForBody, ForIteration, FunctionParameter, LogicalOperator, Lvalue, NodeId, ResolvedVar,
-    SourceLocalCounts,
+    ForBody, ForIteration, FunctionParameter, LogicalOperator, Lvalue, ResolvedVar,
 };
 use std::rc::Rc;
 
 #[derive(Clone)]
 pub struct Compiler {
     ir: OptimizerIr,
-    num_locals: usize,
+    source_locals: usize,
+    temp_count: usize,
+    temp_uses: Vec<TempUse>,
     loop_stack: Vec<LoopContext>,
     allow_return: bool,
     optimize: bool,
-    source_local_counts: Rc<SourceLocalCounts>,
 }
 
 impl Default for Compiler {
     fn default() -> Self {
         Self {
             ir: OptimizerIr::default(),
-            num_locals: 0,
+            source_locals: 0,
+            temp_count: 0,
+            temp_uses: Vec::new(),
             loop_stack: Vec::new(),
             allow_return: false,
             optimize: true,
-            source_local_counts: Rc::new(SourceLocalCounts::default()),
         }
     }
 }
@@ -36,9 +37,8 @@ impl Default for Compiler {
 impl Compiler {
     pub fn compile(
         expressions: impl Iterator<Item = ExpressionLocation>,
-        source_local_counts: SourceLocalCounts,
     ) -> Result<CompiledFunction, CompileError> {
-        let mut compiler = Self::with_source_local_counts(true, source_local_counts);
+        let mut compiler = Self::default();
         compiler.compile_batch(expressions.collect())?;
         Ok(compiler.finish()?.0)
     }
@@ -48,9 +48,11 @@ impl Compiler {
     /// debugging tools (e.g. a future `--no-optimize` disassembler flag).
     pub fn compile_unoptimized(
         expressions: impl Iterator<Item = ExpressionLocation>,
-        source_local_counts: SourceLocalCounts,
     ) -> Result<CompiledFunction, CompileError> {
-        let mut compiler = Self::with_source_local_counts(false, source_local_counts);
+        let mut compiler = Self {
+            optimize: false,
+            ..Default::default()
+        };
         compiler.compile_batch(expressions.collect())?;
         Ok(compiler.finish()?.0)
     }
@@ -65,9 +67,11 @@ impl Compiler {
     /// the emitted chunk, and shifting instructions invalidates that.
     pub fn compile_resumable(
         expressions: impl Iterator<Item = ExpressionLocation>,
-        source_local_counts: SourceLocalCounts,
     ) -> Result<(CompiledFunction, Self), CompileError> {
-        let mut compiler = Self::with_source_local_counts(false, source_local_counts);
+        let mut compiler = Self {
+            optimize: false,
+            ..Default::default()
+        };
         compiler.compile_batch(expressions.collect())?;
         compiler.finish()
     }
@@ -82,22 +86,10 @@ impl Compiler {
     pub fn resume(
         self,
         new_expressions: impl Iterator<Item = ExpressionLocation>,
-        source_local_counts: SourceLocalCounts,
     ) -> Result<(CompiledFunction, Self), CompileError> {
         let mut compiler = self; // checkpoint has no trailing Halt
-        compiler.num_locals = compiler.num_locals.max(source_local_counts.top_level);
-        compiler.source_local_counts = Rc::new(source_local_counts);
         compiler.compile_batch(new_expressions.collect())?;
         compiler.finish()
-    }
-
-    fn with_source_local_counts(optimize: bool, source_local_counts: SourceLocalCounts) -> Self {
-        Self {
-            num_locals: source_local_counts.top_level,
-            optimize,
-            source_local_counts: Rc::new(source_local_counts),
-            ..Default::default()
-        }
     }
 
     fn compile_batch(&mut self, expressions: Vec<ExpressionLocation>) -> Result<(), CompileError> {
@@ -107,10 +99,22 @@ impl Compiler {
         Ok(())
     }
 
-    fn allocate_temp(&mut self) -> usize {
-        let slot = self.num_locals;
-        self.num_locals += 1;
-        slot
+    fn allocate_temp(&mut self) -> TempSlot {
+        let temp = TempSlot(self.temp_count);
+        self.temp_count += 1;
+        temp
+    }
+
+    fn write_temp(&mut self, temp: TempSlot, span: Span, opcode: impl FnOnce(usize) -> OpCode) {
+        let label = self.ir.write(opcode(0), span);
+        self.temp_uses.push(TempUse { label, temp });
+    }
+
+    fn layout_temporaries(&mut self) {
+        for temp_use in &self.temp_uses {
+            self.ir
+                .set_local_slot(temp_use.label, self.source_locals + temp_use.temp.0);
+        }
     }
 
     /// The instruction index where the trailing `Halt` was written.
@@ -121,17 +125,21 @@ impl Compiler {
 
     /// Number of top-level local slots used so far.
     pub fn num_locals(&self) -> usize {
-        self.num_locals
+        self.source_locals + self.temp_count
     }
 
     /// Internal: clone a checkpoint (pre-Halt), write Halt, return both.
     fn finish(mut self) -> Result<(CompiledFunction, Self), CompileError> {
+        // Keep resumable IR symbolic so later batches can grow the source-local
+        // range and lay out every compiler temporary against the new boundary.
         let checkpoint = self.clone();
+        self.layout_temporaries();
         self.ir.write(OpCode::Halt, Span::synthetic());
         if self.optimize {
             self.ir.peephole();
         }
 
+        let num_locals = self.num_locals();
         let function = CompiledFunction {
             name: None,
             static_type: StaticType::Function {
@@ -139,7 +147,7 @@ impl Compiler {
                 return_type: Box::new(StaticType::Any),
             },
             body: self.ir.into_chunk(),
-            num_locals: self.num_locals,
+            num_locals,
         };
         Ok((function, checkpoint))
     }
@@ -149,9 +157,7 @@ impl Compiler {
         expression_location: ExpressionLocation,
     ) -> Result<(), CompileError> {
         let ExpressionLocation {
-            expression,
-            span,
-            id,
+            expression, span, ..
         } = expression_location;
         match expression {
             Expression::BoolLiteral(b) => {
@@ -292,7 +298,6 @@ impl Compiler {
             } => {
                 let type_signature = FunctionParameter::from_params(&parameters);
                 self.compile_function_decl(
-                    id,
                     name,
                     resolved_name,
                     *body,
@@ -445,12 +450,12 @@ impl Compiler {
                 // 5. Pop the return value
 
                 let tmp_value = self.allocate_temp();
-                self.ir.write(OpCode::SetLocal(tmp_value), span);
+                self.write_temp(tmp_value, span, OpCode::SetLocal);
 
                 self.compile_binding(resolved_set.expect("[]= must be resolved"), span)?;
                 self.compile_expr(*value)?;
                 self.compile_expr(*index)?;
-                self.ir.write(OpCode::GetLocal(tmp_value), span);
+                self.write_temp(tmp_value, span, OpCode::GetLocal);
                 self.ir.write(OpCode::Call(3), span);
                 self.ir.write(OpCode::Pop, Span::synthetic());
             }
@@ -473,7 +478,7 @@ impl Compiler {
                     _ => unreachable!("declaration lvalue must be a local"),
                 };
                 self.ir.write(OpCode::SetLocal(slot), span);
-                self.num_locals = self.num_locals.max(slot + 1);
+                self.source_locals = self.source_locals.max(slot + 1);
             }
             Lvalue::Index { .. } => unreachable!("cannot declare into index"),
             Lvalue::Sequence(seq) => {
@@ -655,7 +660,6 @@ impl Compiler {
     #[allow(clippy::too_many_arguments)]
     fn compile_function_decl(
         &mut self,
-        node_id: NodeId,
         name: Option<String>,
         resolved_name: Option<ResolvedVar>,
         body: ExpressionLocation,
@@ -679,31 +683,26 @@ impl Compiler {
             },
             return_type: Box::new(return_type.clone()),
         };
-        let function_source_locals = self
-            .source_local_counts
-            .functions
-            .get(&node_id)
-            .copied()
-            .ok_or_else(|| CompileError::missing_source_local_count(node_id, span))?;
         let mut fn_compiler = Self {
-            num_locals: num_params.max(function_source_locals),
+            source_locals: num_params,
             allow_return: true,
             optimize: self.optimize,
-            source_local_counts: Rc::clone(&self.source_local_counts),
             ..Default::default()
         };
         fn_compiler.compile_expr(body)?;
         fn_compiler.ir.write(OpCode::Return, Span::synthetic());
+        fn_compiler.layout_temporaries();
 
         if fn_compiler.optimize {
             fn_compiler.ir.peephole();
         }
 
+        let num_locals = fn_compiler.num_locals();
         let compiled = CompiledFunction {
             name,
             static_type,
             body: fn_compiler.ir.into_chunk(),
-            num_locals: fn_compiler.num_locals,
+            num_locals,
         };
         let idx = self
             .ir
@@ -731,7 +730,7 @@ impl Compiler {
         match resolved_name {
             Some(ResolvedVar::Local { slot }) => {
                 self.ir.write(OpCode::SetLocal(slot), span);
-                self.num_locals = self.num_locals.max(slot + 1);
+                self.source_locals = self.source_locals.max(slot + 1);
             }
             Some(ResolvedVar::Upvalue { .. } | ResolvedVar::Global { .. }) => {
                 unreachable!("the analyser never assigns a declaration to a non-local binding")
@@ -762,13 +761,13 @@ impl Compiler {
             ForBody::List { expr } => {
                 let tmp_list = self.allocate_temp();
                 self.ir.write(OpCode::MakeList(0), span);
-                self.ir.write(OpCode::SetLocal(tmp_list), span);
+                self.write_temp(tmp_list, span, OpCode::SetLocal);
                 self.compile_for_iterations(iterations, span, &mut |this| {
                     this.compile_expr(expr.clone())?;
-                    this.ir.write(OpCode::ListPush(tmp_list), span);
+                    this.write_temp(tmp_list, span, OpCode::ListPush);
                     Ok(())
                 })?;
-                self.ir.write(OpCode::GetLocal(tmp_list), span);
+                self.write_temp(tmp_list, span, OpCode::GetLocal);
                 Ok(())
             }
             ForBody::Map {
@@ -788,7 +787,7 @@ impl Compiler {
                     },
                     span,
                 );
-                self.ir.write(OpCode::SetLocal(tmp_map), span);
+                self.write_temp(tmp_map, span, OpCode::SetLocal);
                 self.compile_for_iterations(iterations, span, &mut |this| {
                     this.compile_expr(key.clone())?;
                     if let Some(value) = value.clone() {
@@ -797,10 +796,10 @@ impl Compiler {
                         let idx = this.ir.add_constant(Value::unit());
                         this.ir.write(OpCode::Constant(idx), Span::synthetic());
                     }
-                    this.ir.write(OpCode::MapInsert(tmp_map), span);
+                    this.write_temp(tmp_map, span, OpCode::MapInsert);
                     Ok(())
                 })?;
-                self.ir.write(OpCode::GetLocal(tmp_map), span);
+                self.write_temp(tmp_map, span, OpCode::GetLocal);
                 Ok(())
             }
         }
@@ -900,6 +899,16 @@ struct LoopContext {
     break_instructions: Vec<LabelId>,
 }
 
+/// Logical compiler-local slot, assigned a concrete frame slot after lowering.
+#[derive(Clone, Copy)]
+struct TempSlot(usize);
+
+#[derive(Clone, Copy)]
+struct TempUse {
+    label: LabelId,
+    temp: TempSlot,
+}
+
 /// An assignment location whose side-effecting components have already been
 /// evaluated and cached. This lets augmented assignment use one lowering for
 /// every target without evaluating an index expression more than once.
@@ -909,8 +918,8 @@ enum PreparedAssignmentTarget {
         span: Span,
     },
     Index {
-        cached_container: usize,
-        cached_index: usize,
+        cached_container: TempSlot,
+        cached_index: TempSlot,
         container_span: Span,
         index_span: Span,
         getter: Binding,
@@ -937,13 +946,9 @@ impl PreparedAssignmentTarget {
                 let cached_index = compiler.allocate_temp();
 
                 compiler.compile_expr(*value)?;
-                compiler
-                    .ir
-                    .write(OpCode::SetLocal(cached_container), container_span);
+                compiler.write_temp(cached_container, container_span, OpCode::SetLocal);
                 compiler.compile_expr(*index)?;
-                compiler
-                    .ir
-                    .write(OpCode::SetLocal(cached_index), index_span);
+                compiler.write_temp(cached_index, index_span, OpCode::SetLocal);
 
                 Ok(Self::Index {
                     cached_container,
@@ -970,12 +975,8 @@ impl PreparedAssignmentTarget {
                 ..
             } => {
                 compiler.compile_binding(getter.clone(), *index_span)?;
-                compiler
-                    .ir
-                    .write(OpCode::GetLocal(*cached_container), *container_span);
-                compiler
-                    .ir
-                    .write(OpCode::GetLocal(*cached_index), *index_span);
+                compiler.write_temp(*cached_container, *container_span, OpCode::GetLocal);
+                compiler.write_temp(*cached_index, *index_span, OpCode::GetLocal);
                 compiler
                     .ir
                     .write(OpCode::Call(2), container_span.merge(*index_span));
@@ -998,19 +999,11 @@ impl PreparedAssignmentTarget {
                 let cached_value = compiler.allocate_temp();
                 let target_span = container_span.merge(*index_span);
 
-                compiler
-                    .ir
-                    .write(OpCode::SetLocal(cached_value), target_span);
+                compiler.write_temp(cached_value, target_span, OpCode::SetLocal);
                 compiler.compile_binding(setter.clone(), target_span)?;
-                compiler
-                    .ir
-                    .write(OpCode::GetLocal(*cached_container), *container_span);
-                compiler
-                    .ir
-                    .write(OpCode::GetLocal(*cached_index), *index_span);
-                compiler
-                    .ir
-                    .write(OpCode::GetLocal(cached_value), target_span);
+                compiler.write_temp(*cached_container, *container_span, OpCode::GetLocal);
+                compiler.write_temp(*cached_index, *index_span, OpCode::GetLocal);
+                compiler.write_temp(cached_value, target_span, OpCode::GetLocal);
                 compiler.ir.write(OpCode::Call(3), target_span);
                 compiler.ir.write(OpCode::Pop, target_span);
             }
@@ -1059,15 +1052,6 @@ pub struct CompileError {
 }
 
 impl CompileError {
-    fn missing_source_local_count(node_id: NodeId, span: Span) -> Self {
-        Self {
-            text: format!(
-                "missing source-local count for function node {node_id:?}; analysed AST and metadata must be compiled together"
-            ),
-            span,
-        }
-    }
-
     fn unresolved_binding(span: Span) -> Self {
         Self {
             text: "encountered unresolved binding during compilation, this is probably an internal error".to_string(),
