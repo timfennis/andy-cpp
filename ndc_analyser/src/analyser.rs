@@ -244,11 +244,11 @@ impl Analyser {
                         *plan = AugmentedAssignmentPlan::Unresolved;
                         None
                     }
-                    _ if has_op_binding => {
+                    Binding::None if has_op_binding => {
                         *plan = AugmentedAssignmentPlan::Resolved(op_binding);
                         Some(op_return)
                     }
-                    _ => {
+                    Binding::None => {
                         self.emit(AnalysisError::function_not_found(
                             operation, &arg_types, *span,
                         ));
@@ -630,8 +630,7 @@ impl Analyser {
                         .binding,
                 );
 
-                let range_type = StaticType::Iterator(Box::new(StaticType::Int));
-                if index_type.is_subtype(&range_type)
+                if Self::index_type_is_slice(&index_type)
                     && let StaticType::List(element) = &type_of_index_target
                 {
                     return Ok(StaticType::List(element.clone()));
@@ -664,6 +663,12 @@ impl Analyser {
                 StaticType::Any
             }
         }
+    }
+
+    /// An index expression typed as an integer sequence (e.g. `0..2`) selects
+    /// a slice of the container rather than a single element.
+    fn index_type_is_slice(index_type: &StaticType) -> bool {
+        index_type.is_subtype(&StaticType::Iterator(Box::new(StaticType::Int)))
     }
 
     /// Specialized `op=` implementations preserve the concrete left type.
@@ -715,12 +720,11 @@ impl Analyser {
                     return;
                 }
 
-                let range_type = StaticType::Iterator(Box::new(StaticType::Int));
                 let is_slice = self
                     .result
                     .expr_types
                     .get(&index.id)
-                    .is_some_and(|index_type| index_type.is_subtype(&range_type));
+                    .is_some_and(Self::index_type_is_slice);
                 let (stored_element_type, value_element_type) = if is_slice {
                     let Some(stored_element_type) = stored_type.index_element_type() else {
                         self.emit(AnalysisError::mismatched_types(
