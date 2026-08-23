@@ -1,0 +1,27 @@
+// Constructors and field accessors are ordinary function values, so passing
+// them to a higher-order function must work the same as passing a lambda.
+struct Point {
+    x: Int,
+    y: Int,
+}
+
+let points = [Point(1, 10), Point(2, 20)];
+
+// Getter as a mapper.
+assert_eq(points.map(x), [1, 2]);
+assert_eq(points.map(y), [10, 20]);
+
+// A lambda that calls the getter agrees with the getter itself.
+assert_eq(points.map(fn (p) => p.x), points.map(x));
+
+// Constructor as a mapper.
+struct Wrap {
+    v: Int,
+}
+assert_eq([1, 2, 3].map(Wrap), [Wrap(1), Wrap(2), Wrap(3)]);
+
+// Getter as a predicate.
+struct Flag {
+    on: Bool,
+}
+assert_eq([Flag(true), Flag(false), Flag(true)].filter(on).len(), 2);
