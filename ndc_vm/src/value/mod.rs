@@ -968,11 +968,15 @@ impl Hash for Object {
                         state.write_u8(1); // 1 for constructor
                         Rc::as_ptr(i).hash(state);
                     }
-                    Function::GetField { .. } => {
-                        todo!("implement this");
+                    Function::GetField(info, index) => {
+                        state.write_u8(2); // 2 for field getter
+                        Rc::as_ptr(info).hash(state);
+                        index.hash(state);
                     }
-                    Function::SetField { .. } => {
-                        todo!("implement this");
+                    Function::SetField(info, index) => {
+                        state.write_u8(3); // 3 for field setter
+                        Rc::as_ptr(info).hash(state);
+                        index.hash(state);
                     }
                 }
             }

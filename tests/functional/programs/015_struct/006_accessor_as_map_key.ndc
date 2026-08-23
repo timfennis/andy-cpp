@@ -1,0 +1,33 @@
+// Constructors and getters are hashable function values, so they can be used
+// as map keys. Identity is per-struct: a getter is tied to the struct it was
+// declared in, not just to the field name.
+struct Point {
+    x: Int,
+    y: Int,
+}
+
+// Round-trips through the map.
+let by_getter = %{x: "the x field", y: "the y field"};
+assert_eq(by_getter.len(), 2);
+assert_eq(by_getter[x], "the x field");
+assert_eq(by_getter[y], "the y field");
+
+assert(x == x);
+assert(x != y);
+
+// Constructors are keys too.
+let by_ctor = %{Point: "the Point constructor"};
+assert_eq(by_ctor[Point], "the Point constructor");
+
+// A same-named field on another struct is a distinct getter.
+let point_x = x;
+struct Other {
+    x: Int,
+}
+let other_x = x;
+
+assert(point_x != other_x);
+let both = %{point_x: "Point", other_x: "Other"};
+assert_eq(both.len(), 2);
+assert_eq(both[point_x], "Point");
+assert_eq(both[other_x], "Other");
