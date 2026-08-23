@@ -562,7 +562,9 @@ impl Compiler {
                     self.compile_lvalue(lv, span)?;
                 }
             }
-            Lvalue::Member { .. } => todo!(),
+            Lvalue::Member { .. } => unreachable!(
+                "member assignment is lowered by Expression::Assignment; the parser rejects members inside destructuring patterns"
+            ),
         }
 
         Ok(())
@@ -585,7 +587,7 @@ impl Compiler {
                     self.compile_declare_lvalue(lv, span)?;
                 }
             }
-            Lvalue::Member { .. } => todo!(),
+            Lvalue::Member { .. } => unreachable!("cannot declare into a field"),
         }
         Ok(())
     }
@@ -1033,6 +1035,13 @@ enum PreparedAssignmentTarget {
         getter: Binding,
         setter: Binding,
     },
+    Member {
+        cached_receiver: TempSlot,
+        receiver_span: Span,
+        member_span: Span,
+        getter: Binding,
+        setter: Binding,
+    },
 }
 
 impl PreparedAssignmentTarget {
@@ -1067,7 +1076,27 @@ impl PreparedAssignmentTarget {
                     setter: resolved_set.expect("[]= must be resolved"),
                 })
             }
-            Lvalue::Member { .. } => todo!("this is the rest of the owl"),
+            Lvalue::Member {
+                receiver,
+                member_span,
+                resolved_getter,
+                resolved_setter,
+                ..
+            } => {
+                let receiver_span = receiver.span;
+                let cached_receiver = compiler.allocate_temp();
+
+                compiler.compile_expr(*receiver)?;
+                compiler.write_temp(cached_receiver, receiver_span, OpCode::SetLocal);
+
+                Ok(Self::Member {
+                    cached_receiver,
+                    receiver_span,
+                    member_span,
+                    getter: resolved_getter.expect("member getter must be resolved"),
+                    setter: resolved_setter.expect("member setter must be resolved"),
+                })
+            }
             Lvalue::Sequence(_) => Err(CompileError::lvalue_required_to_be_single_identifier(span)),
         }
     }
@@ -1089,6 +1118,17 @@ impl PreparedAssignmentTarget {
                 compiler
                     .ir
                     .write(OpCode::Call(2), container_span.merge(*index_span));
+            }
+            Self::Member {
+                cached_receiver,
+                receiver_span,
+                member_span,
+                getter,
+                ..
+            } => {
+                compiler.compile_binding(getter.clone(), *member_span)?;
+                compiler.write_temp(*cached_receiver, *receiver_span, OpCode::GetLocal);
+                compiler.ir.write(OpCode::Call(1), *member_span);
             }
         }
         Ok(())
@@ -1115,6 +1155,22 @@ impl PreparedAssignmentTarget {
                 compiler.write_temp(cached_value, target_span, OpCode::GetLocal);
                 compiler.ir.write(OpCode::Call(3), target_span);
                 compiler.ir.write(OpCode::Pop, target_span);
+            }
+            Self::Member {
+                cached_receiver,
+                receiver_span,
+                member_span,
+                setter,
+                ..
+            } => {
+                let cached_value = compiler.allocate_temp();
+
+                compiler.write_temp(cached_value, *member_span, OpCode::SetLocal);
+                compiler.compile_binding(setter.clone(), *member_span)?;
+                compiler.write_temp(*cached_receiver, *receiver_span, OpCode::GetLocal);
+                compiler.write_temp(cached_value, *member_span, OpCode::GetLocal);
+                compiler.ir.write(OpCode::Call(2), *member_span);
+                compiler.ir.write(OpCode::Pop, *member_span);
             }
         }
         Ok(())

@@ -369,15 +369,6 @@ impl Parser {
                 Ok(assignment_expression.to_location(start.merge(end)))
             }
             Some(Token::OpAssign(inner)) => {
-                if matches!(&maybe_lvalue.expression, Expression::MemberAccess { .. }) {
-                    return Err(Error::with_help(
-                        "Member augmented assignment is not supported yet".to_string(),
-                        maybe_lvalue.span,
-                        "Use an ordinary member assignment such as `foo.bar = foo.bar + value`."
-                            .to_string(),
-                    ));
-                }
-
                 let operation_identifier = inner.token.to_string();
 
                 self.advance();

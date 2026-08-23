@@ -101,17 +101,22 @@ fn member_destructuring_is_not_assignable() {
 }
 
 #[test]
-fn member_augmented_assignment_is_explicitly_rejected() {
-    let tokens = Lexer::new("foo.bar += value", SourceId::SYNTHETIC)
-        .collect::<Result<Vec<_>, _>>()
-        .expect("source must lex");
-    let error = Parser::from_tokens(tokens)
-        .parse()
-        .expect_err("member augmented assignment must not parse yet");
+fn member_augmented_assignment_has_a_member_lvalue() {
+    let expression = parse_one("foo.bar += value");
 
-    assert!(
-        error
-            .to_string()
-            .contains("Member augmented assignment is not supported yet")
-    );
+    let Expression::OpAssignment {
+        l_value, operation, ..
+    } = expression.expression
+    else {
+        panic!(
+            "expected augmented assignment, found {:?}",
+            expression.expression
+        );
+    };
+
+    assert_eq!(operation, "+");
+    assert!(matches!(
+        l_value,
+        Lvalue::Member { member, .. } if member == "bar"
+    ));
 }
