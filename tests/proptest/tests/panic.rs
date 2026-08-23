@@ -247,7 +247,7 @@ fn run_pipeline(tokens: Vec<TokenLocation>) {
         return;
     }
 
-    let compiled = match Compiler::compile(expressions.into_iter(), Default::default()) {
+    let compiled = match Compiler::compile(expressions.into_iter()) {
         Ok(c) => c,
         Err(_) => return,
     };
