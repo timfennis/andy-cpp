@@ -11,6 +11,61 @@ my_number += 5;
 assert_eq(my_number, 8);
 ```
 
+## Indexed targets
+
+The target of an augmented assignment can also be an indexed location:
+
+```ndc
+let values = [1, 2, 3];
+values[0] += 10;
+assert_eq(values, [11, 2, 3]);
+```
+
+This works even when reading the location produces a new value rather than a
+reference, such as a character of a string or a slice of a list. The updated
+value is always stored back into the container:
+
+```ndc
+let text = "ab";
+text[0] ++= "x";
+assert_eq(text, "axb");
+
+let items = [1, 2];
+items[0..1] ++= [3];
+assert_eq(items, [1, 3, 2]);
+```
+
+The target, index, and right-hand side are each evaluated exactly once, in
+source order. The augmented assignment expression itself evaluates to `()`.
+
+## Type checking
+
+An augmented assignment with an in-place operator such as `++=` never changes
+the type of its target. If the right-hand side would force a type change the
+program is rejected:
+
+```ndc
+let values = [1];
+values ++= ["two"]; // error: mismatched types: found List<String> but expected List<Int>
+```
+
+Annotate the target with `Any` to opt into heterogeneous contents:
+
+```ndc
+let mixed: List<Any> = [1];
+mixed ++= ["two"];
+assert_eq(mixed, [1, "two"]);
+```
+
+Operators without an in-place implementation behave like `target = target op value`
+and may widen the inferred type of the target, just like a regular assignment:
+
+```ndc
+let numbers = [1];
+numbers[0] += 0.5; // fine: the element type widens from Int to Number
+assert_eq(numbers, [1.5]);
+```
+
 ## Optimization
 
 You might expect `list ++= [1,2,3]` to desugar to `list = list ++ [1,2,3]`, but that would waste work. Andy C++ handles some augmented assignments directly. In this case, it appends `[1,2,3]` without creating an intermediate list.
