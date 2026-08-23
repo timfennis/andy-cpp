@@ -453,7 +453,7 @@ impl Analyser {
                     return_type,
                 } = self.scope_tree.resolve_call(
                     member,
-                    &[receiver_type.clone()],
+                    std::slice::from_ref(&receiver_type),
                     CallKind::Regular,
                 );
 

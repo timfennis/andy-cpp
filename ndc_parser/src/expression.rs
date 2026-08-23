@@ -357,8 +357,7 @@ impl Lvalue {
     #[must_use]
     pub fn can_build_from_expression(expression: &Expression) -> bool {
         match expression {
-            Expression::Identifier { .. } => true,
-            Expression::MemberAccess { .. } => true,
+            Expression::Identifier { .. } | Expression::MemberAccess { .. } => true,
             Expression::Call {
                 function,
                 arguments,
