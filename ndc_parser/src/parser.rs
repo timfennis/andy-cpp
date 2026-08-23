@@ -2,7 +2,7 @@ use std::fmt::Write;
 
 use crate::expression::{
     AugmentedAssignmentPlan, Binding, ExpressionLocation, ForBody, ForIteration, FunctionParameter,
-    Lvalue, NodeId,
+    Lvalue, NodeId, NonBindingTarget,
 };
 use crate::expression::{Expression, StructField};
 use crate::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
@@ -1559,6 +1559,22 @@ impl Parser {
                 "Assignment target is not a valid lvalue. Only a few expressions can be assigned a value. Check that the left-hand side of the assignment is a valid target.".to_string(),
             ));
         };
+
+        if let Some(target) = lvalue.non_binding_target() {
+            let help = match target {
+                NonBindingTarget::Member => {
+                    "`let` introduces a new binding; assign to a field with `foo.bar = value` instead."
+                }
+                NonBindingTarget::Index => {
+                    "`let` introduces a new binding; assign to an element with `foo[index] = value` instead."
+                }
+            };
+            return Err(Error::with_help(
+                "Invalid declaration target".to_string(),
+                lvalue_span,
+                help.to_string(),
+            ));
+        }
 
         let annotated_type = if self.peek_current_token() == Some(&Token::Colon) {
             self.advance();

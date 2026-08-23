@@ -120,3 +120,27 @@ fn member_augmented_assignment_has_a_member_lvalue() {
         Lvalue::Member { member, .. } if member == "bar"
     ));
 }
+
+#[test]
+fn member_is_not_a_declaration_target() {
+    let tokens = Lexer::new("let foo.bar = value", SourceId::SYNTHETIC)
+        .collect::<Result<Vec<_>, _>>()
+        .expect("source must lex");
+    let error = Parser::from_tokens(tokens)
+        .parse()
+        .expect_err("`let` must not accept a member target");
+
+    assert!(error.to_string().contains("Invalid declaration target"));
+}
+
+#[test]
+fn index_is_not_a_declaration_target() {
+    let tokens = Lexer::new("let foo[0] = value", SourceId::SYNTHETIC)
+        .collect::<Result<Vec<_>, _>>()
+        .expect("source must lex");
+    let error = Parser::from_tokens(tokens)
+        .parse()
+        .expect_err("`let` must not accept an index target");
+
+    assert!(error.to_string().contains("Invalid declaration target"));
+}
