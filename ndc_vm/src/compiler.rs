@@ -39,7 +39,7 @@ impl Compiler {
         expressions: impl Iterator<Item = ExpressionLocation>,
     ) -> Result<CompiledFunction, CompileError> {
         let mut compiler = Self::default();
-        compiler.compile_batch(expressions.collect())?;
+        compiler.compile_batch(expressions)?;
         Ok(compiler.finish()?.0)
     }
 
@@ -53,7 +53,7 @@ impl Compiler {
             optimize: false,
             ..Default::default()
         };
-        compiler.compile_batch(expressions.collect())?;
+        compiler.compile_batch(expressions)?;
         Ok(compiler.finish()?.0)
     }
 
@@ -72,7 +72,7 @@ impl Compiler {
             optimize: false,
             ..Default::default()
         };
-        compiler.compile_batch(expressions.collect())?;
+        compiler.compile_batch(expressions)?;
         compiler.finish()
     }
 
@@ -88,11 +88,14 @@ impl Compiler {
         new_expressions: impl Iterator<Item = ExpressionLocation>,
     ) -> Result<(CompiledFunction, Self), CompileError> {
         let mut compiler = self; // checkpoint has no trailing Halt
-        compiler.compile_batch(new_expressions.collect())?;
+        compiler.compile_batch(new_expressions)?;
         compiler.finish()
     }
 
-    fn compile_batch(&mut self, expressions: Vec<ExpressionLocation>) -> Result<(), CompileError> {
+    fn compile_batch(
+        &mut self,
+        expressions: impl Iterator<Item = ExpressionLocation>,
+    ) -> Result<(), CompileError> {
         for expression in expressions {
             self.compile_expr(expression)?;
         }
