@@ -338,14 +338,8 @@ impl OptimizerIr {
     }
 
     /// Assigns a concrete frame slot to a compiler-generated local operation.
-    pub(crate) fn set_local_slot(&mut self, label: LabelId, slot: usize) {
-        let idx = self
-            .code
-            .iter()
-            .position(|(l, _, _)| *l == label)
-            .expect("invalid label");
-
-        match self.code.get_mut(idx) {
+    pub(crate) fn set_local_slot(&mut self, instruction_idx: usize, slot: usize) {
+        match self.code.get_mut(instruction_idx) {
             Some((
                 _label,
                 OpCode::GetLocal(n)
@@ -354,7 +348,9 @@ impl OptimizerIr {
                 | OpCode::MapInsert(n),
                 _span,
             )) => *n = slot,
-            _ => panic!("expected a compiler-generated local instruction at index {idx}"),
+            _ => {
+                panic!("expected a compiler-generated local instruction at index {instruction_idx}")
+            }
         }
     }
 

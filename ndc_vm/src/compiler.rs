@@ -106,14 +106,20 @@ impl Compiler {
     }
 
     fn write_temp(&mut self, temp: TempSlot, span: Span, opcode: impl FnOnce(usize) -> OpCode) {
-        let label = self.ir.write(opcode(0), span);
-        self.temp_uses.push(TempUse { label, temp });
+        let instruction_idx = self.ir.len();
+        self.ir.write(opcode(0), span);
+        self.temp_uses.push(TempUse {
+            instruction_idx,
+            temp,
+        });
     }
 
     fn layout_temporaries(&mut self) {
         for temp_use in &self.temp_uses {
-            self.ir
-                .set_local_slot(temp_use.label, self.source_locals + temp_use.temp.0);
+            self.ir.set_local_slot(
+                temp_use.instruction_idx,
+                self.source_locals + temp_use.temp.0,
+            );
         }
     }
 
@@ -905,7 +911,7 @@ struct TempSlot(usize);
 
 #[derive(Clone, Copy)]
 struct TempUse {
-    label: LabelId,
+    instruction_idx: usize,
     temp: TempSlot,
 }
 
