@@ -1,0 +1,28 @@
+// Augmented assignment through a field reads with the getter and writes with
+// the setter, evaluating the receiver expression exactly once.
+struct Counter {
+    hits: Int,
+    scale: Int,
+}
+
+let counter = Counter(1, 2);
+
+counter.hits += 4;
+assert_eq(counter.hits, 5);
+
+counter.scale *= 5;
+assert_eq(counter.scale, 10);
+
+counter.hits %= 3;
+assert_eq(counter.hits, 2);
+
+// The receiver is evaluated once, not once per read and once per write.
+let receiver_calls = 0;
+fn target() {
+    receiver_calls += 1;
+    counter
+}
+
+target().hits += 10;
+assert_eq(receiver_calls, 1);
+assert_eq(counter.hits, 12);
