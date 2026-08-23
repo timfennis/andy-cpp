@@ -1145,7 +1145,8 @@ mod tests {
             .collect::<Result<Vec<_>, _>>()
             .expect("lex failed");
         let mut expressions = Parser::from_tokens(tokens).parse().expect("parse failed");
-        let mut analyser = Analyser::from_scope_tree(ScopeTree::from_global_scope(globals));
+        let mut analyser =
+            Analyser::from_scope_tree(ScopeTree::from_global_scope(globals), Default::default());
         let mut last_type = StaticType::unit();
         for expression in &mut expressions {
             last_type = analyser.analyse(expression).expect("analysis failed");
