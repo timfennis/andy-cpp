@@ -27,6 +27,15 @@ pub struct AnalysisResult {
     pub errors: Vec<AnalysisError>,
 }
 
+/// A snapshot of the analyser's persistent state: the scope tree and the
+/// number of registered structs at the time of the snapshot. Restoring it
+/// discards every binding and struct declared since.
+#[derive(Debug, Clone)]
+pub struct Checkpoint {
+    scope_tree: ScopeTree,
+    struct_count: usize,
+}
+
 #[derive(Debug)]
 pub struct Analyser {
     struct_registry: Rc<RefCell<StructRegistry>>,
@@ -55,12 +64,18 @@ impl Analyser {
         }
     }
 
-    pub fn checkpoint(&self) -> ScopeTree {
-        self.scope_tree.clone()
+    pub fn checkpoint(&self) -> Checkpoint {
+        Checkpoint {
+            scope_tree: self.scope_tree.clone(),
+            struct_count: self.struct_registry.borrow().len(),
+        }
     }
 
-    pub fn restore(&mut self, checkpoint: ScopeTree) {
-        self.scope_tree = checkpoint;
+    pub fn restore(&mut self, checkpoint: Checkpoint) {
+        self.scope_tree = checkpoint.scope_tree;
+        self.struct_registry
+            .borrow_mut()
+            .truncate(checkpoint.struct_count);
     }
 
     /// Take the accumulated analysis result (including any errors),
@@ -83,22 +98,37 @@ impl Analyser {
     }
 
     /// Resolves a syntactic type annotation to a `StaticType`: `Int` becomes
-    /// `StaticType::Int`, `Map<String, Int>` becomes `StaticType::Map { .. }`.
-    /// An unknown name or a wrong generic-argument count is reported as an
-    /// analysis error at the annotation's span, and the annotation falls back
-    /// to `Any` so the rest of the program is still checked.
+    /// `StaticType::Int`, `Map<String, Int>` becomes `StaticType::Map { .. }`,
+    /// and a declared struct name becomes its `StaticType::Struct`. Built-in
+    /// names take precedence over structs. An unknown name or a wrong
+    /// generic-argument count is reported as an analysis error at the
+    /// annotation's span, and the annotation falls back to `Any` so the rest
+    /// of the program is still checked.
     fn lower_type_expr(&mut self, expr: &TypeExpr) -> StaticType {
         match expr {
             TypeExpr::Tuple { elements, .. } => {
                 StaticType::Tuple(elements.iter().map(|e| self.lower_type_expr(e)).collect())
             }
             TypeExpr::Name { name, args, span } => {
+                let has_args = !args.is_empty();
                 let args = args.iter().map(|a| self.lower_type_expr(a)).collect();
                 match StaticType::from_name_and_args(name, args) {
                     Ok(typ) => typ,
                     Err(err) => {
-                        self.emit(AnalysisError::invalid_type_annotation(&err, *span));
-                        StaticType::Any
+                        let info = self.struct_registry.borrow().find_by_name(name).cloned();
+                        match info {
+                            Some(info) if !has_args => info.static_type(),
+                            Some(_) => {
+                                self.emit(AnalysisError::type_does_not_take_generic_args(
+                                    name, *span,
+                                ));
+                                StaticType::Any
+                            }
+                            None => {
+                                self.emit(AnalysisError::invalid_type_annotation(&err, *span));
+                                StaticType::Any
+                            }
+                        }
                     }
                 }
             }
@@ -530,6 +560,11 @@ impl Analyser {
                     .iter()
                     .map(|f| self.lower_type_expr(&f.annotation))
                     .collect();
+
+                if self.struct_registry.borrow().find_by_name(name).is_some() {
+                    self.emit(AnalysisError::struct_redefinition(name, *span));
+                    return Ok(StaticType::unit());
+                }
 
                 let struct_id = self.struct_registry.borrow_mut().register(
                     &*name,
@@ -1125,6 +1160,20 @@ impl AnalysisError {
     fn invalid_type_annotation(err: &StaticTypeConstructionError, span: Span) -> Self {
         Self {
             text: format!("{err}. {}", err.help_text()),
+            span,
+        }
+    }
+
+    fn type_does_not_take_generic_args(name: &str, span: Span) -> Self {
+        Self {
+            text: format!("type `{name}` does not take generic arguments"),
+            span,
+        }
+    }
+
+    fn struct_redefinition(name: &str, span: Span) -> Self {
+        Self {
+            text: format!("Illegal redefinition of struct '{name}'"),
             span,
         }
     }

@@ -1,0 +1,7 @@
+struct Point { x: Int, y: Int }
+
+fn total(points: List<Point>) => points.map(x).sum()
+
+let points: List<Point> = [Point(1, 2), Point(3, 4)];
+print(total(points))
+// expect-output: 4

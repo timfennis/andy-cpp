@@ -64,6 +64,25 @@ impl StructRegistry {
         self.data.push(info);
         id
     }
+
+    pub fn find_by_name(&self, name: &str) -> Option<&Rc<StructInfo>> {
+        self.data.iter().find(|info| &*info.name == name)
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.data.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty()
+    }
+
+    /// Discards every struct registered after the registry had `len` entries.
+    pub fn truncate(&mut self, len: usize) {
+        self.data.truncate(len);
+    }
 }
 
 impl Index<StructId> for StructRegistry {

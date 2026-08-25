@@ -1,0 +1,7 @@
+struct Point { x: Int, y: Int }
+
+// A hand-written function with a struct-typed parameter.
+fn manhattan(p: Point) => p.x + p.y
+
+print(manhattan(Point(3, 4)))
+// expect-output: 7

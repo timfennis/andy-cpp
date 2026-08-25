@@ -1,0 +1,5 @@
+struct Point { x: Int, y: Int }
+
+let p: Point = Point(1, 2);
+print(p)
+// expect-output: Point {x: 1, y: 2}
