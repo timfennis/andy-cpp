@@ -33,7 +33,7 @@ fn collect_symbol(
         Expression::FunctionDeclaration {
             name: Some(name),
             parameters,
-            return_type,
+            resolved_return_type,
             body,
             ..
         } => {
@@ -41,7 +41,7 @@ fn collect_symbol(
             collect_children(body, text, line_index, &mut children);
             out.push(make_symbol(
                 name.clone(),
-                Some(signature(parameters, return_type.as_ref())),
+                Some(signature(parameters, resolved_return_type.as_ref())),
                 SymbolKind::FUNCTION,
                 expr.span,
                 expr.span,

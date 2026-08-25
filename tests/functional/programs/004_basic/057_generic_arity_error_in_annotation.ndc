@@ -1,0 +1,2 @@
+// expect-error: type `Map` expects exactly 2 generic arguments
+let a: Map<Int> = %{};

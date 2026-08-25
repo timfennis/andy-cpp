@@ -1,5 +1,6 @@
 use crate::operator::LogicalOperator;
 use crate::parser::Error as ParseError;
+use crate::type_expr::TypeExpr;
 use ndc_core::{StaticType, TypeSignature};
 use ndc_lexer::Span;
 use num::BigInt;
@@ -110,7 +111,7 @@ pub enum Expression {
     Grouping(Box<ExpressionLocation>),
     VariableDeclaration {
         l_value: Lvalue,
-        annotated_type: Option<StaticType>,
+        annotated_type: Option<TypeExpr>,
         value: Box<ExpressionLocation>,
     },
     Assignment {
@@ -129,7 +130,8 @@ pub enum Expression {
         parameters: Vec<FunctionParameter>,
         parameters_span: Span,
         body: Box<ExpressionLocation>,
-        return_type: Option<StaticType>,
+        return_annotation: Option<TypeExpr>,
+        resolved_return_type: Option<StaticType>,
         captures: Vec<CaptureSource>,
         pure: bool,
     },
@@ -213,7 +215,8 @@ pub enum ForBody {
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct FunctionParameter {
     pub lvalue: Lvalue,
-    pub annotation: Option<StaticType>,
+    pub annotation: Option<TypeExpr>,
+    pub resolved_type: Option<StaticType>,
     pub span: Span,
 }
 
@@ -229,7 +232,7 @@ impl FunctionParameter {
                             p.lvalue
                         );
                     };
-                    (identifier.clone(), p.annotation.clone())
+                    (identifier.clone(), p.resolved_type.clone())
                 })
                 .collect(),
         )

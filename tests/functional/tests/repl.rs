@@ -181,3 +181,25 @@ fn vm_error_rolls_back_failed_declaration() {
         "unexpected error: {err:?}"
     );
 }
+
+#[test]
+fn unknown_annotation_errors_without_corrupting_state() {
+    let mut interp = {
+        let mut i = Interpreter::capturing();
+        i.configure(ndc_stdlib::register);
+        i
+    };
+    interp.eval("let x = 42;").unwrap();
+    let err = interp
+        .eval("let y: Unknwn = 1;")
+        .expect_err("unknown type should error");
+    assert!(
+        format!("{err:?}").contains("unknown type `Unknwn`"),
+        "unexpected error: {err:?}"
+    );
+    // The failed line must not leak `y` into scope, and `x` must still work.
+    assert!(interp.eval("y").is_err());
+    interp.eval("print(x)").unwrap();
+    let out = String::from_utf8(interp.get_output().unwrap()).unwrap();
+    assert_eq!(out.trim(), "42");
+}

@@ -1,0 +1,2 @@
+// expect-error: unknown type `Unknwn`
+fn f(x: Unknwn) => x

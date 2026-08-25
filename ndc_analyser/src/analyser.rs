@@ -3,11 +3,12 @@ use std::fmt::Debug;
 
 use crate::scope::{CallKind, ResolvedCall, ScopeTree, TypeBinding};
 use itertools::{Itertools, izip};
+use ndc_core::static_type::StaticTypeConstructionError;
 use ndc_core::{StaticType, TypeSignature};
 use ndc_lexer::Span;
 use ndc_parser::{
     AugmentedAssignmentPlan, Binding, Candidate, Expression, ExpressionLocation, ForBody,
-    ForIteration, FunctionParameter, Lvalue, NodeId,
+    ForIteration, FunctionParameter, Lvalue, NodeId, TypeExpr,
 };
 
 /// Side table holding semantic information keyed by AST node identity.
@@ -72,6 +73,33 @@ impl Analyser {
     /// Record an error from outside the analyser (e.g. a hard error caught by the caller).
     pub fn emit_external(&mut self, err: AnalysisError) {
         self.errors.push(err);
+    }
+
+    /// Resolves a syntactic type annotation to a `StaticType`: `Int` becomes
+    /// `StaticType::Int`, `Map<String, Int>` becomes `StaticType::Map { .. }`.
+    /// An unknown name or a wrong generic-argument count is reported as an
+    /// analysis error at the annotation's span, and the annotation falls back
+    /// to `Any` so the rest of the program is still checked.
+    fn lower_type_expr(&mut self, expr: &TypeExpr) -> StaticType {
+        match expr {
+            TypeExpr::Tuple { elements, .. } => {
+                StaticType::Tuple(elements.iter().map(|e| self.lower_type_expr(e)).collect())
+            }
+            TypeExpr::Name { name, args, span } => {
+                let args = args.iter().map(|a| self.lower_type_expr(a)).collect();
+                match StaticType::from_name_and_args(name, args) {
+                    Ok(typ) => typ,
+                    Err(err) => {
+                        self.emit(AnalysisError::invalid_type_annotation(&err, *span));
+                        StaticType::Any
+                    }
+                }
+            }
+        }
+    }
+
+    fn lower_annotation(&mut self, annotation: Option<&TypeExpr>) -> Option<StaticType> {
+        annotation.map(|expr| self.lower_type_expr(expr))
     }
 
     /// Returns `true` if any errors have been recorded during the current
@@ -155,12 +183,13 @@ impl Analyser {
                 annotated_type,
                 value,
             } => {
+                let annotated_type = self.lower_annotation(annotated_type.as_ref());
                 let value_span = value.span;
                 let found_type = self.analyse_or_any(value);
 
                 self.resolve_lvalue_declarative(
                     l_value,
-                    annotated_type.to_owned(),
+                    annotated_type,
                     found_type.clone(),
                     value_span,
                 );
@@ -268,10 +297,17 @@ impl Analyser {
                 resolved_name,
                 parameters,
                 body,
-                return_type: return_type_slot,
+                return_annotation,
+                resolved_return_type,
                 captures,
                 ..
             } => {
+                for param in parameters.iter_mut() {
+                    param.resolved_type = self.lower_annotation(param.annotation.as_ref());
+                }
+                *resolved_return_type = self.lower_annotation(return_annotation.as_ref());
+                let return_type_slot: &Option<StaticType> = resolved_return_type;
+
                 let type_signature = FunctionParameter::from_params(parameters);
 
                 // Pre-register the function before analysing its body so recursive calls can
@@ -939,6 +975,13 @@ pub struct AnalysisError {
 impl AnalysisError {
     pub fn span(&self) -> Span {
         self.span
+    }
+
+    fn invalid_type_annotation(err: &StaticTypeConstructionError, span: Span) -> Self {
+        Self {
+            text: format!("{err}. {}", err.help_text()),
+            span,
+        }
     }
 
     fn tuple_arity_mismatch(ident_len: usize, annotation_len: usize, span: Span) -> Self {
