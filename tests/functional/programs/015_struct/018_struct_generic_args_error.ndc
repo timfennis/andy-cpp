@@ -1,0 +1,4 @@
+// expect-error: type `Point` does not take generic arguments
+struct Point { x: Int, y: Int }
+
+let p: Point<Int> = Point(1, 2);

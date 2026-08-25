@@ -203,3 +203,49 @@ fn unknown_annotation_errors_without_corrupting_state() {
     let out = String::from_utf8(interp.get_output().unwrap()).unwrap();
     assert_eq!(out.trim(), "42");
 }
+
+#[test]
+fn struct_usable_as_type_on_later_line() {
+    let out = repl_output(&[
+        "struct Point { x: Int, y: Int }",
+        "fn dist(p: Point) => p.x + p.y",
+        "print(dist(Point(3, 4)))",
+    ]);
+    assert_eq!(out.trim(), "7");
+}
+
+#[test]
+fn struct_redefinition_on_later_line_errors() {
+    repl_error(
+        &["struct Point { x: Int }", "struct Point { y: Int }"],
+        "Illegal redefinition of struct 'Point'",
+    );
+}
+
+#[test]
+fn failed_line_rolls_back_struct_registry() {
+    let mut interp = {
+        let mut i = Interpreter::capturing();
+        i.configure(ndc_stdlib::register);
+        i
+    };
+    // The struct declaration is on a line that fails as a whole, so it must
+    // not stay registered.
+    assert!(
+        interp
+            .eval("struct Foo { x: Int }\nundefined_variable")
+            .is_err()
+    );
+    let err = interp
+        .eval("let f: Foo = 1;")
+        .expect_err("Foo should not be a known type");
+    assert!(
+        format!("{err:?}").contains("unknown type `Foo`"),
+        "unexpected error: {err:?}"
+    );
+    // The name is free again, so declaring it now succeeds.
+    interp.eval("struct Foo { x: Int }").unwrap();
+    interp.eval("print(Foo(42).x)").unwrap();
+    let out = String::from_utf8(interp.get_output().unwrap()).unwrap();
+    assert_eq!(out.trim(), "42");
+}

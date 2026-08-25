@@ -1,0 +1,8 @@
+struct Point { x: Int, y: Int }
+
+fn origin() -> Point {
+    Point(0, 0)
+}
+
+print(origin())
+// expect-output: Point {x: 0, y: 0}
