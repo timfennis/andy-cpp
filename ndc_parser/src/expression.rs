@@ -223,7 +223,7 @@ pub enum ForBody {
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct StructField {
     pub identifier: String,
-    pub annotation: StaticType,
+    pub annotation: TypeExpr,
     pub resolved_getter: Option<ResolvedVar>,
     pub resolved_setter: Option<ResolvedVar>,
     pub span: Span,

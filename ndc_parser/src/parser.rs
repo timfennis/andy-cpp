@@ -1498,7 +1498,7 @@ impl Parser {
 
         let annotation = if self.peek_current_token() == Some(&Token::Colon) {
             self.advance();
-            self.static_type()?
+            self.type_annotation()?
         } else {
             return Err(Error::with_help(
                 "Expected field type".to_string(),
