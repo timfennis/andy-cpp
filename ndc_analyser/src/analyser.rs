@@ -566,6 +566,21 @@ impl Analyser {
                     return Ok(StaticType::unit());
                 }
 
+                let duplicate_fields = fields
+                    .iter()
+                    .duplicates_by(|field| &field.identifier)
+                    .collect_vec();
+                if !duplicate_fields.is_empty() {
+                    for field in duplicate_fields {
+                        self.emit(AnalysisError::field_redefinition(
+                            &field.identifier,
+                            name,
+                            field.span,
+                        ));
+                    }
+                    return Ok(StaticType::unit());
+                }
+
                 let struct_id = self.struct_registry.borrow_mut().register(
                     &*name,
                     fields
@@ -998,10 +1013,11 @@ impl Analyser {
             return vec![];
         };
 
-        let mut types: Vec<StaticType> = Vec::new();
-        let mut seen_names: Vec<&str> = Vec::new();
+        for param in parameters.iter().duplicates_by(|param| &param.name) {
+            self.emit(AnalysisError::parameter_redefined(&param.name, span));
+        }
 
-        for param in parameters {
+        for param in parameters.iter().unique_by(|param| &param.name) {
             let has_annotation = param.type_name != StaticType::Any;
             let binding = if has_annotation {
                 TypeBinding::Annotated(param.type_name.clone())
@@ -1009,18 +1025,14 @@ impl Analyser {
                 TypeBinding::Inferred(StaticType::Any)
             };
 
-            types.push(param.type_name.clone());
-            if seen_names.contains(&param.name.as_str()) {
-                self.emit(AnalysisError::parameter_redefined(&param.name, span));
-                continue;
-            }
-            seen_names.push(&param.name);
-
             self.scope_tree
                 .create_local_binding(param.name.clone(), binding);
         }
 
-        types
+        parameters
+            .iter()
+            .map(|param| param.type_name.clone())
+            .collect()
     }
     fn resolve_lvalue_declarative(
         &mut self,
@@ -1174,6 +1186,13 @@ impl AnalysisError {
     fn struct_redefinition(name: &str, span: Span) -> Self {
         Self {
             text: format!("Illegal redefinition of struct '{name}'"),
+            span,
+        }
+    }
+
+    fn field_redefinition(field: &str, struct_name: &str, span: Span) -> Self {
+        Self {
+            text: format!("Illegal redefinition of field '{field}' in struct '{struct_name}'"),
             span,
         }
     }
@@ -1391,6 +1410,27 @@ mod tests {
                 ("++".to_string(), concat),
             ],
             "mismatched types: found List<String> but expected List<Int>",
+        );
+    }
+
+    #[test]
+    fn duplicate_struct_field_is_rejected() {
+        assert_analysis_error(
+            "struct Dup { a: Int, a: String, a: Bool }",
+            vec![],
+            "Illegal redefinition of field 'a' in struct 'Dup'",
+        );
+    }
+
+    #[test]
+    fn struct_with_duplicate_fields_does_not_claim_its_name() {
+        let (_, result) = analyse_with_globals(
+            "struct Dup { a: Int, a: String }\nstruct Dup { a: Int }",
+            vec![],
+        );
+        assert_eq!(
+            result.errors.iter().map(ToString::to_string).collect_vec(),
+            vec!["Illegal redefinition of field 'a' in struct 'Dup'"],
         );
     }
 }
