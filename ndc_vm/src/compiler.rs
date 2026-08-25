@@ -300,7 +300,7 @@ impl Compiler {
                 resolved_name,
                 body,
                 parameters,
-                return_type,
+                resolved_return_type,
                 captures,
                 pure,
                 ..
@@ -311,7 +311,7 @@ impl Compiler {
                     resolved_name,
                     *body,
                     &type_signature,
-                    return_type,
+                    resolved_return_type,
                     captures,
                     pure,
                     span,

@@ -6,6 +6,7 @@ use crate::expression::{
     Lvalue, NodeId,
 };
 use crate::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
+use crate::type_expr::TypeExpr;
 use ndc_core::{Parameter, StaticType, TypeSignature};
 use ndc_lexer::{Span, Token, TokenLocation};
 
@@ -1190,9 +1191,9 @@ impl Parser {
         )?;
 
         // Optional return type annotation: `-> Type`
-        let annotated_return_type = if self.peek_current_token() == Some(&Token::RightArrow) {
+        let return_annotation = if self.peek_current_token() == Some(&Token::RightArrow) {
             self.advance();
-            Some(self.static_type()?)
+            Some(self.type_annotation()?)
         } else {
             None
         };
@@ -1222,7 +1223,8 @@ impl Parser {
                 parameters: argument_list,
                 parameters_span,
                 body: Box::new(body),
-                return_type: annotated_return_type,
+                return_annotation,
+                resolved_return_type: None,
                 resolved_name: None,
                 captures: vec![],
                 pure: is_pure,
@@ -1330,7 +1332,7 @@ impl Parser {
         Ok(Expression::Map { values, default }.to_location(map_open_span.merge(map_close_span)))
     }
 
-    pub fn static_type(&mut self) -> Result<StaticType, Error> {
+    pub fn type_annotation(&mut self) -> Result<TypeExpr, Error> {
         let Some(TokenLocation { token, span }) = self.peek_current_token_location() else {
             return Err(Error::end_of_input(
                 self.tokens.last().expect("last token exists").span,
@@ -1348,7 +1350,7 @@ impl Parser {
         }
     }
 
-    pub fn named_or_generic_type(&mut self) -> Result<StaticType, Error> {
+    pub fn named_or_generic_type(&mut self) -> Result<TypeExpr, Error> {
         let Ok(TokenLocation {
             token: Token::Identifier(ident),
             span,
@@ -1357,32 +1359,37 @@ impl Parser {
             unreachable!("this should have been checked");
         };
 
-        let generic_args = if self.peek_current_token() == Some(&Token::Less) {
-            self.delimited_type_params()?
+        let (args, span) = if self.peek_current_token() == Some(&Token::Less) {
+            let (args, close_span) = self.delimited_type_params()?;
+            (args, span.merge(close_span))
         } else {
-            Vec::new()
+            (Vec::new(), span)
         };
 
-        StaticType::from_name_and_args(ident.as_str(), generic_args)
-            .map_err(|err| Error::with_help(err.to_string(), span, err.help_text().to_string()))
+        Ok(TypeExpr::Name {
+            name: ident,
+            args,
+            span,
+        })
     }
 
     /// Parses `<T, U, ...>` type parameter lists, handling the `>>` / `>=` / `>>=`
-    /// ambiguity that arises with nested generics like `List<List<Int>>`.
-    fn delimited_type_params(&mut self) -> Result<Vec<StaticType>, Error> {
+    /// ambiguity that arises with nested generics like `List<List<Int>>`. Returns
+    /// the parsed items and the span of the closing `>`.
+    fn delimited_type_params(&mut self) -> Result<(Vec<TypeExpr>, Span), Error> {
         self.require_current_token_matches(&Token::Less)?;
 
-        let mut items = vec![self.static_type()?];
+        let mut items = vec![self.type_annotation()?];
 
         while self.consume_token_if(&[Token::Comma]).is_some() {
             if self.peek_current_token() == Some(&Token::Greater) {
                 break;
             }
-            items.push(self.static_type()?);
+            items.push(self.type_annotation()?);
         }
 
-        self.consume_closing_angle_bracket()?;
-        Ok(items)
+        let close_span = self.consume_closing_angle_bracket()?;
+        Ok((items, close_span))
     }
 
     /// Consumes a closing `>` for a generic type parameter list. If the current
@@ -1430,14 +1437,14 @@ impl Parser {
         Ok(greater_span)
     }
 
-    pub fn tuple_type(&mut self) -> Result<StaticType, Error> {
-        let (types, _span) = self.delimited_comma_separated(
+    pub fn tuple_type(&mut self) -> Result<TypeExpr, Error> {
+        let (elements, span) = self.delimited_comma_separated(
             &Token::LeftParentheses,
             &Token::RightParentheses,
-            Self::static_type,
+            Self::type_annotation,
             true,
         )?;
-        Ok(StaticType::Tuple(types))
+        Ok(TypeExpr::Tuple { elements, span })
     }
 
     fn named_parameter(&mut self) -> Result<FunctionParameter, Error> {
@@ -1454,7 +1461,7 @@ impl Parser {
 
         let annotation = if self.peek_current_token() == Some(&Token::Colon) {
             self.advance();
-            Some(self.static_type()?)
+            Some(self.type_annotation()?)
         } else {
             None
         };
@@ -1468,11 +1475,12 @@ impl Parser {
         Ok(FunctionParameter {
             lvalue,
             annotation,
+            resolved_type: None,
             span,
         })
     }
 
-    pub fn named_binding(&mut self) -> Result<(Lvalue, Option<StaticType>), Error> {
+    pub fn named_binding(&mut self) -> Result<(Lvalue, Option<TypeExpr>), Error> {
         let maybe_lvalue = self.tuple_expression(Self::single_expression, false)?;
         let lvalue_span = maybe_lvalue.span;
 
@@ -1486,7 +1494,7 @@ impl Parser {
 
         let annotated_type = if self.peek_current_token() == Some(&Token::Colon) {
             self.advance();
-            Some(self.static_type()?)
+            Some(self.type_annotation()?)
         } else {
             None
         };

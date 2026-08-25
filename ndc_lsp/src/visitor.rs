@@ -222,7 +222,7 @@ fn walk_expression(visitor: &mut impl AstVisitor, expr: &ExpressionLocation) {
             walk_expression(visitor, value);
         }
         Expression::FunctionDeclaration {
-            return_type,
+            resolved_return_type,
             parameters,
             parameters_span,
             body,
@@ -231,7 +231,11 @@ fn walk_expression(visitor: &mut impl AstVisitor, expr: &ExpressionLocation) {
             for p in parameters {
                 walk_lvalue(visitor, &p.lvalue, p.annotation.is_some());
             }
-            visitor.on_function_declaration(return_type.as_ref(), *parameters_span, expr.id);
+            visitor.on_function_declaration(
+                resolved_return_type.as_ref(),
+                *parameters_span,
+                expr.id,
+            );
             walk_expression(visitor, body);
         }
         Expression::Statement(inner) | Expression::Grouping(inner) => {

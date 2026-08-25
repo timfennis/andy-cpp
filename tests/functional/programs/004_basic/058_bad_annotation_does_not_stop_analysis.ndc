@@ -1,0 +1,5 @@
+// A bad type annotation is a recoverable analysis error: the analyser keeps
+// going, so the unrelated error on the next line is reported as well.
+// expect-error: Identifier undefined_variable has not previously been declared
+let x: Unknwn = 1;
+undefined_variable
