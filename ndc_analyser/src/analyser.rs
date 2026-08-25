@@ -1,7 +1,7 @@
 use crate::scope::{CallKind, ResolvedCall, ScopeTree, TypeBinding};
 use itertools::{Itertools, izip};
-use ndc_core::r#struct::StructRegistry;
 use ndc_core::static_type::StaticTypeConstructionError;
+use ndc_core::r#struct::StructRegistry;
 use ndc_core::{StaticType, TypeSignature};
 use ndc_lexer::Span;
 use ndc_parser::{
@@ -526,36 +526,34 @@ impl Analyser {
                 resolved,
                 resolved_name,
             } => {
+                let field_types: Vec<StaticType> = fields
+                    .iter()
+                    .map(|f| self.lower_type_expr(&f.annotation))
+                    .collect();
+
                 let struct_id = self.struct_registry.borrow_mut().register(
                     &*name,
                     fields
                         .iter()
-                        .cloned()
-                        .map(|f| (f.identifier, f.annotation))
+                        .zip(&field_types)
+                        .map(|(f, t)| (f.identifier.clone(), t.clone()))
                         .collect(),
                 );
                 *resolved = Some(struct_id);
 
                 // Create a constructor
-                *resolved_name = Some(
-                    self.scope_tree.create_local_binding(
-                        name.clone(),
-                        TypeBinding::Annotated(StaticType::Function {
-                            parameters: Some(
-                                fields
-                                    .iter()
-                                    .map(|thing| thing.annotation.clone())
-                                    .collect(),
-                            ),
-                            return_type: Box::new(StaticType::Struct {
-                                id: struct_id,
-                                name: Box::from(name.as_str()),
-                            }),
+                *resolved_name = Some(self.scope_tree.create_local_binding(
+                    name.clone(),
+                    TypeBinding::Annotated(StaticType::Function {
+                        parameters: Some(field_types.clone()),
+                        return_type: Box::new(StaticType::Struct {
+                            id: struct_id,
+                            name: Box::from(name.as_str()),
                         }),
-                    ),
-                );
+                    }),
+                ));
 
-                for field in fields {
+                for (field, field_type) in fields.iter_mut().zip(&field_types) {
                     // Getter
                     field.resolved_getter = Some(self.scope_tree.create_local_binding(
                         field.identifier.clone(),
@@ -563,7 +561,7 @@ impl Analyser {
                             parameters: Some(vec![
                                 self.struct_registry.borrow()[struct_id].static_type(),
                             ]),
-                            return_type: Box::new(field.annotation.clone()),
+                            return_type: Box::new(field_type.clone()),
                         }),
                     ));
 
@@ -572,7 +570,7 @@ impl Analyser {
                         TypeBinding::Annotated(StaticType::Function {
                             parameters: Some(vec![
                                 self.struct_registry.borrow()[struct_id].static_type(),
-                                field.annotation.clone(),
+                                field_type.clone(),
                             ]),
                             return_type: Box::new(StaticType::unit()),
                         }),
