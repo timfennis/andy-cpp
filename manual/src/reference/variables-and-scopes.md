@@ -81,6 +81,15 @@ A mismatch is rejected with a `mismatched types` error:
 let x: Int = "hello";   // ERROR: mismatched types: found String but expected Int
 ```
 
+An empty container literal adopts the annotated type — there are no elements to infer
+from, so the annotation decides:
+
+```ndc
+let xs: List<Int> = [];        // xs is List<Int>, not List<Any>
+let m: Map<Int, Int> = %{};    // m is Map<Int, Int>
+let nested: List<List<Int>> = [[]];
+```
+
 Once a binding has an annotation, it stays locked to that type. Reassignment and augmented assignment can't widen it the way they widen an inferred binding:
 
 ```ndc
