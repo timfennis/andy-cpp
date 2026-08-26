@@ -851,11 +851,6 @@ impl PartialEq for Object {
                     (Function::Memoized { cache: a, .. }, Function::Memoized { cache: b, .. }) => {
                         Rc::ptr_eq(a, b)
                     }
-                    (Function::Constructor(a), Function::Constructor(b)) => Rc::ptr_eq(a, b),
-                    (Function::GetField(a, i), Function::GetField(b, j))
-                    | (Function::SetField(a, i), Function::SetField(b, j)) => {
-                        Rc::ptr_eq(a, b) && i == j
-                    }
                     _ => false,
                 }
             }
@@ -967,20 +962,6 @@ impl Hash for Object {
                     Function::Memoized { cache, .. } => {
                         state.write_u8(4);
                         Rc::as_ptr(cache).hash(state);
-                    }
-                    Function::Constructor(i) => {
-                        state.write_u8(5);
-                        Rc::as_ptr(i).hash(state);
-                    }
-                    Function::GetField(info, index) => {
-                        state.write_u8(6);
-                        Rc::as_ptr(info).hash(state);
-                        state.write_usize(*index);
-                    }
-                    Function::SetField(info, index) => {
-                        state.write_u8(7);
-                        Rc::as_ptr(info).hash(state);
-                        state.write_usize(*index);
                     }
                 }
             }

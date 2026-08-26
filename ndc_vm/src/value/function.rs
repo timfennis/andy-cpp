@@ -1,4 +1,4 @@
-use super::Value;
+use super::{Object, Value};
 use crate::chunk::{Chunk, OpCode};
 use crate::error::VmError;
 use ndc_core::StaticType;
@@ -22,10 +22,6 @@ pub enum Function {
         cache: Rc<RefCell<HashMap<u64, Value>>>,
         function: Rc<Self>,
     },
-
-    Constructor(Rc<StructInfo>),
-    GetField(Rc<StructInfo>, usize),
-    SetField(Rc<StructInfo>, usize),
 }
 
 pub struct NativeFunction {
@@ -75,27 +71,113 @@ impl CompiledFunction {
     }
 }
 impl Function {
+    /// The constructor bound by a struct declaration: takes the field values
+    /// positionally and produces a new instance.
+    pub fn struct_constructor(info: Rc<StructInfo>) -> Self {
+        let static_type = info.constructor_type();
+        let name = info.name.to_string();
+        Self::Native(Rc::new(NativeFunction {
+            name,
+            documentation: None,
+            static_type,
+            func: NativeFunc::Simple(Box::new(move |args| {
+                if args.len() != info.fields.len() {
+                    return Err(VmError::native(format!(
+                        "constructor {} expects {} arguments, got {}",
+                        info.name,
+                        info.fields.len(),
+                        args.len(),
+                    )));
+                }
+                Ok(Value::Object(Rc::new(Object::Struct {
+                    info: Rc::clone(&info),
+                    fields: RefCell::new(args.to_vec()),
+                })))
+            })),
+        }))
+    }
+
+    /// The getter bound by a struct declaration for field `index`: `x(p)`,
+    /// which member access `p.x` lowers to.
+    pub fn struct_getter(info: Rc<StructInfo>, index: usize) -> Self {
+        let static_type = info.getter_type(index);
+        let name = format!("{}.{}", info.name, info.field_name(index));
+        Self::Native(Rc::new(NativeFunction {
+            name,
+            documentation: None,
+            static_type,
+            func: NativeFunc::Simple(Box::new(move |args| {
+                let [receiver] = args else {
+                    return Err(VmError::native(format!(
+                        "field access {}.{} expects 1 argument, got {}",
+                        info.name,
+                        info.field_name(index),
+                        args.len(),
+                    )));
+                };
+                // The pointer comparison is the nominal type check: another
+                // struct type may share the field name at a different index.
+                if let Value::Object(obj) = receiver
+                    && let Object::Struct {
+                        info: actual,
+                        fields,
+                    } = obj.as_ref()
+                    && Rc::ptr_eq(actual, &info)
+                {
+                    Ok(fields.borrow()[index].clone())
+                } else {
+                    Err(VmError::native(format!(
+                        "cannot read field {} of {receiver:?}",
+                        info.field_name(index),
+                    )))
+                }
+            })),
+        }))
+    }
+
+    /// The setter bound by a struct declaration for field `index`: `x=(p, v)`,
+    /// which field assignment `p.x = v` lowers to.
+    pub fn struct_setter(info: Rc<StructInfo>, index: usize) -> Self {
+        let static_type = info.setter_type(index);
+        let name = format!("{}.{}=", info.name, info.field_name(index));
+        Self::Native(Rc::new(NativeFunction {
+            name,
+            documentation: None,
+            static_type,
+            func: NativeFunc::Simple(Box::new(move |args| {
+                let [receiver, value] = args else {
+                    return Err(VmError::native(format!(
+                        "field assignment {}.{} expects 2 arguments, got {}",
+                        info.name,
+                        info.field_name(index),
+                        args.len(),
+                    )));
+                };
+                if let Value::Object(obj) = receiver
+                    && let Object::Struct {
+                        info: actual,
+                        fields,
+                    } = obj.as_ref()
+                    && Rc::ptr_eq(actual, &info)
+                {
+                    fields.borrow_mut()[index] = value.clone();
+                    Ok(Value::unit())
+                } else {
+                    Err(VmError::native(format!(
+                        "cannot assign field {} of {receiver:?}",
+                        info.field_name(index),
+                    )))
+                }
+            })),
+        }))
+    }
+
     pub fn prototype(&self) -> Option<&Rc<CompiledFunction>> {
         match self {
             Self::Closure(c) => Some(&c.prototype),
             Self::Compiled(f) => Some(f),
             Self::Memoized { function, .. } => function.prototype(),
-            Self::Native(_)
-            | Self::Constructor(_)
-            | Self::GetField(_, _)
-            | Self::SetField(_, _) => None,
-        }
-    }
-
-    /// Returns true if this function (or the inner function of a memoized wrapper)
-    /// is a native function. Native functions bridge to the tree-walk interpreter,
-    /// which may call closures back via `Vm::call_function` in a fresh VM context,
-    /// where open upvalues pointing to the current stack would be invalid.
-    pub fn is_native(&self) -> bool {
-        match self {
-            Self::Native(_) => true,
-            Self::Memoized { function, .. } => function.is_native(),
-            _ => false,
+            Self::Native(_) => None,
         }
     }
 
@@ -113,10 +195,6 @@ impl Function {
             Self::Native(f) => Some(&f.name),
             Self::Closure(c) => c.prototype.name.as_deref(),
             Self::Memoized { function, .. } => function.name(),
-            Self::Constructor(info) => Some(info.name.as_ref()),
-            Self::GetField(info, index) | Self::SetField(info, index) => {
-                Some(info.field_name(*index))
-            }
         }
     }
 
@@ -126,9 +204,6 @@ impl Function {
             Self::Native(f) => f.static_type.clone(),
             Self::Closure(c) => c.prototype.static_type.clone(),
             Self::Memoized { function, .. } => function.static_type(),
-            Self::Constructor(f) => f.constructor_type(),
-            Self::GetField(info, index) => info.getter_type(*index),
-            Self::SetField(info, index) => info.setter_type(*index),
         }
     }
 
@@ -140,9 +215,6 @@ impl Function {
             Self::Compiled(f) => &f.static_type,
             Self::Closure(c) => &c.prototype.static_type,
             Self::Memoized { function, .. } => return function.matches_arg_types(arg_types),
-            Self::Constructor(i) => &i.constructor_type(),
-            Self::GetField(info, index) => &info.getter_type(*index),
-            Self::SetField(info, index) => &info.setter_type(*index),
         };
         let StaticType::Function { parameters, .. } = st else {
             return false;
@@ -168,9 +240,6 @@ impl Function {
             Self::Compiled(f) => &f.static_type,
             Self::Closure(c) => &c.prototype.static_type,
             Self::Memoized { function, .. } => return function.matches_value_args(args),
-            Self::Constructor(i) => &i.constructor_type(),
-            Self::GetField(info, index) => &info.getter_type(*index),
-            Self::SetField(info, index) => &info.setter_type(*index),
         };
         let StaticType::Function { parameters, .. } = st else {
             return false;
@@ -192,16 +261,9 @@ impl fmt::Debug for Function {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::Compiled(func) => write!(f, "function {:?}", func.name),
-            Self::Native(native) => write!(f, "<native function {:?}>", native.static_type),
+            Self::Native(native) => write!(f, "{native:?}"),
             Self::Closure(closure) => write!(f, "<closure over {:?}>", closure.prototype.name),
             Self::Memoized { function, .. } => write!(f, "<memoized {:?}>", function),
-            Self::Constructor(i) => write!(f, "function {:?}", i.name),
-            Self::GetField(info, index) => {
-                write!(f, "<getter {}.{}>", info.name, info.field_name(*index))
-            }
-            Self::SetField(info, index) => {
-                write!(f, "<setter {}.{}>", info.name, info.field_name(*index))
-            }
         }
     }
 }
@@ -213,18 +275,14 @@ impl fmt::Display for Function {
                 let name = func.name.as_deref().unwrap_or("?");
                 write!(f, "<fn {name}>")
             }
-            Self::Native(native) => write!(f, "<native fn {:?}>", native.static_type),
+            Self::Native(native) => write!(f, "<fn {}>", native.name),
             Self::Closure(closure) => write!(f, "<closure over {:?}>", closure.prototype.name),
             Self::Memoized { function, .. } => write!(f, "<memoized {function}>"),
-            Self::Constructor(i) => write!(f, "<fn {}>", i.name),
-            Self::GetField(info, index) | Self::SetField(info, index) => {
-                write!(f, "<fn {}.{}>", info.name, info.field_name(*index))
-            }
         }
     }
 }
 impl fmt::Debug for NativeFunction {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "<native fn {:?}>", self.static_type)
+        write!(f, "<native fn {} {:?}>", self.name, self.static_type)
     }
 }
