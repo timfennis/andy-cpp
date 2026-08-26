@@ -1,0 +1,6 @@
+// Same shape, different name: struct types are nominal.
+// expect-error: mismatched types: found Bar but expected Foo
+struct Foo { x: Int }
+struct Bar { x: Int }
+
+let a: Foo = Bar(1);

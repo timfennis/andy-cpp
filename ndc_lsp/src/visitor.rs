@@ -160,6 +160,7 @@ fn child_expressions(expr: &ExpressionLocation) -> Vec<&ExpressionLocation> {
             out.push(function);
             out.extend(arguments.iter());
         }
+        Expression::MemberAccess { receiver, .. } => out.push(receiver),
         Expression::Tuple { values } | Expression::List { values } => out.extend(values.iter()),
         Expression::Map { values, default } => {
             for (key, value) in values {
@@ -180,6 +181,8 @@ fn child_expressions(expr: &ExpressionLocation) -> Vec<&ExpressionLocation> {
                 out.push(e);
             }
         }
+        // Leaves with no sub-expressions. Struct declarations belong here:
+        // fields are names + type annotations, not expressions.
         Expression::Identifier { .. }
         | Expression::BoolLiteral(_)
         | Expression::StringLiteral(_)
@@ -188,7 +191,8 @@ fn child_expressions(expr: &ExpressionLocation) -> Vec<&ExpressionLocation> {
         | Expression::BigIntLiteral(_)
         | Expression::ComplexLiteral(_)
         | Expression::Break
-        | Expression::Continue => {}
+        | Expression::Continue
+        | Expression::StructDeclaration { .. } => {}
     }
     out
 }
@@ -201,6 +205,7 @@ fn push_lvalue_index<'a>(lvalue: &'a Lvalue, out: &mut Vec<&'a ExpressionLocatio
             out.push(value);
             out.push(index);
         }
+        Lvalue::Member { receiver, .. } => out.push(receiver),
         Lvalue::Sequence(lvalues) => {
             for lv in lvalues {
                 push_lvalue_index(lv, out);
@@ -319,6 +324,7 @@ fn walk_expression(visitor: &mut impl AstVisitor, expr: &ExpressionLocation) {
                 walk_expression(visitor, arg);
             }
         }
+        Expression::MemberAccess { receiver, .. } => walk_expression(visitor, receiver),
         Expression::Tuple { values } | Expression::List { values } => {
             for v in values {
                 walk_expression(visitor, v);
@@ -343,6 +349,8 @@ fn walk_expression(visitor: &mut impl AstVisitor, expr: &ExpressionLocation) {
                 walk_expression(visitor, e);
             }
         }
+        // Leaves with no sub-expressions. Struct declarations belong here:
+        // fields are names + type annotations, not expressions.
         Expression::Identifier { .. }
         | Expression::BoolLiteral(_)
         | Expression::StringLiteral(_)
@@ -351,7 +359,8 @@ fn walk_expression(visitor: &mut impl AstVisitor, expr: &ExpressionLocation) {
         | Expression::BigIntLiteral(_)
         | Expression::ComplexLiteral(_)
         | Expression::Break
-        | Expression::Continue => {}
+        | Expression::Continue
+        | Expression::StructDeclaration { .. } => {}
     }
 }
 
@@ -374,5 +383,6 @@ fn walk_lvalue(visitor: &mut impl AstVisitor, lvalue: &Lvalue, has_annotation: b
             walk_expression(visitor, value);
             walk_expression(visitor, index);
         }
+        Lvalue::Member { receiver, .. } => walk_expression(visitor, receiver),
     }
 }

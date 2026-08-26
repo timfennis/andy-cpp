@@ -1,0 +1,28 @@
+struct Point {
+    x: Int,
+}
+
+struct Other {
+    x: Int,
+}
+
+let point = Point(1);
+let alias = point;
+let other = Other(10);
+
+let assignment_result = point.x = 2;
+other.x = 20;
+assert_eq(assignment_result, ());
+assert_eq(point.x, 2);
+assert_eq(alias.x, 2);
+assert_eq(other.x, 20);
+
+let receiver_calls = 0;
+fn get_point() {
+    receiver_calls += 1;
+    point
+}
+
+get_point().x = 3;
+assert_eq(receiver_calls, 1);
+assert_eq(point.x, 3);

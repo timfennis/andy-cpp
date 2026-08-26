@@ -57,6 +57,21 @@ pub struct Vm {
 
 type MemoCache = (Rc<RefCell<HashMap<u64, Value>>>, u64);
 
+/// What a dispatched call left behind. Callees split into two kinds: compiled
+/// functions and closures push a frame that still has to be executed, while
+/// natives, struct constructors, field accessors, and memoization cache hits
+/// finish during dispatch and push their result straight onto the value stack.
+/// Callers that drive execution themselves (`call_callback`) must know which
+/// happened; running a frame that was never pushed resumes the *caller's*
+/// instruction stream instead.
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+enum Dispatch {
+    /// A new frame sits on top of the frame stack; run it to completion.
+    FramePushed,
+    /// The call is already done and its result is on the value stack.
+    Completed,
+}
+
 pub struct CallFrame {
     closure: ClosureFunction,
     ip: usize,
@@ -602,7 +617,7 @@ impl Vm {
         });
     }
 
-    fn dispatch_call(&mut self, func: Function, args: usize) -> Result<(), VmError> {
+    fn dispatch_call(&mut self, func: Function, args: usize) -> Result<Dispatch, VmError> {
         // Memoized functions check the cache first.  On a hit we short-circuit
         // without pushing a new frame.  On a miss we dispatch the inner
         // function normally and tag the new frame so `Return` will populate
@@ -619,7 +634,7 @@ impl Vm {
                 // Cache hit: discard the callee slot and arguments, push result.
                 self.stack.truncate(start - 1);
                 self.stack.push(cached);
-                return Ok(());
+                return Ok(Dispatch::Completed);
             }
 
             // Cache miss: dispatch the inner function and remember to store
@@ -638,7 +653,7 @@ impl Vm {
         func: Function,
         args: usize,
         memo: Option<MemoCache>,
-    ) -> Result<(), VmError> {
+    ) -> Result<Dispatch, VmError> {
         let closure = match func {
             Function::Native(native) => {
                 let start = self.stack.len() - args;
@@ -661,7 +676,7 @@ impl Vm {
                     cache.borrow_mut().insert(key, result.clone());
                 }
                 self.stack.push(result);
-                return Ok(());
+                return Ok(Dispatch::Completed);
             }
             Function::Closure(c) => c,
             Function::Compiled(f) => ClosureFunction {
@@ -685,7 +700,7 @@ impl Vm {
         for _ in args..num_locals {
             self.stack.push(Value::unit());
         }
-        Ok(())
+        Ok(Dispatch::FramePushed)
     }
 
     /// Call a VM function with the given arguments, using a fresh VM instance.
@@ -725,8 +740,9 @@ impl Vm {
             let n = args.len();
             self.stack.push(Value::unit()); // dummy callee slot
             self.stack.extend(args.iter().cloned());
-            self.dispatch_call_with_memo(func, n, None)?;
-            self.run_to_depth(depth)?;
+            if self.dispatch_call(func, n)? == Dispatch::FramePushed {
+                self.run_to_depth(depth)?;
+            }
             Ok(self.stack.pop().expect("callback must produce a value"))
         }
     }

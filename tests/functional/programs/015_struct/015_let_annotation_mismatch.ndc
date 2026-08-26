@@ -1,0 +1,4 @@
+// expect-error: mismatched types: found Int but expected Point
+struct Point { x: Int, y: Int }
+
+let p: Point = 1;

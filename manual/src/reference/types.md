@@ -22,6 +22,7 @@ The type system is hierarchical with `Any` at the root:
     * [`MinHeap<T>` / `MaxHeap<T>`](./types/min-max-heap.md): min/max heap
     * `Iterator<T>`: produces values when consumed (currently only from range expressions like `5..100`)
   * [`Function`](./types/function.md)
+  * [Structs](./types/struct.md): user-defined record types, one per `struct` declaration
 
 These are also the names you write in annotations. Generic types take their parameters in angle brackets:
 
@@ -38,5 +39,18 @@ Nested generics work too — the parser handles the `>>` ambiguity for you:
 ```ndc
 let grid: List<List<Int>> = [[1, 2], [3, 4]];
 ```
+
+[Struct](./types/struct.md) names are type names like any other, including inside generics:
+
+```ndc
+struct Point { x: Int, y: Int }
+
+fn manhattan(p: Point) => p.x + p.y
+let points: List<Point> = [Point(1, 2), Point(3, 4)];
+```
+
+A struct name refers to the struct declared earlier in the program; it cannot be used
+before (or inside) its own declaration, and declaring two structs with the same name is
+an error.
 
 > **Note:** `Any` is the base type for every other type, so an `Any`-annotated binding will accept anything. When a parameter or value has no annotation and the analyser can't infer a type, it falls back to `Any`. There is also a `Never` type used internally for things like `break` that don't produce a value — you'll rarely need to write it by hand.

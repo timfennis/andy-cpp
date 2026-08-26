@@ -1,9 +1,12 @@
+use ndc_core::r#struct::StructRegistry;
 use ndc_lexer::{Lexer, SourceId};
 use ndc_parser::Parser;
 use ndc_vm::chunk::JumpTarget;
 use ndc_vm::chunk::OpCode;
 use ndc_vm::chunk::OpCode::*;
 use ndc_vm::compiler::Compiler;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 // These helpers compile without the peephole optimizer so the tests
 // document the raw compiler output as a specification. Optimizer behaviour
@@ -14,10 +17,13 @@ fn compile(input: &str) -> Vec<OpCode> {
         .collect::<Result<Vec<_>, _>>()
         .expect("lex failed");
     let expressions = Parser::from_tokens(tokens).parse().expect("parse failed");
-    Compiler::compile_unoptimized(expressions.into_iter())
-        .expect("compile failed")
-        .opcodes()
-        .to_vec()
+    Compiler::compile_unoptimized(
+        expressions.into_iter(),
+        Rc::new(RefCell::new(StructRegistry::default())),
+    )
+    .expect("compile failed")
+    .opcodes()
+    .to_vec()
 }
 
 fn compile_with_analysis(input: &str) -> Vec<OpCode> {
@@ -530,5 +536,16 @@ fn test_regular_call_with_tuple_arg_does_not_vec() {
     assert!(
         ops.iter().any(|op| matches!(op, Call(1))),
         "expected a Call(1) for id((1, 2, 3)), got: {ops:?}",
+    );
+}
+
+#[test]
+fn test_member_assignment_calls_setter_with_receiver_and_value() {
+    let ops = compile_with_analysis("struct Point { x: Int }\nlet point = Point(1);\npoint.x = 2;");
+
+    assert!(
+        ops.windows(4)
+            .any(|window| matches!(window, [Constant(_), GetLocal(_), Constant(_), Call(2)])),
+        "expected setter, receiver, value, Call(2); got: {ops:?}",
     );
 }

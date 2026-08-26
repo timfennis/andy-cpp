@@ -1,0 +1,3 @@
+// Field names within a struct must be unique.
+// expect-error: Illegal redefinition of field 'a' in struct 'Dup'
+struct Dup { a: Int, a: String }

@@ -1,0 +1,20 @@
+// Structs are allowed to have zero fields
+struct Empty { }
+
+let e = Empty();
+print(e);
+// expect-output: Empty {}
+
+// Instances of the same empty struct compare equal
+print(e == Empty());
+// expect-output: true
+
+// Empty struct instances can be hashed and used as map keys
+let m = %{Empty(): 1};
+print(m[Empty()]);
+// expect-output: 1
+
+// The struct name is usable as a type annotation
+fn takes(e: Empty) { "ok" }
+print(takes(e));
+// expect-output: ok

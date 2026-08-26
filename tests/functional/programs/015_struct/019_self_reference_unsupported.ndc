@@ -1,0 +1,4 @@
+// A struct cannot reference itself in its own field types (yet): the name is
+// only registered after its field annotations are resolved.
+// expect-error: unknown type `Node`
+struct Node { value: Int, next: Option<Node> }

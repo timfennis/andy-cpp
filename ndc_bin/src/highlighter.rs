@@ -136,6 +136,14 @@ fn collect_function_spans(expr: &ExpressionLocation, spans: &mut AHashSet<usize>
                 collect_function_spans(arg, spans);
             }
         }
+        Expression::MemberAccess {
+            receiver,
+            member_span,
+            ..
+        } => {
+            spans.insert(member_span.offset());
+            collect_function_spans(receiver, spans);
+        }
         Expression::FunctionDeclaration { body, .. } => {
             collect_function_spans(body, spans);
         }
@@ -236,6 +244,7 @@ fn collect_function_spans(expr: &ExpressionLocation, spans: &mut AHashSet<usize>
         | Expression::BigIntLiteral(_)
         | Expression::ComplexLiteral(_)
         | Expression::Identifier { .. }
+        | Expression::StructDeclaration { .. }
         | Expression::Break
         | Expression::Continue => {}
     }

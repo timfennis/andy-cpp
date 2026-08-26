@@ -1,0 +1,14 @@
+struct Point { x: Int, y: Int }
+struct Line { a: Point, b: Point }
+
+let l = Line(Point(1, 2), Point(3, 4));
+
+print(l.a.x);
+// expect-output: 1
+print(l.b.y);
+// expect-output: 4
+
+// Nested field write: the receiver `l.a` is an ordinary struct value.
+l.a.x = 5;
+print(l.a.x)
+// expect-output: 5

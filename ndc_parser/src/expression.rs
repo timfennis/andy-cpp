@@ -1,6 +1,7 @@
 use crate::operator::LogicalOperator;
 use crate::parser::Error as ParseError;
 use crate::type_expr::TypeExpr;
+use ndc_core::r#struct::StructId;
 use ndc_core::{StaticType, TypeSignature};
 use ndc_lexer::Span;
 use num::BigInt;
@@ -135,6 +136,12 @@ pub enum Expression {
         captures: Vec<CaptureSource>,
         pure: bool,
     },
+    StructDeclaration {
+        name: String,
+        fields: Vec<StructField>,
+        resolved: Option<StructId>,
+        resolved_name: Option<ResolvedVar>,
+    },
     Block {
         statements: Vec<ExpressionLocation>,
     },
@@ -152,17 +159,19 @@ pub enum Expression {
         body: Box<ForBody>,
     },
     Call {
-        /// The function to call, could be an identifier, or any expression that produces a function as its value
         function: Box<ExpressionLocation>,
         arguments: Vec<ExpressionLocation>,
     },
-    /// Desugared operator syntax: `a + b`, `-x`, `not x`, etc. Distinguished
-    /// from `Call` so the analyser can apply tuple-broadcast (vec) dispatch
-    /// rules without leaking the curated list of operator names downstream.
-    /// Regular function calls never broadcast.
     OperatorCall {
         function: Box<ExpressionLocation>,
         arguments: Vec<ExpressionLocation>,
+    },
+    // Example: reading from `foo.bar`
+    MemberAccess {
+        receiver: Box<ExpressionLocation>,
+        member: String,
+        member_span: Span,
+        resolved_getter: Binding,
     },
     Tuple {
         values: Vec<ExpressionLocation>,
@@ -211,6 +220,14 @@ pub enum ForBody {
         default: Option<Box<ExpressionLocation>>,
     },
 }
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct StructField {
+    pub identifier: String,
+    pub annotation: TypeExpr,
+    pub resolved_getter: Option<ResolvedVar>,
+    pub resolved_setter: Option<ResolvedVar>,
+    pub span: Span,
+}
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct FunctionParameter {
@@ -257,6 +274,22 @@ pub enum Lvalue {
     },
     // Example: `let a, b = ...`
     Sequence(Vec<Self>),
+    // Example: `a.b = ...`
+    Member {
+        receiver: Box<ExpressionLocation>,
+        member: String,
+        member_span: Span,
+        resolved_getter: Option<Binding>,
+        resolved_setter: Option<Binding>,
+    },
+}
+
+/// A target that writes through an existing value instead of introducing a new
+/// binding, and so cannot appear in a `let`.
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
+pub enum NonBindingTarget {
+    Index,
+    Member,
 }
 
 impl Eq for Expression {}
@@ -289,6 +322,13 @@ impl ExpressionLocation {
         }
     }
 
+    pub fn to_identifier(self) -> String {
+        match self.expression {
+            Expression::Identifier { name, resolved: _ } => name,
+            _ => panic!("the parser should have guaranteed us the right type of expression"),
+        }
+    }
+
     pub fn as_parameters(&self) -> Vec<&str> {
         match &self.expression {
             Expression::Tuple {
@@ -315,27 +355,45 @@ impl ExpressionLocation {
 
 impl Lvalue {
     #[must_use]
-    pub fn expression_type_name(&self) -> &str {
-        match self {
-            Self::Identifier { .. } => "variable",
-            Self::Index { .. } => "index expression",
-            Self::Sequence(_) => "destructure pattern", // ??
-        }
-    }
-
-    #[must_use]
     pub fn can_build_from_expression(expression: &Expression) -> bool {
         match expression {
-            Expression::Identifier { .. } => true,
+            Expression::Identifier { .. } | Expression::MemberAccess { .. } => true,
             Expression::Call {
                 function,
                 arguments,
             } if is_index_call(function, arguments) => true,
             Expression::List { values } | Expression::Tuple { values } => values
                 .iter()
-                .all(|el| Self::can_build_from_expression(&el.expression)),
-            Expression::Grouping(inner) => Self::can_build_from_expression(&inner.expression),
+                .all(|el| Self::can_build_destructure_from_expression(&el.expression)),
+            Expression::Grouping(inner) => {
+                Self::can_build_destructure_from_expression(&inner.expression)
+            }
             _ => false,
+        }
+    }
+
+    fn can_build_destructure_from_expression(expression: &Expression) -> bool {
+        match expression {
+            Expression::MemberAccess { .. } => false,
+            Expression::List { values } | Expression::Tuple { values } => values
+                .iter()
+                .all(|el| Self::can_build_destructure_from_expression(&el.expression)),
+            Expression::Grouping(inner) => {
+                Self::can_build_destructure_from_expression(&inner.expression)
+            }
+            expression => Self::can_build_from_expression(expression),
+        }
+    }
+
+    /// The first target in this lvalue that writes through an existing value
+    /// rather than binding a new name, if any.
+    #[must_use]
+    pub fn non_binding_target(&self) -> Option<NonBindingTarget> {
+        match self {
+            Self::Identifier { .. } => None,
+            Self::Index { .. } => Some(NonBindingTarget::Index),
+            Self::Member { .. } => Some(NonBindingTarget::Member),
+            Self::Sequence(items) => items.iter().find_map(Self::non_binding_target),
         }
     }
 
@@ -368,6 +426,18 @@ impl TryFrom<ExpressionLocation> for Lvalue {
                     resolved_get: None,
                 })
             }
+            Expression::MemberAccess {
+                receiver,
+                member,
+                member_span,
+                ..
+            } => Ok(Self::Member {
+                receiver,
+                member,
+                member_span,
+                resolved_getter: None,
+                resolved_setter: None,
+            }),
             Expression::List { values } | Expression::Tuple { values } => Ok(Self::Sequence(
                 values
                     .into_iter()

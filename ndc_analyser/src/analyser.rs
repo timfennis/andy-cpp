@@ -1,15 +1,17 @@
-use std::collections::HashMap;
-use std::fmt::Debug;
-
 use crate::scope::{CallKind, ResolvedCall, ScopeTree, TypeBinding};
 use itertools::{Itertools, izip};
 use ndc_core::static_type::StaticTypeConstructionError;
+use ndc_core::r#struct::StructRegistry;
 use ndc_core::{StaticType, TypeSignature};
 use ndc_lexer::Span;
 use ndc_parser::{
     AugmentedAssignmentPlan, Binding, Candidate, Expression, ExpressionLocation, ForBody,
     ForIteration, FunctionParameter, Lvalue, NodeId, TypeExpr,
 };
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::fmt::Debug;
+use std::rc::Rc;
 
 /// Side table holding semantic information keyed by AST node identity.
 /// Keeps tooling-specific data (like per-expression types) out of the AST.
@@ -25,8 +27,18 @@ pub struct AnalysisResult {
     pub errors: Vec<AnalysisError>,
 }
 
+/// A snapshot of the analyser's persistent state: the scope tree and the
+/// number of registered structs at the time of the snapshot. Restoring it
+/// discards every binding and struct declared since.
+#[derive(Debug, Clone)]
+pub struct Checkpoint {
+    scope_tree: ScopeTree,
+    struct_count: usize,
+}
+
 #[derive(Debug)]
 pub struct Analyser {
+    struct_registry: Rc<RefCell<StructRegistry>>,
     scope_tree: ScopeTree,
     /// Stack of explicit `return` types for each enclosing function scope.
     /// Pushed on function entry, popped on exit. The value accumulates the
@@ -39,21 +51,31 @@ pub struct Analyser {
 }
 
 impl Analyser {
-    pub fn from_scope_tree(scope_tree: ScopeTree) -> Self {
+    pub fn from_scope_tree(
+        scope_tree: ScopeTree,
+        struct_registry: Rc<RefCell<StructRegistry>>,
+    ) -> Self {
         Self {
             scope_tree,
+            struct_registry,
             return_type_stack: Vec::new(),
             result: AnalysisResult::default(),
             errors: Vec::new(),
         }
     }
 
-    pub fn checkpoint(&self) -> ScopeTree {
-        self.scope_tree.clone()
+    pub fn checkpoint(&self) -> Checkpoint {
+        Checkpoint {
+            scope_tree: self.scope_tree.clone(),
+            struct_count: self.struct_registry.borrow().len(),
+        }
     }
 
-    pub fn restore(&mut self, checkpoint: ScopeTree) {
-        self.scope_tree = checkpoint;
+    pub fn restore(&mut self, checkpoint: Checkpoint) {
+        self.scope_tree = checkpoint.scope_tree;
+        self.struct_registry
+            .borrow_mut()
+            .truncate(checkpoint.struct_count);
     }
 
     /// Take the accumulated analysis result (including any errors),
@@ -76,22 +98,37 @@ impl Analyser {
     }
 
     /// Resolves a syntactic type annotation to a `StaticType`: `Int` becomes
-    /// `StaticType::Int`, `Map<String, Int>` becomes `StaticType::Map { .. }`.
-    /// An unknown name or a wrong generic-argument count is reported as an
-    /// analysis error at the annotation's span, and the annotation falls back
-    /// to `Any` so the rest of the program is still checked.
+    /// `StaticType::Int`, `Map<String, Int>` becomes `StaticType::Map { .. }`,
+    /// and a declared struct name becomes its `StaticType::Struct`. Built-in
+    /// names take precedence over structs. An unknown name or a wrong
+    /// generic-argument count is reported as an analysis error at the
+    /// annotation's span, and the annotation falls back to `Any` so the rest
+    /// of the program is still checked.
     fn lower_type_expr(&mut self, expr: &TypeExpr) -> StaticType {
         match expr {
             TypeExpr::Tuple { elements, .. } => {
                 StaticType::Tuple(elements.iter().map(|e| self.lower_type_expr(e)).collect())
             }
             TypeExpr::Name { name, args, span } => {
+                let has_args = !args.is_empty();
                 let args = args.iter().map(|a| self.lower_type_expr(a)).collect();
                 match StaticType::from_name_and_args(name, args) {
                     Ok(typ) => typ,
                     Err(err) => {
-                        self.emit(AnalysisError::invalid_type_annotation(&err, *span));
-                        StaticType::Any
+                        let info = self.struct_registry.borrow().find_by_name(name).cloned();
+                        match info {
+                            Some(info) if !has_args => info.static_type(),
+                            Some(_) => {
+                                self.emit(AnalysisError::type_does_not_take_generic_args(
+                                    name, *span,
+                                ));
+                                StaticType::Any
+                            }
+                            None => {
+                                self.emit(AnalysisError::invalid_type_annotation(&err, *span));
+                                StaticType::Any
+                            }
+                        }
                     }
                 }
             }
@@ -127,6 +164,80 @@ impl Analyser {
                 StaticType::Any
             }
         }
+    }
+
+    /// Like [`analyse_or_any`], but with an expected type from an annotation
+    /// or an annotated target: `let x: List<Int> = []` types the literal as
+    /// `List<Int>` instead of `List<Any>`. A container literal with no
+    /// elements has nothing to infer from, so it adopts the expected element
+    /// types; non-empty literals recurse so nested empties (`[(1, [])]`)
+    /// adopt too. Everything else falls back to plain analysis, and the
+    /// caller still subtype-checks the result against the expectation.
+    ///
+    /// This is a temporary measure until the type system supports type
+    /// parameters and proper unification, at which point empty literals can
+    /// be typed with fresh type variables instead of adopting the annotation.
+    fn analyse_with_expected(
+        &mut self,
+        expr_loc: &mut ExpressionLocation,
+        expected: &StaticType,
+    ) -> StaticType {
+        let typ = match (&mut expr_loc.expression, expected) {
+            (
+                Expression::List { values },
+                StaticType::List(element) | StaticType::Sequence(element),
+            ) => {
+                let mut element_type: Option<StaticType> = None;
+                for value in values {
+                    let found = self.analyse_with_expected(value, element);
+                    Self::fold_lub(&mut element_type, found);
+                }
+                StaticType::List(Box::new(
+                    element_type.unwrap_or_else(|| element.as_ref().clone()),
+                ))
+            }
+            (Expression::Map { values, default }, StaticType::Map { key, value }) => {
+                let is_empty = values.is_empty();
+                let mut key_type: Option<StaticType> = None;
+                let mut value_type: Option<StaticType> = None;
+                for (entry_key, entry_value) in values {
+                    let found = self.analyse_with_expected(entry_key, key);
+                    Self::fold_lub(&mut key_type, found);
+                    if let Some(entry_value) = entry_value {
+                        let found = self.analyse_with_expected(entry_value, value);
+                        Self::fold_lub(&mut value_type, found);
+                    }
+                }
+                if let Some(default) = default {
+                    let found = self.analyse_with_expected(default, value);
+                    Self::fold_lub(&mut value_type, found);
+                }
+                StaticType::Map {
+                    key: Box::new(key_type.unwrap_or_else(|| key.as_ref().clone())),
+                    value: Box::new(value_type.unwrap_or_else(|| {
+                        if is_empty {
+                            value.as_ref().clone()
+                        } else {
+                            // A set literal like `%{1, 2}` has unit values.
+                            StaticType::unit()
+                        }
+                    })),
+                }
+            }
+            (Expression::Tuple { values }, StaticType::Tuple(elements))
+                if values.len() == elements.len() =>
+            {
+                let types = values
+                    .iter_mut()
+                    .zip(elements)
+                    .map(|(value, element)| self.analyse_with_expected(value, element))
+                    .collect();
+                StaticType::Tuple(types)
+            }
+            _ => return self.analyse_or_any(expr_loc),
+        };
+        self.result.expr_types.insert(expr_loc.id, typ.clone());
+        typ
     }
 
     fn analyse_inner(
@@ -185,7 +296,10 @@ impl Analyser {
             } => {
                 let annotated_type = self.lower_annotation(annotated_type.as_ref());
                 let value_span = value.span;
-                let found_type = self.analyse_or_any(value);
+                let found_type = match &annotated_type {
+                    Some(expected) => self.analyse_with_expected(value, expected),
+                    None => self.analyse_or_any(value),
+                };
 
                 self.resolve_lvalue_declarative(
                     l_value,
@@ -197,7 +311,7 @@ impl Analyser {
             }
             Expression::Assignment { l_value, r_value } => {
                 let old_type = self.resolve_lvalue_or_any(l_value, *span);
-                let new_type = self.analyse_or_any(r_value);
+                let new_type = self.analyse_with_expected(r_value, &old_type);
                 self.validate_lvalue_write(l_value, &old_type, &new_type, *span);
 
                 Ok(StaticType::unit())
@@ -310,7 +424,7 @@ impl Analyser {
 
                 let type_signature = FunctionParameter::from_params(parameters);
 
-                // Pre-register the function before analysing its body so recursive calls can
+                // Pre-register the function before analyzing its body so recursive calls can
                 // resolve the name. The return type is unknown at this point so we use Any.
                 let pre_slot =
                     if let Some(name) = name {
@@ -434,6 +548,33 @@ impl Analyser {
                 function,
                 arguments,
             } => self.analyse_call(function, arguments, CallKind::Operator, *span),
+            Expression::MemberAccess {
+                receiver,
+                member,
+                member_span,
+                resolved_getter,
+            } => {
+                let receiver_type = self.analyse_or_any(receiver);
+                let ResolvedCall {
+                    binding,
+                    return_type,
+                } = self.scope_tree.resolve_call(
+                    member,
+                    std::slice::from_ref(&receiver_type),
+                    CallKind::Regular,
+                );
+
+                if matches!(binding, Binding::None) {
+                    self.emit(AnalysisError::function_not_found(
+                        member,
+                        &[receiver_type],
+                        *member_span,
+                    ));
+                }
+
+                *resolved_getter = binding;
+                Ok(return_type)
+            }
             Expression::Tuple { values } => {
                 let mut types = Vec::with_capacity(values.len());
                 for v in values {
@@ -459,8 +600,11 @@ impl Analyser {
                     }
                 }
 
+                // Reads can produce the default value, so its type is part of
+                // the map's value type.
                 if let Some(default) = default {
-                    self.analyse_or_any(default);
+                    let default_type = self.analyse_or_any(default);
+                    Self::fold_lub(&mut value_type, default_type);
                 }
 
                 Ok(StaticType::Map {
@@ -485,6 +629,85 @@ impl Analyser {
                 }
 
                 Ok(StaticType::Iterator(Box::new(StaticType::Int)))
+            }
+            Expression::StructDeclaration {
+                name,
+                fields,
+                resolved,
+                resolved_name,
+            } => {
+                let field_types: Vec<StaticType> = fields
+                    .iter()
+                    .map(|f| self.lower_type_expr(&f.annotation))
+                    .collect();
+
+                if self.struct_registry.borrow().find_by_name(name).is_some() {
+                    self.emit(AnalysisError::struct_redefinition(name, *span));
+                    return Ok(StaticType::unit());
+                }
+
+                let duplicate_fields = fields
+                    .iter()
+                    .duplicates_by(|field| &field.identifier)
+                    .collect_vec();
+                if !duplicate_fields.is_empty() {
+                    for field in duplicate_fields {
+                        self.emit(AnalysisError::field_redefinition(
+                            &field.identifier,
+                            name,
+                            field.span,
+                        ));
+                    }
+                    return Ok(StaticType::unit());
+                }
+
+                let struct_id = self.struct_registry.borrow_mut().register(
+                    &*name,
+                    fields
+                        .iter()
+                        .zip(&field_types)
+                        .map(|(f, t)| (f.identifier.clone(), t.clone()))
+                        .collect(),
+                );
+                *resolved = Some(struct_id);
+
+                // Create a constructor
+                *resolved_name = Some(self.scope_tree.create_local_binding(
+                    name.clone(),
+                    TypeBinding::Annotated(StaticType::Function {
+                        parameters: Some(field_types.clone()),
+                        return_type: Box::new(StaticType::Struct {
+                            id: struct_id,
+                            name: Box::from(name.as_str()),
+                        }),
+                    }),
+                ));
+
+                for (field, field_type) in fields.iter_mut().zip(&field_types) {
+                    // Getter
+                    field.resolved_getter = Some(self.scope_tree.create_local_binding(
+                        field.identifier.clone(),
+                        TypeBinding::Annotated(StaticType::Function {
+                            parameters: Some(vec![
+                                self.struct_registry.borrow()[struct_id].static_type(),
+                            ]),
+                            return_type: Box::new(field_type.clone()),
+                        }),
+                    ));
+
+                    field.resolved_setter = Some(self.scope_tree.create_local_binding(
+                        format!("{}=", field.identifier),
+                        TypeBinding::Annotated(StaticType::Function {
+                            parameters: Some(vec![
+                                self.struct_registry.borrow()[struct_id].static_type(),
+                                field_type.clone(),
+                            ]),
+                            return_type: Box::new(StaticType::unit()),
+                        }),
+                    ));
+                }
+
+                Ok(StaticType::unit())
             }
         }
     }
@@ -688,6 +911,46 @@ impl Analyser {
                 }
                 Ok(StaticType::unit())
             }
+            Lvalue::Member {
+                receiver,
+                member,
+                member_span,
+                resolved_getter,
+                resolved_setter,
+            } => {
+                let receiver_type = self.analyse_or_any(receiver);
+                let getter_args = [receiver_type.clone()];
+                let setter_args = [receiver_type, StaticType::Any];
+                let getter = self
+                    .scope_tree
+                    .resolve_call(member, &getter_args, CallKind::Regular);
+                let setter_name = format!("{member}=");
+                let setter =
+                    self.scope_tree
+                        .resolve_call(&setter_name, &setter_args, CallKind::Regular);
+                let getter_missing = matches!(getter.binding, Binding::None);
+                let setter_missing = matches!(setter.binding, Binding::None);
+
+                *resolved_getter = Some(getter.binding);
+                *resolved_setter = Some(setter.binding);
+
+                if getter_missing {
+                    return Err(AnalysisError::function_not_found(
+                        member,
+                        &getter_args,
+                        *member_span,
+                    ));
+                }
+                if setter_missing {
+                    return Err(AnalysisError::function_not_found(
+                        &setter_name,
+                        &setter_args,
+                        *member_span,
+                    ));
+                }
+
+                Ok(getter.return_type)
+            }
         }
     }
 
@@ -747,6 +1010,15 @@ impl Analyser {
                     self.emit(AnalysisError::mismatched_types(
                         value_type,
                         &annotated_type,
+                        span,
+                    ));
+                }
+            }
+            Lvalue::Member { .. } => {
+                if !value_type.is_subtype(stored_type) {
+                    self.emit(AnalysisError::mismatched_types(
+                        value_type,
+                        stored_type,
                         span,
                     ));
                 }
@@ -821,10 +1093,11 @@ impl Analyser {
             return vec![];
         };
 
-        let mut types: Vec<StaticType> = Vec::new();
-        let mut seen_names: Vec<&str> = Vec::new();
+        for param in parameters.iter().duplicates_by(|param| &param.name) {
+            self.emit(AnalysisError::parameter_redefined(&param.name, span));
+        }
 
-        for param in parameters {
+        for param in parameters.iter().unique_by(|param| &param.name) {
             let has_annotation = param.type_name != StaticType::Any;
             let binding = if has_annotation {
                 TypeBinding::Annotated(param.type_name.clone())
@@ -832,18 +1105,14 @@ impl Analyser {
                 TypeBinding::Inferred(StaticType::Any)
             };
 
-            types.push(param.type_name.clone());
-            if seen_names.contains(&param.name.as_str()) {
-                self.emit(AnalysisError::parameter_redefined(&param.name, span));
-                continue;
-            }
-            seen_names.push(&param.name);
-
             self.scope_tree
                 .create_local_binding(param.name.clone(), binding);
         }
 
-        types
+        parameters
+            .iter()
+            .map(|param| param.type_name.clone())
+            .collect()
     }
     fn resolve_lvalue_declarative(
         &mut self,
@@ -943,6 +1212,9 @@ impl Analyser {
                     self.emit(AnalysisError::unable_to_unpack_type(&found_type, span));
                 }
             }
+            Lvalue::Member { receiver, .. } => {
+                self.analyse_or_any(receiver);
+            }
         }
     }
     fn analyse_multiple_expression_with_same_type(
@@ -980,6 +1252,27 @@ impl AnalysisError {
     fn invalid_type_annotation(err: &StaticTypeConstructionError, span: Span) -> Self {
         Self {
             text: format!("{err}. {}", err.help_text()),
+            span,
+        }
+    }
+
+    fn type_does_not_take_generic_args(name: &str, span: Span) -> Self {
+        Self {
+            text: format!("type `{name}` does not take generic arguments"),
+            span,
+        }
+    }
+
+    fn struct_redefinition(name: &str, span: Span) -> Self {
+        Self {
+            text: format!("Illegal redefinition of struct '{name}'"),
+            span,
+        }
+    }
+
+    fn field_redefinition(field: &str, struct_name: &str, span: Span) -> Self {
+        Self {
+            text: format!("Illegal redefinition of field '{field}' in struct '{struct_name}'"),
             span,
         }
     }
@@ -1077,7 +1370,8 @@ mod tests {
             .collect::<Result<Vec<_>, _>>()
             .expect("lex failed");
         let mut expressions = Parser::from_tokens(tokens).parse().expect("parse failed");
-        let mut analyser = Analyser::from_scope_tree(ScopeTree::from_global_scope(globals));
+        let mut analyser =
+            Analyser::from_scope_tree(ScopeTree::from_global_scope(globals), Default::default());
         let mut last_type = StaticType::unit();
         for expression in &mut expressions {
             last_type = analyser.analyse(expression).expect("analysis failed");
@@ -1196,6 +1490,91 @@ mod tests {
                 ("++".to_string(), concat),
             ],
             "mismatched types: found List<String> but expected List<Int>",
+        );
+    }
+
+    #[test]
+    fn annotated_declaration_types_empty_container_literals() {
+        assert_eq!(
+            analyse_last_type("let x: Map<Int, Int> = %{}; x"),
+            StaticType::Map {
+                key: Box::new(StaticType::Int),
+                value: Box::new(StaticType::Int),
+            },
+        );
+        assert_eq!(
+            analyse_last_type("let x: List<Int> = []; x"),
+            StaticType::List(Box::new(StaticType::Int)),
+        );
+        assert_eq!(
+            analyse_last_type("let x: List<List<Int>> = [[]]; x"),
+            StaticType::List(Box::new(StaticType::List(Box::new(StaticType::Int)))),
+        );
+    }
+
+    #[test]
+    fn annotated_declaration_still_rejects_mismatched_literals() {
+        assert_analysis_error(
+            "let x: Map<Int, Int> = %{\"a\": 1};",
+            vec![],
+            "mismatched types: found Map<String, Int> but expected Map<Int, Int>",
+        );
+    }
+
+    #[test]
+    fn constructor_arity_mismatch_is_rejected() {
+        assert_analysis_error(
+            "struct Point { x: Int, y: Int }\nPoint(1)",
+            vec![],
+            "No function called 'Point' found that matches the arguments 'Int'",
+        );
+    }
+
+    #[test]
+    fn constructor_argument_type_mismatch_is_rejected() {
+        assert_analysis_error(
+            "struct Point { x: Int, y: Int }\nPoint(\"x\", 2)",
+            vec![],
+            "No function called 'Point' found that matches the arguments 'String, Int'",
+        );
+    }
+
+    #[test]
+    fn any_typed_callee_still_dispatches_dynamically() {
+        let (_, result) =
+            analyse_with_globals("f(\"x\")", vec![("f".to_string(), StaticType::Any)]);
+        assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
+    }
+
+    #[test]
+    fn map_default_value_contributes_to_value_type() {
+        assert_eq!(
+            analyse_last_type("let m = %{:0}; m"),
+            StaticType::Map {
+                key: Box::new(StaticType::Any),
+                value: Box::new(StaticType::Int),
+            },
+        );
+    }
+
+    #[test]
+    fn duplicate_struct_field_is_rejected() {
+        assert_analysis_error(
+            "struct Dup { a: Int, a: String, a: Bool }",
+            vec![],
+            "Illegal redefinition of field 'a' in struct 'Dup'",
+        );
+    }
+
+    #[test]
+    fn struct_with_duplicate_fields_does_not_claim_its_name() {
+        let (_, result) = analyse_with_globals(
+            "struct Dup { a: Int, a: String }\nstruct Dup { a: Int }",
+            vec![],
+        );
+        assert_eq!(
+            result.errors.iter().map(ToString::to_string).collect_vec(),
+            vec!["Illegal redefinition of field 'a' in struct 'Dup'"],
         );
     }
 }

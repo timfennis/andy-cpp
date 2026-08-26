@@ -8,6 +8,7 @@ use ndc_core::compare::FallibleOrd;
 use ndc_core::hash_map::{DefaultHasher, HashMap};
 use ndc_core::int::Int;
 use ndc_core::num::Number;
+use ndc_core::r#struct::StructInfo;
 use ndc_parser::ResolvedVar;
 use ordered_float::OrderedFloat;
 use std::cell::RefCell;
@@ -48,6 +49,10 @@ pub enum Object {
         default: Option<Value>,
     },
     Function(Function),
+    Struct {
+        info: Rc<StructInfo>,
+        fields: RefCell<Vec<Value>>,
+    },
     /// A set of overload candidates the runtime narrows per call. Scalars are
     /// walked first (first-match-wins, same shape as the master baseline);
     /// `vec_candidates` is only consulted as a fallback for operator-form
@@ -510,6 +515,7 @@ impl Object {
             }
             Self::MinHeap(_) => StaticType::MinHeap(Box::new(StaticType::Any)),
             Self::MaxHeap(_) => StaticType::MaxHeap(Box::new(StaticType::Any)),
+            Self::Struct { info, .. } => info.static_type(),
         }
     }
 
@@ -591,6 +597,19 @@ impl fmt::Display for Object {
             Self::Deque(d) => write!(f, "Deque(len={})", d.borrow().len()),
             Self::MinHeap(h) => write!(f, "MinHeap(len={})", h.borrow().len()),
             Self::MaxHeap(h) => write!(f, "MaxHeap(len={})", h.borrow().len()),
+            Self::Struct { info, fields } => {
+                let length = info.fields.len();
+                write!(f, "{} {{", info.name)?;
+                for (i, ((field, _type), v)) in
+                    info.fields.iter().zip(fields.borrow().iter()).enumerate()
+                {
+                    write!(f, "{field}: {v:?}")?;
+                    if i + 1 < length {
+                        write!(f, ", ")?;
+                    }
+                }
+                write!(f, "}}")
+            }
         }
     }
 }
@@ -640,6 +659,14 @@ impl fmt::Debug for Object {
             Self::Deque(d) => write!(f, "Deque(len={})", d.borrow().len()),
             Self::MinHeap(h) => write!(f, "MinHeap(len={})", h.borrow().len()),
             Self::MaxHeap(h) => write!(f, "MaxHeap(len={})", h.borrow().len()),
+            Self::Struct { info, fields } => {
+                let values = fields.borrow();
+                let mut s = f.debug_struct(&info.name);
+                for ((name, _), value) in info.fields.iter().zip(values.iter()) {
+                    s.field(name, value);
+                }
+                s.finish()
+            }
         }
     }
 }
@@ -827,6 +854,16 @@ impl PartialEq for Object {
                     _ => false,
                 }
             }
+            (
+                Self::Struct {
+                    info: a_info,
+                    fields: a_fields,
+                },
+                Self::Struct {
+                    info: b_info,
+                    fields: b_fields,
+                },
+            ) => Rc::ptr_eq(a_info, b_info) && a_fields.borrow().eq(&*b_fields.borrow()),
             (Self::OverloadSet { .. }, Self::OverloadSet { .. }) => {
                 panic!("OverloadSet cannot be used as a map key")
             }
@@ -911,15 +948,19 @@ impl Hash for Object {
                 state.write_u8(9);
                 match f {
                     Function::Compiled(func) => {
+                        state.write_u8(1);
                         Rc::as_ptr(func).hash(state);
                     }
                     Function::Native(native) => {
+                        state.write_u8(2);
                         Rc::as_ptr(native).hash(state);
                     }
                     Function::Closure(closure) => {
+                        state.write_u8(3);
                         Rc::as_ptr(&closure.prototype).hash(state);
                     }
                     Function::Memoized { cache, .. } => {
+                        state.write_u8(4);
                         Rc::as_ptr(cache).hash(state);
                     }
                 }
@@ -946,6 +987,13 @@ impl Hash for Object {
             Self::MaxHeap(h) => {
                 state.write_u8(14);
                 (h as *const RefCell<BinaryHeap<OrdValue>>).hash(state);
+            }
+            Self::Struct { info, fields } => {
+                state.write_u8(15);
+                Rc::as_ptr(info).hash(state);
+                for v in fields.borrow().iter() {
+                    v.hash(state);
+                }
             }
         }
     }

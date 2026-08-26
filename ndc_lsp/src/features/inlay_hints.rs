@@ -117,6 +117,12 @@ mod tests {
     }
 
     #[test]
+    fn constructed_struct_gets_type_inlay() {
+        let hints = collect_hints("struct Point { x: Int, y: Int }\nlet p = Point(1, 2);");
+        assert!(has_label(&hints, |l| l == ": Point"));
+    }
+
+    #[test]
     fn annotated_return_type_skips_inlay() {
         let hints = collect_hints("fn foo(x: Int) -> Int { x + 1 }");
         assert!(!has_label(&hints, |l| l.contains("->")));

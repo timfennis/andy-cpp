@@ -1,12 +1,14 @@
 use crate::chunk::{JumpTarget, LabelId, OpCode, OptimizerIr};
 use crate::value::{CompiledFunction, Function};
 use crate::{Object, Value};
+use ndc_core::r#struct::StructRegistry;
 use ndc_core::{StaticType, TypeSignature};
 use ndc_lexer::Span;
 use ndc_parser::{
     AugmentedAssignmentPlan, Binding, Candidate, CaptureSource, Expression, ExpressionLocation,
     ForBody, ForIteration, FunctionParameter, LogicalOperator, Lvalue, ResolvedVar,
 };
+use std::cell::RefCell;
 use std::rc::Rc;
 
 #[derive(Clone)]
@@ -18,27 +20,40 @@ pub struct Compiler {
     loop_stack: Vec<LoopContext>,
     allow_return: bool,
     optimize: bool,
-}
-
-impl Default for Compiler {
-    fn default() -> Self {
-        Self {
-            ir: OptimizerIr::default(),
-            source_locals: 0,
-            temp_count: 0,
-            temp_uses: Vec::new(),
-            loop_stack: Vec::new(),
-            allow_return: false,
-            optimize: true,
-        }
-    }
+    struct_registry: Rc<RefCell<StructRegistry>>,
 }
 
 impl Compiler {
+    pub fn new(struct_registry: Rc<RefCell<StructRegistry>>) -> Self {
+        Self {
+            ir: Default::default(),
+            source_locals: 0,
+            temp_count: 0,
+            temp_uses: Vec::new(),
+            loop_stack: vec![],
+            allow_return: false,
+            optimize: true,
+            struct_registry,
+        }
+    }
+
+    pub fn new_without_optimization(struct_registry: Rc<RefCell<StructRegistry>>) -> Self {
+        Self {
+            ir: Default::default(),
+            source_locals: 0,
+            temp_count: 0,
+            temp_uses: Vec::new(),
+            loop_stack: vec![],
+            allow_return: false,
+            optimize: false,
+            struct_registry,
+        }
+    }
     pub fn compile(
         expressions: impl Iterator<Item = ExpressionLocation>,
+        struct_registry: Rc<RefCell<StructRegistry>>,
     ) -> Result<CompiledFunction, CompileError> {
-        let mut compiler = Self::default();
+        let mut compiler = Self::new(struct_registry);
         compiler.compile_batch(expressions)?;
         Ok(compiler.finish()?.0)
     }
@@ -48,11 +63,9 @@ impl Compiler {
     /// debugging tools (e.g. a future `--no-optimize` disassembler flag).
     pub fn compile_unoptimized(
         expressions: impl Iterator<Item = ExpressionLocation>,
+        struct_registry: Rc<RefCell<StructRegistry>>,
     ) -> Result<CompiledFunction, CompileError> {
-        let mut compiler = Self {
-            optimize: false,
-            ..Default::default()
-        };
+        let mut compiler = Self::new_without_optimization(struct_registry);
         compiler.compile_batch(expressions)?;
         Ok(compiler.finish()?.0)
     }
@@ -67,11 +80,9 @@ impl Compiler {
     /// the emitted chunk, and shifting instructions invalidates that.
     pub fn compile_resumable(
         expressions: impl Iterator<Item = ExpressionLocation>,
+        struct_registry: Rc<RefCell<StructRegistry>>,
     ) -> Result<(CompiledFunction, Self), CompileError> {
-        let mut compiler = Self {
-            optimize: false,
-            ..Default::default()
-        };
+        let mut compiler = Self::new_without_optimization(struct_registry);
         compiler.compile_batch(expressions)?;
         compiler.finish()
     }
@@ -270,6 +281,18 @@ impl Compiler {
                     let idx = self.ir.add_constant(Value::unit());
                     self.ir.write(OpCode::Constant(idx), Span::synthetic());
                 }
+                Lvalue::Member {
+                    receiver,
+                    member_span,
+                    resolved_setter,
+                    ..
+                } => {
+                    let setter = resolved_setter.expect("member setter must be resolved");
+                    self.compile_binding(setter, member_span)?;
+                    self.compile_expr(*receiver)?;
+                    self.compile_expr(*value)?;
+                    self.ir.write(OpCode::Call(2), member_span);
+                }
             },
             Expression::OpAssignment {
                 l_value,
@@ -317,6 +340,67 @@ impl Compiler {
                     span,
                 )?;
             }
+            Expression::StructDeclaration {
+                fields,
+                resolved,
+                resolved_name,
+                ..
+            } => {
+                let info = Rc::clone(
+                    &self.struct_registry.borrow()
+                        [resolved.expect("must be resolved by the analyser")],
+                );
+
+                let idx = self
+                    .ir
+                    .add_constant(Value::function(Function::struct_constructor(Rc::clone(
+                        &info,
+                    ))));
+
+                self.ir.write(OpCode::Constant(idx), span);
+
+                match resolved_name {
+                    Some(var @ ResolvedVar::Local { .. }) => {
+                        self.emit_set_var(var, span);
+                    }
+                    Some(_) => unreachable!("declarations always bind locally"),
+                    None => unreachable!("resolved_name should have been resolved"),
+                };
+
+                for (field_offset, field) in fields.iter().enumerate() {
+                    // GET
+                    let get_idx = self
+                        .ir
+                        .add_constant(Value::function(Function::struct_getter(
+                            Rc::clone(&info),
+                            field_offset,
+                        )));
+                    self.ir.write(OpCode::Constant(get_idx), span);
+                    match field.resolved_getter {
+                        Some(var @ ResolvedVar::Local { .. }) => {
+                            self.emit_set_var(var, span);
+                        }
+                        Some(_) => unreachable!("declarations always bind locally"),
+                        None => unreachable!("resolved_name should have been resolved"),
+                    }
+
+                    // SET
+                    let set_idx = self
+                        .ir
+                        .add_constant(Value::function(Function::struct_setter(
+                            Rc::clone(&info),
+                            field_offset,
+                        )));
+                    self.ir.write(OpCode::Constant(set_idx), span);
+                    match field.resolved_setter {
+                        Some(var @ ResolvedVar::Local { .. }) => {
+                            self.emit_set_var(var, span);
+                        }
+                        Some(_) => unreachable!("declarations always bind locally"),
+                        None => unreachable!("resolved_name should have been resolved"),
+                    }
+                }
+            }
             Expression::Grouping(statements) => {
                 self.compile_expr(*statements)?;
             }
@@ -361,6 +445,16 @@ impl Compiler {
                 }
 
                 self.ir.write(opcode, function_span);
+            }
+            Expression::MemberAccess {
+                receiver,
+                member_span,
+                resolved_getter,
+                ..
+            } => {
+                self.compile_binding(resolved_getter, member_span)?;
+                self.compile_expr(*receiver)?;
+                self.ir.write(OpCode::Call(1), member_span);
             }
             Expression::Tuple { values } => {
                 let size = values.len();
@@ -474,6 +568,9 @@ impl Compiler {
                     self.compile_lvalue(lv, span)?;
                 }
             }
+            Lvalue::Member { .. } => unreachable!(
+                "member assignment is lowered by Expression::Assignment; the parser rejects members inside destructuring patterns"
+            ),
         }
 
         Ok(())
@@ -496,6 +593,7 @@ impl Compiler {
                     self.compile_declare_lvalue(lv, span)?;
                 }
             }
+            Lvalue::Member { .. } => unreachable!("cannot declare into a field"),
         }
         Ok(())
     }
@@ -559,10 +657,15 @@ impl Compiler {
 
     fn emit_set_var(&mut self, var: ResolvedVar, span: Span) {
         match var {
-            ResolvedVar::Local { slot } => self.ir.write(OpCode::SetLocal(slot), span),
-            ResolvedVar::Upvalue { slot } => self.ir.write(OpCode::SetUpvalue(slot), span),
+            ResolvedVar::Local { slot } => {
+                self.ir.write(OpCode::SetLocal(slot), span);
+                self.source_locals = self.source_locals.max(slot + 1);
+            }
+            ResolvedVar::Upvalue { slot } => {
+                self.ir.write(OpCode::SetUpvalue(slot), span);
+            }
             ResolvedVar::Global { .. } => unreachable!("globals are native, never assigned"),
-        };
+        }
     }
 
     /// Backpatches a forward jump at `op_idx` to land just after the most recently
@@ -693,10 +796,14 @@ impl Compiler {
             return_type: Box::new(return_type.clone()),
         };
         let mut fn_compiler = Self {
+            ir: Default::default(),
             source_locals: num_params,
+            temp_count: 0,
+            temp_uses: Vec::new(),
+            loop_stack: vec![],
             allow_return: true,
             optimize: self.optimize,
-            ..Default::default()
+            struct_registry: Rc::clone(&self.struct_registry),
         };
         fn_compiler.compile_expr(body)?;
         fn_compiler.ir.write(OpCode::Return, Span::synthetic());
@@ -934,6 +1041,13 @@ enum PreparedAssignmentTarget {
         getter: Binding,
         setter: Binding,
     },
+    Member {
+        cached_receiver: TempSlot,
+        receiver_span: Span,
+        member_span: Span,
+        getter: Binding,
+        setter: Binding,
+    },
 }
 
 impl PreparedAssignmentTarget {
@@ -968,6 +1082,27 @@ impl PreparedAssignmentTarget {
                     setter: resolved_set.expect("[]= must be resolved"),
                 })
             }
+            Lvalue::Member {
+                receiver,
+                member_span,
+                resolved_getter,
+                resolved_setter,
+                ..
+            } => {
+                let receiver_span = receiver.span;
+                let cached_receiver = compiler.allocate_temp();
+
+                compiler.compile_expr(*receiver)?;
+                compiler.write_temp(cached_receiver, receiver_span, OpCode::SetLocal);
+
+                Ok(Self::Member {
+                    cached_receiver,
+                    receiver_span,
+                    member_span,
+                    getter: resolved_getter.expect("member getter must be resolved"),
+                    setter: resolved_setter.expect("member setter must be resolved"),
+                })
+            }
             Lvalue::Sequence(_) => Err(CompileError::lvalue_required_to_be_single_identifier(span)),
         }
     }
@@ -989,6 +1124,17 @@ impl PreparedAssignmentTarget {
                 compiler
                     .ir
                     .write(OpCode::Call(2), container_span.merge(*index_span));
+            }
+            Self::Member {
+                cached_receiver,
+                receiver_span,
+                member_span,
+                getter,
+                ..
+            } => {
+                compiler.compile_binding(getter.clone(), *member_span)?;
+                compiler.write_temp(*cached_receiver, *receiver_span, OpCode::GetLocal);
+                compiler.ir.write(OpCode::Call(1), *member_span);
             }
         }
         Ok(())
@@ -1016,6 +1162,22 @@ impl PreparedAssignmentTarget {
                 compiler.ir.write(OpCode::Call(3), target_span);
                 compiler.ir.write(OpCode::Pop, target_span);
             }
+            Self::Member {
+                cached_receiver,
+                receiver_span,
+                member_span,
+                setter,
+                ..
+            } => {
+                let cached_value = compiler.allocate_temp();
+
+                compiler.write_temp(cached_value, *member_span, OpCode::SetLocal);
+                compiler.compile_binding(setter.clone(), *member_span)?;
+                compiler.write_temp(*cached_receiver, *receiver_span, OpCode::GetLocal);
+                compiler.write_temp(cached_value, *member_span, OpCode::GetLocal);
+                compiler.ir.write(OpCode::Call(2), *member_span);
+                compiler.ir.write(OpCode::Pop, *member_span);
+            }
         }
         Ok(())
     }
@@ -1037,6 +1199,7 @@ fn min_lvalue_slot(lv: &Lvalue) -> Option<usize> {
 fn produces_value(expr: &Expression) -> bool {
     match expr {
         Expression::Statement(_)
+        | Expression::StructDeclaration { .. }
         | Expression::VariableDeclaration { .. }
         | Expression::FunctionDeclaration {
             resolved_name: Some(_),
@@ -1049,7 +1212,31 @@ fn produces_value(expr: &Expression) -> bool {
         Expression::For { body, .. } => {
             matches!(**body, ForBody::List { .. } | ForBody::Map { .. })
         }
-        _ => true,
+        Expression::BoolLiteral(_)
+        | Expression::StringLiteral(_)
+        | Expression::Int64Literal(_)
+        | Expression::Float64Literal(_)
+        | Expression::BigIntLiteral(_)
+        | Expression::ComplexLiteral(_)
+        | Expression::FunctionDeclaration {
+            resolved_name: None,
+            ..
+        }
+        | Expression::Identifier { .. }
+        | Expression::Logical { .. }
+        | Expression::Grouping(_)
+        | Expression::Assignment { .. }
+        | Expression::OpAssignment { .. }
+        | Expression::Block { .. }
+        | Expression::If { .. }
+        | Expression::Call { .. }
+        | Expression::OperatorCall { .. }
+        | Expression::MemberAccess { .. }
+        | Expression::Tuple { .. }
+        | Expression::List { .. }
+        | Expression::Map { .. }
+        | Expression::RangeInclusive { .. }
+        | Expression::RangeExclusive { .. } => true,
     }
 }
 

@@ -1,10 +1,10 @@
 use std::fmt::Write;
 
-use crate::expression::Expression;
 use crate::expression::{
     AugmentedAssignmentPlan, Binding, ExpressionLocation, ForBody, ForIteration, FunctionParameter,
-    Lvalue, NodeId,
+    Lvalue, NodeId, NonBindingTarget,
 };
+use crate::expression::{Expression, StructField};
 use crate::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
 use crate::type_expr::TypeExpr;
 use ndc_core::{Parameter, StaticType, TypeSignature};
@@ -35,6 +35,7 @@ impl Parser {
                     | Expression::For { .. }
                     | Expression::FunctionDeclaration { .. }
                     | Expression::VariableDeclaration { .. }
+                    | Expression::StructDeclaration { .. }
             )
         };
         let mut expressions = Vec::new();
@@ -655,7 +656,7 @@ impl Parser {
         //    * `identifier()` <-- call
         //    * `identifier[idx]` <-- idx
         //    * `identifier.ident()` <-- dot call
-        //    * `identifier.ident` <-- dot call w/o parentheses
+        //    * `identifier.ident` <-- member access
         while let Some(current) =
             self.match_token(&[Token::LeftParentheses, Token::LeftSquareBracket, Token::Dot])
         {
@@ -664,15 +665,46 @@ impl Parser {
                 Token::LeftParentheses => {
                     let arguments = self.delimited_tuple(Self::single_expression)?;
                     let arguments_span = arguments.span;
-                    let Expression::Tuple { values: arguments } = arguments.expression else {
+                    let Expression::Tuple {
+                        values: mut arguments,
+                    } = arguments.expression
+                    else {
                         unreachable!("self.tuple() must always produce a tuple");
                     };
 
                     let span = expr.span;
+                    let (function, arguments) = match expr.expression {
+                        Expression::MemberAccess {
+                            receiver,
+                            member,
+                            member_span,
+                            ..
+                        } => {
+                            arguments.insert(0, *receiver);
+                            (
+                                Box::new(
+                                    Expression::Identifier {
+                                        name: member,
+                                        resolved: Binding::None,
+                                    }
+                                    .to_location(member_span),
+                                ),
+                                arguments,
+                            )
+                        }
+                        expression => (
+                            Box::new(ExpressionLocation {
+                                expression,
+                                span: expr.span,
+                                id: expr.id,
+                            }),
+                            arguments,
+                        ),
+                    };
 
                     expr = ExpressionLocation {
                         expression: Expression::Call {
-                            function: Box::new(expr),
+                            function,
                             arguments,
                         },
                         span: span.merge(arguments_span),
@@ -683,48 +715,19 @@ impl Parser {
                     self.require_current_token_matches(&Token::Dot)?; // consume matched token
                     let l_value = self.require_identifier()?;
                     let identifier_span = l_value.span;
-                    let first_argument_span = expr.span;
                     let identifier = Lvalue::try_from(l_value)?;
                     let Lvalue::Identifier { identifier, .. } = identifier else {
                         unreachable!("Guaranteed to match by previous call to require_identifier")
                     };
 
-                    // () is now optional?
-                    let (mut arguments, tuple_span) =
-                        if self.match_token(&[Token::LeftParentheses]).is_some() {
-                            let tuple_expression = self.delimited_tuple(Self::single_expression)?;
-
-                            if let Expression::Tuple { values: arguments } =
-                                tuple_expression.expression
-                            {
-                                (arguments, Some(tuple_expression.span))
-                            } else {
-                                unreachable!("self.tuple() must always produce a tuple");
-                            }
-                        } else {
-                            (Vec::new(), None)
-                        };
-
-                    arguments.insert(0, expr);
-
-                    expr = ExpressionLocation {
-                        expression: Expression::Call {
-                            function: Box::new(
-                                Expression::Identifier {
-                                    name: identifier,
-                                    resolved: Binding::None,
-                                }
-                                .to_location(identifier_span),
-                            ),
-                            arguments,
-                        },
-                        span: tuple_span
-                            .unwrap_or(identifier_span)
-                            .merge(first_argument_span),
-                        id: NodeId::next(),
+                    let span = expr.span.merge(identifier_span);
+                    expr = Expression::MemberAccess {
+                        receiver: Box::new(expr),
+                        member: identifier,
+                        member_span: identifier_span,
+                        resolved_getter: Binding::None,
                     }
-
-                    // for now, we require parentheses
+                    .to_location(span);
                 }
                 Token::LeftSquareBracket => {
                     let bracket_span = current.span;
@@ -949,6 +952,10 @@ impl Parser {
         // matches function declarations like `fn function_name(arg1, arg2) { }`
         else if self.match_token(&[Token::Fn, Token::Pure]).is_some() {
             return self.function_declaration();
+        }
+        // Matches the start of a struct declaration
+        else if self.match_token(&[Token::Struct]).is_some() {
+            return self.struct_declaration();
         }
         // matches `return;` and `return (expression);`
         else if let Some(return_token_location) = self.consume_token_if(&[Token::Return]) {
@@ -1234,6 +1241,29 @@ impl Parser {
         })
     }
 
+    fn struct_declaration(&mut self) -> Result<ExpressionLocation, Error> {
+        let struct_start = self.require_token(&[Token::Struct])?;
+        let identifier = self.require_identifier()?;
+
+        let (fields, field_span) = self.delimited_comma_separated(
+            &Token::LeftCurlyBracket,
+            &Token::RightCurlyBracket,
+            Self::struct_field,
+            true,
+        )?;
+
+        Ok(ExpressionLocation {
+            id: NodeId::next(),
+            expression: Expression::StructDeclaration {
+                name: identifier.to_identifier(),
+                fields,
+                resolved_name: None,
+                resolved: None,
+            },
+            span: struct_start.merge(field_span),
+        })
+    }
+
     /// Parses a block expression including the block delimiters `{` and `}`
     fn block(&mut self) -> Result<ExpressionLocation, Error> {
         let left_curly_span = self.require_token(&[Token::LeftCurlyBracket])?;
@@ -1447,6 +1477,44 @@ impl Parser {
         Ok(TypeExpr::Tuple { elements, span })
     }
 
+    fn struct_field(&mut self) -> Result<StructField, Error> {
+        let ExpressionLocation {
+            expression,
+            span: identifier_span,
+            ..
+        } = self.single_expression()?;
+
+        let Expression::Identifier {
+            name: identifier, ..
+        } = expression
+        else {
+            return Err(Error::with_help(
+                "Expected field name".to_string(),
+                identifier_span,
+                "Struct field must be identifiers followed by a type annotation (e.g. `x: Int`)."
+                    .to_string(),
+            ));
+        };
+
+        let annotation = if self.peek_current_token() == Some(&Token::Colon) {
+            self.advance();
+            self.type_annotation()?
+        } else {
+            return Err(Error::with_help(
+                "Expected field type".to_string(),
+                identifier_span,
+                "Struct fields must have a type annotation".to_string(),
+            ));
+        };
+
+        Ok(StructField {
+            identifier,
+            annotation,
+            resolved_getter: None,
+            resolved_setter: None,
+            span: identifier_span.merge(self.tokens[self.current - 1].span),
+        })
+    }
     fn named_parameter(&mut self) -> Result<FunctionParameter, Error> {
         let maybe_lvalue = self.single_expression()?;
         let lvalue_span = maybe_lvalue.span;
@@ -1491,6 +1559,22 @@ impl Parser {
                 "Assignment target is not a valid lvalue. Only a few expressions can be assigned a value. Check that the left-hand side of the assignment is a valid target.".to_string(),
             ));
         };
+
+        if let Some(target) = lvalue.non_binding_target() {
+            let help = match target {
+                NonBindingTarget::Member => {
+                    "`let` introduces a new binding; assign to a field with `foo.bar = value` instead."
+                }
+                NonBindingTarget::Index => {
+                    "`let` introduces a new binding; assign to an element with `foo[index] = value` instead."
+                }
+            };
+            return Err(Error::with_help(
+                "Invalid declaration target".to_string(),
+                lvalue_span,
+                help.to_string(),
+            ));
+        }
 
         let annotated_type = if self.peek_current_token() == Some(&Token::Colon) {
             self.advance();

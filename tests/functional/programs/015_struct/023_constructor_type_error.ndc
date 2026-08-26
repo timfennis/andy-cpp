@@ -1,0 +1,5 @@
+// Constructor calls with incompatible argument types are rejected at
+// compile time.
+// expect-error: No function called 'Point' found that matches the arguments 'String, Int'
+struct Point { x: Int, y: Int }
+Point("x", 2)

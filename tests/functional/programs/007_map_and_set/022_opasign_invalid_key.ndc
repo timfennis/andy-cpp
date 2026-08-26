@@ -1,3 +1,3 @@
 // expect-error: Key not found in map: invalid key
-let map = %{};
+let map = %{"a": 1};
 map["invalid key"] += 3;
