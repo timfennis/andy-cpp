@@ -296,6 +296,8 @@ impl Parser {
     fn expression_or_statement(&mut self) -> Result<ExpressionLocation, Error> {
         let mut expression = if self.match_token(&[Token::Let]).is_some() {
             self.let_statement()?
+        } else if self.match_token(&[Token::Struct]).is_some() {
+            self.struct_declaration()?
         } else {
             self.expression()?
         };
@@ -923,7 +925,25 @@ impl Parser {
     /// x in xs
     /// ```
     fn for_iteration(&mut self) -> Result<ForIteration, Error> {
-        let l_value = Lvalue::try_from(self.tuple_expression(Self::primary, false)?)?;
+        let maybe_lvalue = self.tuple_expression(Self::primary, false)?;
+        let lvalue_span = maybe_lvalue.span;
+        let l_value = Lvalue::try_from(maybe_lvalue)?;
+
+        if let Some(target) = l_value.non_binding_target() {
+            let help = match target {
+                NonBindingTarget::Member => {
+                    "A for loop introduces a new binding for each iteration; a struct field like `foo.bar` cannot be an iteration variable."
+                }
+                NonBindingTarget::Index => {
+                    "A for loop introduces a new binding for each iteration; an indexed element like `foo[index]` cannot be an iteration variable."
+                }
+            };
+            return Err(Error::with_help(
+                "Invalid iteration variable".to_string(),
+                lvalue_span,
+                help.to_string(),
+            ));
+        }
 
         self.require_current_token_matches(&Token::In)?;
 
@@ -952,10 +972,6 @@ impl Parser {
         // matches function declarations like `fn function_name(arg1, arg2) { }`
         else if self.match_token(&[Token::Fn, Token::Pure]).is_some() {
             return self.function_declaration();
-        }
-        // Matches the start of a struct declaration
-        else if self.match_token(&[Token::Struct]).is_some() {
-            return self.struct_declaration();
         }
         // matches `return;` and `return (expression);`
         else if let Some(return_token_location) = self.consume_token_if(&[Token::Return]) {
@@ -1003,8 +1019,16 @@ impl Parser {
             let mut grouped = self.expression()?;
 
             let end_parentheses = self.require_current_token_matches(&Token::RightParentheses)?;
-            grouped.span = start_parentheses.span.merge(end_parentheses.span);
+            let span = start_parentheses.span.merge(end_parentheses.span);
 
+            // Parenthesized member access keeps its Grouping wrapper so the
+            // postfix-call rewrite can tell `(s.f)()` (call the field's value)
+            // apart from `s.f()` (method call, lowered to `f(s)`).
+            if matches!(grouped.expression, Expression::MemberAccess { .. }) {
+                return Ok(Expression::Grouping(Box::new(grouped)).to_location(span));
+            }
+
+            grouped.span = span;
             return Ok(grouped);
         }
 
@@ -1519,7 +1543,7 @@ impl Parser {
         let maybe_lvalue = self.single_expression()?;
         let lvalue_span = maybe_lvalue.span;
 
-        let Ok(lvalue) = Lvalue::try_from(maybe_lvalue) else {
+        let Ok(lvalue @ Lvalue::Identifier { .. }) = Lvalue::try_from(maybe_lvalue) else {
             return Err(Error::with_help(
                 "Expected parameter name".to_string(),
                 lvalue_span,

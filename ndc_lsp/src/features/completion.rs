@@ -136,7 +136,8 @@ fn format_function_signature(typ: &StaticType, is_dot: bool) -> (String, String)
 
 /// Language keywords offered in general (non-dot) completion.
 const KEYWORDS: &[&str] = &[
-    "let", "fn", "if", "else", "while", "for", "in", "return", "break", "continue", "true", "false",
+    "let", "fn", "struct", "if", "else", "while", "for", "in", "return", "break", "continue",
+    "true", "false",
 ];
 
 fn keyword_completions() -> impl Iterator<Item = CompletionItem> {

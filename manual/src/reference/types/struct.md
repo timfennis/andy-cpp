@@ -31,6 +31,10 @@ struct Person {
 struct Marker { }
 ```
 
+Declare a struct on its own line, like a `let` declaration — at the top level of
+a program, inside a block, or in the REPL. A struct cannot be declared in the
+middle of another expression, so `let s = struct P { x: Int }` is an error.
+
 Struct names are globally unique: declaring two structs with the same name is an
 error, even in different scopes.
 
@@ -102,6 +106,18 @@ assert_eq(Foo(1).size, 1);
 assert_eq(Bar(10).size, 10);
 ```
 
+Because `s.f()` is method-call syntax, calling a *function stored in a field*
+needs parentheses around the member access: `(s.f)()` first evaluates `s.f`
+(the getter) and then calls its result.
+
+```ndc
+struct Callback { f: Any }
+let cb = Callback(fn (a) => a * 2);
+
+cb.f(21);    // ERROR: this is method-call syntax for `f(cb, 21)`
+(cb.f)(21)   // 42: reads the field, then calls the stored function
+```
+
 ## Field assignment
 
 `p.x = value` writes to a field. The value must fit the field's declared type:
@@ -147,6 +163,17 @@ let b = a;
 b.x = 99;
 
 assert_eq(a.x, 99);
+```
+
+Use `clone` for an independent instance (nested containers are still shared,
+like cloning a list of lists) or `deepcopy` to duplicate nested mutable state
+as well:
+
+```ndc
+let c = clone(a);
+c.x = 1;
+assert_eq(a.x, 99);
+assert_eq(c.x, 1);
 ```
 
 ## Equality and hashing

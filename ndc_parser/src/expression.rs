@@ -365,9 +365,9 @@ impl Lvalue {
             Expression::List { values } | Expression::Tuple { values } => values
                 .iter()
                 .all(|el| Self::can_build_destructure_from_expression(&el.expression)),
-            Expression::Grouping(inner) => {
-                Self::can_build_destructure_from_expression(&inner.expression)
-            }
+            // Parentheses around an lvalue are transparent: `(s.x) = 5` writes
+            // the same location as `s.x = 5`.
+            Expression::Grouping(inner) => Self::can_build_from_expression(&inner.expression),
             _ => false,
         }
     }
@@ -444,7 +444,7 @@ impl TryFrom<ExpressionLocation> for Lvalue {
                     .map(Self::try_from)
                     .collect::<Result<Vec<Self>, Self::Error>>()?,
             )),
-            Expression::Grouping(value) => Ok(Self::Sequence(vec![Self::try_from(*value)?])),
+            Expression::Grouping(value) => Self::try_from(*value),
             _expr => Err(ParseError::text("invalid l-value".to_string(), value.span)),
         }
     }

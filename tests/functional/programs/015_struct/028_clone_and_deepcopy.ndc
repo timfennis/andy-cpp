@@ -1,0 +1,22 @@
+// Structs are mutable, so clone() must produce an independent instance and
+// deepcopy() must also duplicate nested mutable state. Both used to alias.
+struct P { x: Int }
+let a = P(1);
+let b = clone(a);
+b.x = 99;
+assert_eq(a.x, 1);
+assert_eq(b.x, 99);
+
+struct Holder { items: List<Int> }
+let h = Holder([1]);
+
+// clone is shallow: the instance is independent but nested containers are shared.
+let shallow = clone(h);
+shallow.items.push(2);
+assert_eq(h.items, [1, 2]);
+
+// deepcopy shares nothing.
+let deep = deepcopy(h);
+deep.items.push(3);
+assert_eq(h.items, [1, 2]);
+assert_eq(deep.items, [1, 2, 3]);

@@ -66,6 +66,7 @@ impl AndycppHighlighter {
                 // Keywords — coral red
                 Token::Let
                 | Token::Fn
+                | Token::Struct
                 | Token::If
                 | Token::Else
                 | Token::Return
