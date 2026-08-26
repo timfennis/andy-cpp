@@ -166,6 +166,80 @@ impl Analyser {
         }
     }
 
+    /// Like [`analyse_or_any`], but with an expected type from an annotation
+    /// or an annotated target: `let x: List<Int> = []` types the literal as
+    /// `List<Int>` instead of `List<Any>`. A container literal with no
+    /// elements has nothing to infer from, so it adopts the expected element
+    /// types; non-empty literals recurse so nested empties (`[(1, [])]`)
+    /// adopt too. Everything else falls back to plain analysis, and the
+    /// caller still subtype-checks the result against the expectation.
+    ///
+    /// This is a temporary measure until the type system supports type
+    /// parameters and proper unification, at which point empty literals can
+    /// be typed with fresh type variables instead of adopting the annotation.
+    fn analyse_with_expected(
+        &mut self,
+        expr_loc: &mut ExpressionLocation,
+        expected: &StaticType,
+    ) -> StaticType {
+        let typ = match (&mut expr_loc.expression, expected) {
+            (
+                Expression::List { values },
+                StaticType::List(element) | StaticType::Sequence(element),
+            ) => {
+                let mut element_type: Option<StaticType> = None;
+                for value in values {
+                    let found = self.analyse_with_expected(value, element);
+                    Self::fold_lub(&mut element_type, found);
+                }
+                StaticType::List(Box::new(
+                    element_type.unwrap_or_else(|| element.as_ref().clone()),
+                ))
+            }
+            (Expression::Map { values, default }, StaticType::Map { key, value }) => {
+                let is_empty = values.is_empty();
+                let mut key_type: Option<StaticType> = None;
+                let mut value_type: Option<StaticType> = None;
+                for (entry_key, entry_value) in values {
+                    let found = self.analyse_with_expected(entry_key, key);
+                    Self::fold_lub(&mut key_type, found);
+                    if let Some(entry_value) = entry_value {
+                        let found = self.analyse_with_expected(entry_value, value);
+                        Self::fold_lub(&mut value_type, found);
+                    }
+                }
+                if let Some(default) = default {
+                    let found = self.analyse_with_expected(default, value);
+                    Self::fold_lub(&mut value_type, found);
+                }
+                StaticType::Map {
+                    key: Box::new(key_type.unwrap_or_else(|| key.as_ref().clone())),
+                    value: Box::new(value_type.unwrap_or_else(|| {
+                        if is_empty {
+                            value.as_ref().clone()
+                        } else {
+                            // A set literal like `%{1, 2}` has unit values.
+                            StaticType::unit()
+                        }
+                    })),
+                }
+            }
+            (Expression::Tuple { values }, StaticType::Tuple(elements))
+                if values.len() == elements.len() =>
+            {
+                let types = values
+                    .iter_mut()
+                    .zip(elements)
+                    .map(|(value, element)| self.analyse_with_expected(value, element))
+                    .collect();
+                StaticType::Tuple(types)
+            }
+            _ => return self.analyse_or_any(expr_loc),
+        };
+        self.result.expr_types.insert(expr_loc.id, typ.clone());
+        typ
+    }
+
     fn analyse_inner(
         &mut self,
         ExpressionLocation {
@@ -222,7 +296,10 @@ impl Analyser {
             } => {
                 let annotated_type = self.lower_annotation(annotated_type.as_ref());
                 let value_span = value.span;
-                let found_type = self.analyse_or_any(value);
+                let found_type = match &annotated_type {
+                    Some(expected) => self.analyse_with_expected(value, expected),
+                    None => self.analyse_or_any(value),
+                };
 
                 self.resolve_lvalue_declarative(
                     l_value,
@@ -234,7 +311,7 @@ impl Analyser {
             }
             Expression::Assignment { l_value, r_value } => {
                 let old_type = self.resolve_lvalue_or_any(l_value, *span);
-                let new_type = self.analyse_or_any(r_value);
+                let new_type = self.analyse_with_expected(r_value, &old_type);
                 self.validate_lvalue_write(l_value, &old_type, &new_type, *span);
 
                 Ok(StaticType::unit())
@@ -1413,6 +1490,34 @@ mod tests {
                 ("++".to_string(), concat),
             ],
             "mismatched types: found List<String> but expected List<Int>",
+        );
+    }
+
+    #[test]
+    fn annotated_declaration_types_empty_container_literals() {
+        assert_eq!(
+            analyse_last_type("let x: Map<Int, Int> = %{}; x"),
+            StaticType::Map {
+                key: Box::new(StaticType::Int),
+                value: Box::new(StaticType::Int),
+            },
+        );
+        assert_eq!(
+            analyse_last_type("let x: List<Int> = []; x"),
+            StaticType::List(Box::new(StaticType::Int)),
+        );
+        assert_eq!(
+            analyse_last_type("let x: List<List<Int>> = [[]]; x"),
+            StaticType::List(Box::new(StaticType::List(Box::new(StaticType::Int)))),
+        );
+    }
+
+    #[test]
+    fn annotated_declaration_still_rejects_mismatched_literals() {
+        assert_analysis_error(
+            "let x: Map<Int, Int> = %{\"a\": 1};",
+            vec![],
+            "mismatched types: found Map<String, Int> but expected Map<Int, Int>",
         );
     }
 

@@ -22,3 +22,13 @@ let map_value: Map<String, Int> = %{"a": 1, "b": 2};
 let tuple_named_value: Tuple<Int, String> = (1, "hello");
 let tuple_shorthand_value: (Int, String) = (1, "hello");
 let tuple_empty_value: () = ();
+
+// Empty container literals adopt the annotated type.
+let empty_list: List<Int> = [];
+let empty_map: Map<Int, Int> = %{};
+let empty_set: Map<Int, ()> = %{};
+let nested_empty: List<List<Int>> = [[]];
+let tuple_with_empty: (Int, List<String>) = (1, []);
+
+// Reassignment of an annotated binding adopts the annotation too.
+empty_list = [];
