@@ -353,7 +353,9 @@ impl Compiler {
 
                 let idx = self
                     .ir
-                    .add_constant(Value::function(Function::Constructor(Rc::clone(&info))));
+                    .add_constant(Value::function(Function::struct_constructor(Rc::clone(
+                        &info,
+                    ))));
 
                 self.ir.write(OpCode::Constant(idx), span);
 
@@ -367,10 +369,12 @@ impl Compiler {
 
                 for (field_offset, field) in fields.iter().enumerate() {
                     // GET
-                    let get_idx = self.ir.add_constant(Value::function(Function::GetField(
-                        Rc::clone(&info),
-                        field_offset,
-                    )));
+                    let get_idx = self
+                        .ir
+                        .add_constant(Value::function(Function::struct_getter(
+                            Rc::clone(&info),
+                            field_offset,
+                        )));
                     self.ir.write(OpCode::Constant(get_idx), span);
                     match field.resolved_getter {
                         Some(var @ ResolvedVar::Local { .. }) => {
@@ -381,10 +385,12 @@ impl Compiler {
                     }
 
                     // SET
-                    let set_idx = self.ir.add_constant(Value::function(Function::SetField(
-                        Rc::clone(&info),
-                        field_offset,
-                    )));
+                    let set_idx = self
+                        .ir
+                        .add_constant(Value::function(Function::struct_setter(
+                            Rc::clone(&info),
+                            field_offset,
+                        )));
                     self.ir.write(OpCode::Constant(set_idx), span);
                     match field.resolved_setter {
                         Some(var @ ResolvedVar::Local { .. }) => {
