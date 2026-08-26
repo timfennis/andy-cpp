@@ -671,39 +671,25 @@ impl Analyser {
                 );
                 *resolved = Some(struct_id);
 
-                // Create a constructor
+                // Bind the constructor and per-field accessors with the same
+                // types the runtime functions report (StructInfo is the source
+                // of truth), so static bindings and runtime dispatch agree.
+                let info = Rc::clone(&self.struct_registry.borrow()[struct_id]);
+
                 *resolved_name = Some(self.scope_tree.create_local_binding(
                     name.clone(),
-                    TypeBinding::Annotated(StaticType::Function {
-                        parameters: Some(field_types.clone()),
-                        return_type: Box::new(StaticType::Struct {
-                            id: struct_id,
-                            name: Box::from(name.as_str()),
-                        }),
-                    }),
+                    TypeBinding::Annotated(info.constructor_type()),
                 ));
 
-                for (field, field_type) in fields.iter_mut().zip(&field_types) {
-                    // Getter
+                for (index, field) in fields.iter_mut().enumerate() {
                     field.resolved_getter = Some(self.scope_tree.create_local_binding(
                         field.identifier.clone(),
-                        TypeBinding::Annotated(StaticType::Function {
-                            parameters: Some(vec![
-                                self.struct_registry.borrow()[struct_id].static_type(),
-                            ]),
-                            return_type: Box::new(field_type.clone()),
-                        }),
+                        TypeBinding::Annotated(info.getter_type(index)),
                     ));
 
                     field.resolved_setter = Some(self.scope_tree.create_local_binding(
                         format!("{}=", field.identifier),
-                        TypeBinding::Annotated(StaticType::Function {
-                            parameters: Some(vec![
-                                self.struct_registry.borrow()[struct_id].static_type(),
-                                field_type.clone(),
-                            ]),
-                            return_type: Box::new(StaticType::unit()),
-                        }),
+                        TypeBinding::Annotated(info.setter_type(index)),
                     ));
                 }
 
