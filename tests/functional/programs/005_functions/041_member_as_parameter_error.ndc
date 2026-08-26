@@ -1,0 +1,6 @@
+// Function parameters must be plain identifiers. A member access used to
+// panic the parser's parameter conversion.
+// expect-error: Expected parameter name
+struct P { x: Int }
+let p = P(1);
+fn f(p.x) { 1 }

@@ -1,0 +1,6 @@
+// A for loop introduces a new binding per iteration, so a struct field is not
+// a valid iteration variable. This used to panic the compiler.
+// expect-error: Invalid iteration variable
+struct Point { x: Int }
+let p = Point(1);
+for (p.x) in [1, 2, 3] { }

@@ -1,0 +1,22 @@
+// `s.f()` is method-call syntax (it lowers to `f(s)`), so calling a function
+// stored in a field requires parentheses: `(s.f)()` evaluates the getter and
+// calls its result. This used to silently lower to `f(s)` as well.
+struct S { f: Any, n: Int }
+let s = S(fn (a) => a * 2, 5);
+
+assert_eq((s.f)(21), 42);
+assert_eq(((s.f))(3), 6);
+
+// A stored function can still be lifted into a variable first.
+let g = (s.f);
+assert_eq(g(4), 8);
+
+// Parentheses around the receiver (not the whole member access) keep
+// method-call semantics.
+assert_eq((s).n, 5);
+
+// Parentheses around an lvalue are transparent for assignment.
+(s.n) = 7;
+assert_eq(s.n, 7);
+(s.n) += 3;
+assert_eq(s.n, 10);

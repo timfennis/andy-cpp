@@ -1,0 +1,4 @@
+// Struct declarations are statements, like `let`. Using one in value position
+// used to corrupt the VM stack (the declaration pushes no value).
+// expect-error: Expected an expression but got 'struct' instead
+let l = [struct R { x: Int }, 5];
