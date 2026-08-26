@@ -20,6 +20,7 @@
   - [Deque](./reference/types/deque.md): A double ended queue
   - [MinHeap & MaxHeap](./reference/types/min-max-heap.md): Min/max Heap
   - [Function](./reference/types/function.md)
+  - [Struct](./reference/types/struct.md)
 - [Control flow](./reference/control-flow.md)
   - [If-else](./reference/if-else.md)
   - [While loop](./reference/while-loop.md)
