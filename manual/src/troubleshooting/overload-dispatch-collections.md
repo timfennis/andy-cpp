@@ -7,6 +7,12 @@ call is free of any type-checking overhead at runtime. When it cannot (because a
 inferred as `Any`), the VM performs **dynamic dispatch**: it tests each candidate overload at
 runtime to find the best match.
 
+The reverse also holds: when every argument type is known at compile time and **no** overload
+can accept them — every candidate has a fully-annotated signature of the wrong arity or with
+conflicting parameter types — the call is rejected at compile time with a
+`No function called '…' found that matches the arguments` error, instead of being deferred to
+a guaranteed runtime failure.
+
 ## O(1) dispatch guarantee
 
 For dynamic dispatch the VM checks whether a value *conforms to* the parameter type without

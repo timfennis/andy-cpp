@@ -1,4 +1,4 @@
-// expect-error: no function called 'dist' found matches the arguments: (Other)
+// expect-error: No function called 'dist' found that matches the arguments 'Other'
 struct Point { x: Int, y: Int }
 struct Other { x: Int, y: Int }
 

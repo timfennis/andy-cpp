@@ -523,8 +523,11 @@ impl Analyser {
                     }
                 }
 
+                // Reads can produce the default value, so its type is part of
+                // the map's value type.
                 if let Some(default) = default {
-                    self.analyse_or_any(default);
+                    let default_type = self.analyse_or_any(default);
+                    Self::fold_lub(&mut value_type, default_type);
                 }
 
                 Ok(StaticType::Map {
@@ -1410,6 +1413,42 @@ mod tests {
                 ("++".to_string(), concat),
             ],
             "mismatched types: found List<String> but expected List<Int>",
+        );
+    }
+
+    #[test]
+    fn constructor_arity_mismatch_is_rejected() {
+        assert_analysis_error(
+            "struct Point { x: Int, y: Int }\nPoint(1)",
+            vec![],
+            "No function called 'Point' found that matches the arguments 'Int'",
+        );
+    }
+
+    #[test]
+    fn constructor_argument_type_mismatch_is_rejected() {
+        assert_analysis_error(
+            "struct Point { x: Int, y: Int }\nPoint(\"x\", 2)",
+            vec![],
+            "No function called 'Point' found that matches the arguments 'String, Int'",
+        );
+    }
+
+    #[test]
+    fn any_typed_callee_still_dispatches_dynamically() {
+        let (_, result) =
+            analyse_with_globals("f(\"x\")", vec![("f".to_string(), StaticType::Any)]);
+        assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
+    }
+
+    #[test]
+    fn map_default_value_contributes_to_value_type() {
+        assert_eq!(
+            analyse_last_type("let m = %{:0}; m"),
+            StaticType::Map {
+                key: Box::new(StaticType::Any),
+                value: Box::new(StaticType::Int),
+            },
         );
     }
 

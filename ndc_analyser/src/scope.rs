@@ -612,8 +612,17 @@ impl ScopeTree {
             };
         }
 
-        // 4. Last-resort same-name callables (for Any-typed callees, upvalues, …).
-        if !walk.all_by_name.is_empty() {
+        // 4. Last-resort same-name callables (for Any-typed callees, upvalues, …),
+        //    but only when at least one candidate could still accept this call
+        //    at runtime. When every candidate provably rejects the signature
+        //    (fully-annotated functions of the wrong arity or with conflicting
+        //    parameter types) the call can never succeed, so we fall through
+        //    and let the caller report it at compile time.
+        if walk
+            .all_by_name
+            .iter()
+            .any(|var| self.could_accept_call(*var, sig))
+        {
             return ResolvedCall {
                 binding: Binding::Dynamic(
                     walk.all_by_name
@@ -793,6 +802,29 @@ impl ScopeTree {
             }
         }
         out
+    }
+
+    /// Whether a candidate could still accept a call with this signature at
+    /// runtime: its type is `Any`, a variadic function, or a function whose
+    /// parameters don't provably conflict with `sig`.
+    fn could_accept_call(&self, var: ResolvedVar, sig: &[StaticType]) -> bool {
+        match self.get_type(var) {
+            StaticType::Function {
+                parameters: Some(parameters),
+                ..
+            } => {
+                parameters.len() == sig.len()
+                    && parameters
+                        .iter()
+                        .zip(sig)
+                        .all(|(param, arg)| !param.is_incompatible_with(arg))
+            }
+            StaticType::Function {
+                parameters: None, ..
+            }
+            | StaticType::Any => true,
+            _ => false,
+        }
     }
 
     /// Return type of a scalar candidate. Falls back to `Any` if the binding

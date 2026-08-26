@@ -1,0 +1,5 @@
+// Constructor calls with the wrong number of arguments are rejected at
+// compile time.
+// expect-error: No function called 'Point' found that matches the arguments 'Int'
+struct Point { x: Int, y: Int }
+Point(1)
