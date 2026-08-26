@@ -184,9 +184,10 @@ impl Value {
     }
 
     /// Creates a shallow copy: scalars are copied by value; mutable collection
-    /// types (String, List, Map, Deque, heaps) get new independent containers
-    /// with cloned contents; immutable / identity types (Tuple, Function,
-    /// Iterator, `BigInt`, Rational, Complex, Some, `OverloadSet`) share the Rc.
+    /// types (String, List, Map, Deque, heaps, structs) get new independent
+    /// containers with cloned contents; immutable / identity types (Tuple,
+    /// Function, Iterator, `BigInt`, Rational, Complex, Some, `OverloadSet`)
+    /// share the Rc.
     pub fn shallow_clone(&self) -> Self {
         match self {
             Self::Object(obj) => match obj.as_ref() {
@@ -208,6 +209,10 @@ impl Value {
                 Object::Map { entries, default } => Self::Object(Rc::new(Object::Map {
                     entries: RefCell::new(entries.borrow().clone()),
                     default: default.clone(),
+                })),
+                Object::Struct { info, fields } => Self::Object(Rc::new(Object::Struct {
+                    info: Rc::clone(info),
+                    fields: RefCell::new(fields.borrow().clone()),
                 })),
                 _ => Self::Object(obj.clone()),
             },
@@ -447,6 +452,10 @@ impl Object {
             )),
             Self::MinHeap(refcell) => Self::MinHeap(RefCell::new(refcell.borrow().clone())),
             Self::MaxHeap(refcell) => Self::MaxHeap(RefCell::new(refcell.borrow().clone())),
+            Self::Struct { info, fields } => Self::Struct {
+                info: Rc::clone(info),
+                fields: RefCell::new(fields.borrow().iter().map(Value::deep_copy).collect()),
+            },
             // Iterator: deep_copy if supported, otherwise share the Rc.
             Self::Iterator(shared) => {
                 if let Some(copy) = shared.borrow().deep_copy() {
