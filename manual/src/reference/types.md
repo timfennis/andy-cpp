@@ -22,6 +22,7 @@ The type system is hierarchical with `Any` at the root:
     * [`MinHeap<T>` / `MaxHeap<T>`](./types/min-max-heap.md): min/max heap
     * `Iterator<T>`: produces values when consumed (currently only from range expressions like `5..100`)
   * [`Function`](./types/function.md)
+  * [Structs](./types/struct.md): user-defined record types, one per `struct` declaration
 
 These are also the names you write in annotations. Generic types take their parameters in angle brackets:
 
@@ -39,7 +40,7 @@ Nested generics work too — the parser handles the `>>` ambiguity for you:
 let grid: List<List<Int>> = [[1, 2], [3, 4]];
 ```
 
-Struct names are type names like any other, including inside generics:
+[Struct](./types/struct.md) names are type names like any other, including inside generics:
 
 ```ndc
 struct Point { x: Int, y: Int }
