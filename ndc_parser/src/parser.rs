@@ -1249,7 +1249,7 @@ impl Parser {
             &Token::LeftCurlyBracket,
             &Token::RightCurlyBracket,
             Self::struct_field,
-            false,
+            true,
         )?;
 
         Ok(ExpressionLocation {
