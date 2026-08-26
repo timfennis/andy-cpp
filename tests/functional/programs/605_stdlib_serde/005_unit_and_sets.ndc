@@ -1,0 +1,9 @@
+// The unit value () pairs with JSON null in both directions
+assert_eq(json_encode(()), "null");
+assert_eq(json_decode("null"), ());
+assert_eq(json_encode([1, (), 2]), "[1,null,2]");
+
+// A set is a map with unit values, so it round-trips as an object with nulls
+assert_eq(json_encode(%{"a", "b"}), "{\"a\":null,\"b\":null}");
+assert_eq(json_decode(json_encode(%{"a", "b"})), %{"a", "b"});
+assert_eq(json_decode("{\"a\":null}"), %{"a": ()});

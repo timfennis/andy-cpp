@@ -1,0 +1,2 @@
+json_decode("1e999");
+// expect-error: does not fit in a float

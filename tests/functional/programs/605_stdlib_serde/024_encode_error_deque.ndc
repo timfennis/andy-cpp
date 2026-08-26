@@ -1,0 +1,4 @@
+let d = Deque();
+d.push_back(1);
+json_encode(d);
+// expect-error: cannot convert a deque to JSON

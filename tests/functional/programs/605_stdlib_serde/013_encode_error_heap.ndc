@@ -1,0 +1,4 @@
+let h = MaxHeap();
+h.push(1);
+json_encode(h);
+// expect-error: cannot convert a heap to JSON
