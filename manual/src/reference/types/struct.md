@@ -31,8 +31,9 @@ struct Person {
 struct Marker { }
 ```
 
-A struct declaration is a statement, like `let` — it cannot appear in value
-position (`let s = struct P { x: Int }` is a parse error).
+Declare a struct on its own line, like a `let` declaration — at the top level of
+a program, inside a block, or in the REPL. A struct cannot be declared in the
+middle of another expression, so `let s = struct P { x: Int }` is an error.
 
 Struct names are globally unique: declaring two structs with the same name is an
 error, even in different scopes.
