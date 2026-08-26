@@ -1,0 +1,21 @@
+struct Point {
+    x: Int,
+    y: Int,
+}
+
+let p = Point(1, 2);
+print(json_encode_lossy(p));
+
+// A JSON object always decodes to a map, structs are an encode-only coercion
+assert_eq(json_decode(json_encode_lossy(p)), %{"x": 1, "y": 2});
+
+// Nested structs encode recursively
+struct Line {
+    from: Point,
+    to: Point,
+}
+
+print(json_encode_lossy(Line(Point(0, 0), Point(3, 4))));
+
+// expect-output: {"x":1,"y":2}
+// expect-output: {"from":{"x":0,"y":0},"to":{"x":3,"y":4}}

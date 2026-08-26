@@ -1,0 +1,7 @@
+struct Point {
+    x: Int,
+    y: Int,
+}
+
+json_encode(Point(1, 2));
+// expect-error: cannot convert a struct to JSON
