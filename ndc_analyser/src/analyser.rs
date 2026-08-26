@@ -1,4 +1,4 @@
-use crate::scope::{CallKind, ResolvedCall, ScopeTree, TypeBinding};
+use crate::scope::{CallKind, ResolvedCall, ScopeTree, TypeBinding, TypeDef};
 use itertools::{Itertools, izip};
 use ndc_core::static_type::StaticTypeConstructionError;
 use ndc_core::r#struct::StructRegistry;
@@ -99,9 +99,11 @@ impl Analyser {
 
     /// Resolves a syntactic type annotation to a `StaticType`: `Int` becomes
     /// `StaticType::Int`, `Map<String, Int>` becomes `StaticType::Map { .. }`,
-    /// and a declared struct name becomes its `StaticType::Struct`. Built-in
-    /// names take precedence over structs. An unknown name or a wrong
-    /// generic-argument count is reported as an analysis error at the
+    /// and a struct name declared in a surrounding scope becomes its
+    /// `StaticType::Struct`. Type names resolve through the lexical scope
+    /// chain; built-ins live in the global scope and can never be shadowed
+    /// (struct declarations reject built-in names). An unknown name or a
+    /// wrong generic-argument count is reported as an analysis error at the
     /// annotation's span, and the annotation falls back to `Any` so the rest
     /// of the program is still checked.
     fn lower_type_expr(&mut self, expr: &TypeExpr) -> StaticType {
@@ -112,19 +114,21 @@ impl Analyser {
             TypeExpr::Name { name, args, span } => {
                 let has_args = !args.is_empty();
                 let args = args.iter().map(|a| self.lower_type_expr(a)).collect();
-                match StaticType::from_name_and_args(name, args) {
-                    Ok(typ) => typ,
-                    Err(err) => {
-                        let info = self.struct_registry.borrow().find_by_name(name).cloned();
-                        match info {
-                            Some(info) if !has_args => info.static_type(),
-                            Some(_) => {
-                                self.emit(AnalysisError::type_does_not_take_generic_args(
-                                    name, *span,
-                                ));
-                                StaticType::Any
-                            }
-                            None => {
+                match self.scope_tree.resolve_type(name).cloned() {
+                    Some(TypeDef::Struct(info)) => {
+                        if has_args {
+                            self.emit(AnalysisError::type_does_not_take_generic_args(name, *span));
+                            StaticType::Any
+                        } else {
+                            info.static_type()
+                        }
+                    }
+                    // `from_name_and_args` reports wrong generic arity for
+                    // built-ins and "unknown type" for unresolved names.
+                    Some(TypeDef::Builtin) | None => {
+                        match StaticType::from_name_and_args(name, args) {
+                            Ok(typ) => typ,
+                            Err(err) => {
                                 self.emit(AnalysisError::invalid_type_annotation(&err, *span));
                                 StaticType::Any
                             }
@@ -641,7 +645,12 @@ impl Analyser {
                     .map(|f| self.lower_type_expr(&f.annotation))
                     .collect();
 
-                if self.struct_registry.borrow().find_by_name(name).is_some() {
+                if matches!(self.scope_tree.resolve_type(name), Some(TypeDef::Builtin)) {
+                    self.emit(AnalysisError::struct_shadows_builtin(name, *span));
+                    return Ok(StaticType::unit());
+                }
+
+                if self.scope_tree.has_type_in_current_scope(name) {
                     self.emit(AnalysisError::struct_redefinition(name, *span));
                     return Ok(StaticType::unit());
                 }
@@ -675,6 +684,9 @@ impl Analyser {
                 // types the runtime functions report (StructInfo is the source
                 // of truth), so static bindings and runtime dispatch agree.
                 let info = Rc::clone(&self.struct_registry.borrow()[struct_id]);
+
+                self.scope_tree
+                    .declare_type(name.clone(), TypeDef::Struct(Rc::clone(&info)));
 
                 *resolved_name = Some(self.scope_tree.create_local_binding(
                     name.clone(),
@@ -1245,6 +1257,13 @@ impl AnalysisError {
     fn type_does_not_take_generic_args(name: &str, span: Span) -> Self {
         Self {
             text: format!("type `{name}` does not take generic arguments"),
+            span,
+        }
+    }
+
+    fn struct_shadows_builtin(name: &str, span: Span) -> Self {
+        Self {
+            text: format!("Struct '{name}' is not allowed to shadow the built-in type '{name}'"),
             span,
         }
     }

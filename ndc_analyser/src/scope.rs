@@ -1,6 +1,8 @@
 use ndc_core::StaticType;
+use ndc_core::r#struct::StructInfo;
 use ndc_parser::{Binding, Candidate, CaptureSource, ResolvedVar};
 use std::fmt::{Debug, Formatter};
+use std::rc::Rc;
 
 /// Whether a call site can fall back to element-wise tuple broadcast when no
 /// scalar overload matches the argument types directly. Set by the parser:
@@ -100,6 +102,18 @@ fn extend_dedup(
     }
 }
 
+/// What a type name refers to in the type namespace. Type names live in the
+/// same lexical scopes as value bindings but form a separate namespace: they
+/// have no runtime slots and are only consulted when lowering annotations.
+#[derive(Debug, Clone)]
+pub(crate) enum TypeDef {
+    /// A built-in type name (`Int`, `List`, …); lowering delegates to
+    /// [`StaticType::from_name_and_args`], which also checks generic arity.
+    Builtin,
+    /// A user-declared struct.
+    Struct(Rc<StructInfo>),
+}
+
 #[derive(Debug, Clone)]
 pub(crate) enum TypeBinding {
     Inferred(StaticType),
@@ -132,6 +146,8 @@ pub(crate) struct Scope {
     function_scope_idx: usize,
     identifiers: Vec<ScopeBinding>,
     upvalues: Vec<(String, CaptureSource)>,
+    /// Type names declared in this scope (separate namespace from `identifiers`).
+    types: Vec<(String, TypeDef)>,
 }
 
 impl Scope {
@@ -147,6 +163,7 @@ impl Scope {
             function_scope_idx,
             identifiers: Vec::default(),
             upvalues: Vec::default(),
+            types: Vec::default(),
         }
     }
 
@@ -162,6 +179,7 @@ impl Scope {
             function_scope_idx,
             identifiers: Vec::default(),
             upvalues: Vec::default(),
+            types: Vec::default(),
         }
     }
 
@@ -375,6 +393,10 @@ impl ScopeTree {
                 name,
                 binding: TypeBinding::Inferred(typ),
             })
+            .collect();
+        global_scope.types = StaticType::BUILTIN_TYPE_NAMES
+            .iter()
+            .map(|name| ((*name).to_string(), TypeDef::Builtin))
             .collect();
 
         Self {
@@ -882,6 +904,43 @@ impl ScopeTree {
         // Tuple<…>)` collapses to `Any` in our lattice anyway, so there's
         // nothing more precise to compute for the mixed case.
         StaticType::Any
+    }
+
+    /// Declare a type name in the current scope. Shadowing a same-named type
+    /// in an outer scope is allowed; the caller is responsible for rejecting
+    /// redeclarations within one scope and shadowing of built-in type names.
+    pub(crate) fn declare_type(&mut self, name: String, def: TypeDef) {
+        self.scopes[self.current_scope_idx].types.push((name, def));
+    }
+
+    /// Resolve a type name through the scope chain (innermost first), falling
+    /// back to the global scope where the built-in type names live.
+    pub(crate) fn resolve_type(&self, name: &str) -> Option<&TypeDef> {
+        let mut scope_idx = self.current_scope_idx;
+        loop {
+            let scope = &self.scopes[scope_idx];
+            if let Some((_, def)) = scope.types.iter().rev().find(|(n, _)| n == name) {
+                return Some(def);
+            }
+            match scope.parent_idx {
+                Some(parent_idx) => scope_idx = parent_idx,
+                None => break,
+            }
+        }
+        self.global_scope
+            .types
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, def)| def)
+    }
+
+    /// Whether the current scope itself already declares a type with this
+    /// name. Used to detect illegal same-scope redefinitions.
+    pub(crate) fn has_type_in_current_scope(&self, name: &str) -> bool {
+        self.scopes[self.current_scope_idx]
+            .types
+            .iter()
+            .any(|(n, _)| n == name)
     }
 
     pub(crate) fn create_local_binding(

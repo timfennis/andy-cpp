@@ -35,16 +35,28 @@ Declare a struct on its own line, like a `let` declaration — at the top level 
 a program, inside a block, or in the REPL. A struct cannot be declared in the
 middle of another expression, so `let s = struct P { x: Int }` is an error.
 
-Struct names are globally unique: declaring two structs with the same name is an
-error, even in different scopes.
+Struct names are lexically scoped, like variables. Declaring two structs with
+the same name in the same scope is an error, but the name can be reused in
+scopes that never coexist, and a declaration in an inner scope shadows a
+same-named struct from an outer scope.
 
 ```ndc
 struct Point { x: Int }
 struct Point { y: Int } // ERROR: Illegal redefinition of struct 'Point'
 ```
 
+A struct declared inside a function or block goes out of scope with it: the
+type name, the constructor, and the field accessors are all unavailable
+outside.
+
+A struct cannot take the name of a built-in type:
+
+```ndc
+struct Int { x: Float } // ERROR: Struct 'Int' is not allowed to shadow the built-in type 'Int'
+```
+
 A struct can only be used after its declaration, and the name becomes usable as a
-[type annotation](../types.md) everywhere annotations are accepted.
+[type annotation](../types.md) in the scopes where the struct is visible.
 
 ## Constructing instances
 

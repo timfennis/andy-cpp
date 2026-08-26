@@ -1,0 +1,3 @@
+// Struct names may not shadow built-in type names.
+// expect-error: Struct 'Int' is not allowed to shadow the built-in type 'Int'
+struct Int { x: Float }
