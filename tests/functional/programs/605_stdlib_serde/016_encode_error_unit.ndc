@@ -1,2 +1,0 @@
-json_encode([1, (), 2]);
-// expect-error: cannot convert the unit value () to JSON

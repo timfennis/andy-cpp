@@ -14,7 +14,7 @@ use std::str::FromStr;
 /// is accepted: rationals become floats, complex numbers become strings,
 /// options are unwrapped, tuples and deques become arrays, heaps become arrays
 /// in priority order, iterators are drained, non-string map keys are
-/// stringified, and non-finite floats and unit values become null.
+/// stringified, and `None` and non-finite floats become null.
 ///
 /// `active` holds the containers currently being converted on the recursion
 /// path, so a value that (transitively) contains itself is detected instead of
@@ -25,7 +25,8 @@ fn value_to_json(
     active: &mut HashSet<*const Object>,
 ) -> Result<JsonValue, anyhow::Error> {
     match value {
-        Value::None => Ok(JsonValue::Null),
+        Value::None if lossy => Ok(JsonValue::Null),
+        Value::None => bail!("cannot convert None to JSON, JSON null maps to the unit value ()"),
         Value::Bool(b) => Ok(json!(b)),
         Value::Int(i) => Ok(json!(i)),
         Value::Float(f) if f.is_finite() => Ok(json!(f)),
@@ -110,13 +111,7 @@ fn object_to_json(
             bail!("cannot convert a function to JSON")
         }
         Object::String(s) => Ok(json!(&*s.borrow())),
-        Object::Tuple(v) if v.is_empty() => {
-            if lossy {
-                Ok(JsonValue::Null)
-            } else {
-                bail!("cannot convert the unit value () to JSON")
-            }
-        }
+        Object::Tuple(v) if v.is_empty() => Ok(JsonValue::Null),
         Object::Tuple(v) if lossy => values_to_array(&mut v.iter(), active),
         Object::Tuple(_) => bail!("cannot convert a tuple to JSON, convert it to a list first"),
         Object::List(v) => values_to_array(&mut v.borrow().iter(), active),
@@ -138,9 +133,6 @@ fn object_to_json(
                         },
                         _ => bail!("cannot convert a map with non-string key {key} to JSON"),
                     };
-                    if value.is_unit() && !lossy {
-                        bail!("cannot convert a set to JSON, convert it to a list first");
-                    }
                     let value = value_to_json(value, lossy, active)?;
                     Ok((key, value))
                 })
@@ -152,7 +144,7 @@ fn object_to_json(
 
 fn json_to_value(value: JsonValue) -> Result<Value, anyhow::Error> {
     Ok(match value {
-        JsonValue::Null => Value::None,
+        JsonValue::Null => Value::unit(),
         JsonValue::Bool(b) => Value::Bool(b),
         JsonValue::Number(n) => {
             // With serde_json's arbitrary_precision feature the number's
@@ -188,24 +180,26 @@ fn json_to_value(value: JsonValue) -> Result<Value, anyhow::Error> {
 
 #[export_module]
 mod inner {
-    /// Converts a JSON string to a value: `json_decode("{\"a\": [1, null]}") == %{"a": [1, None]}`.
+    /// Converts a JSON string to a value: `json_decode("{\"a\": [1, null]}") == %{"a": [1, ()]}`.
     ///
-    /// `null` becomes `None`, arrays become lists, objects become maps with
-    /// string keys, and integers too big for `Int` decode losslessly to big
-    /// integers.
+    /// `null` becomes the unit value `()`, arrays become lists, objects become
+    /// maps with string keys, and integers too big for `Int` decode losslessly
+    /// to big integers.
     pub fn json_decode(input: &str) -> anyhow::Result<Value> {
         let json: JsonValue = serde_json::from_str(input)?;
         json_to_value(json)
     }
 
-    /// Converts a value to a JSON string: `json_encode(%{"a": [1, None]}) == "{\"a\":[1,null]}"`.
+    /// Converts a value to a JSON string: `json_encode(%{"a": [1, ()]}) == "{\"a\":[1,null]}"`.
     ///
     /// Only values that decode back to an equal value are accepted, so this is
-    /// the exact inverse of `json_decode`. Anything else is rejected with an
-    /// error: rationals, complex numbers, non-finite floats, options, tuples,
-    /// deques, iterators, heaps, sets, functions, the unit value `()`, maps
-    /// with non-string keys or a default value, and values that contain
-    /// themselves. Use `json_encode_lossy` to convert those anyway.
+    /// the exact inverse of `json_decode`. The unit value `()` converts to
+    /// `null`; sets convert to objects whose values are all `null`. Anything
+    /// else is rejected with an error: rationals, complex numbers, non-finite
+    /// floats, options (both `Some` and `None`), tuples, deques, iterators,
+    /// heaps, functions, maps with non-string keys or a default value, and
+    /// values that contain themselves. Use `json_encode_lossy` to convert
+    /// those anyway.
     pub fn json_encode(input: Value) -> anyhow::Result<String> {
         let v = value_to_json(&input, false, &mut HashSet::new())?;
         Ok(v.to_string())
@@ -214,13 +208,13 @@ mod inner {
     /// Converts any value to a JSON string, accepting values `json_encode`
     /// rejects by degrading them: `json_encode_lossy((1, Some(1/2))) == "[1,0.5]"`.
     ///
-    /// Rationals become floats, complex numbers become strings, options are
-    /// unwrapped, tuples and deques become arrays, heaps become arrays in
-    /// priority order, iterators are drained, non-string map keys are
-    /// stringified, and non-finite floats and unit values (so also set entries)
-    /// become `null`. There is no lossy counterpart for `json_decode` because
-    /// these conversions cannot be reversed. Functions and values that contain
-    /// themselves are still errors.
+    /// Rationals become floats, complex numbers become strings, `Some(x)` is
+    /// unwrapped to `x`, tuples and deques become arrays, heaps become arrays
+    /// in priority order, iterators are drained, non-string map keys are
+    /// stringified, and `None` and non-finite floats become `null`. There is
+    /// no lossy counterpart for `json_decode` because these conversions cannot
+    /// be reversed. Functions and values that contain themselves are still
+    /// errors.
     pub fn json_encode_lossy(input: Value) -> anyhow::Result<String> {
         let v = value_to_json(&input, true, &mut HashSet::new())?;
         Ok(v.to_string())

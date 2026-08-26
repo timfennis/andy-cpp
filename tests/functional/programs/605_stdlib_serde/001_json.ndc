@@ -2,7 +2,8 @@ let object = %{
     "foo": "bar",
     "int": 123,
     "float": 123.123,
-    "none": None,
+    "unit": (),
+    "set": %{"a", "b"},
     "object": %{
         "test": [1,2,3]
     },
@@ -12,7 +13,8 @@ let object = %{
 let result = %{
     "float": 123.123,
     "foo": "bar",
-    "none": None,
+    "unit": (),
+    "set": %{"a", "b"},
     "int": 123,
     "object": %{
         "test": [1,2,3]
