@@ -37,7 +37,12 @@ fn value_to_json(
             // immutable, so they never need to be tracked.
             let cycle_guard = matches!(
                 obj.as_ref(),
-                Object::List(_) | Object::Deque(_) | Object::Map { .. }
+                Object::List(_)
+                    | Object::Deque(_)
+                    | Object::Map { .. }
+                    | Object::MaxHeap(_)
+                    | Object::MinHeap(_)
+                    | Object::Iterator(_)
             );
             if cycle_guard && !active.insert(Rc::as_ptr(obj)) {
                 bail!("cannot convert a value that contains itself to JSON");
