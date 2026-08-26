@@ -1,0 +1,2 @@
+json_encode((1, 2, 3));
+// expect-error: cannot convert a tuple to JSON

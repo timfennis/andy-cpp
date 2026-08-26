@@ -1,0 +1,2 @@
+json_encode(%{"a", "b"});
+// expect-error: cannot convert a set to JSON

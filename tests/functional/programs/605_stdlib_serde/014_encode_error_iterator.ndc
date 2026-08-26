@@ -1,0 +1,2 @@
+json_encode(1..10);
+// expect-error: cannot convert an iterator to JSON

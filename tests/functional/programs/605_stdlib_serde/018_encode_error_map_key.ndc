@@ -1,0 +1,2 @@
+json_encode(%{(1, 2): "a"});
+// expect-error: cannot convert a map with non-string key (1,2) to JSON

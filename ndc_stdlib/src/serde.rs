@@ -1,95 +1,169 @@
-use anyhow::Context;
+use anyhow::{Context, bail};
 use ndc_core::hash_map::HashMap;
 use ndc_macros::export_module;
 use ndc_vm::value::{Object, Value};
 use num::ToPrimitive;
 use serde_json::{Map, Number, Value as JsonValue, json};
+use std::collections::HashSet;
 use std::rc::Rc;
+use std::str::FromStr;
 
-fn value_to_json(value: Value) -> Result<JsonValue, anyhow::Error> {
+/// Converts a value to JSON. In strict mode (`lossy == false`) any value that
+/// would not survive `json_decode(json_encode(value)) == value` is rejected
+/// with an error. In lossy mode every value that can be reasonably represented
+/// is accepted: rationals become floats, complex numbers become strings,
+/// options are unwrapped, tuples and deques become arrays, heaps become arrays
+/// in priority order, iterators are drained, non-string map keys are
+/// stringified, and non-finite floats and unit values become null.
+///
+/// `active` holds the containers currently being converted on the recursion
+/// path, so a value that (transitively) contains itself is detected instead of
+/// recursing forever.
+fn value_to_json(
+    value: &Value,
+    lossy: bool,
+    active: &mut HashSet<*const Object>,
+) -> Result<JsonValue, anyhow::Error> {
     match value {
         Value::None => Ok(JsonValue::Null),
         Value::Bool(b) => Ok(json!(b)),
         Value::Int(i) => Ok(json!(i)),
-        Value::Float(f) => Ok(json!(f)),
-        Value::Object(obj) => match obj.as_ref() {
-            Object::Some(inner) => value_to_json(inner.clone()),
-            Object::BigInt(big_int) => {
-                use std::str::FromStr;
-                Number::from_str(&big_int.to_string())
-                    .map(JsonValue::Number)
-                    .context("Cannot convert bigint to JSON number")
+        Value::Float(f) if f.is_finite() => Ok(json!(f)),
+        Value::Float(_) if lossy => Ok(JsonValue::Null),
+        Value::Float(f) => bail!("cannot convert non-finite float {f} to JSON"),
+        Value::Object(obj) => {
+            // Only these variants have interior mutability through which a
+            // value can contain itself; all other variants are leaves or
+            // immutable, so they never need to be tracked.
+            let cycle_guard = matches!(
+                obj.as_ref(),
+                Object::List(_) | Object::Deque(_) | Object::Map { .. }
+            );
+            if cycle_guard && !active.insert(Rc::as_ptr(obj)) {
+                bail!("cannot convert a value that contains itself to JSON");
             }
-            Object::Rational(ratio) => Ok(json!(ratio.to_f64())),
-            Object::Complex(complex) => Ok(json!(format!("{complex}"))),
-            Object::String(s) => Ok(json!(&*s.borrow())),
-            Object::List(v) => Ok(JsonValue::Array(
-                v.borrow()
-                    .iter()
-                    .map(|v| value_to_json(v.clone()))
-                    .collect::<Result<Vec<_>, _>>()?,
-            )),
-            Object::Tuple(v) => match v.len() {
-                0 => Ok(JsonValue::Null),
-                _ => Ok(JsonValue::Array(
-                    v.iter()
-                        .map(|v| value_to_json(v.clone()))
-                        .collect::<Result<Vec<_>, _>>()?,
-                )),
-            },
-            Object::Map { entries, .. } => Ok(JsonValue::Object(
-                entries
-                    .borrow()
-                    .iter()
-                    .map(|(key, value)| {
-                        value_to_json(value.clone()).map(|value| (key.to_string(), value))
-                    })
-                    .collect::<Result<Map<String, JsonValue>, _>>()?,
-            )),
-            Object::Iterator(i) => {
-                let mut out = Vec::new();
-                let mut iter = i.borrow_mut();
-                while let Some(v) = iter.next() {
-                    out.push(value_to_json(v)?);
-                }
-                Ok(JsonValue::Array(out))
+            let result = object_to_json(obj, lossy, active);
+            if cycle_guard {
+                active.remove(&Rc::as_ptr(obj));
             }
-            Object::MaxHeap(h) => Ok(JsonValue::Array(
-                h.borrow()
-                    .iter()
-                    .map(|v| value_to_json(v.0.clone()))
-                    .collect::<Result<Vec<_>, _>>()?,
-            )),
-            Object::MinHeap(h) => Ok(JsonValue::Array(
-                h.borrow()
-                    .iter()
-                    .map(|v| value_to_json(v.0.0.clone()))
-                    .collect::<Result<Vec<_>, _>>()?,
-            )),
-            Object::Deque(d) => Ok(JsonValue::Array(
-                d.borrow()
-                    .iter()
-                    .map(|v| value_to_json(v.clone()))
-                    .collect::<Result<Vec<_>, _>>()?,
-            )),
-            Object::Function(_) | Object::OverloadSet { .. } => {
-                Err(anyhow::anyhow!("Unable to serialize function"))
+            result
+        }
+    }
+}
+
+fn object_to_json(
+    obj: &Rc<Object>,
+    lossy: bool,
+    active: &mut HashSet<*const Object>,
+) -> Result<JsonValue, anyhow::Error> {
+    let values_to_array = |values: &mut dyn Iterator<Item = &Value>,
+                           active: &mut HashSet<*const Object>| {
+        values
+            .map(|v| value_to_json(v, lossy, active))
+            .collect::<Result<Vec<_>, _>>()
+            .map(JsonValue::Array)
+    };
+
+    match obj.as_ref() {
+        Object::BigInt(big_int) => Number::from_str(&big_int.to_string())
+            .map(JsonValue::Number)
+            .context("cannot convert bigint to JSON number"),
+        Object::Rational(ratio) if lossy => Ok(json!(ratio.to_f64())),
+        Object::Rational(_) => {
+            bail!("cannot convert a rational number to JSON, convert it to a float first")
+        }
+        Object::Complex(complex) if lossy => Ok(json!(format!("{complex}"))),
+        Object::Complex(_) => bail!("cannot convert a complex number to JSON"),
+        Object::Some(inner) if lossy => value_to_json(inner, lossy, active),
+        Object::Some(_) => bail!("cannot convert an option to JSON, unwrap it first"),
+        Object::Iterator(i) if lossy => {
+            let mut out = Vec::new();
+            let mut iter = i.borrow_mut();
+            while let Some(v) = iter.next() {
+                out.push(value_to_json(&v, lossy, active)?);
             }
-        },
+            Ok(JsonValue::Array(out))
+        }
+        Object::Iterator(_) => {
+            bail!("cannot convert an iterator to JSON, collect it into a list first")
+        }
+        Object::MaxHeap(h) if lossy => {
+            // Priority order: the order `pop` would produce
+            let mut sorted = h.borrow().clone().into_sorted_vec();
+            sorted.reverse();
+            values_to_array(&mut sorted.iter().map(|v| &v.0), active)
+        }
+        Object::MinHeap(h) if lossy => {
+            let mut sorted = h.borrow().clone().into_sorted_vec();
+            sorted.reverse();
+            values_to_array(&mut sorted.iter().map(|v| &v.0.0), active)
+        }
+        Object::MaxHeap(_) | Object::MinHeap(_) => {
+            bail!("cannot convert a heap to JSON, convert it to a list first")
+        }
+        Object::Function(_) | Object::OverloadSet { .. } => {
+            bail!("cannot convert a function to JSON")
+        }
+        Object::String(s) => Ok(json!(&*s.borrow())),
+        Object::Tuple(v) if v.is_empty() => {
+            if lossy {
+                Ok(JsonValue::Null)
+            } else {
+                bail!("cannot convert the unit value () to JSON")
+            }
+        }
+        Object::Tuple(v) if lossy => values_to_array(&mut v.iter(), active),
+        Object::Tuple(_) => bail!("cannot convert a tuple to JSON, convert it to a list first"),
+        Object::List(v) => values_to_array(&mut v.borrow().iter(), active),
+        Object::Deque(d) if lossy => values_to_array(&mut d.borrow().iter(), active),
+        Object::Deque(_) => bail!("cannot convert a deque to JSON, convert it to a list first"),
+        Object::Map { entries, default } => {
+            if default.is_some() && !lossy {
+                bail!("cannot convert a map with a default value to JSON");
+            }
+            entries
+                .borrow()
+                .iter()
+                .map(|(key, value)| {
+                    let key = match key {
+                        _ if lossy => key.to_string(),
+                        Value::Object(obj) => match obj.as_ref() {
+                            Object::String(key) => key.borrow().clone(),
+                            _ => bail!("cannot convert a map with non-string key {key} to JSON"),
+                        },
+                        _ => bail!("cannot convert a map with non-string key {key} to JSON"),
+                    };
+                    if value.is_unit() && !lossy {
+                        bail!("cannot convert a set to JSON, convert it to a list first");
+                    }
+                    let value = value_to_json(value, lossy, active)?;
+                    Ok((key, value))
+                })
+                .collect::<Result<Map<String, JsonValue>, _>>()
+                .map(JsonValue::Object)
+        }
     }
 }
 
 fn json_to_value(value: JsonValue) -> Result<Value, anyhow::Error> {
     Ok(match value {
-        JsonValue::Null => Value::unit(),
+        JsonValue::Null => Value::None,
         JsonValue::Bool(b) => Value::Bool(b),
         JsonValue::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                Value::Int(i)
-            } else if let Some(f) = n.as_f64() {
-                Value::Float(f)
+            // With serde_json's arbitrary_precision feature the number's
+            // original text is preserved exactly, so integers of any size can
+            // be converted without going through a lossy f64.
+            let repr = n.to_string();
+            if repr.contains(['.', 'e', 'E']) {
+                let float: f64 = repr.parse().context("cannot parse JSON number")?;
+                if !float.is_finite() {
+                    bail!("JSON number {repr} does not fit in a float");
+                }
+                Value::Float(float)
+            } else if let Ok(int) = repr.parse::<i64>() {
+                Value::Int(int)
             } else {
-                return Err(anyhow::anyhow!("Cannot parse JSON number"));
+                Value::bigint(repr.parse().context("cannot parse JSON number")?)
             }
         }
         JsonValue::String(s) => Value::string(s),
@@ -109,15 +183,41 @@ fn json_to_value(value: JsonValue) -> Result<Value, anyhow::Error> {
 
 #[export_module]
 mod inner {
-    /// Converts a JSON string to a value
+    /// Converts a JSON string to a value: `json_decode("{\"a\": [1, null]}") == %{"a": [1, None]}`.
+    ///
+    /// `null` becomes `None`, arrays become lists, objects become maps with
+    /// string keys, and integers too big for `Int` decode losslessly to big
+    /// integers.
     pub fn json_decode(input: &str) -> anyhow::Result<Value> {
         let json: JsonValue = serde_json::from_str(input)?;
         json_to_value(json)
     }
 
-    /// Converts the input value to JSON
+    /// Converts a value to a JSON string: `json_encode(%{"a": [1, None]}) == "{\"a\":[1,null]}"`.
+    ///
+    /// Only values that decode back to an equal value are accepted, so this is
+    /// the exact inverse of `json_decode`. Anything else is rejected with an
+    /// error: rationals, complex numbers, non-finite floats, options, tuples,
+    /// deques, iterators, heaps, sets, functions, the unit value `()`, maps
+    /// with non-string keys or a default value, and values that contain
+    /// themselves. Use `json_encode_lossy` to convert those anyway.
     pub fn json_encode(input: Value) -> anyhow::Result<String> {
-        let v = value_to_json(input)?;
+        let v = value_to_json(&input, false, &mut HashSet::new())?;
+        Ok(v.to_string())
+    }
+
+    /// Converts any value to a JSON string, accepting values `json_encode`
+    /// rejects by degrading them: `json_encode_lossy((1, Some(1/2))) == "[1,0.5]"`.
+    ///
+    /// Rationals become floats, complex numbers become strings, options are
+    /// unwrapped, tuples and deques become arrays, heaps become arrays in
+    /// priority order, iterators are drained, non-string map keys are
+    /// stringified, and non-finite floats and unit values (so also set entries)
+    /// become `null`. There is no lossy counterpart for `json_decode` because
+    /// these conversions cannot be reversed. Functions and values that contain
+    /// themselves are still errors.
+    pub fn json_encode_lossy(input: Value) -> anyhow::Result<String> {
+        let v = value_to_json(&input, true, &mut HashSet::new())?;
         Ok(v.to_string())
     }
 }

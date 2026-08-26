@@ -1,0 +1,41 @@
+// json_encode_lossy accepts everything json_encode rejects (except functions
+// and cyclic values) by degrading it to the nearest JSON representation
+
+// Rationals become floats
+assert_eq(json_encode_lossy(10/3), "3.3333333333333335");
+
+// Complex numbers become strings
+assert_eq(json_encode_lossy(5.0 + 3.1j), "\"5+3.1i\"");
+
+// Options are unwrapped
+assert_eq(json_encode_lossy(Some(5)), "5");
+assert_eq(json_encode_lossy(None), "null");
+
+// Sets become objects with null values
+assert_eq(json_encode_lossy(%{"a", "b"}), "{\"a\":null,\"b\":null}");
+
+// Non-finite floats and the unit value become null
+assert_eq(json_encode_lossy(0.0 / 0.0), "null");
+assert_eq(json_encode_lossy((1, (), 2)), "[1,null,2]");
+
+// Non-string map keys are stringified, map defaults are dropped
+assert_eq(json_encode_lossy(%{1: "a"}), "{\"1\":\"a\"}");
+assert_eq(json_encode_lossy(%{: 0}), "{}");
+
+// Iterators are drained
+assert_eq(json_encode_lossy(1..4), "[1,2,3]");
+
+// Heaps become arrays in priority order
+let h = MaxHeap();
+h.push(1); h.push(3); h.push(2);
+assert_eq(json_encode_lossy(h), "[3,2,1]");
+
+let m = MinHeap();
+m.push(3); m.push(1); m.push(2);
+assert_eq(json_encode_lossy(m), "[1,2,3]");
+
+// Deques become arrays
+let d = Deque();
+d.push_back(1);
+d.push_front(0);
+assert_eq(json_encode_lossy(d), "[0,1]");

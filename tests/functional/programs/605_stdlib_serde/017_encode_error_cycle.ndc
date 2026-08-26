@@ -1,0 +1,4 @@
+let l = [1, 2];
+l.push(l);
+json_encode(l);
+// expect-error: cannot convert a value that contains itself to JSON

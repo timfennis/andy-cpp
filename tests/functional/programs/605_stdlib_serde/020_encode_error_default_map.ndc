@@ -1,0 +1,2 @@
+json_encode(%{: 0});
+// expect-error: cannot convert a map with a default value to JSON

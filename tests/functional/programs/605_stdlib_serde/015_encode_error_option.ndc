@@ -1,0 +1,2 @@
+json_encode(Some(5));
+// expect-error: cannot convert an option to JSON

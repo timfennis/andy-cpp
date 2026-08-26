@@ -1,0 +1,13 @@
+// Big integers round-trip exactly instead of degrading to floats
+let big = 2 ^ 100 + 1;
+assert_eq(json_decode(json_encode(big)), big);
+assert_eq(json_decode("123456789123456789123456789"), 123456789123456789123456789);
+
+// Numbers written with a decimal point or exponent decode to floats
+assert_eq(json_decode("1e2"), 100.0);
+assert_eq(json_decode("123.5"), 123.5);
+assert_eq(json_decode(json_encode(0.1)), 0.1);
+
+// null and None are the same thing on both sides
+assert_eq(json_decode("null"), None);
+assert_eq(json_encode(None), "null");
