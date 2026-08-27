@@ -609,21 +609,46 @@ fn register_aggregates(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
 
 fn aggregate(args: &[Value], kind: NumericKind, product: bool) -> Result<Value, VmError> {
     arity(args, 1)?;
-    let mut values = args[0]
+
+    if let Value::Object(object) = &args[0] {
+        match object.as_ref() {
+            Object::List(values) => {
+                let values = values.borrow();
+                return aggregate_values(values.iter(), kind, product);
+            }
+            Object::Tuple(values) => return aggregate_values(values.iter(), kind, product),
+            Object::Deque(values) => {
+                let values = values.borrow();
+                return aggregate_values(values.iter(), kind, product);
+            }
+            _ => {}
+        }
+    }
+
+    let values = args[0]
         .clone()
         .try_into_iter()
         .ok_or_else(|| VmError::native("expected a sequence".to_string()))?;
+    aggregate_values(values, kind, product)
+}
+
+fn aggregate_values<I>(mut values: I, kind: NumericKind, product: bool) -> Result<Value, VmError>
+where
+    I: Iterator,
+    I::Item: std::borrow::Borrow<Value>,
+{
     match kind {
         NumericKind::Int => {
             let initial: i64 = if product { 1 } else { 0 };
             let value = values.try_fold(initial, |accumulator, value| {
+                let value = std::borrow::Borrow::borrow(&value);
                 let Value::Int(value) = value else {
                     return Err(VmError::native("expected a sequence of Int".to_string()));
                 };
                 if product {
-                    accumulator.checked_mul(value)
+                    accumulator.checked_mul(*value)
                 } else {
-                    accumulator.checked_add(value)
+                    accumulator.checked_add(*value)
                 }
                 .ok_or_else(|| VmError::native("integer aggregate overflowed".to_string()))
             })?;
@@ -632,13 +657,14 @@ fn aggregate(args: &[Value], kind: NumericKind, product: bool) -> Result<Value, 
         NumericKind::Float => {
             let initial = if product { 1.0 } else { 0.0 };
             let value = values.try_fold(initial, |accumulator, value| {
+                let value = std::borrow::Borrow::borrow(&value);
                 let Value::Float(value) = value else {
                     return Err(VmError::native("expected a sequence of Float".to_string()));
                 };
                 Ok::<_, VmError>(if product {
-                    accumulator * value
+                    accumulator * *value
                 } else {
-                    accumulator + value
+                    accumulator + *value
                 })
             })?;
             Ok(Value::Float(value))
@@ -646,6 +672,7 @@ fn aggregate(args: &[Value], kind: NumericKind, product: bool) -> Result<Value, 
         NumericKind::Number => {
             let initial = AdvancedNumber::Int(BigInt::from(if product { 1 } else { 0 }));
             let value = values.try_fold(initial, |accumulator, value| {
+                let value = std::borrow::Borrow::borrow(&value);
                 let Value::Number(value) = value else {
                     return Err(VmError::native("expected a sequence of Number".to_string()));
                 };
