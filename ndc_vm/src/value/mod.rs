@@ -897,6 +897,15 @@ impl fmt::Debug for Object {
 
 impl PartialOrd for Value {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        match (self, other) {
+            (Self::Int(a), Self::Int(b)) => return Some(a.cmp(b)),
+            (Self::Float(a), Self::Float(b)) => return Some(compare_floats(*a, *b)),
+            (Self::Int(a), Self::Float(b)) => return Some(compare_int_float(*a, *b)),
+            (Self::Float(a), Self::Int(b)) => return Some(compare_int_float(*b, *a).reverse()),
+            (Self::Number(a), Self::Number(b)) => return a.partial_cmp(b),
+            _ => {}
+        }
+
         if self.is_number() && other.is_number() {
             return vm_value_to_number(self)?.partial_cmp(&vm_value_to_number(other)?);
         }
@@ -906,6 +915,41 @@ impl PartialOrd for Value {
             (Self::Object(a), Self::Object(b)) => a.partial_cmp(b),
             _ => None,
         }
+    }
+}
+
+/// Match `AdvancedNumber`'s total ordering without constructing exact rational
+/// representations for two values that are already stored as floats.
+fn compare_floats(left: f64, right: f64) -> Ordering {
+    match (left.is_nan(), right.is_nan()) {
+        (true, true) => Ordering::Equal,
+        (true, false) => Ordering::Greater,
+        (false, true) => Ordering::Less,
+        (false, false) => left
+            .partial_cmp(&right)
+            .expect("non-NaN floats are totally ordered"),
+    }
+}
+
+/// Compare an `i64` to an `f64` exactly, without first allocating a `BigInt`
+/// and exact `BigRational` for their `AdvancedNumber` representations.
+fn compare_int_float(integer: i64, float: f64) -> Ordering {
+    const I64_MIN_AS_F64: f64 = i64::MIN as f64;
+    const I64_UPPER_BOUND_AS_F64: f64 = i64::MAX as f64;
+
+    if float.is_nan() || float >= I64_UPPER_BOUND_AS_F64 {
+        return Ordering::Less;
+    }
+    if float < I64_MIN_AS_F64 {
+        return Ordering::Greater;
+    }
+
+    let truncated = float.trunc() as i64;
+    match integer.cmp(&truncated) {
+        Ordering::Equal if float.fract() == 0.0 => Ordering::Equal,
+        Ordering::Equal if float.is_sign_positive() => Ordering::Less,
+        Ordering::Equal => Ordering::Greater,
+        ordering => ordering,
     }
 }
 
@@ -974,6 +1018,17 @@ impl Value {
 
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Int(a), Self::Int(b)) => return a == b,
+            (Self::Float(a), Self::Float(b)) => {
+                return compare_floats(*a, *b) == Ordering::Equal;
+            }
+            (Self::Int(a), Self::Float(b)) => return compare_int_float(*a, *b) == Ordering::Equal,
+            (Self::Float(a), Self::Int(b)) => return compare_int_float(*b, *a) == Ordering::Equal,
+            (Self::Number(a), Self::Number(b)) => return a == b,
+            _ => {}
+        }
+
         if self.is_number() && other.is_number() {
             return match (vm_value_to_number(self), vm_value_to_number(other)) {
                 (Some(left), Some(right)) => left == right,
@@ -1199,4 +1254,64 @@ mod tests {
         // Break the reference cycle so the test does not leak its allocations.
         elements.borrow_mut().clear();
     }
+
+    #[test]
+    fn same_representation_numbers_compare_without_changing_semantics() {
+        assert!(Value::int(-1) < Value::int(1));
+        assert_eq!(Value::float(-0.0), Value::float(0.0));
+        assert_eq!(Value::float(f64::NAN), Value::float(f64::NAN));
+        assert!(Value::float(f64::NAN) > Value::float(f64::INFINITY));
+
+        let one = Value::bigint(num::BigInt::from(1));
+        let two = Value::bigint(num::BigInt::from(2));
+        assert!(one < two);
+    }
+
+    #[test]
+    fn cross_representation_numbers_keep_exact_comparison_semantics() {
+        let integers = [
+            i64::MIN,
+            i64::MIN + 1,
+            -9_007_199_254_740_993,
+            -1,
+            0,
+            1,
+            9_007_199_254_740_993,
+            i64::MAX,
+        ];
+        let floats = [
+            f64::NEG_INFINITY,
+            i64::MIN as f64,
+            -9_007_199_254_740_992.0,
+            -1.5,
+            -0.0,
+            0.5,
+            1.0,
+            9_007_199_254_740_992.0,
+            i64::MAX as f64,
+            f64::INFINITY,
+            f64::NAN,
+        ];
+
+        for integer in integers {
+            for float in floats {
+                let fast_integer = Value::int(integer);
+                let fast_float = Value::float(float);
+                let canonical_integer = AdvancedNumber::Int(num::BigInt::from(integer));
+                let canonical_float = AdvancedNumber::Float(float);
+
+                assert_eq!(
+                    fast_integer.partial_cmp(&fast_float),
+                    canonical_integer.partial_cmp(&canonical_float),
+                    "ordering differs for {integer} and {float}"
+                );
+                assert_eq!(
+                    fast_integer == fast_float,
+                    canonical_integer == canonical_float,
+                    "equality differs for {integer} and {float}"
+                );
+            }
+        }
+    }
+
 }
