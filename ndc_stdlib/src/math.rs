@@ -87,12 +87,12 @@ fn declare(
     name: &str,
     parameters: Vec<StaticType>,
     return_type: StaticType,
-    documentation: &str,
+    documentation: impl Into<String>,
     func: impl Fn(&[Value]) -> Result<Value, VmError> + 'static,
 ) {
     env.declare_global_fn(Rc::new(NativeFunction {
         name: name.to_string(),
-        documentation: Some(documentation.to_string()),
+        documentation: Some(documentation.into()),
         static_type: StaticType::Function {
             parameters: Some(parameters),
             return_type: Box::new(return_type),
@@ -1041,6 +1041,25 @@ enum Transcendental {
 }
 
 impl Transcendental {
+    const ALL: [Self; 16] = [
+        Self::Acos,
+        Self::Acosh,
+        Self::Asin,
+        Self::Asinh,
+        Self::Atan,
+        Self::Atanh,
+        Self::Cbrt,
+        Self::Cos,
+        Self::Exp,
+        Self::Ln,
+        Self::Log2,
+        Self::Log10,
+        Self::Sin,
+        Self::Sqrt,
+        Self::Tan,
+        Self::Tanh,
+    ];
+
     fn name(self) -> &'static str {
         match self {
             Self::Acos => "acos",
@@ -1060,6 +1079,63 @@ impl Transcendental {
             Self::Tan => "tan",
             Self::Tanh => "tanh",
         }
+    }
+
+    fn description(self) -> &'static str {
+        match self {
+            Self::Acos => "Computes the inverse cosine in radians.",
+            Self::Acosh => "Computes the inverse hyperbolic cosine.",
+            Self::Asin => "Computes the inverse sine in radians.",
+            Self::Asinh => "Computes the inverse hyperbolic sine.",
+            Self::Atan => "Computes the inverse tangent in radians.",
+            Self::Atanh => "Computes the inverse hyperbolic tangent.",
+            Self::Cbrt => "Returns the cube root of the input.",
+            Self::Cos => "Computes the cosine of an angle in radians.",
+            Self::Exp => "Raises e to the power of the input.",
+            Self::Ln => "Returns the natural logarithm of the input.",
+            Self::Log2 => "Returns the base-2 logarithm of the input.",
+            Self::Log10 => "Returns the base-10 logarithm of the input.",
+            Self::Sin => "Computes the sine of an angle in radians.",
+            Self::Sqrt => "Returns the square root of the input.",
+            Self::Tan => "Computes the tangent of an angle in radians.",
+            Self::Tanh => "Computes the hyperbolic tangent.",
+        }
+    }
+
+    fn real_domain_description(self) -> &'static str {
+        match self {
+            Self::Acos | Self::Asin => " Real inputs outside [-1, 1] produce NaN.",
+            Self::Acosh => " Real inputs below 1 produce NaN.",
+            Self::Atanh => " Real inputs with an absolute value greater than 1 produce NaN.",
+            Self::Ln | Self::Log2 | Self::Log10 | Self::Sqrt => {
+                " Negative real inputs produce NaN."
+            }
+            Self::Asinh
+            | Self::Atan
+            | Self::Cbrt
+            | Self::Cos
+            | Self::Exp
+            | Self::Sin
+            | Self::Tan
+            | Self::Tanh => "",
+        }
+    }
+
+    fn documentation(self, kind: NumericKind) -> String {
+        let mode = match kind {
+            NumericKind::Int => " Converts Int input to Float before evaluation and returns Float.",
+            NumericKind::Float => " Returns Float for Float input.",
+            NumericKind::Number => {
+                " Returns Number for real or complex Number input. Values outside the real domain continue into the complex plane."
+            }
+        };
+        let domain = if kind == NumericKind::Number {
+            ""
+        } else {
+            self.real_domain_description()
+        };
+
+        format!("{}{domain}{mode}", self.description())
     }
 
     fn apply_float(self, value: f64) -> f64 {
@@ -1106,32 +1182,13 @@ impl Transcendental {
 }
 
 fn register_transcendentals(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
-    const FUNCTIONS: [Transcendental; 16] = [
-        Transcendental::Acos,
-        Transcendental::Acosh,
-        Transcendental::Asin,
-        Transcendental::Asinh,
-        Transcendental::Atan,
-        Transcendental::Atanh,
-        Transcendental::Cbrt,
-        Transcendental::Cos,
-        Transcendental::Exp,
-        Transcendental::Ln,
-        Transcendental::Log2,
-        Transcendental::Log10,
-        Transcendental::Sin,
-        Transcendental::Sqrt,
-        Transcendental::Tan,
-        Transcendental::Tanh,
-    ];
-
-    for function in FUNCTIONS {
+    for function in Transcendental::ALL {
         declare(
             env,
             function.name(),
             vec![StaticType::Int],
             StaticType::Float,
-            "Applies a transcendental function and returns a Float.",
+            function.documentation(NumericKind::Int),
             move |args| {
                 let [Value::Int(value)] = args else {
                     return Err(VmError::native("expected one Int argument".to_string()));
@@ -1144,7 +1201,7 @@ fn register_transcendentals(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
             function.name(),
             vec![StaticType::Float],
             StaticType::Float,
-            "Applies a transcendental function to a Float.",
+            function.documentation(NumericKind::Float),
             move |args| {
                 let [Value::Float(value)] = args else {
                     return Err(VmError::native("expected one Float argument".to_string()));
@@ -1157,7 +1214,7 @@ fn register_transcendentals(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
             function.name(),
             vec![StaticType::Number],
             StaticType::Number,
-            "Applies a transcendental function with complex continuation.",
+            function.documentation(NumericKind::Number),
             move |args| {
                 let [Value::Number(value)] = args else {
                     return Err(VmError::native("expected one Number argument".to_string()));
@@ -1218,6 +1275,42 @@ mod tests {
                                 }
                     }));
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn transcendental_overloads_have_function_specific_documentation() {
+        let mut registry = FunctionRegistry::default();
+        register(&mut registry);
+
+        for transcendental in Transcendental::ALL {
+            for kind in [NumericKind::Int, NumericKind::Float, NumericKind::Number] {
+                let expected_type = StaticType::Function {
+                    parameters: Some(vec![kind.static_type()]),
+                    return_type: Box::new(match kind {
+                        NumericKind::Int | NumericKind::Float => StaticType::Float,
+                        NumericKind::Number => StaticType::Number,
+                    }),
+                };
+                let function = registry
+                    .iter()
+                    .find(|function| {
+                        function.name == transcendental.name()
+                            && function.static_type == expected_type
+                    })
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "missing {}({}) transcendental overload",
+                            transcendental.name(),
+                            kind.static_type()
+                        )
+                    });
+
+                assert_eq!(
+                    function.documentation.as_deref(),
+                    Some(transcendental.documentation(kind).as_str())
+                );
             }
         }
     }
