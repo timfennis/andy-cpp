@@ -1,4 +1,4 @@
-let result = 1;
+let result = 1n;
 for i in 2..=5000 {
     result *= i;
 }
