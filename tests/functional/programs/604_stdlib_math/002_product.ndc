@@ -1,5 +1,5 @@
 assert_eq((1..10).product(), 362880);
-assert_eq(%{1,2,3}.keys().product(), 6);
-assert_eq(%{1: "foo", 2: "bar", 3: "baz"}.keys().product(), 6);
 assert_eq((1,2,3,4).product(), 24);
 assert_eq([1,2,3,4,5].product(), 120);
+assert_eq([1.0,2.0,3.0].product(), 6.0);
+assert_eq([1n,2n,3n].product(), 6n);

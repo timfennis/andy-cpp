@@ -1,0 +1,18 @@
+let decimal_integer: Number = 123456789123456789123456789n;
+let decimal_float: Number = 1.25n;
+let binary: Number = 0b101010n;
+let octal: Number = 0o52n;
+let hexadecimal: Number = 0x2an;
+let imaginary_i: Number = 2i;
+let imaginary_j: Number = 2j;
+
+assert_eq(decimal_integer, 123456789123456789123456789n);
+assert_eq(decimal_float, Number(1.25));
+assert_eq(binary, 42n);
+assert_eq(octal, 42n);
+assert_eq(hexadecimal, 42n);
+assert_eq(imaginary_i, imaginary_j);
+
+// Arbitrary-radix literals intentionally remain Int literals without a suffix.
+let arbitrary_radix: Int = 16r2a;
+assert_eq(arbitrary_radix, 42);

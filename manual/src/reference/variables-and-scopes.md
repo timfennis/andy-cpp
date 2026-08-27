@@ -47,7 +47,7 @@ The `=` operator can be used to reassign a value to an existing variable. When y
 ```ndc
 let x = 1;     // type is Int
 x = 2;         // type is still Int
-x = 3.14;      // type widens to Number (LUB of Int and Float)
+x = 3.14;      // type widens to Any (Int and Float are siblings)
 ```
 
 ```ndc
@@ -68,11 +68,11 @@ let name: String = "world";
 let xs: List<Int> = [1, 2, 3];
 ```
 
-A subtype is fine — `Int` fits where `Number` is asked for, and so on:
+A subtype is fine. All concrete types fit where `Any` is requested:
 
 ```ndc
-let n: Number = 3;        // OK: Int is a Number
-let x: Any = "anything";  // OK: everything is Any
+let n: Number = 3n;
+let x: Any = "anything";  // every value fits Any
 ```
 
 A mismatch is rejected with a `mismatched types` error:
@@ -95,7 +95,7 @@ Once a binding has an annotation, it stays locked to that type. Reassignment and
 ```ndc
 let x: Int = 5;
 x = "test";   // ERROR: mismatched types
-x /= 2;       // ERROR: division can produce a Rational, which doesn't fit in Int
+x += 0.5;     // ERROR: Float doesn't fit in Int
 ```
 
 If you want a binding that widens freely, just leave the annotation off. Annotations are opt-in.

@@ -1,0 +1,2 @@
+// expect-error: suffix is not supported on arbitrary-radix literals
+print(16rffn);

@@ -45,6 +45,13 @@ impl NumberLexer for Lexer<'_> {
 
             self.lex_to_buffer(&mut buf, |c| c == '1' || c == '0');
 
+            let is_number = if matches!(self.source.peek(), Some('n')) {
+                self.source.next();
+                true
+            } else {
+                false
+            };
+
             match self.source.peek() {
                 Some(c) if c.is_ascii_digit() => {
                     self.source.next();
@@ -63,7 +70,12 @@ impl NumberLexer for Lexer<'_> {
                 _ => {}
             }
 
-            return match buf_to_token_with_radix(&buf, 2) {
+            let token = if is_number {
+                buf_to_number_token_with_radix(&buf, 2)
+            } else {
+                buf_to_token_with_radix(&buf, 2)
+            };
+            return match token {
                 Some(token) => Ok(TokenLocation {
                     token,
                     span: self.source.create_span(start_offset),
@@ -80,7 +92,19 @@ impl NumberLexer for Lexer<'_> {
 
             self.lex_to_buffer(&mut buf, |c| c.is_ascii_hexdigit());
 
-            return match buf_to_token_with_radix(&buf, 16) {
+            let is_number = if matches!(self.source.peek(), Some('n')) {
+                self.source.next();
+                true
+            } else {
+                false
+            };
+
+            let token = if is_number {
+                buf_to_number_token_with_radix(&buf, 16)
+            } else {
+                buf_to_token_with_radix(&buf, 16)
+            };
+            return match token {
                 Some(token) => Ok(TokenLocation {
                     token,
                     span: self.source.create_span(start_offset),
@@ -97,7 +121,19 @@ impl NumberLexer for Lexer<'_> {
 
             self.lex_to_buffer(&mut buf, |c| matches!(c, '0'..='7'));
 
-            return match buf_to_token_with_radix(&buf, 8) {
+            let is_number = if matches!(self.source.peek(), Some('n')) {
+                self.source.next();
+                true
+            } else {
+                false
+            };
+
+            let token = if is_number {
+                buf_to_number_token_with_radix(&buf, 8)
+            } else {
+                buf_to_token_with_radix(&buf, 8)
+            };
+            return match token {
                 Some(token) => Ok(TokenLocation {
                     token,
                     span: self.source.create_span(start_offset),
@@ -158,6 +194,14 @@ impl NumberLexer for Lexer<'_> {
                             let mut buf = String::new();
                             self.lex_to_buffer(&mut buf, validator_for_radix(usize::from(radix)));
 
+                            if matches!(self.source.peek(), Some('n')) {
+                                return Err(Error::text(
+                                    "the `n` suffix is not supported on arbitrary-radix literals"
+                                        .to_string(),
+                                    self.source.create_span(start_offset),
+                                ));
+                            }
+
                             return match buf_to_token_with_radix(&buf, u32::from(radix)) {
                                 Some(token) => Ok(TokenLocation {
                                     token,
@@ -176,6 +220,30 @@ impl NumberLexer for Lexer<'_> {
                             ));
                         }
                     }
+                }
+                'n' => {
+                    self.source.next();
+                    let token = if is_float {
+                        buf.parse::<f64>()
+                            .map(Token::NumberFloat)
+                            .map_err(|_error| {
+                                Error::text(
+                                    format!("invalid Number literal '{buf}n'"),
+                                    self.source.create_span(start_offset),
+                                )
+                            })?
+                    } else {
+                        buf_to_number_token_with_radix(&buf, 10).ok_or_else(|| {
+                            Error::text(
+                                format!("invalid Number literal '{buf}n'"),
+                                self.source.create_span(start_offset),
+                            )
+                        })?
+                    };
+                    return Ok(TokenLocation {
+                        token,
+                        span: self.source.create_span(start_offset),
+                    });
                 }
                 'j' | 'i' => {
                     self.source.next();
@@ -219,6 +287,12 @@ fn buf_to_token_with_radix(buf: &str, radix: u32) -> Option<Token> {
             Err(_err) => None,
         },
     }
+}
+
+fn buf_to_number_token_with_radix(buf: &str, radix: u32) -> Option<Token> {
+    BigInt::from_str_radix(buf, radix)
+        .ok()
+        .map(Token::NumberInt)
 }
 
 fn validator_for_radix(radix: usize) -> impl Fn(char) -> bool {

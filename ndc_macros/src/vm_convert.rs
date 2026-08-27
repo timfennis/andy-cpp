@@ -99,7 +99,10 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
             let err = arg_error(position, "float");
             VmInputArg {
                 extract: quote! {
-                    let #temp = #raw.to_f64().ok_or_else(|| #err)?;
+                    let ndc_vm::value::Value::Float(#temp) = #raw else {
+                        return Err(#err);
+                    };
+                    let #temp = *#temp;
                 },
                 pass: quote! { #temp },
                 static_type: quote! { ndc_core::StaticType::Float },
@@ -160,11 +163,14 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
             let err = arg_error(position, "int");
             VmInputArg {
                 extract: quote! {
-                    let #temp = {
-                        let num = #raw.to_number().ok_or_else(|| #err)?;
-                        usize::try_from(num).map_err(|e| {
-                            ndc_vm::error::VmError::native(format!("arg {}: {}", #position, e))
-                        })?
+                    let #temp = match #raw {
+                        ndc_vm::value::Value::Int(value) => usize::try_from(*value).map_err(|_| {
+                            ndc_vm::error::VmError::native(format!(
+                                "arg {}: expected a non-negative integer, but the value was negative",
+                                #position,
+                            ))
+                        })?,
+                        _ => return Err(#err),
                     };
                 },
                 pass: quote! { #temp },
@@ -176,12 +182,9 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
             let err = arg_error(position, "int");
             VmInputArg {
                 extract: quote! {
-                    let #temp = {
-                        let num = #raw.to_number().ok_or_else(|| #err)?;
-                        match num {
-                            ndc_core::num::Number::Int(i) => i.to_bigint(),
-                            _ => return Err(#err),
-                        }
+                    let #temp = match #raw {
+                        ndc_vm::value::Value::Int(value) => num::BigInt::from(*value),
+                        _ => return Err(#err),
                     };
                 },
                 pass: quote! { &#temp },
@@ -196,13 +199,13 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                     let #temp = {
                         let num = #raw.to_number().ok_or_else(|| #err)?;
                         match num {
-                            ndc_core::num::Number::Rational(r) => *r,
+                            ndc_core::num::AdvancedNumber::Rational(r) => *r,
                             _ => return Err(#err),
                         }
                     };
                 },
                 pass: quote! { &#temp },
-                static_type: quote! { ndc_core::StaticType::Rational },
+                static_type: quote! { ndc_core::StaticType::Number },
             }
         }
 
@@ -213,13 +216,13 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                     let #temp = {
                         let num = #raw.to_number().ok_or_else(|| #err)?;
                         match num {
-                            ndc_core::num::Number::Complex(c) => c,
+                            ndc_core::num::AdvancedNumber::Complex(c) => c,
                             _ => return Err(#err),
                         }
                     };
                 },
                 pass: quote! { #temp },
-                static_type: quote! { ndc_core::StaticType::Complex },
+                static_type: quote! { ndc_core::StaticType::Number },
             }
         }
 
@@ -520,7 +523,7 @@ fn vm_return_for_classified(ty: &syn::Type) -> Option<(TokenStream, TokenStream)
         NdcType::BigInt => Some((
             quote! {
                 Ok(ndc_vm::value::Value::from_number(
-                    ndc_core::num::Number::Int(
+                    ndc_core::num::AdvancedNumber::Int(
                         ndc_core::int::Int::BigInt(result).simplified()
                     )
                 ))
@@ -530,10 +533,10 @@ fn vm_return_for_classified(ty: &syn::Type) -> Option<(TokenStream, TokenStream)
         NdcType::BigRational => Some((
             quote! {
                 Ok(ndc_vm::value::Value::from_number(
-                    ndc_core::num::Number::Rational(Box::new(result))
+                    ndc_core::num::AdvancedNumber::Rational(Box::new(result))
                 ))
             },
-            quote! { ndc_core::StaticType::Rational },
+            quote! { ndc_core::StaticType::Number },
         )),
         // Input-only types — not valid as return types
         _ => None,

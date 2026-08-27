@@ -255,9 +255,16 @@ impl Analyser {
         match expression {
             Expression::BoolLiteral(_) => Ok(StaticType::Bool),
             Expression::StringLiteral(_) => Ok(StaticType::String),
-            Expression::Int64Literal(_) | Expression::BigIntLiteral(_) => Ok(StaticType::Int),
+            Expression::Int64Literal(_) => Ok(StaticType::Int),
+            Expression::BigIntLiteral(value) => {
+                self.emit(AnalysisError::integer_literal_out_of_range(value, *span));
+                Ok(StaticType::Int)
+            }
             Expression::Float64Literal(_) => Ok(StaticType::Float),
-            Expression::ComplexLiteral(_) => Ok(StaticType::Complex),
+            Expression::NumberIntLiteral(_) | Expression::NumberFloatLiteral(_) => {
+                Ok(StaticType::Number)
+            }
+            Expression::ComplexLiteral(_) => Ok(StaticType::Number),
             Expression::Continue | Expression::Break => Ok(StaticType::Never),
             Expression::Identifier {
                 name: ident,
@@ -1279,6 +1286,16 @@ impl AnalysisError {
         self.help_text.as_deref()
     }
 
+    fn integer_literal_out_of_range(value: &impl std::fmt::Display, span: Span) -> Self {
+        Self {
+            text: format!(
+                "integer literal does not fit in Int; use the advanced literal `{value}n`"
+            ),
+            span,
+            help_text: None,
+        }
+    }
+
     fn invalid_type_annotation(err: &StaticTypeConstructionError, span: Span) -> Self {
         Self {
             text: err.to_string(),
@@ -1521,7 +1538,7 @@ mod tests {
                 "let values = [1]; values[0] += 0.5; values",
                 vec![("+".to_string(), add)],
             ),
-            StaticType::List(Box::new(StaticType::Number)),
+            StaticType::List(Box::new(StaticType::Any)),
         );
     }
 

@@ -2,7 +2,7 @@
 // and cyclic values) by degrading it to the nearest JSON representation
 
 // Rationals become floats
-assert_eq(json_encode_lossy(10/3), "3.3333333333333335");
+assert_eq(json_encode_lossy(10n/3n), "3.3333333333333335");
 
 // Complex numbers become strings
 assert_eq(json_encode_lossy(5.0 + 3.1j), "\"5+3.1i\"");

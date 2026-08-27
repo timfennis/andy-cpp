@@ -4,4 +4,4 @@
 // negative") and aborted the whole process. It now computes the
 // reciprocal, exactly like a plain negative integer exponent.
 // expect-output: 1/2
-print(2 ^ (1/-1));
+print(2n ^ (1n/-1n));

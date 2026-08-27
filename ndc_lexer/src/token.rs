@@ -10,6 +10,8 @@ pub enum Token {
     Int64(i64),
     Float64(f64),
     BigInt(BigInt),
+    NumberInt(BigInt),
+    NumberFloat(f64),
     Complex(Complex64),
     Infinity,
 
@@ -107,6 +109,13 @@ impl fmt::Display for Token {
             }
             Self::BigInt(n) => {
                 return write!(f, "{n}");
+            }
+            Self::NumberInt(n) => {
+                return write!(f, "{n}n");
+            }
+            Self::NumberFloat(n) => {
+                let mut buffer = ryu::Buffer::new();
+                return write!(f, "{}n", buffer.format(*n));
             }
             Self::Complex(n) => {
                 return write!(f, "{n}");

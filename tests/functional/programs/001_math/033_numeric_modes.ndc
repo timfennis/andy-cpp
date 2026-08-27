@@ -1,0 +1,40 @@
+// The three public numeric types are siblings. Every mixed arithmetic pair
+// has an explicit overload and the result mode follows Int < Float < Number.
+let int_int: Int = 1 + 2;
+let int_float: Float = 1 + 2.5;
+let float_int: Float = 2.5 + 1;
+let float_float: Float = 1.5 + 2.5;
+let int_number: Number = 1 + 2n;
+let number_int: Number = 2n + 1;
+let float_number: Number = 1.5 + 2n;
+let number_float: Number = 2n + 1.5;
+let number_number: Number = 1n + 2n;
+
+assert_eq(int_int, 3);
+assert_eq(int_float, 3.5);
+assert_eq(float_int, 3.5);
+assert_eq(float_float, 4.0);
+assert_eq(int_number, 3n);
+assert_eq(number_int, 3n);
+assert_eq(float_number, 3.5n);
+assert_eq(number_float, 3.5n);
+assert_eq(number_number, 3n);
+
+// Int division truncates, floor division rounds toward negative infinity,
+// and the two remainder operators pair with those choices.
+assert_eq(-7 / 2, -3);
+assert_eq(-7 \ 2, -4);
+assert_eq(-7 % 2, -1);
+assert_eq(-7 %% 2, 1);
+assert_eq(2 ^ 10, 1024);
+
+// Number division remains exact and all Number results remain wrapped.
+let ratio: Number = 7n / 2n;
+let floored: Number = -7n \ 2n;
+assert_eq(ratio, 7n / 2n);
+assert_eq(floored, -4n);
+assert_eq(7n \ -2n, -4n);
+
+assert_eq(Number(3), 3n);
+assert_eq(Number(3.5), 3.5n);
+assert_eq(Number(3n), 3n);

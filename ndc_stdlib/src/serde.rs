@@ -1,5 +1,7 @@
 use anyhow::{Context, bail};
 use ndc_core::hash_map::HashMap;
+use ndc_core::int::Int;
+use ndc_core::num::AdvancedNumber;
 use ndc_macros::export_module;
 use ndc_vm::value::{Object, Value};
 use num::ToPrimitive;
@@ -32,6 +34,7 @@ fn value_to_json(
         Value::Float(f) if f.is_finite() => Ok(json!(f)),
         Value::Float(_) if lossy => Ok(JsonValue::Null),
         Value::Float(f) => bail!("cannot convert non-finite float {f} to JSON"),
+        Value::Number(number) => advanced_number_to_json(number, lossy),
         Value::Object(obj) => {
             // Only these variants have interior mutability through which a
             // value can contain itself; all other variants are leaves or
@@ -58,6 +61,27 @@ fn value_to_json(
     }
 }
 
+fn advanced_number_to_json(
+    number: &AdvancedNumber,
+    lossy: bool,
+) -> Result<JsonValue, anyhow::Error> {
+    match number {
+        AdvancedNumber::Int(Int::Int64(i)) => Ok(json!(i)),
+        AdvancedNumber::Int(Int::BigInt(big_int)) => Number::from_str(&big_int.to_string())
+            .map(JsonValue::Number)
+            .context("cannot convert bigint to JSON number"),
+        AdvancedNumber::Float(f) if f.is_finite() => Ok(json!(f)),
+        AdvancedNumber::Float(_) if lossy => Ok(JsonValue::Null),
+        AdvancedNumber::Float(f) => bail!("cannot convert non-finite float {f} to JSON"),
+        AdvancedNumber::Rational(ratio) if lossy => Ok(json!(ratio.to_f64())),
+        AdvancedNumber::Rational(_) => {
+            bail!("cannot convert a rational number to JSON, convert it to a float first")
+        }
+        AdvancedNumber::Complex(complex) if lossy => Ok(json!(format!("{complex}"))),
+        AdvancedNumber::Complex(_) => bail!("cannot convert a complex number to JSON"),
+    }
+}
+
 fn object_to_json(
     obj: &Rc<Object>,
     lossy: bool,
@@ -72,15 +96,6 @@ fn object_to_json(
     };
 
     match obj.as_ref() {
-        Object::BigInt(big_int) => Number::from_str(&big_int.to_string())
-            .map(JsonValue::Number)
-            .context("cannot convert bigint to JSON number"),
-        Object::Rational(ratio) if lossy => Ok(json!(ratio.to_f64())),
-        Object::Rational(_) => {
-            bail!("cannot convert a rational number to JSON, convert it to a float first")
-        }
-        Object::Complex(complex) if lossy => Ok(json!(format!("{complex}"))),
-        Object::Complex(_) => bail!("cannot convert a complex number to JSON"),
         Object::Some(inner) if lossy => value_to_json(inner, lossy, active),
         Object::Some(_) => bail!("cannot convert an option to JSON, unwrap it first"),
         Object::Iterator(i) if lossy => {

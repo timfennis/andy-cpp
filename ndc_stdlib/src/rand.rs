@@ -22,7 +22,7 @@ pub fn random_n<N: SampleUniform + std::fmt::Display + Copy>(
 #[export_module]
 mod inner {
     use itertools::Itertools;
-    use ndc_core::num::Number;
+    use ndc_core::num::AdvancedNumber;
 
     /// Randomly shuffles the elements of the list in place.
     pub fn shuffle(list: &mut [Value]) {
@@ -50,13 +50,13 @@ mod inner {
 
     #[function(name = "randf")]
     /// Generate a random number between 0 (inclusive) and `upper` (exclusive)
-    pub fn randf_1(upper: &Number) -> anyhow::Result<f64> {
+    pub fn randf_1(upper: &AdvancedNumber) -> anyhow::Result<f64> {
         random_n(0.0, upper.try_into()?)
     }
 
     #[function(name = "randf")]
     /// Generate a random number between `lower` (inclusive) and `upper` (exclusive)
-    pub fn randf_2(lower: &Number, upper: &Number) -> anyhow::Result<f64> {
+    pub fn randf_2(lower: &AdvancedNumber, upper: &AdvancedNumber) -> anyhow::Result<f64> {
         random_n(lower.try_into()?, upper.try_into()?)
     }
 
@@ -68,13 +68,13 @@ mod inner {
 
     #[function(name = "randi")]
     /// Generate a random number between 0 (inclusive) and `upper` (exclusive)
-    pub fn randi_1(upper: &Number) -> anyhow::Result<i64> {
+    pub fn randi_1(upper: &AdvancedNumber) -> anyhow::Result<i64> {
         random_n(0, upper.try_into()?)
     }
 
     #[function(name = "randi")]
     /// Generate a random number between `lower` (inclusive) and `upper` (exclusive)
-    pub fn randi_2(lower: &Number, upper: &Number) -> anyhow::Result<i64> {
+    pub fn randi_2(lower: &AdvancedNumber, upper: &AdvancedNumber) -> anyhow::Result<i64> {
         random_n(lower.try_into()?, upper.try_into()?)
     }
 }

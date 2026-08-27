@@ -224,6 +224,20 @@ impl Compiler {
                 let idx = self.ir.add_constant(Value::bigint(i));
                 self.ir.write(OpCode::Constant(idx), span);
             }
+            Expression::NumberIntLiteral(i) => {
+                let idx = self
+                    .ir
+                    .add_constant(Value::number(ndc_core::num::AdvancedNumber::Int(
+                        ndc_core::int::Int::BigInt(i).simplified(),
+                    )));
+                self.ir.write(OpCode::Constant(idx), span);
+            }
+            Expression::NumberFloatLiteral(f) => {
+                let idx = self
+                    .ir
+                    .add_constant(Value::number(ndc_core::num::AdvancedNumber::Float(f)));
+                self.ir.write(OpCode::Constant(idx), span);
+            }
             Expression::ComplexLiteral(c) => {
                 let idx = self.ir.add_constant(Value::complex(c));
                 self.ir.write(OpCode::Constant(idx), span);

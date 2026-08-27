@@ -4,4 +4,4 @@
 // instead of computing a result that wouldn't fit in any reasonable
 // amount of memory.
 // expect-error: exponent too large
-print(-2 ^ 170141183460469231731687303715884105727)
+print(-2n ^ 170141183460469231731687303715884105727n)

@@ -7,6 +7,5 @@ version.workspace = true
 ahash.workspace = true
 itertools.workspace = true
 num.workspace = true
-ordered-float.workspace = true
 ryu.workspace = true
 thiserror.workspace = true
