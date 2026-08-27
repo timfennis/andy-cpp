@@ -467,14 +467,14 @@ module.exports = grammar({
     ),
 
     integer: _ => token(choice(
-      /0b[01][01_]*/,
-      /0o[0-7][0-7_]*/,
-      /0x[0-9A-Fa-f][0-9A-Fa-f_]*/,
+      /0b[01][01_]*n?/,
+      /0o[0-7][0-7_]*n?/,
+      /0x[0-9A-Fa-f][0-9A-Fa-f_]*n?/,
       /[0-9]+r[0-9A-Za-z][0-9A-Za-z_]*/, // arbitrary radix, e.g. 16rFF
-      /[0-9][0-9_]*/,
+      /[0-9][0-9_]*n?/,
     )),
 
-    float: _ => token(/[0-9][0-9_]*\.[0-9][0-9_]*/),
+    float: _ => token(/[0-9][0-9_]*\.[0-9][0-9_]*n?/),
 
     // Imaginary part of a complex literal: `3i`, `2.5j`
     complex: _ => token(/[0-9][0-9_]*(\.[0-9][0-9_]*)?[ij]/),

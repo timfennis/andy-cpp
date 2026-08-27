@@ -207,3 +207,32 @@ shift right after a cast comparison
     right: (binary_expression
       left: (integer)
       right: (integer))))
+
+==================
+advanced number literals
+==================
+
+let decimal = 42n;
+let float = 1.25n;
+let binary = 0b101n;
+let octal = 0o77n;
+let hexadecimal = 0xffn;
+
+---
+
+(source_file
+  (variable_declaration
+    name: (identifier)
+    value: (integer))
+  (variable_declaration
+    name: (identifier)
+    value: (float))
+  (variable_declaration
+    name: (identifier)
+    value: (integer))
+  (variable_declaration
+    name: (identifier)
+    value: (integer))
+  (variable_declaration
+    name: (identifier)
+    value: (integer)))

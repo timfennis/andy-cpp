@@ -59,6 +59,8 @@ impl AndycppHighlighter {
                 Token::BigInt(_)
                 | Token::Int64(_)
                 | Token::Float64(_)
+                | Token::NumberInt(_)
+                | Token::NumberFloat(_)
                 | Token::Complex(_)
                 | Token::Infinity
                 | Token::True
@@ -253,5 +255,30 @@ fn collect_function_spans(expr: &ExpressionLocation, spans: &mut AHashSet<usize>
         | Expression::StructDeclaration { .. }
         | Expression::Break
         | Expression::Continue => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use yansi::Color;
+
+    #[test]
+    fn number_literals_are_highlighted_as_numbers() {
+        for literal in ["42n", "1.25n", "0b101n", "0o77n", "0xffn"] {
+            let highlighted = AndycppHighlighter::highlight_parsed(literal);
+
+            assert_eq!(
+                highlighted.len(),
+                1,
+                "unexpected tokenization for {literal}"
+            );
+            assert_eq!(highlighted[0].value, literal);
+            assert_eq!(
+                highlighted[0].style.foreground,
+                Some(Color::Rgb(209, 154, 102)),
+                "unexpected color for {literal}"
+            );
+        }
     }
 }
