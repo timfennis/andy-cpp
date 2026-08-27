@@ -223,9 +223,7 @@ impl Compiler {
             Expression::NumberIntLiteral(i) => {
                 let idx = self
                     .ir
-                    .add_constant(Value::number(ndc_core::num::AdvancedNumber::Int(
-                        ndc_core::int::Int::BigInt(i).simplified(),
-                    )));
+                    .add_constant(Value::number(ndc_core::num::AdvancedNumber::Int(i)));
                 self.ir.write(OpCode::Constant(idx), span);
             }
             Expression::NumberFloatLiteral(f) => {

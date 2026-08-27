@@ -1,5 +1,4 @@
 use factorial::Factorial;
-use ndc_core::int::Int;
 use ndc_core::num::{AdvancedNumber, BinaryOperatorError};
 use ndc_core::{FunctionRegistry, StaticType};
 use ndc_vm::error::VmError;
@@ -210,7 +209,7 @@ fn primitive_float(kind: NumericKind, value: &Value) -> Result<f64, VmError> {
 
 fn promoted_number(kind: NumericKind, value: &Value) -> Result<AdvancedNumber, VmError> {
     match (kind, value) {
-        (NumericKind::Int, Value::Int(value)) => Ok(AdvancedNumber::Int(Int::Int64(*value))),
+        (NumericKind::Int, Value::Int(value)) => Ok(AdvancedNumber::Int(BigInt::from(*value))),
         (NumericKind::Float, Value::Float(value)) => Ok(AdvancedNumber::Float(*value)),
         (NumericKind::Number, Value::Number(value)) => Ok(value.as_ref().clone()),
         _ => Err(VmError::native(format!(
@@ -633,7 +632,7 @@ fn aggregate(args: &[Value], kind: NumericKind, product: bool) -> Result<Value, 
             Ok(Value::Float(value))
         }
         NumericKind::Number => {
-            let initial = AdvancedNumber::Int(Int::Int64(if product { 1 } else { 0 }));
+            let initial = AdvancedNumber::Int(BigInt::from(if product { 1 } else { 0 }));
             let value = values.try_fold(initial, |accumulator, value| {
                 let Value::Number(value) = value else {
                     return Err(VmError::native("expected a sequence of Number".to_string()));
@@ -726,7 +725,7 @@ fn register_number_helpers(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
                     (AdvancedNumber::Complex(value), false) => AdvancedNumber::Float(value.re),
                     (AdvancedNumber::Complex(value), true) => AdvancedNumber::Float(value.im),
                     (_, false) => value.as_ref().clone(),
-                    (_, true) => AdvancedNumber::Int(Int::Int64(0)),
+                    (_, true) => AdvancedNumber::Int(BigInt::from(0)),
                 };
                 Ok(Value::from_number(component))
             },
@@ -746,13 +745,11 @@ fn register_number_helpers(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
                 };
                 let value = match value.as_ref() {
                     AdvancedNumber::Int(value) if numerator => AdvancedNumber::Int(value.clone()),
-                    AdvancedNumber::Int(_) => AdvancedNumber::Int(Int::Int64(1)),
+                    AdvancedNumber::Int(_) => AdvancedNumber::Int(BigInt::from(1)),
                     AdvancedNumber::Rational(value) if numerator => {
-                        AdvancedNumber::Int(Int::BigInt(value.numer().clone()).simplified())
+                        AdvancedNumber::Int(value.numer().clone())
                     }
-                    AdvancedNumber::Rational(value) => {
-                        AdvancedNumber::Int(Int::BigInt(value.denom().clone()).simplified())
-                    }
+                    AdvancedNumber::Rational(value) => AdvancedNumber::Int(value.denom().clone()),
                     _ => {
                         return Err(VmError::native(
                             "expected an exact integer or rational Number".to_string(),
@@ -902,7 +899,7 @@ fn exact_integer(value: &Value) -> Result<BigInt, VmError> {
         ));
     };
     match value.as_ref() {
-        AdvancedNumber::Int(value) => Ok(value.to_bigint()),
+        AdvancedNumber::Int(value) => Ok(value.clone()),
         AdvancedNumber::Rational(value) if value.is_integer() => Ok(value.to_integer()),
         _ => Err(VmError::native(
             "expected an exact integer Number".to_string(),
@@ -911,7 +908,7 @@ fn exact_integer(value: &Value) -> Result<BigInt, VmError> {
 }
 
 fn bigint_number(value: BigInt) -> Value {
-    Value::from_number(AdvancedNumber::Int(Int::BigInt(value).simplified()))
+    Value::from_number(AdvancedNumber::Int(value))
 }
 
 fn register_conversions(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
@@ -981,7 +978,7 @@ fn convert_to_int(value: &Value) -> Result<i64, VmError> {
         Value::Int(value) => return Ok(*value),
         Value::Float(value) => float_to_i64(*value),
         Value::Number(value) => match value.as_ref() {
-            AdvancedNumber::Int(value) => value.to_bigint().to_i64(),
+            AdvancedNumber::Int(value) => value.to_i64(),
             AdvancedNumber::Float(value) => float_to_i64(*value),
             AdvancedNumber::Rational(value) => value.to_integer().to_i64(),
             AdvancedNumber::Complex(_) => None,

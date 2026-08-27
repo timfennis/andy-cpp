@@ -6,7 +6,6 @@ use crate::iterator::SharedIterator;
 use ndc_core::StaticType;
 use ndc_core::compare::FallibleOrd;
 use ndc_core::hash_map::{DefaultHasher, HashMap};
-use ndc_core::int::Int;
 use ndc_core::num::AdvancedNumber;
 use ndc_core::r#struct::StructInfo;
 use ndc_parser::ResolvedVar;
@@ -197,7 +196,7 @@ impl Value {
     }
 
     pub fn bigint(i: num::BigInt) -> Self {
-        Self::number(AdvancedNumber::Int(Int::BigInt(i)))
+        Self::number(AdvancedNumber::Int(i))
     }
 
     pub fn complex(c: num::complex::Complex64) -> Self {
@@ -575,23 +574,6 @@ impl Value {
         Self::number(n)
     }
 
-    /// Extract an integer VM value as a `ndc_core::Int`.
-    /// Returns `None` for non-integer values.
-    pub fn to_int(&self) -> Option<Int> {
-        match self {
-            Self::Int(i) => Some(Int::Int64(*i)),
-            _ => None,
-        }
-    }
-
-    /// Convert a `ndc_core::Int` to a VM value.
-    pub fn from_int(i: Int) -> Self {
-        match i {
-            Int::Int64(n) => Self::Int(n),
-            Int::BigInt(b) => Self::number(AdvancedNumber::Int(Int::BigInt(b))),
-        }
-    }
-
     /// Convert a numeric VM value to `f64`, coercing integers and rationals.
     /// Returns `None` for non-numeric values (Bool, None, String, …).
     pub fn to_f64(&self) -> Option<f64> {
@@ -931,7 +913,7 @@ impl PartialOrd for Value {
 /// Returns `None` for non-numeric values (Bool, None, String, List, …).
 fn vm_value_to_number(v: &Value) -> Option<AdvancedNumber> {
     match v {
-        Value::Int(i) => Some(AdvancedNumber::Int(Int::Int64(*i))),
+        Value::Int(i) => Some(AdvancedNumber::Int(num::BigInt::from(*i))),
         Value::Float(f) => Some(AdvancedNumber::Float(*f)),
         Value::Number(number) => Some(number.as_ref().clone()),
         _ => None,
@@ -973,7 +955,7 @@ impl Value {
                 .partial_cmp(&0.0)
                 .ok_or_else(|| "NaN in comparator result".to_string()),
             Self::Number(number) => match number.as_ref() {
-                AdvancedNumber::Int(i) => Ok(i.cmp(&Int::Int64(0))),
+                AdvancedNumber::Int(i) => Ok(i.cmp(&num::BigInt::from(0))),
                 AdvancedNumber::Rational(r) => Ok(r
                     .as_ref()
                     .cmp(&num::BigRational::from(num::BigInt::from(0)))),

@@ -1,6 +1,5 @@
 use anyhow::{Context, bail};
 use ndc_core::hash_map::HashMap;
-use ndc_core::int::Int;
 use ndc_core::num::AdvancedNumber;
 use ndc_macros::export_module;
 use ndc_vm::value::{Object, Value};
@@ -66,8 +65,7 @@ fn advanced_number_to_json(
     lossy: bool,
 ) -> Result<JsonValue, anyhow::Error> {
     match number {
-        AdvancedNumber::Int(Int::Int64(i)) => Ok(json!(i)),
-        AdvancedNumber::Int(Int::BigInt(big_int)) => Number::from_str(&big_int.to_string())
+        AdvancedNumber::Int(big_int) => Number::from_str(&big_int.to_string())
             .map(JsonValue::Number)
             .context("cannot convert bigint to JSON number"),
         AdvancedNumber::Float(f) if f.is_finite() => Ok(json!(f)),

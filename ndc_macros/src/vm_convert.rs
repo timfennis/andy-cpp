@@ -523,12 +523,10 @@ fn vm_return_for_classified(ty: &syn::Type) -> Option<(TokenStream, TokenStream)
         NdcType::BigInt => Some((
             quote! {
                 Ok(ndc_vm::value::Value::from_number(
-                    ndc_core::num::AdvancedNumber::Int(
-                        ndc_core::int::Int::BigInt(result).simplified()
-                    )
+                    ndc_core::num::AdvancedNumber::Int(result)
                 ))
             },
-            quote! { ndc_core::StaticType::Int },
+            quote! { ndc_core::StaticType::Number },
         )),
         NdcType::BigRational => Some((
             quote! {
