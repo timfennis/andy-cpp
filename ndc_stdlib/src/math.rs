@@ -125,8 +125,22 @@ fn result_kind(left: NumericKind, right: NumericKind) -> NumericKind {
     }
 }
 
+/// Runtime overload candidates are inspected in reverse registration order.
+/// Keep homogeneous primitive pairs first in that runtime order: dynamic code
+/// usually preserves one numeric representation across repeated operations.
+const NUMERIC_PAIRS_BY_DYNAMIC_PRIORITY: [(NumericKind, NumericKind); 9] = [
+    (NumericKind::Int, NumericKind::Int),
+    (NumericKind::Float, NumericKind::Float),
+    (NumericKind::Number, NumericKind::Number),
+    (NumericKind::Int, NumericKind::Float),
+    (NumericKind::Float, NumericKind::Int),
+    (NumericKind::Int, NumericKind::Number),
+    (NumericKind::Number, NumericKind::Int),
+    (NumericKind::Float, NumericKind::Number),
+    (NumericKind::Number, NumericKind::Float),
+];
+
 fn register_binary_arithmetic(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
-    const KINDS: [NumericKind; 3] = [NumericKind::Int, NumericKind::Float, NumericKind::Number];
     const OPERATIONS: [BinaryOperation; 8] = [
         BinaryOperation::Add,
         BinaryOperation::Sub,
@@ -139,28 +153,26 @@ fn register_binary_arithmetic(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     ];
 
     for operation in OPERATIONS {
-        for left_kind in KINDS {
-            for right_kind in KINDS {
-                let output_kind = result_kind(left_kind, right_kind);
-                declare(
-                    env,
-                    operation.name(),
-                    vec![left_kind.static_type(), right_kind.static_type()],
-                    output_kind.static_type(),
-                    operation.documentation(),
-                    move |args| {
-                        arity(args, 2)?;
-                        eval_binary(
-                            operation,
-                            left_kind,
-                            right_kind,
-                            output_kind,
-                            &args[0],
-                            &args[1],
-                        )
-                    },
-                );
-            }
+        for (left_kind, right_kind) in NUMERIC_PAIRS_BY_DYNAMIC_PRIORITY.into_iter().rev() {
+            let output_kind = result_kind(left_kind, right_kind);
+            declare(
+                env,
+                operation.name(),
+                vec![left_kind.static_type(), right_kind.static_type()],
+                output_kind.static_type(),
+                operation.documentation(),
+                move |args| {
+                    arity(args, 2)?;
+                    eval_binary(
+                        operation,
+                        left_kind,
+                        right_kind,
+                        output_kind,
+                        &args[0],
+                        &args[1],
+                    )
+                },
+            );
         }
     }
 }
@@ -1273,6 +1285,35 @@ mod tests {
                     }));
                 }
             }
+        }
+    }
+
+    #[test]
+    fn arithmetic_registration_prefers_homogeneous_dynamic_operands() {
+        let mut registry = FunctionRegistry::default();
+        register(&mut registry);
+
+        for operator in ["+", "-", "*", "/", "\\", "%", "%%", "^"] {
+            let dynamic_order = registry
+                .iter()
+                .filter(|function| function.name == operator)
+                .filter_map(|function| match &function.static_type {
+                    StaticType::Function {
+                        parameters: Some(parameters),
+                        ..
+                    } if parameters.len() == 2 && parameters.iter().all(StaticType::is_number) => {
+                        Some((parameters[0].clone(), parameters[1].clone()))
+                    }
+                    _ => None,
+                })
+                .rev()
+                .collect::<Vec<_>>();
+            let expected = NUMERIC_PAIRS_BY_DYNAMIC_PRIORITY
+                .iter()
+                .map(|(left, right)| (left.static_type(), right.static_type()))
+                .collect::<Vec<_>>();
+
+            assert_eq!(dynamic_order, expected, "unexpected {operator} priority");
         }
     }
 
