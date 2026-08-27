@@ -29,8 +29,8 @@ impl JumpTarget {
     #[inline]
     pub fn raw(self) -> isize {
         match self {
-            JumpTarget::Offset(i) => i,
-            JumpTarget::Label(_) => panic!("cannot get raw offset of unresolved label"),
+            Self::Offset(i) => i,
+            Self::Label(_) => panic!("cannot get raw offset of unresolved label"),
         }
     }
 
@@ -38,8 +38,8 @@ impl JumpTarget {
     #[inline]
     pub fn apply(self, ip: usize) -> usize {
         match self {
-            JumpTarget::Offset(o) => ip.wrapping_add_signed(o),
-            JumpTarget::Label(_) => panic!("cannot apply instruction pointer to unresolved label"),
+            Self::Offset(o) => ip.wrapping_add_signed(o),
+            Self::Label(_) => panic!("cannot apply instruction pointer to unresolved label"),
         }
     }
 }
@@ -47,8 +47,8 @@ impl JumpTarget {
 impl std::fmt::Debug for JumpTarget {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            JumpTarget::Offset(offset) => std::fmt::Debug::fmt(&offset, f),
-            JumpTarget::Label(label_id) => std::fmt::Debug::fmt(&label_id.0, f),
+            Self::Offset(offset) => std::fmt::Debug::fmt(&offset, f),
+            Self::Label(label_id) => std::fmt::Debug::fmt(&label_id.0, f),
         }
     }
 }
@@ -244,7 +244,7 @@ impl OptimizerIr {
             JumpTarget::Offset(dest - cur - 1)
         };
 
-        for (cur_label, opcode, span) in self.code.into_iter() {
+        for (cur_label, opcode, span) in self.code {
             spans.push(span);
             let lowered = match opcode {
                 OpCode::Jump(JumpTarget::Label(d)) => OpCode::Jump(resolve(cur_label, d)),

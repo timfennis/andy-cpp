@@ -20,7 +20,7 @@ pub struct AnalysisResult {
     /// Maps each expression node to its inferred result type.
     pub expr_types: HashMap<NodeId, StaticType>,
     /// Inferred return types for functions without explicit annotations.
-    /// Keyed by the FunctionDeclaration's `NodeId`.
+    /// Keyed by the `FunctionDeclaration`'s `NodeId`.
     pub inferred_return_types: HashMap<NodeId, StaticType>,
     /// Errors accumulated during analysis. Non-empty when the analyser
     /// encountered problems but was able to continue with fallback types.
@@ -758,7 +758,7 @@ impl Analyser {
         &mut self,
         iterations: &mut [ForIteration],
         body: &mut ForBody,
-        span: Span,
+        _span: Span,
     ) -> StaticType {
         let Some((iteration, tail)) = iterations.split_first_mut() else {
             unreachable!("because this function is never called with an empty slice");
@@ -788,7 +788,7 @@ impl Analyser {
         }
 
         let out_type = if !tail.is_empty() {
-            self.resolve_for_iterations(tail, body, span)
+            self.resolve_for_iterations(tail, body, _span)
         } else {
             match body {
                 ForBody::Block(block) => {

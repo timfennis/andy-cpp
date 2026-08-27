@@ -494,10 +494,7 @@ impl VmIterator for CombinationsIter {
                 return None;
             }
 
-            let pivot = match (0..k).rev().find(|&i| self.indices[i] < pool_len - k + i) {
-                Some(p) => p,
-                None => return None,
-            };
+            let pivot = (0..k).rev().find(|&i| self.indices[i] < pool_len - k + i)?;
 
             self.indices[pivot] += 1;
             for j in (pivot + 1)..k {
