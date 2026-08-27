@@ -1,0 +1,9 @@
+// A struct declared inside a function is scoped to that function; its name
+// is not a valid type annotation outside.
+// expect-error: unknown type `S`
+fn make() {
+    struct S { v: Int }
+    S(1)
+}
+
+fn check(x: S) { x.v }

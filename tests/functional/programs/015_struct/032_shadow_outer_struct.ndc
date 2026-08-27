@@ -1,0 +1,14 @@
+// An inner scope may declare a struct that shadows one from an outer scope.
+struct T { a: Int }
+
+fn inner() {
+    struct T { b: Int }
+    let t = T(5);
+    t.b
+}
+
+let t = T(1);
+print(t.a);
+// expect-output: 1
+print(inner())
+// expect-output: 5

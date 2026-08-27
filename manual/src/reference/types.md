@@ -49,8 +49,9 @@ fn manhattan(p: Point) => p.x + p.y
 let points: List<Point> = [Point(1, 2), Point(3, 4)];
 ```
 
-A struct name refers to the struct declared earlier in the program; it cannot be used
-before (or inside) its own declaration, and declaring two structs with the same name is
-an error.
+A struct name refers to the struct declared earlier in an enclosing scope; it cannot be
+used before (or inside) its own declaration, and it goes out of scope together with the
+block or function that declared it. See [Struct](./types/struct.md) for the scoping
+rules.
 
 > **Note:** `Any` is the base type for every other type, so an `Any`-annotated binding will accept anything. When a parameter or value has no annotation and the analyser can't infer a type, it falls back to `Any`. There is also a `Never` type used internally for things like `break` that don't produce a value — you'll rarely need to write it by hand.

@@ -65,10 +65,6 @@ impl StructRegistry {
         id
     }
 
-    pub fn find_by_name(&self, name: &str) -> Option<&Rc<StructInfo>> {
-        self.data.iter().find(|info| &*info.name == name)
-    }
-
     #[must_use]
     pub fn len(&self) -> usize {
         self.data.len()

@@ -223,6 +223,14 @@ fn struct_redefinition_on_later_line_errors() {
 }
 
 #[test]
+fn struct_shadowing_builtin_type_errors() {
+    repl_error(
+        &["struct Int { x: Float }"],
+        "Struct 'Int' is not allowed to shadow the built-in type 'Int'",
+    );
+}
+
+#[test]
 fn failed_line_rolls_back_struct_registry() {
     let mut interp = {
         let mut i = Interpreter::capturing();

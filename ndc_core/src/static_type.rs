@@ -150,6 +150,14 @@ impl fmt::Display for StaticTypeConstructionError {
 }
 
 impl StaticType {
+    /// Every type name recognised by [`StaticType::from_name_and_args`].
+    /// Must stay in sync with its match arms; the unit test
+    /// `builtin_type_names_are_constructible` guards this.
+    pub const BUILTIN_TYPE_NAMES: &'static [&'static str] = &[
+        "Any", "Never", "Bool", "Number", "Float", "Int", "Rational", "Complex", "String",
+        "Option", "Sequence", "List", "Iterator", "MinHeap", "MaxHeap", "Deque", "Tuple", "Map",
+    ];
+
     pub fn from_name_and_args(
         name: &str,
         args: Vec<Self>,
@@ -739,5 +747,21 @@ mod test {
         ])));
 
         assert!(fun.is_fn_and_matches(&[list_of_two_tuple_int, StaticType::Int]));
+    }
+
+    // Every name in BUILTIN_TYPE_NAMES must be accepted by from_name_and_args
+    // for some argument count; a name that is only rejected as "unknown type"
+    // means the two lists have drifted apart.
+    #[test]
+    fn builtin_type_names_are_constructible() {
+        for name in StaticType::BUILTIN_TYPE_NAMES {
+            let constructible = (0..=2).any(|arg_count| {
+                StaticType::from_name_and_args(name, vec![StaticType::Any; arg_count]).is_ok()
+            });
+            assert!(
+                constructible,
+                "`{name}` is listed in BUILTIN_TYPE_NAMES but from_name_and_args rejects it"
+            );
+        }
     }
 }

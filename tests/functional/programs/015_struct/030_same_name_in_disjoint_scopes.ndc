@@ -1,0 +1,17 @@
+// The same struct name can be reused in scopes that never coexist.
+fn make_point() {
+    struct P { x: Int }
+    let p = P(1);
+    p.x
+}
+
+fn make_pair() {
+    struct P { a: Int, b: Int }
+    let q = P(2, 3);
+    q.a + q.b
+}
+
+print(make_point());
+// expect-output: 1
+print(make_pair())
+// expect-output: 5

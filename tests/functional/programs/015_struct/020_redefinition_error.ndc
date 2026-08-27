@@ -1,4 +1,4 @@
-// Struct names are globally unique.
+// Struct names are unique within a scope.
 // expect-error: Illegal redefinition of struct 'Point'
 struct Point { x: Int }
 struct Point { y: Int }
