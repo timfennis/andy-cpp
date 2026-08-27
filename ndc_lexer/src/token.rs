@@ -9,7 +9,6 @@ pub enum Token {
     String(String),
     Int64(i64),
     Float64(f64),
-    BigInt(BigInt),
     NumberInt(BigInt),
     NumberFloat(f64),
     Complex(Complex64),
@@ -106,9 +105,6 @@ impl fmt::Display for Token {
             Self::Float64(n) => {
                 let mut buffer = ryu::Buffer::new();
                 return write!(f, "{}", buffer.format(*n));
-            }
-            Self::BigInt(n) => {
-                return write!(f, "{n}");
             }
             Self::NumberInt(n) => {
                 return write!(f, "{n}n");

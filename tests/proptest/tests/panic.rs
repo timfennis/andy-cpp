@@ -94,7 +94,7 @@ fn install_quiet_panic_hook() {
 }
 
 /// All unit-variant tokens, identifiers/strings/numbers from small pools,
-/// and a couple of `BigInt`/`Complex` literals. Combined uniformly with a
+/// and a couple of advanced-number/complex literals. Combined uniformly with a
 /// low-weight `OpAssign` wrapping an augmentable inner token.
 fn arb_token() -> impl Strategy<Value = Token> {
     let mut atoms: Vec<Token> = vec![
@@ -173,8 +173,9 @@ fn arb_token() -> impl Strategy<Value = Token> {
     for f in [0.0_f64, 1.0, -1.0, 0.5, f64::INFINITY, f64::NAN] {
         atoms.push(Token::Float64(f));
     }
-    atoms.push(Token::BigInt(num::BigInt::from(0)));
-    atoms.push(Token::BigInt(num::BigInt::from(i128::MAX)));
+    atoms.push(Token::NumberInt(num::BigInt::from(0)));
+    atoms.push(Token::NumberInt(num::BigInt::from(i128::MAX)));
+    atoms.push(Token::NumberFloat(0.5));
     atoms.push(Token::Complex(num::complex::Complex64::new(0.0, 1.0)));
     atoms.push(Token::Complex(num::complex::Complex64::new(2.0, -3.0)));
 

@@ -256,10 +256,6 @@ impl Analyser {
             Expression::BoolLiteral(_) => Ok(StaticType::Bool),
             Expression::StringLiteral(_) => Ok(StaticType::String),
             Expression::Int64Literal(_) => Ok(StaticType::Int),
-            Expression::BigIntLiteral(value) => {
-                self.emit(AnalysisError::integer_literal_out_of_range(value, *span));
-                Ok(StaticType::Int)
-            }
             Expression::Float64Literal(_) => Ok(StaticType::Float),
             Expression::NumberIntLiteral(_) | Expression::NumberFloatLiteral(_) => {
                 Ok(StaticType::Number)
@@ -1284,16 +1280,6 @@ impl AnalysisError {
     /// snippet rather than crammed into the message.
     pub fn help_text(&self) -> Option<&str> {
         self.help_text.as_deref()
-    }
-
-    fn integer_literal_out_of_range(value: &impl std::fmt::Display, span: Span) -> Self {
-        Self {
-            text: format!(
-                "integer literal does not fit in Int; use the advanced literal `{value}n`"
-            ),
-            span,
-            help_text: None,
-        }
     }
 
     fn invalid_type_annotation(err: &StaticTypeConstructionError, span: Span) -> Self {

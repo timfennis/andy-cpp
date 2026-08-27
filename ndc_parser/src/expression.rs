@@ -97,7 +97,6 @@ pub enum Expression {
     StringLiteral(String),
     Int64Literal(i64),
     Float64Literal(f64),
-    BigIntLiteral(BigInt),
     NumberIntLiteral(BigInt),
     NumberFloatLiteral(f64),
     ComplexLiteral(Complex64),

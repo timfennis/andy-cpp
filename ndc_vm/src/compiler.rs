@@ -220,10 +220,6 @@ impl Compiler {
                 let idx = self.ir.add_constant(Value::float(f));
                 self.ir.write(OpCode::Constant(idx), span);
             }
-            Expression::BigIntLiteral(i) => {
-                let idx = self.ir.add_constant(Value::bigint(i));
-                self.ir.write(OpCode::Constant(idx), span);
-            }
             Expression::NumberIntLiteral(i) => {
                 let idx = self
                     .ir

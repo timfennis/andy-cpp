@@ -56,8 +56,7 @@ impl AndycppHighlighter {
                 // Strings — green
                 Token::String(_) => substring.rgb(152, 195, 121),
                 // Numeric literals and booleans — orange
-                Token::BigInt(_)
-                | Token::Int64(_)
+                Token::Int64(_)
                 | Token::Float64(_)
                 | Token::NumberInt(_)
                 | Token::NumberFloat(_)
@@ -247,7 +246,6 @@ fn collect_function_spans(expr: &ExpressionLocation, spans: &mut AHashSet<usize>
         | Expression::StringLiteral(_)
         | Expression::Int64Literal(_)
         | Expression::Float64Literal(_)
-        | Expression::BigIntLiteral(_)
         | Expression::NumberIntLiteral(_)
         | Expression::NumberFloatLiteral(_)
         | Expression::ComplexLiteral(_)

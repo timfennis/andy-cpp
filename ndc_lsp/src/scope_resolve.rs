@@ -205,7 +205,6 @@ fn collect(expr: &ExpressionLocation, scope: Span, out: &mut Vec<Decl>) {
         | Expression::StringLiteral(_)
         | Expression::Int64Literal(_)
         | Expression::Float64Literal(_)
-        | Expression::BigIntLiteral(_)
         | Expression::NumberIntLiteral(_)
         | Expression::NumberFloatLiteral(_)
         | Expression::ComplexLiteral(_)

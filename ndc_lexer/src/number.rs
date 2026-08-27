@@ -73,7 +73,7 @@ impl NumberLexer for Lexer<'_> {
             let token = if is_number {
                 buf_to_number_token_with_radix(&buf, 2)
             } else {
-                buf_to_token_with_radix(&buf, 2)
+                buf_to_primitive_token_with_radix(&buf, 2, self.source.create_span(start_offset))?
             };
             return match token {
                 Some(token) => Ok(TokenLocation {
@@ -102,7 +102,7 @@ impl NumberLexer for Lexer<'_> {
             let token = if is_number {
                 buf_to_number_token_with_radix(&buf, 16)
             } else {
-                buf_to_token_with_radix(&buf, 16)
+                buf_to_primitive_token_with_radix(&buf, 16, self.source.create_span(start_offset))?
             };
             return match token {
                 Some(token) => Ok(TokenLocation {
@@ -131,7 +131,7 @@ impl NumberLexer for Lexer<'_> {
             let token = if is_number {
                 buf_to_number_token_with_radix(&buf, 8)
             } else {
-                buf_to_token_with_radix(&buf, 8)
+                buf_to_primitive_token_with_radix(&buf, 8, self.source.create_span(start_offset))?
             };
             return match token {
                 Some(token) => Ok(TokenLocation {
@@ -202,7 +202,11 @@ impl NumberLexer for Lexer<'_> {
                                 ));
                             }
 
-                            return match buf_to_token_with_radix(&buf, u32::from(radix)) {
+                            return match buf_to_primitive_token_with_radix(
+                                &buf,
+                                u32::from(radix),
+                                self.source.create_span(start_offset),
+                            )? {
                                 Some(token) => Ok(TokenLocation {
                                     token,
                                     span: self.source.create_span(start_offset),
@@ -265,8 +269,9 @@ impl NumberLexer for Lexer<'_> {
             }
         }
 
-        let Some(token) = buf_to_token_with_radix(&buf, 10)
-            .or_else(|| buf.parse::<f64>().map(Token::Float64).ok())
+        let Some(token) =
+            buf_to_primitive_token_with_radix(&buf, 10, self.source.create_span(start_offset))?
+                .or_else(|| buf.parse::<f64>().map(Token::Float64).ok())
         else {
             // If we've lexed the int/float correctly this error should never happen, that's why it's probably safe to panic
             panic!("unable to convert buffer into Token");
@@ -279,14 +284,23 @@ impl NumberLexer for Lexer<'_> {
     }
 }
 
-fn buf_to_token_with_radix(buf: &str, radix: u32) -> Option<Token> {
-    match i64::from_str_radix(buf, radix) {
-        Ok(num) => Some(Token::Int64(num)),
-        Err(_err) => match BigInt::from_str_radix(buf, radix) {
-            Ok(num) => Some(Token::BigInt(num)),
-            Err(_err) => None,
-        },
+fn buf_to_primitive_token_with_radix(
+    buf: &str,
+    radix: u32,
+    span: crate::Span,
+) -> Result<Option<Token>, Error> {
+    if let Ok(num) = i64::from_str_radix(buf, radix) {
+        return Ok(Some(Token::Int64(num)));
     }
+
+    let Ok(value) = BigInt::from_str_radix(buf, radix) else {
+        return Ok(None);
+    };
+
+    Err(Error::text(
+        format!("integer literal does not fit in Int; use the advanced literal `{value}n`"),
+        span,
+    ))
 }
 
 fn buf_to_number_token_with_radix(buf: &str, radix: u32) -> Option<Token> {
@@ -297,4 +311,32 @@ fn buf_to_number_token_with_radix(buf: &str, radix: u32) -> Option<Token> {
 
 fn validator_for_radix(radix: usize) -> impl Fn(char) -> bool {
     move |c| "0123456789abcdefghijlkmnopqrstuvwxyz"[0..radix].contains(c.to_ascii_lowercase())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::SourceId;
+
+    #[test]
+    fn oversized_bare_integer_literals_are_rejected_by_the_lexer() {
+        for literal in [
+            "9223372036854775808",
+            "0b1000000000000000000000000000000000000000000000000000000000000000",
+            "0o1000000000000000000000",
+            "0x8000000000000000",
+            "16r8000000000000000",
+        ] {
+            let error = Lexer::new(literal, SourceId::SYNTHETIC)
+                .next()
+                .expect("literal should produce a lexer result")
+                .expect_err("oversized bare literal should fail lexing");
+
+            assert_eq!(
+                error.to_string(),
+                "integer literal does not fit in Int; use the advanced literal `9223372036854775808n`",
+                "unexpected diagnostic for {literal}"
+            );
+        }
+    }
 }
