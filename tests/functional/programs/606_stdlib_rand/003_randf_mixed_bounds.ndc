@@ -1,0 +1,20 @@
+// randf accepts any mix of Int, Float, and Number bounds
+for _ in 0..100 {
+    let x: Float = randf(-1, 1.0);
+    assert(x >= -1.0 and x < 1.0);
+}
+
+for _ in 0..100 {
+    let x: Float = randf(-1.0, 1);
+    assert(x >= -1.0 and x < 1.0);
+}
+
+for _ in 0..100 {
+    let x: Float = randf(-1n, 1);
+    assert(x >= -1.0 and x < 1.0);
+}
+
+for _ in 0..100 {
+    let x: Float = randf(-1.0, 1n);
+    assert(x >= -1.0 and x < 1.0);
+}

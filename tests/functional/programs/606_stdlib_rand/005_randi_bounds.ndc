@@ -1,0 +1,16 @@
+// randi accepts Int bounds and always returns an Int
+let a: Int = randi();
+assert(a >= 0);
+
+for _ in 0..100 {
+    let x: Int = randi(10);
+    assert(x >= 0 and x < 10);
+}
+
+for _ in 0..100 {
+    let x: Int = randi(-5, 5);
+    assert(x >= -5 and x < 5);
+}
+
+// a single-value range is deterministic
+assert_eq(randi(5, 6), 5);
