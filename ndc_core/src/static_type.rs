@@ -581,9 +581,116 @@ impl StaticType {
         )
     }
 
-    // BRUH
+    /// Checks whether some runtime value could satisfy both `self` and `other`.
+    ///
+    /// # Examples
+    /// - `Sequence<String>` overlaps `List<Any>`: a `List<String>` inhabits
+    ///   both, even though neither type is a subtype of the other
+    /// - `Any` overlaps every type
+    /// - `List<Int>` does not overlap `List<String>`
+    /// - `Int` does not overlap `String`
+    ///
+    /// This is the right question for runtime-dispatch feasibility: a call is
+    /// only *provably* impossible when an argument's static type is disjoint
+    /// from the corresponding parameter type of every overload.
+    ///
+    /// Element types are treated as inhabited: `List<Int>` and `List<String>`
+    /// are considered disjoint even though the empty list technically inhabits
+    /// both. This keeps overlap useful for rejecting provably-mismatched calls.
+    pub fn overlaps(&self, other: &Self) -> bool {
+        // A subtype relation in either direction implies a common inhabitant.
+        // This also handles Any (supertype of everything) and Never (subtype
+        // of everything).
+        if self.is_subtype(other) || other.is_subtype(self) {
+            return true;
+        }
+
+        match (self, other) {
+            // Sequence<T> overlaps every sequence-family type whose element
+            // type overlaps T, even when the subtype check fails because the
+            // relationship points in different directions per layer.
+            (
+                Self::Sequence(t),
+                Self::List(u)
+                | Self::Iterator(u)
+                | Self::MinHeap(u)
+                | Self::MaxHeap(u)
+                | Self::Deque(u)
+                | Self::Sequence(u),
+            )
+            | (
+                Self::List(u)
+                | Self::Iterator(u)
+                | Self::MinHeap(u)
+                | Self::MaxHeap(u)
+                | Self::Deque(u),
+                Self::Sequence(t),
+            ) => t.overlaps(u),
+            (Self::Sequence(t), Self::String) | (Self::String, Self::Sequence(t)) => {
+                Self::String.overlaps(t)
+            }
+            (Self::Sequence(t), Self::Tuple(elems)) | (Self::Tuple(elems), Self::Sequence(t)) => {
+                elems.iter().all(|elem| elem.overlaps(t))
+            }
+            (Self::Sequence(t), Self::Map { key, value })
+            | (Self::Map { key, value }, Self::Sequence(t)) => {
+                Self::Tuple(vec![key.as_ref().clone(), value.as_ref().clone()]).overlaps(t)
+            }
+
+            // Covariant containers of the same shape overlap when their
+            // element types do.
+            (Self::Option(s), Self::Option(t))
+            | (Self::List(s), Self::List(t))
+            | (Self::Iterator(s), Self::Iterator(t))
+            | (Self::MinHeap(s), Self::MinHeap(t))
+            | (Self::MaxHeap(s), Self::MaxHeap(t))
+            | (Self::Deque(s), Self::Deque(t)) => s.overlaps(t),
+            (Self::Tuple(s_elems), Self::Tuple(t_elems)) => {
+                s_elems.len() == t_elems.len()
+                    && s_elems.iter().zip(t_elems).all(|(s, t)| s.overlaps(t))
+            }
+            (Self::Map { key: k1, value: v1 }, Self::Map { key: k2, value: v2 }) => {
+                k1.overlaps(k2) && v1.overlaps(v2)
+            }
+
+            // A function value's parameter and return types are not checkable
+            // at runtime, so only a provable arity mismatch rules overlap out.
+            (Self::Function { parameters: p1, .. }, Self::Function { parameters: p2, .. }) => {
+                match (p1, p2) {
+                    (Some(p1), Some(p2)) => p1.len() == p2.len(),
+                    _ => true,
+                }
+            }
+
+            _ => false,
+        }
+    }
+
+    /// Checks whether `self` and `other` are provably disjoint: no runtime
+    /// value can satisfy both types. See [`Self::overlaps`].
     pub fn is_incompatible_with(&self, other: &Self) -> bool {
-        !self.is_subtype(other) && !other.is_subtype(self)
+        !self.overlaps(other)
+    }
+
+    /// Whether runtime dispatch can decide if a value matches this parameter
+    /// type. Scalars carry their type in the value itself, and a container of
+    /// `Any` is settled by the container's shape alone. A container with a
+    /// concrete element type is *not* checkable: deciding it would mean
+    /// scanning every element on each dispatch attempt.
+    ///
+    /// `List<Any>` is checkable; `List<Int>` is not.
+    ///
+    /// Must stay in agreement with `Value::matches_param` in `ndc_vm`, which
+    /// returns `false` for exactly the types this rejects.
+    pub fn is_runtime_checkable(&self) -> bool {
+        match self {
+            Self::List(t) | Self::Deque(t) | Self::Sequence(t) => matches!(t.as_ref(), Self::Any),
+            Self::Map { key, value } => {
+                matches!((key.as_ref(), value.as_ref()), (Self::Any, Self::Any))
+            }
+            Self::Tuple(elements) => elements.is_empty(),
+            _ => true,
+        }
     }
 
     /// Returns a new type with the element type replaced. For container types
@@ -747,6 +854,33 @@ mod test {
         ])));
 
         assert!(fun.is_fn_and_matches(&[list_of_two_tuple_int, StaticType::Int]));
+    }
+
+    #[test]
+    fn test_overlaps() {
+        let list_of = |elem: StaticType| StaticType::List(Box::new(elem));
+        let seq_of = |elem: StaticType| StaticType::Sequence(Box::new(elem));
+
+        // Mixed-direction relationships overlap: a List<String> inhabits both.
+        assert!(seq_of(StaticType::String).overlaps(&list_of(StaticType::Any)));
+        assert!(list_of(StaticType::Any).overlaps(&seq_of(StaticType::String)));
+
+        // Any overlaps everything, including containers of concrete elements.
+        assert!(StaticType::Any.overlaps(&list_of(StaticType::Int)));
+        assert!(list_of(StaticType::Int).overlaps(&StaticType::Any));
+
+        // Element types are treated as inhabited, so concrete containers with
+        // disjoint element types are disjoint.
+        assert!(!list_of(StaticType::Int).overlaps(&list_of(StaticType::String)));
+        assert!(!seq_of(StaticType::Int).overlaps(&list_of(StaticType::String)));
+
+        // Disjoint scalar constructors never overlap.
+        assert!(!StaticType::Int.overlaps(&StaticType::String));
+        assert!(!StaticType::Bool.overlaps(&StaticType::Number));
+
+        // A string is a sequence of strings.
+        assert!(StaticType::String.overlaps(&seq_of(StaticType::Any)));
+        assert!(!StaticType::String.overlaps(&seq_of(StaticType::Int)));
     }
 
     // Every name in BUILTIN_TYPE_NAMES must be accepted by from_name_and_args

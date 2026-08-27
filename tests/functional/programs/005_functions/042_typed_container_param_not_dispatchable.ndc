@@ -1,0 +1,7 @@
+// Runtime dispatch cannot verify a parameter with a concrete element type, so
+// an argument that only *overlaps* it is rejected at compile time rather than
+// deferred to a runtime match that could never succeed.
+// expect-error: No function called 'consume' found that matches the arguments 'Sequence<Int>'
+fn consume(xs: List<Number>) => xs;
+let xs: Sequence<Int> = [1];
+consume(xs)

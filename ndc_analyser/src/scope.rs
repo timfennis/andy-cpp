@@ -70,6 +70,24 @@ fn is_strictly_more_specific(more: &[StaticType], less: &[StaticType]) -> bool {
     any_strict
 }
 
+/// Whether a call could still succeed at runtime for one argument position,
+/// so the overload is worth keeping as a dynamic-dispatch candidate.
+///
+/// The types must overlap — a `Sequence<Int>` argument may hold a `List<Int>`
+/// at runtime, which satisfies a `List<Any>` parameter even though neither
+/// static type is a subtype of the other. Overlap alone is not enough though:
+/// runtime dispatch has to be able to tell whether the value matches, and it
+/// cannot do that for a parameter with a concrete element type. Advertising
+/// such a candidate would trade a clear compile-time error for a guaranteed
+/// runtime one, so it is only kept when the argument already fits statically.
+fn dispatch_is_feasible(param: &StaticType, arg: &StaticType) -> bool {
+    if !param.overlaps(arg) {
+        return false;
+    }
+
+    arg.is_subtype(param) || param.is_runtime_checkable()
+}
+
 /// If every per-position candidate list contains exactly one entry and they
 /// all point to the same scalar overload, return it. This is the only case
 /// where `Binding::Resolved(Candidate::Vec)` is safe to emit: a single scalar
@@ -237,7 +255,10 @@ impl Scope {
                 };
 
                 let is_good = param_types.len() == find_types.len()
-                    && param_types.iter().zip(find_types.iter()).all(|(typ_1, typ_2)| !typ_1.is_incompatible_with(typ_2));
+                    && param_types
+                        .iter()
+                        .zip(find_types.iter())
+                        .all(|(param, arg)| dispatch_is_feasible(param, arg));
 
                 is_good.then_some(slot)
             })
@@ -839,7 +860,7 @@ impl ScopeTree {
                     && parameters
                         .iter()
                         .zip(sig)
-                        .all(|(param, arg)| !param.is_incompatible_with(arg))
+                        .all(|(param, arg)| dispatch_is_feasible(param, arg))
             }
             StaticType::Function {
                 parameters: None, ..

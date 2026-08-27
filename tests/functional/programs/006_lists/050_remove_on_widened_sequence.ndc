@@ -1,0 +1,6 @@
+// A variable widened to Sequence<String> by reassignment can still call
+// list functions like `remove` through runtime dispatch.
+// expect-output: a ["b","c"]
+let line = "a b c";
+line = line.split(" ");
+print(line.remove(0), line)
