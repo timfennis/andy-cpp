@@ -164,6 +164,9 @@ impl OpCode {
     /// and `continue` know how many pending operands to pop; a new opcode
     /// must declare its delta here.
     pub(crate) fn stack_delta(&self) -> isize {
+        // Arms follow the enum's order so each delta can be reviewed against
+        // its variant's stack comment, rather than being grouped by value.
+        #[allow(clippy::match_same_arms)]
         #[allow(clippy::cast_possible_wrap)]
         match self {
             Self::Call(n) | Self::CallVec(n) => -(*n as isize),
