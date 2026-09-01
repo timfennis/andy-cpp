@@ -157,6 +157,41 @@ pub enum OpCode {
     Memoize,
 }
 
+impl OpCode {
+    /// The net stack effect of executing this instruction on its fall-through
+    /// path, matching the `[… → …]` comments on the enum variants. The
+    /// compiler simulates the stack depth from these deltas so that `break`
+    /// and `continue` know how many pending operands to pop; a new opcode
+    /// must declare its delta here.
+    pub(crate) fn stack_delta(&self) -> isize {
+        #[allow(clippy::cast_possible_wrap)]
+        match self {
+            Self::Call(n) | Self::CallVec(n) => -(*n as isize),
+            Self::Pop => -1,
+            Self::Jump(_) | Self::JumpIfTrue(_) | Self::JumpIfFalse(_) => 0,
+            Self::Constant(_) | Self::GetLocal(_) | Self::GetUpvalue(_) | Self::GetGlobal(_) => 1,
+            Self::SetLocal(_) | Self::SetUpvalue(_) => -1,
+            Self::MakeList(n) | Self::MakeTuple(n) => 1 - *n as isize,
+            Self::MakeMap { pairs, has_default } => {
+                1 - 2 * *pairs as isize - isize::from(*has_default)
+            }
+            Self::Closure { .. } => 1,
+            Self::GetIterator => 0,
+            Self::IterNext(_) => 1,
+            Self::ListPush(_) => -1,
+            Self::MapInsert(_) => -2,
+            Self::MakeRange { bounded, .. } => -isize::from(*bounded),
+            Self::Unpack(n) => *n as isize - 1,
+            Self::Halt => 0,
+            // Pops the return value; the frame teardown that discards the
+            // rest of the frame happens in the VM, outside this accounting.
+            Self::Return => -1,
+            Self::CloseUpvalue(_) => 0,
+            Self::Memoize => 0,
+        }
+    }
+}
+
 impl std::fmt::Debug for OpCode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -213,6 +248,11 @@ pub struct LabelId(usize);
 pub(crate) struct OptimizerIr {
     constants: Vec<Value>,
     code: Vec<(LabelId, OpCode, Span)>,
+    /// Stack depth simulated from [`OpCode::stack_delta`] as instructions are
+    /// written. Exact along straight-line code; instructions that are only
+    /// reached by a jump (a loop's exit pop) can leave it off, so
+    /// `Compiler::compile_expr` re-anchors it at every expression boundary.
+    stack_depth: isize,
 }
 
 impl OptimizerIr {
@@ -356,8 +396,19 @@ impl OptimizerIr {
 
     pub(crate) fn write(&mut self, op: OpCode, span: Span) -> LabelId {
         let label = self.next_label();
+        self.stack_depth += op.stack_delta();
         self.code.push((label, op, span));
         label
+    }
+
+    pub(crate) fn stack_depth(&self) -> isize {
+        self.stack_depth
+    }
+
+    /// Re-anchor the simulated stack depth at a point where the compiler
+    /// knows the true depth (see the field docs on [`OptimizerIr::stack_depth`]).
+    pub(crate) fn set_stack_depth(&mut self, depth: isize) {
+        self.stack_depth = depth;
     }
 }
 
