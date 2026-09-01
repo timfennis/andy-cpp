@@ -5,13 +5,9 @@ use ndc_lexer::Span;
 use ndc_parser::CaptureSource;
 use std::rc::Rc;
 
-/// A signed displacement applied to the instruction pointer to perform a jump.
-///
-/// Wraps `isize` so the contract — "relative offset, in instructions, from the
-/// instruction *after* the jump opcode" — has a single definition site. Future
-/// stages of a compile pipeline may swap this for an `enum JumpTarget { … }`
-/// without touching every call site.
-
+/// A jump destination: either a resolved displacement — "relative offset, in
+/// instructions, from the instruction *after* the jump opcode" — or a symbolic
+/// label that `OptimizerIr::into_chunk` lowers to such an offset.
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub enum JumpTarget {
     Offset(isize),
@@ -67,9 +63,10 @@ impl std::fmt::Debug for JumpTarget {
 /// | `GetLocal`    | `[… → … value]`                        | +1 (copies from slot)                      |
 /// | `GetUpvalue`  | `[… → … value]`                        | +1 (reads upvalue cell)                    |
 /// | `GetGlobal`   | `[… → … value]`                        | +1 (copies from globals)                   |
-/// | `SetLocal`    | `[… value → …]`                        | −1 (pops, writes to slot†)                 |
+/// | `SetLocal`    | `[… value → …]`                        | −1 (pops, writes to slot)                  |
 /// | `SetUpvalue`  | `[… value → …]`                        | −1 (pops, writes to upvalue cell)          |
 /// | `Call`        | `[… callee a1…an → … result]`          | −n (pops callee + args, pushes result)     |
+/// | `CallVec`     | `[… callee a1…an → … tuple]`           | −n (pops callee + args, pushes result)     |
 /// | `Return`      | `[… retval → …]`                       | pops retval, truncates frame, pushes retval|
 /// | `Halt`        | `[…]`                                   | terminates execution                       |
 /// | `Jump`        | `[…]`                                   | 0 (unconditional jump)                     |
@@ -87,10 +84,6 @@ impl std::fmt::Debug for JumpTarget {
 /// | `Unpack`      | `[… compound → … v1…vn]`               | +(n−1) (pops 1, pushes n)                  |
 /// | `CloseUpvalue`| `[…]`                                   | 0 (closes upvalue cells, no stack change)  |
 /// | `Memoize`     | `[… fn → … memoized_fn]`               | 0 (pops and pushes)                        |
-///
-/// † `SetLocal` for a **declaration** (slot == stack top) is effectively a no-op on the
-///   stack: it pops then immediately pushes to extend. For a **reassignment** (slot < top)
-///   it truly shrinks the stack by 1.
 // NOTE: OpCode cannot be Copy because the Closure variant holds Rc<[CaptureSource]>.
 // The dispatch loop accesses opcodes by reference to avoid cloning the 32-byte enum on
 // every iteration; see Vm::run_to_depth.
