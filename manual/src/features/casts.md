@@ -32,6 +32,11 @@ Checking a container inspects every element (and recurses into nested
 containers), so a cast costs one pass over the value. Empty containers
 conform to any element type: `[] as List<Int>` succeeds.
 
+A map's default value is checked against the value type too, since a
+missing-key lookup inserts it. A default *function*'s results can't be
+verified without calling it, so such a map only conforms when the value
+type is `Any`.
+
 Casts between types where neither is a subtype of the other are rejected at
 compile time:
 

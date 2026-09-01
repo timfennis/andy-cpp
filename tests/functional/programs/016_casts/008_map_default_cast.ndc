@@ -1,0 +1,10 @@
+// A map default is inserted on missing-key lookups, so it must conform to
+// the value type too.
+let m: Any = %{: 0};
+let typed = m as Map<Int, Int>;
+assert_eq(typed[5], 0);
+
+// A default function's results can't be verified, so it only conforms when
+// the value type is Any.
+let f: Any = %{: fn() => 1};
+assert_eq((f as Map<Int, Any>)[2], 1);

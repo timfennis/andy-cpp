@@ -357,12 +357,31 @@ impl Value {
                     if values.len() == elements.len()
                         && values.iter().zip(elements).all(|(value, element)| value.conforms_to(element)))
             ),
-            StaticType::Map { key, value } => matches!(
-                self,
-                Self::Object(object) if matches!(object.as_ref(), Object::Map { entries, .. }
-                    if entries.borrow().iter().all(|(entry_key, entry_value)|
-                        entry_key.conforms_to(key) && entry_value.conforms_to(value)))
-            ),
+            StaticType::Map { key, value } => match self {
+                Self::Object(object) => match object.as_ref() {
+                    Object::Map { entries, default } => {
+                        // A missing-key lookup inserts the default (or the
+                        // result of calling it), so the default must conform
+                        // to the value type as well. A default function's
+                        // results can't be verified without calling it.
+                        let default_conforms = match default {
+                            None => true,
+                            Some(Self::Object(object))
+                                if matches!(object.as_ref(), Object::Function(_)) =>
+                            {
+                                matches!(value.as_ref(), StaticType::Any)
+                            }
+                            Some(default) => default.conforms_to(value),
+                        };
+                        default_conforms
+                            && entries.borrow().iter().all(|(entry_key, entry_value)| {
+                                entry_key.conforms_to(key) && entry_value.conforms_to(value)
+                            })
+                    }
+                    _ => false,
+                },
+                _ => false,
+            },
             StaticType::MinHeap(element) => matches!(
                 self,
                 Self::Object(object) if matches!(object.as_ref(), Object::MinHeap(values)
