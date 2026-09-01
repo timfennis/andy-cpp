@@ -1,0 +1,12 @@
+// A `while` loop in a value position used to leave nothing on the stack,
+// shifting later slots so the VM called `1` as a function. Every expression
+// now produces exactly one value; a loop evaluates to `()`.
+let x = 1;
+print(while false {});
+print(x);
+let y = while false {};
+assert_eq(y, ());
+print(x + 1);
+// expect-output:
+// expect-output: 1
+// expect-output: 2

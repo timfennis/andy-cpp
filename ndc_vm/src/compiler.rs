@@ -113,6 +113,13 @@ impl Compiler {
         Ok(())
     }
 
+    /// Push the unit value; the result of expressions that have nothing else
+    /// to produce. `span` is synthetic because unit has no source of its own.
+    fn emit_unit(&mut self) {
+        let idx = self.ir.add_constant(Value::unit());
+        self.ir.write(OpCode::Constant(idx), Span::synthetic());
+    }
+
     fn allocate_temp(&mut self) -> TempSlot {
         let temp = TempSlot(self.temp_count);
         self.temp_count += 1;
@@ -172,6 +179,10 @@ impl Compiler {
         Ok((function, checkpoint))
     }
 
+    /// Compile one expression. Leaves exactly one result value on the stack,
+    /// on top of any local slots the expression declared. Diverging
+    /// expressions (`break`, `continue`, `return`) leave nothing because
+    /// control never returns to observe a result.
     fn compile_expr(
         &mut self,
         expression_location: ExpressionLocation,
@@ -213,11 +224,9 @@ impl Compiler {
                 }
             }
             Expression::Statement(stm) => {
-                let needs_pop = produces_value(&stm.expression);
                 self.compile_expr(*stm)?;
-                if needs_pop {
-                    self.ir.write(OpCode::Pop, Span::synthetic());
-                }
+                // After a diverging statement this pop is unreachable code.
+                self.ir.write(OpCode::Pop, Span::synthetic());
             }
             Expression::Logical {
                 left,
@@ -248,6 +257,7 @@ impl Compiler {
             Expression::VariableDeclaration { value, l_value, .. } => {
                 self.compile_expr(*value)?;
                 self.compile_declare_lvalue(l_value, span)?;
+                self.emit_unit();
             }
             Expression::Assignment {
                 l_value,
@@ -269,8 +279,7 @@ impl Compiler {
                 l_value @ Lvalue::Identifier { .. } => {
                     self.compile_expr(*value)?;
                     self.compile_lvalue(l_value, span)?;
-                    let idx = self.ir.add_constant(Value::unit());
-                    self.ir.write(OpCode::Constant(idx), Span::synthetic());
+                    self.emit_unit();
                 }
                 Lvalue::Sequence(seq) => {
                     self.compile_expr(*value)?;
@@ -278,8 +287,7 @@ impl Compiler {
                     for l_value in seq {
                         self.compile_lvalue(l_value, span)?;
                     }
-                    let idx = self.ir.add_constant(Value::unit());
-                    self.ir.write(OpCode::Constant(idx), Span::synthetic());
+                    self.emit_unit();
                 }
                 Lvalue::Member {
                     receiver,
@@ -315,8 +323,7 @@ impl Compiler {
                 self.ir.write(opcode, span);
                 target.emit_store(self)?;
 
-                let idx = self.ir.add_constant(Value::unit());
-                self.ir.write(OpCode::Constant(idx), span);
+                self.emit_unit();
             }
             Expression::FunctionDeclaration {
                 name,
@@ -400,6 +407,7 @@ impl Compiler {
                         None => unreachable!("resolved_name should have been resolved"),
                     }
                 }
+                self.emit_unit();
             }
             Expression::Grouping(statements) => {
                 self.compile_expr(*statements)?;
@@ -478,8 +486,7 @@ impl Compiler {
                     if let Some(v) = value {
                         self.compile_expr(v)?
                     } else {
-                        let idx = self.ir.add_constant(Value::unit());
-                        self.ir.write(OpCode::Constant(idx), Span::synthetic());
+                        self.emit_unit();
                     }
                 }
                 if let Some(default) = default {
@@ -686,18 +693,17 @@ impl Compiler {
         _span: Span,
     ) -> Result<(), CompileError> {
         if statements.is_empty() {
-            let idx = self.ir.add_constant(Value::unit());
-            // Synthetic unit from empty block has no meaningful source
-            self.ir.write(OpCode::Constant(idx), Span::synthetic());
+            self.emit_unit();
         } else {
             let last = statements.len() - 1;
             for (i, stmt) in statements.into_iter().enumerate() {
-                let is_last_expr = i == last && produces_value(&stmt.expression);
+                // A `;`-terminated statement pops its own value, so it can't
+                // be the block result; substitute unit.
+                let is_last_expr =
+                    i == last && !matches!(stmt.expression, Expression::Statement(_));
                 self.compile_expr(stmt)?;
                 if i == last && !is_last_expr {
-                    let idx = self.ir.add_constant(Value::unit());
-                    // Synthetic unit when last statement doesn't produce value
-                    self.ir.write(OpCode::Constant(idx), Span::synthetic());
+                    self.emit_unit();
                 }
             }
         }
@@ -734,8 +740,7 @@ impl Compiler {
                 .write(OpCode::Jump(JumpTarget::PLACEHOLDER), Span::synthetic());
             self.patch_jump(conditional_jump_idx);
             self.ir.write(OpCode::Pop, Span::synthetic());
-            let idx = self.ir.add_constant(Value::unit());
-            self.ir.write(OpCode::Constant(idx), Span::synthetic());
+            self.emit_unit();
             self.patch_jump(jump_to_end);
         }
 
@@ -766,6 +771,7 @@ impl Compiler {
             self.patch_jump(instruction)
         }
         self.end_loop_context();
+        self.emit_unit();
         Ok(())
     }
 
@@ -847,6 +853,7 @@ impl Compiler {
             Some(ResolvedVar::Local { slot }) => {
                 self.ir.write(OpCode::SetLocal(slot), span);
                 self.source_locals = self.source_locals.max(slot + 1);
+                self.emit_unit();
             }
             Some(ResolvedVar::Upvalue { .. } | ResolvedVar::Global { .. }) => {
                 unreachable!("the analyser never assigns a declaration to a non-local binding")
@@ -867,11 +874,12 @@ impl Compiler {
             ForBody::Block(block) => {
                 self.compile_for_iterations(iterations, span, &mut |this| {
                     // The body is always a block, which always pushes exactly one value.
-                    // Discard it — the loop itself produces no value.
+                    // Discard it — each iteration's result is unobservable.
                     this.compile_expr(block.clone())?;
                     this.ir.write(OpCode::Pop, span);
                     Ok(())
                 })?;
+                self.emit_unit();
                 Ok(())
             }
             ForBody::List { expr } => {
@@ -909,8 +917,7 @@ impl Compiler {
                     if let Some(value) = value.clone() {
                         this.compile_expr(value)?;
                     } else {
-                        let idx = this.ir.add_constant(Value::unit());
-                        this.ir.write(OpCode::Constant(idx), Span::synthetic());
+                        this.emit_unit();
                     }
                     this.write_temp(tmp_map, span, OpCode::MapInsert);
                     Ok(())
@@ -1193,50 +1200,6 @@ fn min_lvalue_slot(lv: &Lvalue) -> Option<usize> {
         } => Some(*slot),
         Lvalue::Sequence(seq) => seq.iter().filter_map(min_lvalue_slot).min(),
         _ => None,
-    }
-}
-
-fn produces_value(expr: &Expression) -> bool {
-    match expr {
-        Expression::Statement(_)
-        | Expression::StructDeclaration { .. }
-        | Expression::VariableDeclaration { .. }
-        | Expression::FunctionDeclaration {
-            resolved_name: Some(_),
-            ..
-        }
-        | Expression::While { .. }
-        | Expression::Break
-        | Expression::Continue
-        | Expression::Return { .. } => false,
-        Expression::For { body, .. } => {
-            matches!(**body, ForBody::List { .. } | ForBody::Map { .. })
-        }
-        Expression::BoolLiteral(_)
-        | Expression::StringLiteral(_)
-        | Expression::Int64Literal(_)
-        | Expression::Float64Literal(_)
-        | Expression::BigIntLiteral(_)
-        | Expression::ComplexLiteral(_)
-        | Expression::FunctionDeclaration {
-            resolved_name: None,
-            ..
-        }
-        | Expression::Identifier { .. }
-        | Expression::Logical { .. }
-        | Expression::Grouping(_)
-        | Expression::Assignment { .. }
-        | Expression::OpAssignment { .. }
-        | Expression::Block { .. }
-        | Expression::If { .. }
-        | Expression::Call { .. }
-        | Expression::OperatorCall { .. }
-        | Expression::MemberAccess { .. }
-        | Expression::Tuple { .. }
-        | Expression::List { .. }
-        | Expression::Map { .. }
-        | Expression::RangeInclusive { .. }
-        | Expression::RangeExclusive { .. } => true,
     }
 }
 

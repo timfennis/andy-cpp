@@ -275,10 +275,11 @@ fn test_if_with_statement_branches() {
 // 1: JumpIfFalse(4)   if false, jump past body to exit Pop (index 6)
 // 2: Pop              pop condition (true path)
 // 3: Constant(1)      body: push `1`
-// 4: Pop              discard body value (loops produce no value)
+// 4: Pop              discard body value (each iteration's result is unobservable)
 // 5: Jump(-6)         jump back to loop_start (index 0)
 // 6: Pop              pop condition (false path, loop exit)
-// 7: Halt
+// 7: Constant(2)      push `()` (the loop's result)
+// 8: Halt
 #[test]
 fn test_while() {
     assert_eq!(
@@ -291,6 +292,7 @@ fn test_while() {
             Pop,
             Jump(JumpTarget::Offset(-6)),
             Pop,
+            Constant(2),
             Halt
         ]
     );
@@ -299,15 +301,19 @@ fn test_while() {
 // let a = 1;
 //
 // Value is compiled, then SetLocal stores it in pre-allocated slot 0.
+// The declaration's unit result is pushed and popped by the statement;
+// the optimizer elides the pair.
 //
 // 0: Constant(0)   push `1`
 // 1: SetLocal(0)   store in slot 0
-// 2: Halt
+// 2: Constant(1)   push `()` (declaration result)
+// 3: Pop           discard (statement)
+// 4: Halt
 #[test]
 fn test_declaration() {
     assert_eq!(
         compile_with_analysis("let a = 1;"),
-        [Constant(0), SetLocal(0), Halt]
+        [Constant(0), SetLocal(0), Constant(1), Pop, Halt]
     );
 }
 
@@ -320,11 +326,13 @@ fn test_declaration() {
 //
 // 0: Constant(0)   push `1`
 // 1: SetLocal(0)   store in slot 0 (declaration)
-// 2: Constant(1)   push `5`
-// 3: SetLocal(0)   overwrite slot 0 (assignment)
-// 4: Constant(2)   push `()` (assignment result)
-// 5: Pop           discard (statement)
-// 6: Halt
+// 2: Constant(1)   push `()` (declaration result)
+// 3: Pop           discard (statement)
+// 4: Constant(2)   push `5`
+// 5: SetLocal(0)   overwrite slot 0 (assignment)
+// 6: Constant(3)   push `()` (assignment result)
+// 7: Pop           discard (statement)
+// 8: Halt
 #[test]
 fn test_assignment() {
     assert_eq!(
@@ -333,8 +341,10 @@ fn test_assignment() {
             Constant(0),
             SetLocal(0),
             Constant(1),
-            SetLocal(0),
+            Pop,
             Constant(2),
+            SetLocal(0),
+            Constant(3),
             Pop,
             Halt
         ]
@@ -449,13 +459,22 @@ fn test_augmented_assignment_temporaries_follow_source_locals() {
 //
 // 0: Constant(0)   push `3`
 // 1: SetLocal(0)   store in slot 0 (declaration)
-// 2: GetLocal(0)   push `a` (block result)
-// 3: Halt
+// 2: Constant(1)   push `()` (declaration result)
+// 3: Pop           discard (statement)
+// 4: GetLocal(0)   push `a` (block result)
+// 5: Halt
 #[test]
 fn test_block_scope_cleanup() {
     assert_eq!(
         compile_with_analysis("{ let a = 3; a }"),
-        [Constant(0), SetLocal(0), GetLocal(0), Halt]
+        [
+            Constant(0),
+            SetLocal(0),
+            Constant(1),
+            Pop,
+            GetLocal(0),
+            Halt
+        ]
     );
 }
 
@@ -466,10 +485,12 @@ fn test_block_scope_cleanup() {
 //
 // 0: Constant(0)   push `1`
 // 1: SetLocal(0)   store in slot 0
-// 2: Constant(1)   push `2`
-// 3: SetLocal(1)   store in slot 1
-// 4: GetLocal(0)   push `a` (block result)
-// 5: Halt
+// 2: Constant(1)   push `()` / 3: Pop
+// 4: Constant(2)   push `2`
+// 5: SetLocal(1)   store in slot 1
+// 6: Constant(3)   push `()` / 7: Pop
+// 8: GetLocal(0)   push `a` (block result)
+// 9: Halt
 #[test]
 fn test_block_scope_cleanup_multiple_locals() {
     assert_eq!(
@@ -478,7 +499,11 @@ fn test_block_scope_cleanup_multiple_locals() {
             Constant(0),
             SetLocal(0),
             Constant(1),
+            Pop,
+            Constant(2),
             SetLocal(1),
+            Constant(3),
+            Pop,
             GetLocal(0),
             Halt
         ]
