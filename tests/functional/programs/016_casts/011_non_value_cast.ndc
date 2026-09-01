@@ -1,5 +1,5 @@
-// A cast around an expression that produces no value must not pop a local
-// slot (this used to make `x` resolve to the wrong stack slot).
+// Casting a unit-valued expression like a loop is a no-op: the loop's unit
+// result satisfies `Any` statically, so no runtime check is emitted.
 let x = 1;
 while false {} as Any;
 print(x);
