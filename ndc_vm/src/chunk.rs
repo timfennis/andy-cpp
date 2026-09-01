@@ -169,21 +169,35 @@ impl OpCode {
         #[allow(clippy::match_same_arms)]
         #[allow(clippy::cast_possible_wrap)]
         match self {
+            // Pops the callee and `n` arguments, pushes one result: -(n+1)+1.
             Self::Call(n) | Self::CallVec(n) => -(*n as isize),
             Self::Pop => -1,
+            // The conditional jumps peek at the condition without popping it;
+            // the branch they land in pops it instead.
             Self::Jump(_) | Self::JumpIfTrue(_) | Self::JumpIfFalse(_) => 0,
             Self::Constant(_) | Self::GetLocal(_) | Self::GetUpvalue(_) | Self::GetGlobal(_) => 1,
             Self::SetLocal(_) | Self::SetUpvalue(_) => -1,
+            // Pops `n` elements, pushes the collection: -n+1.
             Self::MakeList(n) | Self::MakeTuple(n) => 1 - *n as isize,
+            // Pops a key and a value per pair plus the optional default,
+            // pushes the map: -(2*pairs + has_default) + 1.
             Self::MakeMap { pairs, has_default } => {
                 1 - 2 * *pairs as isize - isize::from(*has_default)
             }
             Self::Closure { .. } => 1,
+            // Pops the sequence, pushes the iterator made from it.
             Self::GetIterator => 0,
+            // Peeks the iterator and pushes the next element. This is the
+            // fall-through path; the exhausted path jumps without pushing,
+            // which the jump target's code accounts for.
             Self::IterNext(_) => 1,
             Self::ListPush(_) => -1,
+            // Pops a key and a value.
             Self::MapInsert(_) => -2,
+            // Pops the start bound and, when bounded, the end bound; pushes
+            // the range iterator: -(1 + bounded) + 1.
             Self::MakeRange { bounded, .. } => -isize::from(*bounded),
+            // Pops the compound value, pushes its `n` elements.
             Self::Unpack(n) => *n as isize - 1,
             Self::Halt => 0,
             // Pops the return value; the frame teardown that discards the
