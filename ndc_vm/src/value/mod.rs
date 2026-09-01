@@ -240,12 +240,19 @@ impl Value {
     ///
     /// - [`Value::is_number`] — O(1) check for numeric types
     pub fn static_type(&self) -> StaticType {
+        self.static_type_bounded(usize::MAX)
+    }
+
+    /// Depth-bounded [`Value::static_type`]: container elements more than
+    /// `depth` levels deep are reported as `Any`. Terminates on
+    /// self-referential containers, which makes it safe for diagnostics.
+    pub fn static_type_bounded(&self, depth: usize) -> StaticType {
         match self {
             Self::Int(_) => StaticType::Int,
             Self::Float(_) => StaticType::Float,
             Self::Bool(_) => StaticType::Bool,
             Self::None => StaticType::Option(Box::new(StaticType::Any)),
-            Self::Object(obj) => obj.static_type(),
+            Self::Object(obj) => obj.static_type_bounded(depth),
         }
     }
 
@@ -432,7 +439,26 @@ impl Value {
                 },
                 _ => false,
             },
-            _ => self.static_type().is_subtype(target),
+            // The remaining targets are non-container types (Never, Bool,
+            // numerics, String, Function, Struct, Iterator). Container values
+            // conform to none of them; answering that without `static_type`
+            // keeps recursion bounded by the target's depth, so conformance
+            // checks terminate even on self-referential containers.
+            _ => match self {
+                Self::Object(object)
+                    if matches!(
+                        object.as_ref(),
+                        Object::List(_)
+                            | Object::Tuple(_)
+                            | Object::Map { .. }
+                            | Object::Deque(_)
+                            | Object::Some(_)
+                    ) =>
+                {
+                    false
+                }
+                _ => self.static_type().is_subtype(target),
+            },
         }
     }
 
@@ -588,34 +614,63 @@ impl Object {
     /// because the VM does not track element types at runtime.  Tuple is the
     /// exception: its element types are known from the concrete values it holds.
     pub fn static_type(&self) -> StaticType {
+        self.static_type_bounded(usize::MAX)
+    }
+
+    /// Depth-bounded [`Object::static_type`]: container elements more than
+    /// `depth` levels deep are reported as `Any`. Terminates on
+    /// self-referential containers, which makes it safe for diagnostics.
+    pub fn static_type_bounded(&self, depth: usize) -> StaticType {
         match self {
-            Self::Some(inner) => StaticType::Option(Box::new(inner.static_type())),
+            Self::Some(inner) => {
+                if depth == 0 {
+                    return StaticType::Option(Box::new(StaticType::Any));
+                }
+                StaticType::Option(Box::new(inner.static_type_bounded(depth - 1)))
+            }
             Self::BigInt(_) => StaticType::Int,
             Self::Complex(_) => StaticType::Complex,
             Self::Rational(_) => StaticType::Rational,
             Self::String(_) => StaticType::String,
             Self::List(elements) => {
+                if depth == 0 {
+                    return StaticType::List(Box::new(StaticType::Any));
+                }
                 let elements = elements.borrow();
                 let elem_type = elements
                     .iter()
-                    .map(|e| e.static_type())
+                    .map(|e| e.static_type_bounded(depth - 1))
                     .reduce(|a, b| a.lub(&b))
                     .unwrap_or(StaticType::Any);
                 StaticType::List(Box::new(elem_type))
             }
             Self::Tuple(elements) => {
-                StaticType::Tuple(elements.iter().map(|e| e.static_type()).collect())
+                if depth == 0 {
+                    return StaticType::Tuple(vec![StaticType::Any; elements.len()]);
+                }
+                StaticType::Tuple(
+                    elements
+                        .iter()
+                        .map(|e| e.static_type_bounded(depth - 1))
+                        .collect(),
+                )
             }
             Self::Map { entries, .. } => {
+                if depth == 0 {
+                    return StaticType::Map {
+                        key: Box::new(StaticType::Any),
+                        value: Box::new(StaticType::Any),
+                    };
+                }
                 let entries = entries.borrow();
                 let key_type = entries
                     .keys()
-                    .map(|k| k.static_type())
+                    .map(|k| k.static_type_bounded(depth - 1))
                     .reduce(|a, b| a.lub(&b))
                     .unwrap_or(StaticType::Any);
                 let value_type = entries
                     .values()
-                    .map(|v| v.static_type())
+                    .map(|v| v.static_type_bounded(depth - 1))
                     .reduce(|a, b| a.lub(&b))
                     .unwrap_or(StaticType::Any);
                 StaticType::Map {
@@ -627,10 +682,13 @@ impl Object {
             Self::OverloadSet { .. } => StaticType::Any,
             Self::Iterator(_) => StaticType::Iterator(Box::new(StaticType::Any)),
             Self::Deque(elements) => {
+                if depth == 0 {
+                    return StaticType::Deque(Box::new(StaticType::Any));
+                }
                 let elements = elements.borrow();
                 let elem_type = elements
                     .iter()
-                    .map(|e| e.static_type())
+                    .map(|e| e.static_type_bounded(depth - 1))
                     .reduce(|a, b| a.lub(&b))
                     .unwrap_or(StaticType::Any);
                 StaticType::Deque(Box::new(elem_type))

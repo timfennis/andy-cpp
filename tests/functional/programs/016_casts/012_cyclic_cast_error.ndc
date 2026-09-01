@@ -1,0 +1,6 @@
+// A self-referential container fails a typed cast instead of overflowing
+// the stack: the check recurses on the target type, which is finite.
+// expect-error: cannot cast
+let x: Any = [];
+x.push(x);
+print(x as List<Int>);
