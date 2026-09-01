@@ -14,6 +14,12 @@ use std::rc::Rc;
 #[derive(Clone)]
 pub struct Compiler {
     ir: OptimizerIr,
+    /// Number of stack values belonging to partially compiled enclosing
+    /// expressions (a call's callee and earlier arguments, earlier collection
+    /// elements, an assignment target's scaffolding, …). `break` and
+    /// `continue` pop down to their loop's recorded level before jumping so
+    /// these partial values don't leak.
+    pending_operands: usize,
     source_locals: usize,
     temp_count: usize,
     temp_uses: Vec<TempUse>,
@@ -27,6 +33,7 @@ impl Compiler {
     pub fn new(struct_registry: Rc<RefCell<StructRegistry>>) -> Self {
         Self {
             ir: Default::default(),
+            pending_operands: 0,
             source_locals: 0,
             temp_count: 0,
             temp_uses: Vec::new(),
@@ -40,6 +47,7 @@ impl Compiler {
     pub fn new_without_optimization(struct_registry: Rc<RefCell<StructRegistry>>) -> Self {
         Self {
             ir: Default::default(),
+            pending_operands: 0,
             source_locals: 0,
             temp_count: 0,
             temp_uses: Vec::new(),
@@ -118,6 +126,15 @@ impl Compiler {
     fn emit_unit(&mut self) {
         let idx = self.ir.add_constant(Value::unit());
         self.ir.write(OpCode::Constant(idx), Span::synthetic());
+    }
+
+    /// Pop the stack down to a loop's pending-operand level. Emitted before
+    /// the jump of a `break`/`continue` that sits inside a partially compiled
+    /// expression, e.g. `f(1 + break)`.
+    fn emit_operand_cleanup(&mut self, target_level: usize, span: Span) {
+        for _ in target_level..self.pending_operands {
+            self.ir.write(OpCode::Pop, span);
+        }
     }
 
     fn allocate_temp(&mut self) -> TempSlot {
@@ -271,9 +288,13 @@ impl Compiler {
                 } => {
                     let set_fn = resolved_set.expect("[]= must be resolved");
                     self.compile_binding(set_fn, span)?;
+                    self.pending_operands += 1;
                     self.compile_expr(*container)?;
+                    self.pending_operands += 1;
                     self.compile_expr(*index)?;
+                    self.pending_operands += 1;
                     self.compile_expr(*value)?;
+                    self.pending_operands -= 3;
                     self.ir.write(OpCode::Call(3), span);
                 }
                 l_value @ Lvalue::Identifier { .. } => {
@@ -297,8 +318,11 @@ impl Compiler {
                 } => {
                     let setter = resolved_setter.expect("member setter must be resolved");
                     self.compile_binding(setter, member_span)?;
+                    self.pending_operands += 1;
                     self.compile_expr(*receiver)?;
+                    self.pending_operands += 1;
                     self.compile_expr(*value)?;
+                    self.pending_operands -= 2;
                     self.ir.write(OpCode::Call(2), member_span);
                 }
             },
@@ -319,7 +343,9 @@ impl Compiler {
                 let opcode = Self::call_opcode_for(&binding, 2);
                 self.compile_binding(binding, span)?;
                 target.emit_read(self)?;
+                self.pending_operands += 2;
                 self.compile_expr(*r_value)?;
+                self.pending_operands -= 2;
                 self.ir.write(opcode, span);
                 target.emit_store(self)?;
 
@@ -446,12 +472,16 @@ impl Compiler {
                     }
                     _ => OpCode::Call(arguments.len()),
                 };
+                let argument_count = arguments.len();
                 self.compile_expr(*function)?;
+                self.pending_operands += 1;
 
                 for argument in arguments {
                     self.compile_expr(argument)?;
+                    self.pending_operands += 1;
                 }
 
+                self.pending_operands -= argument_count + 1;
                 self.ir.write(opcode, function_span);
             }
             Expression::MemberAccess {
@@ -461,21 +491,27 @@ impl Compiler {
                 ..
             } => {
                 self.compile_binding(resolved_getter, member_span)?;
+                self.pending_operands += 1;
                 self.compile_expr(*receiver)?;
+                self.pending_operands -= 1;
                 self.ir.write(OpCode::Call(1), member_span);
             }
             Expression::Tuple { values } => {
                 let size = values.len();
                 for expression in values {
                     self.compile_expr(expression)?;
+                    self.pending_operands += 1;
                 }
+                self.pending_operands -= size;
                 self.ir.write(OpCode::MakeTuple(size), span);
             }
             Expression::List { values } => {
                 let size = values.len();
                 for expression in values {
                     self.compile_expr(expression)?;
+                    self.pending_operands += 1;
                 }
+                self.pending_operands -= size;
                 self.ir.write(OpCode::MakeList(size), span);
             }
             Expression::Map { values, default } => {
@@ -483,15 +519,18 @@ impl Compiler {
                 let has_default = default.is_some();
                 for (key, value) in values {
                     self.compile_expr(key)?;
+                    self.pending_operands += 1;
                     if let Some(v) = value {
                         self.compile_expr(v)?
                     } else {
                         self.emit_unit();
                     }
+                    self.pending_operands += 1;
                 }
                 if let Some(default) = default {
                     self.compile_expr(*default)?;
                 }
+                self.pending_operands -= pairs * 2;
                 self.ir.write(OpCode::MakeMap { pairs, has_default }, span);
             }
             Expression::Return { value } => {
@@ -502,20 +541,24 @@ impl Compiler {
                 self.ir.write(OpCode::Return, span);
             }
             Expression::Break => {
+                let context = self
+                    .current_loop_context()
+                    .ok_or(CompileError::unexpected_break(span))?;
+                self.emit_operand_cleanup(context.pending_operands, span);
                 let idx = self.ir.write(OpCode::Jump(JumpTarget::PLACEHOLDER), span); // will be backpatched
 
                 self.current_loop_context_mut()
-                    .ok_or(CompileError::unexpected_break(span))?
+                    .expect("loop context checked above")
                     .break_instructions
                     .push(idx);
             }
             Expression::Continue => {
-                self.write_jump_back(
-                    self.current_loop_context()
-                        .ok_or(CompileError::unexpected_continue(span))?
-                        .start,
-                    span,
-                );
+                let context = self
+                    .current_loop_context()
+                    .ok_or(CompileError::unexpected_continue(span))?;
+                let start = context.start;
+                self.emit_operand_cleanup(context.pending_operands, span);
+                self.write_jump_back(start, span);
             }
             range @ (Expression::RangeInclusive { .. } | Expression::RangeExclusive { .. }) => {
                 let (inclusive, start, end) = match range {
@@ -527,7 +570,9 @@ impl Compiler {
                 self.compile_expr(*start)?;
                 let bounded = end.is_some();
                 if let Some(end) = end {
+                    self.pending_operands += 1;
                     self.compile_expr(*end)?;
+                    self.pending_operands -= 1;
                 }
                 self.ir
                     .write(OpCode::MakeRange { inclusive, bounded }, span);
@@ -803,6 +848,7 @@ impl Compiler {
         };
         let mut fn_compiler = Self {
             ir: Default::default(),
+            pending_operands: 0,
             source_locals: num_params,
             temp_count: 0,
             temp_uses: Vec::new(),
@@ -914,11 +960,13 @@ impl Compiler {
                 self.write_temp(tmp_map, span, OpCode::SetLocal);
                 self.compile_for_iterations(iterations, span, &mut |this| {
                     this.compile_expr(key.clone())?;
+                    this.pending_operands += 1;
                     if let Some(value) = value.clone() {
                         this.compile_expr(value)?;
                     } else {
                         this.emit_unit();
                     }
+                    this.pending_operands -= 1;
                     this.write_temp(tmp_map, span, OpCode::MapInsert);
                     Ok(())
                 })?;
@@ -997,6 +1045,7 @@ impl Compiler {
         self.loop_stack.push(LoopContext {
             start,
             break_instructions: Vec::new(),
+            pending_operands: self.pending_operands,
         });
         start
     }
@@ -1020,6 +1069,9 @@ impl Compiler {
 struct LoopContext {
     start: LabelId,
     break_instructions: Vec<LabelId>,
+    /// The pending-operand level at loop entry; `break`/`continue` pop back
+    /// down to it before jumping.
+    pending_operands: usize,
 }
 
 /// Logical compiler-local slot, assigned a concrete frame slot after lowering.
