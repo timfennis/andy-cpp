@@ -1,0 +1,6 @@
+// A cast around an expression that produces no value must not pop a local
+// slot (this used to make `x` resolve to the wrong stack slot).
+let x = 1;
+while false {} as Any;
+print(x);
+// expect-output: 1
