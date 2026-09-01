@@ -265,10 +265,6 @@ pub struct LabelId(usize);
 pub(crate) struct OptimizerIr {
     constants: Vec<Value>,
     code: Vec<(LabelId, OpCode, Span)>,
-    /// Stack depth simulated from [`OpCode::stack_delta`] as instructions are
-    /// written. Exact along straight-line code; instructions that are only
-    /// reached by a jump (a loop's exit pop) can leave it off, so
-    /// `Compiler::compile_expr` re-anchors it at every expression boundary.
     stack_depth: isize,
 }
 
@@ -422,8 +418,10 @@ impl OptimizerIr {
         self.stack_depth
     }
 
-    /// Re-anchor the simulated stack depth at a point where the compiler
-    /// knows the true depth (see the field docs on [`OptimizerIr::stack_depth`]).
+    /// Re-anchor the simulated stack depth. The simulation is exact along
+    /// straight-line code but instructions reached only by a jump (a loop's
+    /// exit pop) leave it off, so `Compiler::compile_expr` re-anchors it at
+    /// every expression boundary.
     pub(crate) fn set_stack_depth(&mut self, depth: isize) {
         self.stack_depth = depth;
     }

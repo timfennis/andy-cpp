@@ -238,7 +238,6 @@ impl Compiler {
             }
             Expression::Statement(stm) => {
                 self.compile_expr(*stm)?;
-                // After a diverging statement this pop is unreachable code.
                 self.ir.write(OpCode::Pop, Span::synthetic());
             }
             Expression::Logical {
@@ -551,9 +550,7 @@ impl Compiler {
             }
         }
 
-        // Every expression except a statement leaves exactly one value;
-        // re-anchor the simulated depth here because instructions reached
-        // only by a jump (a loop's exit pop) leave the linear simulation off.
+        // Every expression except a statement leaves exactly one value.
         self.ir
             .set_stack_depth(entry_depth + isize::from(leaves_value));
         Ok(())
