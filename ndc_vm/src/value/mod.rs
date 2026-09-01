@@ -323,6 +323,100 @@ impl Value {
         }
     }
 
+    /// Check whether this value conforms to `target`, scanning container
+    /// elements recursively. Empty containers conform to any element type.
+    ///
+    /// Unlike [`Value::matches_param`] this is O(n) by design: it backs the
+    /// runtime check of `as` casts, where the caller explicitly opted into the
+    /// scan. Iterators can't be inspected without consuming them, so they only
+    /// conform to targets with `Any` elements.
+    pub fn conforms_to(&self, target: &StaticType) -> bool {
+        match target {
+            StaticType::Any => true,
+            StaticType::Option(inner) => match self {
+                Self::None => true,
+                Self::Object(object) => match object.as_ref() {
+                    Object::Some(value) => value.conforms_to(inner),
+                    _ => false,
+                },
+                _ => false,
+            },
+            StaticType::List(element) => matches!(
+                self,
+                Self::Object(object) if matches!(object.as_ref(), Object::List(values)
+                    if values.borrow().iter().all(|value| value.conforms_to(element)))
+            ),
+            StaticType::Deque(element) => matches!(
+                self,
+                Self::Object(object) if matches!(object.as_ref(), Object::Deque(values)
+                    if values.borrow().iter().all(|value| value.conforms_to(element)))
+            ),
+            StaticType::Tuple(elements) => matches!(
+                self,
+                Self::Object(object) if matches!(object.as_ref(), Object::Tuple(values)
+                    if values.len() == elements.len()
+                        && values.iter().zip(elements).all(|(value, element)| value.conforms_to(element)))
+            ),
+            StaticType::Map { key, value } => matches!(
+                self,
+                Self::Object(object) if matches!(object.as_ref(), Object::Map { entries, .. }
+                    if entries.borrow().iter().all(|(entry_key, entry_value)|
+                        entry_key.conforms_to(key) && entry_value.conforms_to(value)))
+            ),
+            StaticType::MinHeap(element) => matches!(
+                self,
+                Self::Object(object) if matches!(object.as_ref(), Object::MinHeap(values)
+                    if values.borrow().iter().all(|Reverse(OrdValue(value))| value.conforms_to(element)))
+            ),
+            StaticType::MaxHeap(element) => matches!(
+                self,
+                Self::Object(object) if matches!(object.as_ref(), Object::MaxHeap(values)
+                    if values.borrow().iter().all(|OrdValue(value)| value.conforms_to(element)))
+            ),
+            StaticType::Sequence(element) => match self {
+                Self::Object(object) => match object.as_ref() {
+                    Object::List(values) => values
+                        .borrow()
+                        .iter()
+                        .all(|value| value.conforms_to(element)),
+                    Object::Tuple(values) => values.iter().all(|value| value.conforms_to(element)),
+                    Object::Deque(values) => values
+                        .borrow()
+                        .iter()
+                        .all(|value| value.conforms_to(element)),
+                    Object::String(_) => StaticType::String.is_subtype(element),
+                    Object::Map { entries, .. } => {
+                        entries
+                            .borrow()
+                            .iter()
+                            .all(|(key, value)| match element.as_ref() {
+                                StaticType::Any => true,
+                                StaticType::Tuple(elements) if elements.len() == 2 => {
+                                    key.conforms_to(&elements[0]) && value.conforms_to(&elements[1])
+                                }
+                                StaticType::Sequence(inner) => {
+                                    key.conforms_to(inner) && value.conforms_to(inner)
+                                }
+                                _ => false,
+                            })
+                    }
+                    Object::MinHeap(values) => values
+                        .borrow()
+                        .iter()
+                        .all(|Reverse(OrdValue(value))| value.conforms_to(element)),
+                    Object::MaxHeap(values) => values
+                        .borrow()
+                        .iter()
+                        .all(|OrdValue(value)| value.conforms_to(element)),
+                    Object::Iterator(_) => matches!(element.as_ref(), StaticType::Any),
+                    _ => false,
+                },
+                _ => false,
+            },
+            _ => self.static_type().is_subtype(target),
+        }
+    }
+
     /// Consume this value and produce an iterator over its elements.
     ///
     /// Returns `None` for non-iterable types (`Int`, `Float`, `Bool`, `None`,

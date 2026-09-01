@@ -106,3 +106,35 @@ let m = %{:0, "a": 1};
       (map_entry
         key: (string)
         value: (integer)))))
+
+==================
+cast expression
+==================
+
+let k = xs as List<Int>;
+
+---
+
+(source_file
+  (variable_declaration
+    name: (identifier)
+    value: (cast_expression
+      value: (identifier)
+      type: (generic_type
+        name: (type_identifier)
+        (type_identifier)))))
+
+==================
+cast binds tighter than binary operators
+==================
+
+a + b as Int;
+
+---
+
+(source_file
+  (binary_expression
+    left: (identifier)
+    right: (cast_expression
+      value: (identifier)
+      type: (type_identifier))))

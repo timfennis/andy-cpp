@@ -110,6 +110,14 @@ pub enum Expression {
         right: Box<ExpressionLocation>,
     },
     Grouping(Box<ExpressionLocation>),
+    /// `value as Type` — asserts the value has the target type; never converts.
+    Cast {
+        value: Box<ExpressionLocation>,
+        annotation: TypeExpr,
+        resolved_type: Option<StaticType>,
+        /// Cleared by the analyser when the value's static type proves the cast.
+        requires_check: bool,
+    },
     VariableDeclaration {
         l_value: Lvalue,
         annotated_type: Option<TypeExpr>,

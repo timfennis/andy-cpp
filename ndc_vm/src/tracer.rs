@@ -50,6 +50,7 @@ fn opcode_name(op: &OpCode) -> &'static str {
         OpCode::Return => "Return",
         OpCode::CloseUpvalue(_) => "CloseUpvalue",
         OpCode::Memoize => "Memoize",
+        OpCode::CheckType(_) => "CheckType",
     }
 }
 

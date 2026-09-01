@@ -630,10 +630,26 @@ impl Parser {
 
     fn exponent(&mut self) -> Result<ExpressionLocation, Error> {
         self.consume_binary_expression_right_associative(
-            Self::tight_unary,
+            Self::cast,
             Self::exponent,
             &[Token::Caret],
         )
+    }
+
+    fn cast(&mut self) -> Result<ExpressionLocation, Error> {
+        let mut expression = self.tight_unary()?;
+        while self.consume_token_if(&[Token::As]).is_some() {
+            let annotation = self.type_annotation()?;
+            let span = expression.span.merge(annotation.span());
+            expression = Expression::Cast {
+                value: Box::new(expression),
+                annotation,
+                resolved_type: None,
+                requires_check: true,
+            }
+            .to_location(span);
+        }
+        Ok(expression)
     }
 
     fn tight_unary(&mut self) -> Result<ExpressionLocation, Error> {

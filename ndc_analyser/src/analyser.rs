@@ -293,6 +293,21 @@ impl Analyser {
                 Ok(StaticType::Bool)
             }
             Expression::Grouping(expr) => self.analyse(expr),
+            Expression::Cast {
+                value,
+                annotation,
+                resolved_type,
+                requires_check,
+            } => {
+                let target = self.lower_type_expr(annotation);
+                let found = self.analyse_with_expected(value, &target);
+                if found.is_incompatible_with(&target) {
+                    self.emit(AnalysisError::impossible_cast(&found, &target, *span));
+                }
+                *requires_check = !found.is_subtype(&target);
+                *resolved_type = Some(target.clone());
+                Ok(target)
+            }
             Expression::VariableDeclaration {
                 l_value,
                 annotated_type,
@@ -1294,6 +1309,13 @@ impl AnalysisError {
     fn mismatched_types(found: &StaticType, expected: &StaticType, span: Span) -> Self {
         Self {
             text: format!("mismatched types: found {found} but expected {expected}"),
+            span,
+        }
+    }
+
+    fn impossible_cast(found: &StaticType, target: &StaticType, span: Span) -> Self {
+        Self {
+            text: format!("invalid cast: {found} can never be {target}"),
             span,
         }
     }

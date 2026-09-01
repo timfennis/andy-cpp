@@ -589,3 +589,30 @@ fn test_break_pops_pending_operands() {
         "expected three cleanup Pops before the break jump, got: {ops:?}",
     );
 }
+
+// let x: Any = 1; x as Int
+//
+// `Any` doesn't prove the target type, so the cast compiles to a CheckType
+// guard after the value is loaded.
+#[test]
+fn test_cast_from_any_emits_check_type() {
+    let ops = compile_with_analysis("let x: Any = 1; x as Int");
+    assert!(
+        ops.iter()
+            .any(|op| matches!(op, CheckType(t) if **t == ndc_core::StaticType::Int)),
+        "expected a CheckType(Int) guard, got: {ops:?}",
+    );
+}
+
+// 1 as Int; [1] as Any
+//
+// Both casts are proven by the value's static type, so no runtime guard is
+// emitted.
+#[test]
+fn test_provable_cast_emits_no_check_type() {
+    let ops = compile_with_analysis("1 as Int; [1] as Any");
+    assert!(
+        ops.iter().all(|op| !matches!(op, CheckType(_))),
+        "provable casts must not emit CheckType, got: {ops:?}",
+    );
+}
