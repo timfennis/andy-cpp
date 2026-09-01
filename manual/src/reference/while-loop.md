@@ -1,6 +1,7 @@
 # While loop
 
 Like in every other language a `while` loop will run as long as a condition is true.
+A `while` loop is an expression that always evaluates to the unit value `()`.
 
 ```
 let n = 1;

@@ -5,13 +5,9 @@ use ndc_lexer::Span;
 use ndc_parser::CaptureSource;
 use std::rc::Rc;
 
-/// A signed displacement applied to the instruction pointer to perform a jump.
-///
-/// Wraps `isize` so the contract — "relative offset, in instructions, from the
-/// instruction *after* the jump opcode" — has a single definition site. Future
-/// stages of a compile pipeline may swap this for an `enum JumpTarget { … }`
-/// without touching every call site.
-
+/// A jump destination: either a resolved displacement — "relative offset, in
+/// instructions, from the instruction *after* the jump opcode" — or a symbolic
+/// label that `OptimizerIr::into_chunk` lowers to such an offset.
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub enum JumpTarget {
     Offset(isize),
@@ -67,9 +63,10 @@ impl std::fmt::Debug for JumpTarget {
 /// | `GetLocal`    | `[… → … value]`                        | +1 (copies from slot)                      |
 /// | `GetUpvalue`  | `[… → … value]`                        | +1 (reads upvalue cell)                    |
 /// | `GetGlobal`   | `[… → … value]`                        | +1 (copies from globals)                   |
-/// | `SetLocal`    | `[… value → …]`                        | −1 (pops, writes to slot†)                 |
+/// | `SetLocal`    | `[… value → …]`                        | −1 (pops, writes to slot)                  |
 /// | `SetUpvalue`  | `[… value → …]`                        | −1 (pops, writes to upvalue cell)          |
 /// | `Call`        | `[… callee a1…an → … result]`          | −n (pops callee + args, pushes result)     |
+/// | `CallVec`     | `[… callee a1…an → … tuple]`           | −n (pops callee + args, pushes result)     |
 /// | `Return`      | `[… retval → …]`                       | pops retval, truncates frame, pushes retval|
 /// | `Halt`        | `[…]`                                   | terminates execution                       |
 /// | `Jump`        | `[…]`                                   | 0 (unconditional jump)                     |
@@ -87,10 +84,6 @@ impl std::fmt::Debug for JumpTarget {
 /// | `Unpack`      | `[… compound → … v1…vn]`               | +(n−1) (pops 1, pushes n)                  |
 /// | `CloseUpvalue`| `[…]`                                   | 0 (closes upvalue cells, no stack change)  |
 /// | `Memoize`     | `[… fn → … memoized_fn]`               | 0 (pops and pushes)                        |
-///
-/// † `SetLocal` for a **declaration** (slot == stack top) is effectively a no-op on the
-///   stack: it pops then immediately pushes to extend. For a **reassignment** (slot < top)
-///   it truly shrinks the stack by 1.
 // NOTE: OpCode cannot be Copy because the Closure variant holds Rc<[CaptureSource]>.
 // The dispatch loop accesses opcodes by reference to avoid cloning the 32-byte enum on
 // every iteration; see Vm::run_to_depth.
@@ -157,6 +150,58 @@ pub enum OpCode {
     Memoize,
 }
 
+impl OpCode {
+    /// The net stack effect of executing this instruction on its fall-through
+    /// path, matching the `[… → …]` comments on the enum variants. The
+    /// compiler simulates the stack depth from these deltas so that `break`
+    /// and `continue` know how many pending operands to pop; a new opcode
+    /// must declare its delta here.
+    pub(crate) fn stack_delta(&self) -> isize {
+        // Arms follow the enum's order so each delta can be reviewed against
+        // its variant's stack comment, rather than being grouped by value.
+        #[allow(clippy::match_same_arms)]
+        #[allow(clippy::cast_possible_wrap)]
+        match self {
+            // Pops the callee and `n` arguments, pushes one result: -(n+1)+1.
+            Self::Call(n) | Self::CallVec(n) => -(*n as isize),
+            Self::Pop => -1,
+            // The conditional jumps peek at the condition without popping it;
+            // the branch they land in pops it instead.
+            Self::Jump(_) | Self::JumpIfTrue(_) | Self::JumpIfFalse(_) => 0,
+            Self::Constant(_) | Self::GetLocal(_) | Self::GetUpvalue(_) | Self::GetGlobal(_) => 1,
+            Self::SetLocal(_) | Self::SetUpvalue(_) => -1,
+            // Pops `n` elements, pushes the collection: -n+1.
+            Self::MakeList(n) | Self::MakeTuple(n) => 1 - *n as isize,
+            // Pops a key and a value per pair plus the optional default,
+            // pushes the map: -(2*pairs + has_default) + 1.
+            Self::MakeMap { pairs, has_default } => {
+                1 - 2 * *pairs as isize - isize::from(*has_default)
+            }
+            Self::Closure { .. } => 1,
+            // Pops the sequence, pushes the iterator made from it.
+            Self::GetIterator => 0,
+            // Peeks the iterator and pushes the next element. This is the
+            // fall-through path; the exhausted path jumps without pushing,
+            // which the jump target's code accounts for.
+            Self::IterNext(_) => 1,
+            Self::ListPush(_) => -1,
+            // Pops a key and a value.
+            Self::MapInsert(_) => -2,
+            // Pops the start bound and, when bounded, the end bound; pushes
+            // the range iterator: -(1 + bounded) + 1.
+            Self::MakeRange { bounded, .. } => -isize::from(*bounded),
+            // Pops the compound value, pushes its `n` elements.
+            Self::Unpack(n) => *n as isize - 1,
+            Self::Halt => 0,
+            // Pops the return value; the frame teardown that discards the
+            // rest of the frame happens in the VM, outside this accounting.
+            Self::Return => -1,
+            Self::CloseUpvalue(_) => 0,
+            Self::Memoize => 0,
+        }
+    }
+}
+
 impl std::fmt::Debug for OpCode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -213,6 +258,7 @@ pub struct LabelId(usize);
 pub(crate) struct OptimizerIr {
     constants: Vec<Value>,
     code: Vec<(LabelId, OpCode, Span)>,
+    stack_depth: isize,
 }
 
 impl OptimizerIr {
@@ -356,8 +402,21 @@ impl OptimizerIr {
 
     pub(crate) fn write(&mut self, op: OpCode, span: Span) -> LabelId {
         let label = self.next_label();
+        self.stack_depth += op.stack_delta();
         self.code.push((label, op, span));
         label
+    }
+
+    pub(crate) fn stack_depth(&self) -> isize {
+        self.stack_depth
+    }
+
+    /// Re-anchor the simulated stack depth. The simulation is exact along
+    /// straight-line code but instructions reached only by a jump (a loop's
+    /// exit pop) leave it off, so `Compiler::compile_expr` re-anchors it at
+    /// every expression boundary.
+    pub(crate) fn set_stack_depth(&mut self, depth: isize) {
+        self.stack_depth = depth;
     }
 }
 

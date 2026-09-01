@@ -327,8 +327,18 @@ impl Parser {
             value: Box::new(expression),
         };
 
-        if self.peek_current_token().is_some() {
-            self.require_current_token_matches(&Token::Semicolon)?;
+        // Require the terminating semicolon but leave it for
+        // `expression_or_statement` to consume, so the declaration is wrapped
+        // in a Statement like any other `;`-terminated expression.
+        if let Some(token) = self.peek_current_token()
+            && token != &Token::Semicolon
+        {
+            return Err(Error::text(
+                format!("Expected token ';' but got '{token}' instead"),
+                self.peek_current_token_location()
+                    .expect("token exists")
+                    .span,
+            ));
         }
 
         Ok(declaration.to_location(let_token.span.merge(end)))

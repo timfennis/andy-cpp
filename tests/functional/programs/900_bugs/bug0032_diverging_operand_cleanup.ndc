@@ -1,0 +1,41 @@
+// `break`/`continue` inside a partially evaluated expression used to leak
+// the pending operands on the stack (unboundedly for `continue`, corrupting
+// the iterator in for loops). They now pop back to the loop's level first.
+let n = 0;
+for x in [1, 2, 3] {
+    n += 1;
+    let y = x + continue;
+}
+assert_eq(n, 3);
+
+// Callee and arguments are discarded; print is never called.
+while true {
+    print(1 + break);
+}
+
+// Collection literal elements are discarded; push is never called.
+let acc = [];
+while true {
+    acc.push([1, 2, break]);
+}
+assert_eq(acc, []);
+
+// Index-assignment scaffolding (setter, container, index) is discarded.
+let map = %{};
+while true {
+    map[1 + break] = 9;
+}
+assert_eq(map.len(), 0);
+
+// A nested break pops to its own loop's level only.
+let m = 0;
+for i in [1, 2] {
+    m += 10;
+    for j in [1, 2] {
+        m += 1;
+        let z = (i, j, break);
+    }
+}
+assert_eq(m, 22);
+print("done");
+// expect-output: done
