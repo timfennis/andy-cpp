@@ -51,46 +51,8 @@ pub fn complete(
 
     let is_dot = receiver_type.is_some();
 
-    let function_items = functions.iter().filter_map(|fun| {
-        if !is_normal_ident(&fun.name) {
-            return None;
-        }
-
-        if let Some(recv) = &receiver_type {
-            match &fun.static_type {
-                StaticType::Function {
-                    parameters: Some(params),
-                    ..
-                } => {
-                    if params.is_empty() || !recv.is_subtype(&params[0]) {
-                        return None;
-                    }
-                }
-                StaticType::Function {
-                    parameters: None, ..
-                } => {}
-                _ => return None,
-            }
-        }
-
-        let (param_detail, return_detail) = format_function_signature(&fun.static_type, is_dot);
-
-        Some(CompletionItem {
-            label: fun.name.clone(),
-            label_details: Some(CompletionItemLabelDetails {
-                detail: Some(param_detail),
-                description: Some(return_detail),
-            }),
-            kind: Some(CompletionItemKind::FUNCTION),
-            documentation: fun.documentation.as_ref().map(|d| {
-                Documentation::MarkupContent(MarkupContent {
-                    kind: MarkupKind::Markdown,
-                    value: d.clone(),
-                })
-            }),
-            ..Default::default()
-        })
-    });
+    let groups = group_overloads(functions, receiver_type.as_ref());
+    let function_items = groups.iter().map(|group| group.render(is_dot));
 
     if is_dot {
         return CompletionResponse::Array(function_items.collect());
@@ -111,27 +73,141 @@ pub fn complete(
     CompletionResponse::Array(items)
 }
 
-fn format_function_signature(typ: &StaticType, is_dot: bool) -> (String, String) {
-    match typ {
-        StaticType::Function {
-            parameters: Some(params),
-            return_type,
-        } => {
-            let skip = if is_dot { 1 } else { 0 };
-            let ps = params
-                .iter()
-                .skip(skip)
-                .map(|t| t.to_string())
-                .collect::<Vec<_>>()
-                .join(", ");
-            (format!("({ps})"), return_type.to_string())
+/// One completion item per function name and arity. Overloads that differ only
+/// in parameter types fold together: `randf(Int, Int)`, `randf(Int, Float)`, …,
+/// `randf(Number, Number)` become a single `randf(Int | Float | Number, Int | Float | Number)`,
+/// while `randf()` and `randf(max)` stay separate items.
+struct OverloadGroup<'a> {
+    name: &'a str,
+    /// Distinct candidate types per parameter position. `None` when the
+    /// overloads don't declare their parameters.
+    parameters: Option<Vec<Vec<&'a StaticType>>>,
+    return_types: Vec<&'a StaticType>,
+    documentation: Option<&'a str>,
+}
+
+impl OverloadGroup<'_> {
+    /// Render this group as one completion item. In dot mode the first
+    /// parameter is the receiver and is omitted from the displayed signature.
+    fn render(&self, is_dot: bool) -> CompletionItem {
+        let param_detail = match &self.parameters {
+            Some(positions) => {
+                let ps = positions
+                    .iter()
+                    .skip(usize::from(is_dot))
+                    .map(|candidates| merged_type_display(candidates))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("({ps})")
+            }
+            None => "(...)".to_string(),
+        };
+
+        // Same-name items otherwise sort in whatever order the client picks;
+        // sorting by arity keeps `randf()` above `randf(min, max)`.
+        let sort_text = match &self.parameters {
+            Some(positions) => format!("{}{:02}", self.name, positions.len()),
+            None => format!("{}~~", self.name),
+        };
+
+        let return_detail = merged_type_display(&self.return_types);
+
+        CompletionItem {
+            label: self.name.to_string(),
+            // Clients that don't render label_details in the menu (e.g. Helix)
+            // show `detail` in the docs popup instead.
+            detail: Some(format!("{}{param_detail} -> {return_detail}", self.name)),
+            label_details: Some(CompletionItemLabelDetails {
+                detail: Some(param_detail),
+                description: Some(return_detail),
+            }),
+            kind: Some(CompletionItemKind::FUNCTION),
+            sort_text: Some(sort_text),
+            documentation: self.documentation.map(|d| {
+                Documentation::MarkupContent(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: d.to_string(),
+                })
+            }),
+            ..Default::default()
         }
-        StaticType::Function {
-            parameters: None,
-            return_type,
-        } => ("(...)".to_string(), return_type.to_string()),
-        other => (String::new(), other.to_string()),
     }
+}
+
+/// Group registered functions by (name, arity), keeping registration order and
+/// deduplicating the types seen at each parameter position. When
+/// `receiver_type` is given (dot completion), overloads whose first parameter
+/// doesn't accept the receiver are dropped before grouping.
+fn group_overloads<'a>(
+    functions: &'a [FunctionInfo],
+    receiver_type: Option<&StaticType>,
+) -> Vec<OverloadGroup<'a>> {
+    let mut groups: Vec<OverloadGroup<'a>> = Vec::new();
+    let mut index: AHashMap<(&'a str, Option<usize>), usize> = AHashMap::new();
+
+    for fun in functions {
+        if !is_normal_ident(&fun.name) {
+            continue;
+        }
+        let StaticType::Function {
+            parameters,
+            return_type,
+        } = &fun.static_type
+        else {
+            continue;
+        };
+        if let (Some(recv), Some(params)) = (receiver_type, parameters)
+            && (params.is_empty() || !recv.is_subtype(&params[0]))
+        {
+            continue;
+        }
+
+        let key = (fun.name.as_str(), parameters.as_ref().map(Vec::len));
+        let slot = *index.entry(key).or_insert_with(|| {
+            groups.push(OverloadGroup {
+                name: &fun.name,
+                parameters: parameters
+                    .as_ref()
+                    .map(|params| vec![Vec::new(); params.len()]),
+                return_types: Vec::new(),
+                documentation: None,
+            });
+            groups.len() - 1
+        });
+        let group = &mut groups[slot];
+        if let (Some(positions), Some(params)) = (&mut group.parameters, parameters) {
+            for (candidates, param) in positions.iter_mut().zip(params) {
+                if !candidates.contains(&param) {
+                    candidates.push(param);
+                }
+            }
+        }
+        if !group.return_types.contains(&&**return_type) {
+            group.return_types.push(return_type);
+        }
+        if group.documentation.is_none() {
+            group.documentation = fun.documentation.as_deref();
+        }
+    }
+
+    groups
+}
+
+/// `[Int]` -> `Int`; `[List<Int>, Sequence<Int>]` -> `Sequence<Int>` (a
+/// candidate subsuming all others wins); `[Int, Float, Number]` ->
+/// `Int | Float | Number` (no candidate subsumes the others).
+fn merged_type_display(candidates: &[&StaticType]) -> String {
+    if let Some(supertype) = candidates
+        .iter()
+        .find(|t| candidates.iter().all(|c| c.is_subtype(t)))
+    {
+        return supertype.to_string();
+    }
+    candidates
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(" | ")
 }
 
 /// Language keywords offered in general (non-dot) completion.
@@ -374,6 +450,95 @@ mod tests {
         assert!(
             items.iter().any(|i| i.label == "len"),
             "dot-completion on String should include `len`"
+        );
+    }
+
+    /// A synthetic native function overload, so grouping tests don't depend on
+    /// which overloads the stdlib happens to register.
+    fn native(name: &str, params: &[StaticType], ret: StaticType) -> FunctionInfo {
+        FunctionInfo {
+            name: name.to_string(),
+            static_type: StaticType::Function {
+                parameters: Some(params.to_vec()),
+                return_type: Box::new(ret),
+            },
+            documentation: None,
+        }
+    }
+
+    fn parameter_details(items: &[CompletionItem], label: &str) -> Vec<String> {
+        items
+            .iter()
+            .filter(|i| i.label == label)
+            .map(|i| {
+                i.label_details
+                    .as_ref()
+                    .and_then(|d| d.detail.clone())
+                    .expect("function items carry a parameter detail")
+            })
+            .collect()
+    }
+
+    #[test]
+    fn general_completion_groups_overloads_by_arity() {
+        use StaticType::{Float, Int, Number};
+        let overloads = vec![
+            native("randf", &[], Float),
+            native("randf", &[Int], Float),
+            native("randf", &[Float], Float),
+            native("randf", &[Number], Float),
+            native("randf", &[Int, Int], Float),
+            native("randf", &[Number, Number], Float),
+        ];
+        let state = state_with("", AHashMap::new(), AHashMap::new());
+
+        let response = complete(Some(&state), Position::new(0, 0), &overloads);
+        let CompletionResponse::Array(items) = response else {
+            panic!("expected Array response");
+        };
+
+        // One item per arity; type permutations within an arity fold into the
+        // common supertype (`Number` subsumes `Int` and `Float`).
+        assert_eq!(
+            parameter_details(&items, "randf"),
+            vec!["()", "(Number)", "(Number, Number)"]
+        );
+    }
+
+    #[test]
+    fn dot_completion_groups_surviving_overloads() {
+        use StaticType::{Float, Int, Number};
+        let overloads = vec![
+            native("randf", &[], Float),            // no receiver parameter
+            native("randf", &[Int], Float),         // survives
+            native("randf", &[Float], Float),       // Int is not a Float
+            native("randf", &[Int, Number], Float), // survives, folds with next
+            native("randf", &[Int, Int], Float),
+        ];
+        // Receiver is Int, so only overloads whose first parameter accepts Int
+        // survive; the receiver is then omitted from the displayed signature.
+        let state = state_with(
+            "let x = 42\nx.",
+            AHashMap::from([("x".to_string(), StaticType::Int)]),
+            AHashMap::new(),
+        );
+
+        let response = complete(Some(&state), Position::new(1, 2), &overloads);
+        let CompletionResponse::Array(items) = response else {
+            panic!("expected Array response");
+        };
+
+        assert_eq!(parameter_details(&items, "randf"), vec!["()", "(Number)"]);
+    }
+
+    #[test]
+    fn merged_type_display_prefers_common_supertype() {
+        let list = StaticType::List(Box::new(StaticType::Int));
+        let seq = StaticType::Sequence(Box::new(StaticType::Int));
+        assert_eq!(merged_type_display(&[&list, &seq]), seq.to_string());
+        assert_eq!(
+            merged_type_display(&[&StaticType::Int, &StaticType::Float]),
+            format!("{} | {}", StaticType::Int, StaticType::Float)
         );
     }
 
