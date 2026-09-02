@@ -308,7 +308,7 @@
         {
           "comment": "other keywords",
           "name": "keyword.other.andy-cpp",
-          "match": "\\b(in)\\b"
+          "match": "\\b(in|as)\\b"
         }
       ]
     },

@@ -8,8 +8,8 @@
  *
  *   assignment  <  comma/sequence  <  or  <  and  <  not  <  range
  *     <  comparison/in  <  spaceship  <  shift  <  |  <  ~  <  &
- *     <  + - ++ <>  <  * / \ % %%  <  ^ (right assoc)  <  unary ! - ~
- *     <  postfix call/index/member
+ *     <  + - ++ <>  <  * / \ % %%  <  ^ (right assoc)  <  as cast
+ *     <  unary ! - ~  <  postfix call/index/member
  */
 
 /* eslint-disable arrow-parens */
@@ -33,8 +33,9 @@ const PREC = {
   term: 13,
   factor: 14,
   exponent: 15,
-  unary: 16,
-  call: 17,
+  cast: 16,
+  unary: 17,
+  call: 18,
 };
 
 /** @param {RuleOrLiteral} rule */
@@ -59,6 +60,10 @@ module.exports = grammar({
   conflicts: $ => [
     [$._pattern, $._expression],
     [$.if_expression, $.if_guard],
+    // `x as Int < 2` — a `<` after a cast type may open a type argument list
+    // or be a less-than operator. Both branches are explored; the dynamic
+    // precedence on `generic_type` picks the cast when either parse works.
+    [$._type, $.generic_type],
   ],
 
   rules: {
@@ -151,13 +156,18 @@ module.exports = grammar({
 
     type_identifier: $ => /[A-Za-z_][A-Za-z0-9_]*/,
 
-    generic_type: $ => seq(
+    // A `<` after a type name is ambiguous in a cast: it may open a type
+    // argument list or be a less-than operator. The conflict declared above
+    // makes the parser try both; this dynamic precedence prefers the type
+    // argument list whenever it parses, mirroring the recursive-descent
+    // parser in `ndc_parser/src/parser.rs`.
+    generic_type: $ => prec.dynamic(1, seq(
       field('name', $.type_identifier),
       '<',
       commaSep($._type),
       optional(','),
       '>',
-    ),
+    )),
 
     tuple_type: $ => seq(
       '(',
@@ -186,6 +196,7 @@ module.exports = grammar({
       $._literal,
       $.unary_expression,
       $.not_expression,
+      $.cast_expression,
       $.binary_expression,
       $.range_expression,
       $.assignment,
@@ -238,6 +249,12 @@ module.exports = grammar({
         $.named_op_assign,
       )),
       field('right', $._expression_or_sequence),
+    )),
+
+    cast_expression: $ => prec.left(PREC.cast, seq(
+      field('value', $._expression),
+      'as',
+      field('type', $._type),
     )),
 
     unary_expression: $ => prec(PREC.unary, seq(
