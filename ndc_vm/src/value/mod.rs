@@ -26,6 +26,8 @@ thread_local! {
 
 const DIAGNOSTIC_TYPE_MAX_DEPTH: usize = 4;
 const DIAGNOSTIC_TYPE_VALUE_BUDGET: usize = 256;
+type ConformanceKey = (*const Object, *const StaticType);
+type ConformanceCache = HashMap<ConformanceKey, bool>;
 
 fn bounded_element_type<'a>(
     values: impl Iterator<Item = &'a Value>,
@@ -366,17 +368,34 @@ impl Value {
     /// Check whether this value conforms to `target`, scanning container
     /// elements recursively. Empty containers conform to any element type.
     ///
-    /// Unlike [`Value::matches_param`] this is O(n) by design: it backs the
-    /// runtime check of `as` casts, where the caller explicitly opted into the
-    /// scan. Iterators can't be inspected without consuming them, so they only
+    /// Unlike [`Value::matches_param`] this scans the value by design: it backs
+    /// the runtime check of `as` casts, where the caller explicitly opted into
+    /// the scan. Shared container aliases are memoized by object and target
+    /// type. Iterators can't be inspected without consuming them, so they only
     /// conform to targets with `Any` elements.
     pub fn conforms_to(&self, target: &StaticType) -> bool {
-        match target {
+        self.conforms_to_cached(target, &mut ConformanceCache::default())
+    }
+
+    fn conforms_to_cached(&self, target: &StaticType, cache: &mut ConformanceCache) -> bool {
+        let cache_key = match self {
+            Self::Object(object) => Some((Rc::as_ptr(object), std::ptr::from_ref(target))),
+            _ => None,
+        };
+        if let Some(cache_key) = cache_key
+            && let Some(result) = cache.get(&cache_key)
+        {
+            return *result;
+        }
+
+        // Static types are finite trees, so this pair cannot be re-entered
+        // before its result is stored.
+        let result = match target {
             StaticType::Any => true,
             StaticType::Option(inner) => match self {
                 Self::None => true,
                 Self::Object(object) => match object.as_ref() {
-                    Object::Some(value) => value.conforms_to(inner),
+                    Object::Some(value) => value.conforms_to_cached(inner, cache),
                     _ => false,
                 },
                 _ => false,
@@ -384,18 +403,18 @@ impl Value {
             StaticType::List(element) => matches!(
                 self,
                 Self::Object(object) if matches!(object.as_ref(), Object::List(values)
-                    if values.borrow().iter().all(|value| value.conforms_to(element)))
+                    if values.borrow().iter().all(|value| value.conforms_to_cached(element, cache)))
             ),
             StaticType::Deque(element) => matches!(
                 self,
                 Self::Object(object) if matches!(object.as_ref(), Object::Deque(values)
-                    if values.borrow().iter().all(|value| value.conforms_to(element)))
+                    if values.borrow().iter().all(|value| value.conforms_to_cached(element, cache)))
             ),
             StaticType::Tuple(elements) => matches!(
                 self,
                 Self::Object(object) if matches!(object.as_ref(), Object::Tuple(values)
                     if values.len() == elements.len()
-                        && values.iter().zip(elements).all(|(value, element)| value.conforms_to(element)))
+                        && values.iter().zip(elements).all(|(value, element)| value.conforms_to_cached(element, cache)))
             ),
             StaticType::Map { key, value } => match self {
                 Self::Object(object) => match object.as_ref() {
@@ -411,11 +430,12 @@ impl Value {
                             {
                                 matches!(value.as_ref(), StaticType::Any)
                             }
-                            Some(default) => default.conforms_to(value),
+                            Some(default) => default.conforms_to_cached(value, cache),
                         };
                         default_conforms
                             && entries.borrow().iter().all(|(entry_key, entry_value)| {
-                                entry_key.conforms_to(key) && entry_value.conforms_to(value)
+                                entry_key.conforms_to_cached(key, cache)
+                                    && entry_value.conforms_to_cached(value, cache)
                             })
                     }
                     _ => false,
@@ -425,24 +445,26 @@ impl Value {
             StaticType::MinHeap(element) => matches!(
                 self,
                 Self::Object(object) if matches!(object.as_ref(), Object::MinHeap(values)
-                    if values.borrow().iter().all(|Reverse(OrdValue(value))| value.conforms_to(element)))
+                    if values.borrow().iter().all(|Reverse(OrdValue(value))| value.conforms_to_cached(element, cache)))
             ),
             StaticType::MaxHeap(element) => matches!(
                 self,
                 Self::Object(object) if matches!(object.as_ref(), Object::MaxHeap(values)
-                    if values.borrow().iter().all(|OrdValue(value)| value.conforms_to(element)))
+                    if values.borrow().iter().all(|OrdValue(value)| value.conforms_to_cached(element, cache)))
             ),
             StaticType::Sequence(element) => match self {
                 Self::Object(object) => match object.as_ref() {
                     Object::List(values) => values
                         .borrow()
                         .iter()
-                        .all(|value| value.conforms_to(element)),
-                    Object::Tuple(values) => values.iter().all(|value| value.conforms_to(element)),
+                        .all(|value| value.conforms_to_cached(element, cache)),
+                    Object::Tuple(values) => values
+                        .iter()
+                        .all(|value| value.conforms_to_cached(element, cache)),
                     Object::Deque(values) => values
                         .borrow()
                         .iter()
-                        .all(|value| value.conforms_to(element)),
+                        .all(|value| value.conforms_to_cached(element, cache)),
                     Object::String(_) => StaticType::String.is_subtype(element),
                     Object::Map { entries, .. } => {
                         entries
@@ -451,10 +473,12 @@ impl Value {
                             .all(|(key, value)| match element.as_ref() {
                                 StaticType::Any => true,
                                 StaticType::Tuple(elements) if elements.len() == 2 => {
-                                    key.conforms_to(&elements[0]) && value.conforms_to(&elements[1])
+                                    key.conforms_to_cached(&elements[0], cache)
+                                        && value.conforms_to_cached(&elements[1], cache)
                                 }
                                 StaticType::Sequence(inner) => {
-                                    key.conforms_to(inner) && value.conforms_to(inner)
+                                    key.conforms_to_cached(inner, cache)
+                                        && value.conforms_to_cached(inner, cache)
                                 }
                                 _ => false,
                             })
@@ -462,11 +486,11 @@ impl Value {
                     Object::MinHeap(values) => values
                         .borrow()
                         .iter()
-                        .all(|Reverse(OrdValue(value))| value.conforms_to(element)),
+                        .all(|Reverse(OrdValue(value))| value.conforms_to_cached(element, cache)),
                     Object::MaxHeap(values) => values
                         .borrow()
                         .iter()
-                        .all(|OrdValue(value)| value.conforms_to(element)),
+                        .all(|OrdValue(value)| value.conforms_to_cached(element, cache)),
                     Object::Iterator(_) => matches!(element.as_ref(), StaticType::Any),
                     _ => false,
                 },
@@ -492,7 +516,12 @@ impl Value {
                 }
                 _ => self.static_type().is_subtype(target),
             },
+        };
+
+        if let Some(cache_key) = cache_key {
+            cache.insert(cache_key, result);
         }
+        result
     }
 
     /// Consume this value and produce an iterator over its elements.
@@ -1224,5 +1253,33 @@ impl Hash for Object {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn conformance_memoizes_aliased_containers() {
+        let list = Rc::new(Object::List(RefCell::new(Vec::new())));
+        let value = Value::Object(Rc::clone(&list));
+        let Object::List(elements) = list.as_ref() else {
+            unreachable!();
+        };
+        elements
+            .borrow_mut()
+            .extend(std::iter::repeat_n(value.clone(), 100));
+
+        let target = StaticType::List(Box::new(StaticType::List(Box::new(StaticType::List(
+            Box::new(StaticType::Any),
+        )))));
+        let mut cache = ConformanceCache::default();
+
+        assert!(value.conforms_to_cached(&target, &mut cache));
+        assert_eq!(cache.len(), 4);
+
+        // Break the reference cycle so the test does not leak its allocations.
+        elements.borrow_mut().clear();
     }
 }
