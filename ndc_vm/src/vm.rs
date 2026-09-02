@@ -213,10 +213,8 @@ impl Vm {
                 OpCode::CheckType(target) => {
                     let value = self.stack.last().expect("stack underflow");
                     if !value.conforms_to(target) {
-                        // Bounded so a self-referential container still
-                        // produces a finite type description.
                         return Err(VmError::new(
-                            format!("cannot cast {} to {target}", value.static_type_bounded(4)),
+                            format!("cannot cast {} to {target}", value.diagnostic_type()),
                             span,
                         ));
                     }

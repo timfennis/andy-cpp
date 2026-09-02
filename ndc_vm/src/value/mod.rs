@@ -24,6 +24,28 @@ thread_local! {
     static UNIT: Value = Value::Object(Rc::new(Object::Tuple(vec![])));
 }
 
+const DIAGNOSTIC_TYPE_MAX_DEPTH: usize = 4;
+const DIAGNOSTIC_TYPE_VALUE_BUDGET: usize = 256;
+
+fn bounded_element_type<'a>(
+    values: impl Iterator<Item = &'a Value>,
+    depth: usize,
+    budget: &mut usize,
+) -> StaticType {
+    let mut element_type: Option<StaticType> = None;
+    for value in values {
+        if *budget == 0 {
+            return StaticType::Any;
+        }
+        let found = value.static_type_with_budget(depth, budget);
+        element_type = Some(match element_type {
+            Some(previous) => previous.lub(&found),
+            None => found,
+        });
+    }
+    element_type.unwrap_or(StaticType::Any)
+}
+
 /// Enumerates all the different types of values that exist in the language
 /// All values should be pretty cheap to clone because the bigger ones are wrapped using Rc's
 #[derive(Clone)]
@@ -240,19 +262,30 @@ impl Value {
     ///
     /// - [`Value::is_number`] — O(1) check for numeric types
     pub fn static_type(&self) -> StaticType {
-        self.static_type_bounded(usize::MAX)
+        let mut budget = usize::MAX;
+        self.static_type_with_budget(usize::MAX, &mut budget)
     }
 
-    /// Depth-bounded [`Value::static_type`]: container elements more than
-    /// `depth` levels deep are reported as `Any`. Terminates on
-    /// self-referential containers, which makes it safe for diagnostics.
-    pub fn static_type_bounded(&self, depth: usize) -> StaticType {
+    /// Returns a runtime type description whose recursion depth and total
+    /// number of inspected values are bounded. Once either limit is reached,
+    /// the remaining subtree is widened to `Any`.
+    pub(crate) fn diagnostic_type(&self) -> StaticType {
+        let mut budget = DIAGNOSTIC_TYPE_VALUE_BUDGET;
+        self.static_type_with_budget(DIAGNOSTIC_TYPE_MAX_DEPTH, &mut budget)
+    }
+
+    fn static_type_with_budget(&self, depth: usize, budget: &mut usize) -> StaticType {
+        if *budget == 0 {
+            return StaticType::Any;
+        }
+        *budget -= 1;
+
         match self {
             Self::Int(_) => StaticType::Int,
             Self::Float(_) => StaticType::Float,
             Self::Bool(_) => StaticType::Bool,
             Self::None => StaticType::Option(Box::new(StaticType::Any)),
-            Self::Object(obj) => obj.static_type_bounded(depth),
+            Self::Object(obj) => obj.static_type_with_budget(depth, budget),
         }
     }
 
@@ -614,19 +647,17 @@ impl Object {
     /// because the VM does not track element types at runtime.  Tuple is the
     /// exception: its element types are known from the concrete values it holds.
     pub fn static_type(&self) -> StaticType {
-        self.static_type_bounded(usize::MAX)
+        let mut budget = usize::MAX;
+        self.static_type_with_budget(usize::MAX, &mut budget)
     }
 
-    /// Depth-bounded [`Object::static_type`]: container elements more than
-    /// `depth` levels deep are reported as `Any`. Terminates on
-    /// self-referential containers, which makes it safe for diagnostics.
-    pub fn static_type_bounded(&self, depth: usize) -> StaticType {
+    fn static_type_with_budget(&self, depth: usize, budget: &mut usize) -> StaticType {
         match self {
             Self::Some(inner) => {
                 if depth == 0 {
                     return StaticType::Option(Box::new(StaticType::Any));
                 }
-                StaticType::Option(Box::new(inner.static_type_bounded(depth - 1)))
+                StaticType::Option(Box::new(inner.static_type_with_budget(depth - 1, budget)))
             }
             Self::BigInt(_) => StaticType::Int,
             Self::Complex(_) => StaticType::Complex,
@@ -637,23 +668,28 @@ impl Object {
                     return StaticType::List(Box::new(StaticType::Any));
                 }
                 let elements = elements.borrow();
-                let elem_type = elements
-                    .iter()
-                    .map(|e| e.static_type_bounded(depth - 1))
-                    .reduce(|a, b| a.lub(&b))
-                    .unwrap_or(StaticType::Any);
+                let elem_type = bounded_element_type(elements.iter(), depth - 1, budget);
                 StaticType::List(Box::new(elem_type))
             }
             Self::Tuple(elements) => {
                 if depth == 0 {
+                    if elements.len() > *budget {
+                        return StaticType::Any;
+                    }
+                    *budget -= elements.len();
                     return StaticType::Tuple(vec![StaticType::Any; elements.len()]);
                 }
-                StaticType::Tuple(
-                    elements
-                        .iter()
-                        .map(|e| e.static_type_bounded(depth - 1))
-                        .collect(),
-                )
+                if elements.len() > *budget {
+                    return StaticType::Any;
+                }
+                let mut types = Vec::with_capacity(elements.len());
+                for element in elements {
+                    if *budget == 0 {
+                        return StaticType::Any;
+                    }
+                    types.push(element.static_type_with_budget(depth - 1, budget));
+                }
+                StaticType::Tuple(types)
             }
             Self::Map { entries, .. } => {
                 if depth == 0 {
@@ -663,19 +699,35 @@ impl Object {
                     };
                 }
                 let entries = entries.borrow();
-                let key_type = entries
-                    .keys()
-                    .map(|k| k.static_type_bounded(depth - 1))
-                    .reduce(|a, b| a.lub(&b))
-                    .unwrap_or(StaticType::Any);
-                let value_type = entries
-                    .values()
-                    .map(|v| v.static_type_bounded(depth - 1))
-                    .reduce(|a, b| a.lub(&b))
-                    .unwrap_or(StaticType::Any);
+                let mut key_type: Option<StaticType> = None;
+                let mut value_type: Option<StaticType> = None;
+                for (key, value) in entries.iter() {
+                    if *budget == 0 {
+                        return StaticType::Map {
+                            key: Box::new(StaticType::Any),
+                            value: Box::new(StaticType::Any),
+                        };
+                    }
+                    let found_key = key.static_type_with_budget(depth - 1, budget);
+                    if *budget == 0 {
+                        return StaticType::Map {
+                            key: Box::new(StaticType::Any),
+                            value: Box::new(StaticType::Any),
+                        };
+                    }
+                    let found_value = value.static_type_with_budget(depth - 1, budget);
+                    key_type = Some(match key_type {
+                        Some(previous) => previous.lub(&found_key),
+                        None => found_key,
+                    });
+                    value_type = Some(match value_type {
+                        Some(previous) => previous.lub(&found_value),
+                        None => found_value,
+                    });
+                }
                 StaticType::Map {
-                    key: Box::new(key_type),
-                    value: Box::new(value_type),
+                    key: Box::new(key_type.unwrap_or(StaticType::Any)),
+                    value: Box::new(value_type.unwrap_or(StaticType::Any)),
                 }
             }
             Self::Function(f) => f.static_type(),
@@ -686,11 +738,7 @@ impl Object {
                     return StaticType::Deque(Box::new(StaticType::Any));
                 }
                 let elements = elements.borrow();
-                let elem_type = elements
-                    .iter()
-                    .map(|e| e.static_type_bounded(depth - 1))
-                    .reduce(|a, b| a.lub(&b))
-                    .unwrap_or(StaticType::Any);
+                let elem_type = bounded_element_type(elements.iter(), depth - 1, budget);
                 StaticType::Deque(Box::new(elem_type))
             }
             Self::MinHeap(_) => StaticType::MinHeap(Box::new(StaticType::Any)),
