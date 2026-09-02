@@ -1,0 +1,18 @@
+// A cast is what lets a typed container overload be selected. `sum` has
+// separate Int, Float, and Number overloads, and a value the analyser only
+// knows as List<Any> matches none of them, so each cast below picks a
+// different overload at compile time.
+let values = %{};
+values.insert(1);
+values.insert(2);
+assert_eq((values.keys as List<Int>).sum(), 3);
+
+let floats: List<Any> = [1.0, 2.0, 3.0];
+assert_eq((floats as List<Float>).sum(), 6.0);
+
+let numbers: List<Any> = [1n, 2n, 3n];
+assert_eq((numbers as List<Number>).sum(), 6n);
+
+// An empty container conforms vacuously, so the overload still resolves.
+let empty: List<Any> = [];
+assert_eq((empty as List<Int>).sum(), 0);

@@ -4,8 +4,10 @@ assert_eq([1,2,3,4,5].sum(), 15);
 assert_eq([1.0,2.0,3.0].sum(), 6.0);
 assert_eq([1n,2n,3n].sum(), 6n);
 
+// `Deque()` starts out as Deque<Any> and pushing does not narrow it, so the
+// cast is what lets `sum` resolve against its Int overload.
 let deque = Deque();
 deque.push_back(1);
 deque.push_back(2);
 deque.push_back(3);
-assert_eq(deque.sum(), 6);
+assert_eq((deque as Deque<Int>).sum(), 6);
