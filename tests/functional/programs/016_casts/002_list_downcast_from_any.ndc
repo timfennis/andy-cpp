@@ -1,0 +1,8 @@
+// `keys` returns List<Any>; the cast recovers the element type so calls on
+// the result can resolve against Int overloads.
+let values = %{};
+values.insert(3);
+values.insert(1);
+values.insert(2);
+let keys = values.keys as List<Int>;
+assert_eq(sorted(keys), [1, 2, 3]);

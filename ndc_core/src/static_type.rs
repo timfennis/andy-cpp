@@ -581,6 +581,102 @@ impl StaticType {
         )
     }
 
+    /// Checks whether some runtime value could satisfy both `self` and `other`.
+    ///
+    /// # Examples
+    /// - `Sequence<String>` overlaps `List<Any>`: a `List<String>` inhabits
+    ///   both, even though neither type is a subtype of the other
+    /// - `Any` overlaps every type
+    /// - `List<Int>` does not overlap `List<String>`
+    /// - `Int` does not overlap `String`
+    ///
+    /// This is the question a cast asks: `as` is impossible only when no value
+    /// could satisfy both the operand's type and the target, and anything else
+    /// is left to the runtime check.
+    ///
+    /// Element types are treated as inhabited, so `List<Int>` and `List<String>`
+    /// count as disjoint even though the empty list inhabits both. Casting an
+    /// empty container to an unrelated element type is therefore rejected —
+    /// a deliberate trade, because the alternative gives up the compile-time
+    /// error on every non-empty `List<Int> as List<String>` to allow a cast
+    /// that could only ever be vacuous.
+    ///
+    /// `Never` overlaps nothing, since no value inhabits it.
+    pub fn overlaps(&self, other: &Self) -> bool {
+        // Never has no inhabitants, so nothing can satisfy it — not even
+        // another Never. This has to come first: Never is a subtype of every
+        // type, so the shortcut below would otherwise report overlap.
+        if matches!(self, Self::Never) || matches!(other, Self::Never) {
+            return false;
+        }
+
+        // A subtype relation in either direction implies a common inhabitant.
+        // This also handles Any, the supertype of everything.
+        if self.is_subtype(other) || other.is_subtype(self) {
+            return true;
+        }
+
+        match (self, other) {
+            // Sequence<T> overlaps every sequence-family type whose element
+            // type overlaps T, even when the subtype check fails because the
+            // relationship points in different directions per layer.
+            (
+                Self::Sequence(t),
+                Self::List(u)
+                | Self::Iterator(u)
+                | Self::MinHeap(u)
+                | Self::MaxHeap(u)
+                | Self::Deque(u)
+                | Self::Sequence(u),
+            )
+            | (
+                Self::List(u)
+                | Self::Iterator(u)
+                | Self::MinHeap(u)
+                | Self::MaxHeap(u)
+                | Self::Deque(u),
+                Self::Sequence(t),
+            ) => t.overlaps(u),
+            (Self::Sequence(t), Self::String) | (Self::String, Self::Sequence(t)) => {
+                Self::String.overlaps(t)
+            }
+            (Self::Sequence(t), Self::Tuple(elems)) | (Self::Tuple(elems), Self::Sequence(t)) => {
+                elems.iter().all(|elem| elem.overlaps(t))
+            }
+            (Self::Sequence(t), Self::Map { key, value })
+            | (Self::Map { key, value }, Self::Sequence(t)) => {
+                Self::Tuple(vec![key.as_ref().clone(), value.as_ref().clone()]).overlaps(t)
+            }
+
+            // Covariant containers of the same shape overlap when their
+            // element types do.
+            (Self::Option(s), Self::Option(t))
+            | (Self::List(s), Self::List(t))
+            | (Self::Iterator(s), Self::Iterator(t))
+            | (Self::MinHeap(s), Self::MinHeap(t))
+            | (Self::MaxHeap(s), Self::MaxHeap(t))
+            | (Self::Deque(s), Self::Deque(t)) => s.overlaps(t),
+            (Self::Tuple(s_elems), Self::Tuple(t_elems)) => {
+                s_elems.len() == t_elems.len()
+                    && s_elems.iter().zip(t_elems).all(|(s, t)| s.overlaps(t))
+            }
+            (Self::Map { key: k1, value: v1 }, Self::Map { key: k2, value: v2 }) => {
+                k1.overlaps(k2) && v1.overlaps(v2)
+            }
+
+            // A function value's parameter and return types are not checkable
+            // at runtime, so only a provable arity mismatch rules overlap out.
+            (Self::Function { parameters: p1, .. }, Self::Function { parameters: p2, .. }) => {
+                match (p1, p2) {
+                    (Some(p1), Some(p2)) => p1.len() == p2.len(),
+                    _ => true,
+                }
+            }
+
+            _ => false,
+        }
+    }
+
     // BRUH
     pub fn is_incompatible_with(&self, other: &Self) -> bool {
         !self.is_subtype(other) && !other.is_subtype(self)
@@ -747,6 +843,33 @@ mod test {
         ])));
 
         assert!(fun.is_fn_and_matches(&[list_of_two_tuple_int, StaticType::Int]));
+    }
+
+    #[test]
+    fn test_overlaps() {
+        let list_of = |elem: StaticType| StaticType::List(Box::new(elem));
+        let seq_of = |elem: StaticType| StaticType::Sequence(Box::new(elem));
+
+        // Mixed-direction relationships overlap: a List<String> inhabits both.
+        assert!(seq_of(StaticType::String).overlaps(&list_of(StaticType::Any)));
+        assert!(list_of(StaticType::Any).overlaps(&seq_of(StaticType::String)));
+
+        // Any overlaps everything, including containers of concrete elements.
+        assert!(StaticType::Any.overlaps(&list_of(StaticType::Int)));
+        assert!(list_of(StaticType::Int).overlaps(&StaticType::Any));
+
+        // Element types are treated as inhabited, so concrete containers with
+        // disjoint element types are disjoint.
+        assert!(!list_of(StaticType::Int).overlaps(&list_of(StaticType::String)));
+        assert!(!seq_of(StaticType::Int).overlaps(&list_of(StaticType::String)));
+
+        // Disjoint scalar constructors never overlap.
+        assert!(!StaticType::Int.overlaps(&StaticType::String));
+        assert!(!StaticType::Bool.overlaps(&StaticType::Number));
+
+        // A string is a sequence of strings.
+        assert!(StaticType::String.overlaps(&seq_of(StaticType::Any)));
+        assert!(!StaticType::String.overlaps(&seq_of(StaticType::Int)));
     }
 
     // Every name in BUILTIN_TYPE_NAMES must be accepted by from_name_and_args

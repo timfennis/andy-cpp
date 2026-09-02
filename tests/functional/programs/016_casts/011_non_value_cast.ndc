@@ -1,0 +1,6 @@
+// Casting a unit-valued expression like a loop is a no-op: the loop's unit
+// result satisfies `Any` statically, so no runtime check is emitted.
+let x = 1;
+while false {} as Any;
+print(x);
+// expect-output: 1

@@ -240,12 +240,19 @@ impl Value {
     ///
     /// - [`Value::is_number`] — O(1) check for numeric types
     pub fn static_type(&self) -> StaticType {
+        self.static_type_bounded(usize::MAX)
+    }
+
+    /// Depth-bounded [`Value::static_type`]: container elements more than
+    /// `depth` levels deep are reported as `Any`. Terminates on
+    /// self-referential containers, which makes it safe for diagnostics.
+    pub fn static_type_bounded(&self, depth: usize) -> StaticType {
         match self {
             Self::Int(_) => StaticType::Int,
             Self::Float(_) => StaticType::Float,
             Self::Bool(_) => StaticType::Bool,
             Self::None => StaticType::Option(Box::new(StaticType::Any)),
-            Self::Object(obj) => obj.static_type(),
+            Self::Object(obj) => obj.static_type_bounded(depth),
         }
     }
 
@@ -320,6 +327,138 @@ impl Value {
             | StaticType::Map { .. }
             | StaticType::Tuple(_) => false,
             _ => self.static_type().is_subtype(param),
+        }
+    }
+
+    /// Check whether this value conforms to `target`, scanning container
+    /// elements recursively. Empty containers conform to any element type.
+    ///
+    /// Unlike [`Value::matches_param`] this is O(n) by design: it backs the
+    /// runtime check of `as` casts, where the caller explicitly opted into the
+    /// scan. Iterators can't be inspected without consuming them, so they only
+    /// conform to targets with `Any` elements.
+    pub fn conforms_to(&self, target: &StaticType) -> bool {
+        match target {
+            StaticType::Any => true,
+            StaticType::Option(inner) => match self {
+                Self::None => true,
+                Self::Object(object) => match object.as_ref() {
+                    Object::Some(value) => value.conforms_to(inner),
+                    _ => false,
+                },
+                _ => false,
+            },
+            StaticType::List(element) => matches!(
+                self,
+                Self::Object(object) if matches!(object.as_ref(), Object::List(values)
+                    if values.borrow().iter().all(|value| value.conforms_to(element)))
+            ),
+            StaticType::Deque(element) => matches!(
+                self,
+                Self::Object(object) if matches!(object.as_ref(), Object::Deque(values)
+                    if values.borrow().iter().all(|value| value.conforms_to(element)))
+            ),
+            StaticType::Tuple(elements) => matches!(
+                self,
+                Self::Object(object) if matches!(object.as_ref(), Object::Tuple(values)
+                    if values.len() == elements.len()
+                        && values.iter().zip(elements).all(|(value, element)| value.conforms_to(element)))
+            ),
+            StaticType::Map { key, value } => match self {
+                Self::Object(object) => match object.as_ref() {
+                    Object::Map { entries, default } => {
+                        // A missing-key lookup inserts the default (or the
+                        // result of calling it), so the default must conform
+                        // to the value type as well. A default function's
+                        // results can't be verified without calling it.
+                        let default_conforms = match default {
+                            None => true,
+                            Some(Self::Object(object))
+                                if matches!(object.as_ref(), Object::Function(_)) =>
+                            {
+                                matches!(value.as_ref(), StaticType::Any)
+                            }
+                            Some(default) => default.conforms_to(value),
+                        };
+                        default_conforms
+                            && entries.borrow().iter().all(|(entry_key, entry_value)| {
+                                entry_key.conforms_to(key) && entry_value.conforms_to(value)
+                            })
+                    }
+                    _ => false,
+                },
+                _ => false,
+            },
+            StaticType::MinHeap(element) => matches!(
+                self,
+                Self::Object(object) if matches!(object.as_ref(), Object::MinHeap(values)
+                    if values.borrow().iter().all(|Reverse(OrdValue(value))| value.conforms_to(element)))
+            ),
+            StaticType::MaxHeap(element) => matches!(
+                self,
+                Self::Object(object) if matches!(object.as_ref(), Object::MaxHeap(values)
+                    if values.borrow().iter().all(|OrdValue(value)| value.conforms_to(element)))
+            ),
+            StaticType::Sequence(element) => match self {
+                Self::Object(object) => match object.as_ref() {
+                    Object::List(values) => values
+                        .borrow()
+                        .iter()
+                        .all(|value| value.conforms_to(element)),
+                    Object::Tuple(values) => values.iter().all(|value| value.conforms_to(element)),
+                    Object::Deque(values) => values
+                        .borrow()
+                        .iter()
+                        .all(|value| value.conforms_to(element)),
+                    Object::String(_) => StaticType::String.is_subtype(element),
+                    Object::Map { entries, .. } => {
+                        entries
+                            .borrow()
+                            .iter()
+                            .all(|(key, value)| match element.as_ref() {
+                                StaticType::Any => true,
+                                StaticType::Tuple(elements) if elements.len() == 2 => {
+                                    key.conforms_to(&elements[0]) && value.conforms_to(&elements[1])
+                                }
+                                StaticType::Sequence(inner) => {
+                                    key.conforms_to(inner) && value.conforms_to(inner)
+                                }
+                                _ => false,
+                            })
+                    }
+                    Object::MinHeap(values) => values
+                        .borrow()
+                        .iter()
+                        .all(|Reverse(OrdValue(value))| value.conforms_to(element)),
+                    Object::MaxHeap(values) => values
+                        .borrow()
+                        .iter()
+                        .all(|OrdValue(value)| value.conforms_to(element)),
+                    Object::Iterator(_) => matches!(element.as_ref(), StaticType::Any),
+                    _ => false,
+                },
+                _ => false,
+            },
+            // The remaining targets are non-container types (Never, Bool,
+            // numerics, String, Function, Struct, Iterator). Container values
+            // conform to none of them; answering that without `static_type`
+            // keeps recursion bounded by the target's depth, so conformance
+            // checks terminate even on self-referential containers.
+            _ => match self {
+                Self::Object(object)
+                    if matches!(
+                        object.as_ref(),
+                        Object::List(_)
+                            | Object::Tuple(_)
+                            | Object::Map { .. }
+                            | Object::Deque(_)
+                            | Object::Some(_)
+                    ) =>
+                {
+                    false
+                }
+                _ => self.static_type().is_subtype(target),
+            },
         }
     }
 
@@ -475,34 +614,63 @@ impl Object {
     /// because the VM does not track element types at runtime.  Tuple is the
     /// exception: its element types are known from the concrete values it holds.
     pub fn static_type(&self) -> StaticType {
+        self.static_type_bounded(usize::MAX)
+    }
+
+    /// Depth-bounded [`Object::static_type`]: container elements more than
+    /// `depth` levels deep are reported as `Any`. Terminates on
+    /// self-referential containers, which makes it safe for diagnostics.
+    pub fn static_type_bounded(&self, depth: usize) -> StaticType {
         match self {
-            Self::Some(inner) => StaticType::Option(Box::new(inner.static_type())),
+            Self::Some(inner) => {
+                if depth == 0 {
+                    return StaticType::Option(Box::new(StaticType::Any));
+                }
+                StaticType::Option(Box::new(inner.static_type_bounded(depth - 1)))
+            }
             Self::BigInt(_) => StaticType::Int,
             Self::Complex(_) => StaticType::Complex,
             Self::Rational(_) => StaticType::Rational,
             Self::String(_) => StaticType::String,
             Self::List(elements) => {
+                if depth == 0 {
+                    return StaticType::List(Box::new(StaticType::Any));
+                }
                 let elements = elements.borrow();
                 let elem_type = elements
                     .iter()
-                    .map(|e| e.static_type())
+                    .map(|e| e.static_type_bounded(depth - 1))
                     .reduce(|a, b| a.lub(&b))
                     .unwrap_or(StaticType::Any);
                 StaticType::List(Box::new(elem_type))
             }
             Self::Tuple(elements) => {
-                StaticType::Tuple(elements.iter().map(|e| e.static_type()).collect())
+                if depth == 0 {
+                    return StaticType::Tuple(vec![StaticType::Any; elements.len()]);
+                }
+                StaticType::Tuple(
+                    elements
+                        .iter()
+                        .map(|e| e.static_type_bounded(depth - 1))
+                        .collect(),
+                )
             }
             Self::Map { entries, .. } => {
+                if depth == 0 {
+                    return StaticType::Map {
+                        key: Box::new(StaticType::Any),
+                        value: Box::new(StaticType::Any),
+                    };
+                }
                 let entries = entries.borrow();
                 let key_type = entries
                     .keys()
-                    .map(|k| k.static_type())
+                    .map(|k| k.static_type_bounded(depth - 1))
                     .reduce(|a, b| a.lub(&b))
                     .unwrap_or(StaticType::Any);
                 let value_type = entries
                     .values()
-                    .map(|v| v.static_type())
+                    .map(|v| v.static_type_bounded(depth - 1))
                     .reduce(|a, b| a.lub(&b))
                     .unwrap_or(StaticType::Any);
                 StaticType::Map {
@@ -514,10 +682,13 @@ impl Object {
             Self::OverloadSet { .. } => StaticType::Any,
             Self::Iterator(_) => StaticType::Iterator(Box::new(StaticType::Any)),
             Self::Deque(elements) => {
+                if depth == 0 {
+                    return StaticType::Deque(Box::new(StaticType::Any));
+                }
                 let elements = elements.borrow();
                 let elem_type = elements
                     .iter()
-                    .map(|e| e.static_type())
+                    .map(|e| e.static_type_bounded(depth - 1))
                     .reduce(|a, b| a.lub(&b))
                     .unwrap_or(StaticType::Any);
                 StaticType::Deque(Box::new(elem_type))

@@ -1,0 +1,6 @@
+// A cast asserts the value already has the target type; it never converts.
+assert_eq(3 as Int, 3);
+assert_eq("a" as String, "a");
+assert_eq(3 as Any, 3);
+assert_eq(3 as Int as Any, 3);
+assert_eq(true as Bool, true);

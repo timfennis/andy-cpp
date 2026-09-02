@@ -101,7 +101,9 @@ fn collect(expr: &ExpressionLocation, scope: Span, out: &mut Vec<Decl>) {
                 collect(s, expr.span, out);
             }
         }
-        Expression::Statement(inner) | Expression::Grouping(inner) => collect(inner, scope, out),
+        Expression::Statement(inner)
+        | Expression::Grouping(inner)
+        | Expression::Cast { value: inner, .. } => collect(inner, scope, out),
         Expression::If {
             condition,
             on_true,

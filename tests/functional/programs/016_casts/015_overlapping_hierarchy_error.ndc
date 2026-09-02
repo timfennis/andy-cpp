@@ -1,0 +1,5 @@
+// The cast is possible for the type, so it reaches the runtime check — which
+// then rejects this particular value.
+// expect-error: cannot cast List<Any> to Sequence<Int>
+let xs: List<Any> = [1, "two"];
+xs as Sequence<Int>

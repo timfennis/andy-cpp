@@ -1,0 +1,4 @@
+// The `)` closes an enclosing expression rather than a tuple type, so the type
+// ends at `Int` and the `<` is a comparison.
+// expect-output: true
+print((3 as Int < 5))

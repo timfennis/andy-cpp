@@ -89,7 +89,9 @@ fn child_expressions(expr: &ExpressionLocation) -> Vec<&ExpressionLocation> {
             out.push(value);
         }
         Expression::FunctionDeclaration { body, .. } => out.push(body),
-        Expression::Statement(inner) | Expression::Grouping(inner) => out.push(inner),
+        Expression::Statement(inner)
+        | Expression::Grouping(inner)
+        | Expression::Cast { value: inner, .. } => out.push(inner),
         Expression::Block { statements } => out.extend(statements.iter()),
         Expression::If {
             condition,
@@ -243,7 +245,9 @@ fn walk_expression(visitor: &mut impl AstVisitor, expr: &ExpressionLocation) {
             );
             walk_expression(visitor, body);
         }
-        Expression::Statement(inner) | Expression::Grouping(inner) => {
+        Expression::Statement(inner)
+        | Expression::Grouping(inner)
+        | Expression::Cast { value: inner, .. } => {
             walk_expression(visitor, inner);
         }
         Expression::Block { statements } => {

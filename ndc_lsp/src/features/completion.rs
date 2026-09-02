@@ -212,7 +212,7 @@ fn merged_type_display(candidates: &[&StaticType]) -> String {
 
 /// Language keywords offered in general (non-dot) completion.
 const KEYWORDS: &[&str] = &[
-    "let", "fn", "struct", "if", "else", "while", "for", "in", "return", "break", "continue",
+    "let", "fn", "struct", "if", "else", "while", "for", "in", "as", "return", "break", "continue",
     "true", "false",
 ];
 

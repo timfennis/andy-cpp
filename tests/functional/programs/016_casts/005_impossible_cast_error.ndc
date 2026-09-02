@@ -1,0 +1,3 @@
+// The analyser rejects casts between types that share no subtype relation.
+// expect-error: invalid cast: String can never be Int
+print("foo" as Int);

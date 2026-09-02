@@ -1,5 +1,6 @@
 use crate::Value;
 use ahash::AHashSet;
+use ndc_core::StaticType;
 use ndc_core::hash_map::HashMap;
 use ndc_lexer::Span;
 use ndc_parser::CaptureSource;
@@ -148,6 +149,8 @@ pub enum OpCode {
     CloseUpvalue(usize),
     /// Pops function, pushes memoized wrapper. `[… fn → … memoized_fn]`
     Memoize,
+    /// Peeks top; errors if the value does not conform to the type. `[… value → … value]`
+    CheckType(Rc<StaticType>),
 }
 
 impl OpCode {
@@ -198,6 +201,8 @@ impl OpCode {
             Self::Return => -1,
             Self::CloseUpvalue(_) => 0,
             Self::Memoize => 0,
+            // Peeks the value without popping it.
+            Self::CheckType(_) => 0,
         }
     }
 }
@@ -247,6 +252,7 @@ impl std::fmt::Debug for OpCode {
             Self::Unpack(n) => write!(f, "Unpack({n})"),
             Self::CloseUpvalue(n) => write!(f, "CloseUpvalue({n})"),
             Self::Memoize => write!(f, "Memoize"),
+            Self::CheckType(typ) => write!(f, "CheckType({typ})"),
         }
     }
 }

@@ -49,6 +49,40 @@ let values = [1];
 values ++= ["two"]; // error: mismatched types: found List<String> but expected List<Int>
 ```
 
+The right-hand side has to *provably* fit. A wider element type is not enough,
+because the operator copies the values across without checking them:
+
+```ndc
+let values: List<Int> = [1];
+let rhs: List<Number> = [0.5];
+values ++= rhs; // error: mismatched types: found List<Number> but expected List<Int>
+```
+
+The same goes for an operand whose type is unknown. `Any` says nothing about
+what the value holds, and no later step re-checks it, so it is rejected too:
+
+```ndc
+fn opaque(x) => x;
+let values = [1];
+values ++= opaque([2, 3]); // error: mismatched types: found Any but expected List<Int>
+```
+
+[Cast](casts.md) the operand to say what it holds. The cast checks the value, so
+the assignment gets its guarantee from the cast site:
+
+```ndc
+fn opaque(x) => x;
+let values = [1];
+values ++= opaque([2, 3]) as List<Int>;
+assert_eq(values, [1, 2, 3]);
+```
+
+A cast that does not hold fails there rather than corrupting the target:
+
+```ndc
+values ++= opaque([0.5]) as List<Int>; // error: cannot cast List<Float> to List<Int>
+```
+
 Annotate the target with `Any` to opt into heterogeneous contents:
 
 ```ndc

@@ -1,0 +1,7 @@
+// The cast checks the elements, so a bad operand fails at the cast site
+// instead of silently landing in the target.
+// expect-error: cannot cast List<Float> to List<Int>
+fn opaque(x) => x;
+let values = [1];
+values ++= opaque([0.5]) as List<Int>;
+print(values)

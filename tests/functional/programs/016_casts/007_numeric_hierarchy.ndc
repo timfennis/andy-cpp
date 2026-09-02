@@ -1,0 +1,7 @@
+// Casts that depend on the numeric subtype hierarchy. Isolated here on
+// purpose: the explicit-numeric-modes work makes Int, Float, and Number
+// siblings, so this file is expected to change when that lands.
+assert_eq(1 as Number, 1);
+assert_eq(1.5 as Number, 1.5);
+let value: Any = 1;
+assert_eq(value as Int, 1);
