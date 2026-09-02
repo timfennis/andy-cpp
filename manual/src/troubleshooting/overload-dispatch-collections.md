@@ -41,20 +41,48 @@ fn process(List<String>)
 would both fail to match under dynamic dispatch if the list type cannot be resolved at compile
 time, because verifying element types would require scanning the entire container.
 
-In practice this limitation is not currently visible:
+Standard library overloads do differ by element type. Numeric sequence functions preserve the
+concrete numeric type, so `sum` has three typed overloads:
 
-- User-defined functions cannot yet declare typed container parameters (the syntax is not
-  implemented), so user overloads always use `Any` and dispatch works correctly.
-- All standard library overloads on container parameters use `<Any>` element types
-  (e.g. `List<Any>`, `Sequence<Any>`, `Map<Any, Any>`), so they also hit the fast path.
-  Overloads that differ by container *kind* (e.g. `pop(List<Any>)` vs `pop(MinHeap<Any>)`)
-  are distinguished by the container kind check alone.
+```
+fn sum(Sequence<Int>) -> Int
+fn sum(Sequence<Float>) -> Float
+fn sum(Sequence<Number>) -> Number
+```
+
+A value the analyser only knows as `List<Any>` matches none of them. Rather than dispatch on
+it and scan, the call is rejected at compile time:
+
+```ndc
+let values: List<Any> = [1, 2, 3];
+values.sum()
+// error[resolver]: No function called 'sum' found that matches the arguments 'List<Any>'
+// = An overload would accept a narrower argument type. Cast to say what the value holds,
+//   as in `value as List<Int>`.
+```
+
+Overloads that differ only by container *kind* (e.g. `pop(List<Any>)` vs `pop(MinHeap<Any>)`)
+are still distinguished by the kind check alone. User-defined functions cannot yet declare
+typed container parameters (the syntax is not implemented), so user overloads always use
+`Any`.
 
 ## Workaround
 
-If you notice that a function call unexpectedly fails to match an overload, move the call to a
-location where Andy C++ can infer the argument types statically — for example, directly at the
-call site rather than through an intermediate untyped function parameter:
+State the element type with a [cast](../features/casts.md). A cast scans the value, but the
+cost lands at a site you wrote rather than inside every dispatch:
+
+```ndc
+let values = %{};
+values.insert(1);
+values.insert(2);
+
+// keys is typed List<Any>; the cast recovers Int so sum can resolve.
+assert_eq((values.keys as List<Int>).sum(), 3);
+```
+
+Otherwise, move the call to a location where Andy C++ can infer the argument types
+statically — for example, directly at the call site rather than through an intermediate
+untyped function parameter:
 
 ```ndc
 // The type of `data` is Any here — dynamic dispatch used
