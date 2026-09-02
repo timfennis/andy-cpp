@@ -172,3 +172,38 @@ generic arguments still win over less-than
       (generic_type
         name: (type_identifier)
         (type_identifier)))))
+
+==================
+grouped comparison after a cast
+==================
+
+value as Int < (y > z);
+
+---
+
+(source_file
+  (binary_expression
+    left: (cast_expression
+      value: (identifier)
+      type: (type_identifier))
+    right: (parenthesized_expression
+      (binary_expression
+        left: (identifier)
+        right: (identifier)))))
+
+==================
+shift right after a cast comparison
+==================
+
+3 as Int < 4 >> 1;
+
+---
+
+(source_file
+  (binary_expression
+    left: (cast_expression
+      value: (integer)
+      type: (type_identifier))
+    right: (binary_expression
+      left: (integer)
+      right: (integer))))

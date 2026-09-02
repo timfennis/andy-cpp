@@ -1499,10 +1499,10 @@ impl Parser {
                 _ => return false,
             };
 
-            // The list closes part-way through this token, so what is left of
-            // it starts with `>` and goes on to continue the expression.
+            // A token with more closers than the list has open also contains
+            // part of the following expression, so this `<` is a comparison.
             if depth < closers {
-                return true;
+                return false;
             }
 
             // Consuming every closer would leave a bare `=`, which can neither
@@ -1513,7 +1513,9 @@ impl Parser {
             }
 
             if depth == closers {
-                return true;
+                // A matching `>` inside parentheses belongs to the grouped
+                // expression unless every parenthesized type has closed.
+                return parens == 0;
             }
 
             depth -= closers;

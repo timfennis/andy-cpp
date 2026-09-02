@@ -27,7 +27,9 @@ fn collect_symbol(
     out: &mut Vec<DocumentSymbol>,
 ) {
     match &expr.expression {
-        Expression::Statement(inner) | Expression::Grouping(inner) => {
+        Expression::Statement(inner)
+        | Expression::Grouping(inner)
+        | Expression::Cast { value: inner, .. } => {
             collect_symbol(inner, text, line_index, out);
         }
         Expression::FunctionDeclaration {
@@ -99,7 +101,9 @@ fn collect_children(
                 collect_symbol(s, text, line_index, out);
             }
         }
-        Expression::Statement(inner) | Expression::Grouping(inner) => {
+        Expression::Statement(inner)
+        | Expression::Grouping(inner)
+        | Expression::Cast { value: inner, .. } => {
             collect_children(inner, text, line_index, out);
         }
         _ => collect_symbol(body, text, line_index, out),
@@ -240,5 +244,15 @@ mod tests {
         );
         assert_eq!(children.len(), 2);
         assert_eq!(children[1].detail.as_deref(), Some("Int"));
+    }
+
+    #[test]
+    fn cast_does_not_hide_a_declaration() {
+        let syms = symbols("(fn identity(value) => value) as Any");
+        assert!(
+            syms.iter()
+                .any(|s| s.name == "identity" && s.kind == SymbolKind::FUNCTION),
+            "expected function `identity` in {syms:?}"
+        );
     }
 }
