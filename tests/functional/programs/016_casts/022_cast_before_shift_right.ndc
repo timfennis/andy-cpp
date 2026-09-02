@@ -1,0 +1,4 @@
+// The extra `>` in `>>` belongs to the following shift operator, so this is a
+// comparison rather than a cast to the nonexistent generic type `Int<4>`.
+// expect-output: false
+print(3 as Int < 4 >> 1)

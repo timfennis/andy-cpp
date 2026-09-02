@@ -236,6 +236,20 @@ impl Compiler {
                     self.compile_binding(resolved, span)?;
                 }
             }
+            Expression::Cast {
+                value,
+                resolved_type,
+                requires_check,
+                ..
+            } => {
+                self.compile_expr(*value)?;
+                if requires_check {
+                    let Some(target) = resolved_type else {
+                        return Err(CompileError::unresolved_cast(span));
+                    };
+                    self.ir.write(OpCode::CheckType(Rc::new(target)), span);
+                }
+            }
             Expression::Statement(stm) => {
                 self.compile_expr(*stm)?;
                 self.ir.write(OpCode::Pop, Span::synthetic());
@@ -1237,6 +1251,15 @@ impl CompileError {
     fn unresolved_binding(span: Span) -> Self {
         Self {
             text: "encountered unresolved binding during compilation, this is probably an internal error".to_string(),
+            span,
+        }
+    }
+
+    fn unresolved_cast(span: Span) -> Self {
+        Self {
+            text:
+                "encountered unresolved cast during compilation, this is probably an internal error"
+                    .to_string(),
             span,
         }
     }

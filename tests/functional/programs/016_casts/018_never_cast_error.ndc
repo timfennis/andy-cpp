@@ -1,0 +1,4 @@
+// Never has no inhabitants, so no value can ever satisfy it — the cast is
+// impossible rather than something to check at runtime.
+// expect-error: invalid cast: Int can never be Never
+1 as Never

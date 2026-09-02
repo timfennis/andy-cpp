@@ -55,3 +55,5 @@ block or function that declared it. See [Struct](./types/struct.md) for the scop
 rules.
 
 > **Note:** `Any` is the base type for every other type, so an `Any`-annotated binding will accept anything. When a parameter or value has no annotation and the analyser can't infer a type, it falls back to `Any`. There is also a `Never` type used internally for things like `break` that don't produce a value — you'll rarely need to write it by hand.
+
+To go the other way — recover a precise type from an `Any`-typed value — use a [cast](../features/casts.md): `value as List<Int>`.

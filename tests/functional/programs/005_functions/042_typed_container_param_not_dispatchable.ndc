@@ -1,0 +1,6 @@
+// Neither type is a subtype of the other, so the call is rejected at compile
+// time. A cast is how you tell the analyser what the value actually holds.
+// expect-error: No function called 'consume' found that matches the arguments 'Sequence<Int>'
+fn consume(xs: List<Number>) => xs;
+let xs: Sequence<Int> = [1];
+consume(xs)

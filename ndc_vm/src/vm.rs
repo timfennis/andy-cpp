@@ -210,6 +210,15 @@ impl Vm {
                     self.stack
                         .push(frame.closure.prototype.body.constant(idx).clone());
                 }
+                OpCode::CheckType(target) => {
+                    let value = self.stack.last().expect("stack underflow");
+                    if !value.conforms_to(target) {
+                        return Err(VmError::new(
+                            format!("cannot cast {} to {target}", value.diagnostic_type()),
+                            span,
+                        ));
+                    }
+                }
                 OpCode::GetLocal(slot) => {
                     let slot = *slot;
                     self.stack.push(self.stack[frame.slot(slot)].clone());

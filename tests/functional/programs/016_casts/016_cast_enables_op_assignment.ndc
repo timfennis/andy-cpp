@@ -1,0 +1,6 @@
+// A specialized `op=` needs to prove the right operand fits. An opaque value
+// is rejected on its own; casting states what it holds and gets it checked.
+fn opaque(x) => x;
+let values = [1];
+values ++= opaque([2, 3]) as List<Int>;
+assert_eq(values, [1, 2, 3]);

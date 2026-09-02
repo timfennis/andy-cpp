@@ -24,6 +24,30 @@ thread_local! {
     static UNIT: Value = Value::Object(Rc::new(Object::Tuple(vec![])));
 }
 
+const DIAGNOSTIC_TYPE_MAX_DEPTH: usize = 4;
+const DIAGNOSTIC_TYPE_VALUE_BUDGET: usize = 256;
+type ConformanceKey = (*const Object, *const StaticType);
+type ConformanceCache = HashMap<ConformanceKey, bool>;
+
+fn bounded_element_type<'a>(
+    values: impl Iterator<Item = &'a Value>,
+    depth: usize,
+    budget: &mut usize,
+) -> StaticType {
+    let mut element_type: Option<StaticType> = None;
+    for value in values {
+        if *budget == 0 {
+            return StaticType::Any;
+        }
+        let found = value.static_type_with_budget(depth, budget);
+        element_type = Some(match element_type {
+            Some(previous) => previous.lub(&found),
+            None => found,
+        });
+    }
+    element_type.unwrap_or(StaticType::Any)
+}
+
 /// Enumerates all the different types of values that exist in the language
 /// All values should be pretty cheap to clone because the bigger ones are wrapped using Rc's
 #[derive(Clone)]
@@ -240,12 +264,30 @@ impl Value {
     ///
     /// - [`Value::is_number`] — O(1) check for numeric types
     pub fn static_type(&self) -> StaticType {
+        let mut budget = usize::MAX;
+        self.static_type_with_budget(usize::MAX, &mut budget)
+    }
+
+    /// Returns a runtime type description whose recursion depth and total
+    /// number of inspected values are bounded. Once either limit is reached,
+    /// the remaining subtree is widened to `Any`.
+    pub(crate) fn diagnostic_type(&self) -> StaticType {
+        let mut budget = DIAGNOSTIC_TYPE_VALUE_BUDGET;
+        self.static_type_with_budget(DIAGNOSTIC_TYPE_MAX_DEPTH, &mut budget)
+    }
+
+    fn static_type_with_budget(&self, depth: usize, budget: &mut usize) -> StaticType {
+        if *budget == 0 {
+            return StaticType::Any;
+        }
+        *budget -= 1;
+
         match self {
             Self::Int(_) => StaticType::Int,
             Self::Float(_) => StaticType::Float,
             Self::Bool(_) => StaticType::Bool,
             Self::None => StaticType::Option(Box::new(StaticType::Any)),
-            Self::Object(obj) => obj.static_type(),
+            Self::Object(obj) => obj.static_type_with_budget(depth, budget),
         }
     }
 
@@ -321,6 +363,165 @@ impl Value {
             | StaticType::Tuple(_) => false,
             _ => self.static_type().is_subtype(param),
         }
+    }
+
+    /// Check whether this value conforms to `target`, scanning container
+    /// elements recursively. Empty containers conform to any element type.
+    ///
+    /// Unlike [`Value::matches_param`] this scans the value by design: it backs
+    /// the runtime check of `as` casts, where the caller explicitly opted into
+    /// the scan. Shared container aliases are memoized by object and target
+    /// type. Iterators can't be inspected without consuming them, so they only
+    /// conform to targets with `Any` elements.
+    pub fn conforms_to(&self, target: &StaticType) -> bool {
+        self.conforms_to_cached(target, &mut ConformanceCache::default())
+    }
+
+    fn conforms_to_cached(&self, target: &StaticType, cache: &mut ConformanceCache) -> bool {
+        let cache_key = match self {
+            Self::Object(object) => Some((Rc::as_ptr(object), std::ptr::from_ref(target))),
+            _ => None,
+        };
+        if let Some(cache_key) = cache_key
+            && let Some(result) = cache.get(&cache_key)
+        {
+            return *result;
+        }
+
+        // Static types are finite trees, so this pair cannot be re-entered
+        // before its result is stored.
+        let result = match target {
+            StaticType::Any => true,
+            StaticType::Option(inner) => match self {
+                Self::None => true,
+                Self::Object(object) => match object.as_ref() {
+                    Object::Some(value) => value.conforms_to_cached(inner, cache),
+                    _ => false,
+                },
+                _ => false,
+            },
+            StaticType::List(element) => matches!(
+                self,
+                Self::Object(object) if matches!(object.as_ref(), Object::List(values)
+                    if values.borrow().iter().all(|value| value.conforms_to_cached(element, cache)))
+            ),
+            StaticType::Deque(element) => matches!(
+                self,
+                Self::Object(object) if matches!(object.as_ref(), Object::Deque(values)
+                    if values.borrow().iter().all(|value| value.conforms_to_cached(element, cache)))
+            ),
+            StaticType::Tuple(elements) => matches!(
+                self,
+                Self::Object(object) if matches!(object.as_ref(), Object::Tuple(values)
+                    if values.len() == elements.len()
+                        && values.iter().zip(elements).all(|(value, element)| value.conforms_to_cached(element, cache)))
+            ),
+            StaticType::Map { key, value } => match self {
+                Self::Object(object) => match object.as_ref() {
+                    Object::Map { entries, default } => {
+                        // A missing-key lookup inserts the default (or the
+                        // result of calling it), so the default must conform
+                        // to the value type as well. A default function's
+                        // results can't be verified without calling it.
+                        let default_conforms = match default {
+                            None => true,
+                            Some(Self::Object(object))
+                                if matches!(object.as_ref(), Object::Function(_)) =>
+                            {
+                                matches!(value.as_ref(), StaticType::Any)
+                            }
+                            Some(default) => default.conforms_to_cached(value, cache),
+                        };
+                        default_conforms
+                            && entries.borrow().iter().all(|(entry_key, entry_value)| {
+                                entry_key.conforms_to_cached(key, cache)
+                                    && entry_value.conforms_to_cached(value, cache)
+                            })
+                    }
+                    _ => false,
+                },
+                _ => false,
+            },
+            StaticType::MinHeap(element) => matches!(
+                self,
+                Self::Object(object) if matches!(object.as_ref(), Object::MinHeap(values)
+                    if values.borrow().iter().all(|Reverse(OrdValue(value))| value.conforms_to_cached(element, cache)))
+            ),
+            StaticType::MaxHeap(element) => matches!(
+                self,
+                Self::Object(object) if matches!(object.as_ref(), Object::MaxHeap(values)
+                    if values.borrow().iter().all(|OrdValue(value)| value.conforms_to_cached(element, cache)))
+            ),
+            StaticType::Sequence(element) => match self {
+                Self::Object(object) => match object.as_ref() {
+                    Object::List(values) => values
+                        .borrow()
+                        .iter()
+                        .all(|value| value.conforms_to_cached(element, cache)),
+                    Object::Tuple(values) => values
+                        .iter()
+                        .all(|value| value.conforms_to_cached(element, cache)),
+                    Object::Deque(values) => values
+                        .borrow()
+                        .iter()
+                        .all(|value| value.conforms_to_cached(element, cache)),
+                    Object::String(_) => StaticType::String.is_subtype(element),
+                    Object::Map { entries, .. } => {
+                        entries
+                            .borrow()
+                            .iter()
+                            .all(|(key, value)| match element.as_ref() {
+                                StaticType::Any => true,
+                                StaticType::Tuple(elements) if elements.len() == 2 => {
+                                    key.conforms_to_cached(&elements[0], cache)
+                                        && value.conforms_to_cached(&elements[1], cache)
+                                }
+                                StaticType::Sequence(inner) => {
+                                    key.conforms_to_cached(inner, cache)
+                                        && value.conforms_to_cached(inner, cache)
+                                }
+                                _ => false,
+                            })
+                    }
+                    Object::MinHeap(values) => values
+                        .borrow()
+                        .iter()
+                        .all(|Reverse(OrdValue(value))| value.conforms_to_cached(element, cache)),
+                    Object::MaxHeap(values) => values
+                        .borrow()
+                        .iter()
+                        .all(|OrdValue(value)| value.conforms_to_cached(element, cache)),
+                    Object::Iterator(_) => matches!(element.as_ref(), StaticType::Any),
+                    _ => false,
+                },
+                _ => false,
+            },
+            // The remaining targets are non-container types (Never, Bool,
+            // numerics, String, Function, Struct, Iterator). Container values
+            // conform to none of them; answering that without `static_type`
+            // keeps recursion bounded by the target's depth, so conformance
+            // checks terminate even on self-referential containers.
+            _ => match self {
+                Self::Object(object)
+                    if matches!(
+                        object.as_ref(),
+                        Object::List(_)
+                            | Object::Tuple(_)
+                            | Object::Map { .. }
+                            | Object::Deque(_)
+                            | Object::Some(_)
+                    ) =>
+                {
+                    false
+                }
+                _ => self.static_type().is_subtype(target),
+            },
+        };
+
+        if let Some(cache_key) = cache_key {
+            cache.insert(cache_key, result);
+        }
+        result
     }
 
     /// Consume this value and produce an iterator over its elements.
@@ -475,51 +676,98 @@ impl Object {
     /// because the VM does not track element types at runtime.  Tuple is the
     /// exception: its element types are known from the concrete values it holds.
     pub fn static_type(&self) -> StaticType {
+        let mut budget = usize::MAX;
+        self.static_type_with_budget(usize::MAX, &mut budget)
+    }
+
+    fn static_type_with_budget(&self, depth: usize, budget: &mut usize) -> StaticType {
         match self {
-            Self::Some(inner) => StaticType::Option(Box::new(inner.static_type())),
+            Self::Some(inner) => {
+                if depth == 0 {
+                    return StaticType::Option(Box::new(StaticType::Any));
+                }
+                StaticType::Option(Box::new(inner.static_type_with_budget(depth - 1, budget)))
+            }
             Self::BigInt(_) => StaticType::Int,
             Self::Complex(_) => StaticType::Complex,
             Self::Rational(_) => StaticType::Rational,
             Self::String(_) => StaticType::String,
             Self::List(elements) => {
+                if depth == 0 {
+                    return StaticType::List(Box::new(StaticType::Any));
+                }
                 let elements = elements.borrow();
-                let elem_type = elements
-                    .iter()
-                    .map(|e| e.static_type())
-                    .reduce(|a, b| a.lub(&b))
-                    .unwrap_or(StaticType::Any);
+                let elem_type = bounded_element_type(elements.iter(), depth - 1, budget);
                 StaticType::List(Box::new(elem_type))
             }
             Self::Tuple(elements) => {
-                StaticType::Tuple(elements.iter().map(|e| e.static_type()).collect())
+                if depth == 0 {
+                    if elements.len() > *budget {
+                        return StaticType::Any;
+                    }
+                    *budget -= elements.len();
+                    return StaticType::Tuple(vec![StaticType::Any; elements.len()]);
+                }
+                if elements.len() > *budget {
+                    return StaticType::Any;
+                }
+                let mut types = Vec::with_capacity(elements.len());
+                for element in elements {
+                    if *budget == 0 {
+                        return StaticType::Any;
+                    }
+                    types.push(element.static_type_with_budget(depth - 1, budget));
+                }
+                StaticType::Tuple(types)
             }
             Self::Map { entries, .. } => {
+                if depth == 0 {
+                    return StaticType::Map {
+                        key: Box::new(StaticType::Any),
+                        value: Box::new(StaticType::Any),
+                    };
+                }
                 let entries = entries.borrow();
-                let key_type = entries
-                    .keys()
-                    .map(|k| k.static_type())
-                    .reduce(|a, b| a.lub(&b))
-                    .unwrap_or(StaticType::Any);
-                let value_type = entries
-                    .values()
-                    .map(|v| v.static_type())
-                    .reduce(|a, b| a.lub(&b))
-                    .unwrap_or(StaticType::Any);
+                let mut key_type: Option<StaticType> = None;
+                let mut value_type: Option<StaticType> = None;
+                for (key, value) in entries.iter() {
+                    if *budget == 0 {
+                        return StaticType::Map {
+                            key: Box::new(StaticType::Any),
+                            value: Box::new(StaticType::Any),
+                        };
+                    }
+                    let found_key = key.static_type_with_budget(depth - 1, budget);
+                    if *budget == 0 {
+                        return StaticType::Map {
+                            key: Box::new(StaticType::Any),
+                            value: Box::new(StaticType::Any),
+                        };
+                    }
+                    let found_value = value.static_type_with_budget(depth - 1, budget);
+                    key_type = Some(match key_type {
+                        Some(previous) => previous.lub(&found_key),
+                        None => found_key,
+                    });
+                    value_type = Some(match value_type {
+                        Some(previous) => previous.lub(&found_value),
+                        None => found_value,
+                    });
+                }
                 StaticType::Map {
-                    key: Box::new(key_type),
-                    value: Box::new(value_type),
+                    key: Box::new(key_type.unwrap_or(StaticType::Any)),
+                    value: Box::new(value_type.unwrap_or(StaticType::Any)),
                 }
             }
             Self::Function(f) => f.static_type(),
             Self::OverloadSet { .. } => StaticType::Any,
             Self::Iterator(_) => StaticType::Iterator(Box::new(StaticType::Any)),
             Self::Deque(elements) => {
+                if depth == 0 {
+                    return StaticType::Deque(Box::new(StaticType::Any));
+                }
                 let elements = elements.borrow();
-                let elem_type = elements
-                    .iter()
-                    .map(|e| e.static_type())
-                    .reduce(|a, b| a.lub(&b))
-                    .unwrap_or(StaticType::Any);
+                let elem_type = bounded_element_type(elements.iter(), depth - 1, budget);
                 StaticType::Deque(Box::new(elem_type))
             }
             Self::MinHeap(_) => StaticType::MinHeap(Box::new(StaticType::Any)),
@@ -1005,5 +1253,33 @@ impl Hash for Object {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn conformance_memoizes_aliased_containers() {
+        let list = Rc::new(Object::List(RefCell::new(Vec::new())));
+        let value = Value::Object(Rc::clone(&list));
+        let Object::List(elements) = list.as_ref() else {
+            unreachable!();
+        };
+        elements
+            .borrow_mut()
+            .extend(std::iter::repeat_n(value.clone(), 100));
+
+        let target = StaticType::List(Box::new(StaticType::List(Box::new(StaticType::List(
+            Box::new(StaticType::Any),
+        )))));
+        let mut cache = ConformanceCache::default();
+
+        assert!(value.conforms_to_cached(&target, &mut cache));
+        assert_eq!(cache.len(), 4);
+
+        // Break the reference cycle so the test does not leak its allocations.
+        elements.borrow_mut().clear();
     }
 }

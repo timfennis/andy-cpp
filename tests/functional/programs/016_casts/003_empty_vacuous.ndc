@@ -1,0 +1,4 @@
+// An empty container conforms to any element type.
+assert_eq([] as List<Int>, []);
+let value: Any = [];
+assert_eq(value as List<Int>, []);

@@ -1,0 +1,7 @@
+// Reassignment widens `line` to Sequence<String>, which no longer matches the
+// List parameter of `remove`. The analyser will not guess that the value is
+// really a list — cast to say so.
+// expect-output: a ["b","c"]
+let line = "a b c";
+line = line.split(" ");
+print((line as List<String>).remove(0), line)

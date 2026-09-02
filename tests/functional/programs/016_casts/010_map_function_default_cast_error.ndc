@@ -1,0 +1,3 @@
+// expect-error: cannot cast
+let m: Any = %{: fn() => 1};
+print(m as Map<Int, Int>);

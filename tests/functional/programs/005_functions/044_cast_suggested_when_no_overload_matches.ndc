@@ -1,0 +1,6 @@
+// The call would resolve if the argument type were narrower, so the error
+// carries help pointing at a cast rather than leaving the user at a dead end.
+// expect-error: Cast to say what the value holds
+let line = "a b c";
+line = line.split(" ");
+print(line.remove(0))

@@ -1,0 +1,5 @@
+// No overload could ever accept a String here, so no cast would help and the
+// error must not suggest one.
+// expect-error: No function called 'f' found that matches the arguments 'String'
+fn f(x: Int) => x;
+print(f("s"))

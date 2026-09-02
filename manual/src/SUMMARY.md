@@ -30,6 +30,7 @@
 
 # Features
 - [Augmented assignment](./features/augmented-assignment.md)
+- [Casts](./features/casts.md)
 - [Method call syntax](./features/method-call-syntax.md)
 - [Slices](./features/slices.md)
 - [Memoization](./features/memoization.md)

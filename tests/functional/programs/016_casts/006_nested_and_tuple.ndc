@@ -1,0 +1,8 @@
+let nested: Any = [[1], [2, 3]];
+assert_eq(nested as List<List<Int>>, [[1], [2, 3]]);
+
+let pair: Any = (1, "a");
+assert_eq(pair as (Int, String), (1, "a"));
+
+let map: Any = %{"a": 1};
+assert_eq(map as Map<String, Int>, %{"a": 1});

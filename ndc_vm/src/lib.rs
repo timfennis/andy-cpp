@@ -20,10 +20,14 @@ pub use value::*;
 
 #[cfg(test)]
 mod test {
+    use crate::{Object, Value};
+    use ndc_core::StaticType;
+    use std::cell::RefCell;
+    use std::rc::Rc;
 
     #[test]
     fn test_that_value_size_does_not_change() {
-        assert_eq!(size_of::<crate::Value>(), 16)
+        assert_eq!(size_of::<Value>(), 16)
     }
 
     #[test]
@@ -37,9 +41,7 @@ mod test {
     #[test]
     fn test_struct_function_display_is_unambiguous() {
         use crate::value::Function;
-        use ndc_core::StaticType;
         use ndc_core::r#struct::StructRegistry;
-        use std::rc::Rc;
 
         let mut registry = StructRegistry::default();
         let id = registry.register("Point", vec![("x".to_string(), StaticType::Int)]);
@@ -52,5 +54,25 @@ mod test {
         assert_eq!(constructor.to_string(), "<fn Point>");
         assert_eq!(getter.to_string(), "<fn Point.x>");
         assert_eq!(setter.to_string(), "<fn Point.x=>");
+    }
+
+    #[test]
+    fn diagnostic_type_has_total_work_budget_for_cycles() {
+        let list = Rc::new(Object::List(RefCell::new(Vec::new())));
+        let value = Value::Object(Rc::clone(&list));
+        let Object::List(elements) = list.as_ref() else {
+            unreachable!();
+        };
+        elements
+            .borrow_mut()
+            .extend(std::iter::repeat_n(value.clone(), 8));
+
+        assert_eq!(
+            value.diagnostic_type(),
+            StaticType::List(Box::new(StaticType::Any))
+        );
+
+        // Break the reference cycle so the test does not leak its allocations.
+        elements.borrow_mut().clear();
     }
 }

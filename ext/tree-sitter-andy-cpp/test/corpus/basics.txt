@@ -106,3 +106,104 @@ let m = %{:0, "a": 1};
       (map_entry
         key: (string)
         value: (integer)))))
+
+==================
+cast expression
+==================
+
+let k = xs as List<Int>;
+
+---
+
+(source_file
+  (variable_declaration
+    name: (identifier)
+    value: (cast_expression
+      value: (identifier)
+      type: (generic_type
+        name: (type_identifier)
+        (type_identifier)))))
+
+==================
+cast binds tighter than binary operators
+==================
+
+a + b as Int;
+
+---
+
+(source_file
+  (binary_expression
+    left: (identifier)
+    right: (cast_expression
+      value: (identifier)
+      type: (type_identifier))))
+
+==================
+less-than after a cast is a comparison
+==================
+
+1 as Int < 2;
+
+---
+
+(source_file
+  (binary_expression
+    left: (cast_expression
+      value: (integer)
+      type: (type_identifier))
+    right: (integer)))
+
+==================
+generic arguments still win over less-than
+==================
+
+[[1]] as List<List<Int>>;
+
+---
+
+(source_file
+  (cast_expression
+    value: (list
+      (list
+        (integer)))
+    type: (generic_type
+      name: (type_identifier)
+      (generic_type
+        name: (type_identifier)
+        (type_identifier)))))
+
+==================
+grouped comparison after a cast
+==================
+
+value as Int < (y > z);
+
+---
+
+(source_file
+  (binary_expression
+    left: (cast_expression
+      value: (identifier)
+      type: (type_identifier))
+    right: (parenthesized_expression
+      (binary_expression
+        left: (identifier)
+        right: (identifier)))))
+
+==================
+shift right after a cast comparison
+==================
+
+3 as Int < 4 >> 1;
+
+---
+
+(source_file
+  (binary_expression
+    left: (cast_expression
+      value: (integer)
+      type: (type_identifier))
+    right: (binary_expression
+      left: (integer)
+      right: (integer))))

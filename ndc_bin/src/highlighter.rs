@@ -76,6 +76,7 @@ impl AndycppHighlighter {
                 | Token::In
                 | Token::While
                 | Token::Pure
+                | Token::As
                 | Token::LogicAnd
                 | Token::LogicOr
                 | Token::LogicNot => substring.rgb(224, 108, 117),
@@ -154,7 +155,9 @@ fn collect_function_spans(expr: &ExpressionLocation, spans: &mut AHashSet<usize>
         | Expression::Return { value } => {
             collect_function_spans(value, spans);
         }
-        Expression::Statement(inner) | Expression::Grouping(inner) => {
+        Expression::Statement(inner)
+        | Expression::Grouping(inner)
+        | Expression::Cast { value: inner, .. } => {
             collect_function_spans(inner, spans);
         }
         Expression::Block { statements } => {

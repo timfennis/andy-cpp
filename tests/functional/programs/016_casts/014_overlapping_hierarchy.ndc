@@ -1,0 +1,8 @@
+// Neither List<Any> nor Sequence<Int> is a subtype of the other, but a
+// List<Int> is a subtype of both, so the cast is possible and gets checked
+// at runtime rather than rejected outright.
+let xs: List<Any> = [1, 2];
+assert_eq(xs as Sequence<Int>, [1, 2]);
+
+let m: Map<Int, Any> = %{1: 2};
+assert_eq(m as Sequence<(Int, Int)>, %{1: 2});
