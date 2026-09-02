@@ -1,0 +1,9 @@
+// A specialized `op=` copies values into the left operand without inspecting
+// them, so an `Any` right operand is rejected rather than silently accepted:
+// nothing downstream would check the elements. Cast the operand to state what
+// it holds.
+// expect-error: mismatched types: found Any but expected List<Int>
+fn opaque(x) => x;
+let values = [1];
+values ++= opaque([2, 3]);
+print(values)

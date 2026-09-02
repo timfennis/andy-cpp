@@ -1,0 +1,9 @@
+// A `Never` argument diverges before the call happens, so the call is not a
+// type error even though no value could satisfy the parameter.
+// expect-output: 1
+let n = 0;
+while true {
+    n = n + 1;
+    print(break);
+}
+print(n)

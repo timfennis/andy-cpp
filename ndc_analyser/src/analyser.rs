@@ -968,7 +968,12 @@ impl Analyser {
         index_type.is_subtype(&StaticType::Iterator(Box::new(StaticType::Int)))
     }
 
-    /// Specialized `op=` implementations preserve the concrete left type.
+    /// Specialized `op=` implementations mutate the left operand in place and
+    /// keep its concrete type, so the right operand must provably fit it: the
+    /// operator copies values across without inspecting them, and nothing
+    /// downstream re-checks. A merely overlapping right operand is not enough —
+    /// `List<Int> ++= List<Number>` would leave the target holding a `Float`.
+    ///
     /// A tuple left-hand side represents vector dispatch, so a scalar right
     /// operand must be compatible with every concrete tuple element.
     fn augmented_rhs_is_compatible(left_type: &StaticType, right_type: &StaticType) -> bool {

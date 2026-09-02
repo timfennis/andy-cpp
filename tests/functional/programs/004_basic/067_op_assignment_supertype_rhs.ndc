@@ -1,0 +1,8 @@
+// A specialized `op=` mutates the left operand in place and keeps its type, so
+// a right operand whose element type is merely a *supertype* is not enough:
+// appending a Float here would leave a List<Int> holding a non-Int.
+// expect-error: mismatched types: found List<Number> but expected List<Int>
+let values: List<Int> = [1];
+let rhs: List<Number> = [0.5];
+values ++= rhs;
+print(values)
