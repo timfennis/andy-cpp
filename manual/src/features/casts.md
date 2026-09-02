@@ -52,6 +52,10 @@ and calls, so `a + b as Int` means `a + (b as Int)`. Method calls bind
 tighter than the cast: recovering an element type before a method call
 needs parentheses, as in `(values.keys as List<Int>).max()`.
 
+A `<` after the cast type is read as a type argument list when the tokens
+that follow form one, and as a less-than comparison otherwise, so
+`n as Int < 10` compares while `xs as List<Int>` casts.
+
 ## Limitations
 
 An iterator cannot be inspected without consuming it, so a runtime check

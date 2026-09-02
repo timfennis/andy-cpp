@@ -69,6 +69,10 @@ impl Parser {
         self.tokens.get(self.current)
     }
 
+    fn peek_next_token(&self) -> Option<&Token> {
+        self.tokens.get(self.current + 1).map(|t| &t.token)
+    }
+
     /// Returns the current `TokenLocation` if it matches the given `Token` or returns `None` if it does not match.
     /// It does not consume the current token however, if that's the purpose you can use `consume_token_if`.
     fn match_token(&self, tokens: &[Token]) -> Option<&TokenLocation> {
@@ -639,7 +643,7 @@ impl Parser {
     fn cast(&mut self) -> Result<ExpressionLocation, Error> {
         let mut expression = self.tight_unary()?;
         while self.consume_token_if(&[Token::As]).is_some() {
-            let annotation = self.type_annotation()?;
+            let annotation = self.cast_type_annotation()?;
             let span = expression.span.merge(annotation.span());
             expression = Expression::Cast {
                 value: Box::new(expression),
@@ -1428,6 +1432,71 @@ impl Parser {
                 "Use a valid type name or tuple type annotation in this position.".to_string(),
             )),
         }
+    }
+
+    /// Parses the type after `as`. Identical to [`Self::type_annotation`] except
+    /// that a `<` which cannot open a type argument list is left alone, so that
+    /// `1 as Int < 2` parses as `(1 as Int) < 2` instead of trying to read `2` as
+    /// a type argument.
+    fn cast_type_annotation(&mut self) -> Result<TypeExpr, Error> {
+        if matches!(self.peek_current_token(), Some(Token::Identifier(_)))
+            && self.peek_next_token() == Some(&Token::Less)
+            && !self.peek_type_arguments()
+        {
+            let Ok(TokenLocation {
+                token: Token::Identifier(name),
+                span,
+            }) = self.require_current_token()
+            else {
+                unreachable!("this should have been checked");
+            };
+
+            return Ok(TypeExpr::Name {
+                name,
+                args: Vec::new(),
+                span,
+            });
+        }
+
+        self.type_annotation()
+    }
+
+    /// Scans ahead from the `<` that follows the current token to decide whether
+    /// it opens a type argument list (`List<Int>`) or is a less-than operator
+    /// (`Int < 2`). Only the tokens that may legally appear inside a type
+    /// argument list are accepted; anything else means this is a comparison.
+    fn peek_type_arguments(&self) -> bool {
+        let mut depth = 0_usize;
+
+        for location in self.tokens.iter().skip(self.current + 1) {
+            // The number of `>` this token contributes, and whether it leaves a
+            // remainder (the `=` of `>=` and `>>=`) that cannot occur in a type.
+            let (closers, closes_cleanly) = match &location.token {
+                Token::Less => {
+                    depth += 1;
+                    continue;
+                }
+                Token::Identifier(_)
+                | Token::Comma
+                | Token::LeftParentheses
+                | Token::RightParentheses => continue,
+                Token::Greater => (1, true),
+                Token::GreaterGreater => (2, true),
+                Token::GreaterEquals => (1, false),
+                Token::OpAssign(inner) if inner.token == Token::GreaterGreater => (2, false),
+                _ => return false,
+            };
+
+            if depth <= closers {
+                return true;
+            } else if !closes_cleanly {
+                return false;
+            }
+
+            depth -= closers;
+        }
+
+        false
     }
 
     pub fn named_or_generic_type(&mut self) -> Result<TypeExpr, Error> {

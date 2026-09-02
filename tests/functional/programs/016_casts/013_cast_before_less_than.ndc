@@ -1,0 +1,11 @@
+// A `<` after a cast to a plain type is a comparison, not a type argument list.
+let value: Any = 3;
+assert_eq(value as Int < 10, true);
+assert_eq(1 as Int < 2 as Int, true);
+
+// A real type argument list still wins.
+let list: Any = [1, 2];
+assert_eq((list as List<Int>).len() < 10, true);
+
+let nested: Any = [[1]];
+assert_eq((nested as List<List<Int>>).len() < 10, true);
