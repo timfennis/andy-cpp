@@ -79,18 +79,24 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
     let temp = format_ident!("vm_temp{position}");
 
     let result = match ndc_type {
-        NdcType::Number | NdcType::NumberRef => {
+        NdcType::Number => {
             let err = arg_error(position, "number");
-            let pass = if ndc_type == NdcType::NumberRef {
-                quote! { &#temp }
-            } else {
-                quote! { #temp }
-            };
             VmInputArg {
                 extract: quote! {
                     let #temp = #raw.to_number().ok_or_else(|| #err)?;
                 },
-                pass,
+                pass: quote! { #temp },
+                static_type: quote! { ndc_core::StaticType::Number },
+            }
+        }
+
+        NdcType::NumberRef => {
+            let err = arg_error(position, "number");
+            VmInputArg {
+                extract: quote! {
+                    let #temp = #raw.as_number().ok_or_else(|| #err)?;
+                },
+                pass: quote! { #temp },
                 static_type: quote! { ndc_core::StaticType::Number },
             }
         }
@@ -197,14 +203,14 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
             VmInputArg {
                 extract: quote! {
                     let #temp = {
-                        let num = #raw.to_number().ok_or_else(|| #err)?;
+                        let num = #raw.as_number().ok_or_else(|| #err)?;
                         match num {
-                            ndc_core::num::AdvancedNumber::Rational(r) => *r,
+                            ndc_core::num::AdvancedNumber::Rational(r) => r.as_ref(),
                             _ => return Err(#err),
                         }
                     };
                 },
-                pass: quote! { &#temp },
+                pass: quote! { #temp },
                 static_type: quote! { ndc_core::StaticType::Number },
             }
         }
@@ -214,9 +220,9 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
             VmInputArg {
                 extract: quote! {
                     let #temp = {
-                        let num = #raw.to_number().ok_or_else(|| #err)?;
+                        let num = #raw.as_number().ok_or_else(|| #err)?;
                         match num {
-                            ndc_core::num::AdvancedNumber::Complex(c) => c,
+                            ndc_core::num::AdvancedNumber::Complex(c) => *c,
                             _ => return Err(#err),
                         }
                     };

@@ -1,6 +1,8 @@
 mod function;
+mod numeric;
 
 pub use function::*;
+pub use numeric::{NumericMode, NumericRef};
 
 use crate::iterator::SharedIterator;
 use ndc_core::StaticType;
@@ -296,7 +298,7 @@ impl Value {
     /// Prefer this over `self.static_type().is_number()` in hot paths — this is O(1)
     /// and never allocates, whereas `static_type()` on containers is O(n).
     pub fn is_number(&self) -> bool {
-        matches!(self, Self::Int(_) | Self::Float(_) | Self::Number(_))
+        self.numeric_ref().is_some()
     }
 
     /// Check whether this value satisfies a function parameter type at runtime,
@@ -559,14 +561,20 @@ impl Value {
     }
 
     pub fn as_number(&self) -> Option<&AdvancedNumber> {
+        self.numeric_ref().and_then(NumericRef::as_number)
+    }
+
+    pub fn numeric_ref(&self) -> Option<NumericRef<'_>> {
         match self {
-            Self::Number(number) => Some(number.as_ref()),
-            _ => None,
+            Self::Int(value) => Some(NumericRef::Int(*value)),
+            Self::Float(value) => Some(NumericRef::Float(*value)),
+            Self::Number(value) => Some(NumericRef::Number(value.as_ref())),
+            Self::Bool(_) | Self::None | Self::Object(_) => None,
         }
     }
 
     pub fn to_advanced_number(&self) -> Option<AdvancedNumber> {
-        vm_value_to_number(self)
+        self.numeric_ref().map(NumericRef::to_advanced_number)
     }
 
     /// Wrap an advanced numeric payload as a Number value.
@@ -577,13 +585,7 @@ impl Value {
     /// Convert a numeric VM value to `f64`, coercing integers and rationals.
     /// Returns `None` for non-numeric values (Bool, None, String, …).
     pub fn to_f64(&self) -> Option<f64> {
-        use num::ToPrimitive;
-        match self {
-            Self::Float(f) => Some(*f),
-            Self::Int(i) => i.to_f64(),
-            Self::Number(number) => number.to_f64(),
-            _ => None,
-        }
+        self.numeric_ref().and_then(NumericRef::to_f64)
     }
 }
 
@@ -897,17 +899,8 @@ impl fmt::Debug for Object {
 
 impl PartialOrd for Value {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        match (self, other) {
-            (Self::Int(a), Self::Int(b)) => return Some(a.cmp(b)),
-            (Self::Float(a), Self::Float(b)) => return Some(compare_floats(*a, *b)),
-            (Self::Int(a), Self::Float(b)) => return Some(compare_int_float(*a, *b)),
-            (Self::Float(a), Self::Int(b)) => return Some(compare_int_float(*b, *a).reverse()),
-            (Self::Number(a), Self::Number(b)) => return a.partial_cmp(b),
-            _ => {}
-        }
-
-        if self.is_number() && other.is_number() {
-            return vm_value_to_number(self)?.partial_cmp(&vm_value_to_number(other)?);
+        if let (Some(left), Some(right)) = (self.numeric_ref(), other.numeric_ref()) {
+            return Some(left.compare(right));
         }
 
         match (self, other) {
@@ -915,52 +908,6 @@ impl PartialOrd for Value {
             (Self::Object(a), Self::Object(b)) => a.partial_cmp(b),
             _ => None,
         }
-    }
-}
-
-/// Match `AdvancedNumber`'s total ordering without constructing exact rational
-/// representations for two values that are already stored as floats.
-fn compare_floats(left: f64, right: f64) -> Ordering {
-    match (left.is_nan(), right.is_nan()) {
-        (true, true) => Ordering::Equal,
-        (true, false) => Ordering::Greater,
-        (false, true) => Ordering::Less,
-        (false, false) => left
-            .partial_cmp(&right)
-            .expect("non-NaN floats are totally ordered"),
-    }
-}
-
-/// Compare an `i64` to an `f64` exactly, without first allocating a `BigInt`
-/// and exact `BigRational` for their `AdvancedNumber` representations.
-fn compare_int_float(integer: i64, float: f64) -> Ordering {
-    const I64_MIN_AS_F64: f64 = i64::MIN as f64;
-    const I64_UPPER_BOUND_AS_F64: f64 = i64::MAX as f64;
-
-    if float.is_nan() || float >= I64_UPPER_BOUND_AS_F64 {
-        return Ordering::Less;
-    }
-    if float < I64_MIN_AS_F64 {
-        return Ordering::Greater;
-    }
-
-    let truncated = float.trunc() as i64;
-    match integer.cmp(&truncated) {
-        Ordering::Equal if float.fract() == 0.0 => Ordering::Equal,
-        Ordering::Equal if float.is_sign_positive() => Ordering::Less,
-        Ordering::Equal => Ordering::Greater,
-        ordering => ordering,
-    }
-}
-
-/// Convert a VM numeric value to an `AdvancedNumber` for cross-type comparison.
-/// Returns `None` for non-numeric values (Bool, None, String, List, …).
-fn vm_value_to_number(v: &Value) -> Option<AdvancedNumber> {
-    match v {
-        Value::Int(i) => Some(AdvancedNumber::Int(num::BigInt::from(*i))),
-        Value::Float(f) => Some(AdvancedNumber::Float(*f)),
-        Value::Number(number) => Some(number.as_ref().clone()),
-        _ => None,
     }
 }
 
@@ -1018,22 +965,8 @@ impl Value {
 
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Int(a), Self::Int(b)) => return a == b,
-            (Self::Float(a), Self::Float(b)) => {
-                return compare_floats(*a, *b) == Ordering::Equal;
-            }
-            (Self::Int(a), Self::Float(b)) => return compare_int_float(*a, *b) == Ordering::Equal,
-            (Self::Float(a), Self::Int(b)) => return compare_int_float(*b, *a) == Ordering::Equal,
-            (Self::Number(a), Self::Number(b)) => return a == b,
-            _ => {}
-        }
-
-        if self.is_number() && other.is_number() {
-            return match (vm_value_to_number(self), vm_value_to_number(other)) {
-                (Some(left), Some(right)) => left == right,
-                _ => false,
-            };
+        if let (Some(left), Some(right)) = (self.numeric_ref(), other.numeric_ref()) {
+            return left == right;
         }
 
         match (self, other) {
@@ -1049,7 +982,7 @@ impl Eq for Value {}
 
 impl Hash for Value {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        if let Some(number) = vm_value_to_number(self) {
+        if let Some(number) = self.numeric_ref() {
             state.write_u8(1);
             number.hash(state);
             return;
@@ -1231,6 +1164,54 @@ impl Hash for Object {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn value_hash(value: &Value) -> u64 {
+        let mut hasher = DefaultHasher::default();
+        value.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    #[test]
+    fn numeric_ref_owns_checked_numeric_conversions() {
+        let integer = Value::Int(42);
+        let float = Value::Float(42.75);
+        let rational = Value::number(AdvancedNumber::rational(num::BigRational::new(
+            7.into(),
+            2.into(),
+        )));
+        let complex = Value::complex(num::Complex::new(1.0, 2.0));
+
+        assert_eq!(integer.numeric_ref().unwrap().mode(), NumericMode::Int);
+        assert_eq!(float.numeric_ref().unwrap().mode(), NumericMode::Float);
+        assert_eq!(rational.numeric_ref().unwrap().mode(), NumericMode::Number);
+        assert_eq!(float.numeric_ref().unwrap().to_i64_truncating(), Some(42));
+        assert_eq!(rational.numeric_ref().unwrap().to_i64_truncating(), Some(3));
+        assert_eq!(rational.numeric_ref().unwrap().to_f64(), Some(3.5));
+        assert_eq!(complex.numeric_ref().unwrap().to_f64(), None);
+        assert!(Value::Bool(true).numeric_ref().is_none());
+    }
+
+    #[test]
+    fn equal_numeric_modes_keep_equal_hashes() {
+        let values = [
+            Value::Int(1),
+            Value::Float(1.0),
+            Value::number(AdvancedNumber::Int(1.into())),
+            Value::number(AdvancedNumber::Float(1.0)),
+            Value::number(AdvancedNumber::rational(num::BigRational::from_integer(
+                1.into(),
+            ))),
+            Value::complex(num::Complex::new(1.0, 0.0)),
+        ];
+
+        for left in &values {
+            for right in &values {
+                assert_eq!(left, right);
+                assert_eq!(left.partial_cmp(right), Some(Ordering::Equal));
+                assert_eq!(value_hash(left), value_hash(right));
+            }
+        }
+    }
 
     #[test]
     fn conformance_memoizes_aliased_containers() {

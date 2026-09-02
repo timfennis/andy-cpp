@@ -2,29 +2,12 @@ use factorial::Factorial;
 use ndc_core::num::{AdvancedNumber, BinaryOperatorError};
 use ndc_core::{FunctionRegistry, StaticType};
 use ndc_vm::error::VmError;
-use ndc_vm::value::{NativeFunc, NativeFunction, Object, Value};
+use ndc_vm::value::{NativeFunc, NativeFunction, NumericMode, NumericRef, Object, Value};
 use num::complex::Complex64;
-use num::{BigInt, BigUint, FromPrimitive, Integer, ToPrimitive};
+use num::{BigInt, BigUint, Integer, ToPrimitive};
 use std::cmp::Ordering;
 use std::ops::{Add, Div, Mul, Neg, Not, Rem, Sub};
 use std::rc::Rc;
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum NumericKind {
-    Int,
-    Float,
-    Number,
-}
-
-impl NumericKind {
-    fn static_type(self) -> StaticType {
-        match self {
-            Self::Int => StaticType::Int,
-            Self::Float => StaticType::Float,
-            Self::Number => StaticType::Number,
-        }
-    }
-}
 
 #[derive(Clone, Copy)]
 enum BinaryOperation {
@@ -115,29 +98,19 @@ fn native_error(error: impl std::fmt::Display) -> VmError {
     VmError::native(error.to_string())
 }
 
-fn result_kind(left: NumericKind, right: NumericKind) -> NumericKind {
-    if left == NumericKind::Number || right == NumericKind::Number {
-        NumericKind::Number
-    } else if left == NumericKind::Float || right == NumericKind::Float {
-        NumericKind::Float
-    } else {
-        NumericKind::Int
-    }
-}
-
 /// Runtime overload candidates are inspected in reverse registration order.
 /// Keep homogeneous primitive pairs first in that runtime order: dynamic code
 /// usually preserves one numeric representation across repeated operations.
-const NUMERIC_PAIRS_BY_DYNAMIC_PRIORITY: [(NumericKind, NumericKind); 9] = [
-    (NumericKind::Int, NumericKind::Int),
-    (NumericKind::Float, NumericKind::Float),
-    (NumericKind::Number, NumericKind::Number),
-    (NumericKind::Int, NumericKind::Float),
-    (NumericKind::Float, NumericKind::Int),
-    (NumericKind::Int, NumericKind::Number),
-    (NumericKind::Number, NumericKind::Int),
-    (NumericKind::Float, NumericKind::Number),
-    (NumericKind::Number, NumericKind::Float),
+const NUMERIC_PAIRS_BY_DYNAMIC_PRIORITY: [(NumericMode, NumericMode); 9] = [
+    (NumericMode::Int, NumericMode::Int),
+    (NumericMode::Float, NumericMode::Float),
+    (NumericMode::Number, NumericMode::Number),
+    (NumericMode::Int, NumericMode::Float),
+    (NumericMode::Float, NumericMode::Int),
+    (NumericMode::Int, NumericMode::Number),
+    (NumericMode::Number, NumericMode::Int),
+    (NumericMode::Float, NumericMode::Number),
+    (NumericMode::Number, NumericMode::Float),
 ];
 
 fn register_binary_arithmetic(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
@@ -153,21 +126,21 @@ fn register_binary_arithmetic(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     ];
 
     for operation in OPERATIONS {
-        for (left_kind, right_kind) in NUMERIC_PAIRS_BY_DYNAMIC_PRIORITY.into_iter().rev() {
-            let output_kind = result_kind(left_kind, right_kind);
+        for (left_mode, right_mode) in NUMERIC_PAIRS_BY_DYNAMIC_PRIORITY.into_iter().rev() {
+            let output_mode = left_mode.promote(right_mode);
             declare(
                 env,
                 operation.name(),
-                vec![left_kind.static_type(), right_kind.static_type()],
-                output_kind.static_type(),
+                vec![left_mode.static_type(), right_mode.static_type()],
+                output_mode.static_type(),
                 operation.documentation(),
                 move |args| {
                     arity(args, 2)?;
                     eval_binary(
                         operation,
-                        left_kind,
-                        right_kind,
-                        output_kind,
+                        left_mode,
+                        right_mode,
+                        output_mode,
                         &args[0],
                         &args[1],
                     )
@@ -179,27 +152,37 @@ fn register_binary_arithmetic(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
 
 fn eval_binary(
     operation: BinaryOperation,
-    left_kind: NumericKind,
-    right_kind: NumericKind,
-    output_kind: NumericKind,
+    left_mode: NumericMode,
+    right_mode: NumericMode,
+    output_mode: NumericMode,
     left: &Value,
     right: &Value,
 ) -> Result<Value, VmError> {
-    match output_kind {
-        NumericKind::Int => {
-            let (Value::Int(left), Value::Int(right)) = (left, right) else {
-                return Err(VmError::native("expected two Int operands".to_string()));
-            };
-            eval_int_binary(operation, *left, *right).map(Value::Int)
+    let left = numeric_ref(left_mode, left)?;
+    let right = numeric_ref(right_mode, right)?;
+
+    match output_mode {
+        NumericMode::Int => {
+            let left = left
+                .as_int()
+                .expect("Int output requires an Int left operand");
+            let right = right
+                .as_int()
+                .expect("Int output requires an Int right operand");
+            eval_int_binary(operation, left, right).map(Value::Int)
         }
-        NumericKind::Float => {
-            let left = primitive_float(left_kind, left)?;
-            let right = primitive_float(right_kind, right)?;
+        NumericMode::Float => {
+            let left = left
+                .to_primitive_float()
+                .expect("Float output only combines primitive operands");
+            let right = right
+                .to_primitive_float()
+                .expect("Float output only combines primitive operands");
             Ok(Value::Float(eval_float_binary(operation, left, right)))
         }
-        NumericKind::Number => {
-            let left = promoted_number(left_kind, left)?;
-            let right = promoted_number(right_kind, right)?;
+        NumericMode::Number => {
+            let left = left.to_advanced_number();
+            let right = right.to_advanced_number();
             eval_number_binary(operation, left, right)
                 .map(Value::from_number)
                 .map_err(native_error)
@@ -207,26 +190,12 @@ fn eval_binary(
     }
 }
 
-fn primitive_float(kind: NumericKind, value: &Value) -> Result<f64, VmError> {
-    match (kind, value) {
-        (NumericKind::Int, Value::Int(value)) => Ok(*value as f64),
-        (NumericKind::Float, Value::Float(value)) => Ok(*value),
+fn numeric_ref(mode: NumericMode, value: &Value) -> Result<NumericRef<'_>, VmError> {
+    match value.numeric_ref() {
+        Some(number) if number.mode() == mode => Ok(number),
         _ => Err(VmError::native(format!(
             "expected {}, got {}",
-            kind.static_type(),
-            value.static_type()
-        ))),
-    }
-}
-
-fn promoted_number(kind: NumericKind, value: &Value) -> Result<AdvancedNumber, VmError> {
-    match (kind, value) {
-        (NumericKind::Int, Value::Int(value)) => Ok(AdvancedNumber::Int(BigInt::from(*value))),
-        (NumericKind::Float, Value::Float(value)) => Ok(AdvancedNumber::Float(*value)),
-        (NumericKind::Number, Value::Number(value)) => Ok(value.as_ref().clone()),
-        _ => Err(VmError::native(format!(
-            "expected {}, got {}",
-            kind.static_type(),
+            mode.static_type(),
             value.static_type()
         ))),
     }
@@ -573,53 +542,55 @@ fn register_bitwise(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
 }
 
 fn register_constructors(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
-    for kind in [NumericKind::Int, NumericKind::Float, NumericKind::Number] {
+    for mode in NumericMode::ALL {
         declare(
             env,
             "Number",
-            vec![kind.static_type()],
+            vec![mode.static_type()],
             StaticType::Number,
             "Wraps a primitive numeric value as a Number.",
             move |args| {
                 arity(args, 1)?;
-                promoted_number(kind, &args[0]).map(Value::from_number)
+                Ok(Value::from_number(
+                    numeric_ref(mode, &args[0])?.to_advanced_number(),
+                ))
             },
         );
     }
 }
 
 fn register_aggregates(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
-    for kind in [NumericKind::Int, NumericKind::Float, NumericKind::Number] {
+    for mode in NumericMode::ALL {
         for (name, product) in [("sum", false), ("product", true)] {
             declare(
                 env,
                 name,
-                vec![StaticType::Sequence(Box::new(kind.static_type()))],
-                kind.static_type(),
+                vec![StaticType::Sequence(Box::new(mode.static_type()))],
+                mode.static_type(),
                 if product {
                     "Returns the product of a numeric sequence."
                 } else {
                     "Returns the sum of a numeric sequence."
                 },
-                move |args| aggregate(args, kind, product),
+                move |args| aggregate(args, mode, product),
             );
         }
     }
 }
 
-fn aggregate(args: &[Value], kind: NumericKind, product: bool) -> Result<Value, VmError> {
+fn aggregate(args: &[Value], mode: NumericMode, product: bool) -> Result<Value, VmError> {
     arity(args, 1)?;
 
     if let Value::Object(object) = &args[0] {
         match object.as_ref() {
             Object::List(values) => {
                 let values = values.borrow();
-                return aggregate_values(values.iter(), kind, product);
+                return aggregate_values(values.iter(), mode, product);
             }
-            Object::Tuple(values) => return aggregate_values(values.iter(), kind, product),
+            Object::Tuple(values) => return aggregate_values(values.iter(), mode, product),
             Object::Deque(values) => {
                 let values = values.borrow();
-                return aggregate_values(values.iter(), kind, product);
+                return aggregate_values(values.iter(), mode, product);
             }
             _ => {}
         }
@@ -629,16 +600,16 @@ fn aggregate(args: &[Value], kind: NumericKind, product: bool) -> Result<Value, 
         .clone()
         .try_into_iter()
         .ok_or_else(|| VmError::native("expected a sequence".to_string()))?;
-    aggregate_values(values, kind, product)
+    aggregate_values(values, mode, product)
 }
 
-fn aggregate_values<I>(mut values: I, kind: NumericKind, product: bool) -> Result<Value, VmError>
+fn aggregate_values<I>(mut values: I, mode: NumericMode, product: bool) -> Result<Value, VmError>
 where
     I: Iterator,
     I::Item: std::borrow::Borrow<Value>,
 {
-    match kind {
-        NumericKind::Int => {
+    match mode {
+        NumericMode::Int => {
             let initial: i64 = if product { 1 } else { 0 };
             let value = values.try_fold(initial, |accumulator, value| {
                 let value = std::borrow::Borrow::borrow(&value);
@@ -654,7 +625,7 @@ where
             })?;
             Ok(Value::Int(value))
         }
-        NumericKind::Float => {
+        NumericMode::Float => {
             let initial = if product { 1.0 } else { 0.0 };
             let value = values.try_fold(initial, |accumulator, value| {
                 let value = std::borrow::Borrow::borrow(&value);
@@ -669,7 +640,7 @@ where
             })?;
             Ok(Value::Float(value))
         }
-        NumericKind::Number => {
+        NumericMode::Number => {
             let initial = AdvancedNumber::Int(BigInt::from(if product { 1 } else { 0 }));
             let value = values.try_fold(initial, |accumulator, value| {
                 let value = std::borrow::Borrow::borrow(&value);
@@ -698,14 +669,14 @@ enum PreservingUnary {
 }
 
 fn register_number_helpers(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
-    for kind in [NumericKind::Int, NumericKind::Float, NumericKind::Number] {
+    for mode in NumericMode::ALL {
         declare(
             env,
             "signum",
-            vec![kind.static_type()],
-            kind.static_type(),
+            vec![mode.static_type()],
+            mode.static_type(),
             "Returns the sign of a number.",
-            move |args| unary_preserving(args, kind, PreservingUnary::Signum),
+            move |args| unary_preserving(args, mode, PreservingUnary::Signum),
         );
         for (name, operation) in [
             ("ceil", PreservingUnary::Ceil),
@@ -716,17 +687,17 @@ fn register_number_helpers(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
             declare(
                 env,
                 name,
-                vec![kind.static_type()],
-                kind.static_type(),
+                vec![mode.static_type()],
+                mode.static_type(),
                 "Applies a numeric operation while preserving the numeric mode.",
-                move |args| unary_preserving(args, kind, operation),
+                move |args| unary_preserving(args, mode, operation),
             );
         }
     }
 
-    for left in [NumericKind::Int, NumericKind::Float, NumericKind::Number] {
-        for right in [NumericKind::Int, NumericKind::Float, NumericKind::Number] {
-            let output = result_kind(left, right);
+    for left in NumericMode::ALL {
+        for right in NumericMode::ALL {
+            let output = left.promote(right);
             declare(
                 env,
                 "abs_diff",
@@ -803,12 +774,12 @@ fn register_number_helpers(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
 
 fn unary_preserving(
     args: &[Value],
-    kind: NumericKind,
+    mode: NumericMode,
     operation: PreservingUnary,
 ) -> Result<Value, VmError> {
     arity(args, 1)?;
-    match (kind, &args[0]) {
-        (NumericKind::Int, Value::Int(value)) => {
+    match (mode, &args[0]) {
+        (NumericMode::Int, Value::Int(value)) => {
             let result = match operation {
                 PreservingUnary::Signum => value.signum(),
                 PreservingUnary::Ceil | PreservingUnary::Floor | PreservingUnary::Round => *value,
@@ -818,7 +789,7 @@ fn unary_preserving(
             };
             Ok(Value::Int(result))
         }
-        (NumericKind::Float, Value::Float(value)) => {
+        (NumericMode::Float, Value::Float(value)) => {
             let result = match operation {
                 PreservingUnary::Signum => value.signum(),
                 PreservingUnary::Ceil => value.ceil(),
@@ -828,7 +799,7 @@ fn unary_preserving(
             };
             Ok(Value::Float(result))
         }
-        (NumericKind::Number, Value::Number(value)) => {
+        (NumericMode::Number, Value::Number(value)) => {
             let result = match operation {
                 PreservingUnary::Signum => value.signum(),
                 PreservingUnary::Ceil => value.ceil(),
@@ -840,7 +811,7 @@ fn unary_preserving(
         }
         _ => Err(VmError::native(format!(
             "expected {}, got {}",
-            kind.static_type(),
+            mode.static_type(),
             args[0].static_type()
         ))),
     }
@@ -974,25 +945,25 @@ fn register_conversions(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
         },
     );
 
-    for left_kind in [NumericKind::Int, NumericKind::Float, NumericKind::Number] {
-        for right_kind in [NumericKind::Int, NumericKind::Float, NumericKind::Number] {
-            let output = result_kind(left_kind, right_kind);
-            let output = if output == NumericKind::Int {
-                NumericKind::Float
+    for left_mode in NumericMode::ALL {
+        for right_mode in NumericMode::ALL {
+            let output = left_mode.promote(right_mode);
+            let output = if output == NumericMode::Int {
+                NumericMode::Float
             } else {
                 output
             };
             declare(
                 env,
                 "atan2",
-                vec![left_kind.static_type(), right_kind.static_type()],
+                vec![left_mode.static_type(), right_mode.static_type()],
                 output.static_type(),
                 "Computes the four-quadrant arctangent of y and x.",
                 move |args| {
                     arity(args, 2)?;
-                    if output == NumericKind::Number {
-                        let left = promoted_number(left_kind, &args[0])?;
-                        let right = promoted_number(right_kind, &args[1])?;
+                    let left = numeric_ref(left_mode, &args[0])?;
+                    let right = numeric_ref(right_mode, &args[1])?;
+                    if output == NumericMode::Number {
                         let left = left.to_f64().ok_or_else(|| {
                             VmError::native("atan2 requires real Number operands".to_string())
                         })?;
@@ -1001,8 +972,12 @@ fn register_conversions(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
                         })?;
                         Ok(Value::from_number(AdvancedNumber::Float(left.atan2(right))))
                     } else {
-                        let left = primitive_float(left_kind, &args[0])?;
-                        let right = primitive_float(right_kind, &args[1])?;
+                        let left = left
+                            .to_primitive_float()
+                            .expect("Float atan2 only combines primitive operands");
+                        let right = right
+                            .to_primitive_float()
+                            .expect("Float atan2 only combines primitive operands");
                         Ok(Value::Float(left.atan2(right)))
                     }
                 },
@@ -1013,46 +988,39 @@ fn register_conversions(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
 
 fn convert_to_int(value: &Value) -> Result<i64, VmError> {
     let static_type = value.static_type();
+    if let Some(number) = value.numeric_ref() {
+        return number
+            .to_i64_truncating()
+            .ok_or_else(|| VmError::native(format!("cannot convert {static_type} to Int")));
+    }
+
     let converted = match value {
-        Value::Int(value) => return Ok(*value),
-        Value::Float(value) => float_to_i64(*value),
-        Value::Number(value) => match value.as_ref() {
-            AdvancedNumber::Int(value) => value.to_i64(),
-            AdvancedNumber::Float(value) => float_to_i64(*value),
-            AdvancedNumber::Rational(value) => value.to_integer().to_i64(),
-            AdvancedNumber::Complex(_) => None,
-        },
         Value::Bool(value) => return Ok(if *value { 1 } else { 0 }),
         Value::Object(value) => match value.as_ref() {
             Object::String(value) => return value.borrow().parse::<i64>().map_err(native_error),
             _ => None,
         },
         Value::None => None,
+        Value::Int(_) | Value::Float(_) | Value::Number(_) => unreachable!("handled above"),
     };
     converted.ok_or_else(|| VmError::native(format!("cannot convert {static_type} to Int")))
 }
 
-fn float_to_i64(value: f64) -> Option<i64> {
-    if value.is_finite() {
-        BigInt::from_f64(value.trunc())?.to_i64()
-    } else {
-        None
-    }
-}
-
 fn convert_to_float(value: &Value) -> Result<f64, VmError> {
+    if let Some(number) = value.numeric_ref() {
+        return number.to_f64().ok_or_else(|| {
+            VmError::native("cannot convert a complex Number to Float".to_string())
+        });
+    }
+
     match value {
-        Value::Int(value) => Ok(*value as f64),
-        Value::Float(value) => Ok(*value),
-        Value::Number(value) => value
-            .to_f64()
-            .ok_or_else(|| VmError::native("cannot convert a complex Number to Float".to_string())),
         Value::Bool(value) => Ok(if *value { 1.0 } else { 0.0 }),
         Value::Object(value) => match value.as_ref() {
             Object::String(value) => value.borrow().parse::<f64>().map_err(native_error),
             _ => Err(VmError::native("cannot convert value to Float".to_string())),
         },
         Value::None => Err(VmError::native("cannot convert None to Float".to_string())),
+        Value::Int(_) | Value::Float(_) | Value::Number(_) => unreachable!("handled above"),
     }
 }
 
@@ -1157,21 +1125,21 @@ impl Transcendental {
         }
     }
 
-    fn documentation(self, kind: NumericKind) -> String {
-        let mode = match kind {
-            NumericKind::Int => " Converts Int input to Float before evaluation and returns Float.",
-            NumericKind::Float => " Returns Float for Float input.",
-            NumericKind::Number => {
+    fn documentation(self, mode: NumericMode) -> String {
+        let mode_description = match mode {
+            NumericMode::Int => " Converts Int input to Float before evaluation and returns Float.",
+            NumericMode::Float => " Returns Float for Float input.",
+            NumericMode::Number => {
                 " Returns Number for real or complex Number input. Values outside the real domain continue into the complex plane."
             }
         };
-        let domain = if kind == NumericKind::Number {
+        let domain = if mode == NumericMode::Number {
             ""
         } else {
             self.real_domain_description()
         };
 
-        format!("{}{domain}{mode}", self.description())
+        format!("{}{domain}{mode_description}", self.description())
     }
 
     fn apply_float(self, value: f64) -> f64 {
@@ -1224,7 +1192,7 @@ fn register_transcendentals(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
             function.name(),
             vec![StaticType::Int],
             StaticType::Float,
-            function.documentation(NumericKind::Int),
+            function.documentation(NumericMode::Int),
             move |args| {
                 let [Value::Int(value)] = args else {
                     return Err(VmError::native("expected one Int argument".to_string()));
@@ -1237,7 +1205,7 @@ fn register_transcendentals(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
             function.name(),
             vec![StaticType::Float],
             StaticType::Float,
-            function.documentation(NumericKind::Float),
+            function.documentation(NumericMode::Float),
             move |args| {
                 let [Value::Float(value)] = args else {
                     return Err(VmError::native("expected one Float argument".to_string()));
@@ -1250,7 +1218,7 @@ fn register_transcendentals(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
             function.name(),
             vec![StaticType::Number],
             StaticType::Number,
-            function.documentation(NumericKind::Number),
+            function.documentation(NumericMode::Number),
             move |args| {
                 let [Value::Number(value)] = args else {
                     return Err(VmError::native("expected one Number argument".to_string()));
@@ -1350,12 +1318,12 @@ mod tests {
         register(&mut registry);
 
         for transcendental in Transcendental::ALL {
-            for kind in [NumericKind::Int, NumericKind::Float, NumericKind::Number] {
+            for mode in NumericMode::ALL {
                 let expected_type = StaticType::Function {
-                    parameters: Some(vec![kind.static_type()]),
-                    return_type: Box::new(match kind {
-                        NumericKind::Int | NumericKind::Float => StaticType::Float,
-                        NumericKind::Number => StaticType::Number,
+                    parameters: Some(vec![mode.static_type()]),
+                    return_type: Box::new(match mode {
+                        NumericMode::Int | NumericMode::Float => StaticType::Float,
+                        NumericMode::Number => StaticType::Number,
                     }),
                 };
                 let function = registry
@@ -1368,13 +1336,13 @@ mod tests {
                         panic!(
                             "missing {}({}) transcendental overload",
                             transcendental.name(),
-                            kind.static_type()
+                            mode.static_type()
                         )
                     });
 
                 assert_eq!(
                     function.documentation.as_deref(),
-                    Some(transcendental.documentation(kind).as_str())
+                    Some(transcendental.documentation(mode).as_str())
                 );
             }
         }
