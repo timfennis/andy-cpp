@@ -138,3 +138,37 @@ a + b as Int;
     right: (cast_expression
       value: (identifier)
       type: (type_identifier))))
+
+==================
+less-than after a cast is a comparison
+==================
+
+1 as Int < 2;
+
+---
+
+(source_file
+  (binary_expression
+    left: (cast_expression
+      value: (integer)
+      type: (type_identifier))
+    right: (integer)))
+
+==================
+generic arguments still win over less-than
+==================
+
+[[1]] as List<List<Int>>;
+
+---
+
+(source_file
+  (cast_expression
+    value: (list
+      (list
+        (integer)))
+    type: (generic_type
+      name: (type_identifier)
+      (generic_type
+        name: (type_identifier)
+        (type_identifier)))))

@@ -60,6 +60,10 @@ module.exports = grammar({
   conflicts: $ => [
     [$._pattern, $._expression],
     [$.if_expression, $.if_guard],
+    // `x as Int < 2` — a `<` after a cast type may open a type argument list
+    // or be a less-than operator. Both branches are explored; the dynamic
+    // precedence on `generic_type` picks the cast when either parse works.
+    [$._type, $.generic_type],
   ],
 
   rules: {
@@ -152,10 +156,12 @@ module.exports = grammar({
 
     type_identifier: $ => /[A-Za-z_][A-Za-z0-9_]*/,
 
-    // Higher precedence than the bare `type_identifier` alternative so that
-    // `x as List<Int>` greedily parses `<` as generic arguments (mirroring
-    // the recursive-descent parser) instead of as a comparison operator.
-    generic_type: $ => prec(1, seq(
+    // A `<` after a type name is ambiguous in a cast: it may open a type
+    // argument list or be a less-than operator. The conflict declared above
+    // makes the parser try both; this dynamic precedence prefers the type
+    // argument list whenever it parses, mirroring the recursive-descent
+    // parser in `ndc_parser/src/parser.rs`.
+    generic_type: $ => prec.dynamic(1, seq(
       field('name', $.type_identifier),
       '<',
       commaSep($._type),

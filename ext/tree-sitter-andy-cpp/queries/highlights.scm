@@ -52,7 +52,10 @@
   (continue_expression)
 ] @keyword.control
 
-"in" @keyword.operator
+[
+  "in"
+  "as"
+] @keyword.operator
 
 [
   "and"

@@ -520,7 +520,7 @@
       "value": "[A-Za-z_][A-Za-z0-9_]*"
     },
     "generic_type": {
-      "type": "PREC",
+      "type": "PREC_DYNAMIC",
       "value": 1,
       "content": {
         "type": "SEQ",
@@ -2857,6 +2857,10 @@
     [
       "if_expression",
       "if_guard"
+    ],
+    [
+      "_type",
+      "generic_type"
     ]
   ],
   "precedences": [],
