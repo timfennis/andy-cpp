@@ -218,6 +218,22 @@ impl Scope {
             .collect()
     }
 
+    /// Parameter lists of every same-named function in this scope. Read-only,
+    /// for diagnostics — unlike the resolution walk it creates no upvalues.
+    fn callable_signatures(&self, find_ident: &str) -> Vec<Vec<StaticType>> {
+        self.identifiers
+            .iter()
+            .filter(|b| b.name == find_ident)
+            .filter_map(|b| match b.binding.typ() {
+                StaticType::Function {
+                    parameters: Some(parameters),
+                    ..
+                } => Some(parameters.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
     fn find_function_candidates(&self, find_ident: &str, find_types: &[StaticType]) -> Vec<usize> {
         self.identifiers.iter()
             .enumerate()
@@ -526,6 +542,35 @@ impl ScopeTree {
                 });
             }
         }
+    }
+
+    /// Whether some same-named overload would accept these arguments if their
+    /// types were known more precisely: every parameter overlaps the argument
+    /// in that position, and at least one argument does not already fit. A
+    /// failed call that satisfies this can be fixed with a cast, so the
+    /// diagnostic says so; one that does not is a genuine mismatch and gets no
+    /// misleading advice.
+    pub(crate) fn a_cast_could_resolve(&self, ident: &str, sig: &[StaticType]) -> bool {
+        let mut scope_ptr = Some(self.current_scope_idx);
+        let mut signatures = Vec::new();
+
+        while let Some(idx) = scope_ptr {
+            signatures.extend(self.scopes[idx].callable_signatures(ident));
+            scope_ptr = self.scopes[idx].parent_idx;
+        }
+        signatures.extend(self.global_scope.callable_signatures(ident));
+
+        signatures.iter().any(|parameters| {
+            parameters.len() == sig.len()
+                && parameters
+                    .iter()
+                    .zip(sig)
+                    .all(|(param, arg)| param.overlaps(arg))
+                && parameters
+                    .iter()
+                    .zip(sig)
+                    .any(|(param, arg)| !arg.is_subtype(param))
+        })
     }
 
     /// Resolve a function call to a binding and an inferred return type.

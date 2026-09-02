@@ -584,11 +584,12 @@ impl Analyser {
                 );
 
                 if matches!(binding, Binding::None) {
-                    self.emit(AnalysisError::function_not_found(
-                        member,
-                        &[receiver_type],
-                        *member_span,
-                    ));
+                    let args = [receiver_type];
+                    self.emit(if self.scope_tree.a_cast_could_resolve(member, &args) {
+                        AnalysisError::function_not_found_suggest_cast(member, &args, *member_span)
+                    } else {
+                        AnalysisError::function_not_found(member, &args, *member_span)
+                    });
                 }
 
                 *resolved_getter = binding;
@@ -760,7 +761,11 @@ impl Analyser {
         } = self.scope_tree.resolve_call(name, &type_sig, kind);
 
         if matches!(binding, Binding::None) {
-            self.emit(AnalysisError::function_not_found(name, &type_sig, span));
+            self.emit(if self.scope_tree.a_cast_could_resolve(name, &type_sig) {
+                AnalysisError::function_not_found_suggest_cast(name, &type_sig, span)
+            } else {
+                AnalysisError::function_not_found(name, &type_sig, span)
+            });
             *resolved = binding;
             return Ok(StaticType::Any);
         }
@@ -1260,6 +1265,7 @@ impl Analyser {
 pub struct AnalysisError {
     text: String,
     span: Span,
+    help_text: Option<String>,
 }
 
 impl AnalysisError {
@@ -1267,10 +1273,17 @@ impl AnalysisError {
         self.span
     }
 
+    /// Advice on how to fix the error, rendered as a separate note under the
+    /// snippet rather than crammed into the message.
+    pub fn help_text(&self) -> Option<&str> {
+        self.help_text.as_deref()
+    }
+
     fn invalid_type_annotation(err: &StaticTypeConstructionError, span: Span) -> Self {
         Self {
             text: format!("{err}. {}", err.help_text()),
             span,
+            help_text: None,
         }
     }
 
@@ -1278,6 +1291,7 @@ impl AnalysisError {
         Self {
             text: format!("type `{name}` does not take generic arguments"),
             span,
+            help_text: None,
         }
     }
 
@@ -1285,6 +1299,7 @@ impl AnalysisError {
         Self {
             text: format!("Struct '{name}' is not allowed to shadow the built-in type '{name}'"),
             span,
+            help_text: None,
         }
     }
 
@@ -1292,6 +1307,7 @@ impl AnalysisError {
         Self {
             text: format!("Illegal redefinition of struct '{name}'"),
             span,
+            help_text: None,
         }
     }
 
@@ -1299,6 +1315,7 @@ impl AnalysisError {
         Self {
             text: format!("Illegal redefinition of field '{field}' in struct '{struct_name}'"),
             span,
+            help_text: None,
         }
     }
 
@@ -1308,6 +1325,7 @@ impl AnalysisError {
                 "mismatched tuple arity: found a len={ident_len} identifier and a len={annotation_len} annotation."
             ),
             span,
+            help_text: None,
         }
     }
 
@@ -1315,6 +1333,7 @@ impl AnalysisError {
         Self {
             text: format!("mismatched types: found {found} but expected {expected}"),
             span,
+            help_text: None,
         }
     }
 
@@ -1322,6 +1341,7 @@ impl AnalysisError {
         Self {
             text: format!("invalid cast: {found} can never be {target}"),
             span,
+            help_text: None,
         }
     }
 
@@ -1335,6 +1355,7 @@ impl AnalysisError {
                 "Illegal redefinition of function '{name}' with {arity_desc} in the same scope"
             ),
             span,
+            help_text: None,
         }
     }
 
@@ -1342,24 +1363,28 @@ impl AnalysisError {
         Self {
             text: format!("Illegal redefinition of parameter {param}"),
             span,
+            help_text: None,
         }
     }
     fn unable_to_index_into(typ: &StaticType, span: Span) -> Self {
         Self {
             text: format!("Unable to index into {typ}"),
             span,
+            help_text: None,
         }
     }
     fn unable_to_unpack_type(typ: &StaticType, span: Span) -> Self {
         Self {
             text: format!("Invalid unpacking of {typ}"),
             span,
+            help_text: None,
         }
     }
     fn lvalue_required_to_be_single_identifier(span: Span) -> Self {
         Self {
             text: "This lvalue is required to be a single identifier".to_string(),
             span,
+            help_text: None,
         }
     }
 
@@ -1370,6 +1395,22 @@ impl AnalysisError {
                 types.iter().join(", ")
             ),
             span,
+            help_text: None,
+        }
+    }
+
+    /// Same as [`Self::function_not_found`], for a call an overload would
+    /// accept if the arguments were known more precisely.
+    fn function_not_found_suggest_cast(ident: &str, types: &[StaticType], span: Span) -> Self {
+        Self {
+            help_text: Some(
+                concat!(
+                    "An overload would accept a narrower argument type. ",
+                    "Cast to say what the value holds, as in `value as List<Int>`.",
+                )
+                .to_string(),
+            ),
+            ..Self::function_not_found(ident, types, span)
         }
     }
 
@@ -1377,6 +1418,7 @@ impl AnalysisError {
         Self {
             text: format!("Unable to invoke {typ} as a function."),
             span,
+            help_text: None,
         }
     }
 
@@ -1384,6 +1426,7 @@ impl AnalysisError {
         Self {
             text: format!("Identifier {ident} has not previously been declared"),
             span,
+            help_text: None,
         }
     }
 }
