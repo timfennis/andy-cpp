@@ -1281,9 +1281,9 @@ impl AnalysisError {
 
     fn invalid_type_annotation(err: &StaticTypeConstructionError, span: Span) -> Self {
         Self {
-            text: format!("{err}. {}", err.help_text()),
+            text: err.to_string(),
             span,
-            help_text: None,
+            help_text: Some(err.help_text().to_string()),
         }
     }
 

@@ -14,8 +14,15 @@ fn make_diagnostic(text: &str, span: Span, message: String) -> Diagnostic {
 }
 
 /// Convert an [`AnalysisError`] into an LSP [`Diagnostic`].
+///
+/// An LSP diagnostic has no separate note channel the way a terminal report
+/// does, so help text is folded into the message instead of being dropped.
 pub fn analysis_error_to_diagnostic(text: &str, err: &AnalysisError) -> Diagnostic {
-    make_diagnostic(text, err.span(), err.to_string())
+    let message = match err.help_text() {
+        Some(help) => format!("{err}. {help}"),
+        None => err.to_string(),
+    };
+    make_diagnostic(text, err.span(), message)
 }
 
 /// Lex and parse the source text, returning any diagnostics and (on success)
