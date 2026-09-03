@@ -29,7 +29,7 @@
 use ndc_analyser::{Analyser, ScopeTree};
 use ndc_core::FunctionRegistry;
 use ndc_core::r#struct::StructRegistry;
-use ndc_lexer::{Span, Token, TokenLocation};
+use ndc_lexer::{NumericLiteral, Span, Token, TokenLocation};
 use ndc_parser::Parser;
 use ndc_vm::compiler::Compiler;
 use ndc_vm::value::{Function as VmFunction, Object as VmObject};
@@ -99,7 +99,6 @@ fn install_quiet_panic_hook() {
 fn arb_token() -> impl Strategy<Value = Token> {
     let mut atoms: Vec<Token> = vec![
         // Literals (unit)
-        Token::Infinity,
         Token::True,
         Token::False,
         // Operators
@@ -168,16 +167,24 @@ fn arb_token() -> impl Strategy<Value = Token> {
         atoms.push(Token::String(s.to_string()));
     }
     for i in [-2_i64, -1, 0, 1, 2, 42, i64::MAX] {
-        atoms.push(Token::Int64(i));
+        atoms.push(Token::NumericLiteral(NumericLiteral::Int64(i)));
     }
     for f in [0.0_f64, 1.0, -1.0, 0.5, f64::INFINITY, f64::NAN] {
-        atoms.push(Token::Float64(f));
+        atoms.push(Token::NumericLiteral(NumericLiteral::Float64(f)));
     }
-    atoms.push(Token::NumberInt(num::BigInt::from(0)));
-    atoms.push(Token::NumberInt(num::BigInt::from(i128::MAX)));
-    atoms.push(Token::NumberFloat(0.5));
-    atoms.push(Token::Complex(num::complex::Complex64::new(0.0, 1.0)));
-    atoms.push(Token::Complex(num::complex::Complex64::new(2.0, -3.0)));
+    atoms.push(Token::NumericLiteral(NumericLiteral::NumberInt(
+        num::BigInt::from(0),
+    )));
+    atoms.push(Token::NumericLiteral(NumericLiteral::NumberInt(
+        num::BigInt::from(i128::MAX),
+    )));
+    atoms.push(Token::NumericLiteral(NumericLiteral::NumberFloat(0.5)));
+    atoms.push(Token::NumericLiteral(NumericLiteral::Complex(
+        num::complex::Complex64::new(0.0, 1.0),
+    )));
+    atoms.push(Token::NumericLiteral(NumericLiteral::Complex(
+        num::complex::Complex64::new(2.0, -3.0),
+    )));
 
     // Inner token of an `OpAssign`. Lexer invariant: only augmentable tokens
     // appear here, so we mirror that to avoid finding "panics" that no real

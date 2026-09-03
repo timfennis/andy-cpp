@@ -1229,7 +1229,6 @@ dependencies = [
  "derive_more",
  "ndc_core",
  "ndc_lexer",
- "num",
  "thiserror",
 ]
 

@@ -203,11 +203,7 @@ fn collect(expr: &ExpressionLocation, scope: Span, out: &mut Vec<Decl>) {
         Expression::Identifier { .. }
         | Expression::BoolLiteral(_)
         | Expression::StringLiteral(_)
-        | Expression::Int64Literal(_)
-        | Expression::Float64Literal(_)
-        | Expression::NumberIntLiteral(_)
-        | Expression::NumberFloatLiteral(_)
-        | Expression::ComplexLiteral(_)
+        | Expression::NumericLiteral(_)
         | Expression::Break
         | Expression::Continue => {}
         Expression::StructDeclaration { name, .. } => {
