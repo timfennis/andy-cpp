@@ -55,13 +55,6 @@ impl<'a> NumericRef<'a> {
         }
     }
 
-    pub fn as_int(self) -> Option<i64> {
-        match self {
-            Self::Int(value) => Some(value),
-            Self::Float(_) | Self::Number(_) => None,
-        }
-    }
-
     pub fn as_number(self) -> Option<&'a AdvancedNumber> {
         match self {
             Self::Number(value) => Some(value),
@@ -118,21 +111,11 @@ impl<'a> NumericRef<'a> {
             (Self::Float(left), Self::Float(right)) => compare_floats(left, right),
             (Self::Int(left), Self::Float(right)) => compare_int_float(left, right),
             (Self::Float(left), Self::Int(right)) => compare_int_float(right, left).reverse(),
-            (Self::Number(left), Self::Number(right)) => left
-                .partial_cmp(right)
-                .expect("AdvancedNumber values are totally ordered"),
-            (Self::Int(left), Self::Number(right)) => AdvancedNumber::Int(left.into())
-                .partial_cmp(right)
-                .expect("AdvancedNumber values are totally ordered"),
-            (Self::Float(left), Self::Number(right)) => AdvancedNumber::Float(left)
-                .partial_cmp(right)
-                .expect("AdvancedNumber values are totally ordered"),
-            (Self::Number(left), Self::Int(right)) => left
-                .partial_cmp(&AdvancedNumber::Int(right.into()))
-                .expect("AdvancedNumber values are totally ordered"),
-            (Self::Number(left), Self::Float(right)) => left
-                .partial_cmp(&AdvancedNumber::Float(right))
-                .expect("AdvancedNumber values are totally ordered"),
+            // A `Number` on either side falls back to its exact ordering. The
+            // primitive side is promoted, but a `Number` is never cloned.
+            (Self::Number(left), Self::Number(right)) => exact_cmp(left, right),
+            (Self::Number(left), right) => exact_cmp(left, &right.to_advanced_number()),
+            (left, Self::Number(right)) => exact_cmp(&left.to_advanced_number(), right),
         }
     }
 }
@@ -168,6 +151,11 @@ impl Hash for NumericRef<'_> {
             Self::Number(value) => value.hash(state),
         }
     }
+}
+
+fn exact_cmp(left: &AdvancedNumber, right: &AdvancedNumber) -> Ordering {
+    left.partial_cmp(right)
+        .expect("AdvancedNumber values are totally ordered")
 }
 
 fn float_to_i64(value: f64) -> Option<i64> {

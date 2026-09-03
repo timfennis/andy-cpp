@@ -15,40 +15,6 @@ impl Default for TypeSignature {
 }
 
 impl TypeSignature {
-    /// Matches argument types to a signature. Returns `None` for a mismatch,
-    /// or a score where exact matches cost zero and subtype matches cost one.
-    pub fn calc_type_score(&self, types: &[StaticType]) -> Option<u32> {
-        match self {
-            Self::Variadic => Some(0),
-            Self::Exact(signature) => {
-                if types.len() == signature.len() {
-                    let mut acc = 0;
-                    for (a, b) in types.iter().zip(signature.iter()) {
-                        let dist = if a == &b.type_name {
-                            0
-                        } else if a.is_subtype(&b.type_name) {
-                            1
-                        } else {
-                            return None;
-                        };
-                        acc += dist;
-                    }
-
-                    return Some(acc);
-                }
-
-                None
-            }
-        }
-    }
-
-    pub fn arity(&self) -> Option<usize> {
-        match self {
-            Self::Variadic => None,
-            Self::Exact(args) => Some(args.len()),
-        }
-    }
-
     pub fn from_annotated_bindings(bindings: Vec<(String, Option<StaticType>)>) -> Self {
         Self::Exact(
             bindings

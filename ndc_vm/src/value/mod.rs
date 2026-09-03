@@ -573,19 +573,9 @@ impl Value {
         }
     }
 
-    pub fn to_advanced_number(&self) -> Option<AdvancedNumber> {
-        self.numeric_ref().map(NumericRef::to_advanced_number)
-    }
-
     /// Wrap an advanced numeric payload as a Number value.
     pub fn from_number(n: AdvancedNumber) -> Self {
         Self::number(n)
-    }
-
-    /// Convert a numeric VM value to `f64`, coercing integers and rationals.
-    /// Returns `None` for non-numeric values (Bool, None, String, …).
-    pub fn to_f64(&self) -> Option<f64> {
-        self.numeric_ref().and_then(NumericRef::to_f64)
     }
 }
 

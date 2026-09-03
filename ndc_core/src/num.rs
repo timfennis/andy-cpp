@@ -1,10 +1,9 @@
 use std::cmp::Ordering;
 use std::fmt;
 use std::hash::{Hash, Hasher};
-use std::ops::{Add, Div, Mul, Neg, Not, Rem, Sub};
+use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
 use crate::StaticType;
-use num::bigint::TryFromBigIntError;
 use num::complex::{Complex64, ComplexFloat};
 use num::{BigInt, BigRational, Complex, FromPrimitive, Signed, ToPrimitive, Zero};
 
@@ -154,17 +153,6 @@ impl Neg for AdvancedNumber {
     }
 }
 
-impl Not for AdvancedNumber {
-    type Output = Self;
-
-    fn not(self) -> Self::Output {
-        match self {
-            Self::Int(int) => int.not().into(),
-            _ => f64::NAN.into(),
-        }
-    }
-}
-
 trait Unbox {
     type Output;
     fn unbox(self) -> Self::Output;
@@ -208,100 +196,57 @@ impl BinaryOperatorError {
 }
 
 macro_rules! impl_binary_operator {
-    ($self:ty, $other:ty, $trait:ident, $method:ident,$intmethod:expr,$floatmethod:expr,$rationalmethod:expr,$complexmethod:expr) => {
+    ($self:ty, $other:ty, $trait:ident, $method:ident) => {
         impl $trait<$other> for $self {
             type Output = Result<AdvancedNumber, BinaryOperatorError>;
             fn $method(self, other: $other) -> Self::Output {
                 Ok(match (self, other) {
                     // Integer
                     (AdvancedNumber::Int(left), AdvancedNumber::Int(right)) => {
-                        AdvancedNumber::Int($intmethod(left, right))
+                        AdvancedNumber::Int($trait::$method(left, right))
                     }
                     // Complex
                     (AdvancedNumber::Complex(left), right) => {
-                        AdvancedNumber::Complex($complexmethod(left, right.to_complex()))
+                        AdvancedNumber::Complex($trait::$method(left, right.to_complex()))
                     }
                     (left, AdvancedNumber::Complex(right)) => {
-                        AdvancedNumber::Complex($complexmethod(left.to_complex(), right))
+                        AdvancedNumber::Complex($trait::$method(left.to_complex(), right))
                     }
                     // Float
                     // NOTE: these `expect` calls are safe because complex has already been handled
-                    (AdvancedNumber::Float(left), right) => AdvancedNumber::Float($floatmethod(
-                        left,
-                        right.to_f64().expect("cannot convert complex to float"),
-                    )),
-                    (left, AdvancedNumber::Float(right)) => AdvancedNumber::Float($floatmethod(
-                        left.to_f64().expect("cannot convert complex to float"),
-                        right,
-                    )),
+                    (AdvancedNumber::Float(left), right) => {
+                        AdvancedNumber::Float($trait::$method(left, right.expect_f64()))
+                    }
+                    (left, AdvancedNumber::Float(right)) => {
+                        AdvancedNumber::Float($trait::$method(left.expect_f64(), right))
+                    }
                     // Rational
                     // NOTE: these `expect` calls are safe because complex and float are handled
-                    (left, AdvancedNumber::Rational(right)) => {
-                        AdvancedNumber::rational($rationalmethod(
-                            left.to_rational().expect("cannot convert to rational"),
-                            right.unbox(),
-                        ))
-                    }
-                    (AdvancedNumber::Rational(left), right) => {
-                        AdvancedNumber::rational($rationalmethod(
-                            left.unbox(),
-                            right.to_rational().expect("cannot convert to rational"),
-                        ))
-                    }
+                    (left, AdvancedNumber::Rational(right)) => AdvancedNumber::rational(
+                        $trait::$method(left.expect_rational(), right.unbox()),
+                    ),
+                    (AdvancedNumber::Rational(left), right) => AdvancedNumber::rational(
+                        $trait::$method(left.unbox(), right.expect_rational()),
+                    ),
                 })
             }
         }
     };
 }
 
+/// Implement `$trait` for every owned/borrowed combination of `AdvancedNumber`.
 macro_rules! impl_binary_operator_all {
-    ($implement:ident,$method:ident,$intmethod:expr,$floatmethod:expr,$rationalmethod:expr,$complexmethod:expr) => {
-        impl_binary_operator!(
-            AdvancedNumber,
-            AdvancedNumber,
-            $implement,
-            $method,
-            $intmethod,
-            $floatmethod,
-            $rationalmethod,
-            $complexmethod
-        );
-        impl_binary_operator!(
-            AdvancedNumber,
-            &AdvancedNumber,
-            $implement,
-            $method,
-            $intmethod,
-            $floatmethod,
-            $rationalmethod,
-            $complexmethod
-        );
-        impl_binary_operator!(
-            &AdvancedNumber,
-            AdvancedNumber,
-            $implement,
-            $method,
-            $intmethod,
-            $floatmethod,
-            $rationalmethod,
-            $complexmethod
-        );
-        impl_binary_operator!(
-            &AdvancedNumber,
-            &AdvancedNumber,
-            $implement,
-            $method,
-            $intmethod,
-            $floatmethod,
-            $rationalmethod,
-            $complexmethod
-        );
+    ($trait:ident, $method:ident) => {
+        impl_binary_operator!(AdvancedNumber, AdvancedNumber, $trait, $method);
+        impl_binary_operator!(AdvancedNumber, &AdvancedNumber, $trait, $method);
+        impl_binary_operator!(&AdvancedNumber, AdvancedNumber, $trait, $method);
+        impl_binary_operator!(&AdvancedNumber, &AdvancedNumber, $trait, $method);
     };
 }
 
-impl_binary_operator_all!(Add, add, Add::add, Add::add, Add::add, Add::add);
-impl_binary_operator_all!(Sub, sub, Sub::sub, Sub::sub, Sub::sub, Sub::sub);
-impl_binary_operator_all!(Mul, mul, Mul::mul, Mul::mul, Mul::mul, Mul::mul);
+impl_binary_operator_all!(Add, add);
+impl_binary_operator_all!(Sub, sub);
+impl_binary_operator_all!(Mul, mul);
 
 /// Returns `true` for the number kinds that use exact (integer/rational)
 /// arithmetic.
@@ -328,19 +273,11 @@ impl Rem<Self> for AdvancedNumber {
             (Self::Complex(left), right) => Self::Complex(left % right.to_complex()),
             (left, Self::Complex(right)) => Self::Complex(left.to_complex() % right),
             // Float
-            (Self::Float(left), right) => {
-                Self::Float(left % right.to_f64().expect("cannot convert complex to float"))
-            }
-            (left, Self::Float(right)) => {
-                Self::Float(left.to_f64().expect("cannot convert complex to float") % right)
-            }
+            (Self::Float(left), right) => Self::Float(left % right.expect_f64()),
+            (left, Self::Float(right)) => Self::Float(left.expect_f64() % right),
             // Rational
-            (left, Self::Rational(right)) => Self::rational(
-                left.to_rational().expect("cannot convert to rational") % right.unbox(),
-            ),
-            (Self::Rational(left), right) => Self::rational(
-                left.unbox() % right.to_rational().expect("cannot convert to rational"),
-            ),
+            (left, Self::Rational(right)) => Self::rational(left.expect_rational() % right.unbox()),
+            (Self::Rational(left), right) => Self::rational(left.unbox() % right.expect_rational()),
         })
     }
 }
@@ -451,11 +388,6 @@ impl AdvancedNumber {
     }
 
     #[must_use]
-    pub fn float(f: f64) -> Self {
-        Self::Float(f)
-    }
-
-    #[must_use]
     pub fn rational(rat: BigRational) -> Self {
         Self::Rational(Box::new(rat))
     }
@@ -546,115 +478,28 @@ impl AdvancedNumber {
         }
 
         Ok(match (self, rhs) {
-            // Int vs others
-            (Self::Int(p1), Self::Int(p2)) => return Self::int_pow(&p1, &p2),
-            (Self::Int(p1), Self::Float(p2)) => {
-                let p1 = bigint_to_float(&p1);
-                if p1 < 0.0 && p2.fract() != 0.0 {
-                    Self::Complex(Complex64::from(p1).powf(p2))
-                } else {
-                    Self::Float(p1.powf(p2))
-                }
+            // Exact results first: an integer exponent keeps an exact base exact.
+            (Self::Int(base), Self::Int(exponent)) => return Self::int_pow(&base, &exponent),
+            (Self::Int(base), Self::Rational(exponent)) if exponent.is_integer() => {
+                return Self::int_pow(&base, &exponent.to_integer());
             }
-            (Self::Int(p1), Self::Complex(p2)) => {
-                Self::Complex(Complex::from(bigint_to_float(&p1)).powc(p2))
+            (Self::Rational(base), Self::Int(exponent)) => {
+                Self::Rational(Box::new(num::pow::Pow::pow(&*base, exponent)))
             }
-            (Self::Int(p1), Self::Rational(p2)) => {
-                if p2.is_integer() {
-                    return Self::int_pow(&p1, &p2.to_integer());
-                }
-
-                let p1 = bigint_to_float(&p1);
-                let p2 = rational_to_float(&p2);
-                if p1 < 0.0 {
-                    Self::Complex(Complex64::from(p1).powf(p2))
-                } else {
-                    Self::Float(p1.powf(p2))
-                }
+            (Self::Rational(base), Self::Rational(exponent))
+                if exponent.is_integer() && exponent.to_i32().is_some() =>
+            {
+                let exponent = exponent.to_i32().expect("checked by the match guard");
+                Self::Rational(Box::new(base.pow(exponent)))
             }
 
-            // Rational vs Others
-            (Self::Rational(p1), Self::Int(p2)) => {
-                Self::Rational(Box::new(num::pow::Pow::pow(&*p1, p2)))
-            }
-            (Self::Rational(p1), Self::Rational(p2)) => {
-                if p2.is_integer()
-                    && let Some(p2) = p2.to_i32()
-                {
-                    return Ok(Self::Rational(Box::new(p1.pow(p2))));
-                }
+            // A complex operand on either side keeps the result complex.
+            (Self::Complex(base), exponent) => Self::Complex(base.powc(exponent.to_complex())),
+            (base, Self::Complex(exponent)) => Self::Complex(base.to_complex().powc(exponent)),
 
-                let p1 = rational_to_float(&p1);
-                let p2 = rational_to_float(&p2);
-                if p1 < 0.0 {
-                    Self::Complex(Complex64::from(p1).powf(p2))
-                } else {
-                    Self::Float(p1.powf(p2))
-                }
-            }
-            (Self::Rational(p1), Self::Float(p2)) => {
-                let p1 = rational_to_float(&p1);
-                if p1 < 0.0 && p2.fract() != 0.0 {
-                    Self::Complex(Complex64::from(p1).powf(p2))
-                } else {
-                    Self::Float(p1.powf(p2))
-                }
-            }
-            (Self::Rational(p1), Self::Complex(p2)) => {
-                Self::Complex(rational_to_complex(&p1).powc(p2))
-            }
-
-            // Float vs others
-            (Self::Float(p1), Self::Float(p2)) => {
-                if p1 < 0.0 && p2.fract() != 0.0 {
-                    Self::Complex(Complex64::from(p1).powf(p2))
-                } else {
-                    Self::Float(p1.powf(p2))
-                }
-            }
-            (Self::Float(p1), Self::Complex(p2)) => Self::Complex(Complex::from(p1).powc(p2)),
-            (Self::Float(p1), Self::Int(p2)) => Self::Float(p1.powf(bigint_to_float(&p2))),
-            (Self::Float(p1), Self::Rational(p2)) => {
-                let p2 = rational_to_float(&p2);
-                if p1 < 0.0 && p2.fract() != 0.0 {
-                    Self::Complex(Complex64::from(p1).powf(p2))
-                } else {
-                    Self::Float(p1.powf(p2))
-                }
-            }
-
-            // Complex vs others
-            (Self::Complex(p1), Self::Complex(p2)) => Self::Complex(p1.powc(p2)),
-            (Self::Complex(p1), Self::Float(p2)) => Self::Complex(p1.powc(Complex::from(p2))),
-            (Self::Complex(p1), Self::Int(p2)) => {
-                Self::Complex(p1.powc(Complex::from(bigint_to_float(&p2))))
-            }
-            (Self::Complex(p1), Self::Rational(p2)) => {
-                Self::Complex(p1.powc(rational_to_complex(&p2)))
-            }
+            // Everything else is real, so evaluate in floating point.
+            (base, exponent) => float_pow(base.expect_f64(), exponent.expect_f64()),
         })
-    }
-
-    /// # Errors
-    /// Returns a `NumberConversionError` if you try to convert Inf, NaN, or Complex to an int
-    pub fn to_int_lossy(&self) -> Result<Self, NumberConversionError> {
-        let n = match self {
-            Self::Int(i) => Self::Int(i.clone()),
-            Self::Float(f) => {
-                if let Some(bi) = BigInt::from_f64(*f) {
-                    Self::Int(bi)
-                } else {
-                    return Err(NumberConversionError(format!("cannot convert {f} to int")));
-                }
-            }
-            Self::Rational(r) => Self::Int(r.to_integer()),
-            Self::Complex(c) => {
-                return Err(NumberConversionError(format!(
-                    "cannot convert complex number {c} to int"
-                )));
-            }
-        };
-        Ok(n)
     }
 
     #[must_use]
@@ -675,6 +520,18 @@ impl AdvancedNumber {
             Self::Rational(r) => Some(rational_to_float(r)),
             Self::Complex(_) => None,
         }
+    }
+
+    /// The `f64` value of a number that a caller has already established is not
+    /// complex. Panics otherwise.
+    fn expect_f64(&self) -> f64 {
+        self.to_f64().expect("cannot convert complex to float")
+    }
+
+    /// The exact rational value of a number that a caller has already
+    /// established is an integer or a rational. Panics otherwise.
+    fn expect_rational(&self) -> BigRational {
+        self.to_rational().expect("cannot convert to rational")
     }
 
     #[must_use]
@@ -744,25 +601,6 @@ implement_rounding!(floor);
 implement_rounding!(round);
 
 #[derive(thiserror::Error, Debug)]
-pub enum NumberToUsizeError {
-    #[error("expected a non-negative integer, got {0}")]
-    UnsupportedVariant(StaticType),
-    #[error("this integer is out of range (must be non-negative and small enough to be an index)")]
-    FromBigIntError(#[from] TryFromBigIntError<BigInt>),
-}
-
-impl TryFrom<AdvancedNumber> for usize {
-    type Error = NumberToUsizeError;
-
-    fn try_from(value: AdvancedNumber) -> Result<Self, Self::Error> {
-        match value {
-            AdvancedNumber::Int(value) => Ok(Self::try_from(value)?),
-            n => Err(NumberToUsizeError::UnsupportedVariant(n.static_type())),
-        }
-    }
-}
-
-#[derive(thiserror::Error, Debug)]
 pub enum NumberToFloatError {
     #[error("cannot convert {0} to float")]
     UnsupportedType(StaticType),
@@ -821,6 +659,17 @@ impl fmt::Display for AdvancedNumber {
     }
 }
 
+/// `base ^ exponent` in floating point, escaping to the complex plane when a
+/// negative base is raised to a fractional power: `(-8.0) ^ 2.0` is `64.0`,
+/// but `(-8.0) ^ 0.5` has no real value.
+fn float_pow(base: f64, exponent: f64) -> AdvancedNumber {
+    if base < 0.0 && exponent.fract() != 0.0 {
+        AdvancedNumber::Complex(Complex64::from(base).powf(exponent))
+    } else {
+        AdvancedNumber::Float(base.powf(exponent))
+    }
+}
+
 fn rational_to_float(r: &BigRational) -> f64 {
     r.to_f64().unwrap_or(f64::NAN)
 }
@@ -838,10 +687,6 @@ fn bigint_to_float(value: &BigInt) -> f64 {
 fn rational_to_complex(r: &BigRational) -> Complex<f64> {
     Complex::from(r.to_f64().unwrap_or(f64::NAN))
 }
-
-#[derive(thiserror::Error, Debug)]
-#[error("{0}")]
-pub struct NumberConversionError(String);
 
 #[cfg(test)]
 mod tests {
