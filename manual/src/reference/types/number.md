@@ -29,7 +29,7 @@ let octal = 0o52n;
 let hexadecimal = 0x2an;
 ```
 
-An integer literal without `n` must fit in `i64`. The analyser reports an error and suggests the suffixed form when it does not fit.
+An integer literal without `n` must fit in `i64`. The lexer reports an error and suggests the suffixed form when it does not fit.
 
 Arbitrary-radix literals such as `16r2a` remain `Int` literals and do not accept `n`. The `i` and `j` suffixes create complex `Number` values:
 

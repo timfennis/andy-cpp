@@ -307,7 +307,8 @@ impl Value {
     ///
     /// When `param` is a container type whose inner types are all `Any` (e.g.
     /// `Sequence(Any)`, `Map { Any, Any }`, `List(Any)`), only the outer kind is
-    /// checked — no element iteration occurs.  All other cases fall back to
+    /// checked — no element iteration occurs. Typed container parameters are
+    /// rejected rather than scanned; the remaining cases fall back to
     /// `self.static_type().is_subtype(param)`.
     pub fn matches_param(&self, param: &StaticType) -> bool {
         match param {
@@ -1225,6 +1226,22 @@ mod tests {
 
         // Break the reference cycle so the test does not leak its allocations.
         elements.borrow_mut().clear();
+    }
+
+    #[test]
+    fn runtime_parameter_matching_does_not_scan_lists() {
+        let list = Rc::new(Object::List(RefCell::new(vec![Value::Int(1)])));
+        let value = Value::Object(Rc::clone(&list));
+        let Object::List(elements) = list.as_ref() else {
+            unreachable!();
+        };
+
+        // Holding a mutable borrow makes any attempted element scan panic.
+        // Dynamic dispatch must only inspect the outer container kind.
+        let _borrow = elements.borrow_mut();
+        assert!(value.matches_param(&StaticType::List(Box::new(StaticType::Any))));
+        assert!(value.matches_param(&StaticType::Sequence(Box::new(StaticType::Any,))));
+        assert!(!value.matches_param(&StaticType::List(Box::new(StaticType::Int,))));
     }
 
     #[test]

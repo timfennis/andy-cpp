@@ -45,9 +45,18 @@ print(x); // 3
 The `=` operator can be used to reassign a value to an existing variable. When you reassign a variable to a value of a different type, the variable's type is widened to the least upper bound (LUB) of the old and new types.
 
 ```ndc
-let x = 1;     // type is Int
-x = 2;         // type is still Int
-x = 3.14;      // type widens to Any (Int and Float are siblings)
+let x = 1;     // the initializer and declaration have type Int
+x = 2;         // subsequent reads still have type Int
+x = 3.14;      // subsequent reads have type Any (Int and Float are siblings)
+x;             // type is Any
+```
+
+Augmented assignment widens an inferred binding from the operation's result in the same way:
+
+```ndc
+let total = 3;
+total += 0.5;  // Int + Float returns Float, so subsequent reads have type Any
+total;         // type is Any
 ```
 
 ```ndc
@@ -95,7 +104,7 @@ Once a binding has an annotation, it stays locked to that type. Reassignment and
 ```ndc
 let x: Int = 5;
 x = "test";   // ERROR: mismatched types
-x += 0.5;     // ERROR: Float doesn't fit in Int
+x += 0.5;     // ERROR: the Float result doesn't fit in Int
 ```
 
 If you want a binding that widens freely, just leave the annotation off. Annotations are opt-in.

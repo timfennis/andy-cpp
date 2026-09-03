@@ -1530,6 +1530,33 @@ mod tests {
     }
 
     #[test]
+    fn inferred_identifier_assignments_widen_subsequent_reads() {
+        assert_eq!(analyse_last_type("let x = 3; x = 0.5; x"), StaticType::Any,);
+
+        let add = StaticType::Function {
+            parameters: Some(vec![StaticType::Int, StaticType::Float]),
+            return_type: Box::new(StaticType::Float),
+        };
+        assert_eq!(
+            analyse_last_type_with_globals("let x = 3; x += 0.5; x", vec![("+".to_string(), add)],),
+            StaticType::Any,
+        );
+    }
+
+    #[test]
+    fn annotated_identifier_augmented_assignment_rejects_widening() {
+        let add = StaticType::Function {
+            parameters: Some(vec![StaticType::Int, StaticType::Float]),
+            return_type: Box::new(StaticType::Float),
+        };
+        assert_analysis_error(
+            "let x: Int = 3; x += 0.5;",
+            vec![("+".to_string(), add)],
+            "mismatched types: found Float but expected Int",
+        );
+    }
+
+    #[test]
     fn compatible_specialized_assignment_preserves_left_type() {
         let list_any = StaticType::List(Box::new(StaticType::Any));
         let append = StaticType::Function {
