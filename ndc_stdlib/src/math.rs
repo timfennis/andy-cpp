@@ -83,6 +83,74 @@ fn declare(
     }));
 }
 
+/// Declares a native whose operands and result have fixed types.
+///
+/// A type name is written once and used twice: as the operand's declared
+/// [`StaticType`] and as the [`Value`] variant it must arrive in. A signature
+/// therefore cannot drift away from the destructuring that enforces it, and
+/// the mismatch error is reported from one place.
+///
+/// Each operand is bound by name to a reference to its payload, and the body
+/// evaluates to the result's payload — or, with a `Result<_>` result type, to a
+/// `Result` carrying it:
+///
+/// ```ignore
+/// declare_typed!(env, "&", (left: Int, right: Int) -> Int, "…", left & right);
+/// declare_typed!(env, "-", (value: Int) -> Result<Int>, "…",
+///     value.checked_neg().ok_or_else(|| overflowed()));
+/// ```
+macro_rules! declare_typed {
+    ($env:expr, $name:expr, ($($operand:ident: $operand_type:ident),+) -> Result<$result:ident>,
+     $documentation:expr, $body:expr) => {
+        declare(
+            $env,
+            $name,
+            vec![$(StaticType::$operand_type),+],
+            StaticType::$result,
+            $documentation,
+            move |args| {
+                let [$(Value::$operand_type($operand)),+] = args else {
+                    return Err(wrong_operands(&[$(StaticType::$operand_type),+], args));
+                };
+                $body.map(|payload| wrap_payload!($result, payload))
+            },
+        )
+    };
+    ($env:expr, $name:expr, ($($operand:ident: $operand_type:ident),+) -> $result:ident,
+     $documentation:expr, $body:expr) => {
+        declare_typed!(
+            $env, $name, ($($operand: $operand_type),+) -> Result<$result>, $documentation,
+            Ok::<_, VmError>($body)
+        )
+    };
+}
+
+/// Wraps a result payload as a [`Value`]. `Number` is not a plain variant
+/// wrapper, so it needs its own arm.
+macro_rules! wrap_payload {
+    (Number, $payload:expr) => {
+        Value::from_number($payload)
+    };
+    ($variant:ident, $payload:expr) => {
+        Value::$variant($payload)
+    };
+}
+
+/// Reports operands that do not match a native's declared signature.
+#[cold]
+#[inline(never)]
+fn wrong_operands(expected: &[StaticType], args: &[Value]) -> VmError {
+    let list = |types: Vec<String>| types.join(", ");
+    let expected = list(expected.iter().map(StaticType::to_string).collect());
+    let got = list(
+        args.iter()
+            .map(|arg| arg.static_type().to_string())
+            .collect(),
+    );
+
+    VmError::native(format!("expected ({expected}), got ({got})"))
+}
+
 fn arity(args: &[Value], expected: usize) -> Result<(), VmError> {
     if args.len() == expected {
         Ok(())
@@ -128,24 +196,53 @@ fn register_binary_arithmetic(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     for operation in OPERATIONS {
         for (left_mode, right_mode) in NUMERIC_PAIRS_BY_DYNAMIC_PRIORITY.into_iter().rev() {
             let output_mode = left_mode.promote(right_mode);
-            declare(
-                env,
-                operation.name(),
-                vec![left_mode.static_type(), right_mode.static_type()],
-                output_mode.static_type(),
-                operation.documentation(),
-                move |args| {
-                    arity(args, 2)?;
-                    eval_binary(
-                        operation,
-                        left_mode,
-                        right_mode,
-                        output_mode,
-                        &args[0],
-                        &args[1],
-                    )
-                },
-            );
+            let parameters = vec![left_mode.static_type(), right_mode.static_type()];
+            let (name, documentation) = (operation.name(), operation.documentation());
+
+            // Choosing the evaluator per overload here, instead of letting one
+            // shared closure rediscover the output mode on every call, is what
+            // lets `1 + 2` read two `i64` slots and add them.
+            match output_mode {
+                NumericMode::Int => declare(
+                    env,
+                    name,
+                    parameters,
+                    StaticType::Int,
+                    documentation,
+                    move |args| {
+                        let [left, right] = args else {
+                            return Err(wrong_arity(args));
+                        };
+                        eval_int_operands(operation, left, right)
+                    },
+                ),
+                NumericMode::Float => declare(
+                    env,
+                    name,
+                    parameters,
+                    StaticType::Float,
+                    documentation,
+                    move |args| {
+                        let [left, right] = args else {
+                            return Err(wrong_arity(args));
+                        };
+                        eval_float_operands(operation, left_mode, right_mode, left, right)
+                    },
+                ),
+                NumericMode::Number => declare(
+                    env,
+                    name,
+                    parameters,
+                    StaticType::Number,
+                    documentation,
+                    move |args| {
+                        let [left, right] = args else {
+                            return Err(wrong_arity(args));
+                        };
+                        eval_number_operands(operation, left_mode, right_mode, left, right)
+                    },
+                ),
+            }
         }
     }
 }
@@ -158,36 +255,85 @@ fn eval_binary(
     left: &Value,
     right: &Value,
 ) -> Result<Value, VmError> {
-    let left = numeric_ref(left_mode, left)?;
-    let right = numeric_ref(right_mode, right)?;
-
     match output_mode {
-        NumericMode::Int => {
-            let left = left
-                .as_int()
-                .expect("Int output requires an Int left operand");
-            let right = right
-                .as_int()
-                .expect("Int output requires an Int right operand");
-            eval_int_binary(operation, left, right).map(Value::Int)
-        }
-        NumericMode::Float => {
-            let left = left
-                .to_primitive_float()
-                .expect("Float output only combines primitive operands");
-            let right = right
-                .to_primitive_float()
-                .expect("Float output only combines primitive operands");
-            Ok(Value::Float(eval_float_binary(operation, left, right)))
-        }
-        NumericMode::Number => {
-            let left = left.to_advanced_number();
-            let right = right.to_advanced_number();
-            eval_number_binary(operation, left, right)
-                .map(Value::from_number)
-                .map_err(native_error)
-        }
+        NumericMode::Int => eval_int_operands(operation, left, right),
+        NumericMode::Float => eval_float_operands(operation, left_mode, right_mode, left, right),
+        NumericMode::Number => eval_number_operands(operation, left_mode, right_mode, left, right),
     }
+}
+
+/// `promote` only answers `Int` for two `Int` operands, so both are plain
+/// `i64` slots and need no numeric-mode round trip.
+#[inline]
+fn eval_int_operands(
+    operation: BinaryOperation,
+    left: &Value,
+    right: &Value,
+) -> Result<Value, VmError> {
+    let Value::Int(left_int) = left else {
+        return Err(wrong_mode(NumericMode::Int, left));
+    };
+    let Value::Int(right_int) = right else {
+        return Err(wrong_mode(NumericMode::Int, right));
+    };
+
+    eval_int_binary(operation, *left_int, *right_int).map(Value::Int)
+}
+
+#[inline]
+fn eval_float_operands(
+    operation: BinaryOperation,
+    left_mode: NumericMode,
+    right_mode: NumericMode,
+    left: &Value,
+    right: &Value,
+) -> Result<Value, VmError> {
+    let Some(left_float) = primitive_float(left_mode, left) else {
+        return Err(wrong_mode(left_mode, left));
+    };
+    let Some(right_float) = primitive_float(right_mode, right) else {
+        return Err(wrong_mode(right_mode, right));
+    };
+
+    Ok(Value::Float(eval_float_binary(
+        operation,
+        left_float,
+        right_float,
+    )))
+}
+
+fn eval_number_operands(
+    operation: BinaryOperation,
+    left_mode: NumericMode,
+    right_mode: NumericMode,
+    left: &Value,
+    right: &Value,
+) -> Result<Value, VmError> {
+    let left = numeric_ref(left_mode, left)?.to_advanced_number();
+    let right = numeric_ref(right_mode, right)?.to_advanced_number();
+
+    eval_number_binary(operation, left, right)
+        .map(Value::from_number)
+        .map_err(native_error)
+}
+
+/// Reads an operand of a `Float` overload: an `Int` widens and a `Float`
+/// passes through. A `Number` operand never reaches one, because any `Number`
+/// promotes the whole operation to `Number`.
+#[inline]
+fn primitive_float(mode: NumericMode, value: &Value) -> Option<f64> {
+    match (mode, value) {
+        (NumericMode::Int, Value::Int(value)) => Some(*value as f64),
+        (NumericMode::Float, Value::Float(value)) => Some(*value),
+        _ => None,
+    }
+}
+
+/// Kept out of line so the operand destructuring above stays inlineable.
+#[cold]
+#[inline(never)]
+fn wrong_arity(args: &[Value]) -> VmError {
+    VmError::native(format!("expected 2 arguments, got {}", args.len()))
 }
 
 #[inline]
@@ -211,41 +357,67 @@ fn wrong_mode(mode: NumericMode, value: &Value) -> VmError {
 }
 
 fn eval_int_binary(operation: BinaryOperation, left: i64, right: i64) -> Result<i64, VmError> {
-    if right == 0
-        && matches!(
-            operation,
-            BinaryOperation::Div
-                | BinaryOperation::FloorDiv
-                | BinaryOperation::Rem
-                | BinaryOperation::RemEuclid
-        )
-    {
-        return Err(VmError::native("division by zero".to_string()));
-    }
-    if right < 0 && matches!(operation, BinaryOperation::Pow) {
-        return Err(VmError::native(
-            "negative integer exponents require Number operands".to_string(),
-        ));
-    }
     let failed = || {
         VmError::native(format!(
             "integer operation overflowed or is undefined: {left} {} {right}",
             operation.name()
         ))
     };
+
+    // Each operation carries its own precondition, so add, subtract and
+    // multiply test nothing but their own overflow flag.
     match operation {
         BinaryOperation::Add => left.checked_add(right).ok_or_else(failed),
         BinaryOperation::Sub => left.checked_sub(right).ok_or_else(failed),
         BinaryOperation::Mul => left.checked_mul(right).ok_or_else(failed),
-        BinaryOperation::Div => left.checked_div(right).ok_or_else(failed),
-        BinaryOperation::FloorDiv => checked_floor_div(left, right).ok_or_else(failed),
-        BinaryOperation::Rem => left.checked_rem(right).ok_or_else(failed),
-        BinaryOperation::RemEuclid => left.checked_rem_euclid(right).ok_or_else(failed),
-        BinaryOperation::Pow => u32::try_from(right)
-            .ok()
-            .and_then(|right| left.checked_pow(right))
-            .ok_or_else(failed),
+        BinaryOperation::Div => {
+            nonzero_divisor(right)?;
+            left.checked_div(right).ok_or_else(failed)
+        }
+        BinaryOperation::FloorDiv => {
+            nonzero_divisor(right)?;
+            checked_floor_div(left, right).ok_or_else(failed)
+        }
+        BinaryOperation::Rem => {
+            nonzero_divisor(right)?;
+            left.checked_rem(right).ok_or_else(failed)
+        }
+        BinaryOperation::RemEuclid => {
+            nonzero_divisor(right)?;
+            left.checked_rem_euclid(right).ok_or_else(failed)
+        }
+        BinaryOperation::Pow => {
+            if right < 0 {
+                return Err(negative_exponent());
+            }
+            u32::try_from(right)
+                .ok()
+                .and_then(|right| left.checked_pow(right))
+                .ok_or_else(failed)
+        }
     }
+}
+
+/// A zero divisor is reported as such rather than as the overflow the checked
+/// operation would otherwise report.
+#[inline]
+fn nonzero_divisor(divisor: i64) -> Result<(), VmError> {
+    if divisor == 0 {
+        return Err(division_by_zero());
+    }
+    Ok(())
+}
+
+#[cold]
+#[inline(never)]
+fn division_by_zero() -> VmError {
+    VmError::native("division by zero".to_string())
+}
+
+#[cold]
+#[inline(never)]
+fn negative_exponent() -> VmError {
+    VmError::native("negative integer exponents require Number operands".to_string())
 }
 
 fn checked_floor_div(left: i64, right: i64) -> Option<i64> {
@@ -289,48 +461,44 @@ fn eval_number_binary(
 }
 
 fn register_unary_arithmetic(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
-    declare(
+    declare_typed!(
         env,
         "-",
-        vec![StaticType::Int],
-        StaticType::Int,
+        (value: Int) -> Result<Int>,
         "Negates an integer.",
-        |args| {
-            let [Value::Int(value)] = args else {
-                return Err(VmError::native("expected one Int argument".to_string()));
-            };
-            value
-                .checked_neg()
-                .map(Value::Int)
-                .ok_or_else(|| VmError::native("integer negation overflowed".to_string()))
-        },
+        value
+            .checked_neg()
+            .ok_or_else(|| VmError::native("integer negation overflowed".to_string()))
     );
-    declare(
+    declare_typed!(
         env,
         "-",
-        vec![StaticType::Float],
-        StaticType::Float,
+        (value: Float) -> Float,
         "Negates a floating-point number.",
-        |args| {
-            let [Value::Float(value)] = args else {
-                return Err(VmError::native("expected one Float argument".to_string()));
-            };
-            Ok(Value::Float(-value))
-        },
+        -value
     );
-    declare(
+    declare_typed!(
         env,
         "-",
-        vec![StaticType::Number],
-        StaticType::Number,
+        (value: Number) -> Number,
         "Negates an advanced number.",
-        |args| {
-            let [Value::Number(value)] = args else {
-                return Err(VmError::native("expected one Number argument".to_string()));
-            };
-            Ok(Value::from_number(value.as_ref().clone().neg()))
-        },
+        value.as_ref().clone().neg()
     );
+}
+
+/// Orders two operands, reporting the pair that has no ordering between them.
+fn compare_operands(args: &[Value]) -> Result<Ordering, VmError> {
+    let [left, right] = args else {
+        return Err(wrong_arity(args));
+    };
+
+    left.partial_cmp(right).ok_or_else(|| {
+        VmError::native(format!(
+            "cannot compare {} and {}",
+            left.static_type(),
+            right.static_type()
+        ))
+    })
 }
 
 fn register_comparisons(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
@@ -362,17 +530,7 @@ fn register_comparisons(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
             vec![StaticType::Any, StaticType::Any],
             StaticType::Bool,
             docs,
-            move |args| {
-                arity(args, 2)?;
-                let ordering = args[0].partial_cmp(&args[1]).ok_or_else(|| {
-                    VmError::native(format!(
-                        "cannot compare {} and {}",
-                        args[0].static_type(),
-                        args[1].static_type()
-                    ))
-                })?;
-                Ok(Value::Bool(predicate(ordering)))
-            },
+            move |args| Ok(Value::Bool(predicate(compare_operands(args)?))),
         );
     }
 
@@ -410,15 +568,7 @@ fn register_comparisons(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
             StaticType::Int,
             docs,
             move |args| {
-                arity(args, 2)?;
-                let ordering = args[0].partial_cmp(&args[1]).ok_or_else(|| {
-                    VmError::native(format!(
-                        "cannot compare {} and {}",
-                        args[0].static_type(),
-                        args[1].static_type()
-                    ))
-                })?;
-                let result = match ordering {
+                let result = match compare_operands(args)? {
                     Ordering::Less => -1,
                     Ordering::Equal => 0,
                     Ordering::Greater => 1,
@@ -447,18 +597,12 @@ fn register_bitwise(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
             "Computes bitwise XOR of two integers.",
         ),
     ] {
-        declare(
+        declare_typed!(
             env,
             name,
-            vec![StaticType::Int, StaticType::Int],
-            StaticType::Int,
+            (left: Int, right: Int) -> Int,
             docs,
-            move |args| {
-                let [Value::Int(left), Value::Int(right)] = args else {
-                    return Err(VmError::native("expected two Int arguments".to_string()));
-                };
-                Ok(Value::Int(operation(*left, *right)))
-            },
+            operation(*left, *right)
         );
     }
 
@@ -479,73 +623,49 @@ fn register_bitwise(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
             "Computes logical XOR of two booleans.",
         ),
     ] {
-        declare(
+        declare_typed!(
             env,
             name,
-            vec![StaticType::Bool, StaticType::Bool],
-            StaticType::Bool,
+            (left: Bool, right: Bool) -> Bool,
             docs,
-            move |args| {
-                let [Value::Bool(left), Value::Bool(right)] = args else {
-                    return Err(VmError::native("expected two Bool arguments".to_string()));
-                };
-                Ok(Value::Bool(operation(*left, *right)))
-            },
+            operation(*left, *right)
         );
     }
 
-    declare(
+    declare_typed!(
         env,
         "~",
-        vec![StaticType::Int],
-        StaticType::Int,
+        (value: Int) -> Int,
         "Computes bitwise NOT of an integer.",
-        |args| {
-            let [Value::Int(value)] = args else {
-                return Err(VmError::native("expected one Int argument".to_string()));
-            };
-            Ok(Value::Int(value.not()))
-        },
+        value.not()
     );
 
     for name in ["!", "not"] {
-        declare(
+        declare_typed!(
             env,
             name,
-            vec![StaticType::Bool],
-            StaticType::Bool,
+            (value: Bool) -> Bool,
             "Computes logical negation.",
-            |args| {
-                let [Value::Bool(value)] = args else {
-                    return Err(VmError::native("expected one Bool argument".to_string()));
-                };
-                Ok(Value::Bool(!value))
-            },
+            !value
         );
     }
 
     for (name, left_shift) in [("<<", true), (">>", false)] {
-        declare(
+        declare_typed!(
             env,
             name,
-            vec![StaticType::Int, StaticType::Int],
-            StaticType::Int,
+            (left: Int, right: Int) -> Result<Int>,
             "Shifts an integer by a checked non-negative amount.",
-            move |args| {
-                let [Value::Int(left), Value::Int(right)] = args else {
-                    return Err(VmError::native("expected two Int arguments".to_string()));
-                };
-                let right = u32::try_from(*right)
+            {
+                let amount = u32::try_from(*right)
                     .map_err(|_error| VmError::native("invalid shift amount".to_string()))?;
-                let result = if left_shift {
-                    left.checked_shl(right)
+                if left_shift {
+                    left.checked_shl(amount)
                 } else {
-                    left.checked_shr(right)
-                };
-                result
-                    .map(Value::Int)
-                    .ok_or_else(|| VmError::native("invalid shift amount".to_string()))
-            },
+                    left.checked_shr(amount)
+                }
+                .ok_or_else(|| VmError::native("invalid shift amount".to_string()))
+            }
         );
     }
 }
@@ -730,53 +850,39 @@ fn register_number_helpers(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     }
 
     for (name, imaginary) in [("real", false), ("imag", true)] {
-        declare(
+        declare_typed!(
             env,
             name,
-            vec![StaticType::Number],
-            StaticType::Number,
+            (value: Number) -> Number,
             "Returns a component of an advanced number.",
-            move |args| {
-                let [Value::Number(value)] = args else {
-                    return Err(VmError::native("expected one Number argument".to_string()));
-                };
-                let component = match (value.as_ref(), imaginary) {
-                    (AdvancedNumber::Complex(value), false) => AdvancedNumber::Float(value.re),
-                    (AdvancedNumber::Complex(value), true) => AdvancedNumber::Float(value.im),
-                    (_, false) => value.as_ref().clone(),
-                    (_, true) => AdvancedNumber::Int(BigInt::from(0)),
-                };
-                Ok(Value::from_number(component))
-            },
+            match (value.as_ref(), imaginary) {
+                (AdvancedNumber::Complex(value), false) => AdvancedNumber::Float(value.re),
+                (AdvancedNumber::Complex(value), true) => AdvancedNumber::Float(value.im),
+                (_, false) => value.as_ref().clone(),
+                (_, true) => AdvancedNumber::Int(BigInt::from(0)),
+            }
         );
     }
 
     for (name, numerator) in [("numerator", true), ("denominator", false)] {
-        declare(
+        declare_typed!(
             env,
             name,
-            vec![StaticType::Number],
-            StaticType::Number,
+            (value: Number) -> Number,
             "Returns a component of an exact Number fraction.",
-            move |args| {
-                let [Value::Number(value)] = args else {
-                    return Err(VmError::native("expected one Number argument".to_string()));
-                };
-                let value = match value.as_ref() {
-                    AdvancedNumber::Int(value) if numerator => AdvancedNumber::Int(value.clone()),
-                    AdvancedNumber::Int(_) => AdvancedNumber::Int(BigInt::from(1)),
-                    AdvancedNumber::Rational(value) if numerator => {
-                        AdvancedNumber::Int(value.numer().clone())
-                    }
-                    AdvancedNumber::Rational(value) => AdvancedNumber::Int(value.denom().clone()),
-                    _ => {
-                        return Err(VmError::native(
-                            "expected an exact integer or rational Number".to_string(),
-                        ));
-                    }
-                };
-                Ok(Value::from_number(value))
-            },
+            match value.as_ref() {
+                AdvancedNumber::Int(value) if numerator => AdvancedNumber::Int(value.clone()),
+                AdvancedNumber::Int(_) => AdvancedNumber::Int(BigInt::from(1)),
+                AdvancedNumber::Rational(value) if numerator => {
+                    AdvancedNumber::Int(value.numer().clone())
+                }
+                AdvancedNumber::Rational(value) => AdvancedNumber::Int(value.denom().clone()),
+                _ => {
+                    return Err(VmError::native(
+                        "expected an exact integer or rational Number".to_string(),
+                    ));
+                }
+            }
         );
     }
 }
@@ -827,30 +933,21 @@ fn unary_preserving(
 }
 
 fn register_integer_helpers(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
-    declare(
+    declare_typed!(
         env,
         "factorial",
-        vec![StaticType::Int],
-        StaticType::Int,
+        (value: Int) -> Result<Int>,
         "Returns the checked factorial of a non-negative Int.",
-        |args| {
-            let [Value::Int(value)] = args else {
-                return Err(VmError::native("expected one Int argument".to_string()));
-            };
+        {
             if *value < 0 {
                 return Err(VmError::native(
                     "cannot compute the factorial of a negative number".to_string(),
                 ));
             }
-            let result = (1..=*value)
-                .try_fold(1i64, i64::checked_mul)
-                .ok_or_else(|| {
-                    VmError::native(
-                        "integer factorial overflowed; use a Number argument".to_string(),
-                    )
-                })?;
-            Ok(Value::Int(result))
-        },
+            (1..=*value).try_fold(1i64, i64::checked_mul).ok_or_else(|| {
+                VmError::native("integer factorial overflowed; use a Number argument".to_string())
+            })
+        }
     );
     declare(
         env,
@@ -874,21 +971,14 @@ fn register_integer_helpers(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
         ),
         ("lcm", |left: &BigInt, right: &BigInt| left.lcm(right)),
     ] {
-        declare(
+        declare_typed!(
             env,
             name,
-            vec![StaticType::Int, StaticType::Int],
-            StaticType::Int,
+            (left: Int, right: Int) -> Result<Int>,
             "Computes an integer divisor operation with checked i64 output.",
-            move |args| {
-                let [Value::Int(left), Value::Int(right)] = args else {
-                    return Err(VmError::native("expected two Int arguments".to_string()));
-                };
-                operation(&BigInt::from(*left), &BigInt::from(*right))
-                    .to_i64()
-                    .map(Value::Int)
-                    .ok_or_else(|| VmError::native("integer result overflowed".to_string()))
-            },
+            operation(&BigInt::from(*left), &BigInt::from(*right))
+                .to_i64()
+                .ok_or_else(|| VmError::native("integer result overflowed".to_string()))
         );
         declare(
             env,
@@ -1196,60 +1286,39 @@ impl Transcendental {
 
 fn register_transcendentals(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     for function in Transcendental::ALL {
-        declare(
+        declare_typed!(
             env,
             function.name(),
-            vec![StaticType::Int],
-            StaticType::Float,
+            (value: Int) -> Float,
             function.documentation(NumericMode::Int),
-            move |args| {
-                let [Value::Int(value)] = args else {
-                    return Err(VmError::native("expected one Int argument".to_string()));
-                };
-                Ok(Value::Float(function.apply_float(*value as f64)))
-            },
+            function.apply_float(*value as f64)
         );
-        declare(
+        declare_typed!(
             env,
             function.name(),
-            vec![StaticType::Float],
-            StaticType::Float,
+            (value: Float) -> Float,
             function.documentation(NumericMode::Float),
-            move |args| {
-                let [Value::Float(value)] = args else {
-                    return Err(VmError::native("expected one Float argument".to_string()));
-                };
-                Ok(Value::Float(function.apply_float(*value)))
-            },
+            function.apply_float(*value)
         );
-        declare(
+        declare_typed!(
             env,
             function.name(),
-            vec![StaticType::Number],
-            StaticType::Number,
+            (value: Number) -> Number,
             function.documentation(NumericMode::Number),
-            move |args| {
-                let [Value::Number(value)] = args else {
-                    return Err(VmError::native("expected one Number argument".to_string()));
-                };
-                let result = match value.as_ref() {
-                    AdvancedNumber::Complex(value) => {
-                        AdvancedNumber::Complex(function.apply_complex(*value))
+            match value.as_ref() {
+                AdvancedNumber::Complex(value) => {
+                    AdvancedNumber::Complex(function.apply_complex(*value))
+                }
+                value => {
+                    let input = value.to_f64().expect("non-complex Number is real");
+                    let result = function.apply_float(input);
+                    if result.is_nan() && !input.is_nan() {
+                        AdvancedNumber::Complex(function.apply_complex(Complex64::new(input, 0.0)))
+                    } else {
+                        AdvancedNumber::Float(result)
                     }
-                    value => {
-                        let input = value.to_f64().expect("non-complex Number is real");
-                        let result = function.apply_float(input);
-                        if result.is_nan() && !input.is_nan() {
-                            AdvancedNumber::Complex(
-                                function.apply_complex(Complex64::new(input, 0.0)),
-                            )
-                        } else {
-                            AdvancedNumber::Float(result)
-                        }
-                    }
-                };
-                Ok(Value::from_number(result))
-            },
+                }
+            }
         );
     }
 }
