@@ -1,5 +1,5 @@
 use ndc_core::StaticType;
-use ndc_core::num::AdvancedNumber;
+use ndc_core::num::{AdvancedNumber, hash_exact_i64};
 use num::{FromPrimitive, ToPrimitive};
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
@@ -160,7 +160,10 @@ impl Ord for NumericRef<'_> {
 impl Hash for NumericRef<'_> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         match self {
-            Self::Int(value) => AdvancedNumber::Int((*value).into()).hash(state),
+            // Both arms agree with `AdvancedNumber`'s hash, which routes
+            // integers through `hash_exact_i64` too, so `5`, `5.0` and `5n`
+            // land in the same bucket.
+            Self::Int(value) => hash_exact_i64(*value, state),
             Self::Float(value) => AdvancedNumber::Float(*value).hash(state),
             Self::Number(value) => value.hash(state),
         }
@@ -213,6 +216,32 @@ fn compare_int_float(integer: i64, float: f64) -> Ordering {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::hash_map::DefaultHasher;
+
+    fn hash(value: NumericRef<'_>) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        value.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    #[test]
+    fn equal_numeric_refs_hash_alike_across_modes() {
+        let five = AdvancedNumber::Int(5.into());
+        let five_halves = AdvancedNumber::rational(num::BigRational::new(5.into(), 2.into()));
+
+        for reference in [NumericRef::Float(5.0), NumericRef::Number(&five)] {
+            assert_eq!(reference, NumericRef::Int(5));
+            assert_eq!(hash(reference), hash(NumericRef::Int(5)));
+        }
+
+        // Values that miss the integer fast path still have to agree.
+        assert_eq!(NumericRef::Float(2.5), NumericRef::Number(&five_halves));
+        assert_eq!(
+            hash(NumericRef::Float(2.5)),
+            hash(NumericRef::Number(&five_halves))
+        );
+        assert_ne!(hash(NumericRef::Int(5)), hash(NumericRef::Float(2.5)));
+    }
 
     #[test]
     fn numeric_modes_promote_by_runtime_representation() {

@@ -190,15 +190,24 @@ fn eval_binary(
     }
 }
 
+#[inline]
 fn numeric_ref(mode: NumericMode, value: &Value) -> Result<NumericRef<'_>, VmError> {
     match value.numeric_ref() {
         Some(number) if number.mode() == mode => Ok(number),
-        _ => Err(VmError::native(format!(
-            "expected {}, got {}",
-            mode.static_type(),
-            value.static_type()
-        ))),
+        _ => Err(wrong_mode(mode, value)),
     }
+}
+
+/// Kept out of line so the operand check above stays small enough to inline
+/// into each registered overload.
+#[cold]
+#[inline(never)]
+fn wrong_mode(mode: NumericMode, value: &Value) -> VmError {
+    VmError::native(format!(
+        "expected {}, got {}",
+        mode.static_type(),
+        value.static_type()
+    ))
 }
 
 fn eval_int_binary(operation: BinaryOperation, left: i64, right: i64) -> Result<i64, VmError> {

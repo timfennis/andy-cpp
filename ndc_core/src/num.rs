@@ -99,8 +99,44 @@ impl Default for AdvancedNumber {
     }
 }
 
+/// Tags keeping the two hashing schemes below from colliding with each other.
+const HASH_TAG_EXACT_I64: u8 = 0;
+const HASH_TAG_CANONICAL: u8 = 1;
+
+/// Hash a number whose exact value is the integer `value`.
+///
+/// Every numeric representation routes integers here, so `5`, `5.0`, `5n` and
+/// `10/2` produce one hash without allocating a [`BigInt`] to say so.
+pub fn hash_exact_i64<H: Hasher>(value: i64, state: &mut H) {
+    HASH_TAG_EXACT_I64.hash(state);
+    value.hash(state);
+}
+
+/// `5.0` answers `Some(5)`; `2.5`, `1e300`, `inf` and `NaN` answer `None`.
+#[must_use]
+pub fn exact_f64_to_i64(value: f64) -> Option<i64> {
+    // `i64::MIN` is exactly -2^63, so negating it gives the first f64 above
+    // `i64::MAX`. The bound is exclusive because `i64::MAX` itself rounds up
+    // to 2^63 when converted.
+    const LOWER: f64 = i64::MIN as f64;
+    const UPPER: f64 = -LOWER;
+
+    // `fract` is NaN for infinities and NaN, so both fail this comparison.
+    if value.fract() == 0.0 && (LOWER..UPPER).contains(&value) {
+        Some(value as i64)
+    } else {
+        None
+    }
+}
+
 impl Hash for AdvancedNumber {
     fn hash<H: Hasher>(&self, state: &mut H) {
+        if let Some(value) = self.as_exact_i64() {
+            hash_exact_i64(value, state);
+            return;
+        }
+
+        HASH_TAG_CANONICAL.hash(state);
         self.canonical().hash(state);
     }
 }
@@ -370,6 +406,24 @@ impl Div<AdvancedNumber> for &AdvancedNumber {
 }
 
 impl AdvancedNumber {
+    /// The exact value as an `i64`, when this number is a real integer that
+    /// fits one. `5n`, `5.0`, `10/2` and `5+0i` all answer `Some(5)`, while
+    /// `2.5`, `1e300`, `inf` and `5+1i` answer `None`.
+    ///
+    /// Every representation of one integer answers the same `Some`, which is
+    /// what lets [`Hash`] skip building a [`CanonicalNumber`] for it.
+    #[must_use]
+    pub fn as_exact_i64(&self) -> Option<i64> {
+        match self {
+            Self::Int(value) => value.to_i64(),
+            Self::Float(value) => exact_f64_to_i64(*value),
+            // A reduced rational is an integer exactly when its denominator is
+            // one, which `is_integer` checks without dividing.
+            Self::Rational(value) => value.is_integer().then(|| value.numer().to_i64())?,
+            Self::Complex(value) => (value.im == 0.0).then(|| exact_f64_to_i64(value.re))?,
+        }
+    }
+
     fn canonical(&self) -> CanonicalNumber {
         match self {
             Self::Int(value) => CanonicalNumber {
@@ -814,6 +868,54 @@ mod tests {
 
         let tenth = AdvancedNumber::rational(BigRational::new(1.into(), 10.into()));
         assert_ne!(tenth, AdvancedNumber::Float(0.1));
+    }
+
+    #[test]
+    fn every_representation_of_one_integer_hashes_alike() {
+        let five = [
+            AdvancedNumber::Int(BigInt::from(5)),
+            AdvancedNumber::Float(5.0),
+            AdvancedNumber::rational(BigRational::new(10.into(), 2.into())),
+            AdvancedNumber::complex(5.0, -0.0),
+        ];
+
+        for value in &five {
+            assert_eq!(value.as_exact_i64(), Some(5));
+            assert_eq!(*value, five[0]);
+            assert_eq!(hash(value), hash(&five[0]));
+        }
+    }
+
+    #[test]
+    fn values_off_the_integer_fast_path_still_agree() {
+        let huge = AdvancedNumber::Int(BigInt::from(u64::MAX) * BigInt::from(u64::MAX));
+        let half = AdvancedNumber::rational(BigRational::new(1.into(), 2.into()));
+
+        assert_eq!(huge.as_exact_i64(), None);
+        assert_eq!(half.as_exact_i64(), None);
+
+        // 0.5 is exactly 1/2, so the two representations stay interchangeable
+        // on the canonical path.
+        assert_eq!(half, AdvancedNumber::Float(0.5));
+        assert_eq!(hash(&half), hash(&AdvancedNumber::Float(0.5)));
+        assert_ne!(hash(&huge), hash(&half));
+    }
+
+    #[test]
+    fn integer_fast_path_stops_at_the_i64_boundaries() {
+        assert_eq!(exact_f64_to_i64(i64::MIN as f64), Some(i64::MIN));
+        // 2^63 is one past i64::MAX, so it falls back instead of wrapping.
+        assert_eq!(exact_f64_to_i64(-(i64::MIN as f64)), None);
+        assert_eq!(exact_f64_to_i64(f64::INFINITY), None);
+        assert_eq!(exact_f64_to_i64(f64::NAN), None);
+        assert_eq!(exact_f64_to_i64(2.5), None);
+
+        // Negative zero is zero, so it must not take a bucket of its own.
+        assert_eq!(exact_f64_to_i64(-0.0), Some(0));
+        assert_eq!(
+            hash(&AdvancedNumber::Float(-0.0)),
+            hash(&AdvancedNumber::Int(BigInt::from(0)))
+        );
     }
 
     #[test]
