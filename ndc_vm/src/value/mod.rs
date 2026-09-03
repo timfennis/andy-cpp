@@ -672,9 +672,14 @@ impl Object {
 
     /// Returns the best static type descriptor for this runtime value.
     ///
-    /// Container element types (List, Map, Iterator, …) are reported as `Any`
-    /// because the VM does not track element types at runtime.  Tuple is the
-    /// exception: its element types are known from the concrete values it holds.
+    /// `[1, 2]` reports `List<Int>` and `%{"a": 1}` reports `Map<String, Int>`:
+    /// lists and deques join their element types into a least upper bound, while
+    /// maps do so separately for keys and values. Tuples preserve each position's
+    /// type, and `Some` wraps the type of its inner value. Empty lists, deques, and
+    /// maps report `Any` for the types they cannot infer.
+    ///
+    /// Iterators and heaps always report `Any` elements, because inspecting them
+    /// would consume or expose their internal values.
     pub fn static_type(&self) -> StaticType {
         let mut budget = usize::MAX;
         self.static_type_with_budget(usize::MAX, &mut budget)
