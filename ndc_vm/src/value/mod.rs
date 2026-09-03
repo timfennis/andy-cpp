@@ -1,14 +1,15 @@
 mod function;
+mod number;
 mod numeric;
 
 pub use function::*;
+pub use number::{AdvancedNumber, BinaryOperatorError, NumberToFloatError, NumberToIntError};
 pub use numeric::{NumericMode, NumericRef};
 
 use crate::iterator::SharedIterator;
 use ndc_core::StaticType;
 use ndc_core::compare::FallibleOrd;
 use ndc_core::hash_map::{DefaultHasher, HashMap};
-use ndc_core::num::AdvancedNumber;
 use ndc_core::r#struct::StructInfo;
 use ndc_parser::ResolvedVar;
 use std::cell::RefCell;

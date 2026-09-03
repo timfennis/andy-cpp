@@ -1172,9 +1172,6 @@ version = "0.3.0"
 dependencies = [
  "ahash",
  "itertools 0.15.0",
- "num",
- "ryu",
- "thiserror",
 ]
 
 [[package]]
@@ -1261,6 +1258,7 @@ dependencies = [
  "ndc_lexer",
  "ndc_parser",
  "num",
+ "ryu",
  "thiserror",
 ]
 

@@ -205,7 +205,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                     let #temp = {
                         let num = #raw.as_number().ok_or_else(|| #err)?;
                         match num {
-                            ndc_core::num::AdvancedNumber::Rational(r) => r.as_ref(),
+                            ndc_vm::value::AdvancedNumber::Rational(r) => r.as_ref(),
                             _ => return Err(#err),
                         }
                     };
@@ -222,7 +222,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                     let #temp = {
                         let num = #raw.as_number().ok_or_else(|| #err)?;
                         match num {
-                            ndc_core::num::AdvancedNumber::Complex(c) => *c,
+                            ndc_vm::value::AdvancedNumber::Complex(c) => *c,
                             _ => return Err(#err),
                         }
                     };
@@ -529,7 +529,7 @@ fn vm_return_for_classified(ty: &syn::Type) -> Option<(TokenStream, TokenStream)
         NdcType::BigInt => Some((
             quote! {
                 Ok(ndc_vm::value::Value::from_number(
-                    ndc_core::num::AdvancedNumber::Int(result)
+                    ndc_vm::value::AdvancedNumber::Int(result)
                 ))
             },
             quote! { ndc_core::StaticType::Number },
@@ -537,7 +537,7 @@ fn vm_return_for_classified(ty: &syn::Type) -> Option<(TokenStream, TokenStream)
         NdcType::BigRational => Some((
             quote! {
                 Ok(ndc_vm::value::Value::from_number(
-                    ndc_core::num::AdvancedNumber::Rational(Box::new(result))
+                    ndc_vm::value::AdvancedNumber::Rational(Box::new(result))
                 ))
             },
             quote! { ndc_core::StaticType::Number },

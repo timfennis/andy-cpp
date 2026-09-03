@@ -1,7 +1,7 @@
 use anyhow::{Context, bail};
 use ndc_core::hash_map::HashMap;
-use ndc_core::num::AdvancedNumber;
 use ndc_macros::export_module;
+use ndc_vm::value::AdvancedNumber;
 use ndc_vm::value::{Object, Value};
 use num::ToPrimitive;
 use serde_json::{Map, Number, Value as JsonValue, json};

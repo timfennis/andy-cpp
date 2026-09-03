@@ -1,8 +1,9 @@
 use ndc_core::StaticType;
-use ndc_core::num::{AdvancedNumber, hash_exact_i64};
 use num::{FromPrimitive, ToPrimitive};
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
+
+use super::number::{AdvancedNumber, hash_exact_i64};
 
 /// The runtime representation mode of a numeric [`super::Value`].
 ///

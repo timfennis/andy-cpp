@@ -217,10 +217,10 @@ impl Compiler {
                     NumericLiteral::Int64(i) => Value::int(i),
                     NumericLiteral::Float64(f) => Value::float(f),
                     NumericLiteral::NumberInt(i) => {
-                        Value::number(ndc_core::num::AdvancedNumber::Int(i))
+                        Value::number(crate::value::AdvancedNumber::Int(i))
                     }
                     NumericLiteral::NumberFloat(f) => {
-                        Value::number(ndc_core::num::AdvancedNumber::Float(f))
+                        Value::number(crate::value::AdvancedNumber::Float(f))
                     }
                     NumericLiteral::Complex(c) => Value::complex(c),
                 };

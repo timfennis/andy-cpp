@@ -1,7 +1,7 @@
 use factorial::Factorial;
-use ndc_core::num::{AdvancedNumber, BinaryOperatorError};
 use ndc_core::{FunctionRegistry, StaticType};
 use ndc_vm::error::VmError;
+use ndc_vm::value::{AdvancedNumber, BinaryOperatorError};
 use ndc_vm::value::{NativeFunc, NativeFunction, NumericMode, NumericRef, Object, Value};
 use num::complex::Complex64;
 use num::{BigInt, BigUint, Integer, ToPrimitive};

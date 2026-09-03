@@ -22,7 +22,7 @@ pub fn random_n<N: SampleUniform + std::fmt::Display + Copy>(
 #[export_module]
 mod inner {
     use itertools::Itertools;
-    use ndc_core::num::AdvancedNumber;
+    use ndc_vm::value::AdvancedNumber;
 
     /// Randomly shuffles the elements of the list in place.
     pub fn shuffle(list: &mut [Value]) {

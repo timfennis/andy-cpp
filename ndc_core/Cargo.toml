@@ -6,6 +6,3 @@ version.workspace = true
 [dependencies]
 ahash.workspace = true
 itertools.workspace = true
-num.workspace = true
-ryu.workspace = true
-thiserror.workspace = true
