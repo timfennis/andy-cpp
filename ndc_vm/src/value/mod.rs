@@ -273,7 +273,7 @@ impl Value {
     /// Returns a runtime type description whose recursion depth and total
     /// number of inspected values are bounded. Once either limit is reached,
     /// the remaining subtree is widened to `Any`.
-    pub(crate) fn diagnostic_type(&self) -> StaticType {
+    pub fn diagnostic_type(&self) -> StaticType {
         let mut budget = DIAGNOSTIC_TYPE_VALUE_BUDGET;
         self.static_type_with_budget(DIAGNOSTIC_TYPE_MAX_DEPTH, &mut budget)
     }
@@ -1192,8 +1192,8 @@ mod tests {
             Value::Float(1.0),
             Value::number(AdvancedNumber::Int(1.into())),
             Value::number(AdvancedNumber::Float(1.0)),
-            Value::number(AdvancedNumber::rational(num::BigRational::from_integer(
-                1.into(),
+            Value::number(AdvancedNumber::Rational(Box::new(
+                num::BigRational::from_integer(1.into()),
             ))),
             Value::complex(num::Complex::new(1.0, 0.0)),
         ];

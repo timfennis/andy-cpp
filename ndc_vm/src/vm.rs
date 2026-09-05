@@ -493,7 +493,7 @@ impl Vm {
                     let end = if bounded {
                         let v = self.stack.pop().expect("stack underflow");
                         let Value::Int(n) = v else {
-                            return Err(VmError::new("Integer too large for range bounds", span));
+                            return Err(VmError::new(bad_range_bound(&v), span));
                         };
                         Some(n)
                     } else {
@@ -501,7 +501,7 @@ impl Vm {
                     };
                     let start = self.stack.pop().expect("stack underflow");
                     let Value::Int(start) = start else {
-                        return Err(VmError::new("Integer too large for range bounds", span));
+                        return Err(VmError::new(bad_range_bound(&start), span));
                     };
                     let iter: Rc<RefCell<dyn VmIterator>> = match (inclusive, end) {
                         (_, None) => Rc::new(RefCell::new(UnboundedRangeIter::new(start))),
@@ -1246,4 +1246,18 @@ impl VmCallable<'_> {
     pub fn call(&mut self, args: &[Value]) -> Result<Value, VmError> {
         self.vm.call_callback(self.function.clone(), args)
     }
+}
+
+/// Explain why a range bound was rejected. Only an integer too big for an
+/// `Int` is a size problem; every other non-`Int` bound is a type problem, and
+/// since `n` literals are the only way to write a big integer, a small
+/// `Number` bound is now the common case.
+fn bad_range_bound(value: &Value) -> String {
+    if let Some(number) = value.as_number()
+        && matches!(number, crate::value::AdvancedNumber::Int(_))
+        && number.as_exact_i64().is_none()
+    {
+        return "Integer too large for range bounds".to_string();
+    }
+    format!("range bounds must be Int, got {}", value.diagnostic_type())
 }
