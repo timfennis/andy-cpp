@@ -3,7 +3,7 @@ mod number;
 mod numeric;
 
 pub use function::*;
-pub use number::{AdvancedNumber, BinaryOperatorError, NumberToFloatError, NumberToIntError};
+pub use number::{AdvancedNumber, BinaryOperatorError, NumberToFloatError};
 pub use numeric::{NumericMode, NumericRef};
 
 use crate::iterator::SharedIterator;
@@ -939,13 +939,15 @@ impl Value {
                 .ok_or_else(|| "NaN in comparator result".to_string()),
             Self::Number(number) => match number.as_ref() {
                 AdvancedNumber::Int(i) => Ok(i.cmp(&num::BigInt::from(0))),
+                AdvancedNumber::Float(f) => f
+                    .partial_cmp(&0.0)
+                    .ok_or_else(|| "NaN in comparator result".to_string()),
                 AdvancedNumber::Rational(r) => Ok(r
                     .as_ref()
                     .cmp(&num::BigRational::from(num::BigInt::from(0)))),
-                _ => Err(format!(
-                    "comparator must return a number, got {}",
-                    self.static_type()
-                )),
+                AdvancedNumber::Complex(_) => {
+                    Err("comparator must return a real number, got a complex number".to_string())
+                }
             },
             _ => Err(format!(
                 "comparator must return a number, got {}",
