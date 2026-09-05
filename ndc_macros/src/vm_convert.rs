@@ -199,32 +199,26 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
         }
 
         NdcType::BigRationalRef => {
-            let err = arg_error(position, "rational");
+            let err = arg_error(position, "an exact integer or rational Number");
             VmInputArg {
                 extract: quote! {
                     let #temp = {
                         let num = #raw.as_number().ok_or_else(|| #err)?;
-                        match num {
-                            ndc_vm::value::AdvancedNumber::Rational(r) => r.as_ref(),
-                            _ => return Err(#err),
-                        }
+                        num.to_rational().ok_or_else(|| #err)?
                     };
                 },
-                pass: quote! { #temp },
+                pass: quote! { &#temp },
                 static_type: quote! { ndc_core::StaticType::Number },
             }
         }
 
         NdcType::Complex64 => {
-            let err = arg_error(position, "complex");
+            let err = arg_error(position, "a Number");
             VmInputArg {
                 extract: quote! {
                     let #temp = {
                         let num = #raw.as_number().ok_or_else(|| #err)?;
-                        match num {
-                            ndc_vm::value::AdvancedNumber::Complex(c) => *c,
-                            _ => return Err(#err),
-                        }
+                        num.to_complex()
                     };
                 },
                 pass: quote! { #temp },
