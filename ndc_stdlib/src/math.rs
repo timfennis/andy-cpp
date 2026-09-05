@@ -144,7 +144,7 @@ fn wrong_operands(expected: &[StaticType], args: &[Value]) -> VmError {
     let expected = list(expected.iter().map(StaticType::to_string).collect());
     let got = list(
         args.iter()
-            .map(|arg| arg.static_type().to_string())
+            .map(|arg| arg.diagnostic_type().to_string())
             .collect(),
     );
 
@@ -352,7 +352,7 @@ fn wrong_mode(mode: NumericMode, value: &Value) -> VmError {
     VmError::native(format!(
         "expected {}, got {}",
         mode.static_type(),
-        value.static_type()
+        value.diagnostic_type()
     ))
 }
 
@@ -498,8 +498,8 @@ fn compare_operands(args: &[Value]) -> Result<Ordering, VmError> {
     left.partial_cmp(right).ok_or_else(|| {
         VmError::native(format!(
             "cannot compare {} and {}",
-            left.static_type(),
-            right.static_type()
+            left.diagnostic_type(),
+            right.diagnostic_type()
         ))
     })
 }
@@ -663,11 +663,23 @@ fn register_bitwise(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
                 let amount = u32::try_from(*right)
                     .map_err(|_error| VmError::native("invalid shift amount".to_string()))?;
                 if left_shift {
-                    left.checked_shl(amount)
+                    // `checked_shl` only rejects an out-of-range amount, never
+                    // a result that does not fit, so `1 << 63` would other-
+                    // wise wrap to a negative silently. Verify the shift is
+                    // reversible instead; zero survives any amount.
+                    if *left == 0 {
+                        Ok(0)
+                    } else {
+                        left.checked_shl(amount)
+                            .filter(|shifted| shifted >> amount == *left)
+                            .ok_or_else(|| {
+                                VmError::native("integer shift overflowed".to_string())
+                            })
+                    }
                 } else {
                     left.checked_shr(amount)
+                        .ok_or_else(|| VmError::native("invalid shift amount".to_string()))
                 }
-                .ok_or_else(|| VmError::native("invalid shift amount".to_string()))
             }
         );
     }
@@ -801,27 +813,46 @@ enum PreservingUnary {
 }
 
 fn register_number_helpers(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
-    for mode in NumericMode::ALL {
+    // Reversed for the same reason as `register_binary_arithmetic`: runtime
+    // candidates are inspected in reverse registration order, so registering
+    // `Int` last puts it first where dynamic dispatch looks.
+    for mode in NumericMode::ALL.into_iter().rev() {
         declare(
             env,
             "signum",
             vec![mode.static_type()],
             mode.static_type(),
-            "Returns the sign of a number.",
+            "Returns -1 if the number is negative, 0 if it is zero, and 1 if it is positive.",
             move |args| unary_preserving(args, mode, PreservingUnary::Signum),
         );
-        for (name, operation) in [
-            ("ceil", PreservingUnary::Ceil),
-            ("floor", PreservingUnary::Floor),
-            ("round", PreservingUnary::Round),
-            ("abs", PreservingUnary::Abs),
+        for (name, operation, documentation) in [
+            (
+                "ceil",
+                PreservingUnary::Ceil,
+                "Returns the smallest integer greater than or equal to the number.",
+            ),
+            (
+                "floor",
+                PreservingUnary::Floor,
+                "Returns the largest integer less than or equal to the number.",
+            ),
+            (
+                "round",
+                PreservingUnary::Round,
+                "Rounds the number to the nearest integer, with ties rounding away from zero.",
+            ),
+            (
+                "abs",
+                PreservingUnary::Abs,
+                "Returns the absolute value of a number.",
+            ),
         ] {
             declare(
                 env,
                 name,
                 vec![mode.static_type()],
                 mode.static_type(),
-                "Applies a numeric operation while preserving the numeric mode.",
+                documentation,
                 move |args| unary_preserving(args, mode, operation),
             );
         }
@@ -852,12 +883,19 @@ fn register_number_helpers(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
         }
     }
 
-    for (name, imaginary) in [("real", false), ("imag", true)] {
+    for (name, imaginary, documentation) in [
+        ("real", false, "Returns the real part of a complex number."),
+        (
+            "imag",
+            true,
+            "Returns the imaginary part of a complex number.",
+        ),
+    ] {
         declare_typed!(
             env,
             name,
             (value: Number) -> Number,
-            "Returns a component of an advanced number.",
+            documentation,
             match (value.as_ref(), imaginary) {
                 (AdvancedNumber::Complex(value), false) => AdvancedNumber::Float(value.re),
                 (AdvancedNumber::Complex(value), true) => AdvancedNumber::Float(value.im),
@@ -867,12 +905,23 @@ fn register_number_helpers(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
         );
     }
 
-    for (name, numerator) in [("numerator", true), ("denominator", false)] {
+    for (name, numerator, documentation) in [
+        (
+            "numerator",
+            true,
+            "Returns the numerator of a rational number.",
+        ),
+        (
+            "denominator",
+            false,
+            "Returns the denominator of a rational number.",
+        ),
+    ] {
         declare_typed!(
             env,
             name,
             (value: Number) -> Number,
-            "Returns a component of an exact Number fraction.",
+            documentation,
             match value.as_ref() {
                 AdvancedNumber::Int(value) if numerator => AdvancedNumber::Int(value.clone()),
                 AdvancedNumber::Int(_) => AdvancedNumber::Int(BigInt::from(1)),
@@ -930,7 +979,7 @@ fn unary_preserving(
         _ => Err(VmError::native(format!(
             "expected {}, got {}",
             mode.static_type(),
-            args[0].static_type()
+            args[0].diagnostic_type()
         ))),
     }
 }
@@ -967,18 +1016,23 @@ fn register_integer_helpers(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
         },
     );
 
-    for (name, operation) in [
+    for (name, operation, documentation) in [
         (
             "gcd",
             (|left: &BigInt, right: &BigInt| left.gcd(right)) as fn(&BigInt, &BigInt) -> BigInt,
+            "Returns the greatest common divisor of two integers.",
         ),
-        ("lcm", |left: &BigInt, right: &BigInt| left.lcm(right)),
+        (
+            "lcm",
+            |left: &BigInt, right: &BigInt| left.lcm(right),
+            "Returns the least common multiple of two integers.",
+        ),
     ] {
         declare_typed!(
             env,
             name,
             (left: Int, right: Int) -> Result<Int>,
-            "Computes an integer divisor operation with checked i64 output.",
+            documentation,
             operation(&BigInt::from(*left), &BigInt::from(*right))
                 .to_i64()
                 .ok_or_else(|| VmError::native("integer result overflowed".to_string()))
@@ -1089,11 +1143,12 @@ fn register_conversions(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
 }
 
 fn convert_to_int(value: &Value) -> Result<i64, VmError> {
-    let static_type = value.static_type();
+    // Describing the value is only needed on the error paths, and for a
+    // container that description walks the whole structure.
+    let cannot_convert =
+        || VmError::native(format!("cannot convert {} to Int", value.diagnostic_type()));
     if let Some(number) = value.numeric_ref() {
-        return number
-            .to_i64_truncating()
-            .ok_or_else(|| VmError::native(format!("cannot convert {static_type} to Int")));
+        return number.to_i64_truncating().ok_or_else(cannot_convert);
     }
 
     let converted = match value {
@@ -1105,7 +1160,7 @@ fn convert_to_int(value: &Value) -> Result<i64, VmError> {
         Value::None => None,
         Value::Int(_) | Value::Float(_) | Value::Number(_) => unreachable!("handled above"),
     };
-    converted.ok_or_else(|| VmError::native(format!("cannot convert {static_type} to Int")))
+    converted.ok_or_else(cannot_convert)
 }
 
 fn convert_to_float(value: &Value) -> Result<f64, VmError> {
