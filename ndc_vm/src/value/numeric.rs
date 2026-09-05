@@ -1,5 +1,5 @@
 use ndc_core::StaticType;
-use num::{FromPrimitive, ToPrimitive};
+use num::ToPrimitive;
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 
@@ -159,12 +159,11 @@ fn exact_cmp(left: &AdvancedNumber, right: &AdvancedNumber) -> Ordering {
         .expect("AdvancedNumber values are totally ordered")
 }
 
+/// Truncate toward zero, answering `None` when the result would not fit.
+/// Truncating first makes this the exact conversion of a whole number, so it
+/// reuses that bounds check rather than allocating a `BigInt` to range-test.
 fn float_to_i64(value: f64) -> Option<i64> {
-    if value.is_finite() {
-        num::BigInt::from_f64(value.trunc())?.to_i64()
-    } else {
-        None
-    }
+    super::number::exact_f64_to_i64(value.trunc())
 }
 
 /// Match `AdvancedNumber`'s total ordering without constructing exact rational
