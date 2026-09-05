@@ -1,0 +1,11 @@
+// Division and the remainders build their result as a fraction. A denominator
+// of one has to collapse back to an integer, or the value prints as `2` while
+// no longer matching the integer arm any consumer switches on.
+assert_eq(json_encode(4n / 2n), "2");
+assert_eq(json_encode(7n %% 3n), "1");
+assert_eq(json_encode(7n % 3n), "1");
+assert_eq(json_encode(2n ^ 2n), "4");
+
+// genuine fractions are untouched
+assert_eq(4n / 3n, 4n / 3n);
+assert_eq(denominator(4n / 3n), 3n);

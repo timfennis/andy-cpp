@@ -98,9 +98,10 @@ impl Default for AdvancedNumber {
     }
 }
 
-/// Tags keeping the two hashing schemes below from colliding with each other.
+/// Tags keeping the three hashing schemes below from colliding with each other.
 const HASH_TAG_EXACT_I64: u8 = 0;
 const HASH_TAG_CANONICAL: u8 = 1;
+const HASH_TAG_EXACT_F64: u8 = 2;
 
 /// Hash a number whose exact value is the integer `value`.
 ///
@@ -132,6 +133,22 @@ impl Hash for AdvancedNumber {
     fn hash<H: Hasher>(&self, state: &mut H) {
         if let Some(value) = self.as_exact_i64() {
             hash_exact_i64(value, state);
+            return;
+        }
+
+        // A value an `f64` represents exactly hashes from its bits, which
+        // keeps float keys off the allocating path entirely. Only the values
+        // no float can express build the exact rational form.
+        if let Some(value) = self.as_exact_f64() {
+            HASH_TAG_EXACT_F64.hash(state);
+            // Every NaN compares equal here, so every NaN must hash alike
+            // regardless of the payload bits it carries.
+            let bits = if value.is_nan() {
+                f64::NAN.to_bits()
+            } else {
+                value.to_bits()
+            };
+            bits.hash(state);
             return;
         }
 
@@ -234,19 +251,9 @@ macro_rules! impl_binary_operator {
     };
 }
 
-/// Implement `$trait` for every owned/borrowed combination of `AdvancedNumber`.
-macro_rules! impl_binary_operator_all {
-    ($trait:ident, $method:ident) => {
-        impl_binary_operator!(AdvancedNumber, AdvancedNumber, $trait, $method);
-        impl_binary_operator!(AdvancedNumber, &AdvancedNumber, $trait, $method);
-        impl_binary_operator!(&AdvancedNumber, AdvancedNumber, $trait, $method);
-        impl_binary_operator!(&AdvancedNumber, &AdvancedNumber, $trait, $method);
-    };
-}
-
-impl_binary_operator_all!(Add, add);
-impl_binary_operator_all!(Sub, sub);
-impl_binary_operator_all!(Mul, mul);
+impl_binary_operator!(AdvancedNumber, AdvancedNumber, Add, add);
+impl_binary_operator!(AdvancedNumber, AdvancedNumber, Sub, sub);
+impl_binary_operator!(AdvancedNumber, AdvancedNumber, Mul, mul);
 
 /// Returns `true` for the number kinds that use exact (integer/rational)
 /// arithmetic.
@@ -361,6 +368,31 @@ impl AdvancedNumber {
         }
     }
 
+    /// The value as the `f64` that represents it *exactly*, or `None` when
+    /// the conversion would lose anything. One step up from
+    /// [`Self::as_exact_i64`]: a float always qualifies, a rational only when
+    /// its denominator is a power of two that survives the mantissa.
+    ///
+    /// Equal values agree here, because exactness is a property of the number
+    /// and not of the variant holding it: `0.5` and `1n/2n` both answer
+    /// `Some(0.5)`, so both reach the same hash.
+    fn as_exact_f64(&self) -> Option<f64> {
+        match self {
+            Self::Int(value) => {
+                let candidate = value.to_f64()?;
+                (BigInt::from_f64(candidate).as_ref() == Some(value)).then_some(candidate)
+            }
+            Self::Float(value) => Some(*value),
+            Self::Rational(value) => {
+                let candidate = value.to_f64()?;
+                BigRational::from_float(candidate)?
+                    .eq(value.as_ref())
+                    .then_some(candidate)
+            }
+            Self::Complex(value) => (value.im == 0.0).then_some(value.re),
+        }
+    }
+
     fn canonical(&self) -> CanonicalNumber {
         match self {
             Self::Int(value) => CanonicalNumber {
@@ -388,7 +420,14 @@ impl AdvancedNumber {
     }
 
     #[must_use]
+    /// Wrap an exact fraction, collapsing a denominator of 1 back to
+    /// [`Self::Int`]. Division and the remainders all land here, so without
+    /// the collapse `4n / 2n` stays a `Rational` that prints as `2` but no
+    /// longer matches the `Int` arm any consumer switches on.
     pub fn rational(rat: BigRational) -> Self {
+        if rat.is_integer() {
+            return Self::Int(rat.to_integer());
+        }
         Self::Rational(Box::new(rat))
     }
 
@@ -440,14 +479,10 @@ impl AdvancedNumber {
     }
 
     /// Raise an integer base to a (possibly negative) integer exponent.
-    /// A negative exponent yields the reciprocal as a rational, except
-    /// `0 ^ negative`, which is division by zero and returns an error
-    /// instead of panicking with a zero denominator.
+    /// A negative exponent yields the reciprocal as a rational; `pow` has
+    /// already rejected the `0 ^ negative` pair that would divide by zero.
     fn int_pow(base: &BigInt, exponent: &BigInt) -> Result<Self, BinaryOperatorError> {
         if exponent.is_negative() {
-            if base.is_zero() {
-                return Err(BinaryOperatorError::new("division by zero".to_string()));
-            }
             let denominator = num::pow::Pow::pow(base.clone(), exponent.magnitude());
             Ok(Self::Rational(Box::new(BigRational::new(
                 BigInt::from(1),
@@ -475,6 +510,24 @@ impl AdvancedNumber {
             return Err(BinaryOperatorError::new(
                 "exponent too large to compute".to_string(),
             ));
+        }
+
+        // `0 ^ negative` is division by zero rather than a value. Both exact
+        // bases need the guard here: the rational arms below would otherwise
+        // panic inside num-rational with a zero denominator, taking the whole
+        // process down. Inexact zeroes keep their float infinity.
+        let exact_zero_base = match &self {
+            Self::Int(base) => base.is_zero(),
+            Self::Rational(base) => base.is_zero(),
+            Self::Float(_) | Self::Complex(_) => false,
+        };
+        let exact_negative_exponent = match &rhs {
+            Self::Int(exponent) => exponent.is_negative(),
+            Self::Rational(exponent) => exponent.is_negative(),
+            Self::Float(_) | Self::Complex(_) => false,
+        };
+        if exact_zero_base && exact_negative_exponent {
+            return Err(BinaryOperatorError::new("division by zero".to_string()));
         }
 
         Ok(match (self, rhs) {
@@ -642,7 +695,10 @@ impl fmt::Display for AdvancedNumber {
 /// negative base is raised to a fractional power: `(-8.0) ^ 2.0` is `64.0`,
 /// but `(-8.0) ^ 0.5` has no real value.
 fn float_pow(base: f64, exponent: f64) -> AdvancedNumber {
-    if base < 0.0 && exponent.fract() != 0.0 {
+    // `fract()` is NaN for an infinite or NaN exponent, which compares
+    // unequal to zero and would send a finite negative base into the complex
+    // plane. `powf` already answers those correctly.
+    if base < 0.0 && exponent.is_finite() && exponent.fract() != 0.0 {
         AdvancedNumber::Complex(Complex64::from(base).powf(exponent))
     } else {
         AdvancedNumber::Float(base.powf(exponent))
@@ -699,7 +755,7 @@ mod tests {
         let five = [
             AdvancedNumber::Int(BigInt::from(5)),
             AdvancedNumber::Float(5.0),
-            AdvancedNumber::rational(BigRational::new(10.into(), 2.into())),
+            AdvancedNumber::Rational(Box::new(BigRational::new(10.into(), 2.into()))),
             AdvancedNumber::complex(5.0, -0.0),
         ];
 

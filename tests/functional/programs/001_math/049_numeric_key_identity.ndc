@@ -1,0 +1,24 @@
+// Hashing takes a fast path for values an f64 represents exactly. Equal
+// values must land in the same bucket whichever mode holds them, and unequal
+// ones must not be merged by the shortcut.
+let dyadic = %{};
+dyadic[0.5] = "float";
+dyadic[1n/2n] = "rational";
+assert_eq(dyadic.len(), 1);
+
+let inexact = %{};
+inexact[1n/3n] = "exact";
+inexact[1.0/3.0] = "approx";
+assert_eq(inexact.len(), 2);
+
+let integers = %{};
+integers[5] = "int";
+integers[5.0] = "float";
+integers[5n] = "number";
+assert_eq(integers.len(), 1);
+
+// a big integer that is still exactly an f64 agrees with that float
+let big = %{};
+big[2n ^ 100n] = "bigint";
+big[Number(2.0 ^ 100)] = "float";
+assert_eq(big.len(), 1);
