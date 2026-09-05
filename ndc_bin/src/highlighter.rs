@@ -56,13 +56,9 @@ impl AndycppHighlighter {
                 // Strings — green
                 Token::String(_) => substring.rgb(152, 195, 121),
                 // Numeric literals and booleans — orange
-                Token::BigInt(_)
-                | Token::Int64(_)
-                | Token::Float64(_)
-                | Token::Complex(_)
-                | Token::Infinity
-                | Token::True
-                | Token::False => substring.rgb(209, 154, 102),
+                Token::NumericLiteral(_) | Token::True | Token::False => {
+                    substring.rgb(209, 154, 102)
+                }
                 // Keywords — coral red
                 Token::Let
                 | Token::Fn
@@ -243,13 +239,35 @@ fn collect_function_spans(expr: &ExpressionLocation, spans: &mut AHashSet<usize>
         // Leaves — no sub-expressions to recurse into
         Expression::BoolLiteral(_)
         | Expression::StringLiteral(_)
-        | Expression::Int64Literal(_)
-        | Expression::Float64Literal(_)
-        | Expression::BigIntLiteral(_)
-        | Expression::ComplexLiteral(_)
+        | Expression::NumericLiteral(_)
         | Expression::Identifier { .. }
         | Expression::StructDeclaration { .. }
         | Expression::Break
         | Expression::Continue => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use yansi::Color;
+
+    #[test]
+    fn number_literals_are_highlighted_as_numbers() {
+        for literal in ["42n", "1.25n", "0b101n", "0o77n", "0xffn"] {
+            let highlighted = AndycppHighlighter::highlight_parsed(literal);
+
+            assert_eq!(
+                highlighted.len(),
+                1,
+                "unexpected tokenization for {literal}"
+            );
+            assert_eq!(highlighted[0].value, literal);
+            assert_eq!(
+                highlighted[0].style.foreground,
+                Some(Color::Rgb(209, 154, 102)),
+                "unexpected color for {literal}"
+            );
+        }
     }
 }

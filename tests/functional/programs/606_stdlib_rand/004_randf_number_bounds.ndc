@@ -1,0 +1,15 @@
+// randf accepts Number bounds, including rationals
+for _ in 0..100 {
+    let x: Float = randf(2n);
+    assert(x >= 0.0 and x < 2.0);
+}
+
+for _ in 0..100 {
+    let x: Float = randf(-1n, 1n);
+    assert(x >= -1.0 and x < 1.0);
+}
+
+for _ in 0..100 {
+    let x: Float = randf(1n / 4n, 1n / 2n);
+    assert(x >= 0.25 and x < 0.5);
+}

@@ -15,11 +15,11 @@ assert_eq(f, (14, 26));
 
 // Any args fall to LUB (no scalar `-(Any, Any)` exists, so vec dispatch
 // can't pin a single overload at compile time): `Tuple<Any, Any> -
-// Tuple<Any, Any>` infers as `Tuple<Number, Number>`, the LUB across
-// every numeric overload's return type.
+// Tuple<Any, Any>` remains `Tuple<Any, Any>` because Int, Float, and Number
+// are siblings and their least upper bound is Any.
 let l: List<Int> = [1, 2];
 let p: Tuple<Any, Any> = (l.first, l.first);
 let q: Tuple<Any, Any> = (l.last, l.last);
-let r: Tuple<Number, Number> = p - q;
-let s: Tuple<Number, Number> = r * r;
+let r: Tuple<Any, Any> = p - q;
+let s: Tuple<Any, Any> = r * r;
 assert_eq(s, (1, 1));

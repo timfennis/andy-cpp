@@ -4,14 +4,37 @@ use std::fmt;
 
 use super::Span;
 
+#[derive(Debug, PartialEq, Clone)]
+pub enum NumericLiteral {
+    Int64(i64),
+    Float64(f64),
+    NumberInt(BigInt),
+    NumberFloat(f64),
+    Complex(Complex64),
+}
+
+impl fmt::Display for NumericLiteral {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Int64(n) => write!(f, "{n}"),
+            Self::Float64(n) => {
+                let mut buffer = ryu::Buffer::new();
+                write!(f, "{}", buffer.format(*n))
+            }
+            Self::NumberInt(n) => write!(f, "{n}n"),
+            Self::NumberFloat(n) => {
+                let mut buffer = ryu::Buffer::new();
+                write!(f, "{}n", buffer.format(*n))
+            }
+            Self::Complex(n) => write!(f, "{n}"),
+        }
+    }
+}
+
 #[derive(PartialEq, Clone)]
 pub enum Token {
     String(String),
-    Int64(i64),
-    Float64(f64),
-    BigInt(BigInt),
-    Complex(Complex64),
-    Infinity,
+    NumericLiteral(NumericLiteral),
 
     Identifier(String),
     OpAssign(Box<TokenLocation>),
@@ -98,20 +121,9 @@ impl fmt::Display for Token {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s: &str = match self {
             Self::String(str) => str,
-            Self::Int64(n) => {
+            Self::NumericLiteral(n) => {
                 return write!(f, "{n}");
             }
-            Self::Float64(n) => {
-                let mut buffer = ryu::Buffer::new();
-                return write!(f, "{}", buffer.format(*n));
-            }
-            Self::BigInt(n) => {
-                return write!(f, "{n}");
-            }
-            Self::Complex(n) => {
-                return write!(f, "{n}");
-            }
-            Self::Infinity => "Inf",
             Self::Identifier(ident) => ident,
             // Self::DeclareVar => ":=",
             Self::EqualsSign => "=",
@@ -309,8 +321,8 @@ impl From<String> for Token {
     fn from(value: String) -> Self {
         match value.as_str() {
             // YOLO for now just have Inf and NaN here
-            "Inf" => Self::Float64(f64::INFINITY),
-            "NaN" => Self::Float64(f64::NAN),
+            "Inf" => Self::NumericLiteral(NumericLiteral::Float64(f64::INFINITY)),
+            "NaN" => Self::NumericLiteral(NumericLiteral::Float64(f64::NAN)),
             // Normal keywords
             "and" => Self::LogicAnd,
             "as" => Self::As,

@@ -259,18 +259,9 @@ fn extract_vm_offset(index_value: &Value, size: usize) -> Result<VmOffset, VmErr
     }
     let i = match index_value {
         Value::Int(i) => *i,
-        Value::Object(obj) => match obj.as_ref() {
-            Object::BigInt(n) => num::ToPrimitive::to_i64(n)
-                .ok_or_else(|| VmError::native("index too large for i64"))?,
-            _ => {
-                return Err(VmError::native(
-                    "Invalid list index. List indices must be convertible to a signed 64-bit integer.",
-                ));
-            }
-        },
         _ => {
             return Err(VmError::native(
-                "Invalid list index. List indices must be convertible to a signed 64-bit integer.",
+                "Invalid list index. List indices must be Int values.",
             ));
         }
     };

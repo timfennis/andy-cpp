@@ -1,0 +1,24 @@
+// Equal values compare and hash alike across all three public numeric modes.
+assert(1 == 1.0);
+assert(1.0 == 1n);
+assert(1n == 1 + 0i);
+assert_eq(%{1, 1.0, 1n, 1 + 0i}.len(), 1);
+
+// A finite Float is compared as its exact binary value, not approximately.
+assert(0.1 != 1n / 10n);
+assert(-0.0 == 0.0);
+
+// NaNs form one equal, hash-compatible value and sort after positive infinity.
+let nan = 0.0 / 0.0;
+let number_nan = 0n / 0n;
+assert(nan == number_nan);
+assert_eq(%{nan, number_nan}.len(), 1);
+let negative_infinity = -1n / 0n;
+let positive_infinity = 1n / 0n;
+assert(negative_infinity < 0n);
+assert(0n < positive_infinity);
+assert(positive_infinity < number_nan);
+
+// Complex ordering is lexicographic: real part first, imaginary part second.
+assert((2 + 0i) > (1 + 100i));
+assert((1 + 2i) < (1 + 3i));

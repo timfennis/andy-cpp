@@ -1,0 +1,17 @@
+// Comparators may return any real Number. A Number backed by a float used to
+// fall through to the "not a number" arm, so sorting Numbers by subtraction
+// failed even though the same comparator worked on plain Floats.
+let xs = [1.5n, 0.5n, 2.5n];
+xs.sort_by(fn(a, b) => a - b);
+assert_eq(xs, [0.5n, 1.5n, 2.5n]);
+
+assert_eq([1.5n, 0.5n].min_by(fn(a, b) => a - b), 0.5n);
+assert_eq([1.5n, 0.5n].max_by(fn(a, b) => a - b), 1.5n);
+
+// exact integer and rational results keep working
+assert_eq([3n, 1n, 2n].min_by(fn(a, b) => a - b), 1n);
+assert_eq([3n, 1n, 2n].min_by(fn(a, b) => (a - b) / 2n), 1n);
+
+// plain Int and Float comparators are unaffected
+assert_eq([3, 1, 2].min_by(fn(a, b) => a - b), 1);
+assert_eq([3.5, 1.5].min_by(fn(a, b) => a - b), 1.5);

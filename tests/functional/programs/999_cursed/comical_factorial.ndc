@@ -1,6 +1,6 @@
-let v, n = 100, 100;
+let v, n = 100n, 100;
 while n > 1 {
     n -= 1;
     v *= n;
 }
-assert_eq(v, 100.factorial);
+assert_eq(v, 100n.factorial);

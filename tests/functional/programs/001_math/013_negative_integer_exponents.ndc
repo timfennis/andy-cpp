@@ -1,1 +1,1 @@
-assert_eq(5 ^ -1, 1/5);
+assert_eq(5n ^ -1n, 1n/5n);

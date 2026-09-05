@@ -1,0 +1,4 @@
+// A complex result has no ordering, so it is still rejected — but the message
+// now says which part of "number" the comparator failed.
+// expect-error: comparator must return a real number
+[3, 1].min_by(fn(a, b) => (a - b) * 1i);

@@ -1,0 +1,2 @@
+// expect-error: No function called
+print(1n & 2n);

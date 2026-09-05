@@ -1,0 +1,5 @@
+// `checked_shl` only rejects an out-of-range shift amount, so `1 << 63` used
+// to wrap to a negative Int silently while every other Int operation reported
+// its overflow.
+// expect-error: integer shift overflowed
+print(1 << 63);

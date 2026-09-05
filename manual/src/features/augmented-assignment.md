@@ -96,7 +96,7 @@ and may widen the inferred type of the target, just like a regular assignment:
 
 ```ndc
 let numbers = [1];
-numbers[0] += 0.5; // fine: the element type widens from Int to Number
+numbers[0] += 0.5; // fine: the element type widens from Int to Any
 assert_eq(numbers, [1.5]);
 ```
 

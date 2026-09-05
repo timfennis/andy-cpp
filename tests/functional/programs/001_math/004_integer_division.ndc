@@ -1,6 +1,6 @@
 assert_eq(10 / 2, 5);
 assert_eq(10 \ 2, 5);
-assert_eq(10 / 3, 10 / 3);
+assert_eq(10 / 3, 3);
 
-assert_eq((10 / 3).denominator, 3);
-assert_eq((10 / 3).numerator, 10);
+assert_eq((10n / 3n).denominator, 3n);
+assert_eq((10n / 3n).numerator, 10n);

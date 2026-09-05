@@ -1,16 +1,17 @@
 mod function;
+mod number;
+mod numeric;
 
 pub use function::*;
+pub use number::{AdvancedNumber, BinaryOperatorError, NumberToFloatError};
+pub use numeric::{NumericMode, NumericRef};
 
 use crate::iterator::SharedIterator;
 use ndc_core::StaticType;
 use ndc_core::compare::FallibleOrd;
 use ndc_core::hash_map::{DefaultHasher, HashMap};
-use ndc_core::int::Int;
-use ndc_core::num::Number;
 use ndc_core::r#struct::StructInfo;
 use ndc_parser::ResolvedVar;
-use ordered_float::OrderedFloat;
 use std::cell::RefCell;
 use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;
@@ -54,6 +55,7 @@ fn bounded_element_type<'a>(
 pub enum Value {
     Int(i64),
     Float(f64),
+    Number(Rc<AdvancedNumber>),
     Bool(bool),
     None,
     Object(Rc<Object>),
@@ -62,9 +64,6 @@ pub enum Value {
 #[derive(Clone)]
 pub enum Object {
     Some(Value),
-    BigInt(num::BigInt),
-    Complex(num::Complex<f64>),
-    Rational(num::BigRational),
     String(Rc<RefCell<String>>),
     List(RefCell<Vec<Value>>),
     Tuple(Vec<Value>),
@@ -200,18 +199,21 @@ impl Value {
     }
 
     pub fn bigint(i: num::BigInt) -> Self {
-        Self::Object(Rc::new(Object::BigInt(i)))
+        Self::number(AdvancedNumber::Int(i))
     }
 
     pub fn complex(c: num::complex::Complex64) -> Self {
-        Self::Object(Rc::new(Object::Complex(c)))
+        Self::number(AdvancedNumber::Complex(c))
+    }
+
+    pub fn number(number: AdvancedNumber) -> Self {
+        Self::Number(Rc::new(number))
     }
 
     /// Creates a shallow copy: scalars are copied by value; mutable collection
     /// types (String, List, Map, Deque, heaps, structs) get new independent
     /// containers with cloned contents; immutable / identity types (Tuple,
-    /// Function, Iterator, `BigInt`, Rational, Complex, Some, `OverloadSet`)
-    /// share the Rc.
+    /// Function, Iterator, Some, `OverloadSet`) share the Rc.
     pub fn shallow_clone(&self) -> Self {
         match self {
             Self::Object(obj) => match obj.as_ref() {
@@ -271,7 +273,7 @@ impl Value {
     /// Returns a runtime type description whose recursion depth and total
     /// number of inspected values are bounded. Once either limit is reached,
     /// the remaining subtree is widened to `Any`.
-    pub(crate) fn diagnostic_type(&self) -> StaticType {
+    pub fn diagnostic_type(&self) -> StaticType {
         let mut budget = DIAGNOSTIC_TYPE_VALUE_BUDGET;
         self.static_type_with_budget(DIAGNOSTIC_TYPE_MAX_DEPTH, &mut budget)
     }
@@ -285,25 +287,19 @@ impl Value {
         match self {
             Self::Int(_) => StaticType::Int,
             Self::Float(_) => StaticType::Float,
+            Self::Number(_) => StaticType::Number,
             Self::Bool(_) => StaticType::Bool,
             Self::None => StaticType::Option(Box::new(StaticType::Any)),
             Self::Object(obj) => obj.static_type_with_budget(depth, budget),
         }
     }
 
-    /// Returns `true` if this value is a numeric type (Int, Float, Rational, or Complex).
+    /// Returns `true` if this value is an Int, Float, or Number.
     ///
     /// Prefer this over `self.static_type().is_number()` in hot paths — this is O(1)
     /// and never allocates, whereas `static_type()` on containers is O(n).
     pub fn is_number(&self) -> bool {
-        match self {
-            Self::Int(_) | Self::Float(_) => true,
-            Self::Object(obj) => matches!(
-                obj.as_ref(),
-                Object::BigInt(_) | Object::Rational(_) | Object::Complex(_)
-            ),
-            _ => false,
-        }
+        self.numeric_ref().is_some()
     }
 
     /// Check whether this value satisfies a function parameter type at runtime,
@@ -311,18 +307,18 @@ impl Value {
     ///
     /// When `param` is a container type whose inner types are all `Any` (e.g.
     /// `Sequence(Any)`, `Map { Any, Any }`, `List(Any)`), only the outer kind is
-    /// checked — no element iteration occurs.  All other cases fall back to
+    /// checked — no element iteration occurs. Typed container parameters are
+    /// rejected rather than scanned; the remaining cases fall back to
     /// `self.static_type().is_subtype(param)`.
     pub fn matches_param(&self, param: &StaticType) -> bool {
         match param {
             StaticType::Any => true,
             StaticType::Int => {
                 matches!(self, Self::Int(_))
-                    || matches!(self, Self::Object(o) if matches!(o.as_ref(), Object::BigInt(_)))
             }
             StaticType::Float => matches!(self, Self::Float(_)),
             StaticType::Bool => matches!(self, Self::Bool(_)),
-            StaticType::Number => self.is_number(),
+            StaticType::Number => matches!(self, Self::Number(_)),
             StaticType::String => {
                 matches!(self, Self::Object(o) if matches!(o.as_ref(), Object::String(_)))
             }
@@ -561,59 +557,27 @@ impl Value {
         obj.function_prototype()
     }
 
-    /// Convert a numeric VM value to a `ndc_core::Number`.
-    /// Returns `None` for non-numeric values (Bool, None, String, List, …).
-    pub fn to_number(&self) -> Option<Number> {
-        vm_value_to_number(self)
+    /// Clone the payload of a Number value.
+    pub fn to_number(&self) -> Option<AdvancedNumber> {
+        self.as_number().cloned()
     }
 
-    /// Convert a `ndc_core::Number` to a VM value.
-    /// `Int64` maps to `Value::Int`; all other variants become `Value::Object`.
-    pub fn from_number(n: Number) -> Self {
-        match n {
-            Number::Int(Int::Int64(i)) => Self::Int(i),
-            Number::Int(Int::BigInt(b)) => Self::Object(Rc::new(Object::BigInt(b))),
-            Number::Float(f) => Self::Float(f),
-            Number::Rational(r) => Self::Object(Rc::new(Object::Rational(*r))),
-            Number::Complex(c) => Self::Object(Rc::new(Object::Complex(c))),
-        }
+    pub fn as_number(&self) -> Option<&AdvancedNumber> {
+        self.numeric_ref().and_then(NumericRef::as_number)
     }
 
-    /// Extract an integer VM value as a `ndc_core::Int`.
-    /// Returns `None` for non-integer values.
-    pub fn to_int(&self) -> Option<Int> {
+    pub fn numeric_ref(&self) -> Option<NumericRef<'_>> {
         match self {
-            Self::Int(i) => Some(Int::Int64(*i)),
-            Self::Object(obj) => match obj.as_ref() {
-                Object::BigInt(b) => Some(Int::BigInt(b.clone())),
-                _ => None,
-            },
-            _ => None,
+            Self::Int(value) => Some(NumericRef::Int(*value)),
+            Self::Float(value) => Some(NumericRef::Float(*value)),
+            Self::Number(value) => Some(NumericRef::Number(value.as_ref())),
+            Self::Bool(_) | Self::None | Self::Object(_) => None,
         }
     }
 
-    /// Convert a `ndc_core::Int` to a VM value.
-    pub fn from_int(i: Int) -> Self {
-        match i {
-            Int::Int64(n) => Self::Int(n),
-            Int::BigInt(b) => Self::Object(Rc::new(Object::BigInt(b))),
-        }
-    }
-
-    /// Convert a numeric VM value to `f64`, coercing integers and rationals.
-    /// Returns `None` for non-numeric values (Bool, None, String, …).
-    pub fn to_f64(&self) -> Option<f64> {
-        use num::ToPrimitive;
-        match self {
-            Self::Float(f) => Some(*f),
-            Self::Int(i) => i.to_f64(),
-            Self::Object(obj) => match obj.as_ref() {
-                Object::BigInt(b) => b.to_f64(),
-                Object::Rational(r) => r.to_f64(),
-                _ => None,
-            },
-            _ => None,
-        }
+    /// Wrap an advanced numeric payload as a Number value.
+    pub fn from_number(n: AdvancedNumber) -> Self {
+        Self::number(n)
     }
 }
 
@@ -693,9 +657,6 @@ impl Object {
                 }
                 StaticType::Option(Box::new(inner.static_type_with_budget(depth - 1, budget)))
             }
-            Self::BigInt(_) => StaticType::Int,
-            Self::Complex(_) => StaticType::Complex,
-            Self::Rational(_) => StaticType::Rational,
             Self::String(_) => StaticType::String,
             Self::List(elements) => {
                 if depth == 0 {
@@ -792,6 +753,7 @@ impl fmt::Display for Value {
         match self {
             Self::Int(n) => write!(f, "{n}"),
             Self::Float(n) => write!(f, "{n}"),
+            Self::Number(n) => write!(f, "{n}"),
             Self::Bool(b) => write!(f, "{b}"),
             Self::None => write!(f, "None"),
             Self::Object(obj) => write!(f, "{obj}"),
@@ -803,9 +765,6 @@ impl fmt::Display for Object {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::Some(v) => write!(f, "Some({v})"),
-            Self::BigInt(n) => write!(f, "{n}"),
-            Self::Complex(c) => write!(f, "{c}"),
-            Self::Rational(r) => write!(f, "{r}"),
             // Strings display without quotes at the top level.
             Self::String(s) => write!(f, "{}", s.borrow()),
             Self::List(vs) => {
@@ -893,9 +852,6 @@ impl fmt::Debug for Object {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::Some(v) => f.debug_tuple("Some").field(v).finish(),
-            Self::BigInt(n) => f.debug_tuple("BigInt").field(n).finish(),
-            Self::Complex(c) => f.debug_tuple("Complex").field(c).finish(),
-            Self::Rational(r) => f.debug_tuple("Rational").field(r).finish(),
             // Strings in debug/repr context are shown quoted.
             Self::String(s) => write!(f, "\"{}\"", s.borrow()),
             Self::List(vs) => f.debug_tuple("List").field(&vs.borrow()).finish(),
@@ -935,62 +891,25 @@ impl fmt::Debug for Object {
 
 impl PartialOrd for Value {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        if let (Some(left), Some(right)) = (self.numeric_ref(), other.numeric_ref()) {
+            return Some(left.compare(right));
+        }
+
         match (self, other) {
-            // Same-type fast paths
-            (Self::Int(a), Self::Int(b)) => Some(a.cmp(b)),
-            (Self::Float(a), Self::Float(b)) => OrderedFloat(*a).partial_cmp(&OrderedFloat(*b)),
             (Self::Bool(a), Self::Bool(b)) => a.partial_cmp(b),
             (Self::Object(a), Self::Object(b)) => a.partial_cmp(b),
-            // Cross-type int/float fast paths (avoid BigInt allocation)
-            (Self::Float(a), Self::Int(b)) => {
-                OrderedFloat(*a).partial_cmp(&OrderedFloat(*b as f64))
-            }
-            (Self::Int(a), Self::Float(b)) => {
-                OrderedFloat(*a as f64).partial_cmp(&OrderedFloat(*b))
-            }
-            // Any numeric cross-type comparison (Int/Float vs BigInt/Rational/Complex etc.)
-            // delegates to ndc_core::Number which handles all cases the interpreter does.
-            (a, b) => vm_value_to_number(a)?.partial_cmp(&vm_value_to_number(b)?),
-        }
-    }
-}
-
-/// Convert a VM numeric value to a `ndc_core::Number` for cross-type comparison.
-/// Returns `None` for non-numeric values (Bool, None, String, List, …).
-fn vm_value_to_number(v: &Value) -> Option<Number> {
-    match v {
-        Value::Int(i) => Some(Number::Int(Int::Int64(*i))),
-        Value::Float(f) => Some(Number::Float(*f)),
-        Value::Object(obj) => match obj.as_ref() {
-            Object::BigInt(b) => Some(Number::Int(Int::BigInt(b.clone()))),
-            Object::Rational(r) => Some(Number::Rational(Box::new(r.clone()))),
-            Object::Complex(c) => Some(Number::Complex(*c)),
             _ => None,
-        },
-        _ => None,
-    }
-}
-
-/// Convert an `Object` numeric value to a `ndc_core::Number` for cross-type comparison.
-fn obj_to_number(obj: &Object) -> Option<Number> {
-    match obj {
-        Object::BigInt(b) => Some(Number::Int(Int::BigInt(b.clone()))),
-        Object::Rational(r) => Some(Number::Rational(Box::new(r.clone()))),
-        Object::Complex(c) => Some(Number::Complex(*c)),
-        _ => None,
+        }
     }
 }
 
 impl PartialOrd for Object {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         match (self, other) {
-            (Self::BigInt(a), Self::BigInt(b)) => a.partial_cmp(b),
-            (Self::Rational(a), Self::Rational(b)) => a.partial_cmp(b),
             (Self::String(a), Self::String(b)) => a.borrow().partial_cmp(&*b.borrow()),
             (Self::List(a), Self::List(b)) => a.borrow().partial_cmp(&*b.borrow()),
             (Self::Tuple(a), Self::Tuple(b)) => a.partial_cmp(b),
-            // Cross-type numeric: BigInt vs Rational, BigInt vs Complex, Rational vs Complex, etc.
-            (a, b) => obj_to_number(a)?.partial_cmp(&obj_to_number(b)?),
+            _ => None,
         }
     }
 }
@@ -1018,13 +937,17 @@ impl Value {
             Self::Float(f) => f
                 .partial_cmp(&0.0)
                 .ok_or_else(|| "NaN in comparator result".to_string()),
-            Self::Object(obj) => match obj.as_ref() {
-                Object::BigInt(b) => Ok(b.cmp(&num::BigInt::from(0))),
-                Object::Rational(r) => Ok(r.cmp(&num::BigRational::from(num::BigInt::from(0)))),
-                _ => Err(format!(
-                    "comparator must return a number, got {}",
-                    self.static_type()
-                )),
+            Self::Number(number) => match number.as_ref() {
+                AdvancedNumber::Int(i) => Ok(i.cmp(&num::BigInt::from(0))),
+                AdvancedNumber::Float(f) => f
+                    .partial_cmp(&0.0)
+                    .ok_or_else(|| "NaN in comparator result".to_string()),
+                AdvancedNumber::Rational(r) => Ok(r
+                    .as_ref()
+                    .cmp(&num::BigRational::from(num::BigInt::from(0)))),
+                AdvancedNumber::Complex(_) => {
+                    Err("comparator must return a real number, got a complex number".to_string())
+                }
             },
             _ => Err(format!(
                 "comparator must return a number, got {}",
@@ -1036,18 +959,15 @@ impl Value {
 
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
+        if let (Some(left), Some(right)) = (self.numeric_ref(), other.numeric_ref()) {
+            return left == right;
+        }
+
         match (self, other) {
-            (Self::Int(a), Self::Int(b)) => a == b,
-            (Self::Float(a), Self::Float(b)) => OrderedFloat(*a) == OrderedFloat(*b),
             (Self::Bool(a), Self::Bool(b)) => a == b,
             (Self::None, Self::None) => true,
             (Self::Object(a), Self::Object(b)) => a == b,
-            // Cross-type numeric equality: delegate to Number, consistent with PartialOrd.
-            // Covers Int vs Float, Int vs Rational, Int vs BigInt, Float vs Rational, etc.
-            (a, b) => match (vm_value_to_number(a), vm_value_to_number(b)) {
-                (Some(a), Some(b)) => a == b,
-                _ => false,
-            },
+            _ => false,
         }
     }
 }
@@ -1056,22 +976,13 @@ impl Eq for Value {}
 
 impl Hash for Value {
     fn hash<H: Hasher>(&self, state: &mut H) {
+        if let Some(number) = self.numeric_ref() {
+            state.write_u8(1);
+            number.hash(state);
+            return;
+        }
+
         match self {
-            Self::Int(n) => {
-                state.write_u8(1);
-                n.hash(state);
-            }
-            Self::Float(f) => {
-                // Normalise whole-number floats to the same hash as their integer equivalent,
-                // so that Int(1) and Float(1.0) hash identically (consistent with PartialEq).
-                if let Some(i) = Int::from_f64_if_int(*f) {
-                    state.write_u8(1);
-                    i.hash(state);
-                } else {
-                    state.write_u8(2);
-                    OrderedFloat(*f).hash(state);
-                }
-            }
             Self::Bool(true) => state.write_u8(3),
             Self::Bool(false) => state.write_u8(4),
             Self::None => state.write_u8(5),
@@ -1079,6 +990,7 @@ impl Hash for Value {
                 state.write_u8(6);
                 o.hash(state);
             }
+            Self::Int(_) | Self::Float(_) | Self::Number(_) => unreachable!("handled above"),
         }
     }
 }
@@ -1139,12 +1051,7 @@ impl PartialEq for Object {
             // address is equivalent to comparing the outer Rc pointers.
             (Self::MinHeap(a), Self::MinHeap(b)) => std::ptr::eq(a, b),
             (Self::MaxHeap(a), Self::MaxHeap(b)) => std::ptr::eq(a, b),
-            // Numeric types: delegate to Number for cross-type equality
-            // (e.g. BigInt(5) == Rational(5/1), Rational(5/1) == Complex(5+0i)).
-            (a, b) => match (obj_to_number(a), obj_to_number(b)) {
-                (Some(a), Some(b)) => a == b,
-                _ => false,
-            },
+            _ => false,
         }
     }
 }
@@ -1157,19 +1064,6 @@ impl Hash for Object {
             Self::Some(v) => {
                 state.write_u8(1);
                 v.hash(state);
-            }
-            Self::BigInt(n) => {
-                state.write_u8(2);
-                n.hash(state);
-            }
-            Self::Complex(c) => {
-                state.write_u8(3);
-                c.re.to_bits().hash(state);
-                c.im.to_bits().hash(state);
-            }
-            Self::Rational(r) => {
-                state.write_u8(4);
-                r.hash(state);
             }
             Self::String(s) => {
                 state.write_u8(5);
@@ -1265,6 +1159,54 @@ impl Hash for Object {
 mod tests {
     use super::*;
 
+    fn value_hash(value: &Value) -> u64 {
+        let mut hasher = DefaultHasher::default();
+        value.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    #[test]
+    fn numeric_ref_owns_checked_numeric_conversions() {
+        let integer = Value::Int(42);
+        let float = Value::Float(42.75);
+        let rational = Value::number(AdvancedNumber::rational(num::BigRational::new(
+            7.into(),
+            2.into(),
+        )));
+        let complex = Value::complex(num::Complex::new(1.0, 2.0));
+
+        assert_eq!(integer.numeric_ref().unwrap().mode(), NumericMode::Int);
+        assert_eq!(float.numeric_ref().unwrap().mode(), NumericMode::Float);
+        assert_eq!(rational.numeric_ref().unwrap().mode(), NumericMode::Number);
+        assert_eq!(float.numeric_ref().unwrap().to_i64_truncating(), Some(42));
+        assert_eq!(rational.numeric_ref().unwrap().to_i64_truncating(), Some(3));
+        assert_eq!(rational.numeric_ref().unwrap().to_f64(), Some(3.5));
+        assert_eq!(complex.numeric_ref().unwrap().to_f64(), None);
+        assert!(Value::Bool(true).numeric_ref().is_none());
+    }
+
+    #[test]
+    fn equal_numeric_modes_keep_equal_hashes() {
+        let values = [
+            Value::Int(1),
+            Value::Float(1.0),
+            Value::number(AdvancedNumber::Int(1.into())),
+            Value::number(AdvancedNumber::Float(1.0)),
+            Value::number(AdvancedNumber::Rational(Box::new(
+                num::BigRational::from_integer(1.into()),
+            ))),
+            Value::complex(num::Complex::new(1.0, 0.0)),
+        ];
+
+        for left in &values {
+            for right in &values {
+                assert_eq!(left, right);
+                assert_eq!(left.partial_cmp(right), Some(Ordering::Equal));
+                assert_eq!(value_hash(left), value_hash(right));
+            }
+        }
+    }
+
     #[test]
     fn conformance_memoizes_aliased_containers() {
         let list = Rc::new(Object::List(RefCell::new(Vec::new())));
@@ -1286,5 +1228,80 @@ mod tests {
 
         // Break the reference cycle so the test does not leak its allocations.
         elements.borrow_mut().clear();
+    }
+
+    #[test]
+    fn runtime_parameter_matching_does_not_scan_lists() {
+        let list = Rc::new(Object::List(RefCell::new(vec![Value::Int(1)])));
+        let value = Value::Object(Rc::clone(&list));
+        let Object::List(elements) = list.as_ref() else {
+            unreachable!();
+        };
+
+        // Holding a mutable borrow makes any attempted element scan panic.
+        // Dynamic dispatch must only inspect the outer container kind.
+        let _borrow = elements.borrow_mut();
+        assert!(value.matches_param(&StaticType::List(Box::new(StaticType::Any))));
+        assert!(value.matches_param(&StaticType::Sequence(Box::new(StaticType::Any,))));
+        assert!(!value.matches_param(&StaticType::List(Box::new(StaticType::Int,))));
+    }
+
+    #[test]
+    fn same_representation_numbers_compare_without_changing_semantics() {
+        assert!(Value::int(-1) < Value::int(1));
+        assert_eq!(Value::float(-0.0), Value::float(0.0));
+        assert_eq!(Value::float(f64::NAN), Value::float(f64::NAN));
+        assert!(Value::float(f64::NAN) > Value::float(f64::INFINITY));
+
+        let one = Value::bigint(num::BigInt::from(1));
+        let two = Value::bigint(num::BigInt::from(2));
+        assert!(one < two);
+    }
+
+    #[test]
+    fn cross_representation_numbers_keep_exact_comparison_semantics() {
+        let integers = [
+            i64::MIN,
+            i64::MIN + 1,
+            -9_007_199_254_740_993,
+            -1,
+            0,
+            1,
+            9_007_199_254_740_993,
+            i64::MAX,
+        ];
+        let floats = [
+            f64::NEG_INFINITY,
+            i64::MIN as f64,
+            -9_007_199_254_740_992.0,
+            -1.5,
+            -0.0,
+            0.5,
+            1.0,
+            9_007_199_254_740_992.0,
+            i64::MAX as f64,
+            f64::INFINITY,
+            f64::NAN,
+        ];
+
+        for integer in integers {
+            for float in floats {
+                let fast_integer = Value::int(integer);
+                let fast_float = Value::float(float);
+                let canonical_integer = AdvancedNumber::Int(num::BigInt::from(integer));
+                let canonical_float = AdvancedNumber::Float(float);
+
+                assert_eq!(
+                    fast_integer.partial_cmp(&fast_float),
+                    canonical_integer.partial_cmp(&canonical_float),
+                    "ordering differs for {integer} and {float}"
+                );
+                assert_eq!(
+                    fast_integer == fast_float,
+                    canonical_integer == canonical_float,
+                    "equality differs for {integer} and {float}"
+                );
+            }
+        }
     }
 }

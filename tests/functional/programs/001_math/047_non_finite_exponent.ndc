@@ -1,0 +1,10 @@
+// `fract()` is NaN for a non-finite exponent, which compares unequal to zero
+// and used to send a negative base into the complex plane. Infinite exponents
+// have real answers and must stay on the real path.
+let inf = Number(1.0 / 0.0);
+assert_eq((-2n) ^ inf, Number(1.0 / 0.0));
+assert_eq((-2n) ^ Number(-1.0 / 0.0), 0.0n);
+
+// a genuinely fractional exponent still escapes to the complex plane
+assert(imag((-8n) ^ 0.5n) != 0.0n);
+assert_eq((-8n) ^ 2n, 64n);

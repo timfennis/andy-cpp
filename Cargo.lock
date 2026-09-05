@@ -1172,10 +1172,6 @@ version = "0.3.0"
 dependencies = [
  "ahash",
  "itertools 0.15.0",
- "num",
- "ordered-float",
- "ryu",
- "thiserror",
 ]
 
 [[package]]
@@ -1230,7 +1226,6 @@ dependencies = [
  "derive_more",
  "ndc_core",
  "ndc_lexer",
- "num",
  "thiserror",
 ]
 
@@ -1263,7 +1258,7 @@ dependencies = [
  "ndc_lexer",
  "ndc_parser",
  "num",
- "ordered-float",
+ "ryu",
  "thiserror",
 ]
 
@@ -1372,15 +1367,6 @@ name = "oorandom"
 version = "11.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b410bbe7e14ab526a0e86877eb47c6996a2bd7746f027ba551028c925390e4e9"
-
-[[package]]
-name = "ordered-float"
-version = "5.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7d950ca161dc355eaf28f82b11345ed76c6e1f6eb1f4f4479e0323b9e2fbd0e"
-dependencies = [
- "num-traits",
-]
 
 [[package]]
 name = "page_size"

@@ -1,0 +1,3 @@
+// randi deliberately has no Float overloads: rounding direction would be ambiguous
+// expect-error: No function called 'randi'
+randi(0.5, 1.5);
