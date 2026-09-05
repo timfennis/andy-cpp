@@ -136,35 +136,8 @@ mod inner {
     }
 
     #[function(name = "randi")]
-    /// Generate a random Int between 0 (inclusive) and `upper` (exclusive)
-    pub fn randi_upper_number(upper: &AdvancedNumber) -> anyhow::Result<i64> {
-        random_n(0, upper.try_into()?)
-    }
-
-    #[function(name = "randi")]
     /// Generate a random Int between `lower` (inclusive) and `upper` (exclusive)
     pub fn randi_int_int(lower: i64, upper: i64) -> anyhow::Result<i64> {
         random_n(lower, upper)
-    }
-
-    #[function(name = "randi")]
-    /// Generate a random Int between `lower` (inclusive) and `upper` (exclusive)
-    pub fn randi_int_number(lower: i64, upper: &AdvancedNumber) -> anyhow::Result<i64> {
-        random_n(lower, upper.try_into()?)
-    }
-
-    #[function(name = "randi")]
-    /// Generate a random Int between `lower` (inclusive) and `upper` (exclusive)
-    pub fn randi_number_int(lower: &AdvancedNumber, upper: i64) -> anyhow::Result<i64> {
-        random_n(lower.try_into()?, upper)
-    }
-
-    #[function(name = "randi")]
-    /// Generate a random Int between `lower` (inclusive) and `upper` (exclusive)
-    pub fn randi_number_number(
-        lower: &AdvancedNumber,
-        upper: &AdvancedNumber,
-    ) -> anyhow::Result<i64> {
-        random_n(lower.try_into()?, upper.try_into()?)
     }
 }

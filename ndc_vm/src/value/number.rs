@@ -624,27 +624,6 @@ impl TryFrom<&AdvancedNumber> for f64 {
     }
 }
 
-#[derive(thiserror::Error, Debug)]
-pub enum NumberToIntError {
-    #[error("cannot convert {0} to int")]
-    UnsupportedType(StaticType),
-    #[error("cannot convert {0} to int")]
-    UnsupportedValue(AdvancedNumber),
-}
-
-impl TryFrom<&AdvancedNumber> for i64 {
-    type Error = NumberToIntError;
-
-    fn try_from(value: &AdvancedNumber) -> Result<Self, Self::Error> {
-        match value {
-            AdvancedNumber::Int(integer) => integer
-                .try_into()
-                .map_err(|_err| NumberToIntError::UnsupportedValue(value.clone())),
-            _ => Err(Self::Error::UnsupportedType(value.static_type())),
-        }
-    }
-}
-
 impl fmt::Display for AdvancedNumber {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
