@@ -81,10 +81,16 @@ assert_eq(sqrt(-1n), 1i);
 
 ```ndc
 assert_eq(1n / 0n, Inf);
+assert_eq(1n \ 0n, Inf);
 
 let nan = 0n / 0n;
 assert(nan == nan);
 ```
+
+Both remainder operators follow the same rule, so `5n % 0n` and `5n %% 0n` are
+`NaN` where `5 % 0` and `5 %% 0` are errors. Moving an accumulator from `Int`
+to `Number` therefore trades the zero-divisor diagnostic for a value that
+propagates.
 
 ## Equality, hashing, and ordering
 
