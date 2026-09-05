@@ -378,13 +378,16 @@ fn eval_int_binary(operation: BinaryOperation, left: i64, right: i64) -> Result<
             nonzero_divisor(right)?;
             checked_floor_div(left, right).ok_or_else(failed)
         }
+        // Once the divisor is nonzero a remainder always fits: `i64::MIN % -1`
+        // is 0, even though the quotient it implies overflows. The checked
+        // variants report that quotient overflow, so wrap instead.
         BinaryOperation::Rem => {
             nonzero_divisor(right)?;
-            left.checked_rem(right).ok_or_else(failed)
+            Ok(left.wrapping_rem(right))
         }
         BinaryOperation::RemEuclid => {
             nonzero_divisor(right)?;
-            left.checked_rem_euclid(right).ok_or_else(failed)
+            Ok(left.wrapping_rem_euclid(right))
         }
         BinaryOperation::Pow => {
             if right < 0 {

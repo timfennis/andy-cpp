@@ -2,7 +2,9 @@
 
 Andy C++ exposes three sibling numeric types:
 
-* `Int` stores a signed 64-bit integer. Checked arithmetic reports overflow.
+* `Int` stores a signed 64-bit integer. Checked arithmetic reports overflow. The remainder
+  operators `%` and `%%` are the exception: once the divisor is non-zero the result always
+  fits, even where the quotient it implies would not.
 * `Float` stores an IEEE 754 `f64`.
 * `Number` supports arbitrary-size integers, exact rational values, floats, and complex values.
 
