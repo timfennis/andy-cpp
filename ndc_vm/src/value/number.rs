@@ -11,6 +11,11 @@ use num::{BigInt, BigRational, Complex, FromPrimitive, Signed, ToPrimitive, Zero
 pub enum AdvancedNumber {
     Int(BigInt),
     Float(f64),
+    /// Never holds a whole number: a denominator of one belongs in
+    /// [`Self::Int`], or consumers that switch on the variant — serde is the
+    /// one in tree — reject a value that is an integer in every other sense.
+    /// Build this through [`Self::rational`], which enforces that; the `From`
+    /// conversion routes there too.
     Rational(Box<BigRational>),
     Complex(Complex64),
 }
@@ -70,7 +75,7 @@ impl From<f64> for AdvancedNumber {
 
 impl From<BigRational> for AdvancedNumber {
     fn from(value: BigRational) -> Self {
-        Self::Rational(Box::new(value))
+        Self::rational(value)
     }
 }
 
@@ -484,10 +489,10 @@ impl AdvancedNumber {
     fn int_pow(base: &BigInt, exponent: &BigInt) -> Result<Self, BinaryOperatorError> {
         if exponent.is_negative() {
             let denominator = num::pow::Pow::pow(base.clone(), exponent.magnitude());
-            Ok(Self::Rational(Box::new(BigRational::new(
+            Ok(Self::rational(BigRational::new(
                 BigInt::from(1),
                 denominator,
-            ))))
+            )))
         } else {
             Ok(Self::Int(num::pow::Pow::pow(
                 base.clone(),
@@ -537,13 +542,13 @@ impl AdvancedNumber {
                 return Self::int_pow(&base, &exponent.to_integer());
             }
             (Self::Rational(base), Self::Int(exponent)) => {
-                Self::Rational(Box::new(num::pow::Pow::pow(&*base, exponent)))
+                Self::rational(num::pow::Pow::pow(&*base, exponent))
             }
             (Self::Rational(base), Self::Rational(exponent))
                 if exponent.is_integer() && exponent.to_i32().is_some() =>
             {
                 let exponent = exponent.to_i32().expect("checked by the match guard");
-                Self::Rational(Box::new(base.pow(exponent)))
+                Self::rational(base.pow(exponent))
             }
 
             // A complex operand on either side keeps the result complex.
@@ -601,7 +606,7 @@ impl AdvancedNumber {
         match self {
             Self::Int(i) => Self::Int(i.abs()),
             Self::Float(f) => Self::Float(f.abs()),
-            Self::Rational(r) => Self::Rational(Box::new(r.abs())),
+            Self::Rational(r) => Self::rational(r.abs()),
             Self::Complex(c) => Self::Float(c.abs()),
         }
     }
