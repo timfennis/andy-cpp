@@ -531,7 +531,7 @@ fn vm_return_for_classified(ty: &syn::Type) -> Option<(TokenStream, TokenStream)
         NdcType::BigRational => Some((
             quote! {
                 Ok(ndc_vm::value::Value::from_number(
-                    ndc_vm::value::AdvancedNumber::Rational(Box::new(result))
+                    ndc_vm::value::AdvancedNumber::rational(result)
                 ))
             },
             quote! { ndc_core::StaticType::Number },

@@ -3,7 +3,7 @@ mod number;
 mod numeric;
 
 pub use function::*;
-pub use number::{AdvancedNumber, BinaryOperatorError, NumberToFloatError};
+pub use number::{AdvancedNumber, BinaryOperatorError, ExactFraction, NumberToFloatError};
 pub use numeric::{NumericMode, NumericRef};
 
 use crate::iterator::SharedIterator;
@@ -1192,8 +1192,10 @@ mod tests {
             Value::Float(1.0),
             Value::number(AdvancedNumber::Int(1.into())),
             Value::number(AdvancedNumber::Float(1.0)),
-            Value::number(AdvancedNumber::Rational(Box::new(
-                num::BigRational::from_integer(1.into()),
+            // the constructor collapses this to an integer rather than
+            // leaving a whole fraction in the rational variant
+            Value::number(AdvancedNumber::rational(num::BigRational::from_integer(
+                1.into(),
             ))),
             Value::complex(num::Complex::new(1.0, 0.0)),
         ];

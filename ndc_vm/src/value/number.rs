@@ -11,13 +11,42 @@ use num::{BigInt, BigRational, Complex, FromPrimitive, Signed, ToPrimitive, Zero
 pub enum AdvancedNumber {
     Int(BigInt),
     Float(f64),
-    /// Never holds a whole number: a denominator of one belongs in
-    /// [`Self::Int`], or consumers that switch on the variant — serde is the
-    /// one in tree — reject a value that is an integer in every other sense.
-    /// Build this through [`Self::rational`], which enforces that; the `From`
-    /// conversion routes there too.
-    Rational(Box<BigRational>),
+    /// Never holds a whole number — see [`ExactFraction`], which is why that
+    /// is not merely a convention.
+    Rational(ExactFraction),
     Complex(Complex64),
+}
+
+/// The payload of [`AdvancedNumber::Rational`], holding a fraction that is
+/// never whole: a denominator of one belongs in [`AdvancedNumber::Int`], or
+/// consumers that switch on the variant reject a value that is an integer in
+/// every other sense.
+///
+/// The field is private so that [`AdvancedNumber::rational`] is the only way
+/// to build one, which makes that rule hold by construction rather than by
+/// everyone remembering it. Reading is unrestricted: it derefs to the
+/// fraction it wraps.
+#[derive(Debug, Clone)]
+pub struct ExactFraction(Box<BigRational>);
+
+impl ExactFraction {
+    fn into_inner(self) -> BigRational {
+        *self.0
+    }
+}
+
+impl std::ops::Deref for ExactFraction {
+    type Target = BigRational;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl fmt::Display for ExactFraction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
@@ -169,7 +198,7 @@ impl Neg for AdvancedNumber {
         match self {
             Self::Int(i) => i.neg().into(),
             Self::Float(f) => f.neg().into(),
-            Self::Rational(r) => r.neg().into(),
+            Self::Rational(r) => r.into_inner().neg().into(),
             Self::Complex(c) => c.neg().into(),
         }
     }
@@ -180,17 +209,23 @@ trait Unbox {
     fn unbox(self) -> Self::Output;
 }
 
-impl Unbox for Box<BigRational> {
+impl Unbox for ExactFraction {
     type Output = BigRational;
     fn unbox(self) -> Self::Output {
-        *self
+        self.into_inner()
     }
 }
 
-impl<'a> Unbox for &'a Box<BigRational> {
+impl<'a> Unbox for &'a ExactFraction {
     type Output = &'a BigRational;
     fn unbox(self) -> Self::Output {
-        &**self
+        self
+    }
+}
+
+impl AsRef<BigRational> for ExactFraction {
+    fn as_ref(&self) -> &BigRational {
+        self
     }
 }
 
@@ -433,7 +468,7 @@ impl AdvancedNumber {
         if rat.is_integer() {
             return Self::Int(rat.to_integer());
         }
-        Self::Rational(Box::new(rat))
+        Self::Rational(ExactFraction(Box::new(rat)))
     }
 
     pub fn static_type(&self) -> StaticType {
@@ -760,7 +795,6 @@ mod tests {
         let five = [
             AdvancedNumber::Int(BigInt::from(5)),
             AdvancedNumber::Float(5.0),
-            AdvancedNumber::Rational(Box::new(BigRational::new(10.into(), 2.into()))),
             AdvancedNumber::complex(5.0, -0.0),
         ];
 
@@ -769,6 +803,24 @@ mod tests {
             assert_eq!(*value, five[0]);
             assert_eq!(hash(value), hash(&five[0]));
         }
+    }
+
+    /// A whole fraction has no rational representation to hash: the
+    /// constructor is the only way to build the variant and it hands back an
+    /// integer instead, which is what keeps every consumer that switches on
+    /// the variant honest.
+    #[test]
+    fn a_whole_fraction_becomes_an_integer() {
+        let five = AdvancedNumber::rational(BigRational::new(10.into(), 2.into()));
+        assert!(matches!(five, AdvancedNumber::Int(_)));
+        assert_eq!(five, AdvancedNumber::Int(BigInt::from(5)));
+
+        let whole = AdvancedNumber::from(BigRational::from_integer(7.into()));
+        assert!(matches!(whole, AdvancedNumber::Int(_)));
+
+        // a genuine fraction is left alone
+        let half = AdvancedNumber::rational(BigRational::new(1.into(), 2.into()));
+        assert!(matches!(half, AdvancedNumber::Rational(_)));
     }
 
     #[test]
