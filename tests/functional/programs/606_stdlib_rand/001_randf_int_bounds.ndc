@@ -1,0 +1,10 @@
+// randf accepts Int bounds and always returns a Float
+for _ in 0..100 {
+    let x: Float = randf(-1, 1);
+    assert(x >= -1.0 and x < 1.0);
+}
+
+for _ in 0..100 {
+    let x: Float = randf(5);
+    assert(x >= 0.0 and x < 5.0);
+}

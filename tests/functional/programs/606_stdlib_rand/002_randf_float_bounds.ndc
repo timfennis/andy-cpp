@@ -1,0 +1,15 @@
+// randf accepts Float bounds
+for _ in 0..100 {
+    let x: Float = randf();
+    assert(x >= 0.0 and x < 1.0);
+}
+
+for _ in 0..100 {
+    let x: Float = randf(0.5);
+    assert(x >= 0.0 and x < 0.5);
+}
+
+for _ in 0..100 {
+    let x: Float = randf(-2.5, 2.5);
+    assert(x >= -2.5 and x < 2.5);
+}

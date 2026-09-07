@@ -1,0 +1,4 @@
+// `0 ^ negative` is division by zero for every exact base. The rational base
+// used to reach num-rational directly and panic the whole process.
+// expect-error: division by zero
+print((0n/1n) ^ -1n);

@@ -1,0 +1,4 @@
+// randi takes Int bounds only. Number bounds are rejected when the call is
+// resolved rather than converted, so `10n` never silently loses precision.
+// expect-error: No function called 'randi'
+randi(10n);

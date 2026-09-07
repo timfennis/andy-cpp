@@ -15,41 +15,6 @@ impl Default for TypeSignature {
 }
 
 impl TypeSignature {
-    /// Matches a list of `ValueTypes` to a type signature. It can return `None` if there is no match or
-    /// `Some(num)` where num is the sum of the distances of the types. The type `Int`, is distance 1
-    /// away from `Number`, and `Number` is 1 distance from `Any`, then `Int` is distance 2 from `Any`.
-    pub fn calc_type_score(&self, types: &[StaticType]) -> Option<u32> {
-        match self {
-            Self::Variadic => Some(0),
-            Self::Exact(signature) => {
-                if types.len() == signature.len() {
-                    let mut acc = 0;
-                    for (a, b) in types.iter().zip(signature.iter()) {
-                        let dist = if a == &b.type_name {
-                            0
-                        } else if a.is_subtype(&b.type_name) {
-                            1
-                        } else {
-                            return None;
-                        };
-                        acc += dist;
-                    }
-
-                    return Some(acc);
-                }
-
-                None
-            }
-        }
-    }
-
-    pub fn arity(&self) -> Option<usize> {
-        match self {
-            Self::Variadic => None,
-            Self::Exact(args) => Some(args.len()),
-        }
-    }
-
     pub fn from_annotated_bindings(bindings: Vec<(String, Option<StaticType>)>) -> Self {
         Self::Exact(
             bindings
@@ -106,10 +71,8 @@ pub enum StaticType {
     Number,
     Float,
     Int,
-    Rational,
-    Complex,
 
-    // Sequences List<Int> -> List<Number>
+    // Sequences List<Int> -> Sequence<Int>
     Sequence(Box<Self>),
     List(Box<Self>),
     String,
@@ -154,8 +117,8 @@ impl StaticType {
     /// Must stay in sync with its match arms; the unit test
     /// `builtin_type_names_are_constructible` guards this.
     pub const BUILTIN_TYPE_NAMES: &'static [&'static str] = &[
-        "Any", "Never", "Bool", "Number", "Float", "Int", "Rational", "Complex", "String",
-        "Option", "Sequence", "List", "Iterator", "MinHeap", "MaxHeap", "Deque", "Tuple", "Map",
+        "Any", "Never", "Bool", "Number", "Float", "Int", "String", "Option", "Sequence", "List",
+        "Iterator", "MinHeap", "MaxHeap", "Deque", "Tuple", "Map",
     ];
 
     pub fn from_name_and_args(
@@ -169,8 +132,6 @@ impl StaticType {
             "Number" => Self::require_no_args(name, &args).map(|_| Self::Number),
             "Float" => Self::require_no_args(name, &args).map(|_| Self::Float),
             "Int" => Self::require_no_args(name, &args).map(|_| Self::Int),
-            "Rational" => Self::require_no_args(name, &args).map(|_| Self::Rational),
-            "Complex" => Self::require_no_args(name, &args).map(|_| Self::Complex),
             "String" => Self::require_no_args(name, &args).map(|_| Self::String),
             "Option" => {
                 Self::require_exactly_one_arg(name, args).map(|elem| Self::Option(Box::new(elem)))
@@ -260,7 +221,7 @@ impl StaticType {
     ///
     /// # Key Rules
     /// - `Any` is the top type (supertype of all types)
-    /// - `Number` > `{Float, Int, Rational, Complex}`
+    /// - `Int`, `Float`, and `Number` are sibling types
     /// - `Sequence<T>` > sequence types with element type T
     /// - Generic types are covariant in their type parameters
     /// - Function parameters are **contravariant**, returns are **covariant**
@@ -287,9 +248,6 @@ impl StaticType {
         match (self, other) {
             // Reflexivity: every type is a subtype of itself
             _ if self == other => true,
-
-            // Number hierarchy: all numeric types are subtypes of Number
-            (Self::Float | Self::Int | Self::Rational | Self::Complex, Self::Number) => true,
 
             // Sequence hierarchy: specific sequences are subtypes of Sequence<T>
             // where T is their element type (covariant)
@@ -377,8 +335,8 @@ impl StaticType {
     /// The LUB is the most specific type that is a supertype of both inputs.
     ///
     /// # Examples
-    /// - `lub(Int, Float) = Number`
-    /// - `lub(List<Int>, List<Float>) = List<Number>`
+    /// - `lub(Int, Float) = Any`
+    /// - `lub(List<Int>, List<Float>) = List<Any>`
     /// - `lub(List<Int>, Iterator<Int>) = Sequence<Int>`
     /// - `lub(Int, String) = Any`
     pub fn lub(&self, other: &Self) -> Self {
@@ -409,12 +367,6 @@ impl StaticType {
         }
 
         match (self, other) {
-            // Number type lattice: all numeric types join to Number
-            (Self::Float, Self::Int | Self::Rational | Self::Complex)
-            | (Self::Int, Self::Float | Self::Rational | Self::Complex)
-            | (Self::Rational, Self::Float | Self::Int | Self::Complex)
-            | (Self::Complex, Self::Float | Self::Int | Self::Rational) => Self::Number,
-
             // Covariant generic types: compute LUB pointwise
             (Self::Option(s), Self::Option(t)) => Self::Option(Box::new(s.lub(t))),
             (Self::List(s), Self::List(t)) => Self::List(Box::new(s.lub(t))),
@@ -575,10 +527,7 @@ impl StaticType {
     }
 
     pub fn is_number(&self) -> bool {
-        matches!(
-            self,
-            Self::Number | Self::Float | Self::Int | Self::Rational | Self::Complex
-        )
+        matches!(self, Self::Number | Self::Float | Self::Int)
     }
 
     /// Checks whether some runtime value could satisfy both `self` and `other`.
@@ -751,8 +700,6 @@ impl StaticType {
             | Self::Number
             | Self::Float
             | Self::Int
-            | Self::Rational
-            | Self::Complex
             | Self::Map { .. }
             | Self::Struct { .. } // for now, we won't have positional unpacking
             | Self::Never => None,
@@ -781,8 +728,6 @@ impl fmt::Display for StaticType {
             Self::Number => write!(f, "Number"),
             Self::Float => write!(f, "Float"),
             Self::Int => write!(f, "Int"),
-            Self::Rational => write!(f, "Rational"),
-            Self::Complex => write!(f, "Complex"),
             Self::Sequence(elem) => write!(f, "Sequence<{elem}>"),
             Self::List(elem) => write!(f, "List<{elem}>"),
             Self::String => write!(f, "String"),
@@ -886,5 +831,15 @@ mod test {
                 "`{name}` is listed in BUILTIN_TYPE_NAMES but from_name_and_args rejects it"
             );
         }
+    }
+
+    #[test]
+    fn public_numeric_types_are_siblings() {
+        assert!(!StaticType::Int.is_subtype(&StaticType::Number));
+        assert!(!StaticType::Float.is_subtype(&StaticType::Number));
+        assert_eq!(StaticType::Int.lub(&StaticType::Float), StaticType::Any);
+        assert_eq!(StaticType::Int.lub(&StaticType::Number), StaticType::Any);
+        assert!(StaticType::from_name_and_args("Rational", vec![]).is_err());
+        assert!(StaticType::from_name_and_args("Complex", vec![]).is_err());
     }
 }

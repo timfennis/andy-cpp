@@ -11,9 +11,9 @@
 /// since the generated code differs based on ownership.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NdcType {
-    /// Owned `Number`
+    /// Owned `AdvancedNumber`
     Number,
-    /// `&Number`
+    /// `&AdvancedNumber`
     NumberRef,
     /// `f64`
     F64,
@@ -112,7 +112,7 @@ fn classify_owned(ty: &syn::Type) -> Option<NdcType> {
 
     let last = segments.last()?;
     match last.ident.to_string().as_str() {
-        "Number" => Some(NdcType::Number),
+        "AdvancedNumber" => Some(NdcType::Number),
         "f64" => Some(NdcType::F64),
         "bool" => Some(NdcType::Bool),
         "i64" => Some(NdcType::I64),

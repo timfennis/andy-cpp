@@ -37,7 +37,6 @@ pub fn register(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     index::register(env);
     list::ops::register(env);
     list::register(env);
-    math::f64::register(env);
     math::register(env);
     #[cfg(feature = "rand")]
     rand::register(env);

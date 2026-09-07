@@ -1,0 +1,2 @@
+// expect-error: unknown type `Complex`
+let value: Complex = 1i;

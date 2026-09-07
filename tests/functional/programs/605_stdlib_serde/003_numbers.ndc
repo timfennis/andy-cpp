@@ -1,7 +1,7 @@
 // Big integers round-trip exactly instead of degrading to floats
-let big = 2 ^ 100 + 1;
+let big = 2n ^ 100n + 1n;
 assert_eq(json_decode(json_encode(big)), big);
-assert_eq(json_decode("123456789123456789123456789"), 123456789123456789123456789);
+assert_eq(json_decode("123456789123456789123456789"), 123456789123456789123456789n);
 
 // Numbers written with a decimal point or exponent decode to floats
 assert_eq(json_decode("1e2"), 100.0);

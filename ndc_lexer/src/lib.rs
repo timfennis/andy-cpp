@@ -11,7 +11,7 @@ use string::StringLexer;
 
 pub use source_db::SourceDb;
 pub use span::{SourceId, Span};
-pub use token::{Token, TokenLocation};
+pub use token::{NumericLiteral, Token, TokenLocation};
 
 pub struct Lexer<'a> {
     source: SourceIterator<'a>,

@@ -1469,9 +1469,8 @@ mod tests {
         assert_resolves_to(&mut tree, "locate", &call_sig, 0);
     }
 
-    // From the spec: distance(fn(Int) -> String, fn(Number) -> String) = 1.
-    // When two overloads in the same scope both match, the one whose params
-    // are a strict subtype (here `Int` is a subtype of `Number`) wins.
+    // Int and Number are siblings. An Int call must select the Int overload
+    // without treating the Number overload as a fallback candidate.
     #[test]
     fn more_specific_numeric_overload_wins() {
         let mut tree = ScopeTree::from_global_scope(vec![

@@ -7,11 +7,9 @@ The type system is hierarchical with `Any` at the root:
 * `Any`
   * [`Option<T>`](./types/option.md)
   * [`Bool`](./types/boolean.md)
-  * [`Number`](./types/number.md)
-    * `Int` — machine `i64` or arbitrary-precision `BigInt`, picked automatically
-    * `Float`
-    * `Complex`
-    * `Rational`
+  * [`Int`](./types/number.md) — checked signed 64-bit integers
+  * [`Float`](./types/number.md) — IEEE 754 `f64` values
+  * [`Number`](./types/number.md) — arbitrary-size, rational, floating-point, and complex values
   * `Sequence<T>`
     * [`String`](./types/string.md): a mutable list of characters
     * [`List<T>`](./types/list.md): a mutable list

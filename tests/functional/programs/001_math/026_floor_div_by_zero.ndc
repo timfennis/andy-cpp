@@ -1,4 +1,4 @@
 // Floor division by zero promotes to a float and yields infinity, the same
 // as `/` (it must not panic).
-print(5 \ 0);
+print(5n \ 0n);
 // expect-output: inf

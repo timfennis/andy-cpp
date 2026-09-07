@@ -263,7 +263,7 @@ fn map_type_path(p: &syn::TypePath) -> syn::Result<TokenStream> {
                 "Result requires angle bracketed arguments",
             )),
         },
-        "Number" => Ok(quote! { ndc_core::StaticType::Number }),
+        "AdvancedNumber" => Ok(quote! { ndc_core::StaticType::Number }),
         "MapValue" => Ok(quote! {
             ndc_core::StaticType::Map {
                 key: Box::new(ndc_core::StaticType::Any),

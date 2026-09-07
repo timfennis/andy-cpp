@@ -2,7 +2,8 @@
 // range (`-i64::MIN` does not fit in an i64). `Int::neg` and `Int::abs` used
 // to call `i.neg()` / `i.abs()` directly, which panics in debug builds and
 // silently wraps in release. They now promote to BigInt, yielding the correct
-// positive magnitude.
-// expect-output: 9223372036854775808 9223372036854775808 9223372036854775808
+// positive magnitude. Int arithmetic now reports the overflow instead of
+// promoting implicitly; Number remains arbitrary precision.
+// expect-error: integer negation overflowed
 let min = -9223372036854775807 - 1;
-print(-min, abs(min), abs(-min));
+print(-min);

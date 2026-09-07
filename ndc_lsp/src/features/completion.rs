@@ -497,11 +497,15 @@ mod tests {
             panic!("expected Array response");
         };
 
-        // One item per arity; type permutations within an arity fold into the
-        // common supertype (`Number` subsumes `Int` and `Float`).
+        // One item per arity; type permutations within an arity fold into a
+        // union display (`Int`, `Float` and `Number` are sibling types).
         assert_eq!(
             parameter_details(&items, "randf"),
-            vec!["()", "(Number)", "(Number, Number)"]
+            vec![
+                "()",
+                "(Int | Float | Number)",
+                "(Int | Number, Int | Number)"
+            ]
         );
     }
 
@@ -528,7 +532,10 @@ mod tests {
             panic!("expected Array response");
         };
 
-        assert_eq!(parameter_details(&items, "randf"), vec!["()", "(Number)"]);
+        assert_eq!(
+            parameter_details(&items, "randf"),
+            vec!["()", "(Number | Int)"]
+        );
     }
 
     #[test]

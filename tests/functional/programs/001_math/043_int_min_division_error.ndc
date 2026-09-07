@@ -1,0 +1,5 @@
+// Unlike the remainder, the quotient `i64::MIN / -1` is `2^63` and does not
+// fit in an Int, so division still reports the overflow.
+// expect-error: integer operation overflowed
+let min = -9223372036854775807 - 1;
+print(min / -1);

@@ -154,11 +154,10 @@ assert_eq(c.hits, 5);
 ```
 
 A field is a typed location, so an augmented assignment whose result would not
-fit the field type is rejected. For example `/` and `^` on integers may produce
-non-integer numbers:
+fit the field type is rejected:
 
 ```ndc
-c.hits /= 2; // ERROR: mismatched types: found Number but expected Int
+c.hits += 0.5; // ERROR: mismatched types: found Float but expected Int
 ```
 
 ## Reference semantics

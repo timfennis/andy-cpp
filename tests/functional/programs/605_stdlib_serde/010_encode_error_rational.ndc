@@ -1,2 +1,2 @@
-json_encode(10/3);
+json_encode(10n/3n);
 // expect-error: cannot convert a rational number to JSON

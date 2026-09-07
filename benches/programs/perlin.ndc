@@ -5,7 +5,7 @@ fn fade(t) => t * t * t * (t * (t * 6 - 15) + 10);
 
 fn lerp(a, b, t) => a + t * (b - a);
 
-fn gradient(h, x, y) => (vectors[h % 8] * (x, y)).sum
+fn gradient(h, x, y) => ((vectors[h % 8] * (x, y)) as Tuple<Float, Float>).sum
 
 fn perlin(x, y, perm) {
   let xi, yi = int(x) & 255, int(y) & 255;
@@ -33,4 +33,4 @@ fn benchmark_perlin(grid_size) {
 }
 
 let noise = benchmark_perlin(100);
-print("Min:", noise.min, "Max:", noise.max, "Avg:", (noise.sum / noise.len));
+print("Min:", noise.min, "Max:", noise.max, "Avg:", ((noise as List<Float>).sum / noise.len));

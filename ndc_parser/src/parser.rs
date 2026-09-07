@@ -8,7 +8,7 @@ use crate::expression::{Expression, StructField};
 use crate::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
 use crate::type_expr::TypeExpr;
 use ndc_core::{Parameter, StaticType, TypeSignature};
-use ndc_lexer::{Span, Token, TokenLocation};
+use ndc_lexer::{NumericLiteral, Span, Token, TokenLocation};
 
 pub struct Parser {
     tokens: Vec<TokenLocation>,
@@ -794,7 +794,8 @@ impl Parser {
                             ..
                         } => {
                             *start = Some(Box::new(
-                                Expression::Int64Literal(0).to_location(index_expression.span),
+                                Expression::NumericLiteral(NumericLiteral::Int64(0))
+                                    .to_location(index_expression.span),
                             ));
                         }
                         _ => {}
@@ -1067,10 +1068,7 @@ impl Parser {
         let expression = match token_location.token {
             Token::False => Expression::BoolLiteral(false),
             Token::True => Expression::BoolLiteral(true),
-            Token::Int64(num) => Expression::Int64Literal(num),
-            Token::Float64(num) => Expression::Float64Literal(num),
-            Token::BigInt(num) => Expression::BigIntLiteral(num),
-            Token::Complex(num) => Expression::ComplexLiteral(num),
+            Token::NumericLiteral(literal) => Expression::NumericLiteral(literal),
             Token::String(value) => Expression::StringLiteral(value),
             Token::Identifier(identifier) => Expression::Identifier {
                 name: identifier,

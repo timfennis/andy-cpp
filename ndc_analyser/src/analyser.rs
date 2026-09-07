@@ -3,7 +3,7 @@ use itertools::{Itertools, izip};
 use ndc_core::static_type::StaticTypeConstructionError;
 use ndc_core::r#struct::StructRegistry;
 use ndc_core::{StaticType, TypeSignature};
-use ndc_lexer::Span;
+use ndc_lexer::{NumericLiteral, Span};
 use ndc_parser::{
     AugmentedAssignmentPlan, Binding, Candidate, Expression, ExpressionLocation, ForBody,
     ForIteration, FunctionParameter, Lvalue, NodeId, TypeExpr,
@@ -255,9 +255,13 @@ impl Analyser {
         match expression {
             Expression::BoolLiteral(_) => Ok(StaticType::Bool),
             Expression::StringLiteral(_) => Ok(StaticType::String),
-            Expression::Int64Literal(_) | Expression::BigIntLiteral(_) => Ok(StaticType::Int),
-            Expression::Float64Literal(_) => Ok(StaticType::Float),
-            Expression::ComplexLiteral(_) => Ok(StaticType::Complex),
+            Expression::NumericLiteral(NumericLiteral::Int64(_)) => Ok(StaticType::Int),
+            Expression::NumericLiteral(NumericLiteral::Float64(_)) => Ok(StaticType::Float),
+            Expression::NumericLiteral(
+                NumericLiteral::NumberInt(_)
+                | NumericLiteral::NumberFloat(_)
+                | NumericLiteral::Complex(_),
+            ) => Ok(StaticType::Number),
             Expression::Continue | Expression::Break => Ok(StaticType::Never),
             Expression::Identifier {
                 name: ident,
@@ -1521,7 +1525,34 @@ mod tests {
                 "let values = [1]; values[0] += 0.5; values",
                 vec![("+".to_string(), add)],
             ),
-            StaticType::List(Box::new(StaticType::Number)),
+            StaticType::List(Box::new(StaticType::Any)),
+        );
+    }
+
+    #[test]
+    fn inferred_identifier_assignments_widen_subsequent_reads() {
+        assert_eq!(analyse_last_type("let x = 3; x = 0.5; x"), StaticType::Any,);
+
+        let add = StaticType::Function {
+            parameters: Some(vec![StaticType::Int, StaticType::Float]),
+            return_type: Box::new(StaticType::Float),
+        };
+        assert_eq!(
+            analyse_last_type_with_globals("let x = 3; x += 0.5; x", vec![("+".to_string(), add)],),
+            StaticType::Any,
+        );
+    }
+
+    #[test]
+    fn annotated_identifier_augmented_assignment_rejects_widening() {
+        let add = StaticType::Function {
+            parameters: Some(vec![StaticType::Int, StaticType::Float]),
+            return_type: Box::new(StaticType::Float),
+        };
+        assert_analysis_error(
+            "let x: Int = 3; x += 0.5;",
+            vec![("+".to_string(), add)],
+            "mismatched types: found Float but expected Int",
         );
     }
 

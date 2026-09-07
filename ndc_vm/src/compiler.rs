@@ -3,7 +3,7 @@ use crate::value::{CompiledFunction, Function};
 use crate::{Object, Value};
 use ndc_core::r#struct::StructRegistry;
 use ndc_core::{StaticType, TypeSignature};
-use ndc_lexer::Span;
+use ndc_lexer::{NumericLiteral, Span};
 use ndc_parser::{
     AugmentedAssignmentPlan, Binding, Candidate, CaptureSource, Expression, ExpressionLocation,
     ForBody, ForIteration, FunctionParameter, LogicalOperator, Lvalue, ResolvedVar,
@@ -212,20 +212,19 @@ impl Compiler {
                 let idx = self.ir.add_constant(Value::string(s));
                 self.ir.write(OpCode::Constant(idx), span);
             }
-            Expression::Int64Literal(i) => {
-                let idx = self.ir.add_constant(Value::int(i));
-                self.ir.write(OpCode::Constant(idx), span);
-            }
-            Expression::Float64Literal(f) => {
-                let idx = self.ir.add_constant(Value::float(f));
-                self.ir.write(OpCode::Constant(idx), span);
-            }
-            Expression::BigIntLiteral(i) => {
-                let idx = self.ir.add_constant(Value::bigint(i));
-                self.ir.write(OpCode::Constant(idx), span);
-            }
-            Expression::ComplexLiteral(c) => {
-                let idx = self.ir.add_constant(Value::complex(c));
+            Expression::NumericLiteral(literal) => {
+                let value = match literal {
+                    NumericLiteral::Int64(i) => Value::int(i),
+                    NumericLiteral::Float64(f) => Value::float(f),
+                    NumericLiteral::NumberInt(i) => {
+                        Value::number(crate::value::AdvancedNumber::Int(i))
+                    }
+                    NumericLiteral::NumberFloat(f) => {
+                        Value::number(crate::value::AdvancedNumber::Float(f))
+                    }
+                    NumericLiteral::Complex(c) => Value::complex(c),
+                };
+                let idx = self.ir.add_constant(value);
                 self.ir.write(OpCode::Constant(idx), span);
             }
             Expression::Identifier { name, resolved } => {

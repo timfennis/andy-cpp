@@ -1,0 +1,2 @@
+// expect-error: cannot be greater than
+randf(1, -1);

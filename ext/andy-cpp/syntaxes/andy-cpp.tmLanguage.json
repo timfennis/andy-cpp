@@ -58,7 +58,7 @@
         {
           "comment": "built-in type names used in annotations like `let x: Int` or `-> List<Int>`",
           "name": "support.type.andy-cpp",
-          "match": "\\b(Any|Never|Bool|Number|Float|Int|Rational|Complex|String|Option|Sequence|List|Iterator|MinHeap|MaxHeap|Deque|Tuple|Map)\\b"
+          "match": "\\b(Any|Never|Bool|Number|Float|Int|String|Option|Sequence|List|Iterator|MinHeap|MaxHeap|Deque|Tuple|Map)\\b"
         }
       ]
     },
@@ -200,18 +200,18 @@
           "name": "constant.numeric.complex.andy-cpp"
         },
         {
-          "comment": "Floats",
-          "match": "\\b([0-9][0-9_]*\\.[0-9][0-9_]*)\\b",
+          "comment": "Primitive Float and advanced Number float literals",
+          "match": "\\b([0-9][0-9_]*\\.[0-9][0-9_]*n?)\\b",
           "name": "constant.numeric.float.andy-cpp"
         },
         {
-          "comment": "Hexadecimal numbers",
-          "match": "\\b(0x[0-9A-Fa-f][0-9A-Fa-f_]*)\\b",
+          "comment": "Primitive Int and advanced Number hexadecimal literals",
+          "match": "\\b(0x[0-9A-Fa-f][0-9A-Fa-f_]*n?)\\b",
           "name": "constant.numeric.hex.andy-cpp"
         },
         {
-          "comment": "Ocatal n umbers",
-          "match": "\\b(0o[0-7][0-7]*)\\b",
+          "comment": "Primitive Int and advanced Number octal literals",
+          "match": "\\b(0o[0-7][0-7_]*n?)\\b",
           "name": "constant.numeric.octal.andy-cpp"
         },
         {
@@ -220,13 +220,13 @@
           "name": "constant.numeric.andy-cpp"
         },
         {
-          "comment": "Binary numbers",
-          "match": "\\b(0b[01][01_]*)\\b",
+          "comment": "Primitive Int and advanced Number binary literals",
+          "match": "\\b(0b[01][01_]*n?)\\b",
           "name": "constant.numeric.binary.andy-cpp"
         },
         {
-          "comment": "Integer numbers",
-          "match": "\\b([0-9][0-9_]*)\\b",
+          "comment": "Primitive Int and advanced Number decimal literals",
+          "match": "\\b([0-9][0-9_]*n?)\\b",
           "name": "constant.numeric.decimal.andy-cpp"
         },
         {

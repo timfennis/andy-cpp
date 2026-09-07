@@ -3,9 +3,7 @@ use crate::parser::Error as ParseError;
 use crate::type_expr::TypeExpr;
 use ndc_core::r#struct::StructId;
 use ndc_core::{StaticType, TypeSignature};
-use ndc_lexer::Span;
-use num::BigInt;
-use num::complex::Complex64;
+use ndc_lexer::{NumericLiteral, Span};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 /// Unique identity for an AST node. Used as a key in side tables (e.g. the
@@ -95,10 +93,7 @@ pub enum Expression {
     // Literals
     BoolLiteral(bool),
     StringLiteral(String),
-    Int64Literal(i64),
-    Float64Literal(f64),
-    BigIntLiteral(BigInt),
-    ComplexLiteral(Complex64),
+    NumericLiteral(NumericLiteral),
     Identifier {
         name: String,
         resolved: Binding,

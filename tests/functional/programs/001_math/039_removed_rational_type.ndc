@@ -1,0 +1,2 @@
+// expect-error: unknown type `Rational`
+let value: Rational = 1n / 2n;

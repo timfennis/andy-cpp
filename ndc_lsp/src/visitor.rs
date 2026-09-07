@@ -188,10 +188,7 @@ fn child_expressions(expr: &ExpressionLocation) -> Vec<&ExpressionLocation> {
         Expression::Identifier { .. }
         | Expression::BoolLiteral(_)
         | Expression::StringLiteral(_)
-        | Expression::Int64Literal(_)
-        | Expression::Float64Literal(_)
-        | Expression::BigIntLiteral(_)
-        | Expression::ComplexLiteral(_)
+        | Expression::NumericLiteral(_)
         | Expression::Break
         | Expression::Continue
         | Expression::StructDeclaration { .. } => {}
@@ -358,10 +355,7 @@ fn walk_expression(visitor: &mut impl AstVisitor, expr: &ExpressionLocation) {
         Expression::Identifier { .. }
         | Expression::BoolLiteral(_)
         | Expression::StringLiteral(_)
-        | Expression::Int64Literal(_)
-        | Expression::Float64Literal(_)
-        | Expression::BigIntLiteral(_)
-        | Expression::ComplexLiteral(_)
+        | Expression::NumericLiteral(_)
         | Expression::Break
         | Expression::Continue
         | Expression::StructDeclaration { .. } => {}

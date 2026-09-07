@@ -1,0 +1,4 @@
+// A cast asserts, it does not convert, and Int is not a Number under the
+// sibling numeric model — `Number(1)` is the conversion.
+// expect-error: invalid cast: Int can never be Number
+1 as Number

@@ -1,0 +1,12 @@
+// A remainder stays representable even when the quotient it implies does not:
+// `i64::MIN % -1` is 0 while `i64::MIN / -1` overflows. The checked remainder
+// reports that quotient overflow, so `%` and `%%` wrap instead of failing.
+let min = -9223372036854775807 - 1;
+assert_eq(min % -1, 0);
+assert_eq(min %% -1, 0);
+
+// ordinary remainder semantics are unchanged
+assert_eq(-7 % 3, -1);
+assert_eq(-7 %% 3, 2);
+assert_eq(7 % -3, 1);
+assert_eq(7 %% -3, 1);

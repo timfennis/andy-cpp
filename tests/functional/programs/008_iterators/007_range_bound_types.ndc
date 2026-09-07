@@ -1,0 +1,4 @@
+// Every non-Int bound used to claim the integer was too large. Only an
+// integer that genuinely does not fit is a size problem.
+// expect-error: range bounds must be Int, got Number
+for i in 0n..3n { print(i); }
