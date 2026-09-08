@@ -225,6 +225,13 @@ enum VmOffset {
     Range(usize, usize),
 }
 
+fn char_index_to_byte_offset(string: &str, index: usize) -> usize {
+    string
+        .char_indices()
+        .nth(index)
+        .map_or(string.len(), |(byte_offset, _)| byte_offset)
+}
+
 fn extract_vm_offset(index_value: &Value, size: usize) -> Result<VmOffset, VmError> {
     if let Value::Object(obj) = index_value
         && let Object::Iterator(iter) = obj.as_ref()
@@ -514,9 +521,13 @@ fn vm_set_at_index(container: &Value, index_value: &Value, rhs: Value) -> Result
                 let mut s = s.borrow_mut();
                 match extract_vm_offset(index_value, size)? {
                     VmOffset::Element(idx) => {
-                        s.replace_range(idx..=idx, &rhs_str);
+                        let from = char_index_to_byte_offset(&s, idx);
+                        let to = char_index_to_byte_offset(&s, idx + 1);
+                        s.replace_range(from..to, &rhs_str);
                     }
                     VmOffset::Range(from, to) => {
+                        let from = char_index_to_byte_offset(&s, from);
+                        let to = char_index_to_byte_offset(&s, to);
                         s.replace_range(from..to, &rhs_str);
                     }
                 }

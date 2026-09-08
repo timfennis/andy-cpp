@@ -1,3 +1,9 @@
 let str = "foobar";
 str[0] = "w";
 assert_eq(str, "woobar");
+
+let unicode = "aé🦀z";
+unicode[1] = "ø";
+assert_eq(unicode, "aø🦀z");
+unicode[2] = "X";
+assert_eq(unicode, "aøXz");

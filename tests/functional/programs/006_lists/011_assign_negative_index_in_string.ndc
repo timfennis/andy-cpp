@@ -1,3 +1,7 @@
 let str = "foobak";
 str[-1] = "r";
 assert_eq(str, "foobar");
+
+let unicode = "aé🦀z";
+unicode[-2] = "X";
+assert_eq(unicode, "aéXz");

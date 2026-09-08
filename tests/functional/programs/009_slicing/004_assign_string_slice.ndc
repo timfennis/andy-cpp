@@ -11,3 +11,6 @@ let s = "The world is mine";
 s[4..8] = "foo";
 assert_eq(s, "The food is mine");
 
+let unicode = "aé🦀z";
+unicode[1..3] = "Ω";
+assert_eq(unicode, "aΩz");
