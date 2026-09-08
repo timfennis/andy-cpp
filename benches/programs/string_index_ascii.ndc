@@ -1,0 +1,15 @@
+// 10,000 reads near the end of a 131,072-codepoint ASCII string.
+// Build by doubling so construction is small compared with O(n) indexing.
+let text = "abcd";
+for _ in 0..15 {
+    text <>= text;
+}
+let last = text.len - 1;
+let matches = 0;
+for i in 0..10_000 {
+    if text[last - i % 4] == "d" {
+        matches += 1;
+    }
+}
+assert_eq(matches, 2_500);
+print(matches);
