@@ -585,22 +585,31 @@ mod inner {
         ))
     }
 
-    /// Returns all prefixes of a sequence, each as a list.
+    fn string_prefixes(text: &str) -> Value {
+        Value::list(
+            text.chars()
+                .scan(String::new(), |acc, c| {
+                    acc.push(c);
+                    Some(Value::string(acc.clone()))
+                })
+                .collect(),
+        )
+    }
+
+    /// Returns all prefixes of the string as a list of strings.
+    #[function(name = "prefixes", return_type = Vec<String>)]
+    pub fn prefixes_string(text: &str) -> Value {
+        string_prefixes(text)
+    }
+
+    /// Returns all prefixes of a sequence, each as a list; for strings, returns string prefixes.
     #[function(return_type = Vec<_>)]
     pub fn prefixes(seq: SeqValue) -> anyhow::Result<Value> {
-        // Special case for String — produce string prefixes instead of lists of chars.
+        // A sequence-typed caller can still supply a string.
         if let Value::Object(ref obj) = seq
             && let Object::String(s) = obj.as_ref()
         {
-            return Ok(Value::list(
-                s.borrow()
-                    .chars()
-                    .scan(String::new(), |acc, c| {
-                        acc.push(c);
-                        Some(Value::string(acc.clone()))
-                    })
-                    .collect(),
-            ));
+            return Ok(string_prefixes(&s.borrow()));
         }
         Ok(Value::list(
             seq.try_into_iter()
@@ -613,20 +622,28 @@ mod inner {
         ))
     }
 
+    fn string_suffixes(text: &str) -> Value {
+        Value::list(
+            text.char_indices()
+                .map(|(i, _)| Value::string(text[i..].to_string()))
+                .collect(),
+        )
+    }
+
+    /// Returns all suffixes of the string as a list of strings.
+    #[function(name = "suffixes", return_type = Vec<String>)]
+    pub fn suffixes_string(text: &str) -> Value {
+        string_suffixes(text)
+    }
+
     /// Returns all suffixes of a sequence, each as a list; for strings, returns all trailing substrings.
     #[function(return_type = Vec<_>)]
     pub fn suffixes(seq: SeqValue) -> anyhow::Result<Value> {
-        // Special case for String — produce string suffixes instead of lists of chars.
+        // A sequence-typed caller can still supply a string.
         if let Value::Object(ref obj) = seq
             && let Object::String(s) = obj.as_ref()
         {
-            let borrowed = s.borrow();
-            return Ok(Value::list(
-                borrowed
-                    .char_indices()
-                    .map(|(i, _)| Value::string(borrowed[i..].to_string()))
-                    .collect(),
-            ));
+            return Ok(string_suffixes(&s.borrow()));
         }
         let out: Vec<Value> = seq
             .try_into_iter()
