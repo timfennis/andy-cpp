@@ -1,0 +1,16 @@
+// These annotations require the String overloads to infer List<String>.
+let prefixes: List<String> = "aé🦀".prefixes();
+let suffixes: List<String> = suffixes("aé🦀");
+assert_eq(prefixes, ["a", "aé", "aé🦀"]);
+assert_eq(suffixes, ["aé🦀", "é🦀", "🦀"]);
+
+let empty_prefixes: List<String> = "".prefixes();
+let empty_suffixes: List<String> = "".suffixes();
+assert_eq(empty_prefixes, []);
+assert_eq(empty_suffixes, []);
+
+// Prefixes and suffixes still include the entire input, but no empty string.
+assert_eq("x".prefixes(), ["x"]);
+assert_eq("x".suffixes(), ["x"]);
+assert_eq("abc".prefixes(), ["a", "ab", "abc"]);
+assert_eq("abc".suffixes(), ["abc", "bc", "c"]);

@@ -1,0 +1,25 @@
+// The general overload must retain string behavior when the concrete kind is hidden.
+let text: Sequence<String> = "aé🦀";
+assert_eq(text.prefixes(), ["a", "aé", "aé🦀"]);
+assert_eq(text.suffixes(), ["aé🦀", "é🦀", "🦀"]);
+let empty_text: Sequence<Any> = "";
+assert_eq(empty_text.prefixes(), []);
+assert_eq(empty_text.suffixes(), []);
+
+// Untyped parameters exercise runtime overload dispatch for both kinds.
+fn prefixes_of(value) => value.prefixes();
+fn suffixes_of(value) => value.suffixes();
+assert_eq(prefixes_of("ab"), ["a", "ab"]);
+assert_eq(suffixes_of("ab"), ["ab", "b"]);
+assert_eq(prefixes_of([1, 2]), [[1], [1, 2]]);
+assert_eq(suffixes_of([1, 2]), [[1, 2], [2]]);
+
+// Other sequences continue producing lists of lists.
+assert_eq([1, 2, 3].prefixes(), [[1], [1, 2], [1, 2, 3]]);
+assert_eq([1, 2, 3].suffixes(), [[1, 2, 3], [2, 3], [3]]);
+assert_eq((1, "a").prefixes(), [[1], [1, "a"]]);
+assert_eq((1, "a").suffixes(), [[1, "a"], ["a"]]);
+assert_eq((1..4).prefixes(), [[1], [1, 2], [1, 2, 3]]);
+assert_eq((1..4).suffixes(), [[1, 2, 3], [2, 3], [3]]);
+assert_eq([].prefixes(), []);
+assert_eq([].suffixes(), []);
