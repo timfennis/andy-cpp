@@ -1,0 +1,41 @@
+// Populate the index before each mutation, including writes through an alias.
+let s = "aé中😀";
+let alias = s;
+assert_eq(s[3], "😀");
+alias[1] = "xy";
+assert_eq(s.len, 5);
+assert_eq(s[1..4], "xy中");
+assert_eq(s[-1], "😀");
+
+s[1..4] = "Ω";
+assert_eq(s.len, 3);
+assert_eq(s[0..3], "aΩ😀");
+assert_eq(s[3..3], "");
+s.append("z");
+assert_eq(s[-1], "z");
+s.reverse();
+assert_eq(s[0], "z");
+assert_eq(s[-1], "a");
+
+s ++= s;
+assert_eq(s.len, 8);
+assert_eq(s[4..8], "z😀Ωa");
+s <>= "é";
+assert_eq(s[8], "é");
+
+// Copies have independent storage, including after an indexed read.
+let shallow = s.clone();
+let deep = s.deepcopy();
+assert_eq(shallow[0], "z");
+assert_eq(deep[0], "z");
+s[0] = "中";
+assert_eq(s[0], "中");
+assert_eq(shallow[0], "z");
+assert_eq(deep[0], "z");
+
+// Exercise the generic indexing overload as well as statically typed strings.
+fn at_end(value: Any) => value[-1];
+assert_eq(at_end(s), "é");
+s[0..s.len] = "";
+assert_eq(s.len, 0);
+assert_eq(s[0..0], "");

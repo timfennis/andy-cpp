@@ -222,6 +222,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "char_index"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47b4b5c964e3265da460e34f037984985900ce56b7aba4bbf7d38473d7aec3d2"
+
+[[package]]
 name = "ciborium"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1254,6 +1260,7 @@ name = "ndc_vm"
 version = "0.3.0"
 dependencies = [
  "ahash",
+ "char_index",
  "ndc_core",
  "ndc_lexer",
  "ndc_parser",

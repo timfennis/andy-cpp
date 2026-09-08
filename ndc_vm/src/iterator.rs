@@ -1,3 +1,4 @@
+use crate::value::VmString;
 use crate::{Object, OrdValue, Value, ValueIter};
 use std::cell::RefCell;
 use std::cmp::Reverse;
@@ -639,12 +640,12 @@ impl VmIterator for EnumerateIter {
 
 /// Iterates over string characters, yielding each as a single-char string
 pub struct StringIter {
-    string: Rc<RefCell<String>>,
+    string: Rc<VmString>,
     byte_offset: usize,
 }
 
 impl StringIter {
-    pub fn new(string: Rc<RefCell<String>>) -> Self {
+    pub fn new(string: Rc<VmString>) -> Self {
         Self {
             string,
             byte_offset: 0,
@@ -672,7 +673,7 @@ impl VmIterator for StringIter {
     fn deep_copy(&self) -> Option<SharedIterator> {
         let s = self.string.borrow().clone();
         Some(Rc::new(RefCell::new(Self {
-            string: Rc::new(RefCell::new(s)),
+            string: Rc::new(VmString::new(s)),
             byte_offset: self.byte_offset,
         })))
     }

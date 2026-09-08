@@ -1,10 +1,12 @@
 mod function;
 mod number;
 mod numeric;
+mod string;
 
 pub use function::*;
 pub use number::{AdvancedNumber, BinaryOperatorError, ExactFraction, NumberToFloatError};
 pub use numeric::{NumericMode, NumericRef};
+pub use string::VmString;
 
 use crate::iterator::SharedIterator;
 use ndc_core::StaticType;
@@ -64,7 +66,7 @@ pub enum Value {
 #[derive(Clone)]
 pub enum Object {
     Some(Value),
-    String(Rc<RefCell<String>>),
+    String(Rc<VmString>),
     List(RefCell<Vec<Value>>),
     Tuple(Vec<Value>),
     Map {
@@ -169,12 +171,12 @@ impl Value {
     }
 
     pub fn string<S: Into<String>>(string: S) -> Self {
-        Self::Object(Rc::new(Object::String(Rc::new(RefCell::new(
+        Self::Object(Rc::new(Object::String(Rc::new(VmString::new(
             string.into(),
         )))))
     }
 
-    pub fn from_string_rc(rc: Rc<RefCell<String>>) -> Self {
+    pub fn from_string_rc(rc: Rc<VmString>) -> Self {
         Self::Object(Rc::new(Object::String(rc)))
     }
 
@@ -217,9 +219,9 @@ impl Value {
     pub fn shallow_clone(&self) -> Self {
         match self {
             Self::Object(obj) => match obj.as_ref() {
-                Object::String(rc) => Self::Object(Rc::new(Object::String(Rc::new(RefCell::new(
-                    rc.borrow().clone(),
-                ))))),
+                Object::String(rc) => Self::Object(Rc::new(Object::String(Rc::new(
+                    VmString::new(rc.borrow().clone()),
+                )))),
                 Object::List(refcell) => Self::Object(Rc::new(Object::List(RefCell::new(
                     refcell.borrow().clone(),
                 )))),
@@ -597,7 +599,7 @@ impl Object {
     pub fn deep_copy(&self) -> Self {
         match self {
             Self::Some(v) => Self::Some(v.deep_copy()),
-            Self::String(rc) => Self::String(Rc::new(RefCell::new(rc.borrow().clone()))),
+            Self::String(rc) => Self::String(Rc::new(VmString::new(rc.borrow().clone()))),
             Self::List(refcell) => Self::List(RefCell::new(
                 refcell.borrow().iter().map(Value::deep_copy).collect(),
             )),
