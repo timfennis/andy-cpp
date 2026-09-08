@@ -62,6 +62,11 @@ pub enum UpvalueCell {
 }
 
 impl CompiledFunction {
+    #[must_use]
+    pub fn num_locals(&self) -> usize {
+        self.num_locals
+    }
+
     pub fn opcodes(&self) -> &[OpCode] {
         self.body.opcodes()
     }

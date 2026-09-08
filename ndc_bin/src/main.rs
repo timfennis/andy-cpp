@@ -164,7 +164,7 @@ fn main() -> anyhow::Result<()> {
 
             let string = fs::read_to_string(path)?;
 
-            let mut interpreter = Interpreter::new();
+            let mut interpreter = Interpreter::one_shot();
             interpreter.configure(ndc_stdlib::register);
 
             #[cfg(feature = "trace")]

@@ -28,6 +28,7 @@ pub struct Interpreter {
     /// `None` until the first `eval` call; kept alive afterwards so that
     /// variables declared on one line are visible on subsequent lines.
     repl_state: Option<(Vm, Compiler)>,
+    resumable: bool,
     #[cfg(feature = "trace")]
     tracer: Option<Box<dyn tracer::VmTracer>>,
 }
@@ -58,8 +59,21 @@ impl Interpreter {
             ),
             source_db: SourceDb::new(),
             repl_state: None,
+            resumable: true,
             #[cfg(feature = "trace")]
             tracer: None,
+        }
+    }
+
+    /// Create an interpreter for executing a complete program once.
+    ///
+    /// Unlike the default resumable interpreter used by the REPL, this uses
+    /// the optimizing compiler and does not retain state after execution.
+    #[must_use]
+    pub fn one_shot() -> Self {
+        Self {
+            resumable: false,
+            ..Self::from_capturing(false)
         }
     }
 
@@ -190,7 +204,7 @@ impl Interpreter {
         let analyser_checkpoint = self.analyser.checkpoint();
         let (expressions, _, mut timings) = self.parse_and_analyse(input, source_id)?;
         let vm_result = self.interpret_vm(input, expressions.into_iter());
-        if vm_result.is_err() {
+        if vm_result.is_err() || !self.resumable {
             self.analyser.restore(analyser_checkpoint);
         }
         let (value, vm_timings) = vm_result?;
@@ -259,6 +273,28 @@ impl Interpreter {
             .collect();
 
         let mut timings = ExecutionTimings::default();
+        if !self.resumable {
+            let code = measure(&mut timings, Phase::Compiling, || {
+                self.compile_one_shot(expressions)
+            })?;
+            let num_locals = code.num_locals();
+            let output = if self.capturing {
+                OutputSink::Buffer(Vec::new())
+            } else {
+                OutputSink::Stdout
+            };
+            let mut vm = Vm::new(code, globals).with_output(output);
+            #[cfg(feature = "trace")]
+            {
+                vm = vm.with_source(input);
+                if let Some(tracer) = self.tracer.take() {
+                    vm = vm.with_tracer(tracer);
+                }
+            }
+            measure(&mut timings, Phase::Running, || vm.run())?;
+            return Ok((vm.last_value(num_locals), timings));
+        }
+
         let result = match self.repl_state.take() {
             None => {
                 let output = if self.capturing {
@@ -311,6 +347,13 @@ impl Interpreter {
 
         Ok((result, timings))
     }
+
+    fn compile_one_shot(
+        &self,
+        expressions: impl Iterator<Item = ExpressionLocation>,
+    ) -> Result<CompiledFunction, ndc_vm::CompileError> {
+        Compiler::compile(expressions, Rc::clone(&self.struct_registry))
+    }
 }
 
 impl Default for Interpreter {
@@ -342,4 +385,38 @@ pub enum InterpreterError {
     },
     #[error("{0}")]
     Vm(#[from] ndc_vm::VmError),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndc_vm::chunk::OpCode;
+
+    #[test]
+    fn one_shot_compilation_runs_the_optimizer() {
+        let mut interpreter = Interpreter::one_shot();
+        let source_id = interpreter.source_db.add("<test>", "1;");
+        let (expressions, _, _) = interpreter
+            .parse_and_analyse("1;", source_id)
+            .expect("analysis should succeed");
+
+        let compiled = interpreter
+            .compile_one_shot(expressions.into_iter())
+            .expect("compilation should succeed");
+
+        assert_eq!(compiled.opcodes(), [OpCode::Halt]);
+    }
+
+    #[test]
+    fn one_shot_execution_does_not_retain_declarations() {
+        let mut interpreter = Interpreter::one_shot();
+        interpreter
+            .eval("let value = 1;")
+            .expect("first program should succeed");
+
+        assert!(
+            interpreter.eval("value;").is_err(),
+            "a one-shot interpreter must treat each program as isolated",
+        );
+    }
 }
