@@ -341,6 +341,7 @@ impl Analyser {
             }
             Expression::OpAssignment {
                 l_value,
+                l_value_span,
                 r_value,
                 operation,
                 plan,
@@ -402,10 +403,12 @@ impl Analyser {
                         // change the concrete left type. Reject it here rather
                         // than falling through to an ordinary operation whose
                         // erased return type could widen the same target.
-                        self.emit(AnalysisError::mismatched_types(
+                        self.emit(AnalysisError::augmented_operand_mismatch(
                             &right_type,
                             &left_type,
-                            *span,
+                            r_value.span,
+                            *l_value_span,
+                            operation,
                         ));
                         *plan = AugmentedAssignmentPlan::Unresolved;
                         None
@@ -1270,6 +1273,8 @@ pub struct AnalysisError {
     text: String,
     span: Span,
     help_text: Option<String>,
+    primary_label: Option<String>,
+    related_labels: Vec<(Span, String)>,
 }
 
 impl AnalysisError {
@@ -1283,11 +1288,47 @@ impl AnalysisError {
         self.help_text.as_deref()
     }
 
+    /// Label for the primary span, when the error can identify its role.
+    pub fn primary_label(&self) -> Option<&str> {
+        self.primary_label.as_deref()
+    }
+
+    /// Other source locations that explain the primary error.
+    pub fn related_labels(&self) -> &[(Span, String)] {
+        &self.related_labels
+    }
+
+    fn augmented_operand_mismatch(
+        found: &StaticType,
+        expected: &StaticType,
+        right_span: Span,
+        left_span: Span,
+        operation: &str,
+    ) -> Self {
+        let mut error = Self::mismatched_types(found, expected, right_span);
+        error.primary_label = Some(format!("right operand inferred as {found}"));
+        error.related_labels.push((
+            left_span,
+            format!(
+                "left operand has type {expected}; `{operation}=` requires a compatible right operand"
+            ),
+        ));
+        if *found == StaticType::Any {
+            error.help_text = Some(
+                "If the right operand is a recursive call, add an explicit return type to the function (such as `-> Bool` for a boolean result). Unannotated recursive calls use Any while the function body is checked."
+                    .to_string(),
+            );
+        }
+        error
+    }
+
     fn invalid_type_annotation(err: &StaticTypeConstructionError, span: Span) -> Self {
         Self {
             text: err.to_string(),
             span,
             help_text: Some(err.help_text().to_string()),
+            primary_label: None,
+            related_labels: Vec::new(),
         }
     }
 
@@ -1296,6 +1337,8 @@ impl AnalysisError {
             text: format!("type `{name}` does not take generic arguments"),
             span,
             help_text: None,
+            primary_label: None,
+            related_labels: Vec::new(),
         }
     }
 
@@ -1304,6 +1347,8 @@ impl AnalysisError {
             text: format!("Struct '{name}' is not allowed to shadow the built-in type '{name}'"),
             span,
             help_text: None,
+            primary_label: None,
+            related_labels: Vec::new(),
         }
     }
 
@@ -1312,6 +1357,8 @@ impl AnalysisError {
             text: format!("Illegal redefinition of struct '{name}'"),
             span,
             help_text: None,
+            primary_label: None,
+            related_labels: Vec::new(),
         }
     }
 
@@ -1320,6 +1367,8 @@ impl AnalysisError {
             text: format!("Illegal redefinition of field '{field}' in struct '{struct_name}'"),
             span,
             help_text: None,
+            primary_label: None,
+            related_labels: Vec::new(),
         }
     }
 
@@ -1330,6 +1379,8 @@ impl AnalysisError {
             ),
             span,
             help_text: None,
+            primary_label: None,
+            related_labels: Vec::new(),
         }
     }
 
@@ -1338,6 +1389,8 @@ impl AnalysisError {
             text: format!("mismatched types: found {found} but expected {expected}"),
             span,
             help_text: None,
+            primary_label: None,
+            related_labels: Vec::new(),
         }
     }
 
@@ -1346,6 +1399,8 @@ impl AnalysisError {
             text: format!("invalid cast: {found} can never be {target}"),
             span,
             help_text: None,
+            primary_label: None,
+            related_labels: Vec::new(),
         }
     }
 
@@ -1360,6 +1415,8 @@ impl AnalysisError {
             ),
             span,
             help_text: None,
+            primary_label: None,
+            related_labels: Vec::new(),
         }
     }
 
@@ -1368,6 +1425,8 @@ impl AnalysisError {
             text: format!("Illegal redefinition of parameter {param}"),
             span,
             help_text: None,
+            primary_label: None,
+            related_labels: Vec::new(),
         }
     }
     fn unable_to_index_into(typ: &StaticType, span: Span) -> Self {
@@ -1375,6 +1434,8 @@ impl AnalysisError {
             text: format!("Unable to index into {typ}"),
             span,
             help_text: None,
+            primary_label: None,
+            related_labels: Vec::new(),
         }
     }
     fn unable_to_unpack_type(typ: &StaticType, span: Span) -> Self {
@@ -1382,6 +1443,8 @@ impl AnalysisError {
             text: format!("Invalid unpacking of {typ}"),
             span,
             help_text: None,
+            primary_label: None,
+            related_labels: Vec::new(),
         }
     }
     fn lvalue_required_to_be_single_identifier(span: Span) -> Self {
@@ -1389,6 +1452,8 @@ impl AnalysisError {
             text: "This lvalue is required to be a single identifier".to_string(),
             span,
             help_text: None,
+            primary_label: None,
+            related_labels: Vec::new(),
         }
     }
 
@@ -1400,6 +1465,8 @@ impl AnalysisError {
             ),
             span,
             help_text: None,
+            primary_label: None,
+            related_labels: Vec::new(),
         }
     }
 
@@ -1423,6 +1490,8 @@ impl AnalysisError {
             text: format!("Unable to invoke {typ} as a function."),
             span,
             help_text: None,
+            primary_label: None,
+            related_labels: Vec::new(),
         }
     }
 
@@ -1431,6 +1500,8 @@ impl AnalysisError {
             text: format!("Identifier {ident} has not previously been declared"),
             span,
             help_text: None,
+            primary_label: None,
+            related_labels: Vec::new(),
         }
     }
 }

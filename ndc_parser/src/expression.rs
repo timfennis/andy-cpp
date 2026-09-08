@@ -124,6 +124,8 @@ pub enum Expression {
     },
     OpAssignment {
         l_value: Lvalue,
+        /// Original target span, including grouping and index delimiters.
+        l_value_span: Span,
         r_value: Box<ExpressionLocation>,
         operation: String,
         plan: AugmentedAssignmentPlan,

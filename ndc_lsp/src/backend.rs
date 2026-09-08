@@ -100,7 +100,7 @@ impl Backend {
                 .ok()
                 .map(|(expressions, analysis_result)| {
                     for err in &analysis_result.errors {
-                        diagnostics.push(diagnostics::analysis_error_to_diagnostic(text, err));
+                        diagnostics.push(diagnostics::analysis_error_to_diagnostic(text, uri, err));
                     }
                     (expressions, analysis_result)
                 })

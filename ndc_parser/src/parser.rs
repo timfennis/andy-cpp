@@ -391,6 +391,7 @@ impl Parser {
                 let expression = self.tuple_expression(Self::single_expression, false)?;
                 let end = expression.span;
                 let op_assign = Expression::OpAssignment {
+                    l_value_span: start,
                     l_value: Lvalue::try_from(maybe_lvalue)
                         .expect("guaranteed to produce an lvalue"),
                     r_value: Box::new(expression),
