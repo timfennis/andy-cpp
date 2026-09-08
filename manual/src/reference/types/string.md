@@ -5,7 +5,9 @@ iterate over a string you get strings of length 1. Just like in Rust strings are
 UTF-8. This means that you can't store arbitrary binary data in a String.
 
 Indexing into a String is done by UTF-8 codepoint (equivalent to Rust's `char`) rather than by byte offset.
-This means that indexing into a string is `O(n)` instead of `O(1)`.
+The first indexed read builds a character index in `O(n)` time. Subsequent reads use
+that cache: `O(1)` for ASCII strings and `O(log n)` in the worst case for Unicode strings.
+Mutating the string discards the cache, so the next indexed read rebuilds it.
 
 ```ndc
 let string = "I ❤ Andy C++";

@@ -1,10 +1,9 @@
 use ndc_macros::export_module;
-use ndc_vm::value::{SeqValue, Value};
+use ndc_vm::value::{SeqValue, Value, VmString};
 
-use std::cell::RefCell;
 use std::rc::Rc;
 
-type StringRepr = Rc<RefCell<String>>;
+type StringRepr = Rc<VmString>;
 
 use anyhow::{Context, anyhow};
 
