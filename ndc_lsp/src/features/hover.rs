@@ -29,7 +29,7 @@ pub fn hover(
 
     let node = node_at_offset(&state.ast, offset)?;
     let markdown = match &node.expression {
-        Expression::Identifier { name, resolved } if resolves_to_global(resolved) => {
+        Expression::Identifier { name, resolved, .. } if resolves_to_global(resolved) => {
             function_hover(name, functions).or_else(|| type_hover(state, node.id))
         }
         _ => type_hover(state, node.id),

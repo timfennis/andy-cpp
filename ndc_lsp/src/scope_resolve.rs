@@ -13,7 +13,9 @@
 //! stays.
 
 use ndc_lexer::{SourceId, Span};
-use ndc_parser::{Expression, ExpressionLocation, ForBody, ForIteration, Lvalue};
+use ndc_parser::{
+    BindingPattern, BindingPatternLocation, Expression, ExpressionLocation, ForBody, ForIteration,
+};
 
 /// A declaration discovered while walking the AST.
 pub struct Decl {
@@ -68,7 +70,7 @@ fn collect(expr: &ExpressionLocation, scope: Span, out: &mut Vec<Decl>) {
         Expression::VariableDeclaration { l_value, value, .. } => {
             // Visible only after the initializer, so `let x = x` resolves the RHS
             // to an outer binding rather than itself.
-            push_lvalue(l_value, scope, value.span.end(), out);
+            push_pattern(l_value, scope, value.span.end(), out);
             collect(value, scope, out);
         }
         Expression::FunctionDeclaration {
@@ -92,7 +94,7 @@ fn collect(expr: &ExpressionLocation, scope: Span, out: &mut Vec<Decl>) {
             // visible throughout it (the body follows the parameter list).
             let body_scope = body.span;
             for p in parameters {
-                push_lvalue(&p.lvalue, body_scope, p.span.offset(), out);
+                push_pattern(&p.lvalue, body_scope, p.span.offset(), out);
             }
             collect(body, body_scope, out);
         }
@@ -130,7 +132,7 @@ fn collect(expr: &ExpressionLocation, scope: Span, out: &mut Vec<Decl>) {
             for iteration in iterations {
                 match iteration {
                     ForIteration::Iteration { l_value, sequence } => {
-                        push_lvalue(l_value, loop_scope, sequence.span.end(), out);
+                        push_pattern(l_value, loop_scope, sequence.span.end(), out);
                         collect(sequence, scope, out);
                     }
                     ForIteration::Guard(e) => collect(e, loop_scope, out),
@@ -223,9 +225,14 @@ fn collect(expr: &ExpressionLocation, scope: Span, out: &mut Vec<Decl>) {
     }
 }
 
-fn push_lvalue(lvalue: &Lvalue, scope: Span, visible_from: usize, out: &mut Vec<Decl>) {
-    match lvalue {
-        Lvalue::Identifier {
+fn push_pattern(
+    pattern: &BindingPatternLocation,
+    scope: Span,
+    visible_from: usize,
+    out: &mut Vec<Decl>,
+) {
+    match &pattern.pattern {
+        BindingPattern::Identifier {
             identifier, span, ..
         } => out.push(Decl {
             name: identifier.clone(),
@@ -234,11 +241,10 @@ fn push_lvalue(lvalue: &Lvalue, scope: Span, visible_from: usize, out: &mut Vec<
             visible_from,
             is_function: false,
         }),
-        Lvalue::Sequence(lvalues) => {
-            for lv in lvalues {
-                push_lvalue(lv, scope, visible_from, out);
+        BindingPattern::Sequence(patterns) => {
+            for pattern in patterns {
+                push_pattern(pattern, scope, visible_from, out);
             }
         }
-        Lvalue::Index { .. } | Lvalue::Member { .. } => {}
     }
 }

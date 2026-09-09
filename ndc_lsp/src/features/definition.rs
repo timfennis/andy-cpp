@@ -38,9 +38,9 @@ pub fn goto_definition(state: &DocumentState, position: Position, uri: Url) -> O
 /// The identifier name the cursor is on, plus the document's `SourceId`.
 ///
 /// Handles both expression uses (`x`) and assignment targets (`x = 2`). A
-/// reassignment target is an [`ndc_parser::Lvalue`], not an expression node, so
+/// reassignment target is an [`ndc_parser::AssignmentTargetLocation`], so
 /// `node_at_offset` returns the enclosing assignment for it; we then look up the
-/// lvalue identifier directly. (Declaration/parameter/loop-variable lvalues are
+/// target identifier directly. (Declaration/parameter/loop-variable patterns are
 /// found too, but they aren't visible to themselves, so they resolve to nothing.)
 fn identifier_at(
     ast: &[ndc_parser::ExpressionLocation],
@@ -51,7 +51,7 @@ fn identifier_at(
     {
         return Some((name.clone(), node.span.source_id()));
     }
-    let mut finder = LvalueIdentFinder {
+    let mut finder = BindingIdentFinder {
         offset,
         found: None,
     };
@@ -59,14 +59,14 @@ fn identifier_at(
     finder.found
 }
 
-/// Finds the lvalue identifier whose span contains the cursor. Lvalue
-/// identifiers don't overlap, so the one containing the offset is unambiguous.
-struct LvalueIdentFinder {
+/// Finds the pattern or target identifier whose span contains the cursor.
+/// Identifier spans do not overlap, so the match is unambiguous.
+struct BindingIdentFinder {
     offset: usize,
     found: Option<(String, SourceId)>,
 }
 
-impl AstVisitor for LvalueIdentFinder {
+impl AstVisitor for BindingIdentFinder {
     fn on_declaration(
         &mut self,
         identifier: &str,
@@ -193,12 +193,36 @@ mod tests {
 
     #[test]
     fn jump_from_reassignment_target_to_declaration() {
-        // The `x` in `x = 2` is a use in write position (an lvalue, not an
+        // The `x` in `x = 2` is a use in write position (an assignment target, not an
         // expression node), but should still jump to its declaration.
         let src = "let x = 1;\nx = 2;";
         let state = analyse(src);
         let target = src.rfind("x").unwrap(); // `x` in `x = 2` on line 2
         let loc = def_at(&state, target).expect("definition found");
         assert_eq!(start_offset(&state, &loc), 4); // `let x` at byte 4
+    }
+
+    #[test]
+    fn grouped_destructuring_target_resolves_to_precise_binding_span() {
+        let src = "let ((left), [right]) = (1, [2]);\n((left), [right]) = (3, [4]);";
+        let state = analyse(src);
+        for name in ["left", "right"] {
+            let loc = def_at(&state, src.rfind(name).unwrap()).expect("definition found");
+            assert_eq!(start_offset(&state, &loc), src.find(name).unwrap());
+            assert_eq!(
+                state.line_index.offset(&state.source, loc.range.end),
+                Some(src.find(name).unwrap() + name.len()),
+            );
+        }
+    }
+
+    #[test]
+    fn indexed_assignment_visits_receiver_and_index_expressions() {
+        let src = "let values = [1]; let index = 0; values[index] = 2;";
+        let state = analyse(src);
+        for name in ["values", "index"] {
+            let loc = def_at(&state, src.rfind(name).unwrap()).expect("definition found");
+            assert_eq!(start_offset(&state, &loc), src.find(name).unwrap());
+        }
     }
 }

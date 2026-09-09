@@ -1,7 +1,7 @@
 #![allow(unused_crate_dependencies)]
 
 use ndc_lexer::{Lexer, SourceId};
-use ndc_parser::{Expression, ExpressionLocation, Lvalue, Parser};
+use ndc_parser::{AssignmentTarget, Expression, ExpressionLocation, Parser};
 
 fn parse_one(source: &str) -> ExpressionLocation {
     let tokens = Lexer::new(source, SourceId::SYNTHETIC)
@@ -58,7 +58,7 @@ fn invoked_dot_is_call_with_receiver_as_first_argument() {
 }
 
 #[test]
-fn member_assignment_has_a_member_lvalue() {
+fn member_assignment_has_a_member_target() {
     let expression = parse_one("foo.bar = value");
 
     let Expression::Assignment { l_value, .. } = expression.expression else {
@@ -66,8 +66,8 @@ fn member_assignment_has_a_member_lvalue() {
     };
 
     assert!(matches!(
-        l_value,
-        Lvalue::Member {
+        l_value.target,
+        AssignmentTarget::Member {
             member,
             receiver,
             ..
@@ -101,7 +101,7 @@ fn member_destructuring_is_not_assignable() {
 }
 
 #[test]
-fn member_augmented_assignment_has_a_member_lvalue() {
+fn member_augmented_assignment_has_a_member_target() {
     let expression = parse_one("foo.bar += value");
 
     let Expression::OpAssignment {
@@ -116,8 +116,8 @@ fn member_augmented_assignment_has_a_member_lvalue() {
 
     assert_eq!(operation, "+");
     assert!(matches!(
-        l_value,
-        Lvalue::Member { member, .. } if member == "bar"
+        l_value.target,
+        AssignmentTarget::Member { member, .. } if member == "bar"
     ));
 }
 

@@ -1,6 +1,8 @@
 use ndc_core::StaticType;
 use ndc_lexer::Span;
-use ndc_parser::{Expression, ExpressionLocation, FunctionParameter, Lvalue};
+use ndc_parser::{
+    BindingPattern, BindingPatternLocation, Expression, ExpressionLocation, FunctionParameter,
+};
 use tower_lsp::lsp_types::{DocumentSymbol, SymbolKind};
 
 use crate::util::LineIndex;
@@ -53,7 +55,7 @@ fn collect_symbol(
             ));
         }
         Expression::VariableDeclaration { l_value, value, .. } => {
-            push_lvalue_symbols(l_value, expr.span, text, line_index, out);
+            push_pattern_symbols(l_value, expr.span, text, line_index, out);
             // A lambda bound to a variable should still appear in the outline.
             collect_symbol(value, text, line_index, out);
         }
@@ -110,15 +112,15 @@ fn collect_children(
     }
 }
 
-fn push_lvalue_symbols(
-    lvalue: &Lvalue,
+fn push_pattern_symbols(
+    pattern: &BindingPatternLocation,
     decl_span: Span,
     text: &str,
     line_index: &LineIndex,
     out: &mut Vec<DocumentSymbol>,
 ) {
-    match lvalue {
-        Lvalue::Identifier {
+    match &pattern.pattern {
+        BindingPattern::Identifier {
             identifier,
             span,
             inferred_type,
@@ -135,12 +137,11 @@ fn push_lvalue_symbols(
                 Vec::new(),
             ));
         }
-        Lvalue::Sequence(lvalues) => {
-            for lv in lvalues {
-                push_lvalue_symbols(lv, decl_span, text, line_index, out);
+        BindingPattern::Sequence(patterns) => {
+            for pattern in patterns {
+                push_pattern_symbols(pattern, decl_span, text, line_index, out);
             }
         }
-        Lvalue::Index { .. } | Lvalue::Member { .. } => {}
     }
 }
 
@@ -148,8 +149,8 @@ fn push_lvalue_symbols(
 fn signature(parameters: &[FunctionParameter], return_type: Option<&StaticType>) -> String {
     let params = parameters
         .iter()
-        .map(|p| match &p.lvalue {
-            Lvalue::Identifier { identifier, .. } => identifier.clone(),
+        .map(|p| match &p.lvalue.pattern {
+            BindingPattern::Identifier { identifier, .. } => identifier.clone(),
             _ => "_".to_string(),
         })
         .collect::<Vec<_>>()

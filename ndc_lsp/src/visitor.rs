@@ -1,6 +1,9 @@
 use ndc_core::StaticType;
 use ndc_lexer::Span;
-use ndc_parser::{Expression, ExpressionLocation, ForBody, ForIteration, Lvalue, NodeId};
+use ndc_parser::{
+    AssignmentTarget, AssignmentTargetLocation, BindingPattern, BindingPatternLocation, Expression,
+    ExpressionLocation, ForBody, ForIteration, NodeId,
+};
 
 /// Trait for visiting interesting nodes during an AST walk.
 ///
@@ -78,14 +81,13 @@ fn find_node_at<'a>(
 
 /// The expression-typed children of a node. Mirrors the structure walked by
 /// [`walk_expression`], but returns references so callers can search for a node
-/// rather than visiting via the [`AstVisitor`] trait. Lvalue (declaration)
-/// positions are not expression children and are intentionally omitted, except
-/// for the expression operands inside an `Lvalue::Index`.
+/// rather than visiting via the [`AstVisitor`] trait. Binding patterns are not
+/// expression children. Assignment targets contribute their receiver and index
+/// expressions.
 fn child_expressions(expr: &ExpressionLocation) -> Vec<&ExpressionLocation> {
     let mut out: Vec<&ExpressionLocation> = Vec::new();
     match &expr.expression {
-        Expression::VariableDeclaration { l_value, value, .. } => {
-            push_lvalue_index(l_value, &mut out);
+        Expression::VariableDeclaration { value, .. } => {
             out.push(value);
         }
         Expression::FunctionDeclaration { body, .. } => out.push(body),
@@ -114,8 +116,7 @@ fn child_expressions(expr: &ExpressionLocation) -> Vec<&ExpressionLocation> {
         Expression::For { iterations, body } => {
             for iteration in iterations {
                 match iteration {
-                    ForIteration::Iteration { l_value, sequence } => {
-                        push_lvalue_index(l_value, &mut out);
+                    ForIteration::Iteration { sequence, .. } => {
                         out.push(sequence);
                     }
                     ForIteration::Guard(e) => out.push(e),
@@ -148,7 +149,7 @@ fn child_expressions(expr: &ExpressionLocation) -> Vec<&ExpressionLocation> {
         | Expression::OpAssignment {
             l_value, r_value, ..
         } => {
-            push_lvalue_index(l_value, &mut out);
+            push_target_expressions(l_value, &mut out);
             out.push(r_value);
         }
         Expression::Call {
@@ -196,21 +197,23 @@ fn child_expressions(expr: &ExpressionLocation) -> Vec<&ExpressionLocation> {
     out
 }
 
-/// Push the expression operands of an `Lvalue::Index` (the indexed value and
-/// the index expression) so they participate in position lookup.
-fn push_lvalue_index<'a>(lvalue: &'a Lvalue, out: &mut Vec<&'a ExpressionLocation>) {
-    match lvalue {
-        Lvalue::Index { value, index, .. } => {
+/// Push receiver and index expressions so they participate in position lookup.
+fn push_target_expressions<'a>(
+    target: &'a AssignmentTargetLocation,
+    out: &mut Vec<&'a ExpressionLocation>,
+) {
+    match &target.target {
+        AssignmentTarget::Index { value, index, .. } => {
             out.push(value);
             out.push(index);
         }
-        Lvalue::Member { receiver, .. } => out.push(receiver),
-        Lvalue::Sequence(lvalues) => {
-            for lv in lvalues {
-                push_lvalue_index(lv, out);
+        AssignmentTarget::Member { receiver, .. } => out.push(receiver),
+        AssignmentTarget::Sequence(targets) => {
+            for target in targets {
+                push_target_expressions(target, out);
             }
         }
-        Lvalue::Identifier { .. } => {}
+        AssignmentTarget::Identifier { .. } => {}
     }
 }
 
@@ -222,7 +225,7 @@ fn walk_expression(visitor: &mut impl AstVisitor, expr: &ExpressionLocation) {
             annotated_type,
             value,
         } => {
-            walk_lvalue(visitor, l_value, annotated_type.is_some());
+            walk_pattern(visitor, l_value, annotated_type.is_some());
             walk_expression(visitor, value);
         }
         Expression::FunctionDeclaration {
@@ -233,7 +236,7 @@ fn walk_expression(visitor: &mut impl AstVisitor, expr: &ExpressionLocation) {
             ..
         } => {
             for p in parameters {
-                walk_lvalue(visitor, &p.lvalue, p.annotation.is_some());
+                walk_pattern(visitor, &p.lvalue, p.annotation.is_some());
             }
             visitor.on_function_declaration(
                 resolved_return_type.as_ref(),
@@ -274,7 +277,7 @@ fn walk_expression(visitor: &mut impl AstVisitor, expr: &ExpressionLocation) {
             for iteration in iterations {
                 match iteration {
                     ForIteration::Iteration { l_value, sequence } => {
-                        walk_lvalue(visitor, l_value, false);
+                        walk_pattern(visitor, l_value, false);
                         walk_expression(visitor, sequence);
                     }
                     ForIteration::Guard(expr) => walk_expression(visitor, expr),
@@ -309,7 +312,7 @@ fn walk_expression(visitor: &mut impl AstVisitor, expr: &ExpressionLocation) {
         | Expression::OpAssignment {
             l_value, r_value, ..
         } => {
-            walk_lvalue(visitor, l_value, false);
+            walk_target(visitor, l_value);
             walk_expression(visitor, r_value);
         }
         Expression::Call {
@@ -362,25 +365,45 @@ fn walk_expression(visitor: &mut impl AstVisitor, expr: &ExpressionLocation) {
     }
 }
 
-fn walk_lvalue(visitor: &mut impl AstVisitor, lvalue: &Lvalue, has_annotation: bool) {
-    match lvalue {
-        Lvalue::Identifier {
+fn walk_target(visitor: &mut impl AstVisitor, target: &AssignmentTargetLocation) {
+    match &target.target {
+        AssignmentTarget::Identifier {
             identifier,
             inferred_type,
             span,
             ..
         } => {
-            visitor.on_declaration(identifier, inferred_type.as_ref(), has_annotation, *span);
+            visitor.on_declaration(identifier, inferred_type.as_ref(), false, *span);
         }
-        Lvalue::Sequence(lvalues) => {
-            for lv in lvalues {
-                walk_lvalue(visitor, lv, has_annotation);
+        AssignmentTarget::Sequence(targets) => {
+            for target in targets {
+                walk_target(visitor, target);
             }
         }
-        Lvalue::Index { value, index, .. } => {
+        AssignmentTarget::Index { value, index, .. } => {
             walk_expression(visitor, value);
             walk_expression(visitor, index);
         }
-        Lvalue::Member { receiver, .. } => walk_expression(visitor, receiver),
+        AssignmentTarget::Member { receiver, .. } => walk_expression(visitor, receiver),
+    }
+}
+
+fn walk_pattern(
+    visitor: &mut impl AstVisitor,
+    pattern: &BindingPatternLocation,
+    has_annotation: bool,
+) {
+    match &pattern.pattern {
+        BindingPattern::Identifier {
+            identifier,
+            inferred_type,
+            span,
+            ..
+        } => visitor.on_declaration(identifier, inferred_type.as_ref(), has_annotation, *span),
+        BindingPattern::Sequence(patterns) => {
+            for pattern in patterns {
+                walk_pattern(visitor, pattern, has_annotation);
+            }
+        }
     }
 }

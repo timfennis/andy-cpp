@@ -1,8 +1,9 @@
 use std::fmt::Write;
 
 use crate::expression::{
-    AugmentedAssignmentPlan, Binding, ExpressionLocation, ForBody, ForIteration, FunctionParameter,
-    Lvalue, NodeId, NonBindingTarget,
+    AssignmentTarget, AssignmentTargetLocation, AugmentedAssignmentPlan, Binding, BindingPattern,
+    BindingPatternLocation, ExpressionLocation, ForBody, ForIteration, FunctionParameter, NodeId,
+    NonBindingTarget,
 };
 use crate::expression::{Expression, StructField};
 use crate::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
@@ -210,6 +211,7 @@ impl Parser {
                     Expression::Identifier {
                         name: operator_token_loc.token.to_string(),
                         resolved: Binding::None,
+                        identifier_span: operator_token_loc.span,
                     }
                     .to_location(operator_token_loc.span),
                 ),
@@ -223,6 +225,7 @@ impl Parser {
                         Expression::Identifier {
                             name: not_token.token.to_string(),
                             resolved: Binding::None,
+                            identifier_span: not_token.span,
                         }
                         .to_location(not_token.span),
                     ),
@@ -255,6 +258,7 @@ impl Parser {
                     Expression::Identifier {
                         name: operator.to_string(),
                         resolved: Binding::None,
+                        identifier_span: operator_span,
                     }
                     .to_location(operator_span),
                 ),
@@ -356,7 +360,7 @@ impl Parser {
         let maybe_lvalue = self.tuple_expression(Self::single_expression, false)?;
         let start = maybe_lvalue.span;
 
-        if !Lvalue::can_build_from_expression(&maybe_lvalue.expression) {
+        if !AssignmentTarget::can_build_from_expression(&maybe_lvalue.expression) {
             // In this case we got some kind of expression that we can't assign to. We can just return the expression as is.
             // But to improve error handling and stuff it would be nice if we could check if the next token matches one
             // of the assignment operator and throw an appropriate error.
@@ -371,14 +375,13 @@ impl Parser {
         }
 
         match self.peek_current_token() {
-            // NOTE: the parser supports every LValue but some might cause an error when declaring vars
             Some(Token::EqualsSign) => {
                 self.advance();
                 let expression = self.tuple_expression(Self::single_expression, false)?;
                 let end = expression.span;
                 let assignment_expression = Expression::Assignment {
-                    l_value: Lvalue::try_from(maybe_lvalue)
-                        .expect("guaranteed to produce an lvalue"),
+                    l_value: AssignmentTargetLocation::try_from(maybe_lvalue)
+                        .expect("guaranteed to produce an assignment target"),
                     r_value: Box::new(expression),
                 };
 
@@ -391,8 +394,8 @@ impl Parser {
                 let expression = self.tuple_expression(Self::single_expression, false)?;
                 let end = expression.span;
                 let op_assign = Expression::OpAssignment {
-                    l_value: Lvalue::try_from(maybe_lvalue)
-                        .expect("guaranteed to produce an lvalue"),
+                    l_value: AssignmentTargetLocation::try_from(maybe_lvalue)
+                        .expect("guaranteed to produce an assignment target"),
                     r_value: Box::new(expression),
                     operation: operation_identifier,
                     plan: AugmentedAssignmentPlan::Unresolved,
@@ -523,6 +526,7 @@ impl Parser {
                     Expression::Identifier {
                         name: operator_token_loc.token.to_string(),
                         resolved: Binding::None,
+                        identifier_span: operator_span,
                     }
                     .to_location(operator_span),
                 ),
@@ -670,6 +674,7 @@ impl Parser {
                     Expression::Identifier {
                         name: operator_token_loc.token.to_string(),
                         resolved: Binding::None,
+                        identifier_span: token_span,
                     }
                     .to_location(token_span),
                 ),
@@ -718,6 +723,7 @@ impl Parser {
                                     Expression::Identifier {
                                         name: member,
                                         resolved: Binding::None,
+                                        identifier_span: member_span,
                                     }
                                     .to_location(member_span),
                                 ),
@@ -747,8 +753,8 @@ impl Parser {
                     self.require_current_token_matches(&Token::Dot)?; // consume matched token
                     let l_value = self.require_identifier()?;
                     let identifier_span = l_value.span;
-                    let identifier = Lvalue::try_from(l_value)?;
-                    let Lvalue::Identifier { identifier, .. } = identifier else {
+                    let identifier = AssignmentTargetLocation::try_from(l_value)?;
+                    let AssignmentTarget::Identifier { identifier, .. } = identifier.target else {
                         unreachable!("Guaranteed to match by previous call to require_identifier")
                     };
 
@@ -816,6 +822,7 @@ impl Parser {
                                 Expression::Identifier {
                                     name: "[]".to_string(),
                                     resolved: Binding::None,
+                                    identifier_span: bracket_span,
                                 }
                                 .to_location(bracket_span),
                             ),
@@ -958,9 +965,9 @@ impl Parser {
     fn for_iteration(&mut self) -> Result<ForIteration, Error> {
         let maybe_lvalue = self.tuple_expression(Self::primary, false)?;
         let lvalue_span = maybe_lvalue.span;
-        let l_value = Lvalue::try_from(maybe_lvalue)?;
+        let l_value = AssignmentTargetLocation::try_from(maybe_lvalue)?;
 
-        if let Some(target) = l_value.non_binding_target() {
+        let l_value = BindingPatternLocation::try_from(l_value).map_err(|target| {
             let help = match target {
                 NonBindingTarget::Member => {
                     "A for loop introduces a new binding for each iteration; a struct field like `foo.bar` cannot be an iteration variable."
@@ -969,12 +976,12 @@ impl Parser {
                     "A for loop introduces a new binding for each iteration; an indexed element like `foo[index]` cannot be an iteration variable."
                 }
             };
-            return Err(Error::with_help(
+            Error::with_help(
                 "Invalid iteration variable".to_string(),
                 lvalue_span,
                 help.to_string(),
-            ));
-        }
+            )
+        })?;
 
         self.require_current_token_matches(&Token::In)?;
 
@@ -1073,6 +1080,7 @@ impl Parser {
             Token::Identifier(identifier) => Expression::Identifier {
                 name: identifier,
                 resolved: Binding::None,
+                identifier_span: token_location.span,
             },
             _ => {
                 return Err(Error::text(
@@ -1661,7 +1669,15 @@ impl Parser {
         let maybe_lvalue = self.single_expression()?;
         let lvalue_span = maybe_lvalue.span;
 
-        let Ok(lvalue @ Lvalue::Identifier { .. }) = Lvalue::try_from(maybe_lvalue) else {
+        let Some(
+            lvalue @ BindingPatternLocation {
+                pattern: BindingPattern::Identifier { .. },
+                ..
+            },
+        ) = AssignmentTargetLocation::try_from(maybe_lvalue)
+            .ok()
+            .and_then(|target| BindingPatternLocation::try_from(target).ok())
+        else {
             return Err(Error::with_help(
                 "Expected parameter name".to_string(),
                 lvalue_span,
@@ -1690,11 +1706,11 @@ impl Parser {
         })
     }
 
-    pub fn named_binding(&mut self) -> Result<(Lvalue, Option<TypeExpr>), Error> {
+    pub fn named_binding(&mut self) -> Result<(BindingPatternLocation, Option<TypeExpr>), Error> {
         let maybe_lvalue = self.tuple_expression(Self::single_expression, false)?;
         let lvalue_span = maybe_lvalue.span;
 
-        let Ok(lvalue) = Lvalue::try_from(maybe_lvalue) else {
+        let Ok(lvalue) = AssignmentTargetLocation::try_from(maybe_lvalue) else {
             return Err(Error::with_help(
                 "Invalid assignment target".to_string(),
                 lvalue_span,
@@ -1702,7 +1718,7 @@ impl Parser {
             ));
         };
 
-        if let Some(target) = lvalue.non_binding_target() {
+        let lvalue = BindingPatternLocation::try_from(lvalue).map_err(|target| {
             let help = match target {
                 NonBindingTarget::Member => {
                     "`let` introduces a new binding; assign to a field with `foo.bar = value` instead."
@@ -1711,12 +1727,12 @@ impl Parser {
                     "`let` introduces a new binding; assign to an element with `foo[index] = value` instead."
                 }
             };
-            return Err(Error::with_help(
+            Error::with_help(
                 "Invalid declaration target".to_string(),
                 lvalue_span,
                 help.to_string(),
-            ));
-        }
+            )
+        })?;
 
         let annotated_type = if self.peek_current_token() == Some(&Token::Colon) {
             self.advance();

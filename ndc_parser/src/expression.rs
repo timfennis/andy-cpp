@@ -97,6 +97,11 @@ pub enum Expression {
     Identifier {
         name: String,
         resolved: Binding,
+        /// The identifier token's range. When parsing `(foo)`, the parser reuses
+        /// the identifier expression and widens `ExpressionLocation.span` to
+        /// include the parentheses. This field still covers only `foo`, so a
+        /// binding pattern can use it as the go-to-definition destination.
+        identifier_span: Span,
     },
     Statement(Box<ExpressionLocation>),
     Logical {
@@ -114,16 +119,16 @@ pub enum Expression {
         requires_check: bool,
     },
     VariableDeclaration {
-        l_value: Lvalue,
+        l_value: BindingPatternLocation,
         annotated_type: Option<TypeExpr>,
         value: Box<ExpressionLocation>,
     },
     Assignment {
-        l_value: Lvalue,
+        l_value: AssignmentTargetLocation,
         r_value: Box<ExpressionLocation>,
     },
     OpAssignment {
-        l_value: Lvalue,
+        l_value: AssignmentTargetLocation,
         r_value: Box<ExpressionLocation>,
         operation: String,
         plan: AugmentedAssignmentPlan,
@@ -204,7 +209,7 @@ pub enum Expression {
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum ForIteration {
     Iteration {
-        l_value: Lvalue,
+        l_value: BindingPatternLocation,
         sequence: ExpressionLocation,
     },
     Guard(ExpressionLocation),
@@ -234,7 +239,7 @@ pub struct StructField {
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct FunctionParameter {
-    pub lvalue: Lvalue,
+    pub lvalue: BindingPatternLocation,
     pub annotation: Option<TypeExpr>,
     pub resolved_type: Option<StaticType>,
     pub span: Span,
@@ -246,7 +251,7 @@ impl FunctionParameter {
             params
                 .iter()
                 .map(|p| {
-                    let Lvalue::Identifier { identifier, .. } = &p.lvalue else {
+                    let BindingPattern::Identifier { identifier, .. } = &p.lvalue.pattern else {
                         unreachable!(
                             "parameter list may only contain identifiers {:?} found.",
                             p.lvalue
@@ -260,8 +265,8 @@ impl FunctionParameter {
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
-pub enum Lvalue {
-    // Example: `let foo = ...`
+pub enum AssignmentTarget {
+    // Example: `foo = ...`
     Identifier {
         identifier: String,
         resolved: Option<ResolvedVar>,
@@ -275,8 +280,8 @@ pub enum Lvalue {
         resolved_set: Option<Binding>,
         resolved_get: Option<Binding>,
     },
-    // Example: `let a, b = ...`
-    Sequence(Vec<Self>),
+    // Example: `a, b = ...`
+    Sequence(Vec<AssignmentTargetLocation>),
     // Example: `a.b = ...`
     Member {
         receiver: Box<ExpressionLocation>,
@@ -320,14 +325,14 @@ impl ExpressionLocation {
 
     pub fn as_identifier(&self) -> &str {
         match &self.expression {
-            Expression::Identifier { name, resolved: _ } => name,
+            Expression::Identifier { name, .. } => name,
             _ => panic!("the parser should have guaranteed us the right type of expression"),
         }
     }
 
     pub fn to_identifier(self) -> String {
         match self.expression {
-            Expression::Identifier { name, resolved: _ } => name,
+            Expression::Identifier { name, .. } => name,
             _ => panic!("the parser should have guaranteed us the right type of expression"),
         }
     }
@@ -356,7 +361,7 @@ impl ExpressionLocation {
     }
 }
 
-impl Lvalue {
+impl AssignmentTarget {
     #[must_use]
     pub fn can_build_from_expression(expression: &Expression) -> bool {
         match expression {
@@ -368,7 +373,7 @@ impl Lvalue {
             Expression::List { values } | Expression::Tuple { values } => values
                 .iter()
                 .all(|el| Self::can_build_destructure_from_expression(&el.expression)),
-            // Parentheses around an lvalue are transparent: `(s.x) = 5` writes
+            // Parentheses around a target are transparent: `(s.x) = 5` writes
             // the same location as `s.x = 5`.
             Expression::Grouping(inner) => Self::can_build_from_expression(&inner.expression),
             _ => false,
@@ -387,69 +392,130 @@ impl Lvalue {
             expression => Self::can_build_from_expression(expression),
         }
     }
+}
 
-    /// The first target in this lvalue that writes through an existing value
-    /// rather than binding a new name, if any.
-    #[must_use]
-    pub fn non_binding_target(&self) -> Option<NonBindingTarget> {
-        match self {
-            Self::Identifier { .. } => None,
-            Self::Index { .. } => Some(NonBindingTarget::Index),
-            Self::Member { .. } => Some(NonBindingTarget::Member),
-            Self::Sequence(items) => items.iter().find_map(Self::non_binding_target),
-        }
-    }
+/// A declaration pattern, with identity independent of its source location.
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct BindingPatternLocation {
+    pub id: NodeId,
+    pub pattern: BindingPattern,
+    pub span: Span,
+}
 
-    pub fn new_identifier(identifier: String, span: Span) -> Self {
-        Self::Identifier {
-            identifier,
-            resolved: None,
-            span,
-            inferred_type: None,
-        }
+/// Syntax that introduces names. Index and member writes are not declarations.
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub enum BindingPattern {
+    Identifier {
+        identifier: String,
+        resolved: Option<ResolvedVar>,
+        /// The identifier token, which may be narrower than the pattern's span.
+        span: Span,
+        inferred_type: Option<StaticType>,
+    },
+    Sequence(Vec<BindingPatternLocation>),
+}
+
+/// A destination for a write, with the complete target's source range.
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct AssignmentTargetLocation {
+    pub id: NodeId,
+    pub target: AssignmentTarget,
+    pub span: Span,
+}
+
+impl TryFrom<AssignmentTargetLocation> for BindingPatternLocation {
+    type Error = NonBindingTarget;
+
+    fn try_from(value: AssignmentTargetLocation) -> Result<Self, Self::Error> {
+        let pattern = match value.target {
+            AssignmentTarget::Identifier {
+                identifier,
+                resolved,
+                span,
+                inferred_type,
+            } => BindingPattern::Identifier {
+                identifier,
+                resolved,
+                span,
+                inferred_type,
+            },
+            AssignmentTarget::Sequence(items) => BindingPattern::Sequence(
+                items
+                    .into_iter()
+                    .map(Self::try_from)
+                    .collect::<Result<_, _>>()?,
+            ),
+            AssignmentTarget::Index { .. } => return Err(NonBindingTarget::Index),
+            AssignmentTarget::Member { .. } => return Err(NonBindingTarget::Member),
+        };
+        Ok(Self {
+            id: value.id,
+            pattern,
+            span: value.span,
+        })
     }
 }
 
-impl TryFrom<ExpressionLocation> for Lvalue {
+impl TryFrom<ExpressionLocation> for AssignmentTargetLocation {
     type Error = ParseError;
 
+    /// Convert a parsed expression into an assignment target, reusing its NodeId
+    /// and source span. For `(object.field)`, remove the Grouping wrapper and use
+    /// its ID and span for the resulting member target. Discard the inner member
+    /// node's ID; keep the receiver expression and its ID.
     fn try_from(value: ExpressionLocation) -> Result<Self, Self::Error> {
-        match value.expression {
-            Expression::Identifier { name, .. } => Ok(Self::new_identifier(name, value.span)),
+        let target = match value.expression {
+            Expression::Identifier {
+                name,
+                identifier_span,
+                ..
+            } => AssignmentTarget::Identifier {
+                identifier: name,
+                resolved: None,
+                span: identifier_span,
+                inferred_type: None,
+            },
             Expression::Call {
                 function,
                 mut arguments,
             } if is_index_call(&function, &arguments) => {
                 let index = arguments.remove(1);
                 let container = arguments.remove(0);
-                Ok(Self::Index {
+                AssignmentTarget::Index {
                     value: Box::new(container),
                     index: Box::new(index),
                     resolved_set: None,
                     resolved_get: None,
-                })
+                }
             }
             Expression::MemberAccess {
                 receiver,
                 member,
                 member_span,
                 ..
-            } => Ok(Self::Member {
+            } => AssignmentTarget::Member {
                 receiver,
                 member,
                 member_span,
                 resolved_getter: None,
                 resolved_setter: None,
-            }),
-            Expression::List { values } | Expression::Tuple { values } => Ok(Self::Sequence(
-                values
-                    .into_iter()
-                    .map(Self::try_from)
-                    .collect::<Result<Vec<Self>, Self::Error>>()?,
-            )),
-            Expression::Grouping(value) => Self::try_from(*value),
-            _expr => Err(ParseError::text("invalid l-value".to_string(), value.span)),
-        }
+            },
+            Expression::List { values } | Expression::Tuple { values } => {
+                AssignmentTarget::Sequence(
+                    values
+                        .into_iter()
+                        .map(Self::try_from)
+                        .collect::<Result<_, _>>()?,
+                )
+            }
+            Expression::Grouping(inner) => Self::try_from(*inner)?.target,
+            _ => return Err(ParseError::text("invalid l-value".to_string(), value.span)),
+        };
+        Ok(Self {
+            id: value.id,
+            target,
+            span: value.span,
+        })
     }
 }
 
