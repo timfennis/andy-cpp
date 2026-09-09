@@ -1,4 +1,5 @@
 mod analyser;
+mod name_resolution;
 mod scope;
 mod symbols;
 
