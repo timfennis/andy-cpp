@@ -5,8 +5,9 @@ use ndc_core::r#struct::StructRegistry;
 use ndc_core::{StaticType, TypeSignature};
 use ndc_lexer::{NumericLiteral, Span};
 use ndc_parser::{
-    AugmentedAssignmentPlan, Binding, Candidate, CaptureSource, Expression, ExpressionLocation,
-    ForBody, ForIteration, FunctionParameter, LogicalOperator, Lvalue, ResolvedVar,
+    AssignmentTarget, AugmentedAssignmentPlan, Binding, BindingPattern, BindingPatternLocation,
+    Candidate, CaptureSource, Expression, ExpressionLocation, ForBody, ForIteration,
+    FunctionParameter, LogicalOperator, ResolvedVar,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -227,7 +228,7 @@ impl Compiler {
                 let idx = self.ir.add_constant(value);
                 self.ir.write(OpCode::Constant(idx), span);
             }
-            Expression::Identifier { name, resolved } => {
+            Expression::Identifier { name, resolved, .. } => {
                 if name == "None" {
                     let idx = self.ir.add_constant(Value::None);
                     self.ir.write(OpCode::Constant(idx), span);
@@ -281,14 +282,14 @@ impl Compiler {
             }
             Expression::VariableDeclaration { value, l_value, .. } => {
                 self.compile_expr(*value)?;
-                self.compile_declare_lvalue(l_value, span)?;
+                self.compile_binding_pattern(l_value, span)?;
                 self.emit_unit();
             }
             Expression::Assignment {
                 l_value,
                 r_value: value,
-            } => match l_value {
-                Lvalue::Index {
+            } => match l_value.target {
+                AssignmentTarget::Index {
                     value: container,
                     index,
                     resolved_set,
@@ -301,20 +302,20 @@ impl Compiler {
                     self.compile_expr(*value)?;
                     self.ir.write(OpCode::Call(3), span);
                 }
-                l_value @ Lvalue::Identifier { .. } => {
+                l_value @ AssignmentTarget::Identifier { .. } => {
                     self.compile_expr(*value)?;
-                    self.compile_lvalue(l_value, span)?;
+                    self.compile_assignment_target(l_value, span)?;
                     self.emit_unit();
                 }
-                Lvalue::Sequence(seq) => {
+                AssignmentTarget::Sequence(seq) => {
                     self.compile_expr(*value)?;
                     self.ir.write(OpCode::Unpack(seq.len()), span);
                     for l_value in seq {
-                        self.compile_lvalue(l_value, span)?;
+                        self.compile_assignment_target(l_value.target, span)?;
                     }
                     self.emit_unit();
                 }
-                Lvalue::Member {
+                AssignmentTarget::Member {
                     receiver,
                     member_span,
                     resolved_setter,
@@ -333,7 +334,7 @@ impl Compiler {
                 plan,
                 ..
             } => {
-                let target = PreparedAssignmentTarget::prepare(self, l_value, span)?;
+                let target = PreparedAssignmentTarget::prepare(self, l_value.target, span)?;
                 let binding = match plan {
                     AugmentedAssignmentPlan::Resolved(binding) => binding,
                     AugmentedAssignmentPlan::Unresolved => {
@@ -569,16 +570,20 @@ impl Compiler {
         Ok(())
     }
 
-    fn compile_lvalue(&mut self, l_value: Lvalue, span: Span) -> Result<(), CompileError> {
+    fn compile_assignment_target(
+        &mut self,
+        l_value: AssignmentTarget,
+        span: Span,
+    ) -> Result<(), CompileError> {
         match l_value {
-            Lvalue::Identifier {
+            AssignmentTarget::Identifier {
                 resolved,
                 span: lv_span,
                 ..
             } => {
                 self.emit_set_var(resolved.expect("identifiers must be resolved"), lv_span);
             }
-            Lvalue::Index {
+            AssignmentTarget::Index {
                 value,
                 index,
                 resolved_set,
@@ -601,13 +606,13 @@ impl Compiler {
                 self.ir.write(OpCode::Call(3), span);
                 self.ir.write(OpCode::Pop, Span::synthetic());
             }
-            Lvalue::Sequence(seq) => {
+            AssignmentTarget::Sequence(seq) => {
                 self.ir.write(OpCode::Unpack(seq.len()), span);
                 for lv in seq {
-                    self.compile_lvalue(lv, span)?;
+                    self.compile_assignment_target(lv.target, span)?;
                 }
             }
-            Lvalue::Member { .. } => unreachable!(
+            AssignmentTarget::Member { .. } => unreachable!(
                 "member assignment is lowered by Expression::Assignment; the parser rejects members inside destructuring patterns"
             ),
         }
@@ -615,24 +620,26 @@ impl Compiler {
         Ok(())
     }
 
-    fn compile_declare_lvalue(&mut self, l_value: Lvalue, span: Span) -> Result<(), CompileError> {
-        match l_value {
-            Lvalue::Identifier { resolved, .. } => {
-                let slot = match resolved.expect("declaration lvalue must be resolved") {
+    fn compile_binding_pattern(
+        &mut self,
+        pattern: BindingPatternLocation,
+        span: Span,
+    ) -> Result<(), CompileError> {
+        match pattern.pattern {
+            BindingPattern::Identifier { resolved, .. } => {
+                let slot = match resolved.expect("binding pattern must be resolved") {
                     ResolvedVar::Local { slot } => slot,
-                    _ => unreachable!("declaration lvalue must be a local"),
+                    _ => unreachable!("binding pattern must be a local"),
                 };
                 self.ir.write(OpCode::SetLocal(slot), span);
                 self.source_locals = self.source_locals.max(slot + 1);
             }
-            Lvalue::Index { .. } => unreachable!("cannot declare into index"),
-            Lvalue::Sequence(seq) => {
+            BindingPattern::Sequence(seq) => {
                 self.ir.write(OpCode::Unpack(seq.len()), span);
                 for lv in seq {
-                    self.compile_declare_lvalue(lv, span)?;
+                    self.compile_binding_pattern(lv, span)?;
                 }
             }
-            Lvalue::Member { .. } => unreachable!("cannot declare into a field"),
         }
         Ok(())
     }
@@ -982,13 +989,13 @@ impl Compiler {
                 let iter_next = self
                     .ir
                     .write(OpCode::IterNext(JumpTarget::PLACEHOLDER), span);
-                self.compile_declare_lvalue(l_value.clone(), span)?;
+                self.compile_binding_pattern(l_value.clone(), span)?;
 
                 self.compile_for_iterations(rest, span, compile_leaf)?;
 
                 // Close upvalues for the loop variable so each iteration's closures
                 // get their own frozen copy rather than sharing a mutable slot.
-                if let Some(slot) = min_lvalue_slot(l_value) {
+                if let Some(slot) = min_binding_slot(l_value) {
                     self.ir.write(OpCode::CloseUpvalue(slot), span);
                 }
 
@@ -1094,13 +1101,17 @@ enum PreparedAssignmentTarget {
 }
 
 impl PreparedAssignmentTarget {
-    fn prepare(compiler: &mut Compiler, l_value: Lvalue, span: Span) -> Result<Self, CompileError> {
+    fn prepare(
+        compiler: &mut Compiler,
+        l_value: AssignmentTarget,
+        span: Span,
+    ) -> Result<Self, CompileError> {
         match l_value {
-            Lvalue::Identifier { resolved, span, .. } => Ok(Self::Variable {
+            AssignmentTarget::Identifier { resolved, span, .. } => Ok(Self::Variable {
                 variable: resolved.expect("lvalue must be resolved"),
                 span,
             }),
-            Lvalue::Index {
+            AssignmentTarget::Index {
                 value,
                 index,
                 resolved_get,
@@ -1125,7 +1136,7 @@ impl PreparedAssignmentTarget {
                     setter: resolved_set.expect("[]= must be resolved"),
                 })
             }
-            Lvalue::Member {
+            AssignmentTarget::Member {
                 receiver,
                 member_span,
                 resolved_getter,
@@ -1146,7 +1157,9 @@ impl PreparedAssignmentTarget {
                     setter: resolved_setter.expect("member setter must be resolved"),
                 })
             }
-            Lvalue::Sequence(_) => Err(CompileError::lvalue_required_to_be_single_identifier(span)),
+            AssignmentTarget::Sequence(_) => {
+                Err(CompileError::lvalue_required_to_be_single_identifier(span))
+            }
         }
     }
 
@@ -1226,15 +1239,15 @@ impl PreparedAssignmentTarget {
     }
 }
 
-/// Returns the minimum local slot referenced by an lvalue, used to determine
+/// Returns the minimum local slot referenced by a binding pattern, used to determine
 /// which upvalues to close at the end of a loop iteration.
-fn min_lvalue_slot(lv: &Lvalue) -> Option<usize> {
-    match lv {
-        Lvalue::Identifier {
+fn min_binding_slot(pattern: &BindingPatternLocation) -> Option<usize> {
+    match &pattern.pattern {
+        BindingPattern::Identifier {
             resolved: Some(ResolvedVar::Local { slot }),
             ..
         } => Some(*slot),
-        Lvalue::Sequence(seq) => seq.iter().filter_map(min_lvalue_slot).min(),
+        BindingPattern::Sequence(seq) => seq.iter().filter_map(min_binding_slot).min(),
         _ => None,
     }
 }

@@ -5,8 +5,9 @@ use ndc_core::r#struct::StructRegistry;
 use ndc_core::{StaticType, TypeSignature};
 use ndc_lexer::{NumericLiteral, Span};
 use ndc_parser::{
-    AugmentedAssignmentPlan, Binding, Candidate, Expression, ExpressionLocation, ForBody,
-    ForIteration, FunctionParameter, Lvalue, NodeId, TypeExpr,
+    AssignmentTarget, AssignmentTargetLocation, AugmentedAssignmentPlan, Binding, BindingPattern,
+    BindingPatternLocation, Candidate, Expression, ExpressionLocation, ForBody, ForIteration,
+    FunctionParameter, NodeId, TypeExpr,
 };
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -266,6 +267,7 @@ impl Analyser {
             Expression::Identifier {
                 name: ident,
                 resolved,
+                ..
             } => {
                 if ident == "None" {
                     return Ok(StaticType::Option(Box::new(StaticType::Any)));
@@ -324,7 +326,7 @@ impl Analyser {
                     None => self.analyse_or_any(value),
                 };
 
-                self.resolve_lvalue_declarative(
+                self.resolve_binding_pattern(
                     l_value,
                     annotated_type,
                     found_type.clone(),
@@ -333,9 +335,9 @@ impl Analyser {
                 Ok(StaticType::unit())
             }
             Expression::Assignment { l_value, r_value } => {
-                let old_type = self.resolve_lvalue_or_any(l_value, *span);
+                let old_type = self.resolve_assignment_target_or_any(l_value, *span);
                 let new_type = self.analyse_with_expected(r_value, &old_type);
-                self.validate_lvalue_write(l_value, &old_type, &new_type, *span);
+                self.validate_assignment_write(l_value, &old_type, &new_type, *span);
 
                 Ok(StaticType::unit())
             }
@@ -345,7 +347,7 @@ impl Analyser {
                 operation,
                 plan,
             } => {
-                let left_type = self.resolve_single_lvalue(l_value, *span)?;
+                let left_type = self.resolve_single_assignment_target(l_value, *span)?;
                 let right_type = self.analyse_or_any(r_value);
                 let arg_types = vec![left_type.clone(), right_type.clone()];
 
@@ -424,7 +426,7 @@ impl Analyser {
                 };
 
                 if let Some(result_type) = writeback_type {
-                    self.validate_lvalue_write(l_value, &left_type, &result_type, *span);
+                    self.validate_assignment_write(l_value, &left_type, &result_type, *span);
                 }
 
                 Ok(StaticType::unit())
@@ -476,9 +478,10 @@ impl Analyser {
                 self.return_type_stack.push(None);
                 let param_types = self.resolve_parameters_declarative(&type_signature, *span);
 
-                // Fill inferred_type on parameter Lvalues for LSP hints.
+                // Fill inferred_type on parameter binding patterns for LSP hints.
                 for (p, typ) in parameters.iter_mut().zip(&param_types) {
-                    if let Lvalue::Identifier { inferred_type, .. } = &mut p.lvalue {
+                    if let BindingPattern::Identifier { inferred_type, .. } = &mut p.lvalue.pattern
+                    {
                         *inferred_type = Some(typ.clone());
                     }
                 }
@@ -747,7 +750,7 @@ impl Analyser {
         // Higher-order call shapes like `get_function()()` have a non-identifier
         // function position; in that case we just analyse the callee as a value
         // and trust the runtime to dispatch.
-        let Expression::Identifier { name, resolved } = &mut function.expression else {
+        let Expression::Identifier { name, resolved, .. } = &mut function.expression else {
             let callee_type = self.analyse_or_any(function);
             return Ok(match callee_type {
                 StaticType::Function { return_type, .. } => *return_type,
@@ -803,7 +806,7 @@ impl Analyser {
                 // TOOD: get this from the AST when the parser adds it
                 let expected_type = None;
 
-                self.resolve_lvalue_declarative(l_value, expected_type, found_type, sequence_span);
+                self.resolve_binding_pattern(l_value, expected_type, found_type, sequence_span);
                 do_destroy = true;
             }
             ForIteration::Guard(expr) => {
@@ -851,24 +854,24 @@ impl Analyser {
         out_type
     }
 
-    fn resolve_single_lvalue(
+    fn resolve_single_assignment_target(
         &mut self,
-        lvalue: &mut Lvalue,
+        lvalue: &mut AssignmentTargetLocation,
         span: Span,
     ) -> Result<StaticType, AnalysisError> {
-        if matches!(lvalue, Lvalue::Sequence(_)) {
+        if matches!(lvalue.target, AssignmentTarget::Sequence(_)) {
             return Err(AnalysisError::lvalue_required_to_be_single_identifier(span));
         }
-        self.resolve_lvalue(lvalue, span)
+        self.resolve_assignment_target(lvalue, span)
     }
 
-    fn resolve_lvalue(
+    fn resolve_assignment_target(
         &mut self,
-        lvalue: &mut Lvalue,
+        lvalue: &mut AssignmentTargetLocation,
         span: Span,
     ) -> Result<StaticType, AnalysisError> {
-        match lvalue {
-            Lvalue::Identifier {
+        match &mut lvalue.target {
+            AssignmentTarget::Identifier {
                 identifier,
                 resolved,
                 ..
@@ -882,7 +885,7 @@ impl Analyser {
                 *resolved = Some(target);
                 Ok(self.scope_tree.get_type(target).clone())
             }
-            Lvalue::Index {
+            AssignmentTarget::Index {
                 index,
                 value,
                 resolved_set,
@@ -927,13 +930,13 @@ impl Analyser {
                     Ok(StaticType::Any)
                 }
             }
-            Lvalue::Sequence(seq) => {
+            AssignmentTarget::Sequence(seq) => {
                 for sub_lvalue in seq {
-                    self.resolve_lvalue_or_any(sub_lvalue, span);
+                    self.resolve_assignment_target_or_any(sub_lvalue, span);
                 }
                 Ok(StaticType::unit())
             }
-            Lvalue::Member {
+            AssignmentTarget::Member {
                 receiver,
                 member,
                 member_span,
@@ -976,8 +979,12 @@ impl Analyser {
         }
     }
 
-    fn resolve_lvalue_or_any(&mut self, lvalue: &mut Lvalue, span: Span) -> StaticType {
-        match self.resolve_lvalue(lvalue, span) {
+    fn resolve_assignment_target_or_any(
+        &mut self,
+        lvalue: &mut AssignmentTargetLocation,
+        span: Span,
+    ) -> StaticType {
+        match self.resolve_assignment_target(lvalue, span) {
             Ok(t) => t,
             Err(e) => {
                 self.emit(e);
@@ -1016,15 +1023,15 @@ impl Analyser {
 
     /// Validate a value that will be stored through an lvalue, widening an
     /// inferred binding when the location has a stable variable to update.
-    fn validate_lvalue_write(
+    fn validate_assignment_write(
         &mut self,
-        lvalue: &Lvalue,
+        lvalue: &AssignmentTargetLocation,
         stored_type: &StaticType,
         value_type: &StaticType,
         span: Span,
     ) {
-        match lvalue {
-            Lvalue::Identifier {
+        match &lvalue.target {
+            AssignmentTarget::Identifier {
                 resolved: Some(target),
                 ..
             } => {
@@ -1041,7 +1048,7 @@ impl Analyser {
                     ));
                 }
             }
-            Lvalue::Member { .. } => {
+            AssignmentTarget::Member { .. } => {
                 if !value_type.is_subtype(stored_type) {
                     self.emit(AnalysisError::mismatched_types(
                         value_type,
@@ -1050,7 +1057,7 @@ impl Analyser {
                     ));
                 }
             }
-            Lvalue::Index { value, index, .. } => {
+            AssignmentTarget::Index { value, index, .. } => {
                 if value_type.is_subtype(stored_type) {
                     return;
                 }
@@ -1106,7 +1113,8 @@ impl Analyser {
                     span,
                 ));
             }
-            Lvalue::Identifier { resolved: None, .. } | Lvalue::Sequence(_) => {}
+            AssignmentTarget::Identifier { resolved: None, .. } | AssignmentTarget::Sequence(_) => {
+            }
         }
     }
 
@@ -1141,15 +1149,15 @@ impl Analyser {
             .map(|param| param.type_name.clone())
             .collect()
     }
-    fn resolve_lvalue_declarative(
+    fn resolve_binding_pattern(
         &mut self,
-        lvalue: &mut Lvalue,
+        lvalue: &mut BindingPatternLocation,
         expected_type: Option<StaticType>,
         found_type: StaticType,
         span: Span,
     ) {
-        match lvalue {
-            Lvalue::Identifier {
+        match &mut lvalue.pattern {
+            BindingPattern::Identifier {
                 identifier,
                 resolved,
                 inferred_type,
@@ -1178,13 +1186,9 @@ impl Analyser {
 
                 *inferred_type = Some(type_binding.typ().clone())
             }
-            Lvalue::Index { index, value, .. } => {
-                self.analyse_or_any(index);
-                self.analyse_or_any(value);
-            }
-            Lvalue::Sequence(seq) => {
+            BindingPattern::Sequence(seq) => {
                 // If the type is a fixed-length Tuple whose arity doesn't match
-                // the number of lvalues, fall back to Any for each element. This
+                // the number of bindings, fall back to Any for each element. This
                 // can happen when a variable is declared with one type (e.g. ())
                 // and later reassigned to a tuple of a different arity — the
                 // analyser doesn't track reassignment types.
@@ -1225,7 +1229,7 @@ impl Analyser {
                     } else {
                         None
                     };
-                    self.resolve_lvalue_declarative(
+                    self.resolve_binding_pattern(
                         sub_lvalue,
                         sub_expected,
                         found_type.clone(),
@@ -1238,9 +1242,6 @@ impl Analyser {
                 if desired_length != actual_len {
                     self.emit(AnalysisError::unable_to_unpack_type(&found_type, span));
                 }
-            }
-            Lvalue::Member { receiver, .. } => {
-                self.analyse_or_any(receiver);
             }
         }
     }
