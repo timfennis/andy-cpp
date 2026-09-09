@@ -1,0 +1,12 @@
+// Recursive calls have an unknown return type while the body is analysed.
+// Boolean |= must still fall back to ordinary Boolean |.
+fn possible(depth: Int) {
+    if depth == 0 {
+        return true;
+    }
+    let result = false;
+    result |= possible(depth - 1);
+    result
+}
+
+assert_eq(possible(3), true);

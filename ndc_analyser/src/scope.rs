@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use ndc_core::StaticType;
 use ndc_core::r#struct::StructInfo;
 use ndc_parser::{Binding, Candidate, CaptureSource, ResolvedVar};
@@ -809,8 +810,27 @@ impl ScopeTree {
         if !sig.iter().any(|t| matches!(t, StaticType::Any)) {
             return None;
         }
-        let permissive: Vec<StaticType> = vec![StaticType::Any; sig.len()];
-        let vars = self.candidates_for_sig(ident, &permissive);
+        // An Any argument may be a tuple at runtime, but known scalar
+        // arguments still constrain every element-wise call. Erasing those
+        // types would admit map mutation overloads for e.g. Bool |= Any.
+        // Sequence<T> may also hide a tuple: it can either be broadcast as
+        // one value or supply T elements. Keep both interpretations without
+        // erasing the constraints on the other arguments.
+        let signatures = sig
+            .iter()
+            .map(|arg| match arg {
+                StaticType::Sequence(element) => vec![arg.clone(), *element.clone()],
+                _ => vec![arg.clone()],
+            })
+            .multi_cartesian_product();
+        let mut vars = Vec::new();
+        for signature in signatures {
+            for var in self.candidates_for_sig(ident, &signature) {
+                if !vars.contains(&var) {
+                    vars.push(var);
+                }
+            }
+        }
         if vars.is_empty() {
             None
         } else {

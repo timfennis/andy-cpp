@@ -1,0 +1,26 @@
+// An unknown rhs must not make map/set mutation overloads apply to scalars.
+fn opaque(value) => value;
+
+let sum = 10;
+sum += opaque(3);
+assert_eq(sum, 13);
+
+let difference = 10;
+difference -= opaque(3);
+assert_eq(difference, 7);
+
+let bits = 4;
+bits |= opaque(3);
+assert_eq(bits, 7);
+
+let possible = false;
+possible |= opaque(true);
+assert_eq(possible, true);
+
+let certain = true;
+certain &= opaque(false);
+assert_eq(certain, false);
+
+let toggled = 7;
+toggled ~= opaque(3);
+assert_eq(toggled, 4);

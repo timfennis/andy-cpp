@@ -82,24 +82,28 @@ mod tests {
     }
 
     #[test]
-    fn recursive_assignment_points_to_call_and_links_expected_operand() {
-        let source = "fn possible() {\n  let ok = false;\n  ok |= possible();\n  return ok;\n}";
+    fn augmented_assignment_points_to_rhs_and_links_target() {
+        let source = "let values = [1];\nvalues ++= [0.5];";
         let diagnostic = analyse_diagnostic(source);
         assert_eq!(
             diagnostic.range,
-            Range::new(Position::new(2, 8), Position::new(2, 18))
+            Range::new(Position::new(1, 11), Position::new(1, 16))
         );
-        assert!(diagnostic.message.contains("right operand inferred as Any"));
-        assert!(diagnostic.message.contains("explicit return type"));
+        assert_eq!(
+            diagnostic.message,
+            "mismatched types: found List<Float> but expected List<Int>. right operand inferred as List<Float>"
+        );
         let related = diagnostic.related_information.unwrap();
         assert_eq!(related.len(), 1);
         assert_eq!(related[0].location.uri.as_str(), "file:///test.ndc");
         assert_eq!(
             related[0].location.range,
-            Range::new(Position::new(2, 2), Position::new(2, 4))
+            Range::new(Position::new(1, 0), Position::new(1, 6))
         );
-        assert!(related[0].message.contains("left operand has type Bool"));
-        assert!(related[0].message.contains("`|=`"));
+        assert_eq!(
+            related[0].message,
+            "left operand has type List<Int>; `++=` requires a compatible right operand"
+        );
     }
 
     #[test]
@@ -116,7 +120,6 @@ mod tests {
                 .message
                 .contains("right operand inferred as List<Float>")
         );
-        assert!(!diagnostic.message.contains("recursive"));
         let related = diagnostic.related_information.unwrap();
         assert_eq!(
             related[0].location.range,

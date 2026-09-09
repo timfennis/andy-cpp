@@ -1,0 +1,19 @@
+// Preserve scalar constraints without losing vector dispatch for an Any tuple.
+fn opaque(value) => value;
+
+assert_eq(10 - opaque((1, 2)), (9, 8));
+assert_eq(opaque((10, 20)) - 1, (9, 19));
+
+let difference = 10;
+difference -= opaque((1, 2));
+assert_eq(difference, (9, 8));
+
+let bits = 4;
+bits |= opaque((1, 2));
+assert_eq(bits, (5, 6));
+
+// A Sequence annotation can also hide the tuple shape.
+fn subtract(values: Sequence<Int>, rhs) => values - rhs;
+fn subtract_from(lhs, values: Sequence<Int>) => lhs - values;
+assert_eq(subtract((10, 20), 1), (9, 19));
+assert_eq(subtract_from(10, (1, 2)), (9, 8));

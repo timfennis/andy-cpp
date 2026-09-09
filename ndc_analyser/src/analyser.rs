@@ -1313,12 +1313,6 @@ impl AnalysisError {
                 "left operand has type {expected}; `{operation}=` requires a compatible right operand"
             ),
         ));
-        if *found == StaticType::Any {
-            error.help_text = Some(
-                "If the right operand is a recursive call, add an explicit return type to the function (such as `-> Bool` for a boolean result). Unannotated recursive calls use Any while the function body is checked."
-                    .to_string(),
-            );
-        }
         error
     }
 
@@ -1586,88 +1580,8 @@ mod tests {
     }
 
     #[test]
-    fn inferred_index_augmented_assignment_widens_element_type() {
-        let add = StaticType::Function {
-            parameters: Some(vec![StaticType::Int, StaticType::Float]),
-            return_type: Box::new(StaticType::Number),
-        };
-        assert_eq!(
-            analyse_last_type_with_globals(
-                "let values = [1]; values[0] += 0.5; values",
-                vec![("+".to_string(), add)],
-            ),
-            StaticType::List(Box::new(StaticType::Any)),
-        );
-    }
-
-    #[test]
-    fn inferred_identifier_assignments_widen_subsequent_reads() {
-        assert_eq!(analyse_last_type("let x = 3; x = 0.5; x"), StaticType::Any,);
-
-        let add = StaticType::Function {
-            parameters: Some(vec![StaticType::Int, StaticType::Float]),
-            return_type: Box::new(StaticType::Float),
-        };
-        assert_eq!(
-            analyse_last_type_with_globals("let x = 3; x += 0.5; x", vec![("+".to_string(), add)],),
-            StaticType::Any,
-        );
-    }
-
-    #[test]
-    fn annotated_identifier_augmented_assignment_rejects_widening() {
-        let add = StaticType::Function {
-            parameters: Some(vec![StaticType::Int, StaticType::Float]),
-            return_type: Box::new(StaticType::Float),
-        };
-        assert_analysis_error(
-            "let x: Int = 3; x += 0.5;",
-            vec![("+".to_string(), add)],
-            "mismatched types: found Float but expected Int",
-        );
-    }
-
-    #[test]
-    fn compatible_specialized_assignment_preserves_left_type() {
-        let list_any = StaticType::List(Box::new(StaticType::Any));
-        let append = StaticType::Function {
-            parameters: Some(vec![list_any.clone(), list_any.clone()]),
-            return_type: Box::new(list_any),
-        };
-
-        assert_eq!(
-            analyse_last_type_with_globals(
-                "let values = [1]; values ++= [2]; values",
-                vec![("++=".to_string(), append)],
-            ),
-            StaticType::List(Box::new(StaticType::Int)),
-        );
-    }
-
-    #[test]
-    fn incompatible_specialized_assignment_is_rejected() {
-        let list_any = StaticType::List(Box::new(StaticType::Any));
-        let concat = StaticType::Function {
-            parameters: Some(vec![list_any.clone(), list_any.clone()]),
-            return_type: Box::new(list_any),
-        };
-
-        assert_analysis_error(
-            "let values = [1]; values ++= [\"two\"];",
-            vec![
-                ("++=".to_string(), concat.clone()),
-                ("++".to_string(), concat.clone()),
-            ],
-            "mismatched types: found List<String> but expected List<Int>",
-        );
-        assert_analysis_error(
-            "let values: List<Int> = [1]; values ++= [\"two\"];",
-            vec![
-                ("++=".to_string(), concat.clone()),
-                ("++".to_string(), concat),
-            ],
-            "mismatched types: found List<String> but expected List<Int>",
-        );
+    fn inferred_identifier_assignment_widens_subsequent_reads() {
+        assert_eq!(analyse_last_type("let x = 3; x = 0.5; x"), StaticType::Any);
     }
 
     #[test]

@@ -1,0 +1,4 @@
+// expect-error: mismatched types: found String but expected Int
+fn replace(previous: Int, replacement: String) -> String => replacement;
+let value: Int = 1;
+value replace= "two";

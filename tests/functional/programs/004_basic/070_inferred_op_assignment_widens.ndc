@@ -1,0 +1,9 @@
+fn replace(previous: Int, replacement: String) -> String => replacement;
+
+let value = 1;
+value replace= "two";
+assert_eq(value ++ "!", "two!");
+
+let values = [1];
+values[0] replace= "two";
+assert_eq(values[0] ++ "!", "two!");

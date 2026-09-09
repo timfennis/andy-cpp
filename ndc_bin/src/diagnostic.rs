@@ -144,33 +144,35 @@ mod tests {
     use ndc_interpreter::Interpreter;
 
     #[test]
-    fn recursive_assignment_labels_both_operands_and_explains_any() {
-        let source = "fn possible() { let ok = false; ok |= possible(); return ok; }";
+    fn augmented_assignment_labels_both_operands() {
+        let source = "let values = [1]; values ++= [0.5];";
         let mut interpreter = Interpreter::new();
         interpreter.configure(ndc_stdlib::register);
         let error = interpreter
             .disassemble_str(source)
-            .expect_err("recursive call uses Any");
+            .expect_err("incompatible list elements");
         let diagnostics = into_diagnostics(error);
         assert_eq!(diagnostics.len(), 1);
         let diagnostic = &diagnostics[0];
         assert_eq!(
             diagnostic.message,
-            "mismatched types: found Any but expected Bool"
+            "mismatched types: found List<Float> but expected List<Int>"
         );
         assert_eq!(diagnostic.labels.len(), 2);
         let primary = &diagnostic.labels[0];
         assert_eq!(primary.style, LabelStyle::Primary);
-        assert_eq!(&source[primary.range.clone()], "possible()");
-        assert_eq!(primary.message, "right operand inferred as Any");
+        assert_eq!(&source[primary.range.clone()], "[0.5]");
+        assert_eq!(primary.message, "right operand inferred as List<Float>");
         let secondary = &diagnostic.labels[1];
         assert_eq!(secondary.style, LabelStyle::Secondary);
-        assert_eq!(&source[secondary.range.clone()], "ok");
-        assert_eq!(secondary.range.start, source.find("ok |=").unwrap());
-        assert!(secondary.message.contains("left operand has type Bool"));
-        assert!(secondary.message.contains("`|=`"));
+        assert_eq!(&source[secondary.range.clone()], "values");
+        assert_eq!(secondary.range.start, source.find("values ++=").unwrap());
+        assert_eq!(
+            secondary.message,
+            "left operand has type List<Int>; `++=` requires a compatible right operand"
+        );
         assert_eq!(primary.file_id, secondary.file_id);
-        assert!(diagnostic.notes[0].contains("explicit return type"));
+        assert!(diagnostic.notes.is_empty());
 
         let mut output = Vec::new();
         term::emit_to_io_write(
@@ -181,16 +183,8 @@ mod tests {
         )
         .expect("render diagnostic");
         let output = String::from_utf8(output).unwrap();
-        assert!(output.contains("right operand inferred as Any"));
-        assert!(output.contains("left operand has type Bool"));
-        assert!(output.contains("Unannotated recursive calls use Any"));
-
-        let annotated = source.replace("fn possible()", "fn possible() -> Bool");
-        let mut interpreter = Interpreter::new();
-        interpreter.configure(ndc_stdlib::register);
-        interpreter
-            .disassemble_str(&annotated)
-            .expect("annotation resolves the mismatch");
+        assert!(output.contains(&primary.message));
+        assert!(output.contains(&secondary.message));
     }
 
     #[test]

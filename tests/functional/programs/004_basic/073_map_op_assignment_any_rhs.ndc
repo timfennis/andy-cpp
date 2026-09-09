@@ -1,0 +1,5 @@
+// An actual container mutation must still reject an unknown rhs.
+// expect-error: mismatched types: found Any but expected Map<Int, Int>
+fn opaque(value) => value;
+let values = %{1: 2};
+values |= opaque(%{3: "four"});
