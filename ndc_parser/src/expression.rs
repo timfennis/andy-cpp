@@ -97,7 +97,10 @@ pub enum Expression {
     Identifier {
         name: String,
         resolved: Binding,
-        /// Original token range, retained when grouping widens the expression span.
+        /// The identifier token's range. When parsing `(foo)`, the parser reuses
+        /// the identifier expression and widens `ExpressionLocation.span` to
+        /// include the parentheses. This field still covers only `foo`, so a
+        /// binding pattern can use it as the go-to-definition destination.
         identifier_span: Span,
     },
     Statement(Box<ExpressionLocation>),
@@ -456,8 +459,10 @@ impl TryFrom<AssignmentTargetLocation> for BindingPatternLocation {
 impl TryFrom<ExpressionLocation> for AssignmentTargetLocation {
     type Error = ParseError;
 
-    /// Consuming conversion keeps the expression's identity. Grouping is folded
-    /// into the target, retaining its outer identity and full source range.
+    /// Convert a parsed expression into an assignment target, reusing its NodeId
+    /// and source span. For `(object.field)`, remove the Grouping wrapper and use
+    /// its ID and span for the resulting member target. Discard the inner member
+    /// node's ID; keep the receiver expression and its ID.
     fn try_from(value: ExpressionLocation) -> Result<Self, Self::Error> {
         let target = match value.expression {
             Expression::Identifier {
