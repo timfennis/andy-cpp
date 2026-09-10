@@ -1137,6 +1137,7 @@ dependencies = [
 name = "ndc_analyser"
 version = "0.3.0"
 dependencies = [
+ "ahash",
  "itertools 0.15.0",
  "ndc_core",
  "ndc_lexer",
