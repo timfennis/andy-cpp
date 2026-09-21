@@ -180,6 +180,32 @@ mod inner {
         }
     }
 
+    /// Removes one matching prefix, returning `()` if it does not match.
+    #[function(return_type = String)]
+    pub fn strip_prefix(string: &str, prefix: &str) -> Value {
+        string
+            .strip_prefix(prefix)
+            .map_or_else(Value::unit, Value::string)
+    }
+
+    /// Removes one matching suffix, returning `()` if it does not match.
+    #[function(return_type = String)]
+    pub fn strip_suffix(string: &str, suffix: &str) -> Value {
+        string
+            .strip_suffix(suffix)
+            .map_or_else(Value::unit, Value::string)
+    }
+
+    /// Removes one matching prefix and suffix, returning `()` if either fails to match.
+    /// The prefix and suffix must not overlap. Empty patterns match without removing text.
+    #[function(return_type = String)]
+    pub fn strip_circumfix(string: &str, prefix: &str, suffix: &str) -> Value {
+        string
+            .strip_prefix(prefix)
+            .and_then(|rest| rest.strip_suffix(suffix))
+            .map_or_else(Value::unit, Value::string)
+    }
+
     /// Removes leading and trailing whitespace from the string.
     pub fn trim(string: &str) -> &str {
         string.trim()

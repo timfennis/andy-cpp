@@ -31,6 +31,24 @@ and even
 let string = r###"raw string with r#"stop doing this"#"###;
 ```
 
+## Removing prefixes and suffixes
+
+`strip_prefix(string, prefix)` and `strip_suffix(string, suffix)` remove one matching
+prefix or suffix. `strip_circumfix(string, prefix, suffix)` removes both only when
+both match without overlapping. Each function returns a new string on success or
+`()` on mismatch, leaving the original string unchanged. Matches are exact and
+case-sensitive; empty patterns match without removing any text.
+
+```ndc
+assert_eq("foobar".strip_prefix("foo"), "bar");
+assert_eq("foobar".strip_suffix("bar"), "foo");
+assert_eq("[hello]".strip_circumfix("[", "]"), "hello");
+assert_eq("foofoo".strip_prefix("foo"), "foo");
+assert_eq("hello".strip_prefix("x"), ());
+assert_eq("aaa".strip_circumfix("aa", "aa"), ());
+assert_eq("[]".strip_circumfix("[", "]"), "");
+```
+
 ## Operators
 
 | Operator | Function |

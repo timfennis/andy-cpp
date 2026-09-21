@@ -1,0 +1,15 @@
+assert_eq(strip_suffix("foobar", "bar"), "foo");
+assert_eq("barbar".strip_suffix("bar"), "bar");
+assert_eq("foobar".strip_suffix("foo"), ());
+assert_eq("bar".strip_suffix("foobar"), ());
+assert_eq("BAR".strip_suffix("bar"), ());
+assert_eq("bar".strip_suffix("bar"), "");
+assert_eq("bar".strip_suffix(""), "bar");
+assert_eq("".strip_suffix(""), "");
+assert_eq("".strip_suffix("bar"), ());
+assert_eq("你好❤".strip_suffix("❤"), "你好");
+let original = "foobar";
+let stripped = original.strip_suffix("bar");
+stripped.append("!");
+assert_eq(original, "foobar");
+assert_eq(stripped, "foo!");
