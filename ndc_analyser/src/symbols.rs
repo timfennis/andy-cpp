@@ -1,13 +1,13 @@
 #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub(crate) struct SymbolId(usize);
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Symbol {
     name: String,
     kind: BindingKind,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct SymbolTable {
     symbols: Vec<Symbol>,
 }

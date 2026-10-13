@@ -164,6 +164,18 @@ let foo = fn(a) => "let";
 foo("x");      // "let": both fn overloads are shadowed
 ```
 
+The reverse order is an error within one scope: a scope holds a name either as `let` bindings or as functions. In a nested scope, the `fn` shadows the outer `let` as usual. The same rule applies to a struct's constructor.
+
+```ndc
+let foo = fn(a) => "let";
+fn foo(a, b) { "fn" }    // ERROR: Illegal redefinition of variable foo as a function in the same scope
+
+let bar = 1;
+{
+    fn bar(a) { a }      // fine: a different scope
+}
+```
+
 A non-function `let` binding shadows the name for value access, but function calls still resolve to the underlying function:
 
 ```ndc

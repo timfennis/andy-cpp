@@ -1,0 +1,6 @@
+// A scope holds a name either as `let` bindings or as functions, never both.
+// A `fn` after a `let` of the same name in the same scope is an error rather
+// than a new overload. In a nested scope it would shadow the `let` instead.
+// expect-error: Illegal redefinition of variable foo as a function in the same scope
+let foo = fn(a) => "let:" ++ a;
+fn foo(a, b) { "fn:" ++ a ++ "," ++ b }

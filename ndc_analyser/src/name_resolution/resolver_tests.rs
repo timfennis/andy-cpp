@@ -12,9 +12,13 @@ fn resolve_source(resolver: &mut NameResolver, source: &str) -> Result<(), NameR
         .expect("source lexes");
     let expressions = Parser::from_tokens(tokens).parse().expect("source parses");
     for expression in &expressions {
-        resolver.resolve(expression)?;
+        resolver.resolve_statement(expression);
     }
-    Ok(())
+    // Most tests care about the first error; the recovery tests read them all.
+    match resolver.take_errors().into_iter().next() {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
 }
 
 /// Declared symbols in declaration order; the symbol table hands out ids sequentially.
@@ -1151,4 +1155,57 @@ fn struct_bindings_are_captured_like_functions() {
         captures_of(&resolver, inner),
         [p.constructor, p.accessors[0].0]
     );
+}
+
+/// Every error resolving `source` reports, in order.
+fn all_errors(source: &str) -> Vec<String> {
+    let mut resolver = NameResolver::new([]);
+    let tokens = Lexer::new(source, SourceId::new(0))
+        .collect::<Result<Vec<_>, _>>()
+        .expect("source lexes");
+    for expression in &Parser::from_tokens(tokens).parse().expect("source parses") {
+        resolver.resolve_statement(expression);
+    }
+    resolver
+        .take_errors()
+        .iter()
+        .map(ToString::to_string)
+        .collect()
+}
+
+#[test]
+fn errors_are_reported_for_every_failing_statement() {
+    let expected = [
+        "Identifier a has not previously been declared",
+        "Identifier b has not previously been declared",
+    ];
+    // At the top level, in a block and in a function body.
+    for source in ["a; b;", "{ a; b; }", "fn f() { a; b; }"] {
+        assert_eq!(all_errors(source), expected, "{source}");
+    }
+    assert_eq!(
+        all_errors("let x: Unknwn = 1; undefined_variable;"),
+        [
+            "unknown type `Unknwn`",
+            "Identifier undefined_variable has not previously been declared"
+        ]
+    );
+}
+
+#[test]
+fn a_failing_statement_stops_at_its_first_error() {
+    assert_eq!(
+        all_errors("(a, b);"),
+        ["Identifier a has not previously been declared"]
+    );
+}
+
+#[test]
+fn statements_after_an_error_still_resolve() {
+    let mut resolver = NameResolver::new([]);
+    resolve_source(&mut resolver, "missing; let x = 1; x;").unwrap_err();
+
+    let [x] = declared(&resolver);
+    assert_eq!(uses(&resolver, x), 1);
+    assert!(resolver.take_errors().is_empty());
 }
