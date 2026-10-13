@@ -56,6 +56,15 @@ fn builtin(resolver: &NameResolver, name: &str) -> SymbolId {
         .expect("builtin is declared")
 }
 
+/// The name of the `UnknownName` error that resolving `source` reports.
+fn unknown_name(source: &str) -> String {
+    let mut resolver = NameResolver::new([]);
+    match resolve_source(&mut resolver, source) {
+        Err(NameResolutionError::UnknownName { name, .. }) => name,
+        other => panic!("expected an unknown name in {source:?}, got {other:?}"),
+    }
+}
+
 fn only_reference(resolver: &NameResolver) -> &Candidates {
     resolver
         .references
@@ -263,7 +272,6 @@ fn loop_body_forms_resolve_names_and_restore_scope_on_errors() {
 #[test]
 fn unfinished_language_features_report_errors_instead_of_panicking() {
     for (source, feature) in [
-        ("fn identity(x) => x;", "function declarations"),
         ("struct Point { x: Int }", "struct declarations"),
         (
             "let x = 1; x += 2;",
@@ -348,4 +356,85 @@ fn overloaded_builtins_share_a_group_newest_first() {
             .iter()
             .all(|&id| resolver.symbols.kind(id) == BindingKind::Function)
     );
+}
+
+#[test]
+fn function_names_are_visible_in_their_own_body() {
+    let mut resolver = NameResolver::new([]);
+    resolve_source(&mut resolver, "fn fact(n) { fact(n); }").unwrap();
+
+    let [fact, n] = declared(&resolver);
+    assert_eq!(resolver.symbols.kind(fact), BindingKind::Function);
+    assert_eq!(resolver.symbols.kind(n), BindingKind::Plain);
+    assert_eq!(uses(&resolver, fact), 1);
+    assert_eq!(uses(&resolver, n), 1);
+}
+
+#[test]
+fn parameters_are_only_visible_inside_the_function() {
+    let mut resolver = NameResolver::new([]);
+    resolve_source(&mut resolver, "fn f(x) { x; }").unwrap();
+
+    assert_eq!(unknown_name("fn f(x) { 1; } x;"), "x");
+}
+
+#[test]
+fn function_overloads_share_a_group_newest_first() {
+    let mut resolver = NameResolver::new([]);
+    resolve_source(&mut resolver, "fn f(x) { 1; } fn f(x, y) { 1; } f;").unwrap();
+
+    let [f1, _, f2, _, _] = declared(&resolver);
+    assert_eq!(only_reference(&resolver).0, vec![vec![f2, f1]]);
+    assert_eq!(resolver.symbols.kind(f1), BindingKind::Function);
+    assert_eq!(resolver.symbols.kind(f2), BindingKind::Function);
+}
+
+#[test]
+fn lambdas_do_not_bind_a_name() {
+    // The initializer is resolved before `g` is declared, and the lambda has
+    // no name of its own.
+    assert_eq!(unknown_name("let g = fn(x) { g; };"), "g");
+}
+
+#[test]
+fn named_function_expressions_bind_in_the_enclosing_scope() {
+    let mut resolver = NameResolver::new([]);
+    resolve_source(&mut resolver, "let g = fn h(n) { n; }; h;").unwrap();
+
+    let [h, n, g] = declared(&resolver);
+    assert_eq!(uses(&resolver, h), 1);
+    assert_eq!(uses(&resolver, n), 1);
+    assert_eq!(uses(&resolver, g), 0);
+}
+
+#[test]
+fn function_bodies_see_enclosing_bindings() {
+    let mut resolver = NameResolver::new([]);
+    resolve_source(&mut resolver, "let y = 1; fn f(x) { y; }").unwrap();
+
+    let [y, _, _] = declared(&resolver);
+    assert_eq!(uses(&resolver, y), 1);
+}
+
+#[test]
+fn duplicate_parameters_are_rejected() {
+    let mut resolver = NameResolver::new([]);
+    let source = "fn f(x, x) { 1; }";
+    let error = resolve_source(&mut resolver, source).unwrap_err();
+    assert_eq!(error.to_string(), "Illegal redefinition of parameter x");
+
+    let NameResolutionError::DuplicateParameter { name, span } = error else {
+        panic!("expected a duplicate parameter, got {error:?}");
+    };
+    assert_eq!(name, "x");
+    assert_eq!(span.offset(), source.rfind('x').unwrap());
+    assert_eq!(resolver.scopes.lookup("x", &resolver.symbols), None);
+}
+
+#[test]
+fn errors_in_function_bodies_restore_scope() {
+    let mut resolver = NameResolver::new([]);
+    resolve_source(&mut resolver, "fn f(x) { missing; }").unwrap_err();
+
+    assert_eq!(resolver.scopes.lookup("x", &resolver.symbols), None);
 }

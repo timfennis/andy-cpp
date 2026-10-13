@@ -264,6 +264,15 @@ impl FunctionParameter {
                 .collect(),
         )
     }
+
+    pub fn name(&self) -> &str {
+        match &self.lvalue.pattern {
+            BindingPattern::Identifier { identifier, .. } => identifier,
+            BindingPattern::Sequence(_) => {
+                unreachable!("a function parameter can never be a sequence")
+            }
+        }
+    }
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
