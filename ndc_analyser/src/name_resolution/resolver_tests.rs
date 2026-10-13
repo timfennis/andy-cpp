@@ -1,5 +1,5 @@
 use super::{NameResolutionError, NameResolver};
-use crate::symbols::SymbolId;
+use crate::symbols::{BindingKind, SymbolId};
 use itertools::Itertools;
 use ndc_lexer::{Lexer, SourceId};
 use ndc_parser::Parser;
@@ -42,6 +42,8 @@ fn initializer_reads_outer_binding_before_shadowing() {
     resolve_source(&mut resolver, "let x = 1; { let x = x; x; } x;").unwrap();
 
     let [outer, inner] = declared(&resolver);
+    assert_eq!(resolver.symbols.kind(outer), BindingKind::Plain);
+    assert_eq!(resolver.symbols.kind(inner), BindingKind::Plain);
     assert_eq!(uses(&resolver, outer), 2);
     assert_eq!(uses(&resolver, inner), 1);
     assert_eq!(resolver.scopes.lookup("x", &resolver.symbols), Some(outer));
@@ -103,7 +105,9 @@ fn assignment_reuses_declared_symbols() {
 fn member_and_index_targets_resolve_receivers_without_declaring_names() {
     let mut resolver = NameResolver::new();
     // This supplied name stands for a value in the surrounding environment.
-    let object = resolver.symbols.declare("object".to_string());
+    let object = resolver
+        .symbols
+        .declare("object".to_string(), BindingKind::Plain);
     resolver.scopes.bind(object);
     resolve_source(
         &mut resolver,
@@ -156,7 +160,9 @@ fn traversal_reports_unknown_names_in_expression_children() {
     for source in sources {
         let mut resolver = NameResolver::new();
         for name in ["callee", "+"] {
-            let symbol = resolver.symbols.declare(name.to_string());
+            let symbol = resolver
+                .symbols
+                .declare(name.to_string(), BindingKind::Function);
             resolver.scopes.bind(symbol);
         }
         let error = resolve_source(&mut resolver, source).expect_err(source);
