@@ -38,7 +38,7 @@ pub(crate) struct NameResolver {
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum NameResolutionError {
-    #[error("identifier '{name}' has not been declared")]
+    #[error("Identifier {name} has not previously been declared")]
     UnknownName { name: String, span: Span },
     #[error("name resolution for {feature} is not implemented yet")]
     Unsupported { feature: &'static str, span: Span },
