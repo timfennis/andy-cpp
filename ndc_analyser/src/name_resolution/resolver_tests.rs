@@ -1209,3 +1209,21 @@ fn statements_after_an_error_still_resolve() {
     assert_eq!(uses(&resolver, x), 1);
     assert!(resolver.take_errors().is_empty());
 }
+
+#[test]
+fn natives_record_their_registry_slot() {
+    let mut resolver = NameResolver::new(["len", "+", "len"]);
+    resolve_source(&mut resolver, "let x = 1; len;").unwrap();
+
+    // Overloads of one name keep their own slots, in registration order.
+    let [newest_len, oldest_len] = only_reference(&resolver).0[0][..] else {
+        panic!("expected both `len` overloads");
+    };
+    let plus = builtin(&resolver, "+");
+    assert_eq!(resolver.native_slots[&oldest_len], 0);
+    assert_eq!(resolver.native_slots[&plus], 1);
+    assert_eq!(resolver.native_slots[&newest_len], 2);
+    // Program symbols aren't natives.
+    let [x] = declared(&resolver);
+    assert!(!resolver.native_slots.contains_key(&x));
+}

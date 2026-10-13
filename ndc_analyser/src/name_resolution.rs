@@ -59,6 +59,16 @@ pub(crate) struct NameResolver {
     type_names: AHashMap<NodeId, SymbolId>,
     /// What each struct declaration binds, keyed by the declaration's node.
     structs: AHashMap<NodeId, StructSymbols>,
+    /// Each native's position in the function registry, which is also its
+    /// global slot in the VM. With `new(["len", "+"])`, `len` is 0 and `+` is 1.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "read by the layout pass, which is not written yet"
+        )
+    )]
+    native_slots: AHashMap<SymbolId, usize>,
     /// Errors from statements that failed to resolve. Resolution carries on with
     /// the next statement, so `a; b;` reports both unknown names.
     errors: Vec<NameResolutionError>,
@@ -298,9 +308,11 @@ impl NameResolver {
         let mut scopes = ScopeTree::new();
         let mut symbols = SymbolTable::default();
 
-        for builtin in builtins {
+        let mut native_slots = AHashMap::default();
+        for (slot, builtin) in builtins.into_iter().enumerate() {
             let symbol = symbols.declare(builtin.to_string(), BindingKind::Function);
             scopes.bind(symbol);
+            native_slots.insert(symbol, slot);
         }
         for name in StaticType::BUILTIN_TYPE_NAMES {
             let symbol = symbols.declare((*name).to_string(), BindingKind::Type);
@@ -321,6 +333,7 @@ impl NameResolver {
             setters: Default::default(),
             type_names: Default::default(),
             structs: Default::default(),
+            native_slots,
             errors: Default::default(),
         }
     }
