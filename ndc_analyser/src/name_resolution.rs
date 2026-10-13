@@ -23,8 +23,10 @@ pub(crate) struct ScopeTree {
 pub(crate) struct NameResolver {
     symbols: SymbolTable,
     scopes: ScopeTree,
-    /// The symbol each binding pattern identifier introduces, keyed by the
-    /// pattern's node. In `let (a, b) = ...`, the `a` and `b` nodes.
+    /// The symbol each binding pattern identifier or named function
+    /// introduces. In `let (a, b) = ...`, keyed by the `a` and `b` pattern
+    /// nodes. In `fn a(x) { }`, keyed by the function declaration's node,
+    /// since the name has no node of its own.
     declarations: AHashMap<NodeId, SymbolId>,
     /// Every symbol an identifier use could mean, keyed by the identifier's
     /// node. The type pass picks between them.
@@ -40,6 +42,8 @@ pub(crate) enum NameResolutionError {
     UnknownName { name: String, span: Span },
     #[error("name resolution for {feature} is not implemented yet")]
     Unsupported { feature: &'static str, span: Span },
+    #[error("Illegal redefinition of parameter {name}")]
+    DuplicateParameter { name: String, span: Span },
 }
 
 /// Same-named symbols visible at a use, nearest scope first, newest first
@@ -239,11 +243,35 @@ impl NameResolver {
                     self.resolve(end)?;
                 }
             }
-            Expression::FunctionDeclaration { .. } => {
-                return Err(NameResolutionError::Unsupported {
-                    feature: "function declarations",
-                    span: loc.span,
-                });
+            Expression::FunctionDeclaration {
+                name,
+                parameters,
+                body,
+                ..
+            } => {
+                if let Some(name) = name {
+                    let symbol = self.symbols.declare(name.clone(), BindingKind::Function);
+                    self.scopes.bind(symbol);
+                    self.declarations.insert(loc.id, symbol);
+                }
+
+                // Parameter lists are short, so a linear scan beats hashing.
+                let mut names = Vec::new();
+                self.in_scope(|resolver| {
+                    for parameter in parameters {
+                        let param_name = parameter.name();
+                        if names.contains(&param_name) {
+                            return Err(NameResolutionError::DuplicateParameter {
+                                name: param_name.to_string(),
+                                span: parameter.span,
+                            });
+                        }
+                        names.push(param_name);
+                        resolver.declare_pattern(&parameter.lvalue);
+                    }
+
+                    resolver.resolve(body)
+                })?;
             }
             Expression::StructDeclaration { .. } => {
                 return Err(NameResolutionError::Unsupported {
