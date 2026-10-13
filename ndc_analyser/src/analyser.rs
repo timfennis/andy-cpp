@@ -112,7 +112,9 @@ impl Analyser {
             TypeExpr::Tuple { elements, .. } => {
                 StaticType::Tuple(elements.iter().map(|e| self.lower_type_expr(e)).collect())
             }
-            TypeExpr::Name { name, args, span } => {
+            TypeExpr::Name {
+                name, args, span, ..
+            } => {
                 let has_args = !args.is_empty();
                 let args = args.iter().map(|a| self.lower_type_expr(a)).collect();
                 match self.scope_tree.resolve_type(name).cloned() {

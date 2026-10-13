@@ -1,3 +1,4 @@
+use crate::expression::NodeId;
 use ndc_lexer::Span;
 use std::fmt;
 
@@ -8,6 +9,9 @@ use std::fmt;
 pub enum TypeExpr {
     /// A (possibly generic) named type: `Int`, `List<Int>`, `Map<String, Int>`.
     Name {
+        /// Identity of this name, independent of its source location. In
+        /// `Map<P, Q>`, `Map`, `P` and `Q` each have their own.
+        id: NodeId,
         name: String,
         args: Vec<Self>,
         span: Span,

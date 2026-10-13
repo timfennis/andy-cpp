@@ -1458,6 +1458,7 @@ impl Parser {
             };
 
             return Ok(TypeExpr::Name {
+                id: NodeId::next(),
                 name,
                 args: Vec::new(),
                 span,
@@ -1547,6 +1548,7 @@ impl Parser {
         };
 
         Ok(TypeExpr::Name {
+            id: NodeId::next(),
             name: ident,
             args,
             span,
