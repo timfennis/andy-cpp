@@ -1,4 +1,6 @@
 use super::{NameResolutionError, NameResolver};
+use crate::symbols::SymbolId;
+use itertools::Itertools;
 use ndc_lexer::{Lexer, SourceId};
 use ndc_parser::Parser;
 
@@ -13,30 +15,35 @@ fn resolve_source(resolver: &mut NameResolver, source: &str) -> Result<(), NameR
     Ok(())
 }
 
+/// Declared symbols in declaration order; the symbol table hands out ids sequentially.
+fn declared<const N: usize>(resolver: &NameResolver) -> [SymbolId; N] {
+    let symbols = resolver
+        .declarations
+        .values()
+        .copied()
+        .sorted()
+        .collect_vec();
+    symbols.try_into().unwrap_or_else(|symbols: Vec<_>| {
+        panic!("expected {N} declarations, got {}", symbols.len())
+    })
+}
+
+fn uses(resolver: &NameResolver, symbol: SymbolId) -> usize {
+    resolver
+        .references
+        .values()
+        .filter(|&&id| id == symbol)
+        .count()
+}
+
 #[test]
 fn initializer_reads_outer_binding_before_shadowing() {
     let mut resolver = NameResolver::new();
     resolve_source(&mut resolver, "let x = 1; { let x = x; x; } x;").unwrap();
 
-    let outer = resolver.lvalue_bindings[0].1;
-    let inner = resolver.lvalue_bindings[1].1;
-    assert_ne!(outer, inner);
-    assert_eq!(
-        resolver
-            .references
-            .values()
-            .filter(|&&id| id == outer)
-            .count(),
-        2
-    );
-    assert_eq!(
-        resolver
-            .references
-            .values()
-            .filter(|&&id| id == inner)
-            .count(),
-        1
-    );
+    let [outer, inner] = declared(&resolver);
+    assert_eq!(uses(&resolver, outer), 2);
+    assert_eq!(uses(&resolver, inner), 1);
     assert_eq!(resolver.scopes.lookup("x", &resolver.symbols), Some(outer));
 }
 
@@ -56,7 +63,7 @@ fn self_reference_reports_the_initializer_location() {
     assert_eq!(span.source_id(), SourceId::new(0));
     assert_eq!(&source[span.range()], "missing");
     assert_eq!(span.offset(), source.rfind("missing").unwrap());
-    assert!(resolver.lvalue_bindings.is_empty());
+    assert!(resolver.declarations.is_empty());
 }
 
 #[test]
@@ -68,25 +75,13 @@ fn destructuring_resolves_all_initializers_before_binding_names() {
     )
     .unwrap();
 
-    assert_eq!(resolver.lvalue_bindings.len(), 5);
-    for (_, symbol) in &resolver.lvalue_bindings {
-        assert_eq!(
-            resolver
-                .references
-                .values()
-                .filter(|&id| id == symbol)
-                .count(),
-            1
-        );
+    let symbols: [_; 5] = declared(&resolver);
+    for symbol in symbols {
+        assert_eq!(uses(&resolver, symbol), 1);
     }
-    assert_eq!(
-        resolver.scopes.lookup("x", &resolver.symbols),
-        Some(resolver.lvalue_bindings[2].1)
-    );
-    assert_eq!(
-        resolver.scopes.lookup("y", &resolver.symbols),
-        Some(resolver.lvalue_bindings[3].1)
-    );
+    let [_, _, x, y, _] = symbols;
+    assert_eq!(resolver.scopes.lookup("x", &resolver.symbols), Some(x));
+    assert_eq!(resolver.scopes.lookup("y", &resolver.symbols), Some(y));
 }
 
 #[test]
@@ -97,11 +92,11 @@ fn assignment_reuses_declared_symbols() {
         "let x = 1; let y = 2; (x, y) = (y, x); x = 3;",
     )
     .unwrap();
-    let bindings = &resolver.lvalue_bindings;
-    assert_eq!(bindings.len(), 5);
-    assert_eq!(bindings[0].1, bindings[2].1);
-    assert_eq!(bindings[1].1, bindings[3].1);
-    assert_eq!(bindings[0].1, bindings[4].1);
+
+    // Assignment targets refer to the existing symbols instead of declaring new ones.
+    let [x, y] = declared(&resolver);
+    assert_eq!(uses(&resolver, x), 3);
+    assert_eq!(uses(&resolver, y), 2);
 }
 
 #[test]
@@ -115,19 +110,14 @@ fn member_and_index_targets_resolve_receivers_without_declaring_names() {
         "let i = 0; object.field = i; object[i] = i; object.field;",
     )
     .unwrap();
-    assert_eq!(resolver.lvalue_bindings.len(), 1);
+
+    let [i] = declared(&resolver);
+    assert_eq!(uses(&resolver, i), 3);
+    assert_eq!(uses(&resolver, object), 3);
     assert_eq!(resolver.scopes.lookup("field", &resolver.symbols), None);
     assert_eq!(
         resolver.scopes.lookup("object", &resolver.symbols),
         Some(object)
-    );
-    assert_eq!(
-        resolver
-            .references
-            .values()
-            .filter(|&&id| id == object)
-            .count(),
-        3
     );
 }
 
@@ -186,7 +176,7 @@ fn errors_restore_visibility_after_nested_blocks() {
         "let x = 1; { let x = 2; { let local = 3; missing; } }",
     )
     .unwrap_err();
-    let outer = resolver.lvalue_bindings[0].1;
+    let [outer, _, _] = declared(&resolver);
     assert_eq!(resolver.scopes.lookup("x", &resolver.symbols), Some(outer));
     assert_eq!(resolver.scopes.lookup("local", &resolver.symbols), None);
     resolve_source(&mut resolver, "x;").unwrap();
@@ -204,32 +194,11 @@ fn later_comprehension_clauses_see_earlier_binders() {
         "let xs = [[true]]; [y for x in xs, y in x, if y];",
     )
     .unwrap();
-    let bindings = &resolver.lvalue_bindings;
-    assert_eq!(bindings.len(), 3);
-    assert_eq!(
-        resolver
-            .references
-            .values()
-            .filter(|&&id| id == bindings[0].1)
-            .count(),
-        1
-    );
-    assert_eq!(
-        resolver
-            .references
-            .values()
-            .filter(|&&id| id == bindings[1].1)
-            .count(),
-        1
-    );
-    assert_eq!(
-        resolver
-            .references
-            .values()
-            .filter(|&&id| id == bindings[2].1)
-            .count(),
-        2
-    );
+
+    let [xs, x, y] = declared(&resolver);
+    assert_eq!(uses(&resolver, xs), 1);
+    assert_eq!(uses(&resolver, x), 1);
+    assert_eq!(uses(&resolver, y), 2);
     assert_eq!(resolver.scopes.lookup("x", &resolver.symbols), None);
     assert_eq!(resolver.scopes.lookup("y", &resolver.symbols), None);
 }
@@ -238,24 +207,10 @@ fn later_comprehension_clauses_see_earlier_binders() {
 fn iterable_uses_the_outer_binding_of_its_own_name() {
     let mut resolver = NameResolver::new();
     resolve_source(&mut resolver, "let x = [1]; [x for x in x]; x;").unwrap();
-    let outer = resolver.lvalue_bindings[0].1;
-    let inner = resolver.lvalue_bindings[1].1;
-    assert_eq!(
-        resolver
-            .references
-            .values()
-            .filter(|&&id| id == outer)
-            .count(),
-        2
-    );
-    assert_eq!(
-        resolver
-            .references
-            .values()
-            .filter(|&&id| id == inner)
-            .count(),
-        1
-    );
+
+    let [outer, inner] = declared(&resolver);
+    assert_eq!(uses(&resolver, outer), 2);
+    assert_eq!(uses(&resolver, inner), 1);
 }
 
 #[test]
