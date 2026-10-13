@@ -1,5 +1,5 @@
 use crate::symbols::{BindingKind, SymbolId, SymbolTable};
-use ahash::AHashMap;
+use ahash::{AHashMap, AHashSet};
 use ndc_lexer::Span;
 use ndc_parser::{
     AssignmentTarget, AssignmentTargetLocation, BindingPattern, BindingPatternLocation, Expression,
@@ -19,6 +19,7 @@ pub(crate) struct Scope {
 pub(crate) struct ScopeTree {
     current: ScopeId,
     scopes: Vec<Scope>,
+    bound_in: AHashMap<SymbolId, ScopeId>,
 }
 
 pub(crate) struct NameResolver {
@@ -35,6 +36,11 @@ pub(crate) struct NameResolver {
     /// The symbol each identifier assignment target writes to, keyed by the
     /// target's node. In `x = 1`, the `x` node.
     assignments: AHashMap<NodeId, SymbolId>,
+    /// The outer symbols each function captures, keyed by its declaration node, in order of first use.
+    /// In `fn outer() { let x = 1; fn inner() { x } }`, `inner` captures `[x]`.
+    captures: AHashMap<NodeId, Vec<SymbolId>>,
+    /// Symbols some closure captures. They must outlive their scope (see #227).
+    captured: AHashSet<SymbolId>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -103,18 +109,42 @@ impl ScopeTree {
         Self {
             current: ScopeId(0),
             scopes: vec![Scope::new(ScopeKind::Builtins, None)],
+            bound_in: Default::default(),
         }
     }
 
     pub(crate) fn bind(&mut self, symbol_id: SymbolId) {
         self.scopes[self.current.0].bind(symbol_id);
+        self.bound_in.insert(symbol_id, self.current);
     }
 
     /// The current scope followed by its ancestors, ending at the root.
     fn chain(&self) -> impl Iterator<Item = &Scope> {
-        std::iter::successors(Some(&self.scopes[self.current.0]), |scope| {
-            scope.parent.map(|parent| &self.scopes[parent.0])
-        })
+        self.ancestors(self.current).map(|id| &self.scopes[id.0])
+    }
+
+    /// `from` and its ancestors, ending at the root.
+    fn ancestors(&self, from: ScopeId) -> impl Iterator<Item = ScopeId> {
+        std::iter::successors(Some(from), |id| self.scopes[id.0].parent)
+    }
+
+    /// Functions a use of `symbol` from the current scope reaches through, innermost
+    /// first. In `fn f() { let y = 1; fn g() { y } }`, a use of `y` in `g` crosses `[g]`.
+    /// Natives are globals, so uses of them cross nothing.
+    pub(crate) fn crossed_functions(&self, symbol: SymbolId) -> Vec<NodeId> {
+        let bound_in = self.bound_in[&symbol];
+
+        if self.scopes[bound_in.0].kind == ScopeKind::Builtins {
+            return Vec::new();
+        }
+
+        self.ancestors(self.current)
+            .take_while(|&id| id != bound_in)
+            .filter_map(|id| match self.scopes[id.0].kind {
+                ScopeKind::Function(node) => Some(node),
+                _ => None,
+            })
+            .collect()
     }
 
     pub(crate) fn lookup(&self, name: &str, table: &SymbolTable) -> Option<SymbolId> {
@@ -168,7 +198,28 @@ impl NameResolver {
             declarations: Default::default(),
             references: Default::default(),
             assignments: Default::default(),
+            captures: Default::default(),
+            captured: Default::default(),
         }
+    }
+
+    /// Records a use of `symbol` from the current scope. Every function the use
+    /// reaches through captures it. In `fn outer() { let x = 1; fn inner() { x } }`,
+    /// the use of `x` adds `x` to `inner`'s captures.
+    fn record_use(&mut self, symbol: SymbolId) {
+        let crossed = self.scopes.crossed_functions(symbol);
+        if crossed.is_empty() {
+            return;
+        }
+
+        for node in crossed {
+            let captures = self.captures.entry(node).or_default();
+            if !captures.contains(&symbol) {
+                captures.push(symbol);
+            }
+        }
+
+        self.captured.insert(symbol);
     }
 
     /// Resolve lexical value names. Type annotations and member selection
@@ -182,6 +233,10 @@ impl NameResolver {
             | Expression::Continue => {}
             Expression::Identifier { name, .. } => {
                 let candidates = self.candidates(name, loc.span)?;
+                candidates
+                    .iter()
+                    .flatten()
+                    .for_each(|symbol| self.record_use(*symbol));
                 self.references.insert(loc.id, candidates);
             }
             Expression::Statement(inner)
@@ -371,6 +426,7 @@ impl NameResolver {
                 identifier, span, ..
             } => {
                 let symbol = self.lookup(identifier, *span)?;
+                self.record_use(symbol);
                 self.assignments.insert(target.id, symbol);
             }
             AssignmentTarget::Sequence(items) => {
@@ -436,6 +492,12 @@ impl NameResolver {
                 }
             },
         }
+    }
+}
+
+impl Candidates {
+    fn iter(&self) -> impl Iterator<Item = &Vec<SymbolId>> {
+        self.0.iter()
     }
 }
 

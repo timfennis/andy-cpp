@@ -2,7 +2,7 @@ use super::{Candidates, NameResolutionError, NameResolver, ScopeKind};
 use crate::symbols::{BindingKind, SymbolId};
 use itertools::Itertools;
 use ndc_lexer::{Lexer, SourceId};
-use ndc_parser::Parser;
+use ndc_parser::{NodeId, Parser};
 
 fn resolve_source(resolver: &mut NameResolver, source: &str) -> Result<(), NameResolutionError> {
     let tokens = Lexer::new(source, SourceId::new(0))
@@ -63,6 +63,24 @@ fn unknown_name(source: &str) -> String {
         Err(NameResolutionError::UnknownName { name, .. }) => name,
         other => panic!("expected an unknown name in {source:?}, got {other:?}"),
     }
+}
+
+/// Function scope nodes in creation order. Lambdas have no declaration entry,
+/// so the scope arena is the one place every function's node appears.
+fn functions(resolver: &NameResolver) -> Vec<NodeId> {
+    resolver
+        .scopes
+        .scopes
+        .iter()
+        .filter_map(|scope| match scope.kind {
+            ScopeKind::Function(node) => Some(node),
+            _ => None,
+        })
+        .collect()
+}
+
+fn captures_of(resolver: &NameResolver, function: NodeId) -> &[SymbolId] {
+    resolver.captures.get(&function).map_or(&[], Vec::as_slice)
 }
 
 fn only_reference(resolver: &NameResolver) -> &Candidates {
@@ -525,4 +543,140 @@ fn scopes_record_their_kind_in_creation_order() {
             ScopeKind::Block,
         ]
     );
+}
+
+#[test]
+fn functions_capture_outer_bindings() {
+    let mut resolver = NameResolver::new([]);
+    resolve_source(&mut resolver, "let x = 1; fn f() { x; }").unwrap();
+
+    let [x, _] = declared(&resolver);
+    let [f] = functions(&resolver)[..] else {
+        panic!("expected one function");
+    };
+    assert_eq!(captures_of(&resolver, f), [x]);
+    assert_eq!(resolver.captured, [x].into_iter().collect());
+}
+
+#[test]
+fn blocks_are_not_function_boundaries() {
+    for source in ["let x = 1; { { x; } }", "fn f(a) { { a; } }"] {
+        let mut resolver = NameResolver::new([]);
+        resolve_source(&mut resolver, source).unwrap();
+
+        assert!(resolver.captures.is_empty(), "{source}");
+        assert!(resolver.captured.is_empty(), "{source}");
+    }
+}
+
+#[test]
+fn captures_pass_through_intermediate_functions() {
+    let mut resolver = NameResolver::new([]);
+    resolve_source(
+        &mut resolver,
+        "fn outer() { let x = 1; fn middle() { fn inner() { x; } } }",
+    )
+    .unwrap();
+
+    let [_, x, _, _] = declared(&resolver);
+    let [outer, middle, inner] = functions(&resolver)[..] else {
+        panic!("expected three functions");
+    };
+    assert_eq!(captures_of(&resolver, outer), []);
+    assert_eq!(captures_of(&resolver, middle), [x]);
+    assert_eq!(captures_of(&resolver, inner), [x]);
+}
+
+#[test]
+fn lambdas_capture_under_their_own_node() {
+    let mut resolver = NameResolver::new([]);
+    resolve_source(&mut resolver, "let x = 1; let g = fn() { x; };").unwrap();
+
+    let [x, _] = declared(&resolver);
+    let [lambda] = functions(&resolver)[..] else {
+        panic!("expected one function");
+    };
+    assert_eq!(captures_of(&resolver, lambda), [x]);
+}
+
+#[test]
+fn builtins_are_never_captured() {
+    let mut resolver = NameResolver::new(["len"]);
+    resolve_source(&mut resolver, "fn f() { len; }").unwrap();
+
+    assert!(resolver.captures.is_empty());
+    assert!(resolver.captured.is_empty());
+}
+
+#[test]
+fn assignments_capture_their_target() {
+    let mut resolver = NameResolver::new([]);
+    resolve_source(&mut resolver, "let x = 1; fn f() { x = 2; }").unwrap();
+
+    let [x, _] = declared(&resolver);
+    let [f] = functions(&resolver)[..] else {
+        panic!("expected one function");
+    };
+    assert_eq!(captures_of(&resolver, f), [x]);
+    assert!(resolver.captured.contains(&x));
+}
+
+#[test]
+fn every_candidate_is_captured() {
+    let mut resolver = NameResolver::new([]);
+    resolve_source(
+        &mut resolver,
+        "fn outer() { fn h(a) { 1; } fn h(a, b) { 1; } fn inner() { h; } }",
+    )
+    .unwrap();
+
+    // The type pass picks the overload later, so the closure captures both.
+    let [_, h1, _, h2, _, _, _] = declared(&resolver);
+    let [_, _, _, inner] = functions(&resolver)[..] else {
+        panic!("expected four functions");
+    };
+    assert_eq!(captures_of(&resolver, inner), [h2, h1]);
+}
+
+#[test]
+fn recursive_functions_capture_themselves() {
+    let mut resolver = NameResolver::new([]);
+    resolve_source(&mut resolver, "fn fact(n) { fact(n); }").unwrap();
+
+    let [fact, _] = declared(&resolver);
+    let [fact_node] = functions(&resolver)[..] else {
+        panic!("expected one function");
+    };
+    assert_eq!(captures_of(&resolver, fact_node), [fact]);
+}
+
+#[test]
+fn captures_are_listed_once_in_first_use_order() {
+    let mut resolver = NameResolver::new([]);
+    resolve_source(&mut resolver, "let a = 1; let b = 2; fn f() { b; a; b; }").unwrap();
+
+    let [a, b, _] = declared(&resolver);
+    let [f] = functions(&resolver)[..] else {
+        panic!("expected one function");
+    };
+    assert_eq!(captures_of(&resolver, f), [b, a]);
+}
+
+#[test]
+fn loop_variables_can_be_captured() {
+    let mut resolver = NameResolver::new([]);
+    resolve_source(&mut resolver, "for i in [1] { let g = fn() { i; }; }").unwrap();
+
+    let [i, _] = declared(&resolver);
+    assert!(resolver.captured.contains(&i));
+}
+
+#[test]
+fn block_scoped_variables_can_be_captured() {
+    // The shape from #227: `y` must outlive its block for `g` to read it.
+    let mut resolver = NameResolver::new([]);
+    resolve_source(&mut resolver, "let g = 0; { let y = 1; g = fn() { y; }; }").unwrap();
+
+    let [_, y] = declared(&resolver);
+    assert!(resolver.captured.contains(&y));
 }
