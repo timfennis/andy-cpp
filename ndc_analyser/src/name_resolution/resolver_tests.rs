@@ -93,7 +93,7 @@ fn self_reference_reports_the_initializer_location() {
     let error = resolve_source(&mut resolver, source).unwrap_err();
     assert_eq!(
         error.to_string(),
-        "identifier 'missing' has not been declared"
+        "Identifier missing has not previously been declared"
     );
     let NameResolutionError::UnknownName { name, span } = error else {
         panic!("expected an unknown name");
