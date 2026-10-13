@@ -44,6 +44,12 @@ pub(crate) struct NameResolver {
     /// The operations each augmented assignment can use, keyed by its node.
     /// In `x += 1`, the candidates for `+=` and `+`.
     augmented: AHashMap<NodeId, AugmentedCandidates>,
+    /// Getter candidates for reads through an accessor, keyed by the reading node.
+    /// For `p.x`, the member access node's `x`. For `xs[i] += 1`, the target node's `[]`.
+    getters: AHashMap<NodeId, Candidates>,
+    /// Setter candidates for writes through an accessor, keyed by the target node.
+    /// In `p.x = 1`, `x=`. In `xs[i] = 1`, `[]=`.
+    setters: AHashMap<NodeId, Candidates>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -217,6 +223,8 @@ impl NameResolver {
             captures: Default::default(),
             captured: Default::default(),
             augmented: Default::default(),
+            getters: Default::default(),
+            setters: Default::default(),
         }
     }
 
@@ -249,11 +257,7 @@ impl NameResolver {
             | Expression::Break
             | Expression::Continue => {}
             Expression::Identifier { name, .. } => {
-                let candidates = self.candidates(name, loc.span)?;
-                candidates
-                    .iter()
-                    .flatten()
-                    .for_each(|symbol| self.record_use(*symbol));
+                let candidates = self.use_name(name, loc.span)?;
                 self.references.insert(loc.id, candidates);
             }
             Expression::Statement(inner)
@@ -312,7 +316,16 @@ impl NameResolver {
                     self.resolve(argument)?;
                 }
             }
-            Expression::MemberAccess { receiver, .. } => self.resolve(receiver)?,
+            Expression::MemberAccess {
+                receiver,
+                member,
+                member_span,
+                ..
+            } => {
+                self.resolve(receiver)?;
+                let candidates = self.use_name(member, *member_span)?;
+                self.getters.insert(loc.id, candidates);
+            }
             Expression::Tuple { values } | Expression::List { values } => {
                 for value in values {
                     self.resolve(value)?;
@@ -396,6 +409,20 @@ impl NameResolver {
                 }
 
                 self.resolve_target(l_value)?;
+                // Reading the old value goes through the target's getter.
+                // Identifiers are read directly, and sequences were rejected above.
+                let getter = match &l_value.target {
+                    AssignmentTarget::Index { .. } => Some(self.use_name("[]", l_value.span)?),
+                    AssignmentTarget::Member {
+                        member,
+                        member_span,
+                        ..
+                    } => Some(self.use_name(member, *member_span)?),
+                    AssignmentTarget::Identifier { .. } | AssignmentTarget::Sequence(_) => None,
+                };
+                if let Some(getter) = getter {
+                    self.getters.insert(l_value.id, getter);
+                }
                 self.resolve(r_value)?;
 
                 let in_place_op_name = format!("{operation}=");
@@ -429,17 +456,25 @@ impl NameResolver {
         Ok(())
     }
 
-    fn candidates(&self, name: &str, span: Span) -> Result<Candidates, NameResolutionError> {
-        let out = self.scopes.candidates(name, &self.symbols);
+    /// Resolves a use of `name` from the current scope: every candidate it could
+    /// mean, each recorded as a use so closures capture it. Any candidate may be
+    /// the one the type pass picks, so all of them are captured.
+    fn use_name(&mut self, name: &str, span: Span) -> Result<Candidates, NameResolutionError> {
+        let candidates = self.scopes.candidates(name, &self.symbols);
 
-        if out.0.is_empty() {
+        if candidates.0.is_empty() {
             return Err(NameResolutionError::UnknownName {
                 name: name.to_string(),
                 span,
             });
         }
 
-        Ok(out)
+        candidates
+            .iter()
+            .flatten()
+            .for_each(|symbol| self.record_use(*symbol));
+
+        Ok(candidates)
     }
 
     fn lookup(&self, name: &str, span: Span) -> Result<SymbolId, NameResolutionError> {
@@ -488,8 +523,19 @@ impl NameResolver {
             AssignmentTarget::Index { value, index, .. } => {
                 self.resolve(value)?;
                 self.resolve(index)?;
+                let candidates = self.use_name("[]=", target.span)?;
+                self.setters.insert(target.id, candidates);
             }
-            AssignmentTarget::Member { receiver, .. } => self.resolve(receiver)?,
+            AssignmentTarget::Member {
+                receiver,
+                member,
+                member_span,
+                ..
+            } => {
+                self.resolve(receiver)?;
+                let candidates = self.use_name(&format!("{member}="), *member_span)?;
+                self.setters.insert(target.id, candidates);
+            }
         }
         Ok(())
     }
