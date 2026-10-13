@@ -10,7 +10,7 @@ use ndc_parser::{
 #[derive(Debug, Eq, PartialEq, Copy, Clone, Hash)]
 pub(crate) struct ScopeId(usize);
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Scope {
     parent: Option<ScopeId>,
     bindings: Vec<SymbolId>,
@@ -18,12 +18,14 @@ pub(crate) struct Scope {
     kind: ScopeKind,
 }
 
+#[derive(Debug, Clone)]
 pub(crate) struct ScopeTree {
     current: ScopeId,
     scopes: Vec<Scope>,
     bound_in: AHashMap<SymbolId, ScopeId>,
 }
 
+#[derive(Debug, Clone)]
 pub(crate) struct NameResolver {
     symbols: SymbolTable,
     scopes: ScopeTree,
@@ -62,7 +64,7 @@ pub(crate) struct NameResolver {
     errors: Vec<NameResolutionError>,
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub(crate) enum NameResolutionError {
     #[error("Identifier {name} has not previously been declared")]
     UnknownName { name: String, span: Span },
@@ -88,17 +90,37 @@ pub(crate) enum NameResolutionError {
     IllegalStructRedefinition { name: String, span: Span },
 }
 
+impl NameResolutionError {
+    pub(crate) fn span(&self) -> Span {
+        match self {
+            Self::UnknownName { span, .. }
+            | Self::DuplicateParameter { span, .. }
+            | Self::IllegalFunctionRedefinition { span, .. }
+            | Self::SequenceTargetNotAllowed { span }
+            | Self::UnknownType { span, .. }
+            | Self::StructShadowsBuiltinType { span, .. }
+            | Self::StructRedefinition { span, .. }
+            | Self::DuplicateField { span, .. }
+            | Self::IllegalStructRedefinition { span, .. } => *span,
+        }
+    }
+}
+
 /// Same-named symbols visible at a use, nearest scope first, newest first
 /// within a scope. For `x` in `let x = 1; { let x = 2; x }`: `[[x2], [x1]]`.
 /// Identifiers always have at least one candidate, augmented operators may
 /// not.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Candidates(Vec<Vec<SymbolId>>);
 
 /// The two operations an augmented assignment can use. For `xs ++= ys`:
 /// `in_place` holds `++=` (mutates `xs`), `operator` holds `++` (builds a new value
 /// that is written back). Either may be empty; the type pass picks.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "read by the type pass, which is not written yet")
+)]
 pub(crate) struct AugmentedCandidates {
     in_place: Candidates,
     operator: Candidates,
@@ -106,7 +128,11 @@ pub(crate) struct AugmentedCandidates {
 
 /// The symbols a struct declaration binds. For `struct Point { x: Int }`: the
 /// type `Point`, the constructor `Point`, and the getter `x` with the setter `x=`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "read by the type pass, which is not written yet")
+)]
 pub(crate) struct StructSymbols {
     /// `Point` in annotations such as `let p: Point`.
     type_symbol: SymbolId,
