@@ -10,7 +10,7 @@ use ndc_parser::{
 #[derive(Debug, Eq, PartialEq, Copy, Clone, Hash)]
 pub(crate) struct ScopeId(usize);
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Scope {
     parent: Option<ScopeId>,
     bindings: Vec<SymbolId>,
@@ -18,12 +18,14 @@ pub(crate) struct Scope {
     kind: ScopeKind,
 }
 
+#[derive(Debug, Clone)]
 pub(crate) struct ScopeTree {
     current: ScopeId,
     scopes: Vec<Scope>,
     bound_in: AHashMap<SymbolId, ScopeId>,
 }
 
+#[derive(Debug, Clone)]
 pub(crate) struct NameResolver {
     symbols: SymbolTable,
     scopes: ScopeTree,
@@ -57,9 +59,12 @@ pub(crate) struct NameResolver {
     type_names: AHashMap<NodeId, SymbolId>,
     /// What each struct declaration binds, keyed by the declaration's node.
     structs: AHashMap<NodeId, StructSymbols>,
+    /// Errors from statements that failed to resolve. Resolution carries on with
+    /// the next statement, so `a; b;` reports both unknown names.
+    errors: Vec<NameResolutionError>,
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub(crate) enum NameResolutionError {
     #[error("Identifier {name} has not previously been declared")]
     UnknownName { name: String, span: Span },
@@ -85,17 +90,37 @@ pub(crate) enum NameResolutionError {
     IllegalStructRedefinition { name: String, span: Span },
 }
 
+impl NameResolutionError {
+    pub(crate) fn span(&self) -> Span {
+        match self {
+            Self::UnknownName { span, .. }
+            | Self::DuplicateParameter { span, .. }
+            | Self::IllegalFunctionRedefinition { span, .. }
+            | Self::SequenceTargetNotAllowed { span }
+            | Self::UnknownType { span, .. }
+            | Self::StructShadowsBuiltinType { span, .. }
+            | Self::StructRedefinition { span, .. }
+            | Self::DuplicateField { span, .. }
+            | Self::IllegalStructRedefinition { span, .. } => *span,
+        }
+    }
+}
+
 /// Same-named symbols visible at a use, nearest scope first, newest first
 /// within a scope. For `x` in `let x = 1; { let x = 2; x }`: `[[x2], [x1]]`.
 /// Identifiers always have at least one candidate, augmented operators may
 /// not.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Candidates(Vec<Vec<SymbolId>>);
 
 /// The two operations an augmented assignment can use. For `xs ++= ys`:
 /// `in_place` holds `++=` (mutates `xs`), `operator` holds `++` (builds a new value
 /// that is written back). Either may be empty; the type pass picks.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "read by the type pass, which is not written yet")
+)]
 pub(crate) struct AugmentedCandidates {
     in_place: Candidates,
     operator: Candidates,
@@ -103,7 +128,11 @@ pub(crate) struct AugmentedCandidates {
 
 /// The symbols a struct declaration binds. For `struct Point { x: Int }`: the
 /// type `Point`, the constructor `Point`, and the getter `x` with the setter `x=`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "read by the type pass, which is not written yet")
+)]
 pub(crate) struct StructSymbols {
     /// `Point` in annotations such as `let p: Point`.
     type_symbol: SymbolId,
@@ -292,6 +321,7 @@ impl NameResolver {
             setters: Default::default(),
             type_names: Default::default(),
             structs: Default::default(),
+            errors: Default::default(),
         }
     }
 
@@ -314,10 +344,23 @@ impl NameResolver {
         self.captured.insert(symbol);
     }
 
+    /// Resolves `statement`, recording its error instead of returning it so the
+    /// statements after it still resolve. A failed statement stops at its first error.
+    pub(crate) fn resolve_statement(&mut self, statement: &ExpressionLocation) {
+        if let Err(error) = self.resolve(statement) {
+            self.errors.push(error);
+        }
+    }
+
+    /// The errors recorded so far, leaving none behind.
+    pub(crate) fn take_errors(&mut self) -> Vec<NameResolutionError> {
+        std::mem::take(&mut self.errors)
+    }
+
     /// Resolve lexical names: values, accessors, and the type names in annotations.
     /// Choosing overloads, checking types and validating control flow belong to
     /// later passes.
-    pub(crate) fn resolve(&mut self, loc: &ExpressionLocation) -> Result<(), NameResolutionError> {
+    fn resolve(&mut self, loc: &ExpressionLocation) -> Result<(), NameResolutionError> {
         match &loc.expression {
             Expression::BoolLiteral(_)
             | Expression::NoneLiteral
@@ -360,7 +403,7 @@ impl NameResolver {
             Expression::Block { statements } => {
                 self.in_scope(ScopeKind::Block, |resolver| {
                     for statement in statements {
-                        resolver.resolve(statement)?;
+                        resolver.resolve_statement(statement);
                     }
                     Ok(())
                 })?;

@@ -1,3 +1,4 @@
+use crate::name_resolution::{NameResolutionError, NameResolver};
 use crate::scope::{CallKind, ResolvedCall, ScopeTree, TypeBinding, TypeDef};
 use itertools::{Itertools, izip};
 use ndc_core::static_type::StaticTypeConstructionError;
@@ -33,12 +34,16 @@ pub struct AnalysisResult {
 /// discards every binding and struct declared since.
 #[derive(Debug, Clone)]
 pub struct Checkpoint {
+    resolver: NameResolver,
     scope_tree: ScopeTree,
     struct_count: usize,
 }
 
 #[derive(Debug)]
 pub struct Analyser {
+    /// Resolves names before analysis. It runs alongside the scope tree below
+    /// until the type pass reads names from it instead.
+    resolver: NameResolver,
     struct_registry: Rc<RefCell<StructRegistry>>,
     scope_tree: ScopeTree,
     /// Stack of explicit `return` types for each enclosing function scope.
@@ -57,6 +62,7 @@ impl Analyser {
         struct_registry: Rc<RefCell<StructRegistry>>,
     ) -> Self {
         Self {
+            resolver: NameResolver::new(scope_tree.native_names()),
             scope_tree,
             struct_registry,
             return_type_stack: Vec::new(),
@@ -67,12 +73,14 @@ impl Analyser {
 
     pub fn checkpoint(&self) -> Checkpoint {
         Checkpoint {
+            resolver: self.resolver.clone(),
             scope_tree: self.scope_tree.clone(),
             struct_count: self.struct_registry.borrow().len(),
         }
     }
 
     pub fn restore(&mut self, checkpoint: Checkpoint) {
+        self.resolver = checkpoint.resolver;
         self.scope_tree = checkpoint.scope_tree;
         self.struct_registry
             .borrow_mut()
@@ -152,7 +160,23 @@ impl Analyser {
         !self.errors.is_empty()
     }
 
+    /// Analyses a top-level statement. Names resolve first; a statement with
+    /// unresolved names isn't analysed further, which would only repeat its errors.
     pub fn analyse(
+        &mut self,
+        expr_loc: &mut ExpressionLocation,
+    ) -> Result<StaticType, AnalysisError> {
+        self.resolver.resolve_statement(expr_loc);
+        let name_errors = self.resolver.take_errors();
+        if !name_errors.is_empty() {
+            self.errors
+                .extend(name_errors.into_iter().map(AnalysisError::from));
+            return Ok(StaticType::Any);
+        }
+        self.analyse_expr(expr_loc)
+    }
+
+    fn analyse_expr(
         &mut self,
         expr_loc: &mut ExpressionLocation,
     ) -> Result<StaticType, AnalysisError> {
@@ -164,7 +188,7 @@ impl Analyser {
     /// Like [`analyse`], but on error emits the error and returns `Any`
     /// so that analysis can continue.
     fn analyse_or_any(&mut self, expr_loc: &mut ExpressionLocation) -> StaticType {
-        match self.analyse(expr_loc) {
+        match self.analyse_expr(expr_loc) {
             Ok(t) => t,
             Err(e) => {
                 self.emit(e);
@@ -298,7 +322,7 @@ impl Analyser {
                 self.analyse_or_any(right);
                 Ok(StaticType::Bool)
             }
-            Expression::Grouping(expr) => self.analyse(expr),
+            Expression::Grouping(expr) => self.analyse_expr(expr),
             Expression::Cast {
                 value,
                 annotation,
@@ -1273,6 +1297,16 @@ pub struct AnalysisError {
     help_text: Option<String>,
 }
 
+impl From<NameResolutionError> for AnalysisError {
+    fn from(error: NameResolutionError) -> Self {
+        Self {
+            text: error.to_string(),
+            span: error.span(),
+            help_text: None,
+        }
+    }
+}
+
 impl AnalysisError {
     pub fn span(&self) -> Span {
         self.span
@@ -1476,6 +1510,19 @@ mod tests {
         analyse_last_type_with_globals(source, vec![])
     }
 
+    /// `[]` and `[]=`, which index reads and writes go through. Name resolution
+    /// rejects index access without them, as it would any other unknown function.
+    fn index_natives() -> Vec<(String, StaticType)> {
+        let any_function = StaticType::Function {
+            parameters: None,
+            return_type: Box::new(StaticType::Any),
+        };
+        vec![
+            ("[]".to_string(), any_function.clone()),
+            ("[]=".to_string(), any_function),
+        ]
+    }
+
     fn assert_analysis_error(source: &str, globals: Vec<(String, StaticType)>, expected: &str) {
         let (_, result) = analyse_with_globals(source, globals);
         assert!(
@@ -1491,7 +1538,10 @@ mod tests {
     #[test]
     fn inferred_list_index_assignment_widens_element_type() {
         assert_eq!(
-            analyse_last_type("let values = [1]; values[0] = \"two\"; values"),
+            analyse_last_type_with_globals(
+                "let values = [1]; values[0] = \"two\"; values",
+                index_natives()
+            ),
             StaticType::List(Box::new(StaticType::Any)),
         );
     }
@@ -1499,7 +1549,10 @@ mod tests {
     #[test]
     fn inferred_list_slice_assignment_widens_element_type() {
         assert_eq!(
-            analyse_last_type("let values = [1]; values[0..1] = [\"two\"]; values"),
+            analyse_last_type_with_globals(
+                "let values = [1]; values[0..1] = [\"two\"]; values",
+                index_natives()
+            ),
             StaticType::List(Box::new(StaticType::Any)),
         );
     }
@@ -1507,7 +1560,10 @@ mod tests {
     #[test]
     fn inferred_map_index_assignment_widens_value_and_preserves_key_type() {
         assert_eq!(
-            analyse_last_type("let values = %{\"one\": 1}; values[\"two\"] = \"two\"; values"),
+            analyse_last_type_with_globals(
+                "let values = %{\"one\": 1}; values[\"two\"] = \"two\"; values",
+                index_natives()
+            ),
             StaticType::Map {
                 key: Box::new(StaticType::String),
                 value: Box::new(StaticType::Any),
@@ -1524,7 +1580,7 @@ mod tests {
         assert_eq!(
             analyse_last_type_with_globals(
                 "let values = [1]; values[0] += 0.5; values",
-                vec![("+".to_string(), add)],
+                [index_natives(), vec![("+".to_string(), add)]].concat(),
             ),
             StaticType::List(Box::new(StaticType::Any)),
         );

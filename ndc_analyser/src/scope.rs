@@ -422,6 +422,14 @@ impl ScopeTree {
         }
     }
 
+    /// The names of the native bindings, in registration order.
+    pub(crate) fn native_names(&self) -> impl Iterator<Item = &str> {
+        self.global_scope
+            .identifiers
+            .iter()
+            .map(|binding| binding.name.as_str())
+    }
+
     pub(crate) fn get_type(&self, res: ResolvedVar) -> &StaticType {
         match res {
             ResolvedVar::Local { slot } => self.find_type_by_slot(self.current_scope_idx, slot),
