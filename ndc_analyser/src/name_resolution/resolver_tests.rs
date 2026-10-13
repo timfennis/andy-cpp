@@ -1,4 +1,6 @@
-use super::{AugmentedCandidates, Candidates, NameResolutionError, NameResolver, ScopeKind};
+use super::{
+    AugmentedCandidates, Candidates, NameResolutionError, NameResolver, ScopeKind, StructSymbols,
+};
 use crate::symbols::{BindingKind, SymbolId};
 use itertools::Itertools;
 use ndc_lexer::{Lexer, SourceId};
@@ -314,16 +316,6 @@ fn loop_body_forms_resolve_names_and_restore_scope_on_errors() {
             "{source}"
         );
     }
-}
-
-#[test]
-fn struct_declarations_report_errors_instead_of_panicking() {
-    let mut resolver = NameResolver::new([]);
-    let error = resolve_source(&mut resolver, "struct Point { x: Int }").unwrap_err();
-    assert!(
-        matches!(error, NameResolutionError::Unsupported { feature: "struct declarations", span } if span.source_id() == SourceId::new(0)),
-        "{error:?}"
-    );
 }
 
 #[test]
@@ -969,4 +961,194 @@ fn unannotated_code_records_no_type_names() {
     resolve_source(&mut resolver, "let x = 1; fn f(a) { a; }").unwrap();
 
     assert!(resolver.type_names.is_empty());
+}
+
+fn only_struct(resolver: &NameResolver) -> &StructSymbols {
+    resolver
+        .structs
+        .values()
+        .exactly_one()
+        .expect("exactly one struct declaration")
+}
+
+/// The message of the error that resolving `source` reports.
+fn error_message(source: &str) -> String {
+    let mut resolver = NameResolver::new([]);
+    resolve_source(&mut resolver, source)
+        .expect_err(source)
+        .to_string()
+}
+
+#[test]
+fn structs_bind_a_type_a_constructor_and_accessors() {
+    let mut resolver = NameResolver::new([]);
+    resolve_source(
+        &mut resolver,
+        "struct Point { x: Int, y: Int } let p: Point = Point(1, 2); p.x; p.y = 3;",
+    )
+    .unwrap();
+
+    let point = only_struct(&resolver);
+    let [(x, x_set), (y, y_set)] = point.accessors[..] else {
+        panic!("expected two fields");
+    };
+    let symbols = &resolver.symbols;
+    assert_eq!(symbols.name(point.type_symbol), "Point");
+    assert_eq!(symbols.kind(point.type_symbol), BindingKind::Type);
+    assert_eq!(symbols.name(point.constructor), "Point");
+    assert_eq!(symbols.kind(point.constructor), BindingKind::Function);
+    assert_eq!(
+        [x, x_set, y, y_set].map(|id| (symbols.name(id), symbols.kind(id))),
+        [
+            ("x", BindingKind::Function),
+            ("x=", BindingKind::Function),
+            ("y", BindingKind::Function),
+            ("y=", BindingKind::Function),
+        ]
+    );
+
+    // Each binding is what its use resolves to.
+    assert!(
+        resolver
+            .type_names
+            .values()
+            .any(|&id| id == point.type_symbol)
+    );
+    assert_eq!(uses(&resolver, point.constructor), 1);
+    assert_eq!(only_getter(&resolver).0, vec![vec![x]]);
+    assert_eq!(only_setter(&resolver).0, vec![vec![y_set]]);
+}
+
+#[test]
+fn structs_cannot_refer_to_themselves_or_later_structs() {
+    assert_eq!(
+        error_message("struct Node { value: Int, next: Option<Node> }"),
+        "unknown type `Node`"
+    );
+    assert_eq!(
+        error_message("struct A { b: B } struct B { x: Int }"),
+        "unknown type `B`"
+    );
+}
+
+#[test]
+fn structs_are_scoped_like_other_declarations() {
+    assert_eq!(
+        error_message("fn make() { struct S { v: Int } S(1); } fn check(x: S) { x.v; }"),
+        "unknown type `S`"
+    );
+
+    // An inner struct shadows an outer one of the same name.
+    let mut resolver = NameResolver::new([]);
+    resolve_source(
+        &mut resolver,
+        "struct P { x: Int } { struct P { y: Int } let p: P = P(2); p.y; }",
+    )
+    .unwrap();
+    let inner = resolver
+        .structs
+        .values()
+        .map(|symbols| symbols.type_symbol)
+        .max()
+        .unwrap();
+    // Field annotations add `Int`s; the `let p: P` annotation is the only `P`.
+    let annotated = resolver
+        .type_names
+        .values()
+        .filter(|&&id| resolver.symbols.name(id) == "P")
+        .exactly_one()
+        .unwrap();
+    assert_eq!(*annotated, inner);
+}
+
+#[test]
+fn struct_redefinition_errors_keep_the_current_messages() {
+    assert_eq!(
+        error_message("struct Int { x: Int }"),
+        "Struct 'Int' is not allowed to shadow the built-in type 'Int'"
+    );
+    assert_eq!(
+        error_message("struct P { x: Int } struct P { y: Int }"),
+        "Illegal redefinition of struct 'P'"
+    );
+
+    let source = "struct Dup { a: Int, a: Int }";
+    let mut resolver = NameResolver::new([]);
+    let error = resolve_source(&mut resolver, source).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "Illegal redefinition of field 'a' in struct 'Dup'"
+    );
+    let NameResolutionError::DuplicateField { span, .. } = error else {
+        unreachable!("the message identifies the variant");
+    };
+    assert_eq!(span.offset(), source.rfind("a: Int").unwrap());
+}
+
+#[test]
+fn constructors_cannot_redefine_variables_in_the_same_scope() {
+    assert_eq!(
+        error_message("let P = 5; struct P { x: Int }"),
+        "Illegal redefinition of variable P as a struct in the same scope"
+    );
+    for source in [
+        "struct P { x: Int } let P = 5;",
+        "let P = 5; { struct P { x: Int } }",
+    ] {
+        let mut resolver = NameResolver::new([]);
+        resolve_source(&mut resolver, source).unwrap_or_else(|error| panic!("{source}: {error:?}"));
+    }
+}
+
+#[test]
+fn field_accessors_may_share_names_with_variables() {
+    let mut resolver = NameResolver::new([]);
+    resolve_source(
+        &mut resolver,
+        "let x = 5; struct Point { x: Int, y: Int } Point(1, 2).x;",
+    )
+    .unwrap();
+
+    // The getter is a candidate beside the variable; the type pass skips the variable.
+    let [local] = declared(&resolver);
+    let (getter, _) = only_struct(&resolver).accessors[0];
+    assert_eq!(only_getter(&resolver).0, vec![vec![getter, local]]);
+}
+
+#[test]
+fn structs_sharing_a_field_name_overload_its_accessors() {
+    let mut resolver = NameResolver::new([]);
+    resolve_source(
+        &mut resolver,
+        "struct A { x: Int } struct B { x: String } A(1).x;",
+    )
+    .unwrap();
+
+    let [a_x, b_x] = resolver
+        .structs
+        .values()
+        .map(|symbols| symbols.accessors[0].0)
+        .sorted()
+        .collect_vec()[..]
+    else {
+        panic!("expected two structs");
+    };
+    assert_eq!(only_getter(&resolver).0, vec![vec![b_x, a_x]]);
+}
+
+#[test]
+fn struct_bindings_are_captured_like_functions() {
+    let mut resolver = NameResolver::new([]);
+    resolve_source(
+        &mut resolver,
+        "fn outer() { struct P { x: Int } fn inner() { P(1).x; } }",
+    )
+    .unwrap();
+
+    let p = only_struct(&resolver);
+    let inner = functions(&resolver)[1];
+    assert_eq!(
+        captures_of(&resolver, inner),
+        [p.constructor, p.accessors[0].0]
+    );
 }
