@@ -1,5 +1,6 @@
 use crate::name_resolution::{NameResolutionError, NameResolver};
 use crate::scope::{CallKind, ResolvedCall, ScopeTree, TypeBinding, TypeDef};
+use crate::symbols::SymbolId;
 use itertools::{Itertools, izip};
 use ndc_core::static_type::StaticTypeConstructionError;
 use ndc_core::r#struct::StructRegistry;
@@ -8,7 +9,7 @@ use ndc_lexer::{NumericLiteral, Span};
 use ndc_parser::{
     AssignmentTarget, AssignmentTargetLocation, AugmentedAssignmentPlan, Binding, BindingPattern,
     BindingPatternLocation, Candidate, Expression, ExpressionLocation, ForBody, ForIteration,
-    FunctionParameter, NodeId, TypeExpr,
+    FunctionParameter, NodeId, ResolvedVar, TypeExpr,
 };
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -61,8 +62,18 @@ impl Analyser {
         scope_tree: ScopeTree,
         struct_registry: Rc<RefCell<StructRegistry>>,
     ) -> Self {
+        let resolver = NameResolver::new(scope_tree.native_names());
+        let mut scope_tree = scope_tree;
+        let natives = resolver.native_symbols();
+        debug_assert!(
+            scope_tree
+                .native_names()
+                .zip(&natives)
+                .all(|(name, &symbol)| resolver.symbol_name(symbol) == name)
+        );
+        scope_tree.attach_native_symbols(natives);
         Self {
-            resolver: NameResolver::new(scope_tree.native_names()),
+            resolver,
             scope_tree,
             struct_registry,
             return_type_stack: Vec::new(),
@@ -93,6 +104,17 @@ impl Analyser {
         let mut result = std::mem::take(&mut self.result);
         result.errors = std::mem::take(&mut self.errors);
         result
+    }
+
+    /// Binds `name` in the current scope as the resolver's `symbol` for it.
+    fn create_local_binding(
+        &mut self,
+        name: String,
+        binding: TypeBinding,
+        symbol: SymbolId,
+    ) -> ResolvedVar {
+        debug_assert_eq!(self.resolver.symbol_name(symbol), name);
+        self.scope_tree.create_local_binding(name, binding, symbol)
     }
 
     /// Record a non-fatal analysis error. The analyser continues with a
@@ -475,32 +497,34 @@ impl Analyser {
 
                 // Pre-register the function before analyzing its body so recursive calls can
                 // resolve the name. The return type is unknown at this point so we use Any.
-                let pre_slot =
-                    if let Some(name) = name {
-                        let arity = type_signature.types().map(|t| t.len());
-                        if self.scope_tree.has_function_in_current_scope(name, arity) {
-                            self.emit(AnalysisError::function_redefinition(name, arity, *span));
-                            // Skip re-registering but still analyse the body below.
-                            None
-                        } else {
-                            let placeholder = StaticType::Function {
-                                parameters: type_signature.types(),
-                                return_type: Box::new(
-                                    return_type_slot.clone().unwrap_or(StaticType::Any),
-                                ),
-                            };
-                            Some(self.scope_tree.create_local_binding(
-                                name.clone(),
-                                TypeBinding::Inferred(placeholder),
-                            ))
-                        }
-                    } else {
+                let pre_slot = if let Some(name) = name {
+                    let arity = type_signature.types().map(|t| t.len());
+                    if self.scope_tree.has_function_in_current_scope(name, arity) {
+                        self.emit(AnalysisError::function_redefinition(name, arity, *span));
+                        // Skip re-registering but still analyse the body below.
                         None
-                    };
+                    } else {
+                        let placeholder = StaticType::Function {
+                            parameters: type_signature.types(),
+                            return_type: Box::new(
+                                return_type_slot.clone().unwrap_or(StaticType::Any),
+                            ),
+                        };
+                        Some(self.create_local_binding(
+                            name.clone(),
+                            TypeBinding::Inferred(placeholder),
+                            self.resolver.declared_symbol(*id),
+                        ))
+                    }
+                } else {
+                    None
+                };
 
                 self.scope_tree.new_function_scope();
                 self.return_type_stack.push(None);
-                let param_types = self.resolve_parameters_declarative(&type_signature, *span);
+                let parameter_nodes = parameters.iter().map(|p| p.lvalue.id).collect_vec();
+                let param_types =
+                    self.resolve_parameters_declarative(&type_signature, &parameter_nodes, *span);
 
                 // Fill inferred_type on parameter binding patterns for LSP hints.
                 for (p, typ) in parameters.iter_mut().zip(&param_types) {
@@ -735,20 +759,26 @@ impl Analyser {
                 self.scope_tree
                     .declare_type(name.clone(), TypeDef::Struct(Rc::clone(&info)));
 
-                *resolved_name = Some(self.scope_tree.create_local_binding(
+                let symbols = self.resolver.struct_symbols(*id).clone();
+                *resolved_name = Some(self.create_local_binding(
                     name.clone(),
                     TypeBinding::Annotated(info.constructor_type()),
+                    symbols.constructor,
                 ));
 
-                for (index, field) in fields.iter_mut().enumerate() {
-                    field.resolved_getter = Some(self.scope_tree.create_local_binding(
+                for (index, (field, &(getter, setter))) in
+                    fields.iter_mut().zip(&symbols.accessors).enumerate()
+                {
+                    field.resolved_getter = Some(self.create_local_binding(
                         field.identifier.clone(),
                         TypeBinding::Annotated(info.getter_type(index)),
+                        getter,
                     ));
 
-                    field.resolved_setter = Some(self.scope_tree.create_local_binding(
+                    field.resolved_setter = Some(self.create_local_binding(
                         format!("{}=", field.identifier),
                         TypeBinding::Annotated(info.setter_type(index)),
+                        setter,
                     ));
                 }
 
@@ -1146,6 +1176,7 @@ impl Analyser {
     fn resolve_parameters_declarative(
         &mut self,
         type_signature: &TypeSignature,
+        parameter_nodes: &[NodeId],
         span: Span,
     ) -> Vec<StaticType> {
         let TypeSignature::Exact(parameters) = type_signature else {
@@ -1156,7 +1187,11 @@ impl Analyser {
             self.emit(AnalysisError::parameter_redefined(&param.name, span));
         }
 
-        for param in parameters.iter().unique_by(|param| &param.name) {
+        for (param, &node) in parameters
+            .iter()
+            .zip(parameter_nodes)
+            .unique_by(|(param, _)| &param.name)
+        {
             let has_annotation = param.type_name != StaticType::Any;
             let binding = if has_annotation {
                 TypeBinding::Annotated(param.type_name.clone())
@@ -1164,8 +1199,8 @@ impl Analyser {
                 TypeBinding::Inferred(StaticType::Any)
             };
 
-            self.scope_tree
-                .create_local_binding(param.name.clone(), binding);
+            let symbol = self.resolver.declared_symbol(node);
+            self.create_local_binding(param.name.clone(), binding, symbol);
         }
 
         parameters
@@ -1203,10 +1238,12 @@ impl Analyser {
                     None => TypeBinding::Inferred(found_type),
                 };
 
-                *resolved = Some(
-                    self.scope_tree
-                        .create_local_binding(identifier.clone(), type_binding.clone()),
-                );
+                let symbol = self.resolver.declared_symbol(lvalue.id);
+                *resolved = Some(self.create_local_binding(
+                    identifier.clone(),
+                    type_binding.clone(),
+                    symbol,
+                ));
 
                 *inferred_type = Some(type_binding.typ().clone())
             }
