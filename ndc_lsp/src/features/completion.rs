@@ -213,7 +213,7 @@ fn merged_type_display(candidates: &[&StaticType]) -> String {
 /// Language keywords offered in general (non-dot) completion.
 const KEYWORDS: &[&str] = &[
     "let", "fn", "struct", "if", "else", "while", "for", "in", "as", "return", "break", "continue",
-    "true", "false",
+    "true", "false", "None",
 ];
 
 fn keyword_completions() -> impl Iterator<Item = CompletionItem> {

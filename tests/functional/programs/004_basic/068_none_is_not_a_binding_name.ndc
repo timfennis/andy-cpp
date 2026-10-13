@@ -1,0 +1,3 @@
+// `None` is a literal like `true`, so it can't name a variable.
+// expect-error: Invalid assignment target
+let None = 5;

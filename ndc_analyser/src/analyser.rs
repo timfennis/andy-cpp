@@ -257,6 +257,7 @@ impl Analyser {
     ) -> Result<StaticType, AnalysisError> {
         match expression {
             Expression::BoolLiteral(_) => Ok(StaticType::Bool),
+            Expression::NoneLiteral => Ok(StaticType::Option(Box::new(StaticType::Any))),
             Expression::StringLiteral(_) => Ok(StaticType::String),
             Expression::NumericLiteral(NumericLiteral::Int64(_)) => Ok(StaticType::Int),
             Expression::NumericLiteral(NumericLiteral::Float64(_)) => Ok(StaticType::Float),
@@ -271,9 +272,6 @@ impl Analyser {
                 resolved,
                 ..
             } => {
-                if ident == "None" {
-                    return Ok(StaticType::Option(Box::new(StaticType::Any)));
-                }
                 let Some(binding) = self.scope_tree.get_binding_any(ident) else {
                     self.emit(AnalysisError::identifier_not_previously_declared(
                         ident, *span,

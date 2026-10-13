@@ -55,8 +55,8 @@ impl AndycppHighlighter {
             let colored = match &token.token {
                 // Strings — green
                 Token::String(_) => substring.rgb(152, 195, 121),
-                // Numeric literals and booleans — orange
-                Token::NumericLiteral(_) | Token::True | Token::False => {
+                // Numeric literals, booleans and None — orange
+                Token::NumericLiteral(_) | Token::True | Token::False | Token::None => {
                     substring.rgb(209, 154, 102)
                 }
                 // Keywords — coral red
@@ -238,6 +238,7 @@ fn collect_function_spans(expr: &ExpressionLocation, spans: &mut AHashSet<usize>
         }
         // Leaves — no sub-expressions to recurse into
         Expression::BoolLiteral(_)
+        | Expression::NoneLiteral
         | Expression::StringLiteral(_)
         | Expression::NumericLiteral(_)
         | Expression::Identifier { .. }

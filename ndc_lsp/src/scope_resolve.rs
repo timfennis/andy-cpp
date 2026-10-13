@@ -204,6 +204,7 @@ fn collect(expr: &ExpressionLocation, scope: Span, out: &mut Vec<Decl>) {
         }
         Expression::Identifier { .. }
         | Expression::BoolLiteral(_)
+        | Expression::NoneLiteral
         | Expression::StringLiteral(_)
         | Expression::NumericLiteral(_)
         | Expression::Break
