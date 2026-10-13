@@ -1,9 +1,10 @@
 use crate::symbols::{BindingKind, SymbolId, SymbolTable};
 use ahash::{AHashMap, AHashSet};
+use ndc_core::StaticType;
 use ndc_lexer::Span;
 use ndc_parser::{
     AssignmentTarget, AssignmentTargetLocation, BindingPattern, BindingPatternLocation, Expression,
-    ExpressionLocation, ForBody, ForIteration, NodeId,
+    ExpressionLocation, ForBody, ForIteration, NodeId, TypeExpr,
 };
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone, Hash)]
@@ -13,6 +14,8 @@ pub(crate) struct ScopeId(usize);
 pub(crate) struct Scope {
     parent: Option<ScopeId>,
     bindings: Vec<SymbolId>,
+    /// Type names, kept apart from `bindings`: `let Int = 5` doesn't hide the type `Int`.
+    types: Vec<SymbolId>,
     kind: ScopeKind,
 }
 
@@ -50,6 +53,9 @@ pub(crate) struct NameResolver {
     /// Setter candidates for writes through an accessor, keyed by the target node.
     /// In `p.x = 1`, `x=`. In `xs[i] = 1`, `[]=`.
     setters: AHashMap<NodeId, Candidates>,
+    /// The type each name in an annotation refers to, keyed by the name's node.
+    /// In `let m: Map<String, P>`, the `Map`, `String` and `P` nodes.
+    type_names: AHashMap<NodeId, SymbolId>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -64,6 +70,8 @@ pub(crate) enum NameResolutionError {
     IllegalFunctionRedefinition { name: String, span: Span },
     #[error("This lvalue is required to be a single identifier")]
     SequenceTargetNotAllowed { span: Span },
+    #[error("unknown type `{name}`")]
+    UnknownType { name: String, span: Span },
 }
 
 /// Same-named symbols visible at a use, nearest scope first, newest first
@@ -99,6 +107,7 @@ impl Scope {
         Self {
             parent,
             bindings: Vec::default(),
+            types: Vec::default(),
             kind,
         }
     }
@@ -107,13 +116,24 @@ impl Scope {
         self.bindings.push(symbol_id);
     }
 
+    pub(crate) fn bind_type(&mut self, symbol_id: SymbolId) {
+        self.types.push(symbol_id);
+    }
+
     pub(crate) fn lookup(&self, name: &str, table: &SymbolTable) -> Option<SymbolId> {
-        for id in self.bindings.iter().rev() {
-            if table.name(*id) == name {
-                return Some(*id);
-            }
-        }
-        None
+        Self::newest(&self.bindings, name, table)
+    }
+
+    pub(crate) fn lookup_type(&self, name: &str, table: &SymbolTable) -> Option<SymbolId> {
+        Self::newest(&self.types, name, table)
+    }
+
+    fn newest(symbols: &[SymbolId], name: &str, table: &SymbolTable) -> Option<SymbolId> {
+        symbols
+            .iter()
+            .rev()
+            .copied()
+            .find(|&id| table.name(id) == name)
     }
 
     fn candidates(&self, name: &str, table: &SymbolTable) -> Vec<SymbolId> {
@@ -138,6 +158,12 @@ impl ScopeTree {
     pub(crate) fn bind(&mut self, symbol_id: SymbolId) {
         self.scopes[self.current.0].bind(symbol_id);
         self.bound_in.insert(symbol_id, self.current);
+    }
+
+    /// Binds a type name in the current scope. Types aren't runtime values, so
+    /// they're never captured and need no `bound_in` entry.
+    pub(crate) fn bind_type(&mut self, symbol_id: SymbolId) {
+        self.scopes[self.current.0].bind_type(symbol_id);
     }
 
     /// The current scope followed by its ancestors, ending at the root.
@@ -173,6 +199,12 @@ impl ScopeTree {
         self.chain().find_map(|scope| scope.lookup(name, table))
     }
 
+    /// The innermost type named `name`. Types never overload, so there's at most one.
+    pub(crate) fn lookup_type(&self, name: &str, table: &SymbolTable) -> Option<SymbolId> {
+        self.chain()
+            .find_map(|scope| scope.lookup_type(name, table))
+    }
+
     pub(crate) fn enter_scope(&mut self, kind: ScopeKind) {
         self.scopes.push(Scope::new(kind, Some(self.current)));
         self.current = ScopeId(self.scopes.len() - 1);
@@ -204,6 +236,7 @@ impl NameResolver {
     /// Creates a new name resolver with the supplied `builtins` declared in a scope outside
     /// the program. With `new(["len"])`, a top-level `let len = 99` shadows the native
     /// instead of sharing its scope, so a later `len` resolves to `[[let len], [native len]]`.
+    /// The built-in type names (`Int`, `List`, …) are declared there too.
     pub(crate) fn new<'a>(builtins: impl IntoIterator<Item = &'a str>) -> Self {
         let mut scopes = ScopeTree::new();
         let mut symbols = SymbolTable::default();
@@ -211,6 +244,10 @@ impl NameResolver {
         for builtin in builtins {
             let symbol = symbols.declare(builtin.to_string(), BindingKind::Function);
             scopes.bind(symbol);
+        }
+        for name in StaticType::BUILTIN_TYPE_NAMES {
+            let symbol = symbols.declare((*name).to_string(), BindingKind::Type);
+            scopes.bind_type(symbol);
         }
 
         scopes.enter_scope(ScopeKind::Program);
@@ -225,6 +262,7 @@ impl NameResolver {
             augmented: Default::default(),
             getters: Default::default(),
             setters: Default::default(),
+            type_names: Default::default(),
         }
     }
 
@@ -247,8 +285,9 @@ impl NameResolver {
         self.captured.insert(symbol);
     }
 
-    /// Resolve lexical value names. Type annotations and member selection
-    /// belong to later passes; this does not validate types or control flow.
+    /// Resolve lexical names: values, accessors, and the type names in annotations.
+    /// Choosing overloads, checking types and validating control flow belong to
+    /// later passes.
     pub(crate) fn resolve(&mut self, loc: &ExpressionLocation) -> Result<(), NameResolutionError> {
         match &loc.expression {
             Expression::BoolLiteral(_)
@@ -262,13 +301,25 @@ impl NameResolver {
             }
             Expression::Statement(inner)
             | Expression::Grouping(inner)
-            | Expression::Cast { value: inner, .. }
             | Expression::Return { value: inner } => self.resolve(inner)?,
+            Expression::Cast {
+                value, annotation, ..
+            } => {
+                self.resolve_type(annotation)?;
+                self.resolve(value)?;
+            }
             Expression::Logical { left, right, .. } => {
                 self.resolve(left)?;
                 self.resolve(right)?;
             }
-            Expression::VariableDeclaration { l_value, value, .. } => {
+            Expression::VariableDeclaration {
+                l_value,
+                annotated_type,
+                value,
+            } => {
+                if let Some(annotation) = annotated_type {
+                    self.resolve_type(annotation)?;
+                }
                 self.resolve(value)?;
                 self.declare_pattern(l_value);
             }
@@ -355,6 +406,7 @@ impl NameResolver {
                 name,
                 parameters,
                 body,
+                return_annotation,
                 ..
             } => {
                 if let Some(name) = name {
@@ -386,7 +438,16 @@ impl NameResolver {
                             });
                         }
                         names.push(param_name);
+                        // Only struct declarations add types, and none can appear among
+                        // the parameters, so this scope sees the same types as the
+                        // enclosing one.
+                        if let Some(annotation) = &parameter.annotation {
+                            resolver.resolve_type(annotation)?;
+                        }
                         resolver.declare_pattern(&parameter.lvalue);
+                    }
+                    if let Some(annotation) = return_annotation {
+                        resolver.resolve_type(annotation)?;
                     }
 
                     resolver.resolve(body)
@@ -475,6 +536,38 @@ impl NameResolver {
             .for_each(|symbol| self.record_use(*symbol));
 
         Ok(candidates)
+    }
+
+    /// Resolves every type name in `annotation`. In `Map<String, (Int, P)>`, that's
+    /// `Map`, `String`, `Int` and `P`. Checking how many type arguments a name takes
+    /// belongs to the type pass.
+    fn resolve_type(&mut self, annotation: &TypeExpr) -> Result<(), NameResolutionError> {
+        match annotation {
+            TypeExpr::Name {
+                id,
+                name,
+                args,
+                span,
+            } => {
+                let symbol = self
+                    .scopes
+                    .lookup_type(name, &self.symbols)
+                    .ok_or_else(|| NameResolutionError::UnknownType {
+                        name: name.clone(),
+                        span: *span,
+                    })?;
+                self.type_names.insert(*id, symbol);
+                for arg in args {
+                    self.resolve_type(arg)?;
+                }
+            }
+            TypeExpr::Tuple { elements, .. } => {
+                for element in elements {
+                    self.resolve_type(element)?;
+                }
+            }
+        }
+        Ok(())
     }
 
     fn lookup(&self, name: &str, span: Span) -> Result<SymbolId, NameResolutionError> {

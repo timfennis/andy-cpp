@@ -874,3 +874,99 @@ fn unknown_accessors_are_unknown_names() {
     assert_eq!(unknown_name("let p = 1; p.nope;"), "nope");
     assert_eq!(unknown_name("let p = 1; p.x = 5;"), "x=");
 }
+
+/// The names of every resolved type, sorted for stable comparisons.
+fn type_names(resolver: &NameResolver) -> Vec<&str> {
+    resolver
+        .type_names
+        .values()
+        .map(|&id| resolver.symbols.name(id))
+        .sorted()
+        .collect()
+}
+
+#[test]
+fn builtin_type_names_resolve_including_nested_ones() {
+    let mut resolver = NameResolver::new([]);
+    resolve_source(&mut resolver, "let m: Map<String, (Int, List<Bool>)> = 1;").unwrap();
+
+    assert_eq!(
+        type_names(&resolver),
+        ["Bool", "Int", "List", "Map", "String"]
+    );
+    assert!(
+        resolver
+            .type_names
+            .values()
+            .all(|&id| resolver.symbols.kind(id) == BindingKind::Type)
+    );
+}
+
+#[test]
+fn unknown_types_are_reported_in_every_annotation_position() {
+    for source in [
+        "let x: Nope = 1;",
+        "let x: List<Nope> = 1;",
+        "fn f(x: Nope) { 1; }",
+        "fn f() -> Nope { 1; }",
+        "1 as Nope;",
+    ] {
+        let mut resolver = NameResolver::new([]);
+        let error = resolve_source(&mut resolver, source).expect_err(source);
+        assert_eq!(error.to_string(), "unknown type `Nope`", "{source}");
+        let NameResolutionError::UnknownType { span, .. } = error else {
+            unreachable!("the message identifies the variant");
+        };
+        assert_eq!(&source[span.range()], "Nope", "{source}");
+        // A failed parameter annotation leaves the function's scope.
+        assert_eq!(
+            resolver.scopes.lookup("x", &resolver.symbols),
+            None,
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn types_and_values_are_separate_namespaces() {
+    let mut resolver = NameResolver::new([]);
+    resolve_source(&mut resolver, "let Int = 5; let y: Int = Int;").unwrap();
+
+    // The annotation still means the built-in type; the value is the `let`.
+    let [value, _] = declared(&resolver);
+    assert_eq!(type_names(&resolver), ["Int"]);
+    let type_int = *resolver.type_names.values().next().unwrap();
+    assert_ne!(type_int, value);
+    assert_eq!(resolver.symbols.kind(type_int), BindingKind::Type);
+    assert_eq!(uses(&resolver, value), 1);
+}
+
+#[test]
+fn annotations_resolve_before_values() {
+    for source in ["let x: Nope = missing;", "missing as Nope;"] {
+        let mut resolver = NameResolver::new([]);
+        let error = resolve_source(&mut resolver, source).expect_err(source);
+        assert!(
+            matches!(error, NameResolutionError::UnknownType { .. }),
+            "{source}: {error:?}"
+        );
+    }
+}
+
+#[test]
+fn type_names_are_never_captured() {
+    let mut resolver = NameResolver::new([]);
+    resolve_source(&mut resolver, "fn f() { let x: Int = 1; 1 as Int; }").unwrap();
+
+    assert_eq!(type_names(&resolver), ["Int", "Int"]);
+    assert!(resolver.captures.is_empty());
+    assert!(resolver.captured.is_empty());
+}
+
+#[test]
+fn unannotated_code_records_no_type_names() {
+    let mut resolver = NameResolver::new([]);
+    resolve_source(&mut resolver, "let x = 1; fn f(a) { a; }").unwrap();
+
+    assert!(resolver.type_names.is_empty());
+}

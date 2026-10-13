@@ -33,6 +33,8 @@ pub(crate) enum BindingKind {
     Function,
     /// Example: bindings, parameters, and loop variables: these don't participate in overloading
     Plain,
+    /// Example: `struct Foo { }`: these live in a separate namespace
+    Type,
 }
 
 #[cfg(test)]
