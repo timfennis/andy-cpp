@@ -91,6 +91,22 @@ fn only_augmented(resolver: &NameResolver) -> &AugmentedCandidates {
         .expect("exactly one augmented assignment")
 }
 
+fn only_getter(resolver: &NameResolver) -> &Candidates {
+    resolver
+        .getters
+        .values()
+        .exactly_one()
+        .expect("exactly one getter lookup")
+}
+
+fn only_setter(resolver: &NameResolver) -> &Candidates {
+    resolver
+        .setters
+        .values()
+        .exactly_one()
+        .expect("exactly one setter lookup")
+}
+
 fn only_reference(resolver: &NameResolver) -> &Candidates {
     resolver
         .references
@@ -166,7 +182,8 @@ fn assignment_reuses_declared_symbols() {
 
 #[test]
 fn member_and_index_targets_resolve_receivers_without_declaring_names() {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = NameResolver::new(["field", "field=", "[]="]);
+    let field = builtin(&resolver, "field");
     resolve_source(
         &mut resolver,
         "let object = (); let i = 0; object.field = i; object[i] = i; object.field;",
@@ -176,7 +193,11 @@ fn member_and_index_targets_resolve_receivers_without_declaring_names() {
     let [object, i] = declared(&resolver);
     assert_eq!(uses(&resolver, i), 3);
     assert_eq!(uses(&resolver, object), 3);
-    assert_eq!(resolver.scopes.lookup("field", &resolver.symbols), None);
+    // `field` still means the native getter: the targets declared nothing new.
+    assert_eq!(
+        resolver.scopes.lookup("field", &resolver.symbols),
+        Some(field)
+    );
     assert_eq!(
         resolver.scopes.lookup("object", &resolver.symbols),
         Some(object)
@@ -711,14 +732,13 @@ fn augmented_assignment_finds_both_operations() {
 
 #[test]
 fn augmented_assignment_resolves_index_and_member_targets() {
-    let mut resolver = NameResolver::new(["+"]);
+    let mut resolver = NameResolver::new(["+", "[]", "[]="]);
     resolve_source(&mut resolver, "let xs = [1]; let i = 0; xs[i] += 1;").unwrap();
     let [xs, i] = declared(&resolver);
     assert_eq!(uses(&resolver, xs), 1);
     assert_eq!(uses(&resolver, i), 1);
 
-    // The member name itself is resolved in a later step; only the receiver is here.
-    let mut resolver = NameResolver::new(["+"]);
+    let mut resolver = NameResolver::new(["+", "x", "x="]);
     resolve_source(&mut resolver, "let p = (); p.x += 1;").unwrap();
     let [p] = declared(&resolver);
     assert_eq!(uses(&resolver, p), 1);
@@ -756,4 +776,101 @@ fn augmented_assignment_captures_its_target() {
     };
     // The native `+` is a global, so only `x` is captured.
     assert_eq!(captures_of(&resolver, f), [x]);
+}
+
+#[test]
+fn natives_resolve_as_properties() {
+    let mut resolver = NameResolver::new(["len"]);
+    let len = builtin(&resolver, "len");
+    resolve_source(&mut resolver, "[1].len;").unwrap();
+
+    assert_eq!(only_getter(&resolver).0, vec![vec![len]]);
+}
+
+#[test]
+fn user_functions_resolve_as_properties() {
+    let mut resolver = NameResolver::new([]);
+    resolve_source(&mut resolver, "fn double(x) { x; } 5.double;").unwrap();
+
+    let [double, _] = declared(&resolver);
+    assert_eq!(only_getter(&resolver).0, vec![vec![double]]);
+}
+
+#[test]
+fn getters_keep_same_named_variables_as_candidates() {
+    // The type pass skips the variable because it can't be called.
+    let mut resolver = NameResolver::new(["x"]);
+    let native = builtin(&resolver, "x");
+    resolve_source(&mut resolver, "let p = 1; let x = 99; p.x;").unwrap();
+
+    let [_, local] = declared(&resolver);
+    assert_eq!(only_getter(&resolver).0, vec![vec![local], vec![native]]);
+}
+
+#[test]
+fn getters_are_keyed_by_the_member_access_node() {
+    let mut resolver = NameResolver::new(["b", "c"]);
+    resolve_source(&mut resolver, "let a = 1; a.b.c;").unwrap();
+
+    // One lookup per member access; none of them under the receiver `a`.
+    assert_eq!(resolver.getters.len(), 2);
+    assert!(
+        resolver
+            .getters
+            .keys()
+            .all(|node| !resolver.references.contains_key(node))
+    );
+}
+
+#[test]
+fn member_writes_resolve_the_setter_only() {
+    let mut resolver = NameResolver::new(["x="]);
+    let setter = builtin(&resolver, "x=");
+    resolve_source(&mut resolver, "let p = 1; p.x = 5;").unwrap();
+
+    assert_eq!(only_setter(&resolver).0, vec![vec![setter]]);
+    assert!(resolver.getters.is_empty());
+}
+
+#[test]
+fn index_writes_resolve_the_setter_only() {
+    let mut resolver = NameResolver::new(["[]="]);
+    let setter = builtin(&resolver, "[]=");
+    resolve_source(&mut resolver, "let xs = [1]; xs[0] = 2;").unwrap();
+
+    assert_eq!(only_setter(&resolver).0, vec![vec![setter]]);
+    assert!(resolver.getters.is_empty());
+}
+
+#[test]
+fn augmented_member_assignment_resolves_getter_and_setter() {
+    let mut resolver = NameResolver::new(["x", "x=", "+"]);
+    let getter = builtin(&resolver, "x");
+    let setter = builtin(&resolver, "x=");
+    resolve_source(&mut resolver, "let p = 1; p.x += 1;").unwrap();
+
+    assert_eq!(only_getter(&resolver).0, vec![vec![getter]]);
+    assert_eq!(only_setter(&resolver).0, vec![vec![setter]]);
+    // Both belong to the same target node.
+    assert_eq!(
+        resolver.getters.keys().collect_vec(),
+        resolver.setters.keys().collect_vec()
+    );
+}
+
+#[test]
+fn augmented_index_assignment_resolves_getter_and_setter() {
+    let mut resolver = NameResolver::new(["[]", "[]=", "+"]);
+    let getter = builtin(&resolver, "[]");
+    let setter = builtin(&resolver, "[]=");
+    resolve_source(&mut resolver, "let xs = [1]; xs[0] += 1;").unwrap();
+
+    assert_eq!(only_getter(&resolver).0, vec![vec![getter]]);
+    assert_eq!(only_setter(&resolver).0, vec![vec![setter]]);
+}
+
+#[test]
+fn unknown_accessors_are_unknown_names() {
+    assert_eq!(unknown_name("let p = 1; p.nope;"), "nope");
+    assert_eq!(unknown_name("let p = 1; p.x = 5;"), "x=");
 }
