@@ -1,4 +1,4 @@
-#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
+#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub(crate) struct SymbolId(usize);
 
 #[derive(Debug, Default)]

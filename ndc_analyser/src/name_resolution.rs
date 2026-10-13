@@ -1,7 +1,10 @@
 use crate::symbols::{SymbolId, SymbolTable};
 use ahash::AHashMap;
 use ndc_lexer::Span;
-use ndc_parser::{Expression, ExpressionLocation, ForBody, ForIteration, Lvalue, NodeId};
+use ndc_parser::{
+    AssignmentTarget, AssignmentTargetLocation, BindingPattern, BindingPatternLocation, Expression,
+    ExpressionLocation, ForBody, ForIteration, NodeId,
+};
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone, Hash)]
 pub(crate) struct ScopeId(usize);
@@ -20,18 +23,18 @@ pub(crate) struct ScopeTree {
 pub(crate) struct NameResolver {
     symbols: SymbolTable,
     scopes: ScopeTree,
+    /// The symbol each binding pattern identifier introduces, keyed by the
+    /// pattern's node. In `let (a, b) = ...`, the `a` and `b` nodes.
+    declarations: AHashMap<NodeId, SymbolId>,
+    /// The symbol each name use refers to, keyed by the node naming it. In
+    /// `x = y`, both the `x` target node and the `y` identifier node.
     references: AHashMap<NodeId, SymbolId>,
-    // Lvalues have source spans but no NodeId. Keep their declaration/write
-    // bindings separately so later passes do not have to resolve them again.
-    lvalue_bindings: Vec<(Span, SymbolId)>,
 }
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum NameResolutionError {
     #[error("identifier '{name}' has not been declared")]
     UnknownName { name: String, span: Span },
-    #[error("index and member targets cannot declare names")]
-    InvalidDeclaration { span: Span },
     #[error("name resolution for {feature} is not implemented yet")]
     Unsupported { feature: &'static str, span: Span },
 }
@@ -76,11 +79,7 @@ impl ScopeTree {
                 return Some(id);
             }
 
-            current_scope = if let Some(parent) = current_scope.parent {
-                &self.scopes[parent.0]
-            } else {
-                return None;
-            }
+            current_scope = &self.scopes[current_scope.parent?.0];
         }
     }
 
@@ -101,8 +100,8 @@ impl NameResolver {
         Self {
             symbols: Default::default(),
             scopes: ScopeTree::new(),
+            declarations: Default::default(),
             references: Default::default(),
-            lvalue_bindings: Default::default(),
         }
     }
 
@@ -129,7 +128,7 @@ impl NameResolver {
             }
             Expression::VariableDeclaration { l_value, value, .. } => {
                 self.resolve(value)?;
-                self.declare_pattern(l_value, loc.span)?;
+                self.declare_pattern(l_value);
             }
             Expression::Assignment { l_value, r_value } => {
                 self.resolve_target(l_value)?;
@@ -161,7 +160,7 @@ impl NameResolver {
                 self.resolve(expression)?;
                 self.resolve(loop_body)?;
             }
-            Expression::For { iterations, body } => self.resolve_for(iterations, body, loc.span)?,
+            Expression::For { iterations, body } => self.resolve_for(iterations, body)?,
             Expression::Call {
                 function,
                 arguments,
@@ -201,8 +200,7 @@ impl NameResolver {
                     self.resolve(end)?;
                 }
             }
-            Expression::FunctionDeclaration { name, body, .. } => {
-                s
+            Expression::FunctionDeclaration { .. } => {
                 return Err(NameResolutionError::Unsupported {
                     feature: "function declarations",
                     span: loc.span,
@@ -233,51 +231,42 @@ impl NameResolver {
             })
     }
 
-    fn declare_pattern(&mut self, pattern: &Lvalue, span: Span) -> Result<(), NameResolutionError> {
-        // Validate the whole pattern before publishing any of its names.
-        // The parser already rejects these targets in declarations, but a
-        // malformed AST should still produce an error rather than new names.
-        if pattern.non_binding_target().is_some() {
-            return Err(NameResolutionError::InvalidDeclaration { span });
-        }
-        match pattern {
-            Lvalue::Identifier {
-                identifier, span, ..
-            } => {
+    fn declare_pattern(&mut self, pattern: &BindingPatternLocation) {
+        match &pattern.pattern {
+            BindingPattern::Identifier { identifier, .. } => {
                 let symbol = self.symbols.declare(identifier.clone());
                 self.scopes.bind(symbol);
-                self.lvalue_bindings.push((*span, symbol));
+                self.declarations.insert(pattern.id, symbol);
             }
-            Lvalue::Sequence(items) => {
+            BindingPattern::Sequence(items) => {
                 for item in items {
-                    self.declare_pattern(item, span)?;
+                    self.declare_pattern(item);
                 }
             }
-            Lvalue::Index { .. } | Lvalue::Member { .. } => {
-                unreachable!("validated declaration pattern");
-            }
         }
-        Ok(())
     }
 
-    fn resolve_target(&mut self, target: &Lvalue) -> Result<(), NameResolutionError> {
-        match target {
-            Lvalue::Identifier {
+    fn resolve_target(
+        &mut self,
+        target: &AssignmentTargetLocation,
+    ) -> Result<(), NameResolutionError> {
+        match &target.target {
+            AssignmentTarget::Identifier {
                 identifier, span, ..
             } => {
                 let symbol = self.lookup(identifier, *span)?;
-                self.lvalue_bindings.push((*span, symbol));
+                self.references.insert(target.id, symbol);
             }
-            Lvalue::Sequence(items) => {
+            AssignmentTarget::Sequence(items) => {
                 for item in items {
                     self.resolve_target(item)?;
                 }
             }
-            Lvalue::Index { value, index, .. } => {
+            AssignmentTarget::Index { value, index, .. } => {
                 self.resolve(value)?;
                 self.resolve(index)?;
             }
-            Lvalue::Member { receiver, .. } => self.resolve(receiver)?,
+            AssignmentTarget::Member { receiver, .. } => self.resolve(receiver)?,
         }
         Ok(())
     }
@@ -297,7 +286,6 @@ impl NameResolver {
         &mut self,
         iterations: &[ForIteration],
         body: &ForBody,
-        span: Span,
     ) -> Result<(), NameResolutionError> {
         match iterations.split_first() {
             Some((ForIteration::Iteration { l_value, sequence }, tail)) => {
@@ -305,13 +293,13 @@ impl NameResolver {
                 // iterables and guards can see the earlier binders.
                 self.resolve(sequence)?;
                 self.in_scope(|resolver| {
-                    resolver.declare_pattern(l_value, span)?;
-                    resolver.resolve_for(tail, body, span)
+                    resolver.declare_pattern(l_value);
+                    resolver.resolve_for(tail, body)
                 })
             }
             Some((ForIteration::Guard(guard), tail)) => {
                 self.resolve(guard)?;
-                self.resolve_for(tail, body, span)
+                self.resolve_for(tail, body)
             }
             None => match body {
                 ForBody::Block(block) | ForBody::List { expr: block } => self.resolve(block),
