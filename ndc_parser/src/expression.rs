@@ -92,6 +92,8 @@ pub struct ExpressionLocation {
 pub enum Expression {
     // Literals
     BoolLiteral(bool),
+    /// `None`, the empty option.
+    NoneLiteral,
     StringLiteral(String),
     NumericLiteral(NumericLiteral),
     Identifier {

@@ -188,6 +188,7 @@ fn child_expressions(expr: &ExpressionLocation) -> Vec<&ExpressionLocation> {
         // fields are names + type annotations, not expressions.
         Expression::Identifier { .. }
         | Expression::BoolLiteral(_)
+        | Expression::NoneLiteral
         | Expression::StringLiteral(_)
         | Expression::NumericLiteral(_)
         | Expression::Break
@@ -357,6 +358,7 @@ fn walk_expression(visitor: &mut impl AstVisitor, expr: &ExpressionLocation) {
         // fields are names + type annotations, not expressions.
         Expression::Identifier { .. }
         | Expression::BoolLiteral(_)
+        | Expression::NoneLiteral
         | Expression::StringLiteral(_)
         | Expression::NumericLiteral(_)
         | Expression::Break

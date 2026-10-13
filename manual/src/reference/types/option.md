@@ -13,6 +13,8 @@ if value.is_none() {
 }
 ```
 
+`None` is a literal, like `true` and `false`, so it can't be used as a variable or parameter name.
+
 Some functions have variations with a `?` appended to their name that return options instead of throwing errors:
 
 ```ndc

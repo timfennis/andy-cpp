@@ -1075,6 +1075,7 @@ impl Parser {
         let expression = match token_location.token {
             Token::False => Expression::BoolLiteral(false),
             Token::True => Expression::BoolLiteral(true),
+            Token::None => Expression::NoneLiteral,
             Token::NumericLiteral(literal) => Expression::NumericLiteral(literal),
             Token::String(value) => Expression::StringLiteral(value),
             Token::Identifier(identifier) => Expression::Identifier {

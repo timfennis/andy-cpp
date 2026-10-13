@@ -209,6 +209,10 @@ impl Compiler {
                 let idx = self.ir.add_constant(Value::Bool(b));
                 self.ir.write(OpCode::Constant(idx), span);
             }
+            Expression::NoneLiteral => {
+                let idx = self.ir.add_constant(Value::None);
+                self.ir.write(OpCode::Constant(idx), span);
+            }
             Expression::StringLiteral(s) => {
                 let idx = self.ir.add_constant(Value::string(s));
                 self.ir.write(OpCode::Constant(idx), span);
@@ -228,14 +232,7 @@ impl Compiler {
                 let idx = self.ir.add_constant(value);
                 self.ir.write(OpCode::Constant(idx), span);
             }
-            Expression::Identifier { name, resolved, .. } => {
-                if name == "None" {
-                    let idx = self.ir.add_constant(Value::None);
-                    self.ir.write(OpCode::Constant(idx), span);
-                } else {
-                    self.compile_binding(resolved, span)?;
-                }
-            }
+            Expression::Identifier { resolved, .. } => self.compile_binding(resolved, span)?,
             Expression::Cast {
                 value,
                 resolved_type,
