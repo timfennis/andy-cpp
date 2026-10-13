@@ -438,3 +438,60 @@ fn errors_in_function_bodies_restore_scope() {
 
     assert_eq!(resolver.scopes.lookup("x", &resolver.symbols), None);
 }
+
+#[test]
+fn functions_cannot_redefine_variables_in_the_same_scope() {
+    let cases: [(&[&str], &str); 4] = [
+        (&[], "let a = 1; fn a(x) { 1; }"),
+        (&[], "let a = fn(x) { 1; }; fn a(x) { 1; }"),
+        // The program's top level is one scope, separate from the builtins.
+        (&["a"], "let a = 99; fn a(x, y) { 1; }"),
+        // An arrow body shares the parameter scope; a block body would not.
+        (&[], "fn f(a) => fn a() { 1; };"),
+    ];
+    for (builtins, source) in cases {
+        let mut resolver = NameResolver::new(builtins.iter().copied());
+        let error = resolve_source(&mut resolver, source).expect_err(source);
+        assert_eq!(
+            error.to_string(),
+            "Illegal redefinition of variable a as a function in the same scope",
+            "{source}"
+        );
+        let NameResolutionError::IllegalFunctionRedefinition { span, .. } = error else {
+            unreachable!("the message identifies the variant");
+        };
+        assert!(source[span.range()].starts_with("fn a"), "{source}");
+
+        // The rejected function binds neither its name nor its parameters.
+        assert!(
+            resolver
+                .scopes
+                .lookup("a", &resolver.symbols)
+                .is_none_or(|id| resolver.symbols.kind(id) == BindingKind::Plain),
+            "{source}"
+        );
+        assert_eq!(
+            resolver.scopes.lookup("x", &resolver.symbols),
+            None,
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn functions_may_share_names_with_variables_in_other_scopes() {
+    let cases: [(&[&str], &str); 6] = [
+        (&[], "fn a(x) { 1; } let a = 1;"),
+        (&[], "let a = 1; { fn a(x) { 1; } }"),
+        (&[], "let a = 1; fn b() { fn a(x) { 1; } }"),
+        (&["len"], "fn len(x) { 1; }"),
+        // Rejecting identical overloads needs parameter types: the type pass's job.
+        (&[], "fn a(x) { 1; } fn a(x) { 1; }"),
+        // A block body is its own scope, separate from the parameters.
+        (&[], "fn f(a) { fn a() { 1; } }"),
+    ];
+    for (builtins, source) in cases {
+        let mut resolver = NameResolver::new(builtins.iter().copied());
+        resolve_source(&mut resolver, source).unwrap_or_else(|error| panic!("{source}: {error:?}"));
+    }
+}
