@@ -57,6 +57,9 @@ pub(crate) struct NameResolver {
     type_names: AHashMap<NodeId, SymbolId>,
     /// What each struct declaration binds, keyed by the declaration's node.
     structs: AHashMap<NodeId, StructSymbols>,
+    /// Errors from statements that failed to resolve. Resolution carries on with
+    /// the next statement, so `a; b;` reports both unknown names.
+    errors: Vec<NameResolutionError>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -292,6 +295,7 @@ impl NameResolver {
             setters: Default::default(),
             type_names: Default::default(),
             structs: Default::default(),
+            errors: Default::default(),
         }
     }
 
@@ -314,10 +318,23 @@ impl NameResolver {
         self.captured.insert(symbol);
     }
 
+    /// Resolves `statement`, recording its error instead of returning it so the
+    /// statements after it still resolve. A failed statement stops at its first error.
+    pub(crate) fn resolve_statement(&mut self, statement: &ExpressionLocation) {
+        if let Err(error) = self.resolve(statement) {
+            self.errors.push(error);
+        }
+    }
+
+    /// The errors recorded so far, leaving none behind.
+    pub(crate) fn take_errors(&mut self) -> Vec<NameResolutionError> {
+        std::mem::take(&mut self.errors)
+    }
+
     /// Resolve lexical names: values, accessors, and the type names in annotations.
     /// Choosing overloads, checking types and validating control flow belong to
     /// later passes.
-    pub(crate) fn resolve(&mut self, loc: &ExpressionLocation) -> Result<(), NameResolutionError> {
+    fn resolve(&mut self, loc: &ExpressionLocation) -> Result<(), NameResolutionError> {
         match &loc.expression {
             Expression::BoolLiteral(_)
             | Expression::NoneLiteral
@@ -360,7 +377,7 @@ impl NameResolver {
             Expression::Block { statements } => {
                 self.in_scope(ScopeKind::Block, |resolver| {
                     for statement in statements {
-                        resolver.resolve(statement)?;
+                        resolver.resolve_statement(statement);
                     }
                     Ok(())
                 })?;
