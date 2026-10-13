@@ -1,4 +1,4 @@
-use crate::symbols::{SymbolId, SymbolTable};
+use crate::symbols::{BindingKind, SymbolId, SymbolTable};
 use ahash::AHashMap;
 use ndc_lexer::Span;
 use ndc_parser::{
@@ -52,7 +52,7 @@ impl Scope {
 
     pub(crate) fn lookup(&self, name: &str, table: &SymbolTable) -> Option<SymbolId> {
         for id in self.bindings.iter().rev() {
-            if table.get(*id) == name {
+            if table.name(*id) == name {
                 return Some(*id);
             }
         }
@@ -234,7 +234,9 @@ impl NameResolver {
     fn declare_pattern(&mut self, pattern: &BindingPatternLocation) {
         match &pattern.pattern {
             BindingPattern::Identifier { identifier, .. } => {
-                let symbol = self.symbols.declare(identifier.clone());
+                let symbol = self
+                    .symbols
+                    .declare(identifier.to_owned(), BindingKind::Plain);
                 self.scopes.bind(symbol);
                 self.declarations.insert(pattern.id, symbol);
             }
@@ -329,14 +331,14 @@ mod resolver_tests;
 mod test {
     use crate::name_resolution::Scope;
     use crate::name_resolution::ScopeTree;
-    use crate::symbols::SymbolTable;
+    use crate::symbols::{BindingKind, SymbolTable};
 
     #[test]
     fn binding_follows_shadowing_rules() {
         let mut table = SymbolTable::default();
-        let first = table.declare("foo".to_string());
-        let second = table.declare("foo".to_string());
-        let other = table.declare("another".to_string());
+        let first = table.declare("foo".to_string(), BindingKind::Plain);
+        let second = table.declare("foo".to_string(), BindingKind::Plain);
+        let other = table.declare("another".to_string(), BindingKind::Plain);
 
         let mut scope = Scope::default();
         scope.bind(first);
@@ -356,8 +358,8 @@ mod test {
     #[test]
     fn scope_tree_traverses() {
         let mut table = SymbolTable::default();
-        let first = table.declare("foo".to_string());
-        let middle = table.declare("bar".to_string());
+        let first = table.declare("foo".to_string(), BindingKind::Plain);
+        let middle = table.declare("bar".to_string(), BindingKind::Plain);
 
         let mut tree = ScopeTree::new();
         tree.bind(first);
@@ -378,8 +380,8 @@ mod test {
     #[test]
     fn scope_tree_shadows() {
         let mut table = SymbolTable::default();
-        let first = table.declare("foo".to_string());
-        let second = table.declare("foo".to_string());
+        let first = table.declare("foo".to_string(), BindingKind::Plain);
+        let second = table.declare("foo".to_string(), BindingKind::Plain);
 
         let mut tree = ScopeTree::new();
         tree.bind(first);
@@ -394,8 +396,8 @@ mod test {
     #[test]
     fn sibling_scopes_do_not_share_bindings() {
         let mut table = SymbolTable::default();
-        let first = table.declare("first".to_string());
-        let second = table.declare("second".to_string());
+        let first = table.declare("first".to_string(), BindingKind::Plain);
+        let second = table.declare("second".to_string(), BindingKind::Plain);
 
         let mut tree = ScopeTree::new();
         tree.enter_scope();
@@ -415,8 +417,8 @@ mod test {
     #[test]
     fn lookup_does_not_change_where_new_bindings_are_created() {
         let mut table = SymbolTable::default();
-        let outer = table.declare("outer".to_string());
-        let inner = table.declare("inner".to_string());
+        let outer = table.declare("outer".to_string(), BindingKind::Plain);
+        let inner = table.declare("inner".to_string(), BindingKind::Plain);
 
         let mut tree = ScopeTree::new();
         tree.bind(outer);
