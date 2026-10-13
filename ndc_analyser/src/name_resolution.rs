@@ -122,10 +122,22 @@ impl ScopeTree {
 }
 
 impl NameResolver {
-    pub(crate) fn new() -> Self {
+    /// Creates a new name resolver with the supplied `builtins` declared in a scope outside
+    /// the program. With `new(["len"])`, a top-level `let len = 99` shadows the native
+    /// instead of sharing its scope, so a later `len` resolves to `[[let len], [native len]]`.
+    pub(crate) fn new<'a>(builtins: impl IntoIterator<Item = &'a str>) -> Self {
+        let mut scopes = ScopeTree::new();
+        let mut symbols = SymbolTable::default();
+
+        for builtin in builtins {
+            let symbol = symbols.declare(builtin.to_string(), BindingKind::Function);
+            scopes.bind(symbol);
+        }
+
+        scopes.enter_scope();
         Self {
-            symbols: Default::default(),
-            scopes: ScopeTree::new(),
+            symbols,
+            scopes,
             declarations: Default::default(),
             references: Default::default(),
             assignments: Default::default(),
