@@ -48,6 +48,14 @@ fn uses(resolver: &NameResolver, symbol: SymbolId) -> usize {
     reads + writes
 }
 
+/// The newest built-in declared under `name`, before any source is resolved.
+fn builtin(resolver: &NameResolver, name: &str) -> SymbolId {
+    resolver
+        .scopes
+        .lookup(name, &resolver.symbols)
+        .expect("builtin is declared")
+}
+
 fn only_reference(resolver: &NameResolver) -> &Candidates {
     resolver
         .references
@@ -58,7 +66,7 @@ fn only_reference(resolver: &NameResolver) -> &Candidates {
 
 #[test]
 fn initializer_reads_outer_binding_before_shadowing() {
-    let mut resolver = NameResolver::new();
+    let mut resolver = NameResolver::new([]);
     resolve_source(&mut resolver, "let x = 1; { let x = x; x; } x;").unwrap();
 
     let [outer, inner] = declared(&resolver);
@@ -71,7 +79,7 @@ fn initializer_reads_outer_binding_before_shadowing() {
 
 #[test]
 fn self_reference_reports_the_initializer_location() {
-    let mut resolver = NameResolver::new();
+    let mut resolver = NameResolver::new([]);
     let source = "let missing = missing;";
     let error = resolve_source(&mut resolver, source).unwrap_err();
     assert_eq!(
@@ -90,7 +98,7 @@ fn self_reference_reports_the_initializer_location() {
 
 #[test]
 fn destructuring_resolves_all_initializers_before_binding_names() {
-    let mut resolver = NameResolver::new();
+    let mut resolver = NameResolver::new([]);
     resolve_source(
         &mut resolver,
         "let x = 1; let y = 2; let (x, (y, z)) = (y, (x, 3)); x; y; z;",
@@ -108,7 +116,7 @@ fn destructuring_resolves_all_initializers_before_binding_names() {
 
 #[test]
 fn assignment_reuses_declared_symbols() {
-    let mut resolver = NameResolver::new();
+    let mut resolver = NameResolver::new([]);
     resolve_source(
         &mut resolver,
         "let x = 1; let y = 2; (x, y) = (y, x); x = 3;",
@@ -123,19 +131,14 @@ fn assignment_reuses_declared_symbols() {
 
 #[test]
 fn member_and_index_targets_resolve_receivers_without_declaring_names() {
-    let mut resolver = NameResolver::new();
-    // This supplied name stands for a value in the surrounding environment.
-    let object = resolver
-        .symbols
-        .declare("object".to_string(), BindingKind::Plain);
-    resolver.scopes.bind(object);
+    let mut resolver = NameResolver::new([]);
     resolve_source(
         &mut resolver,
-        "let i = 0; object.field = i; object[i] = i; object.field;",
+        "let object = (); let i = 0; object.field = i; object[i] = i; object.field;",
     )
     .unwrap();
 
-    let [i] = declared(&resolver);
+    let [object, i] = declared(&resolver);
     assert_eq!(uses(&resolver, i), 3);
     assert_eq!(uses(&resolver, object), 3);
     assert_eq!(resolver.scopes.lookup("field", &resolver.symbols), None);
@@ -178,13 +181,7 @@ fn traversal_reports_unknown_names_in_expression_children() {
         "missing.field = 1;",
     ];
     for source in sources {
-        let mut resolver = NameResolver::new();
-        for name in ["callee", "+"] {
-            let symbol = resolver
-                .symbols
-                .declare(name.to_string(), BindingKind::Function);
-            resolver.scopes.bind(symbol);
-        }
+        let mut resolver = NameResolver::new(["callee", "+"]);
         let error = resolve_source(&mut resolver, source).expect_err(source);
         let NameResolutionError::UnknownName { name, span } = error else {
             panic!("expected an unknown name in {source:?}, got {error:?}");
@@ -196,7 +193,7 @@ fn traversal_reports_unknown_names_in_expression_children() {
 
 #[test]
 fn errors_restore_visibility_after_nested_blocks() {
-    let mut resolver = NameResolver::new();
+    let mut resolver = NameResolver::new([]);
     resolve_source(
         &mut resolver,
         "let x = 1; { let x = 2; { let local = 3; missing; } }",
@@ -214,7 +211,7 @@ fn errors_restore_visibility_after_nested_blocks() {
 
 #[test]
 fn later_comprehension_clauses_see_earlier_binders() {
-    let mut resolver = NameResolver::new();
+    let mut resolver = NameResolver::new([]);
     resolve_source(
         &mut resolver,
         "let xs = [[true]]; [y for x in xs, y in x, if y];",
@@ -231,7 +228,7 @@ fn later_comprehension_clauses_see_earlier_binders() {
 
 #[test]
 fn iterable_uses_the_outer_binding_of_its_own_name() {
-    let mut resolver = NameResolver::new();
+    let mut resolver = NameResolver::new([]);
     resolve_source(&mut resolver, "let x = [1]; [x for x in x]; x;").unwrap();
 
     let [outer, inner] = declared(&resolver);
@@ -249,7 +246,7 @@ fn loop_body_forms_resolve_names_and_restore_scope_on_errors() {
         "%{x: missing for x in [1]};",
         "%{:missing, x: x for x in [1]};",
     ] {
-        let mut resolver = NameResolver::new();
+        let mut resolver = NameResolver::new([]);
         let error = resolve_source(&mut resolver, source).unwrap_err();
         assert!(
             matches!(error, NameResolutionError::UnknownName { ref name, .. } if name == "missing"),
@@ -273,7 +270,7 @@ fn unfinished_language_features_report_errors_instead_of_panicking() {
             "augmented assignment operator selection",
         ),
     ] {
-        let mut resolver = NameResolver::new();
+        let mut resolver = NameResolver::new([]);
         let error = resolve_source(&mut resolver, source).unwrap_err();
         assert!(
             matches!(error, NameResolutionError::Unsupported { feature: found, span } if found == feature && span.source_id() == SourceId::new(0)),
@@ -284,7 +281,7 @@ fn unfinished_language_features_report_errors_instead_of_panicking() {
 
 #[test]
 fn candidates_in_one_scope_are_newest_first() {
-    let mut resolver = NameResolver::new();
+    let mut resolver = NameResolver::new([]);
     resolve_source(&mut resolver, "let x = 1; let x = 2; x;").unwrap();
 
     let [first, second] = declared(&resolver);
@@ -293,7 +290,7 @@ fn candidates_in_one_scope_are_newest_first() {
 
 #[test]
 fn candidates_are_grouped_by_scope_without_empty_scopes() {
-    let mut resolver = NameResolver::new();
+    let mut resolver = NameResolver::new([]);
     resolve_source(&mut resolver, "let x = 1; { let x = 2; let x = 3; { x; } }").unwrap();
 
     let [x1, x2, x3] = declared(&resolver);
@@ -302,7 +299,7 @@ fn candidates_are_grouped_by_scope_without_empty_scopes() {
 
 #[test]
 fn assignment_targets_resolve_to_the_innermost_symbol() {
-    let mut resolver = NameResolver::new();
+    let mut resolver = NameResolver::new([]);
     resolve_source(&mut resolver, "let x = 1; { let x = 2; x = 3; }").unwrap();
 
     let [_, inner] = declared(&resolver);
@@ -314,15 +311,41 @@ fn assignment_targets_resolve_to_the_innermost_symbol() {
 
 #[test]
 fn candidates_include_functions_and_plain_bindings() {
-    let mut resolver = NameResolver::new();
-    // This supplied name stands for a native function.
-    let native = resolver
-        .symbols
-        .declare("len".to_string(), BindingKind::Function);
-    resolver.scopes.bind(native);
+    let mut resolver = NameResolver::new(["len"]);
+    let native = builtin(&resolver, "len");
     resolve_source(&mut resolver, "let len = 99; len;").unwrap();
 
     // The resolver keeps both; choosing between them is the type pass's job.
+    // The native lives in the built-in scope, outside the program's top level.
     let [local] = declared(&resolver);
-    assert_eq!(only_reference(&resolver).0, vec![vec![local, native]]);
+    assert_eq!(only_reference(&resolver).0, vec![vec![local], vec![native]]);
+}
+
+#[test]
+fn builtins_resolve_as_functions() {
+    let mut resolver = NameResolver::new(["len"]);
+    let native = builtin(&resolver, "len");
+    resolve_source(&mut resolver, "len;").unwrap();
+
+    assert_eq!(only_reference(&resolver).0, vec![vec![native]]);
+    assert_eq!(resolver.symbols.kind(native), BindingKind::Function);
+}
+
+#[test]
+fn overloaded_builtins_share_a_group_newest_first() {
+    let mut resolver = NameResolver::new(["max", "max"]);
+    resolve_source(&mut resolver, "max;").unwrap();
+
+    let [group] = only_reference(&resolver).0.as_slice() else {
+        panic!("expected one scope of candidates");
+    };
+    let [newest, oldest] = group[..] else {
+        panic!("expected both overloads, got {group:?}");
+    };
+    assert!(newest > oldest);
+    assert!(
+        group
+            .iter()
+            .all(|&id| resolver.symbols.kind(id) == BindingKind::Function)
+    );
 }
