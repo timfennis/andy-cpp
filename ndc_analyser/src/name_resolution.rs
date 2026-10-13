@@ -40,10 +40,12 @@ pub(crate) struct NameResolver {
 pub(crate) enum NameResolutionError {
     #[error("Identifier {name} has not previously been declared")]
     UnknownName { name: String, span: Span },
-    #[error("name resolution for {feature} is not implemented yet")]
+    #[error("Name resolution for {feature} is not implemented yet")]
     Unsupported { feature: &'static str, span: Span },
     #[error("Illegal redefinition of parameter {name}")]
     DuplicateParameter { name: String, span: Span },
+    #[error("Illegal redefinition of variable {name} as a function in the same scope")]
+    IllegalFunctionRedefinition { name: String, span: Span },
 }
 
 /// Same-named symbols visible at a use, nearest scope first, newest first
@@ -122,6 +124,12 @@ impl ScopeTree {
                 .filter(|group| !group.is_empty())
                 .collect(),
         )
+    }
+
+    /// Same-named symbols in the current scope only, newest first. Empty when
+    /// the name is unbound here, even if an enclosing scope binds it.
+    pub(crate) fn current_candidates(&self, name: &str, table: &SymbolTable) -> Vec<SymbolId> {
+        self.scopes[self.current.0].candidates(name, table)
     }
 }
 
@@ -250,6 +258,17 @@ impl NameResolver {
                 ..
             } => {
                 if let Some(name) = name {
+                    if self
+                        .scopes
+                        .current_candidates(name, &self.symbols)
+                        .iter()
+                        .any(|binding| self.symbols.kind(*binding) == BindingKind::Plain)
+                    {
+                        return Err(NameResolutionError::IllegalFunctionRedefinition {
+                            name: name.clone(),
+                            span: loc.span,
+                        });
+                    }
                     let symbol = self.symbols.declare(name.clone(), BindingKind::Function);
                     self.scopes.bind(symbol);
                     self.declarations.insert(loc.id, symbol);
