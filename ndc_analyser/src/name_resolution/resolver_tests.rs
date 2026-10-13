@@ -1,4 +1,4 @@
-use super::{NameResolutionError, NameResolver};
+use super::{Candidates, NameResolutionError, NameResolver};
 use crate::symbols::{BindingKind, SymbolId};
 use itertools::Itertools;
 use ndc_lexer::{Lexer, SourceId};
@@ -28,12 +28,32 @@ fn declared<const N: usize>(resolver: &NameResolver) -> [SymbolId; N] {
     })
 }
 
+/// The symbol a plain value use means: the newest binding in the nearest scope.
+fn innermost(candidates: &Candidates) -> SymbolId {
+    candidates.0[0][0]
+}
+
+/// Reads whose innermost candidate is `symbol`, plus writes to it.
 fn uses(resolver: &NameResolver, symbol: SymbolId) -> usize {
+    let reads = resolver
+        .references
+        .values()
+        .filter(|candidates| innermost(candidates) == symbol)
+        .count();
+    let writes = resolver
+        .assignments
+        .values()
+        .filter(|&&id| id == symbol)
+        .count();
+    reads + writes
+}
+
+fn only_reference(resolver: &NameResolver) -> &Candidates {
     resolver
         .references
         .values()
-        .filter(|&&id| id == symbol)
-        .count()
+        .exactly_one()
+        .expect("exactly one reference")
 }
 
 #[test]
@@ -187,7 +207,7 @@ fn errors_restore_visibility_after_nested_blocks() {
     assert_eq!(resolver.scopes.lookup("local", &resolver.symbols), None);
     resolve_source(&mut resolver, "x;").unwrap();
     assert_eq!(
-        resolver.references.values().copied().collect::<Vec<_>>(),
+        resolver.references.values().map(innermost).collect_vec(),
         vec![outer]
     );
 }
@@ -260,4 +280,49 @@ fn unfinished_language_features_report_errors_instead_of_panicking() {
             "{error:?}"
         );
     }
+}
+
+#[test]
+fn candidates_in_one_scope_are_newest_first() {
+    let mut resolver = NameResolver::new();
+    resolve_source(&mut resolver, "let x = 1; let x = 2; x;").unwrap();
+
+    let [first, second] = declared(&resolver);
+    assert_eq!(only_reference(&resolver).0, vec![vec![second, first]]);
+}
+
+#[test]
+fn candidates_are_grouped_by_scope_without_empty_scopes() {
+    let mut resolver = NameResolver::new();
+    resolve_source(&mut resolver, "let x = 1; { let x = 2; let x = 3; { x; } }").unwrap();
+
+    let [x1, x2, x3] = declared(&resolver);
+    assert_eq!(only_reference(&resolver).0, vec![vec![x3, x2], vec![x1]]);
+}
+
+#[test]
+fn assignment_targets_resolve_to_the_innermost_symbol() {
+    let mut resolver = NameResolver::new();
+    resolve_source(&mut resolver, "let x = 1; { let x = 2; x = 3; }").unwrap();
+
+    let [_, inner] = declared(&resolver);
+    assert_eq!(
+        resolver.assignments.values().copied().collect_vec(),
+        vec![inner]
+    );
+}
+
+#[test]
+fn candidates_include_functions_and_plain_bindings() {
+    let mut resolver = NameResolver::new();
+    // This supplied name stands for a native function.
+    let native = resolver
+        .symbols
+        .declare("len".to_string(), BindingKind::Function);
+    resolver.scopes.bind(native);
+    resolve_source(&mut resolver, "let len = 99; len;").unwrap();
+
+    // The resolver keeps both; choosing between them is the type pass's job.
+    let [local] = declared(&resolver);
+    assert_eq!(only_reference(&resolver).0, vec![vec![local, native]]);
 }

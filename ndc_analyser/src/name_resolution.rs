@@ -26,9 +26,12 @@ pub(crate) struct NameResolver {
     /// The symbol each binding pattern identifier introduces, keyed by the
     /// pattern's node. In `let (a, b) = ...`, the `a` and `b` nodes.
     declarations: AHashMap<NodeId, SymbolId>,
-    /// The symbol each name use refers to, keyed by the node naming it. In
-    /// `x = y`, both the `x` target node and the `y` identifier node.
-    references: AHashMap<NodeId, SymbolId>,
+    /// Every symbol an identifier use could mean, keyed by the identifier's
+    /// node. The type pass picks between them.
+    references: AHashMap<NodeId, Candidates>,
+    /// The symbol each identifier assignment target writes to, keyed by the
+    /// target's node. In `x = 1`, the `x` node.
+    assignments: AHashMap<NodeId, SymbolId>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -38,6 +41,11 @@ pub(crate) enum NameResolutionError {
     #[error("name resolution for {feature} is not implemented yet")]
     Unsupported { feature: &'static str, span: Span },
 }
+
+/// Same-named symbols visible at a use, nearest scope first, newest first
+/// within a scope. For `x` in `let x = 1; { let x = 2; x }`: `[[x2], [x1]]`.
+#[derive(Debug)]
+pub(crate) struct Candidates(Vec<Vec<SymbolId>>);
 
 impl Scope {
     pub(crate) fn new_with_parent(parent: ScopeId) -> Self {
@@ -58,6 +66,15 @@ impl Scope {
         }
         None
     }
+
+    fn candidates(&self, name: &str, table: &SymbolTable) -> Vec<SymbolId> {
+        self.bindings
+            .iter()
+            .rev()
+            .filter(|id| table.name(**id) == name)
+            .copied()
+            .collect()
+    }
 }
 
 impl ScopeTree {
@@ -72,15 +89,15 @@ impl ScopeTree {
         self.scopes[self.current.0].bind(symbol_id);
     }
 
-    pub(crate) fn lookup(&self, name: &str, table: &SymbolTable) -> Option<SymbolId> {
-        let mut current_scope = &self.scopes[self.current.0];
-        loop {
-            if let Some(id) = current_scope.lookup(name, table) {
-                return Some(id);
-            }
+    /// The current scope followed by its ancestors, ending at the root.
+    fn chain(&self) -> impl Iterator<Item = &Scope> {
+        std::iter::successors(Some(&self.scopes[self.current.0]), |scope| {
+            scope.parent.map(|parent| &self.scopes[parent.0])
+        })
+    }
 
-            current_scope = &self.scopes[current_scope.parent?.0];
-        }
+    pub(crate) fn lookup(&self, name: &str, table: &SymbolTable) -> Option<SymbolId> {
+        self.chain().find_map(|scope| scope.lookup(name, table))
     }
 
     pub(crate) fn enter_scope(&mut self) {
@@ -93,6 +110,15 @@ impl ScopeTree {
             .parent
             .expect("internal error: scope stack is empty");
     }
+
+    pub(crate) fn candidates(&self, name: &str, table: &SymbolTable) -> Candidates {
+        Candidates(
+            self.chain()
+                .map(|scope| scope.candidates(name, table))
+                .filter(|group| !group.is_empty())
+                .collect(),
+        )
+    }
 }
 
 impl NameResolver {
@@ -102,6 +128,7 @@ impl NameResolver {
             scopes: ScopeTree::new(),
             declarations: Default::default(),
             references: Default::default(),
+            assignments: Default::default(),
         }
     }
 
@@ -115,8 +142,8 @@ impl NameResolver {
             | Expression::Break
             | Expression::Continue => {}
             Expression::Identifier { name, .. } => {
-                let symbol = self.lookup(name, loc.span)?;
-                self.references.insert(loc.id, symbol);
+                let candidates = self.candidates(name, loc.span)?;
+                self.references.insert(loc.id, candidates);
             }
             Expression::Statement(inner)
             | Expression::Grouping(inner)
@@ -222,6 +249,19 @@ impl NameResolver {
         Ok(())
     }
 
+    fn candidates(&self, name: &str, span: Span) -> Result<Candidates, NameResolutionError> {
+        let out = self.scopes.candidates(name, &self.symbols);
+
+        if out.0.is_empty() {
+            return Err(NameResolutionError::UnknownName {
+                name: name.to_string(),
+                span,
+            });
+        }
+
+        Ok(out)
+    }
+
     fn lookup(&self, name: &str, span: Span) -> Result<SymbolId, NameResolutionError> {
         self.scopes
             .lookup(name, &self.symbols)
@@ -257,7 +297,7 @@ impl NameResolver {
                 identifier, span, ..
             } => {
                 let symbol = self.lookup(identifier, *span)?;
-                self.references.insert(target.id, symbol);
+                self.assignments.insert(target.id, symbol);
             }
             AssignmentTarget::Sequence(items) => {
                 for item in items {
