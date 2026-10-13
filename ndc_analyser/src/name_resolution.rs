@@ -320,6 +320,7 @@ impl NameResolver {
     pub(crate) fn resolve(&mut self, loc: &ExpressionLocation) -> Result<(), NameResolutionError> {
         match &loc.expression {
             Expression::BoolLiteral(_)
+            | Expression::NoneLiteral
             | Expression::StringLiteral(_)
             | Expression::NumericLiteral(_)
             | Expression::Break
