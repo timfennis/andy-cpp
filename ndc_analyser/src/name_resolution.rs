@@ -4,7 +4,7 @@ use ndc_core::StaticType;
 use ndc_lexer::Span;
 use ndc_parser::{
     AssignmentTarget, AssignmentTargetLocation, BindingPattern, BindingPatternLocation, Expression,
-    ExpressionLocation, ForBody, ForIteration, NodeId, TypeExpr,
+    ExpressionLocation, ForBody, ForIteration, NodeId, StructField, TypeExpr,
 };
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone, Hash)]
@@ -14,7 +14,6 @@ pub(crate) struct ScopeId(usize);
 pub(crate) struct Scope {
     parent: Option<ScopeId>,
     bindings: Vec<SymbolId>,
-    /// Type names, kept apart from `bindings`: `let Int = 5` doesn't hide the type `Int`.
     types: Vec<SymbolId>,
     kind: ScopeKind,
 }
@@ -56,14 +55,14 @@ pub(crate) struct NameResolver {
     /// The type each name in an annotation refers to, keyed by the name's node.
     /// In `let m: Map<String, P>`, the `Map`, `String` and `P` nodes.
     type_names: AHashMap<NodeId, SymbolId>,
+    /// What each struct declaration binds, keyed by the declaration's node.
+    structs: AHashMap<NodeId, StructSymbols>,
 }
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum NameResolutionError {
     #[error("Identifier {name} has not previously been declared")]
     UnknownName { name: String, span: Span },
-    #[error("Name resolution for {feature} is not implemented yet")]
-    Unsupported { feature: &'static str, span: Span },
     #[error("Illegal redefinition of parameter {name}")]
     DuplicateParameter { name: String, span: Span },
     #[error("Illegal redefinition of variable {name} as a function in the same scope")]
@@ -72,6 +71,18 @@ pub(crate) enum NameResolutionError {
     SequenceTargetNotAllowed { span: Span },
     #[error("unknown type `{name}`")]
     UnknownType { name: String, span: Span },
+    #[error("Struct '{name}' is not allowed to shadow the built-in type '{name}'")]
+    StructShadowsBuiltinType { name: String, span: Span },
+    #[error("Illegal redefinition of struct '{name}'")]
+    StructRedefinition { name: String, span: Span },
+    #[error("Illegal redefinition of field '{field}' in struct '{struct_name}'")]
+    DuplicateField {
+        field: String,
+        struct_name: String,
+        span: Span,
+    },
+    #[error("Illegal redefinition of variable {name} as a struct in the same scope")]
+    IllegalStructRedefinition { name: String, span: Span },
 }
 
 /// Same-named symbols visible at a use, nearest scope first, newest first
@@ -88,6 +99,18 @@ pub(crate) struct Candidates(Vec<Vec<SymbolId>>);
 pub(crate) struct AugmentedCandidates {
     in_place: Candidates,
     operator: Candidates,
+}
+
+/// The symbols a struct declaration binds. For `struct Point { x: Int }`: the
+/// type `Point`, the constructor `Point`, and the getter `x` with the setter `x=`.
+#[derive(Debug)]
+pub(crate) struct StructSymbols {
+    /// `Point` in annotations such as `let p: Point`.
+    type_symbol: SymbolId,
+    /// `Point` in calls such as `Point(1)`.
+    constructor: SymbolId,
+    /// The getter and setter of each field, in declaration order.
+    accessors: Vec<(SymbolId, SymbolId)>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -199,6 +222,11 @@ impl ScopeTree {
         self.chain().find_map(|scope| scope.lookup(name, table))
     }
 
+    /// The type named `name` in the current scope only, ignoring enclosing scopes.
+    pub(crate) fn current_type(&self, name: &str, table: &SymbolTable) -> Option<SymbolId> {
+        self.scopes[self.current.0].lookup_type(name, table)
+    }
+
     /// The innermost type named `name`. Types never overload, so there's at most one.
     pub(crate) fn lookup_type(&self, name: &str, table: &SymbolTable) -> Option<SymbolId> {
         self.chain()
@@ -263,6 +291,7 @@ impl NameResolver {
             getters: Default::default(),
             setters: Default::default(),
             type_names: Default::default(),
+            structs: Default::default(),
         }
     }
 
@@ -410,19 +439,13 @@ impl NameResolver {
                 ..
             } => {
                 if let Some(name) = name {
-                    if self
-                        .scopes
-                        .current_candidates(name, &self.symbols)
-                        .iter()
-                        .any(|binding| self.symbols.kind(*binding) == BindingKind::Plain)
-                    {
+                    if self.has_plain_binding_here(name) {
                         return Err(NameResolutionError::IllegalFunctionRedefinition {
                             name: name.clone(),
                             span: loc.span,
                         });
                     }
-                    let symbol = self.symbols.declare(name.clone(), BindingKind::Function);
-                    self.scopes.bind(symbol);
+                    let symbol = self.declare_function(name.clone());
                     self.declarations.insert(loc.id, symbol);
                 }
 
@@ -453,11 +476,9 @@ impl NameResolver {
                     resolver.resolve(body)
                 })?;
             }
-            Expression::StructDeclaration { .. } => {
-                return Err(NameResolutionError::Unsupported {
-                    feature: "struct declarations",
-                    span: loc.span,
-                });
+            Expression::StructDeclaration { name, fields, .. } => {
+                let symbols = self.declare_struct(name, fields, loc.span)?;
+                self.structs.insert(loc.id, symbols);
             }
             Expression::OpAssignment {
                 l_value,
@@ -536,6 +557,87 @@ impl NameResolver {
             .for_each(|symbol| self.record_use(*symbol));
 
         Ok(candidates)
+    }
+
+    /// Whether the current scope has a `let`, parameter or loop variable named
+    /// `name`. A scope holds a name either as plain bindings or as functions.
+    fn has_plain_binding_here(&self, name: &str) -> bool {
+        self.scopes
+            .current_candidates(name, &self.symbols)
+            .iter()
+            .any(|&symbol| self.symbols.kind(symbol) == BindingKind::Plain)
+    }
+
+    fn declare_function(&mut self, name: String) -> SymbolId {
+        let symbol = self.symbols.declare(name, BindingKind::Function);
+        self.scopes.bind(symbol);
+        symbol
+    }
+
+    /// Declares `struct name { fields }` in the current scope: its name as a type,
+    /// its constructor, and a getter and setter per field.
+    fn declare_struct(
+        &mut self,
+        name: &str,
+        fields: &[StructField],
+        span: Span,
+    ) -> Result<StructSymbols, NameResolutionError> {
+        // Field types resolve before the struct's own name is bound, so a struct
+        // can't refer to itself or to structs declared after it.
+        for field in fields {
+            self.resolve_type(&field.annotation)?;
+        }
+        if StaticType::BUILTIN_TYPE_NAMES.contains(&name) {
+            return Err(NameResolutionError::StructShadowsBuiltinType {
+                name: name.to_string(),
+                span,
+            });
+        }
+        if self.scopes.current_type(name, &self.symbols).is_some() {
+            return Err(NameResolutionError::StructRedefinition {
+                name: name.to_string(),
+                span,
+            });
+        }
+        // Field lists are short, so a linear scan beats hashing.
+        let mut field_names = Vec::new();
+        for field in fields {
+            if field_names.contains(&&field.identifier) {
+                return Err(NameResolutionError::DuplicateField {
+                    field: field.identifier.clone(),
+                    struct_name: name.to_string(),
+                    span: field.span,
+                });
+            }
+            field_names.push(&field.identifier);
+        }
+        // The constructor is a declared name, so it follows the same rule as `fn`.
+        if self.has_plain_binding_here(name) {
+            return Err(NameResolutionError::IllegalStructRedefinition {
+                name: name.to_string(),
+                span,
+            });
+        }
+
+        let type_symbol = self.symbols.declare(name.to_string(), BindingKind::Type);
+        self.scopes.bind_type(type_symbol);
+        let constructor = self.declare_function(name.to_string());
+        // Accessors are exempt from that rule: a field name belongs to the struct,
+        // so `let x = 5; struct Point { x: Int }` is fine.
+        let accessors = fields
+            .iter()
+            .map(|field| {
+                let getter = self.declare_function(field.identifier.clone());
+                let setter = self.declare_function(format!("{}=", field.identifier));
+                (getter, setter)
+            })
+            .collect();
+
+        Ok(StructSymbols {
+            type_symbol,
+            constructor,
+            accessors,
+        })
     }
 
     /// Resolves every type name in `annotation`. In `Map<String, (Int, P)>`, that's
