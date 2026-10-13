@@ -1,4 +1,4 @@
-use super::{Candidates, NameResolutionError, NameResolver};
+use super::{Candidates, NameResolutionError, NameResolver, ScopeKind};
 use crate::symbols::{BindingKind, SymbolId};
 use itertools::Itertools;
 use ndc_lexer::{Lexer, SourceId};
@@ -494,4 +494,35 @@ fn functions_may_share_names_with_variables_in_other_scopes() {
         let mut resolver = NameResolver::new(builtins.iter().copied());
         resolve_source(&mut resolver, source).unwrap_or_else(|error| panic!("{source}: {error:?}"));
     }
+}
+
+#[test]
+fn scopes_record_their_kind_in_creation_order() {
+    let mut resolver = NameResolver::new([]);
+    resolve_source(&mut resolver, "fn f(x) { 1; } for i in [1] { 1; }").unwrap();
+
+    let [f, _, _] = declared(&resolver);
+    let f_node = resolver
+        .declarations
+        .iter()
+        .find_map(|(&node, &symbol)| (symbol == f).then_some(node))
+        .expect("f is declared");
+    assert_eq!(
+        resolver
+            .scopes
+            .scopes
+            .iter()
+            .map(|scope| scope.kind)
+            .collect_vec(),
+        vec![
+            ScopeKind::Builtins,
+            ScopeKind::Program,
+            ScopeKind::Function(f_node),
+            // The function body.
+            ScopeKind::Block,
+            // The `for` iteration, then the loop body.
+            ScopeKind::Block,
+            ScopeKind::Block,
+        ]
+    );
 }

@@ -9,10 +9,11 @@ use ndc_parser::{
 #[derive(Debug, Eq, PartialEq, Copy, Clone, Hash)]
 pub(crate) struct ScopeId(usize);
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct Scope {
     parent: Option<ScopeId>,
     bindings: Vec<SymbolId>,
+    kind: ScopeKind,
 }
 
 pub(crate) struct ScopeTree {
@@ -53,13 +54,27 @@ pub(crate) enum NameResolutionError {
 #[derive(Debug)]
 pub(crate) struct Candidates(Vec<Vec<SymbolId>>);
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ScopeKind {
+    /// Natives such as `len` and `+`. The VM keeps them as globals, so they're never captured.
+    Builtins,
+    /// The program's top level. In `let x = 1; fn f() { x }`, `x` lives here and `f` captures it.
+    Program,
+    /// The parameters of the function declared at this node, named or lambda.
+    Function(NodeId),
+    /// `{ … }` bodies and `for` iterations. Not a function boundary.
+    Block,
+}
+
 impl Scope {
-    pub(crate) fn new_with_parent(parent: ScopeId) -> Self {
+    pub(crate) fn new(kind: ScopeKind, parent: Option<ScopeId>) -> Self {
         Self {
-            parent: Some(parent),
+            parent,
             bindings: Vec::default(),
+            kind,
         }
     }
+
     pub(crate) fn bind(&mut self, symbol_id: SymbolId) {
         self.bindings.push(symbol_id);
     }
@@ -87,7 +102,7 @@ impl ScopeTree {
     pub(crate) fn new() -> Self {
         Self {
             current: ScopeId(0),
-            scopes: vec![Scope::default()],
+            scopes: vec![Scope::new(ScopeKind::Builtins, None)],
         }
     }
 
@@ -106,8 +121,8 @@ impl ScopeTree {
         self.chain().find_map(|scope| scope.lookup(name, table))
     }
 
-    pub(crate) fn enter_scope(&mut self) {
-        self.scopes.push(Scope::new_with_parent(self.current));
+    pub(crate) fn enter_scope(&mut self, kind: ScopeKind) {
+        self.scopes.push(Scope::new(kind, Some(self.current)));
         self.current = ScopeId(self.scopes.len() - 1);
     }
 
@@ -146,7 +161,7 @@ impl NameResolver {
             scopes.bind(symbol);
         }
 
-        scopes.enter_scope();
+        scopes.enter_scope(ScopeKind::Program);
         Self {
             symbols,
             scopes,
@@ -186,7 +201,7 @@ impl NameResolver {
                 self.resolve(r_value)?;
             }
             Expression::Block { statements } => {
-                self.in_scope(|resolver| {
+                self.in_scope(ScopeKind::Block, |resolver| {
                     for statement in statements {
                         resolver.resolve(statement)?;
                     }
@@ -276,7 +291,7 @@ impl NameResolver {
 
                 // Parameter lists are short, so a linear scan beats hashing.
                 let mut names = Vec::new();
-                self.in_scope(|resolver| {
+                self.in_scope(ScopeKind::Function(loc.id), |resolver| {
                     for parameter in parameters {
                         let param_name = parameter.name();
                         if names.contains(&param_name) {
@@ -374,9 +389,10 @@ impl NameResolver {
 
     fn in_scope(
         &mut self,
+        kind: ScopeKind,
         resolve: impl FnOnce(&mut Self) -> Result<(), NameResolutionError>,
     ) -> Result<(), NameResolutionError> {
-        self.scopes.enter_scope();
+        self.scopes.enter_scope(kind);
         let result = resolve(self);
         // Restore visibility on errors as well as successful traversal.
         self.scopes.leave_scope();
@@ -393,7 +409,7 @@ impl NameResolver {
                 // A binder is not visible in its own iterable. Later
                 // iterables and guards can see the earlier binders.
                 self.resolve(sequence)?;
-                self.in_scope(|resolver| {
+                self.in_scope(ScopeKind::Block, |resolver| {
                     resolver.declare_pattern(l_value);
                     resolver.resolve_for(tail, body)
                 })
@@ -428,8 +444,7 @@ mod resolver_tests;
 
 #[cfg(test)]
 mod test {
-    use crate::name_resolution::Scope;
-    use crate::name_resolution::ScopeTree;
+    use crate::name_resolution::{Scope, ScopeKind, ScopeTree};
     use crate::symbols::{BindingKind, SymbolTable};
 
     #[test]
@@ -439,7 +454,7 @@ mod test {
         let second = table.declare("foo".to_string(), BindingKind::Plain);
         let other = table.declare("another".to_string(), BindingKind::Plain);
 
-        let mut scope = Scope::default();
+        let mut scope = Scope::new(ScopeKind::Block, None);
         scope.bind(first);
         scope.bind(second);
         scope.bind(other);
@@ -462,9 +477,9 @@ mod test {
 
         let mut tree = ScopeTree::new();
         tree.bind(first);
-        tree.enter_scope();
+        tree.enter_scope(ScopeKind::Block);
         tree.bind(middle);
-        tree.enter_scope();
+        tree.enter_scope(ScopeKind::Block);
         assert_eq!(tree.lookup("foo", &table), Some(first));
         assert_eq!(tree.lookup("bar", &table), Some(middle));
         assert_eq!(tree.lookup("missing", &table), None);
@@ -484,7 +499,7 @@ mod test {
 
         let mut tree = ScopeTree::new();
         tree.bind(first);
-        tree.enter_scope();
+        tree.enter_scope(ScopeKind::Block);
         tree.bind(second);
         assert_eq!(tree.lookup("foo", &table), Some(second));
 
@@ -499,12 +514,12 @@ mod test {
         let second = table.declare("second".to_string(), BindingKind::Plain);
 
         let mut tree = ScopeTree::new();
-        tree.enter_scope();
+        tree.enter_scope(ScopeKind::Block);
         tree.bind(first);
         tree.leave_scope();
         assert_eq!(tree.lookup("first", &table), None);
 
-        tree.enter_scope();
+        tree.enter_scope(ScopeKind::Block);
         assert_eq!(tree.lookup("first", &table), None);
         tree.bind(second);
         assert_eq!(tree.lookup("second", &table), Some(second));
@@ -521,7 +536,7 @@ mod test {
 
         let mut tree = ScopeTree::new();
         tree.bind(outer);
-        tree.enter_scope();
+        tree.enter_scope(ScopeKind::Block);
         assert_eq!(tree.lookup("outer", &table), Some(outer));
         assert_eq!(tree.lookup("missing", &table), None);
 
