@@ -1,4 +1,4 @@
-use super::{Candidates, NameResolutionError, NameResolver, ScopeKind};
+use super::{AugmentedCandidates, Candidates, NameResolutionError, NameResolver, ScopeKind};
 use crate::symbols::{BindingKind, SymbolId};
 use itertools::Itertools;
 use ndc_lexer::{Lexer, SourceId};
@@ -81,6 +81,14 @@ fn functions(resolver: &NameResolver) -> Vec<NodeId> {
 
 fn captures_of(resolver: &NameResolver, function: NodeId) -> &[SymbolId] {
     resolver.captures.get(&function).map_or(&[], Vec::as_slice)
+}
+
+fn only_augmented(resolver: &NameResolver) -> &AugmentedCandidates {
+    resolver
+        .augmented
+        .values()
+        .exactly_one()
+        .expect("exactly one augmented assignment")
 }
 
 fn only_reference(resolver: &NameResolver) -> &Candidates {
@@ -288,21 +296,13 @@ fn loop_body_forms_resolve_names_and_restore_scope_on_errors() {
 }
 
 #[test]
-fn unfinished_language_features_report_errors_instead_of_panicking() {
-    for (source, feature) in [
-        ("struct Point { x: Int }", "struct declarations"),
-        (
-            "let x = 1; x += 2;",
-            "augmented assignment operator selection",
-        ),
-    ] {
-        let mut resolver = NameResolver::new([]);
-        let error = resolve_source(&mut resolver, source).unwrap_err();
-        assert!(
-            matches!(error, NameResolutionError::Unsupported { feature: found, span } if found == feature && span.source_id() == SourceId::new(0)),
-            "{error:?}"
-        );
-    }
+fn struct_declarations_report_errors_instead_of_panicking() {
+    let mut resolver = NameResolver::new([]);
+    let error = resolve_source(&mut resolver, "struct Point { x: Int }").unwrap_err();
+    assert!(
+        matches!(error, NameResolutionError::Unsupported { feature: "struct declarations", span } if span.source_id() == SourceId::new(0)),
+        "{error:?}"
+    );
 }
 
 #[test]
@@ -679,4 +679,81 @@ fn block_scoped_variables_can_be_captured() {
 
     let [_, y] = declared(&resolver);
     assert!(resolver.captured.contains(&y));
+}
+
+#[test]
+fn augmented_assignment_finds_the_plain_operator() {
+    let mut resolver = NameResolver::new(["+"]);
+    let plus = builtin(&resolver, "+");
+    resolve_source(&mut resolver, "let x = 1; x += 2;").unwrap();
+
+    let [x] = declared(&resolver);
+    let augmented = only_augmented(&resolver);
+    assert!(augmented.in_place.0.is_empty());
+    assert_eq!(augmented.operator.0, vec![vec![plus]]);
+    assert_eq!(
+        resolver.assignments.values().copied().collect_vec(),
+        vec![x]
+    );
+}
+
+#[test]
+fn augmented_assignment_finds_both_operations() {
+    let mut resolver = NameResolver::new(["++", "++="]);
+    let concat = builtin(&resolver, "++");
+    let append = builtin(&resolver, "++=");
+    resolve_source(&mut resolver, "let xs = []; xs ++= [1];").unwrap();
+
+    let augmented = only_augmented(&resolver);
+    assert_eq!(augmented.in_place.0, vec![vec![append]]);
+    assert_eq!(augmented.operator.0, vec![vec![concat]]);
+}
+
+#[test]
+fn augmented_assignment_resolves_index_and_member_targets() {
+    let mut resolver = NameResolver::new(["+"]);
+    resolve_source(&mut resolver, "let xs = [1]; let i = 0; xs[i] += 1;").unwrap();
+    let [xs, i] = declared(&resolver);
+    assert_eq!(uses(&resolver, xs), 1);
+    assert_eq!(uses(&resolver, i), 1);
+
+    // The member name itself is resolved in a later step; only the receiver is here.
+    let mut resolver = NameResolver::new(["+"]);
+    resolve_source(&mut resolver, "let p = (); p.x += 1;").unwrap();
+    let [p] = declared(&resolver);
+    assert_eq!(uses(&resolver, p), 1);
+}
+
+#[test]
+fn augmented_assignment_rejects_sequence_targets() {
+    let mut resolver = NameResolver::new(["+"]);
+    let error = resolve_source(&mut resolver, "let a = 1; let b = 2; (a, b) += 1;").unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "This lvalue is required to be a single identifier"
+    );
+    assert!(
+        matches!(error, NameResolutionError::SequenceTargetNotAllowed { .. }),
+        "{error:?}"
+    );
+    assert!(resolver.augmented.is_empty());
+}
+
+#[test]
+fn augmented_assignment_without_any_operator_is_unknown() {
+    assert_eq!(unknown_name("let x = 1; x += 2;"), "+");
+}
+
+#[test]
+fn augmented_assignment_captures_its_target() {
+    let mut resolver = NameResolver::new(["+"]);
+    resolve_source(&mut resolver, "let x = 1; fn f() { x += 1; }").unwrap();
+
+    let [x, _] = declared(&resolver);
+    let [f] = functions(&resolver)[..] else {
+        panic!("expected one function");
+    };
+    // The native `+` is a global, so only `x` is captured.
+    assert_eq!(captures_of(&resolver, f), [x]);
 }

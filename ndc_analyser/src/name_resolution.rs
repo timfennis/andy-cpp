@@ -41,6 +41,9 @@ pub(crate) struct NameResolver {
     captures: AHashMap<NodeId, Vec<SymbolId>>,
     /// Symbols some closure captures. They must outlive their scope (see #227).
     captured: AHashSet<SymbolId>,
+    /// The operations each augmented assignment can use, keyed by its node.
+    /// In `x += 1`, the candidates for `+=` and `+`.
+    augmented: AHashMap<NodeId, AugmentedCandidates>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -53,12 +56,25 @@ pub(crate) enum NameResolutionError {
     DuplicateParameter { name: String, span: Span },
     #[error("Illegal redefinition of variable {name} as a function in the same scope")]
     IllegalFunctionRedefinition { name: String, span: Span },
+    #[error("This lvalue is required to be a single identifier")]
+    SequenceTargetNotAllowed { span: Span },
 }
 
 /// Same-named symbols visible at a use, nearest scope first, newest first
 /// within a scope. For `x` in `let x = 1; { let x = 2; x }`: `[[x2], [x1]]`.
+/// Identifiers always have at least one candidate, augmented operators may
+/// not.
 #[derive(Debug)]
 pub(crate) struct Candidates(Vec<Vec<SymbolId>>);
+
+/// The two operations an augmented assignment can use. For `xs ++= ys`:
+/// `in_place` holds `++=` (mutates `xs`), `operator` holds `++` (builds a new value
+/// that is written back). Either may be empty; the type pass picks.
+#[derive(Debug)]
+pub(crate) struct AugmentedCandidates {
+    in_place: Candidates,
+    operator: Candidates,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ScopeKind {
@@ -200,6 +216,7 @@ impl NameResolver {
             assignments: Default::default(),
             captures: Default::default(),
             captured: Default::default(),
+            augmented: Default::default(),
         }
     }
 
@@ -368,11 +385,45 @@ impl NameResolver {
                     span: loc.span,
                 });
             }
-            Expression::OpAssignment { .. } => {
-                return Err(NameResolutionError::Unsupported {
-                    feature: "augmented assignment operator selection",
-                    span: loc.span,
-                });
+            Expression::OpAssignment {
+                l_value,
+                r_value,
+                operation,
+                ..
+            } => {
+                if let AssignmentTarget::Sequence(_) = l_value.target {
+                    return Err(NameResolutionError::SequenceTargetNotAllowed { span: loc.span });
+                }
+
+                self.resolve_target(l_value)?;
+                self.resolve(r_value)?;
+
+                let in_place_op_name = format!("{operation}=");
+                // Ask the scope tree directly: an empty list isn't an error here.
+                let in_place_candidates = self.scopes.candidates(&in_place_op_name, &self.symbols);
+                let candidates = self.scopes.candidates(operation, &self.symbols);
+
+                if in_place_candidates.0.is_empty() && candidates.0.is_empty() {
+                    return Err(NameResolutionError::UnknownName {
+                        name: operation.clone(),
+                        // The operator has no span of its own, so point at the whole assignment.
+                        span: loc.span,
+                    });
+                }
+
+                in_place_candidates
+                    .iter()
+                    .chain(candidates.iter())
+                    .flatten()
+                    .for_each(|op| self.record_use(*op));
+
+                self.augmented.insert(
+                    loc.id,
+                    AugmentedCandidates {
+                        in_place: in_place_candidates,
+                        operator: candidates,
+                    },
+                );
             }
         }
         Ok(())
