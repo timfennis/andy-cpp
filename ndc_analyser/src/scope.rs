@@ -1,3 +1,4 @@
+use crate::symbols::SymbolId;
 use ndc_core::StaticType;
 use ndc_core::r#struct::StructInfo;
 use ndc_parser::{Binding, Candidate, CaptureSource, ResolvedVar};
@@ -136,6 +137,9 @@ impl TypeBinding {
 pub(crate) struct ScopeBinding {
     pub name: String,
     pub binding: TypeBinding,
+    /// The name resolver's symbol for this binding. Natives get theirs when the
+    /// analyser is created, since this tree is built before the resolver.
+    pub symbol: Option<SymbolId>,
 }
 
 #[derive(Debug, Clone)]
@@ -350,10 +354,11 @@ impl Scope {
         })
     }
 
-    fn allocate(&mut self, name: String, type_binding: TypeBinding) -> usize {
+    fn allocate(&mut self, name: String, type_binding: TypeBinding, symbol: SymbolId) -> usize {
         self.identifiers.push(ScopeBinding {
             name,
             binding: type_binding,
+            symbol: Some(symbol),
         });
         self.base_offset + self.identifiers.len() - 1
     }
@@ -408,6 +413,7 @@ impl ScopeTree {
             .map(|(name, typ)| ScopeBinding {
                 name,
                 binding: TypeBinding::Inferred(typ),
+                symbol: None,
             })
             .collect();
         global_scope.types = StaticType::BUILTIN_TYPE_NAMES
@@ -1000,9 +1006,17 @@ impl ScopeTree {
         &mut self,
         ident: String,
         binding: TypeBinding,
+        symbol: SymbolId,
     ) -> ResolvedVar {
         ResolvedVar::Local {
-            slot: self.scopes[self.current_scope_idx].allocate(ident, binding),
+            slot: self.scopes[self.current_scope_idx].allocate(ident, binding, symbol),
+        }
+    }
+
+    /// Gives each native binding its resolver symbol, in registry order.
+    pub(crate) fn attach_native_symbols(&mut self, symbols: impl IntoIterator<Item = SymbolId>) {
+        for (binding, symbol) in self.global_scope.identifiers.iter_mut().zip(symbols) {
+            binding.symbol = Some(symbol);
         }
     }
 
@@ -1171,7 +1185,13 @@ impl Debug for ScopeTree {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::symbols::{BindingKind, SymbolTable};
     use ndc_parser::ResolvedVar;
+
+    /// A placeholder symbol: these tests exercise slots, not symbols.
+    fn symbol() -> SymbolId {
+        SymbolTable::default().declare(String::new(), BindingKind::Plain)
+    }
 
     fn empty_scope_tree() -> ScopeTree {
         ScopeTree::from_global_scope(vec![])
@@ -1180,7 +1200,8 @@ mod tests {
     #[test]
     fn single_local_in_function_scope() {
         let mut tree = empty_scope_tree();
-        let var = tree.create_local_binding("x".into(), TypeBinding::Inferred(StaticType::Int));
+        let var =
+            tree.create_local_binding("x".into(), TypeBinding::Inferred(StaticType::Int), symbol());
         assert_eq!(var, ResolvedVar::Local { slot: 0 });
         assert_eq!(
             tree.get_binding_any("x"),
@@ -1191,9 +1212,12 @@ mod tests {
     #[test]
     fn multiple_locals_get_ascending_slots() {
         let mut tree = empty_scope_tree();
-        let x = tree.create_local_binding("x".into(), TypeBinding::Inferred(StaticType::Int));
-        let y = tree.create_local_binding("y".into(), TypeBinding::Inferred(StaticType::Int));
-        let z = tree.create_local_binding("z".into(), TypeBinding::Inferred(StaticType::Int));
+        let x =
+            tree.create_local_binding("x".into(), TypeBinding::Inferred(StaticType::Int), symbol());
+        let y =
+            tree.create_local_binding("y".into(), TypeBinding::Inferred(StaticType::Int), symbol());
+        let z =
+            tree.create_local_binding("z".into(), TypeBinding::Inferred(StaticType::Int), symbol());
         assert_eq!(x, ResolvedVar::Local { slot: 0 });
         assert_eq!(y, ResolvedVar::Local { slot: 1 });
         assert_eq!(z, ResolvedVar::Local { slot: 2 });
@@ -1202,11 +1226,13 @@ mod tests {
     #[test]
     fn block_scope_continues_flat_numbering() {
         let mut tree = empty_scope_tree();
-        let x = tree.create_local_binding("x".into(), TypeBinding::Inferred(StaticType::Int));
+        let x =
+            tree.create_local_binding("x".into(), TypeBinding::Inferred(StaticType::Int), symbol());
         assert_eq!(x, ResolvedVar::Local { slot: 0 });
 
         tree.new_block_scope();
-        let y = tree.create_local_binding("y".into(), TypeBinding::Inferred(StaticType::Int));
+        let y =
+            tree.create_local_binding("y".into(), TypeBinding::Inferred(StaticType::Int), symbol());
         assert_eq!(y, ResolvedVar::Local { slot: 1 });
 
         assert_eq!(
@@ -1218,21 +1244,23 @@ mod tests {
     #[test]
     fn nested_block_scopes_continue_numbering() {
         let mut tree = empty_scope_tree();
-        tree.create_local_binding("a".into(), TypeBinding::Inferred(StaticType::Int));
+        tree.create_local_binding("a".into(), TypeBinding::Inferred(StaticType::Int), symbol());
 
         tree.new_block_scope();
-        let b = tree.create_local_binding("b".into(), TypeBinding::Inferred(StaticType::Int));
+        let b =
+            tree.create_local_binding("b".into(), TypeBinding::Inferred(StaticType::Int), symbol());
         assert_eq!(b, ResolvedVar::Local { slot: 1 });
 
         tree.new_block_scope();
-        let c = tree.create_local_binding("c".into(), TypeBinding::Inferred(StaticType::Int));
+        let c =
+            tree.create_local_binding("c".into(), TypeBinding::Inferred(StaticType::Int), symbol());
         assert_eq!(c, ResolvedVar::Local { slot: 2 });
     }
 
     #[test]
     fn block_scope_does_not_create_upvalue() {
         let mut tree = empty_scope_tree();
-        tree.create_local_binding("x".into(), TypeBinding::Inferred(StaticType::Int));
+        tree.create_local_binding("x".into(), TypeBinding::Inferred(StaticType::Int), symbol());
 
         tree.new_block_scope();
         assert_eq!(
@@ -1244,10 +1272,11 @@ mod tests {
     #[test]
     fn function_scope_resets_slots_and_captures_as_upvalue() {
         let mut tree = empty_scope_tree();
-        tree.create_local_binding("x".into(), TypeBinding::Inferred(StaticType::Int));
+        tree.create_local_binding("x".into(), TypeBinding::Inferred(StaticType::Int), symbol());
 
         tree.new_function_scope();
-        let y = tree.create_local_binding("y".into(), TypeBinding::Inferred(StaticType::Int));
+        let y =
+            tree.create_local_binding("y".into(), TypeBinding::Inferred(StaticType::Int), symbol());
         assert_eq!(y, ResolvedVar::Local { slot: 0 });
 
         assert_eq!(
@@ -1259,10 +1288,11 @@ mod tests {
     #[test]
     fn iteration_scope_continues_numbering_and_is_transparent() {
         let mut tree = empty_scope_tree();
-        tree.create_local_binding("x".into(), TypeBinding::Inferred(StaticType::Int));
+        tree.create_local_binding("x".into(), TypeBinding::Inferred(StaticType::Int), symbol());
 
         tree.new_iteration_scope();
-        let i = tree.create_local_binding("i".into(), TypeBinding::Inferred(StaticType::Int));
+        let i =
+            tree.create_local_binding("i".into(), TypeBinding::Inferred(StaticType::Int), symbol());
         assert_eq!(i, ResolvedVar::Local { slot: 1 });
 
         assert_eq!(
@@ -1290,21 +1320,26 @@ mod tests {
     #[test]
     fn slot_reuse_after_scope_destroy() {
         let mut tree = empty_scope_tree();
-        tree.create_local_binding("a".into(), TypeBinding::Inferred(StaticType::Int));
+        tree.create_local_binding("a".into(), TypeBinding::Inferred(StaticType::Int), symbol());
 
         tree.new_block_scope();
-        tree.create_local_binding("b".into(), TypeBinding::Inferred(StaticType::Int));
+        tree.create_local_binding("b".into(), TypeBinding::Inferred(StaticType::Int), symbol());
         tree.destroy_scope();
 
-        let c = tree.create_local_binding("c".into(), TypeBinding::Inferred(StaticType::Int));
+        let c =
+            tree.create_local_binding("c".into(), TypeBinding::Inferred(StaticType::Int), symbol());
         assert_eq!(c, ResolvedVar::Local { slot: 1 });
     }
 
     #[test]
     fn get_type_returns_correct_type() {
         let mut tree = empty_scope_tree();
-        tree.create_local_binding("x".into(), TypeBinding::Inferred(StaticType::Int));
-        tree.create_local_binding("y".into(), TypeBinding::Inferred(StaticType::String));
+        tree.create_local_binding("x".into(), TypeBinding::Inferred(StaticType::Int), symbol());
+        tree.create_local_binding(
+            "y".into(),
+            TypeBinding::Inferred(StaticType::String),
+            symbol(),
+        );
 
         assert_eq!(
             tree.get_type(ResolvedVar::Local { slot: 0 }),
@@ -1323,7 +1358,7 @@ mod tests {
     #[test]
     fn upvalue_hoisting_across_two_function_scopes() {
         let mut tree = empty_scope_tree();
-        tree.create_local_binding("x".into(), TypeBinding::Inferred(StaticType::Int));
+        tree.create_local_binding("x".into(), TypeBinding::Inferred(StaticType::Int), symbol());
 
         tree.new_function_scope(); // outer
         tree.new_function_scope(); // inner
@@ -1350,8 +1385,12 @@ mod tests {
     #[test]
     fn multiple_upvalues_get_distinct_indices() {
         let mut tree = empty_scope_tree();
-        tree.create_local_binding("a".into(), TypeBinding::Inferred(StaticType::Int));
-        tree.create_local_binding("b".into(), TypeBinding::Inferred(StaticType::String));
+        tree.create_local_binding("a".into(), TypeBinding::Inferred(StaticType::Int), symbol());
+        tree.create_local_binding(
+            "b".into(),
+            TypeBinding::Inferred(StaticType::String),
+            symbol(),
+        );
 
         tree.new_function_scope();
 
@@ -1366,7 +1405,7 @@ mod tests {
     #[test]
     fn duplicate_upvalue_resolution_reuses_index() {
         let mut tree = empty_scope_tree();
-        tree.create_local_binding("x".into(), TypeBinding::Inferred(StaticType::Int));
+        tree.create_local_binding("x".into(), TypeBinding::Inferred(StaticType::Int), symbol());
 
         tree.new_function_scope();
 
@@ -1385,7 +1424,7 @@ mod tests {
     #[test]
     fn get_type_follows_upvalue_chain() {
         let mut tree = empty_scope_tree();
-        tree.create_local_binding("x".into(), TypeBinding::Inferred(StaticType::Int));
+        tree.create_local_binding("x".into(), TypeBinding::Inferred(StaticType::Int), symbol());
 
         tree.new_function_scope(); // outer
         tree.new_function_scope(); // inner
@@ -1401,7 +1440,7 @@ mod tests {
     #[test]
     fn sibling_closure_finds_existing_upvalue() {
         let mut tree = empty_scope_tree();
-        tree.create_local_binding("x".into(), TypeBinding::Inferred(StaticType::Int));
+        tree.create_local_binding("x".into(), TypeBinding::Inferred(StaticType::Int), symbol());
 
         tree.new_function_scope(); // middle
 
@@ -1509,6 +1548,7 @@ mod tests {
         let inner_var = tree.create_local_binding(
             "foo".into(),
             TypeBinding::Inferred(fn_type(vec![StaticType::Any], StaticType::Any)),
+            symbol(),
         );
         let ResolvedVar::Local { slot: inner_slot } = inner_var else {
             panic!("expected local binding");
@@ -1540,6 +1580,7 @@ mod tests {
         tree.create_local_binding(
             "foo".into(),
             TypeBinding::Inferred(fn_type(vec![StaticType::Int], StaticType::Int)),
+            symbol(),
         );
 
         // Called with `String`: inner `foo(Int)` doesn't match, falls through
