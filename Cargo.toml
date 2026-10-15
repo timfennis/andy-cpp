@@ -14,6 +14,7 @@ license = "MIT"
 
 [workspace.dependencies]
 ahash = { version = "0.8.12" }
+char_index = "0.1.5"
 anyhow = "1.0.103"
 clap = { version = "4.6.1", features = ["derive"] }
 criterion = { version = "0.8.2", features = ["html_reports"] }

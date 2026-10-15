@@ -180,7 +180,7 @@ fn register_set(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
 fn vm_sequence_length(v: &Value) -> Option<usize> {
     match v {
         Value::Object(obj) => match obj.as_ref() {
-            Object::String(s) => Some(s.borrow().chars().count()),
+            Object::String(s) => Some(s.char_count()),
             Object::List(l) => Some(l.borrow().len()),
             Object::Tuple(t) => Some(t.len()),
             Object::Map { entries, .. } => Some(entries.borrow().len()),
@@ -297,15 +297,16 @@ fn vm_get_at_index(container: &Value, index_value: &Value, vm: &mut Vm) -> Resul
                 }
             }
             Object::String(s) => {
-                let s = s.borrow();
+                let s = s.indexed();
                 match extract_vm_offset(index_value, size)? {
                     VmOffset::Element(idx) => {
-                        let ch = s.chars().nth(idx).expect("bounds already checked");
+                        let ch = s.get_char(idx).expect("bounds already checked");
                         Ok(Value::string(ch.to_string()))
                     }
                     VmOffset::Range(from, to) => {
-                        let result: String = s.chars().skip(from).take(to - from).collect();
-                        Ok(Value::string(result))
+                        let from = s.get_index(from).unwrap_or(s.len());
+                        let to = s.get_index(to).unwrap_or(s.len());
+                        Ok(Value::string(&s[from..to]))
                     }
                 }
             }
@@ -407,15 +408,16 @@ fn vm_get_at_index_simple(container: &Value, index_value: &Value) -> Result<Valu
                 }
             }
             Object::String(s) => {
-                let s = s.borrow();
+                let s = s.indexed();
                 match extract_vm_offset(index_value, size)? {
                     VmOffset::Element(idx) => {
-                        let ch = s.chars().nth(idx).expect("bounds already checked");
+                        let ch = s.get_char(idx).expect("bounds already checked");
                         Ok(Value::string(ch.to_string()))
                     }
                     VmOffset::Range(from, to) => {
-                        let result: String = s.chars().skip(from).take(to - from).collect();
-                        Ok(Value::string(result))
+                        let from = s.get_index(from).unwrap_or(s.len());
+                        let to = s.get_index(to).unwrap_or(s.len());
+                        Ok(Value::string(&s[from..to]))
                     }
                 }
             }
