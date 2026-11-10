@@ -1,7 +1,7 @@
 use crate::types::TypeTable;
 use ndc_core::StaticType;
 use ndc_parser::{Binding, Candidate, ResolvedVar};
-use ndc_resolver::{Candidates, SymbolId};
+use ndc_resolver::{BindingKind, Candidates, SymbolId, SymbolTable};
 
 /// Whether a call site can fall back to element-wise tuple broadcast when no
 /// scalar overload matches the argument types directly. Set by the parser:
@@ -97,11 +97,50 @@ fn push_unique<T: PartialEq>(out: &mut Vec<T>, item: T) {
 #[derive(Clone, Copy)]
 pub(crate) struct Overloads<'a> {
     types: &'a TypeTable,
+    /// Tells a `fn` from a plain binding like a `let`, which doesn't join overloads.
+    symbols: &'a SymbolTable,
 }
 
 impl<'a> Overloads<'a> {
-    pub(crate) fn new(types: &'a TypeTable) -> Self {
-        Self { types }
+    pub(crate) fn new(types: &'a TypeTable, symbols: &'a SymbolTable) -> Self {
+        Self { types, symbols }
+    }
+
+    /// The candidate groups a call can reach, nearest scope first. A plain
+    /// binding holding a function, like `let foo = fn(a, b) { … }`, is the last
+    /// candidate: the search stops there instead of reaching the functions
+    /// further out, since a `let` doesn't join their overloads.
+    fn reachable(self, candidates: &Candidates) -> impl Iterator<Item = &[SymbolId]> {
+        let mut stopped = false;
+        candidates.iter().map_while(move |group| {
+            if stopped {
+                return None;
+            }
+            Some(
+                match group.iter().position(|&symbol| self.ends_search(symbol)) {
+                    Some(last) => {
+                        stopped = true;
+                        &group[..=last]
+                    }
+                    None => group.as_slice(),
+                },
+            )
+        })
+    }
+
+    /// The variable holding a function that ends the search, if one does: in
+    /// `fn foo(a) { … } let foo = fn(a, b) { … };`, a call of `foo` ends at the `let`.
+    pub(crate) fn variable_ending_search(self, candidates: &Candidates) -> Option<SymbolId> {
+        self.reachable(candidates)
+            .last()
+            .and_then(|group| group.last().copied())
+            .filter(|&symbol| self.ends_search(symbol))
+    }
+
+    /// Whether `symbol` is a plain binding known to hold a function.
+    fn ends_search(self, symbol: SymbolId) -> bool {
+        self.symbols.kind(symbol) == BindingKind::Plain
+            && matches!(self.types.get_type(symbol), StaticType::Function { .. })
     }
 
     /// Whether some overload among `candidates` would accept these arguments
@@ -121,7 +160,7 @@ impl<'a> Overloads<'a> {
         sig: &[StaticType],
     ) -> Option<SymbolId> {
         let mut any_value = None;
-        for &symbol in candidates.iter().flatten() {
+        for &symbol in self.reachable(candidates).flatten() {
             let typ = self.types.get_type(symbol);
             if *typ == StaticType::Any {
                 any_value.get_or_insert(symbol);
@@ -133,7 +172,7 @@ impl<'a> Overloads<'a> {
     }
 
     pub(crate) fn a_cast_could_resolve(self, candidates: &Candidates, sig: &[StaticType]) -> bool {
-        candidates.iter().flatten().any(|&symbol| {
+        self.reachable(candidates).flatten().any(|&symbol| {
             let StaticType::Function {
                 parameters: Some(parameters),
                 ..
@@ -299,7 +338,7 @@ impl<'a> Overloads<'a> {
         let mut loose: Option<Vec<SymbolId>> = None;
         let mut all_by_name = Vec::new();
 
-        for group in candidates.iter() {
+        for group in self.reachable(candidates) {
             if let Some(exact) = self.most_specific_match(group, sig) {
                 return ScalarWalk {
                     exact: Some(exact),
@@ -576,9 +615,9 @@ mod tests {
         static SYMBOLS: RefCell<SymbolTable> = RefCell::default();
     }
 
-    /// A fresh symbol, distinct from every other one in the test.
-    fn symbol() -> SymbolId {
-        SYMBOLS.with_borrow_mut(|symbols| symbols.declare(String::new(), BindingKind::Plain))
+    /// A fresh symbol of this kind, distinct from every other one in the test.
+    fn symbol(kind: BindingKind) -> SymbolId {
+        SYMBOLS.with_borrow_mut(|symbols| symbols.declare(String::new(), kind))
     }
 
     fn fn_type(params: Vec<StaticType>, ret: StaticType) -> StaticType {
@@ -595,13 +634,14 @@ mod tests {
         }
     }
 
-    /// A table holding these types, each under a fresh symbol, returned in order.
+    /// A table holding these functions' types, each under a fresh `fn`
+    /// symbol, returned in order.
     fn table(types: Vec<StaticType>) -> (TypeTable, Vec<SymbolId>) {
         let mut table = TypeTable::default();
         let symbols = types
             .into_iter()
             .map(|typ| {
-                let symbol = symbol();
+                let symbol = symbol(BindingKind::Function);
                 table.declare(symbol, TypeBinding::Inferred(typ));
                 symbol
             })
@@ -635,8 +675,9 @@ mod tests {
                 .position(|&known| known == symbol)
                 .expect("the test knows every symbol"),
         };
-        let resolved =
-            Overloads::new(types).resolve_call(candidates, sig, CallKind::Regular, locate);
+        let resolved = SYMBOLS.with_borrow(|table| {
+            Overloads::new(types, table).resolve_call(candidates, sig, CallKind::Regular, locate)
+        });
         match resolved.binding {
             Binding::Resolved(Candidate::Scalar(var)) => assert_eq!(var, locate(expected)),
             other => panic!("expected Resolved Scalar, got {other:?}"),
@@ -739,6 +780,49 @@ mod tests {
             &candidates(&[&foos]),
             &[StaticType::Int],
             foos[1],
+        );
+    }
+
+    // Simulates: fn foo(x: Int) { … } let foo = fn(x: String) { … }; foo(1)
+    // The `let` ends the search, so the outer `fn` that would accept `Int`
+    // isn't reached and nothing matches.
+    #[test]
+    fn a_variable_holding_a_function_ends_the_search() {
+        let (mut types, fns) = table(vec![fn_type(vec![StaticType::Int], StaticType::Int)]);
+        let variable = symbol(BindingKind::Plain);
+        types.declare(
+            variable,
+            TypeBinding::Inferred(fn_type(vec![StaticType::String], StaticType::Int)),
+        );
+        let candidates = candidates(&[&[fns[0], variable]]);
+
+        SYMBOLS.with_borrow(|table| {
+            let overloads = Overloads::new(&types, table);
+            let resolved =
+                overloads.resolve_call(&candidates, &[StaticType::Int], CallKind::Regular, |_| {
+                    ResolvedVar::Local { slot: 0 }
+                });
+            assert_eq!(resolved.binding, Binding::None);
+            assert_eq!(
+                overloads.variable_ending_search(&candidates),
+                Some(variable)
+            );
+        });
+    }
+
+    // A plain binding that can't be called doesn't end the search.
+    #[test]
+    fn a_variable_holding_a_value_does_not_end_the_search() {
+        let (mut types, fns) = table(vec![fn_type(vec![StaticType::Int], StaticType::Int)]);
+        let variable = symbol(BindingKind::Plain);
+        types.declare(variable, TypeBinding::Inferred(StaticType::Int));
+
+        assert_resolves_to(
+            &types,
+            &[fns[0], variable],
+            &candidates(&[&[variable], &[fns[0]]]),
+            &[StaticType::Int],
+            fns[0],
         );
     }
 }

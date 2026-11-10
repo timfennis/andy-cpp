@@ -494,6 +494,11 @@ impl NameResolver {
         self.assignments[&node]
     }
 
+    /// Every symbol the resolver declared, with its name and kind.
+    pub fn symbols(&self) -> &SymbolTable {
+        &self.symbols
+    }
+
     pub fn symbol_name(&self, symbol: SymbolId) -> &str {
         self.symbols.name(symbol)
     }
