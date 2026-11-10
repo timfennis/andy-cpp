@@ -58,6 +58,9 @@ pub struct Analyser {
     /// Pushed on function entry, popped on exit. The value accumulates the
     /// lub of all `return <expr>` types seen so far.
     return_type_stack: Vec<Option<StaticType>>,
+    /// How many loops enclose the expression being analysed in the current
+    /// function, so `break` and `continue` outside of one are reported.
+    loop_depth: usize,
     /// Side table populated during analysis.
     result: AnalysisResult,
     /// Non-fatal errors accumulated during the current analysis pass.
@@ -80,6 +83,7 @@ impl Analyser {
             struct_types: AHashMap::new(),
             functions: Vec::new(),
             return_type_stack: Vec::new(),
+            loop_depth: 0,
             result: AnalysisResult::default(),
             errors: Vec::new(),
         }
@@ -388,7 +392,18 @@ impl Analyser {
                 | NumericLiteral::NumberFloat(_)
                 | NumericLiteral::Complex(_),
             ) => Ok(StaticType::Number),
-            Expression::Continue | Expression::Break => Ok(StaticType::Never),
+            Expression::Break => {
+                if self.loop_depth == 0 {
+                    self.emit(AnalysisError::break_outside_loop(*span));
+                }
+                Ok(StaticType::Never)
+            }
+            Expression::Continue => {
+                if self.loop_depth == 0 {
+                    self.emit(AnalysisError::continue_outside_loop(*span));
+                }
+                Ok(StaticType::Never)
+            }
             Expression::Identifier { .. } => {
                 let symbol = self.resolver.innermost_reference(*id);
                 let binding = Binding::Resolved(Candidate::Scalar(self.locate(symbol)));
@@ -614,6 +629,9 @@ impl Analyser {
 
                 self.functions.push(*id);
                 self.return_type_stack.push(None);
+                // A function body starts outside of any loop: `break` can't
+                // leave the function to end a loop around its declaration.
+                let outer_loop_depth = std::mem::take(&mut self.loop_depth);
                 let parameter_nodes = parameters.iter().map(|p| p.lvalue.id).collect_vec();
                 let param_types =
                     self.resolve_parameters_declarative(&type_signature, &parameter_nodes, *span);
@@ -627,6 +645,7 @@ impl Analyser {
 
                 let implicit_return = self.analyse_or_any(body);
                 let explicit_return = self.return_type_stack.pop().unwrap();
+                self.loop_depth = outer_loop_depth;
                 self.functions.pop();
                 let captures = Layout::new(&self.resolver).captures(*id);
                 self.result.analysis.captures.insert(*id, captures);
@@ -701,12 +720,17 @@ impl Analyser {
                 expression,
                 loop_body,
             } => {
+                // The condition is part of the loop too, as it runs on every
+                // iteration.
+                self.loop_depth += 1;
                 self.analyse_or_any(expression);
                 self.analyse_or_any(loop_body);
+                self.loop_depth -= 1;
                 Ok(StaticType::unit())
             }
             Expression::For { iterations, body } => {
-                let return_type = self.resolve_for_iterations(iterations, body, *span);
+                let loop_depth = self.loop_depth;
+                let return_type = self.resolve_for_iterations(iterations, body, loop_depth);
                 Ok(return_type)
             }
             Expression::Call {
@@ -786,8 +810,9 @@ impl Analyser {
             }
             Expression::Return { value } => {
                 let typ = self.analyse_or_any(value);
-                if let Some(slot) = self.return_type_stack.last_mut() {
-                    Self::fold_lub(slot, typ);
+                match self.return_type_stack.last_mut() {
+                    Some(slot) => Self::fold_lub(slot, typ),
+                    None => self.emit(AnalysisError::return_outside_function(*span)),
                 }
                 Ok(StaticType::Never)
             }
@@ -924,11 +949,15 @@ impl Analyser {
         Ok(return_type)
     }
 
+    /// Analyses the iterations of a `for` from the first, and then its body.
+    /// Each iteration's sequence is evaluated outside of its own loop, and what
+    /// follows it inside. `outer_loop_depth` is the loop depth around the whole
+    /// `for`, where a map comprehension's default is evaluated.
     fn resolve_for_iterations(
         &mut self,
         iterations: &mut [ForIteration],
         body: &mut ForBody,
-        _span: Span,
+        outer_loop_depth: usize,
     ) -> StaticType {
         let Some((iteration, tail)) = iterations.split_first_mut() else {
             unreachable!("because this function is never called with an empty slice");
@@ -946,6 +975,7 @@ impl Analyser {
                 // TOOD: get this from the AST when the parser adds it
                 let expected_type = None;
 
+                self.loop_depth += 1;
                 self.resolve_binding_pattern(l_value, expected_type, found_type, sequence_span);
             }
             ForIteration::Guard(expr) => {
@@ -953,8 +983,8 @@ impl Analyser {
             }
         }
 
-        if !tail.is_empty() {
-            self.resolve_for_iterations(tail, body, _span)
+        let typ = if !tail.is_empty() {
+            self.resolve_for_iterations(tail, body, outer_loop_depth)
         } else {
             match body {
                 ForBody::Block(block) => {
@@ -975,7 +1005,9 @@ impl Analyser {
                     };
 
                     if let Some(default) = default {
+                        let loop_depth = std::mem::replace(&mut self.loop_depth, outer_loop_depth);
                         self.analyse_or_any(default);
+                        self.loop_depth = loop_depth;
                     }
 
                     StaticType::Map {
@@ -984,7 +1016,11 @@ impl Analyser {
                     }
                 }
             }
+        };
+        if matches!(iteration, ForIteration::Iteration { .. }) {
+            self.loop_depth -= 1;
         }
+        typ
     }
 
     fn resolve_single_assignment_target(
@@ -1625,6 +1661,30 @@ impl AnalysisError {
         }
     }
 
+    fn break_outside_loop(span: Span) -> Self {
+        Self {
+            text: "unexpected break statement outside of loop".to_string(),
+            span,
+            help_text: None,
+        }
+    }
+
+    fn continue_outside_loop(span: Span) -> Self {
+        Self {
+            text: "unexpected continue statement outside of loop".to_string(),
+            span,
+            help_text: None,
+        }
+    }
+
+    fn return_outside_function(span: Span) -> Self {
+        Self {
+            text: "unexpected return statement outside of function body".to_string(),
+            span,
+            help_text: None,
+        }
+    }
+
     fn not_callable(typ: &StaticType, span: Span) -> Self {
         Self {
             text: format!("Unable to invoke {typ} as a function."),
@@ -1719,9 +1779,45 @@ mod tests {
     }
 
     #[test]
+    fn break_and_continue_need_a_loop_in_their_own_function() {
+        for source in [
+            "break;",
+            "continue;",
+            "while true { fn() { break; }; }",
+            // A sequence is evaluated before its loop starts.
+            "for x in [break] { }",
+            // A map comprehension's default is evaluated before any loop.
+            "%{:break, x: 1 for x in [1]};",
+        ] {
+            assert_analysis_error(source, vec![], "outside of loop");
+        }
+    }
+
+    #[test]
     fn destructuring_assignment_widens_each_target() {
         let typ = analyse_last_type("let a = 1; let b = 2; (a, b) = (\"s\", 2); a");
         assert_eq!(typ, StaticType::Int.lub(&StaticType::String));
+    }
+
+    #[test]
+    fn break_and_continue_inside_a_loop_are_accepted() {
+        for source in [
+            "while true { break; }",
+            "while break { }",
+            "for x in [1] { continue; }",
+            "for x in [1], if break { }",
+            "[break for x in [1]];",
+            "while true { %{:break, x: 1 for x in [1]}; }",
+            "for x in [1] { for y in [break] { } }",
+        ] {
+            analyse_last_type(source);
+        }
+    }
+
+    #[test]
+    fn return_needs_a_function() {
+        assert_analysis_error("return 1;", vec![], "outside of function body");
+        analyse_last_type("fn f() { while true { return 1; } }");
     }
 
     #[test]

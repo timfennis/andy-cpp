@@ -486,16 +486,17 @@ impl Compiler {
                 self.ir.write(OpCode::MakeMap { pairs, has_default }, span);
             }
             Expression::Return { value } => {
-                if !self.allow_return {
-                    return Err(CompileError::return_outside_function(span));
-                }
+                assert!(
+                    self.allow_return,
+                    "internal error: the analyser rejects a return outside of a function"
+                );
                 self.compile_expr(*value)?;
                 self.ir.write(OpCode::Return, span);
             }
             Expression::Break => {
                 let context = self
                     .current_loop_context()
-                    .ok_or(CompileError::unexpected_break(span))?;
+                    .expect("internal error: the analyser rejects a break outside of a loop");
                 self.emit_operand_cleanup(context.stack_depth, span);
                 let idx = self.ir.write(OpCode::Jump(JumpTarget::PLACEHOLDER), span); // will be backpatched
 
@@ -507,7 +508,7 @@ impl Compiler {
             Expression::Continue => {
                 let context = self
                     .current_loop_context()
-                    .ok_or(CompileError::unexpected_continue(span))?;
+                    .expect("internal error: the analyser rejects a continue outside of a loop");
                 let start = context.start;
                 self.emit_operand_cleanup(context.stack_depth, span);
                 self.write_jump_back(start, span);
@@ -1234,26 +1235,6 @@ impl CompileError {
             text:
                 "encountered unresolved cast during compilation, this is probably an internal error"
                     .to_string(),
-            span,
-        }
-    }
-
-    fn unexpected_break(span: Span) -> Self {
-        Self {
-            text: "unexpected break statement outside of loop".to_string(),
-            span,
-        }
-    }
-    fn unexpected_continue(span: Span) -> Self {
-        Self {
-            text: "unexpected continue statement outside of loop".to_string(),
-            span,
-        }
-    }
-
-    fn return_outside_function(span: Span) -> Self {
-        Self {
-            text: "unexpected return statement outside of function body".to_string(),
             span,
         }
     }
