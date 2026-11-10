@@ -1,4 +1,4 @@
-use ndc_analyser::{Analyser, ScopeTree};
+use ndc_analyser::Analyser;
 use ndc_core::FunctionRegistry;
 use ndc_lexer::{Lexer, SourceDb, SourceId, TokenLocation};
 use ndc_parser::ExpressionLocation;
@@ -53,10 +53,7 @@ impl Interpreter {
             function_registry: FunctionRegistry::default(),
             struct_registry: Rc::clone(&struct_registry),
             capturing,
-            analyser: Analyser::from_scope_tree(
-                ScopeTree::from_global_scope(vec![]),
-                struct_registry,
-            ),
+            analyser: Analyser::new(vec![], struct_registry),
             source_db: SourceDb::new(),
             repl_state: None,
             resumable: true,
@@ -85,10 +82,7 @@ impl Interpreter {
             .map(|fun| (fun.name.clone(), fun.static_type.clone()))
             .collect();
 
-        self.analyser = Analyser::from_scope_tree(
-            ScopeTree::from_global_scope(functions),
-            Rc::clone(&self.struct_registry),
-        );
+        self.analyser = Analyser::new(functions, Rc::clone(&self.struct_registry));
     }
 
     #[cfg(feature = "trace")]
