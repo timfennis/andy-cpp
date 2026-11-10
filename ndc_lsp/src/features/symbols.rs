@@ -8,9 +8,9 @@ use tower_lsp::lsp_types::{DocumentSymbol, SymbolKind};
 
 use crate::util::LineIndex;
 
-/// Build the document outline (functions and variable declarations) from the
-/// analysed AST. Declarations nested inside a function body become children of
-/// that function's symbol.
+/// Build the document outline (functions, structs and variable declarations)
+/// from the analysed AST, wherever they are declared. Declarations inside a
+/// named function's body become children of that function's symbol.
 pub fn document_symbols(
     ast: &[ExpressionLocation],
     analysis: &Analysis,
@@ -32,11 +32,6 @@ fn collect_symbol(
     out: &mut Vec<DocumentSymbol>,
 ) {
     match &expr.expression {
-        Expression::Statement(inner)
-        | Expression::Grouping(inner)
-        | Expression::Cast { value: inner, .. } => {
-            collect_symbol(inner, analysis, text, line_index, out);
-        }
         Expression::FunctionDeclaration {
             name: Some(name),
             parameters,
@@ -45,7 +40,7 @@ fn collect_symbol(
             ..
         } => {
             let mut children = Vec::new();
-            collect_children(body, analysis, text, line_index, &mut children);
+            collect_symbol(body, analysis, text, line_index, &mut children);
             // Only an annotated return type is shown; the declared function
             // type holds it as the analyser lowered it.
             let return_type = match analysis.function_types.get(&expr.id) {
@@ -65,9 +60,10 @@ fn collect_symbol(
                 children,
             ));
         }
+        // A function without a name has no symbol to list what it declares under.
+        Expression::FunctionDeclaration { name: None, .. } => {}
         Expression::VariableDeclaration { l_value, value, .. } => {
             push_pattern_symbols(l_value, expr.span, analysis, text, line_index, out);
-            // A lambda bound to a variable should still appear in the outline.
             collect_symbol(value, analysis, text, line_index, out);
         }
         Expression::StructDeclaration { name, fields, .. } => {
@@ -97,30 +93,11 @@ fn collect_symbol(
                 children,
             ));
         }
-        _ => {}
-    }
-}
-
-/// Walk a function body collecting nested function/variable declarations.
-fn collect_children(
-    body: &ExpressionLocation,
-    analysis: &Analysis,
-    text: &str,
-    line_index: &LineIndex,
-    out: &mut Vec<DocumentSymbol>,
-) {
-    match &body.expression {
-        Expression::Block { statements } => {
-            for s in statements {
-                collect_symbol(s, analysis, text, line_index, out);
+        _ => {
+            for child in expr.children() {
+                collect_symbol(child, analysis, text, line_index, out);
             }
         }
-        Expression::Statement(inner)
-        | Expression::Grouping(inner)
-        | Expression::Cast { value: inner, .. } => {
-            collect_children(inner, analysis, text, line_index, out);
-        }
-        _ => collect_symbol(body, analysis, text, line_index, out),
     }
 }
 
@@ -271,5 +248,23 @@ mod tests {
                 .any(|s| s.name == "identity" && s.kind == SymbolKind::FUNCTION),
             "expected function `identity` in {syms:?}"
         );
+    }
+
+    #[test]
+    fn declarations_inside_control_flow_are_listed() {
+        let syms = symbols("if true { fn helper() { 1 } }\nfor x in [1] { let doubled = x * 2; }");
+        let names = syms.iter().map(|s| s.name.as_str()).collect::<Vec<_>>();
+        assert_eq!(names, ["helper", "doubled"]);
+    }
+
+    #[test]
+    fn declarations_nested_in_a_function_body_are_its_children() {
+        let syms = symbols("fn outer() { while true { fn inner() { 1 }; break; } }");
+        let [outer] = syms.as_slice() else {
+            panic!("expected only `outer` at the top level, got {syms:?}");
+        };
+        let children = outer.children.as_deref().unwrap_or_default();
+        let names = children.iter().map(|s| s.name.as_str()).collect::<Vec<_>>();
+        assert_eq!(names, ["inner"]);
     }
 }

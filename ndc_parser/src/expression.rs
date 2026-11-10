@@ -227,6 +227,125 @@ impl ExpressionLocation {
         }
     }
 
+    /// The expressions directly inside this one, in source order. In
+    /// `xs[i] = f(x)` they are `xs`, `i` and `f(x)`: the expressions inside an
+    /// assignment target count too. Binding patterns, struct fields and type
+    /// annotations hold no expressions.
+    pub fn children(&self) -> Vec<&Self> {
+        fn target_children<'a>(
+            target: &'a AssignmentTargetLocation,
+            out: &mut Vec<&'a ExpressionLocation>,
+        ) {
+            match &target.target {
+                AssignmentTarget::Identifier { .. } => {}
+                AssignmentTarget::Index { value, index } => {
+                    out.push(value);
+                    out.push(index);
+                }
+                AssignmentTarget::Sequence(targets) => {
+                    for target in targets {
+                        target_children(target, out);
+                    }
+                }
+                AssignmentTarget::Member { receiver, .. } => out.push(receiver),
+            }
+        }
+
+        let mut out = Vec::new();
+        match &self.expression {
+            Expression::Identifier { .. }
+            | Expression::BoolLiteral(_)
+            | Expression::NoneLiteral
+            | Expression::StringLiteral(_)
+            | Expression::NumericLiteral(_)
+            | Expression::Break
+            | Expression::Continue
+            | Expression::StructDeclaration { .. } => {}
+            Expression::Statement(inner)
+            | Expression::Grouping(inner)
+            | Expression::Cast { value: inner, .. }
+            | Expression::Return { value: inner }
+            | Expression::VariableDeclaration { value: inner, .. }
+            | Expression::FunctionDeclaration { body: inner, .. }
+            | Expression::MemberAccess {
+                receiver: inner, ..
+            } => out.push(inner.as_ref()),
+            Expression::Logical { left, right, .. } => {
+                out.push(left);
+                out.push(right);
+            }
+            Expression::Assignment { l_value, r_value }
+            | Expression::OpAssignment {
+                l_value, r_value, ..
+            } => {
+                target_children(l_value, &mut out);
+                out.push(r_value);
+            }
+            Expression::Block { statements } => out.extend(statements),
+            Expression::If {
+                condition,
+                on_true,
+                on_false,
+            } => {
+                out.push(condition);
+                out.push(on_true);
+                out.extend(on_false.as_deref());
+            }
+            Expression::While {
+                expression,
+                loop_body,
+            } => {
+                out.push(expression);
+                out.push(loop_body);
+            }
+            Expression::For { iterations, body } => {
+                for iteration in iterations {
+                    match iteration {
+                        ForIteration::Iteration { sequence, .. } => out.push(sequence),
+                        ForIteration::Guard(guard) => out.push(guard),
+                    }
+                }
+                match body.as_ref() {
+                    ForBody::Block(expr) | ForBody::List { expr } => out.push(expr),
+                    ForBody::Map {
+                        key,
+                        value,
+                        default,
+                    } => {
+                        out.push(key);
+                        out.extend(value);
+                        out.extend(default.as_deref());
+                    }
+                }
+            }
+            Expression::Call {
+                function,
+                arguments,
+            }
+            | Expression::OperatorCall {
+                function,
+                arguments,
+            } => {
+                out.push(function);
+                out.extend(arguments);
+            }
+            Expression::Tuple { values } | Expression::List { values } => out.extend(values),
+            Expression::Map { values, default } => {
+                for (key, value) in values {
+                    out.push(key);
+                    out.extend(value);
+                }
+                out.extend(default.as_deref());
+            }
+            Expression::RangeInclusive { start, end }
+            | Expression::RangeExclusive { start, end } => {
+                out.extend(start.as_deref());
+                out.extend(end.as_deref());
+            }
+        }
+        out
+    }
+
     /// If this `ExpressionLocation` is a tuple expression with length one, it returns the
     /// `ExpressionLocation` inside the tuple.
     #[must_use]

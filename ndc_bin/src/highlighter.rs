@@ -1,7 +1,7 @@
 use ahash::AHashSet;
 use itertools::Itertools;
 use ndc_lexer::{Lexer, SourceId, Token, TokenLocation};
-use ndc_parser::{Expression, ExpressionLocation, ForBody, ForIteration};
+use ndc_parser::{Expression, ExpressionLocation};
 use yansi::{Paint, Painted};
 
 pub(crate) struct AndycppHighlighter;
@@ -118,133 +118,18 @@ impl AndycppHighlighter {
 /// Walk the parsed AST and collect the byte offsets of identifiers used as function names.
 fn collect_function_spans(expr: &ExpressionLocation, spans: &mut AHashSet<usize>) {
     match &expr.expression {
-        Expression::Call {
-            function,
-            arguments,
+        Expression::Call { function, .. } | Expression::OperatorCall { function, .. }
+            if matches!(function.expression, Expression::Identifier { .. }) =>
+        {
+            spans.insert(function.span.offset());
         }
-        | Expression::OperatorCall {
-            function,
-            arguments,
-        } => {
-            if let Expression::Identifier { .. } = &function.expression {
-                spans.insert(function.span.offset());
-            }
-            collect_function_spans(function, spans);
-            for arg in arguments {
-                collect_function_spans(arg, spans);
-            }
-        }
-        Expression::MemberAccess {
-            receiver,
-            member_span,
-            ..
-        } => {
+        Expression::MemberAccess { member_span, .. } => {
             spans.insert(member_span.offset());
-            collect_function_spans(receiver, spans);
         }
-        Expression::FunctionDeclaration { body, .. } => {
-            collect_function_spans(body, spans);
-        }
-        Expression::VariableDeclaration { value, .. }
-        | Expression::Assignment { r_value: value, .. }
-        | Expression::OpAssignment { r_value: value, .. }
-        | Expression::Return { value } => {
-            collect_function_spans(value, spans);
-        }
-        Expression::Statement(inner)
-        | Expression::Grouping(inner)
-        | Expression::Cast { value: inner, .. } => {
-            collect_function_spans(inner, spans);
-        }
-        Expression::Block { statements } => {
-            for s in statements {
-                collect_function_spans(s, spans);
-            }
-        }
-        Expression::If {
-            condition,
-            on_true,
-            on_false,
-        } => {
-            collect_function_spans(condition, spans);
-            collect_function_spans(on_true, spans);
-            if let Some(f) = on_false {
-                collect_function_spans(f, spans);
-            }
-        }
-        Expression::While {
-            expression,
-            loop_body,
-        } => {
-            collect_function_spans(expression, spans);
-            collect_function_spans(loop_body, spans);
-        }
-        Expression::For { iterations, body } => {
-            for iteration in iterations {
-                match iteration {
-                    ForIteration::Iteration { sequence, .. } => {
-                        collect_function_spans(sequence, spans);
-                    }
-                    ForIteration::Guard(expr) => collect_function_spans(expr, spans),
-                }
-            }
-            match body.as_ref() {
-                ForBody::Block(e) | ForBody::List { expr: e, .. } => {
-                    collect_function_spans(e, spans);
-                }
-                ForBody::Map {
-                    key,
-                    value,
-                    default,
-                    ..
-                } => {
-                    collect_function_spans(key, spans);
-                    if let Some(v) = value {
-                        collect_function_spans(v, spans);
-                    }
-                    if let Some(d) = default {
-                        collect_function_spans(d, spans);
-                    }
-                }
-            }
-        }
-        Expression::Logical { left, right, .. } => {
-            collect_function_spans(left, spans);
-            collect_function_spans(right, spans);
-        }
-        Expression::Tuple { values } | Expression::List { values } => {
-            for v in values {
-                collect_function_spans(v, spans);
-            }
-        }
-        Expression::Map { values, default } => {
-            for (k, v) in values {
-                collect_function_spans(k, spans);
-                if let Some(v) = v {
-                    collect_function_spans(v, spans);
-                }
-            }
-            if let Some(d) = default {
-                collect_function_spans(d, spans);
-            }
-        }
-        Expression::RangeInclusive { start, end } | Expression::RangeExclusive { start, end } => {
-            if let Some(s) = start {
-                collect_function_spans(s, spans);
-            }
-            if let Some(e) = end {
-                collect_function_spans(e, spans);
-            }
-        }
-        // Leaves — no sub-expressions to recurse into
-        Expression::BoolLiteral(_)
-        | Expression::NoneLiteral
-        | Expression::StringLiteral(_)
-        | Expression::NumericLiteral(_)
-        | Expression::Identifier { .. }
-        | Expression::StructDeclaration { .. }
-        | Expression::Break
-        | Expression::Continue => {}
+        _ => {}
+    }
+    for child in expr.children() {
+        collect_function_spans(child, spans);
     }
 }
 
