@@ -131,8 +131,10 @@ impl Analyser {
     }
 
     /// Whether a function declared earlier in the same scope as `symbol` has
-    /// its name and arity, which makes `symbol` an illegal redefinition.
-    fn redefines_function(&self, symbol: SymbolId, arity: Option<usize>) -> bool {
+    /// its name and the same parameter types, which makes `symbol` an illegal
+    /// redefinition. `fn f(x: Int)` and `fn f(x: String)` are two overloads,
+    /// but `fn f(x)` and `fn f(y)` both take `Any`. `None` is variadic.
+    fn redefines_function(&self, symbol: SymbolId, parameters: Option<&[StaticType]>) -> bool {
         let name = self.resolver.symbol_name(symbol);
         let scope = self.resolver.scope(self.resolver.scope_of(symbol));
         scope.bindings()[..self.resolver.binding_position(symbol)]
@@ -140,12 +142,9 @@ impl Analyser {
             .filter(|&&earlier| self.resolver.symbol_name(earlier) == name)
             .any(|&earlier| match self.types.get_type(earlier) {
                 StaticType::Function {
-                    parameters: Some(parameters),
+                    parameters: earlier,
                     ..
-                } => arity == Some(parameters.len()),
-                StaticType::Function {
-                    parameters: None, ..
-                } => arity.is_none(),
+                } => earlier.as_deref() == parameters,
                 _ => false,
             })
     }
@@ -529,9 +528,13 @@ impl Analyser {
                 // A redefinition is reported but still bound, since the resolver declared it.
                 let declared = if let Some(name) = name {
                     let symbol = self.resolver.declared_symbol(*id);
-                    let arity = type_signature.types().map(|t| t.len());
-                    if self.redefines_function(symbol, arity) {
-                        self.emit(AnalysisError::function_redefinition(name, arity, *span));
+                    let parameters = type_signature.types();
+                    if self.redefines_function(symbol, parameters.as_deref()) {
+                        self.emit(AnalysisError::function_redefinition(
+                            name,
+                            parameters.as_deref(),
+                            *span,
+                        ));
                     }
                     let placeholder = StaticType::Function {
                         parameters: type_signature.types(),
@@ -1420,17 +1423,19 @@ impl AnalysisError {
         }
     }
 
-    fn function_redefinition(name: &str, arity: Option<usize>, span: Span) -> Self {
-        let arity_desc = match arity {
-            Some(n) => format!("{n} parameter{}", if n == 1 { "" } else { "s" }),
+    fn function_redefinition(name: &str, parameters: Option<&[StaticType]>, span: Span) -> Self {
+        let parameters_desc = match parameters {
+            Some(types) => format!("({})", types.iter().join(", ")),
             None => "variadic parameters".to_string(),
         };
         Self {
             text: format!(
-                "Illegal redefinition of function '{name}' with {arity_desc} in the same scope"
+                "Illegal redefinition of function '{name}' with parameters {parameters_desc} in the same scope"
             ),
             span,
-            help_text: None,
+            help_text: Some(
+                "Overloads in one scope need different parameter types, so annotate a parameter's type to tell them apart".to_string(),
+            ),
         }
     }
 
@@ -1832,7 +1837,7 @@ mod tests {
         let (_, result) = analyse_with_globals(source, vec![]);
         assert_eq!(
             result.errors.iter().map(ToString::to_string).collect_vec(),
-            vec!["Illegal redefinition of function 'f' with 1 parameter in the same scope"],
+            vec!["Illegal redefinition of function 'f' with parameters (Any) in the same scope"],
         );
     }
 
@@ -1885,6 +1890,25 @@ mod tests {
                 ],
             ),
             StaticType::String,
+        );
+    }
+
+    #[test]
+    fn same_arity_overloads_with_different_parameter_types_are_allowed() {
+        assert_eq!(
+            analyse_last_type(
+                "fn f(x: Int) { 1 } fn f(x: String) { \"one\" } fn f(x: List<Int>) { [1] } f(\"a\")"
+            ),
+            StaticType::String,
+        );
+    }
+
+    #[test]
+    fn same_parameter_types_under_other_names_are_a_redefinition() {
+        let (_, result) = analyse_with_globals("fn f(a: Int) { a } fn f(b: Int) { b }", vec![]);
+        assert_eq!(
+            result.errors.iter().map(ToString::to_string).collect_vec(),
+            vec!["Illegal redefinition of function 'f' with parameters (Int) in the same scope"],
         );
     }
 }

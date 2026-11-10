@@ -1,0 +1,18 @@
+// Functions with the same name and parameter count can overload each other in
+// one scope when their parameter types differ.
+fn describe(x: Int) { "int" }
+fn describe(x: String) { "string" }
+fn describe(x: List<Int>) { "list" }
+print(describe(1), describe("a"), describe([1, 2]));
+// expect-output: int string list
+
+// An argument only known as `Any` is matched against them when the call runs.
+fn describe_any(value) { describe(value) }
+print(describe_any(2), describe_any("b"));
+// expect-output: int string
+
+// The most specific overload that accepts the arguments is used.
+fn size(x: Int) { "int" }
+fn size(x: Any) { "anything" }
+print(size(3), size("c"));
+// expect-output: int anything
