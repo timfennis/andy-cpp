@@ -1247,13 +1247,19 @@ impl Analyser {
                     let container_type = self.types.get_type(target).clone();
                     // An earlier target of the same destructuring may already
                     // have widened the container, as in `l[0], l[1] = …`, so
-                    // widen from its current type rather than `stored_type`.
+                    // check against its current type rather than `stored_type`.
+                    if container_type
+                        .index_element_type()
+                        .is_some_and(|element| value_element_type.is_subtype(&element))
+                    {
+                        return;
+                    }
                     let widened_container = container_type.lub(
                         &container_type
                             .with_element_type(stored_element_type.lub(&value_element_type)),
                     );
-                    if widened_container == container_type
-                        || self
+                    if widened_container != container_type
+                        && self
                             .types
                             .update_binding_type(target, widened_container)
                             .is_ok()
@@ -1705,6 +1711,16 @@ mod tests {
             "mismatched types",
         );
         assert_analysis_error("let a = 1; let b = 2; (a, b) = (1, 2, 3);", vec![], "tuple");
+    }
+
+    #[test]
+    fn index_write_into_a_string_must_be_a_string() {
+        for source in [
+            "let s: String = \"abc\"; s[0] = 42;",
+            "let s = \"abc\"; s[0] = 42;",
+        ] {
+            assert_analysis_error(source, index_natives(), "mismatched types");
+        }
     }
 
     #[test]
