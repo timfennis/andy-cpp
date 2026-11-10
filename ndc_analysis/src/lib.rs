@@ -3,7 +3,7 @@
 //! about it after parsing belongs here.
 
 use ahash::AHashMap;
-use ndc_core::r#struct::StructId;
+use ndc_core::r#struct::StructInfo;
 use ndc_core::{NodeId, StaticType};
 
 /// What the analyser worked out about one batch of statements: a whole program,
@@ -127,9 +127,11 @@ pub enum Binding {
 /// What a struct declaration declares besides its constructor. In
 /// `struct Point { x: Int, y: Int }` that's the struct itself and the accessor
 /// functions `x`, `x=`, `y` and `y=`.
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct DeclaredStruct {
-    pub id: StructId,
+    /// The struct's name, id and fields. A value rather than an `Rc`, so the
+    /// analysis can move between threads (the language server needs that).
+    pub info: StructInfo,
     /// Each field's accessors, in field order.
     pub fields: Vec<FieldAccessors>,
 }
