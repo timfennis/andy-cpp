@@ -250,7 +250,10 @@ impl Compiler {
                 let idx = self.ir.add_constant(value);
                 self.ir.write(OpCode::Constant(idx), span);
             }
-            Expression::Identifier { resolved, .. } => self.compile_binding(resolved, span)?,
+            Expression::Identifier { .. } => {
+                let analysis = Rc::clone(&self.analysis);
+                self.compile_binding(analysis.binding(id), span)?;
+            }
             Expression::Cast {
                 value,
                 resolved_type,
@@ -311,7 +314,7 @@ impl Compiler {
                     ..
                 } => {
                     let set_fn = resolved_set.expect("[]= must be resolved");
-                    self.compile_binding(set_fn, span)?;
+                    self.compile_binding(&set_fn, span)?;
                     self.compile_expr(*container)?;
                     self.compile_expr(*index)?;
                     self.compile_expr(*value)?;
@@ -337,7 +340,7 @@ impl Compiler {
                     ..
                 } => {
                     let setter = resolved_setter.expect("member setter must be resolved");
-                    self.compile_binding(setter, member_span)?;
+                    self.compile_binding(&setter, member_span)?;
                     self.compile_expr(*receiver)?;
                     self.compile_expr(*value)?;
                     self.ir.write(OpCode::Call(2), member_span);
@@ -358,7 +361,7 @@ impl Compiler {
                 };
 
                 let opcode = Self::call_opcode_for(&binding, 2);
-                self.compile_binding(binding, span)?;
+                self.compile_binding(&binding, span)?;
                 target.emit_read(self)?;
                 self.compile_expr(*r_value)?;
                 self.ir.write(opcode, span);
@@ -478,8 +481,8 @@ impl Compiler {
             } => {
                 let function_span = function.span;
                 let opcode = match &function.expression {
-                    Expression::Identifier { resolved, .. } => {
-                        Self::call_opcode_for(resolved, arguments.len())
+                    Expression::Identifier { .. } => {
+                        Self::call_opcode_for(self.analysis.binding(function.id), arguments.len())
                     }
                     _ => OpCode::Call(arguments.len()),
                 };
@@ -497,7 +500,7 @@ impl Compiler {
                 resolved_getter,
                 ..
             } => {
-                self.compile_binding(resolved_getter, member_span)?;
+                self.compile_binding(&resolved_getter, member_span)?;
                 self.compile_expr(*receiver)?;
                 self.ir.write(OpCode::Call(1), member_span);
             }
@@ -610,7 +613,7 @@ impl Compiler {
                 let tmp_value = self.allocate_temp();
                 self.write_temp(tmp_value, span, OpCode::SetLocal);
 
-                self.compile_binding(resolved_set.expect("[]= must be resolved"), span)?;
+                self.compile_binding(resolved_set.as_ref().expect("[]= must be resolved"), span)?;
                 self.compile_expr(*value)?;
                 self.compile_expr(*index)?;
                 self.write_temp(tmp_value, span, OpCode::GetLocal);
@@ -657,7 +660,7 @@ impl Compiler {
     ///   which one the analyser chose (see [`Self::call_opcode_for`]).
     /// * `Dynamic(candidates)` pushes the candidate list as an `OverloadSet`
     ///   constant; the VM dispatcher narrows at runtime.
-    fn compile_binding(&mut self, resolved: Binding, span: Span) -> Result<(), CompileError> {
+    fn compile_binding(&mut self, resolved: &Binding, span: Span) -> Result<(), CompileError> {
         match resolved {
             Binding::None => return Err(CompileError::unresolved_binding(span)),
             Binding::Resolved(candidate) => self.emit_get_var(candidate.var(), span),
@@ -667,9 +670,9 @@ impl Compiler {
                 // scalar-only call site cost identical to master.
                 let (scalars, vec_candidates) =
                     candidates
-                        .into_iter()
+                        .iter()
                         .fold((Vec::new(), Vec::new()), |mut acc, c| {
-                            match c {
+                            match *c {
                                 Candidate::Scalar(v) => acc.0.push(v),
                                 Candidate::Vec(v) => acc.1.push(v),
                             }
@@ -1204,7 +1207,7 @@ impl PreparedAssignmentTarget {
                 getter,
                 ..
             } => {
-                compiler.compile_binding(getter.clone(), *index_span)?;
+                compiler.compile_binding(getter, *index_span)?;
                 compiler.write_temp(*cached_container, *container_span, OpCode::GetLocal);
                 compiler.write_temp(*cached_index, *index_span, OpCode::GetLocal);
                 compiler
@@ -1218,7 +1221,7 @@ impl PreparedAssignmentTarget {
                 getter,
                 ..
             } => {
-                compiler.compile_binding(getter.clone(), *member_span)?;
+                compiler.compile_binding(getter, *member_span)?;
                 compiler.write_temp(*cached_receiver, *receiver_span, OpCode::GetLocal);
                 compiler.ir.write(OpCode::Call(1), *member_span);
             }
@@ -1241,7 +1244,7 @@ impl PreparedAssignmentTarget {
                 let target_span = container_span.merge(*index_span);
 
                 compiler.write_temp(cached_value, target_span, OpCode::SetLocal);
-                compiler.compile_binding(setter.clone(), target_span)?;
+                compiler.compile_binding(setter, target_span)?;
                 compiler.write_temp(*cached_container, *container_span, OpCode::GetLocal);
                 compiler.write_temp(*cached_index, *index_span, OpCode::GetLocal);
                 compiler.write_temp(cached_value, target_span, OpCode::GetLocal);
@@ -1258,7 +1261,7 @@ impl PreparedAssignmentTarget {
                 let cached_value = compiler.allocate_temp();
 
                 compiler.write_temp(cached_value, *member_span, OpCode::SetLocal);
-                compiler.compile_binding(setter.clone(), *member_span)?;
+                compiler.compile_binding(setter, *member_span)?;
                 compiler.write_temp(*cached_receiver, *receiver_span, OpCode::GetLocal);
                 compiler.write_temp(cached_value, *member_span, OpCode::GetLocal);
                 compiler.ir.write(OpCode::Call(2), *member_span);

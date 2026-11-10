@@ -394,9 +394,10 @@ impl Analyser {
                 | NumericLiteral::Complex(_),
             ) => Ok(StaticType::Number),
             Expression::Continue | Expression::Break => Ok(StaticType::Never),
-            Expression::Identifier { resolved, .. } => {
+            Expression::Identifier { .. } => {
                 let symbol = self.resolver.innermost_reference(*id);
-                *resolved = Binding::Resolved(Candidate::Scalar(self.locate(symbol)));
+                let binding = Binding::Resolved(Candidate::Scalar(self.locate(symbol)));
+                self.result.analysis.bindings.insert(*id, binding);
                 Ok(self.types.get_type(symbol).clone())
             }
             Expression::Statement(inner) => {
@@ -863,7 +864,7 @@ impl Analyser {
         // and trust the runtime to dispatch. The callee comes before the
         // arguments, in source order like the resolver, so declarations in it
         // get their slots first.
-        let Expression::Identifier { name, resolved, .. } = &mut function.expression else {
+        let Expression::Identifier { name, .. } = &mut function.expression else {
             let callee_type = self.analyse_or_any(function);
             for arg in arguments {
                 self.analyse_or_any(arg);
@@ -910,11 +911,11 @@ impl Analyser {
             let candidates = self.resolver.reference_candidates(function.id);
             let error = self.no_match(candidates, name, &type_sig, span);
             self.emit(error);
-            *resolved = binding;
+            self.result.analysis.bindings.insert(function.id, binding);
             return Ok(StaticType::Any);
         }
 
-        *resolved = binding;
+        self.result.analysis.bindings.insert(function.id, binding);
         Ok(return_type)
     }
 
@@ -1226,11 +1227,10 @@ impl Analyser {
                     (stored_type.clone(), value_type.clone())
                 };
 
-                if let Expression::Identifier {
-                    resolved: Binding::Resolved(Candidate::Scalar(_)),
-                    ..
-                } = &value.expression
-                {
+                if matches!(
+                    self.result.analysis.binding(value.id),
+                    Binding::Resolved(Candidate::Scalar(_))
+                ) {
                     let target = self.resolver.innermost_reference(value.id);
                     let container_type = self.types.get_type(target).clone();
                     let widened_container = container_type

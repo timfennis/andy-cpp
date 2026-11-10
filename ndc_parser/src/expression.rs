@@ -23,7 +23,6 @@ pub enum Expression {
     NumericLiteral(NumericLiteral),
     Identifier {
         name: String,
-        resolved: Binding,
         /// The identifier token's range. When parsing `(foo)`, the parser reuses
         /// the identifier expression and widens `ExpressionLocation.span` to
         /// include the parentheses. This field still covers only `foo`, so a
