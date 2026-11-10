@@ -128,95 +128,55 @@ fn let_returns_unit() {
     assert!(result.is_unit());
 }
 
+// The REPL runs each line in a forked process, so a failed line costs it
+// nothing; `ndc_bin/tests/repl.rs` tests that. Evaluated in one process, a
+// failed line may have declared or changed some things and not others, so a
+// resumable interpreter starts over after one.
 #[test]
-fn error_does_not_corrupt_state() {
-    // After a failed line the previously-defined variable should still work.
+fn a_failed_evaluation_starts_the_session_over() {
     let mut interp = {
         let mut i = Interpreter::capturing();
         i.configure(ndc_stdlib::register);
         i
     };
-    interp.eval("let x = 99;").unwrap();
-    let _ = interp.eval("undefined_var"); // this should error, ignore it
-    interp.eval("print(x)").unwrap();
-    let out = String::from_utf8(interp.get_output().unwrap()).unwrap();
-    assert_eq!(out.trim(), "99");
-}
-
-// A line rejected before it runs leaves the earlier lines' variables alone.
-#[test]
-fn rejected_line_keeps_earlier_variables() {
-    let mut interp = {
-        let mut i = Interpreter::capturing();
-        i.configure(ndc_stdlib::register);
-        i
-    };
-    interp.eval("let x = 41;").unwrap();
-    assert!(interp.eval("break;").is_err());
-    interp.eval("print(x + 1)").unwrap();
-    let out = String::from_utf8(interp.get_output().unwrap()).unwrap();
-    assert_eq!(out.trim(), "42");
-}
-
-#[test]
-fn vm_error_does_not_panic_on_subsequent_local_access() {
-    // Regression test for GitHub issue #130.
-    // A VM-level runtime error (wrong argument type) used to drop repl_state,
-    // causing a subsequent GetLocal on an empty stack to panic.
-    let mut interp = {
-        let mut i = Interpreter::capturing();
-        i.configure(ndc_stdlib::register);
-        i
-    };
-    interp.eval("let data = \"a,b,c\\na,b,c\\n\";").unwrap();
-    // lines() expects a String; passing an Int triggers a VM error.
-    assert!(interp.eval("lines(1)").is_err());
-    // Referencing `data` must not panic.
-    let result = interp.eval("data");
-    assert!(
-        result.is_ok(),
-        "referencing 'data' after a VM error should not fail: {result:?}"
-    );
-}
-
-#[test]
-fn vm_error_rolls_back_failed_declaration() {
-    // After a VM error on a `let` declaration, the name must not be in scope.
-    let mut interp = {
-        let mut i = Interpreter::capturing();
-        i.configure(ndc_stdlib::register);
-        i
-    };
-    // lines() expects a String; this fails at the VM level, so `x` is never bound.
-    assert!(interp.eval("let x = lines(1);").is_err());
-    // `x` should not be accessible.
-    let err = interp.eval("x").expect_err("x should not be declared");
+    interp.eval("let x = 1;").unwrap();
+    assert!(interp.eval("x = 2; [1][5]").is_err());
+    let err = interp.eval("x").expect_err("x should be forgotten");
     assert!(
         format!("{err:?}").contains("has not previously been declared"),
         "unexpected error: {err:?}"
     );
+    interp.eval("let x = 3; print(x)").unwrap();
+    let out = String::from_utf8(interp.get_output().unwrap()).unwrap();
+    assert_eq!(out.trim(), "3");
 }
 
+// Code that doesn't parse is never analysed or run, so the session stays.
 #[test]
-fn unknown_annotation_errors_without_corrupting_state() {
+fn a_syntax_error_keeps_the_session() {
     let mut interp = {
         let mut i = Interpreter::capturing();
         i.configure(ndc_stdlib::register);
         i
     };
-    interp.eval("let x = 42;").unwrap();
-    let err = interp
-        .eval("let y: Unknwn = 1;")
-        .expect_err("unknown type should error");
-    assert!(
-        format!("{err:?}").contains("unknown type `Unknwn`"),
-        "unexpected error: {err:?}"
-    );
-    // The failed line must not leak `y` into scope, and `x` must still work.
-    assert!(interp.eval("y").is_err());
+    interp.eval("let x = 1;").unwrap();
+    assert!(interp.eval("let = ;").is_err());
     interp.eval("print(x)").unwrap();
     let out = String::from_utf8(interp.get_output().unwrap()).unwrap();
-    assert_eq!(out.trim(), "42");
+    assert_eq!(out.trim(), "1");
+}
+
+#[test]
+fn output_of_a_failed_evaluation_is_kept() {
+    let mut interp = {
+        let mut i = Interpreter::capturing();
+        i.configure(ndc_stdlib::register);
+        i
+    };
+    assert!(interp.eval("print(\"before\"); [1][5]").is_err());
+    interp.eval("print(\"after\")").unwrap();
+    let out = String::from_utf8(interp.get_output().unwrap()).unwrap();
+    assert_eq!(out.trim(), "before\nafter");
 }
 
 #[test]

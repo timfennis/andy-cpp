@@ -30,8 +30,9 @@ pub struct Interpreter {
     /// variables declared on one line are visible on subsequent lines.
     repl_state: Option<(Vm, Compiler)>,
     resumable: bool,
-    /// Output captured from one-shot runs, whose VM doesn't outlive the run.
-    one_shot_output: Vec<u8>,
+    /// Output captured from VMs that are gone: one-shot runs, and REPL sessions
+    /// that started over after an error.
+    earlier_output: Vec<u8>,
     #[cfg(feature = "trace")]
     tracer: Option<Box<dyn tracer::VmTracer>>,
 }
@@ -59,7 +60,7 @@ impl Interpreter {
             source_db: SourceDb::new(),
             repl_state: None,
             resumable: true,
-            one_shot_output: Vec::new(),
+            earlier_output: Vec::new(),
             #[cfg(feature = "trace")]
             tracer: None,
         }
@@ -89,17 +90,36 @@ impl Interpreter {
 
     pub fn configure<F: FnOnce(&mut FunctionRegistry<Rc<NativeFunction>>)>(&mut self, f: F) {
         f(&mut self.function_registry);
+        self.analyser = self.new_analyser();
+        self.globals = ndc_vm::native_globals(self.function_registry.iter());
+        // A REPL VM from an earlier evaluation must see the new natives too.
+        if let Some((vm, _)) = &mut self.repl_state {
+            vm.set_globals(self.globals.clone());
+        }
+    }
+
+    /// An analyser that knows the registered functions and nothing else.
+    fn new_analyser(&self) -> Analyser {
         let functions = self
             .function_registry
             .iter()
             .map(|fun| (fun.name.clone(), fun.static_type.clone()))
             .collect();
+        Analyser::new(functions)
+    }
 
-        self.analyser = Analyser::new(functions);
-        self.globals = ndc_vm::native_globals(self.function_registry.iter());
-        // A REPL VM from an earlier evaluation must see the new natives too.
-        if let Some((vm, _)) = &mut self.repl_state {
-            vm.set_globals(self.globals.clone());
+    /// Forgets everything evaluated so far, keeping only what was printed.
+    fn start_over(&mut self) {
+        if let Some((vm, _)) = self.repl_state.take() {
+            self.keep_output(&vm);
+        }
+        self.analyser = self.new_analyser();
+    }
+
+    /// Keeps what `vm` printed, if output is captured, for when it's gone.
+    fn keep_output(&mut self, vm: &Vm) {
+        if let Some(output) = vm.get_output() {
+            self.earlier_output.extend_from_slice(output);
         }
     }
 
@@ -121,7 +141,7 @@ impl Interpreter {
                 .as_ref()
                 .and_then(|(vm, _)| vm.get_output())
                 .unwrap_or_default();
-            Some([self.one_shot_output.as_slice(), repl_output].concat())
+            Some([self.earlier_output.as_slice(), repl_output].concat())
         } else {
             None
         }
@@ -201,22 +221,33 @@ impl Interpreter {
 
     /// Execute source code with a custom source name for diagnostics and
     /// return wall-clock timings for each pipeline phase.
+    ///
+    /// A one-shot interpreter starts every evaluation afresh. A resumable one
+    /// keeps what each evaluation declared for the next, until one fails after
+    /// parsing: then it starts over, as the failed code may have declared or
+    /// changed some things and not others. The REPL runs each line in a forked
+    /// process instead, so a failed line doesn't cost it the session.
     pub fn eval_named_with_timings(
         &mut self,
         name: impl Into<String>,
         input: &str,
     ) -> Result<(Value, ExecutionTimings), InterpreterError> {
         let source_id = self.source_db.add(name, input);
-        // Save the analyser state before parsing so we can roll it back if the VM
-        // fails — otherwise the analyser would remember declarations from a line
-        // that never actually ran.
-        let analyser_checkpoint = self.analyser.checkpoint();
-        let (expressions, result, mut timings) = self.parse_and_analyse(input, source_id)?;
-        let vm_result = self.interpret_vm(input, expressions.into_iter(), result.analysis);
-        if vm_result.is_err() || !self.resumable {
-            self.analyser.restore(analyser_checkpoint);
+        let result =
+            self.parse_and_analyse(input, source_id)
+                .and_then(|(expressions, result, timings)| {
+                    let vm_result =
+                        self.interpret_vm(input, expressions.into_iter(), result.analysis);
+                    vm_result.map(|(value, vm_timings)| (value, timings, vm_timings))
+                });
+        match &result {
+            // Nothing was analysed, so nothing needs to be forgotten.
+            Err(InterpreterError::Lexer { .. } | InterpreterError::Parser { .. }) => {}
+            Err(_) => self.start_over(),
+            Ok(_) if !self.resumable => self.start_over(),
+            Ok(_) => {}
         }
-        let (value, vm_timings) = vm_result?;
+        let (value, mut timings, vm_timings) = result?;
         timings.compiling = vm_timings.compiling;
         timings.running = vm_timings.running;
         Ok((value, timings))
@@ -237,12 +268,10 @@ impl Interpreter {
             ndc_parser::Parser::from_tokens(tokens).parse()
         })?;
 
-        let checkpoint = self.analyser.checkpoint();
         measure(&mut timings, Phase::Analysing, || {
             for e in &mut expressions {
                 // Hard errors (structural issues) still abort immediately.
                 if let Err(e) = self.analyser.analyse(e) {
-                    self.analyser.restore(checkpoint.clone());
                     self.analyser.take_result();
                     return Err(InterpreterError::Resolver { causes: vec![e] });
                 }
@@ -252,7 +281,6 @@ impl Interpreter {
         })?;
 
         if self.analyser.has_errors() {
-            self.analyser.restore(checkpoint);
             let result = self.analyser.take_result();
             return Err(InterpreterError::Resolver {
                 causes: result.errors,
@@ -291,9 +319,7 @@ impl Interpreter {
             }
             let run = measure(&mut timings, Phase::Running, || vm.run());
             // Keep what the run printed, up to an error too, as the VM goes away.
-            if let Some(output) = vm.get_output() {
-                self.one_shot_output.extend_from_slice(output);
-            }
+            self.keep_output(&vm);
             run?;
             return Ok((vm.last_value(num_locals), timings));
         }
@@ -316,7 +342,10 @@ impl Interpreter {
                         vm = vm.with_tracer(tracer);
                     }
                 }
-                measure(&mut timings, Phase::Running, || vm.run())?;
+                if let Err(error) = measure(&mut timings, Phase::Running, || vm.run()) {
+                    self.keep_output(&vm);
+                    return Err(error.into());
+                }
                 let result = vm.last_value(checkpoint.num_locals());
                 self.repl_state = Some((vm, checkpoint));
                 result
@@ -324,19 +353,13 @@ impl Interpreter {
             Some((mut vm, checkpoint)) => {
                 let resume_ip = checkpoint.halt_ip();
                 let prev_num_locals = checkpoint.num_locals();
-                // Clone before consuming: we need the old checkpoint to restore
-                // repl_state if the VM errors, so subsequent REPL lines can still
-                // find their locals on the stack.
-                let old_checkpoint = checkpoint.clone();
                 let compiled = measure(&mut timings, Phase::Compiling, || {
                     checkpoint.resume(expressions, analysis)
                 });
                 let (code, new_checkpoint) = match compiled {
                     Ok(compiled) => compiled,
                     Err(error) => {
-                        // Nothing ran, so the VM and the old checkpoint still
-                        // describe the earlier lines.
-                        self.repl_state = Some((vm, old_checkpoint));
+                        self.keep_output(&vm);
                         return Err(error.into());
                     }
                 };
@@ -345,11 +368,9 @@ impl Interpreter {
                 {
                     vm.set_source(input);
                 }
-                if let Err(e) = measure(&mut timings, Phase::Running, || vm.run()) {
-                    // Restore the VM so the next resume_from_halt can cleanly
-                    // truncate the stack back to the pre-error locals.
-                    self.repl_state = Some((vm, old_checkpoint));
-                    return Err(InterpreterError::Vm(e));
+                if let Err(error) = measure(&mut timings, Phase::Running, || vm.run()) {
+                    self.keep_output(&vm);
+                    return Err(InterpreterError::Vm(error));
                 }
                 let result = vm.last_value(new_checkpoint.num_locals());
                 self.repl_state = Some((vm, new_checkpoint));

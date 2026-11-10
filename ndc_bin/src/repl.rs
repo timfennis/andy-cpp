@@ -1,6 +1,6 @@
 #![allow(clippy::print_stdout, clippy::print_stderr)]
 use itertools::Itertools;
-use ndc_interpreter::Interpreter;
+use ndc_interpreter::{Interpreter, InterpreterError};
 use rustyline::Helper;
 use rustyline::config::Configurer;
 use rustyline::error::ReadlineError;
@@ -31,39 +31,49 @@ fn new_interpreter() -> Interpreter {
     interpreter
 }
 
-/// Runs one line and prints its value or its error. Returns whether it ran
-/// without an error.
-fn eval_and_print(interpreter: &mut Interpreter, name: String, line: &str) -> bool {
+enum Outcome {
+    Succeeded,
+    /// The line didn't parse, so it never ran.
+    Rejected,
+    Failed,
+}
+
+/// Runs one line and prints its value or its error.
+fn eval_and_print(interpreter: &mut Interpreter, name: String, line: &str) -> Outcome {
     match interpreter.eval_named(name, line) {
         Ok(value) => {
             let output = value.to_string();
             if !output.is_empty() {
                 println!("{output}")
             }
-            true
+            Outcome::Succeeded
         }
         Err(err) => {
+            let outcome = match err {
+                InterpreterError::Lexer { .. } | InterpreterError::Parser { .. } => {
+                    Outcome::Rejected
+                }
+                _ => Outcome::Failed,
+            };
             crate::diagnostic::emit_error(interpreter.source_db(), err);
-            false
+            outcome
         }
     }
 }
 
-/// Runs a line where fork isn't available: a line that fails resets the
-/// session, so the interpreter never carries on after a partly run line.
-/// Compiled everywhere, so it can't break unnoticed on the platforms that use it.
+/// Runs a line where fork isn't available, in this process: after a line that
+/// fails the interpreter starts the session over. Compiled everywhere, so it
+/// can't break unnoticed on the platforms that use it.
 #[cfg_attr(unix, allow(dead_code))]
-fn run_or_reset(interpreter: &mut Interpreter, name: String, line: &str) {
-    if !eval_and_print(interpreter, name, line) {
-        *interpreter = new_interpreter();
-        println!("The session was reset, as the line failed.");
+fn run_in_process(interpreter: &mut Interpreter, name: String, line: &str) {
+    if let Outcome::Failed = eval_and_print(interpreter, name, line) {
+        println!("The session started over, as the line failed.");
     }
 }
 
 pub fn run() -> anyhow::Result<()> {
-    // Every REPL process keeps this open; see `isolation::start`.
     #[cfg(unix)]
-    let _supervisor = crate::isolation::start()?;
+    let session = crate::isolation::start()?;
 
     let h = RustylineHelper {};
 
@@ -81,10 +91,15 @@ pub fn run() -> anyhow::Result<()> {
 
                 // A line that fails leaves no trace in the session.
                 #[cfg(unix)]
-                crate::isolation::run(|| eval_and_print(&mut interpreter, name, &line))?;
+                crate::isolation::run(|| {
+                    matches!(
+                        eval_and_print(&mut interpreter, name, &line),
+                        Outcome::Succeeded
+                    )
+                })?;
 
                 #[cfg(not(unix))]
-                run_or_reset(&mut interpreter, name, &line);
+                run_in_process(&mut interpreter, name, &line);
             }
             Err(ReadlineError::Interrupted) => {
                 // Do nothing!!?
@@ -101,5 +116,7 @@ pub fn run() -> anyhow::Result<()> {
         }
     }
 
+    #[cfg(unix)]
+    session.end();
     Ok(())
 }

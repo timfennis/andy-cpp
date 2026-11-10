@@ -28,17 +28,6 @@ pub struct AnalysisResult {
     pub errors: Vec<AnalysisError>,
 }
 
-/// A snapshot of the analyser's persistent state: the resolver, the scope
-/// tree, the struct types and the number of registered structs at the time of
-/// the snapshot. Restoring it discards every binding and struct declared since.
-#[derive(Debug, Clone)]
-pub struct Checkpoint {
-    resolver: NameResolver,
-    types: TypeTable,
-    struct_types: AHashMap<SymbolId, Rc<StructInfo>>,
-    struct_count: usize,
-}
-
 #[derive(Debug)]
 pub struct Analyser {
     /// Resolves names before analysis. It runs alongside the scope tree below
@@ -87,22 +76,6 @@ impl Analyser {
             result: AnalysisResult::default(),
             errors: Vec::new(),
         }
-    }
-
-    pub fn checkpoint(&self) -> Checkpoint {
-        Checkpoint {
-            resolver: self.resolver.clone(),
-            types: self.types.clone(),
-            struct_types: self.struct_types.clone(),
-            struct_count: self.struct_registry.len(),
-        }
-    }
-
-    pub fn restore(&mut self, checkpoint: Checkpoint) {
-        self.resolver = checkpoint.resolver;
-        self.types = checkpoint.types;
-        self.struct_types = checkpoint.struct_types;
-        self.struct_registry.truncate(checkpoint.struct_count);
     }
 
     /// Take the accumulated analysis result (including any errors),

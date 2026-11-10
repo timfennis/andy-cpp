@@ -72,6 +72,22 @@ fn a_rejected_line_leaves_the_session_as_it_was() {
 }
 
 #[test]
+fn a_struct_declared_on_a_failed_line_is_gone() {
+    let printed = repl(&[
+        "struct Foo { x: Int }; [1][5]",
+        "struct Foo { y: Int }",
+        "print(Foo(42).y)",
+    ]);
+    assert_eq!(printed, ["42"]);
+}
+
+#[test]
+fn a_line_rejected_by_analysis_leaves_the_session_as_it_was() {
+    let printed = repl(&["let x = 42;", "let y: Unknwn = 1;", "print(x)"]);
+    assert_eq!(printed, ["42"]);
+}
+
+#[test]
 fn what_a_failed_line_printed_stays_printed() {
     assert_eq!(repl(&["print(\"before\"); [1][5]"]), ["before"]);
 }
@@ -80,4 +96,65 @@ fn what_a_failed_line_printed_stays_printed() {
 fn the_session_survives_a_stack_overflow() {
     let deep = format!("{}1{}", "(".repeat(100_000), ")".repeat(100_000));
     assert_eq!(repl(&["let y = 7;", &deep, "print(y)"]), ["7"]);
+}
+
+// Stopping `ndc` by its PID, as `timeout` or `Popen.terminate()` do, must stop
+// the REPL processes too, even in the middle of an endless line.
+#[test]
+fn terminating_ndc_stops_the_repl() {
+    use std::os::unix::process::ExitStatusExt;
+    use std::time::{Duration, Instant};
+
+    /// The PIDs of the processes whose parent is `pid`.
+    fn children(pid: &str) -> Vec<String> {
+        let output = Command::new("pgrep").args(["-P", pid]).output();
+        let output = output.expect("pgrep runs");
+        String::from_utf8(output.stdout)
+            .expect("pgrep prints PIDs")
+            .split_whitespace()
+            .map(str::to_string)
+            .collect()
+    }
+    fn is_running(pid: &str) -> bool {
+        let status = Command::new("kill")
+            .args(["-0", pid])
+            .stderr(Stdio::null())
+            .status();
+        status.expect("kill runs").success()
+    }
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ndc"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("ndc starts");
+    let mut stdin = child.stdin.take().expect("stdin is piped");
+    stdin
+        .write_all(b"while true { }\n")
+        .expect("input is written");
+    std::thread::sleep(Duration::from_millis(300));
+
+    // The REPL process, which holds the session, and the copy running the line.
+    let supervisor = child.id().to_string();
+    let repl = children(&supervisor);
+    assert_eq!(repl.len(), 1, "one REPL process");
+    let running = children(&repl[0]);
+    assert_eq!(running.len(), 1, "one process running the line");
+
+    let killed = Command::new("kill").args(["-TERM", &supervisor]).status();
+    assert!(killed.expect("kill runs").success());
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("ndc can be waited on") {
+            break status;
+        }
+        assert!(Instant::now() < deadline, "ndc didn't stop");
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert_eq!(status.signal(), Some(15), "ndc should end by SIGTERM");
+    for pid in repl.iter().chain(&running) {
+        assert!(!is_running(pid), "REPL process {pid} is still running");
+    }
 }
