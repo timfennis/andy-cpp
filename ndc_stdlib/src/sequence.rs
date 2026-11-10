@@ -320,7 +320,7 @@ mod inner {
                 Object::List(l) => Ok(l.borrow().len() as i64),
                 Object::Tuple(t) => Ok(t.len() as i64),
                 Object::Deque(d) => Ok(d.borrow().len() as i64),
-                Object::String(s) => Ok(s.borrow().chars().count() as i64),
+                Object::String(s) => Ok(s.char_count() as i64),
                 Object::Map { entries, .. } => Ok(entries.borrow().len() as i64),
                 _ => Err(anyhow!(
                     "cannot determine the length of {}",
