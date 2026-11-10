@@ -221,6 +221,11 @@ impl ScopeTree {
         self.scopes[self.current.0].bind_type(symbol_id);
     }
 
+    /// The value symbols bound in the current scope, oldest first.
+    pub(crate) fn current_bindings(&self) -> &[SymbolId] {
+        &self.scopes[self.current.0].bindings
+    }
+
     /// The current scope followed by its ancestors, ending at the root.
     fn chain(&self) -> impl Iterator<Item = &Scope> {
         self.ancestors(self.current).map(|id| &self.scopes[id.0])
@@ -358,6 +363,13 @@ impl NameResolver {
         }
     }
 
+    /// The value symbols bound in the current scope, oldest first. A failed
+    /// statement keeps what it bound before its error: `fn f() { missing }`
+    /// still binds `f`.
+    pub(crate) fn current_bindings(&self) -> &[SymbolId] {
+        self.scopes.current_bindings()
+    }
+
     /// The native symbols in registry order: the first is the native in slot 0.
     pub(crate) fn native_symbols(&self) -> Vec<SymbolId> {
         let mut natives = self.native_slots.iter().collect::<Vec<_>>();
@@ -369,6 +381,16 @@ impl NameResolver {
     /// or a named function's, keyed by its node.
     pub(crate) fn declared_symbol(&self, node: NodeId) -> SymbolId {
         self.declarations[&node]
+    }
+
+    /// The innermost symbol the identifier at `node` could mean.
+    pub(crate) fn innermost_reference(&self, node: NodeId) -> SymbolId {
+        self.references[&node].innermost()
+    }
+
+    /// The symbol the identifier assignment target at `node` writes to.
+    pub(crate) fn assigned_symbol(&self, node: NodeId) -> SymbolId {
+        self.assignments[&node]
     }
 
     pub(crate) fn symbol_name(&self, symbol: SymbolId) -> &str {
@@ -862,6 +884,12 @@ impl NameResolver {
 impl Candidates {
     fn iter(&self) -> impl Iterator<Item = &Vec<SymbolId>> {
         self.0.iter()
+    }
+
+    /// The newest symbol in the nearest scope. For `x` in
+    /// `let x = 1; { let x = 2; x }`: the inner `x`.
+    fn innermost(&self) -> SymbolId {
+        self.0[0][0]
     }
 }
 
