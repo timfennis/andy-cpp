@@ -3,7 +3,7 @@
 //! and a closure reaches the values it captures through upvalues. Everything
 //! here is read off the resolver's scope tree.
 
-use ndc_parser::{CaptureSource, NodeId};
+use ndc_parser::{CaptureSource, NodeId, ResolvedVar};
 use ndc_resolver::{NameResolver, ScopeId, ScopeKind, SymbolId};
 
 #[cfg(test)]
@@ -25,15 +25,34 @@ impl<'a> Layout<'a> {
     /// numbers on from its parent, and its slots are free again once it ends:
     /// in `let a = 1; { let b = 2; } let c = 3;`, `a` is 0, `b` is 1 and `c` is 1.
     pub fn local_slot(self, symbol: SymbolId) -> usize {
-        let scope = self.resolver.scope_of(symbol);
-        let index = self
+        self.first_slot(self.resolver.scope_of(symbol)) + self.resolver.binding_position(symbol)
+    }
+
+    /// How code in `function` reaches `symbol` (`None` for the program's top
+    /// level): a native by its global slot, a value of the same frame by its
+    /// local slot, and anything further out through the function's upvalues.
+    /// In `let x = 1; fn f() { x }`, `x` is local 0 at the top level and
+    /// upvalue 0 inside `f`.
+    pub fn location(self, symbol: SymbolId, function: Option<NodeId>) -> ResolvedVar {
+        if let Some(slot) = self.resolver.native_slot(symbol) {
+            return ResolvedVar::Global { slot };
+        }
+        let local = ResolvedVar::Local {
+            slot: self.local_slot(symbol),
+        };
+        let Some(function) = function else {
+            return local;
+        };
+        if self.resolver.function_scope(function) == self.frame_of(self.resolver.scope_of(symbol)) {
+            return local;
+        }
+        let slot = self
             .resolver
-            .scope(scope)
-            .bindings()
+            .captures_of(function)
             .iter()
-            .position(|&bound| bound == symbol)
-            .expect("internal error: a symbol is bound in its own scope");
-        self.first_slot(scope) + index
+            .position(|&captured| captured == symbol)
+            .expect("internal error: a function captures every outer value it uses");
+        ResolvedVar::Upvalue { slot }
     }
 
     /// Where each upvalue of the function declared at `function` comes from,

@@ -1,7 +1,7 @@
+use ahash::AHashMap;
 use ndc_core::StaticType;
-use ndc_parser::{Binding, Candidate, CaptureSource, ResolvedVar};
+use ndc_parser::{Binding, Candidate, ResolvedVar};
 use ndc_resolver::{Candidates, SymbolId};
-use std::fmt::{Debug, Formatter};
 
 /// Whether a call site can fall back to element-wise tuple broadcast when no
 /// scalar overload matches the argument types directly. Set by the parser:
@@ -110,322 +110,68 @@ impl TypeBinding {
     }
 }
 
+/// The type of every value the name resolver declared, natives included,
+/// keyed by its symbol. An assignment can widen an inferred type, but an
+/// annotated one is fixed.
 #[derive(Debug, Clone)]
-pub(crate) struct ScopeBinding {
-    pub name: String,
-    pub binding: TypeBinding,
-    /// The name resolver's symbol for this binding. Natives get theirs when the
-    /// analyser is created, since this tree is built before the resolver.
-    pub symbol: Option<SymbolId>,
-}
-
-/// A binding a function captures from an enclosing function.
-#[derive(Debug, Clone)]
-struct Upvalue {
-    /// The name resolver's symbol for the captured binding.
-    symbol: SymbolId,
-    source: CaptureSource,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct Scope {
-    parent_idx: Option<usize>,
-    creates_environment: bool, // Only true for function scopes and for-loop iterations
-    base_offset: usize,
-    function_scope_idx: usize,
-    identifiers: Vec<ScopeBinding>,
-    upvalues: Vec<Upvalue>,
-}
-
-impl Scope {
-    pub(crate) fn offset(&self) -> usize {
-        self.base_offset + self.identifiers.len()
-    }
-
-    pub(crate) fn new_function_scope(parent_idx: Option<usize>, function_scope_idx: usize) -> Self {
-        Self {
-            parent_idx,
-            creates_environment: true,
-            base_offset: 0,
-            function_scope_idx,
-            identifiers: Vec::default(),
-            upvalues: Vec::default(),
-        }
-    }
-
-    pub(crate) fn new_block_scope(
-        parent_idx: Option<usize>,
-        base_offset: usize,
-        function_scope_idx: usize,
-    ) -> Self {
-        Self {
-            parent_idx,
-            creates_environment: false,
-            base_offset,
-            function_scope_idx,
-            identifiers: Vec::default(),
-            upvalues: Vec::default(),
-        }
-    }
-
-    /// Identical to `new_block_scope` today — kept as a separate constructor so that
-    /// iteration-specific behaviour (e.g. break/continue scoping) can be added later.
-    pub(crate) fn new_iteration_scope(
-        parent_idx: Option<usize>,
-        base_offset: usize,
-        function_scope_idx: usize,
-    ) -> Self {
-        Self::new_block_scope(parent_idx, base_offset, function_scope_idx)
-    }
-
-    fn find_slot_by_symbol(&self, symbol: SymbolId) -> Option<usize> {
-        self.identifiers
-            .iter()
-            .rposition(|b| b.symbol == Some(symbol))
-            .map(|idx| idx + self.base_offset)
-    }
-
-    /// Check if this scope already contains a function with the given name and arity.
-    fn has_function_with_arity(&self, name: &str, arity: Option<usize>) -> bool {
-        self.identifiers.iter().any(|b| {
-            if b.name != name {
-                return false;
-            }
-            match b.binding.typ() {
-                StaticType::Function {
-                    parameters: Some(params),
-                    ..
-                } => match arity {
-                    Some(a) => params.len() == a,
-                    None => false,
-                },
-                StaticType::Function {
-                    parameters: None, ..
-                } => arity.is_none(),
-                _ => false,
-            }
-        })
-    }
-
-    fn allocate(&mut self, name: String, type_binding: TypeBinding, symbol: SymbolId) -> usize {
-        self.identifiers.push(ScopeBinding {
-            name,
-            binding: type_binding,
-            symbol: Some(symbol),
-        });
-        self.base_offset + self.identifiers.len() - 1
-    }
-
-    fn find_upvalue_by_symbol(&self, symbol: SymbolId) -> Option<usize> {
-        self.upvalues.iter().position(|u| u.symbol == symbol)
-    }
-}
-
-#[derive(Clone)]
 pub struct ScopeTree {
-    current_scope_idx: usize,
-    global_scope: Scope,
-    scopes: Vec<Scope>,
+    /// The natives in registry order: the first is the native in global slot 0.
+    natives: Vec<(String, StaticType)>,
+    types: AHashMap<SymbolId, TypeBinding>,
 }
 
 impl ScopeTree {
-    /// Build a `ScopeTree` seeded with pre-registered global bindings (native functions etc.).
-    ///
-    /// Two root scopes exist by design: `global_scope` holds native/built-in bindings that are
-    /// always accessible, while `scopes[0]` is the user's top-level function scope where
-    /// user-defined declarations land. This separation keeps native bindings out of the
-    /// mutable scope chain so they can be searched as a fallback without interfering with
-    /// user-level shadowing.
-    pub fn from_global_scope(global_scope_map: Vec<(String, StaticType)>) -> Self {
-        let mut global_scope = Scope::new_function_scope(None, 0);
-        global_scope.identifiers = global_scope_map
-            .into_iter()
-            .map(|(name, typ)| ScopeBinding {
-                name,
-                binding: TypeBinding::Inferred(typ),
-                symbol: None,
-            })
-            .collect();
-
+    /// A table seeded with the natives' types, in registry order. They're keyed
+    /// by symbol once the resolver has declared them, see
+    /// [`Self::attach_native_symbols`].
+    pub fn from_global_scope(natives: Vec<(String, StaticType)>) -> Self {
         Self {
-            current_scope_idx: 0,
-            global_scope,
-            scopes: vec![Scope::new_function_scope(None, 0)],
+            natives,
+            types: AHashMap::new(),
         }
     }
 
-    /// The names of the native bindings, in registration order.
+    /// The names of the natives, in registry order.
     pub(crate) fn native_names(&self) -> impl Iterator<Item = &str> {
-        self.global_scope
-            .identifiers
-            .iter()
-            .map(|binding| binding.name.as_str())
+        self.natives.iter().map(|(name, _)| name.as_str())
     }
 
-    pub(crate) fn get_type(&self, res: ResolvedVar) -> &StaticType {
-        match res {
-            ResolvedVar::Local { slot } => self.find_type_by_slot(self.current_scope_idx, slot),
-            ResolvedVar::Upvalue { slot } => {
-                let mut scope_idx = self.scopes[self.current_scope_idx].function_scope_idx;
-                let mut check_slot = slot;
-
-                loop {
-                    match &self.scopes[scope_idx].upvalues[check_slot].source {
-                        CaptureSource::Local(slot) => {
-                            let parent = self.scopes[scope_idx]
-                                .parent_idx
-                                .expect("expected parent scope");
-                            return self.find_type_by_slot(parent, *slot);
-                        }
-                        CaptureSource::Upvalue(slot) => {
-                            scope_idx = self.get_parent_function_scope_idx(scope_idx);
-                            check_slot = *slot;
-                        }
-                    }
-                }
-            }
-            ResolvedVar::Global { slot } => self.global_scope.identifiers[slot].binding.typ(),
+    /// Gives each native's type to its resolver symbol, in registry order.
+    pub(crate) fn attach_native_symbols(&mut self, symbols: impl IntoIterator<Item = SymbolId>) {
+        for ((_, typ), symbol) in self.natives.iter().zip(symbols) {
+            self.types
+                .insert(symbol, TypeBinding::Inferred(typ.clone()));
         }
     }
 
-    fn get_parent_function_scope_idx(&self, scope_idx: usize) -> usize {
-        self.scopes[self.scopes[scope_idx]
-            .parent_idx
-            .expect("expected parent scope to exist")]
-        .function_scope_idx
+    /// Records the type of a value the resolver declared.
+    pub(crate) fn declare(&mut self, symbol: SymbolId, binding: TypeBinding) {
+        self.types.insert(symbol, binding);
     }
 
-    pub(crate) fn find_type_by_slot(&self, start_scope: usize, slot: usize) -> &StaticType {
-        let mut scope_idx = start_scope;
-        loop {
-            let scope = &self.scopes[scope_idx];
-            if slot >= scope.base_offset && slot < scope.base_offset + scope.identifiers.len() {
-                return scope.identifiers[slot - scope.base_offset].binding.typ();
-            }
-            scope_idx = scope
-                .parent_idx
-                .expect("slot not found in any scope within function");
+    pub(crate) fn get_type(&self, symbol: SymbolId) -> &StaticType {
+        self.types
+            .get(&symbol)
+            .expect("internal error: a value is analysed after its declaration")
+            .typ()
+    }
+
+    /// Try to update a value's type. Returns `Err` with the annotated type if
+    /// the value has an explicit type annotation and cannot be widened.
+    pub(crate) fn update_binding_type(
+        &mut self,
+        symbol: SymbolId,
+        new_type: StaticType,
+    ) -> Result<(), StaticType> {
+        let binding = self
+            .types
+            .get_mut(&symbol)
+            .expect("internal error: a value is analysed after its declaration");
+        if binding.is_annotated() {
+            return Err(binding.typ().clone());
         }
-    }
-
-    pub(crate) fn new_block_scope(&mut self) -> &Scope {
-        let old_scope_idx = self.current_scope_idx;
-        self.current_scope_idx = self.scopes.len();
-        let new_scope = Scope::new_block_scope(
-            Some(old_scope_idx),
-            self.scopes[old_scope_idx].offset(),
-            self.scopes[old_scope_idx].function_scope_idx,
-        );
-        self.scopes.push(new_scope);
-        &self.scopes[self.current_scope_idx]
-    }
-
-    pub(crate) fn new_function_scope(&mut self) -> &Scope {
-        let old_scope_idx = self.current_scope_idx;
-        self.current_scope_idx = self.scopes.len();
-        let new_scope = Scope::new_function_scope(Some(old_scope_idx), self.scopes.len());
-        self.scopes.push(new_scope);
-        &self.scopes[self.current_scope_idx]
-    }
-
-    pub(crate) fn new_iteration_scope(&mut self) -> &Scope {
-        let old_scope_idx = self.current_scope_idx;
-        self.current_scope_idx = self.scopes.len();
-        let new_scope = Scope::new_iteration_scope(
-            Some(old_scope_idx),
-            self.scopes[old_scope_idx].offset(),
-            self.scopes[old_scope_idx].function_scope_idx,
-        );
-        self.scopes.push(new_scope);
-        &self.scopes[self.current_scope_idx]
-    }
-
-    pub(crate) fn destroy_scope(&mut self) {
-        let next = self.scopes[self.current_scope_idx]
-            .parent_idx
-            .expect("tried to destroy scope while there were none");
-        self.current_scope_idx = next;
-    }
-
-    pub(crate) fn current_scope_captures(&self) -> Vec<CaptureSource> {
-        self.scopes[self.current_scope_idx]
-            .upvalues
-            .iter()
-            .map(|upvalue| upvalue.source.clone())
-            .collect()
-    }
-
-    /// Captures `symbols` as the upvalues of the function scope just entered,
-    /// in order: upvalue `i` is `symbols[i]`. Each one is a local or an upvalue
-    /// of the enclosing function, which captures what it only passes through.
-    /// In `let x = 1; fn f() { fn g() { x } }`, `f` and `g` both capture `[x]`.
-    pub(crate) fn capture(&mut self, symbols: &[SymbolId]) {
-        let function = self.current_scope_idx;
-        let enclosing = self.scopes[function]
-            .parent_idx
-            .expect("internal error: a function scope always has an enclosing scope");
-        for &symbol in symbols {
-            let source = match self.find_in_function(enclosing, symbol) {
-                Some(ResolvedVar::Local { slot }) => CaptureSource::Local(slot),
-                Some(ResolvedVar::Upvalue { slot }) => CaptureSource::Upvalue(slot),
-                _ => panic!("internal error: the enclosing function can't see a captured symbol"),
-            };
-            self.scopes[function]
-                .upvalues
-                .push(Upvalue { symbol, source });
-        }
-    }
-
-    /// Where the binding for the resolver's `symbol` lives, seen from the
-    /// current scope: a local or upvalue of the current function, or a native.
-    /// `x` in `let x = 1; fn f() { x }` is `f`'s upvalue 0.
-    pub(crate) fn get_binding(&self, symbol: SymbolId) -> ResolvedVar {
-        if let Some(var) = self.find_in_function(self.current_scope_idx, symbol) {
-            return var;
-        }
-        let slot = self
-            .global_scope
-            .find_slot_by_symbol(symbol)
-            .expect("internal error: the resolver's symbol is neither in scope nor captured");
-        ResolvedVar::Global { slot }
-    }
-
-    /// `symbol` as a local or an upvalue of the function containing `scope_idx`,
-    /// searching outwards from that scope to the function's own scope.
-    fn find_in_function(&self, scope_idx: usize, symbol: SymbolId) -> Option<ResolvedVar> {
-        let mut idx = scope_idx;
-        loop {
-            let scope = &self.scopes[idx];
-            if let Some(slot) = scope.find_slot_by_symbol(symbol) {
-                return Some(ResolvedVar::Local { slot });
-            }
-            if scope.creates_environment {
-                return scope
-                    .find_upvalue_by_symbol(symbol)
-                    .map(|slot| ResolvedVar::Upvalue { slot });
-            }
-            idx = scope
-                .parent_idx
-                .expect("internal error: a block scope always has a parent");
-        }
-    }
-
-    /// The type of the binding for `symbol`, found through the enclosing scopes.
-    fn symbol_type(&self, symbol: SymbolId) -> &StaticType {
-        let mut scope_ptr = Some(self.current_scope_idx);
-        while let Some(idx) = scope_ptr {
-            let scope = &self.scopes[idx];
-            if let Some(slot) = scope.find_slot_by_symbol(symbol) {
-                return scope.identifiers[slot - scope.base_offset].binding.typ();
-            }
-            scope_ptr = scope.parent_idx;
-        }
-
-        let slot = self
-            .global_scope
-            .find_slot_by_symbol(symbol)
-            .expect("internal error: the resolver's symbol has no binding in scope");
-        self.global_scope.identifiers[slot].binding.typ()
+        *binding = TypeBinding::Inferred(new_type);
+        Ok(())
     }
 
     /// Whether some overload among `candidates` would accept these arguments
@@ -439,7 +185,7 @@ impl ScopeTree {
             let StaticType::Function {
                 parameters: Some(parameters),
                 ..
-            } = self.symbol_type(symbol)
+            } = self.get_type(symbol)
             else {
                 return false;
             };
@@ -458,7 +204,8 @@ impl ScopeTree {
     /// Resolve a function call to a binding and an inferred return type.
     ///
     /// `candidates` are the resolver's same-named symbols for the callee,
-    /// grouped by scope, nearest first.
+    /// grouped by scope, nearest first. `locate` says how the call site
+    /// reaches the symbols it picks.
     ///
     /// Single entry point for both regular calls (`f(x)`) and operator-form
     /// calls (`a + b`, `-x`, `op=`). The two differ only in whether
@@ -485,13 +232,14 @@ impl ScopeTree {
         candidates: &Candidates,
         sig: &[StaticType],
         kind: CallKind,
+        locate: impl Fn(SymbolId) -> ResolvedVar,
     ) -> ResolvedCall {
         let walk = self.scalar_walk(candidates, sig);
 
         // 1. Scalar exact match.
         if let Some(exact) = walk.exact {
             return ResolvedCall {
-                binding: Binding::Resolved(Candidate::Scalar(self.get_binding(exact))),
+                binding: Binding::Resolved(Candidate::Scalar(locate(exact))),
                 return_type: self.scalar_return_type(exact),
             };
         }
@@ -532,7 +280,7 @@ impl ScopeTree {
         {
             let scalar_return = self.scalar_return_type(scalar);
             return ResolvedCall {
-                binding: Binding::Resolved(Candidate::Vec(self.get_binding(scalar))),
+                binding: Binding::Resolved(Candidate::Vec(locate(scalar))),
                 return_type: StaticType::Tuple(vec![scalar_return; *axis_len]),
             };
         }
@@ -549,11 +297,11 @@ impl ScopeTree {
             };
             let mut combined = Vec::new();
             for symbol in scalar_loose {
-                let candidate = Candidate::Scalar(self.get_binding(symbol));
+                let candidate = Candidate::Scalar(locate(symbol));
                 push_unique(&mut combined, candidate);
             }
             for symbol in vec_symbols {
-                let candidate = Candidate::Vec(self.get_binding(symbol));
+                let candidate = Candidate::Vec(locate(symbol));
                 push_unique(&mut combined, candidate);
             }
             return ResolvedCall {
@@ -576,7 +324,7 @@ impl ScopeTree {
             let candidates = walk
                 .all_by_name
                 .into_iter()
-                .map(|symbol| Candidate::Scalar(self.get_binding(symbol)))
+                .map(|symbol| Candidate::Scalar(locate(symbol)))
                 .collect();
             return ResolvedCall {
                 binding: Binding::Dynamic(candidates),
@@ -625,7 +373,7 @@ impl ScopeTree {
                     .iter()
                     .rev()
                     .copied()
-                    .filter(|&symbol| self.symbol_type(symbol).could_be_callable()),
+                    .filter(|&symbol| self.get_type(symbol).could_be_callable()),
             );
         }
 
@@ -658,11 +406,11 @@ impl ScopeTree {
         let matches = group
             .iter()
             .copied()
-            .filter(|&symbol| self.symbol_type(symbol).is_fn_and_matches(sig))
+            .filter(|&symbol| self.get_type(symbol).is_fn_and_matches(sig))
             .collect::<Vec<_>>();
 
         let params_of = |symbol: SymbolId| -> Option<&[StaticType]> {
-            match self.symbol_type(symbol) {
+            match self.get_type(symbol) {
                 StaticType::Function {
                     parameters: Some(p),
                     ..
@@ -694,7 +442,7 @@ impl ScopeTree {
     /// Whether `symbol` is a function whose parameters don't provably conflict
     /// with `sig`, so it might accept the call at runtime.
     fn is_compatible(&self, symbol: SymbolId, sig: &[StaticType]) -> bool {
-        let StaticType::Function { parameters, .. } = self.symbol_type(symbol) else {
+        let StaticType::Function { parameters, .. } = self.get_type(symbol) else {
             return false;
         };
         let Some(parameters) = parameters else {
@@ -787,7 +535,7 @@ impl ScopeTree {
     /// runtime: its type is `Any`, a variadic function, or a function whose
     /// parameters don't provably conflict with `sig`.
     fn could_accept_call(&self, symbol: SymbolId, sig: &[StaticType]) -> bool {
-        match self.symbol_type(symbol) {
+        match self.get_type(symbol) {
             StaticType::Function {
                 parameters: Some(parameters),
                 ..
@@ -809,7 +557,7 @@ impl ScopeTree {
     /// Return type of a scalar candidate. Falls back to `Any` if the binding
     /// turned out not to carry a function type (e.g. `Any`-typed callee).
     fn scalar_return_type(&self, symbol: SymbolId) -> StaticType {
-        match self.symbol_type(symbol) {
+        match self.get_type(symbol) {
             StaticType::Function { return_type, .. } => return_type.as_ref().clone(),
             _ => StaticType::Any,
         }
@@ -863,109 +611,11 @@ impl ScopeTree {
         // nothing more precise to compute for the mixed case.
         StaticType::Any
     }
-
-    pub(crate) fn create_local_binding(
-        &mut self,
-        ident: String,
-        binding: TypeBinding,
-        symbol: SymbolId,
-    ) -> ResolvedVar {
-        ResolvedVar::Local {
-            slot: self.scopes[self.current_scope_idx].allocate(ident, binding, symbol),
-        }
-    }
-
-    /// Gives each native binding its resolver symbol, in registry order.
-    pub(crate) fn attach_native_symbols(&mut self, symbols: impl IntoIterator<Item = SymbolId>) {
-        for (binding, symbol) in self.global_scope.identifiers.iter_mut().zip(symbols) {
-            binding.symbol = Some(symbol);
-        }
-    }
-
-    /// Check whether the current scope already has a `fn` declaration with
-    /// the given name and arity. Used to detect illegal same-scope redefinitions.
-    pub(crate) fn has_function_in_current_scope(&self, name: &str, arity: Option<usize>) -> bool {
-        self.scopes[self.current_scope_idx].has_function_with_arity(name, arity)
-    }
-
-    /// Try to update a binding's type. Returns `Err` with the annotated type
-    /// if the binding has an explicit type annotation and cannot be widened.
-    pub(crate) fn update_binding_type(
-        &mut self,
-        var: ResolvedVar,
-        new_type: StaticType,
-    ) -> Result<(), StaticType> {
-        let binding = self.get_binding_mut(var);
-        if binding.is_annotated() {
-            return Err(binding.typ().clone());
-        }
-        *binding = TypeBinding::Inferred(new_type);
-        Ok(())
-    }
-
-    fn get_binding_mut(&mut self, var: ResolvedVar) -> &mut TypeBinding {
-        match var {
-            ResolvedVar::Local { slot } => {
-                let scope_idx = self.find_scope_owning_slot(self.current_scope_idx, slot);
-                let base = self.scopes[scope_idx].base_offset;
-                &mut self.scopes[scope_idx].identifiers[slot - base].binding
-            }
-            ResolvedVar::Upvalue { slot } => {
-                let mut scope_idx = self.scopes[self.current_scope_idx].function_scope_idx;
-                let mut check_slot = slot;
-
-                loop {
-                    match self.scopes[scope_idx].upvalues[check_slot].source {
-                        CaptureSource::Local(local_slot) => {
-                            let parent = self.scopes[scope_idx]
-                                .parent_idx
-                                .expect("expected parent scope");
-                            let owning = self.find_scope_owning_slot(parent, local_slot);
-                            let base = self.scopes[owning].base_offset;
-                            return &mut self.scopes[owning].identifiers[local_slot - base].binding;
-                        }
-                        CaptureSource::Upvalue(uv_slot) => {
-                            scope_idx = self.get_parent_function_scope_idx(scope_idx);
-                            check_slot = uv_slot;
-                        }
-                    }
-                }
-            }
-            ResolvedVar::Global { .. } => {
-                unreachable!("get_binding_mut called with a global binding")
-            }
-        }
-    }
-
-    pub(crate) fn find_scope_owning_slot(&self, start_scope: usize, slot: usize) -> usize {
-        let mut scope_idx = start_scope;
-        loop {
-            let scope = &self.scopes[scope_idx];
-            if slot >= scope.base_offset && slot < scope.base_offset + scope.identifiers.len() {
-                return scope_idx;
-            }
-            scope_idx = scope
-                .parent_idx
-                .expect("slot not found in any scope within function");
-        }
-    }
-}
-
-impl Debug for ScopeTree {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        writeln!(f)?;
-        for (id, scope) in self.scopes.iter().enumerate() {
-            writeln!(f, "{id}: {scope:?}")?;
-        }
-
-        Ok(())
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndc_parser::ResolvedVar;
     use ndc_resolver::{BindingKind, SymbolTable};
     use std::cell::RefCell;
 
@@ -976,315 +626,6 @@ mod tests {
     /// A fresh symbol, distinct from every other one in the test.
     fn symbol() -> SymbolId {
         SYMBOLS.with_borrow_mut(|symbols| symbols.declare(String::new(), BindingKind::Plain))
-    }
-
-    fn empty_scope_tree() -> ScopeTree {
-        ScopeTree::from_global_scope(vec![])
-    }
-
-    #[test]
-    fn single_local_in_function_scope() {
-        let x_symbol = symbol();
-        let mut tree = empty_scope_tree();
-        let var =
-            tree.create_local_binding("x".into(), TypeBinding::Inferred(StaticType::Int), x_symbol);
-        assert_eq!(var, ResolvedVar::Local { slot: 0 });
-        assert_eq!(tree.get_binding(x_symbol), ResolvedVar::Local { slot: 0 });
-    }
-
-    #[test]
-    fn multiple_locals_get_ascending_slots() {
-        let mut tree = empty_scope_tree();
-        let x =
-            tree.create_local_binding("x".into(), TypeBinding::Inferred(StaticType::Int), symbol());
-        let y =
-            tree.create_local_binding("y".into(), TypeBinding::Inferred(StaticType::Int), symbol());
-        let z =
-            tree.create_local_binding("z".into(), TypeBinding::Inferred(StaticType::Int), symbol());
-        assert_eq!(x, ResolvedVar::Local { slot: 0 });
-        assert_eq!(y, ResolvedVar::Local { slot: 1 });
-        assert_eq!(z, ResolvedVar::Local { slot: 2 });
-    }
-
-    #[test]
-    fn block_scope_continues_flat_numbering() {
-        let x_symbol = symbol();
-        let mut tree = empty_scope_tree();
-        let x =
-            tree.create_local_binding("x".into(), TypeBinding::Inferred(StaticType::Int), x_symbol);
-        assert_eq!(x, ResolvedVar::Local { slot: 0 });
-
-        tree.new_block_scope();
-        let y =
-            tree.create_local_binding("y".into(), TypeBinding::Inferred(StaticType::Int), symbol());
-        assert_eq!(y, ResolvedVar::Local { slot: 1 });
-
-        assert_eq!(tree.get_binding(x_symbol), ResolvedVar::Local { slot: 0 });
-    }
-
-    #[test]
-    fn nested_block_scopes_continue_numbering() {
-        let mut tree = empty_scope_tree();
-        tree.create_local_binding("a".into(), TypeBinding::Inferred(StaticType::Int), symbol());
-
-        tree.new_block_scope();
-        let b =
-            tree.create_local_binding("b".into(), TypeBinding::Inferred(StaticType::Int), symbol());
-        assert_eq!(b, ResolvedVar::Local { slot: 1 });
-
-        tree.new_block_scope();
-        let c =
-            tree.create_local_binding("c".into(), TypeBinding::Inferred(StaticType::Int), symbol());
-        assert_eq!(c, ResolvedVar::Local { slot: 2 });
-    }
-
-    #[test]
-    fn block_scope_does_not_create_upvalue() {
-        let x_symbol = symbol();
-        let mut tree = empty_scope_tree();
-        tree.create_local_binding("x".into(), TypeBinding::Inferred(StaticType::Int), x_symbol);
-
-        tree.new_block_scope();
-        assert_eq!(tree.get_binding(x_symbol), ResolvedVar::Local { slot: 0 });
-    }
-
-    #[test]
-    fn function_scope_resets_slots_and_captures_as_upvalue() {
-        let x_symbol = symbol();
-        let mut tree = empty_scope_tree();
-        tree.create_local_binding("x".into(), TypeBinding::Inferred(StaticType::Int), x_symbol);
-
-        tree.new_function_scope();
-        tree.capture(&[x_symbol]);
-        let y =
-            tree.create_local_binding("y".into(), TypeBinding::Inferred(StaticType::Int), symbol());
-        assert_eq!(y, ResolvedVar::Local { slot: 0 });
-
-        assert_eq!(tree.get_binding(x_symbol), ResolvedVar::Upvalue { slot: 0 });
-    }
-
-    #[test]
-    fn iteration_scope_continues_numbering_and_is_transparent() {
-        let x_symbol = symbol();
-        let mut tree = empty_scope_tree();
-        tree.create_local_binding("x".into(), TypeBinding::Inferred(StaticType::Int), x_symbol);
-
-        tree.new_iteration_scope();
-        let i =
-            tree.create_local_binding("i".into(), TypeBinding::Inferred(StaticType::Int), symbol());
-        assert_eq!(i, ResolvedVar::Local { slot: 1 });
-
-        assert_eq!(tree.get_binding(x_symbol), ResolvedVar::Local { slot: 0 });
-    }
-
-    #[test]
-    fn global_lookup() {
-        let print_symbol = symbol();
-        let mut tree = ScopeTree::from_global_scope(vec![(
-            "print".into(),
-            StaticType::Function {
-                parameters: None,
-                return_type: Box::new(StaticType::Any),
-            },
-        )]);
-        tree.attach_native_symbols([print_symbol]);
-        assert_eq!(
-            tree.get_binding(print_symbol),
-            ResolvedVar::Global { slot: 0 }
-        );
-    }
-
-    #[test]
-    fn slot_reuse_after_scope_destroy() {
-        let mut tree = empty_scope_tree();
-        tree.create_local_binding("a".into(), TypeBinding::Inferred(StaticType::Int), symbol());
-
-        tree.new_block_scope();
-        tree.create_local_binding("b".into(), TypeBinding::Inferred(StaticType::Int), symbol());
-        tree.destroy_scope();
-
-        let c =
-            tree.create_local_binding("c".into(), TypeBinding::Inferred(StaticType::Int), symbol());
-        assert_eq!(c, ResolvedVar::Local { slot: 1 });
-    }
-
-    #[test]
-    fn get_type_returns_correct_type() {
-        let mut tree = empty_scope_tree();
-        tree.create_local_binding("x".into(), TypeBinding::Inferred(StaticType::Int), symbol());
-        tree.create_local_binding(
-            "y".into(),
-            TypeBinding::Inferred(StaticType::String),
-            symbol(),
-        );
-
-        assert_eq!(
-            tree.get_type(ResolvedVar::Local { slot: 0 }),
-            &StaticType::Int
-        );
-        assert_eq!(
-            tree.get_type(ResolvedVar::Local { slot: 1 }),
-            &StaticType::String
-        );
-    }
-
-    // Simulates: let x = 1; fn outer() { fn inner() { x } }
-    // `outer` captures x only to pass it on: it captures the top-level local
-    // as Local(0), and `inner` captures outer's upvalue as Upvalue(0).
-    #[test]
-    fn pass_through_captures_chain_upvalues() {
-        let x_symbol = symbol();
-        let mut tree = empty_scope_tree();
-        tree.create_local_binding("x".into(), TypeBinding::Inferred(StaticType::Int), x_symbol);
-
-        tree.new_function_scope(); // outer
-        tree.capture(&[x_symbol]);
-        let outer_scope_idx = tree.current_scope_idx;
-        tree.new_function_scope(); // inner
-        tree.capture(&[x_symbol]);
-
-        assert_eq!(tree.get_binding(x_symbol), ResolvedVar::Upvalue { slot: 0 });
-        let inner_capture = &tree.scopes[tree.current_scope_idx].upvalues[0];
-        assert_eq!(inner_capture.source, CaptureSource::Upvalue(0));
-        let outer_capture = &tree.scopes[outer_scope_idx].upvalues[0];
-        assert_eq!(outer_capture.source, CaptureSource::Local(0));
-    }
-
-    // Simulates: let a = 1; let b = 2; fn f() { b; a }
-    // Upvalues are numbered in capture order, whatever order the slots are in.
-    #[test]
-    fn upvalues_follow_capture_order() {
-        let a_symbol = symbol();
-        let b_symbol = symbol();
-        let mut tree = empty_scope_tree();
-        tree.create_local_binding("a".into(), TypeBinding::Inferred(StaticType::Int), a_symbol);
-        tree.create_local_binding(
-            "b".into(),
-            TypeBinding::Inferred(StaticType::String),
-            b_symbol,
-        );
-
-        tree.new_function_scope();
-        tree.capture(&[b_symbol, a_symbol]);
-
-        assert_eq!(tree.get_binding(b_symbol), ResolvedVar::Upvalue { slot: 0 });
-        assert_eq!(tree.get_binding(a_symbol), ResolvedVar::Upvalue { slot: 1 });
-        assert_eq!(
-            tree.current_scope_captures(),
-            vec![CaptureSource::Local(1), CaptureSource::Local(0)]
-        );
-    }
-
-    // Looking a captured binding up, however often, adds no upvalues.
-    #[test]
-    fn lookups_create_no_upvalues() {
-        let x_symbol = symbol();
-        let mut tree = empty_scope_tree();
-        tree.create_local_binding("x".into(), TypeBinding::Inferred(StaticType::Int), x_symbol);
-
-        tree.new_function_scope();
-        tree.capture(&[x_symbol]);
-
-        let first = tree.get_binding(x_symbol);
-        let second = tree.get_binding(x_symbol);
-        assert_eq!(first, second);
-        assert_eq!(first, ResolvedVar::Upvalue { slot: 0 });
-        assert_eq!(tree.scopes[tree.current_scope_idx].upvalues.len(), 1);
-    }
-
-    // Simulates: let x = 1; fn f() { x } where the resolver didn't record the capture.
-    #[test]
-    #[should_panic(expected = "neither in scope nor captured")]
-    fn looking_up_an_uncaptured_outer_binding_panics() {
-        let x_symbol = symbol();
-        let mut tree = empty_scope_tree();
-        tree.create_local_binding("x".into(), TypeBinding::Inferred(StaticType::Int), x_symbol);
-
-        tree.new_function_scope();
-        tree.get_binding(x_symbol);
-    }
-
-    // Simulates: let x = 1; fn outer() { fn inner() { x } }
-    // get_type follows inner's upvalue through outer's to the top-level local.
-    #[test]
-    fn get_type_follows_upvalue_chain() {
-        let x_symbol = symbol();
-        let mut tree = empty_scope_tree();
-        tree.create_local_binding("x".into(), TypeBinding::Inferred(StaticType::Int), x_symbol);
-
-        tree.new_function_scope(); // outer
-        tree.capture(&[x_symbol]);
-        tree.new_function_scope(); // inner
-        tree.capture(&[x_symbol]);
-
-        let resolved = tree.get_binding(x_symbol);
-        assert_eq!(tree.get_type(resolved), &StaticType::Int);
-    }
-
-    // Simulates: let x = 1; fn middle() { fn inner1() { x } fn inner2() { x } }
-    // Both siblings capture x through middle's single upvalue for it.
-    #[test]
-    fn sibling_closures_capture_through_the_same_upvalue() {
-        let x_symbol = symbol();
-        let mut tree = empty_scope_tree();
-        tree.create_local_binding("x".into(), TypeBinding::Inferred(StaticType::Int), x_symbol);
-
-        tree.new_function_scope(); // middle
-        tree.capture(&[x_symbol]);
-        let middle_idx = tree.current_scope_idx;
-
-        for _ in 0..2 {
-            tree.new_function_scope(); // inner1, then inner2
-            tree.capture(&[x_symbol]);
-            assert_eq!(
-                tree.current_scope_captures(),
-                vec![CaptureSource::Upvalue(0)]
-            );
-            tree.destroy_scope();
-        }
-
-        assert_eq!(tree.scopes[middle_idx].upvalues.len(), 1);
-    }
-
-    // Simulates: let x = 1; { let x = 2; } with both bindings still in scope.
-    // Each symbol finds its own binding, not just the newest `x`.
-    #[test]
-    fn lookup_tells_same_named_bindings_apart() {
-        let outer = symbol();
-        let inner = symbol();
-        let mut tree = empty_scope_tree();
-        tree.create_local_binding("x".into(), TypeBinding::Inferred(StaticType::Int), outer);
-        tree.new_block_scope();
-        tree.create_local_binding("x".into(), TypeBinding::Inferred(StaticType::String), inner);
-
-        assert_eq!(tree.get_binding(outer), ResolvedVar::Local { slot: 0 });
-        assert_eq!(tree.get_binding(inner), ResolvedVar::Local { slot: 1 });
-    }
-
-    // Simulates: let x = 1; fn f() { x; let x = 2; fn g() { x } }
-    // with `g` reading both `x`s: each gets its own upvalue in `g`.
-    #[test]
-    fn same_named_captures_get_their_own_upvalues() {
-        let top = symbol();
-        let in_f = symbol();
-        let mut tree = empty_scope_tree();
-        tree.create_local_binding("x".into(), TypeBinding::Inferred(StaticType::Int), top);
-        tree.new_function_scope(); // f
-        tree.capture(&[top]);
-        tree.create_local_binding("x".into(), TypeBinding::Inferred(StaticType::String), in_f);
-        tree.new_function_scope(); // g
-        tree.capture(&[top, in_f]);
-
-        assert_eq!(tree.get_binding(top), ResolvedVar::Upvalue { slot: 0 });
-        assert_eq!(tree.get_binding(in_f), ResolvedVar::Upvalue { slot: 1 });
-        assert_eq!(
-            tree.get_type(ResolvedVar::Upvalue { slot: 0 }),
-            &StaticType::Int
-        );
-        assert_eq!(
-            tree.get_type(ResolvedVar::Upvalue { slot: 1 }),
-            &StaticType::String
-        );
     }
 
     fn fn_type(params: Vec<StaticType>, ret: StaticType) -> StaticType {
@@ -1301,11 +642,17 @@ mod tests {
         }
     }
 
-    /// Gives each native in `tree` a fresh symbol, returned in registry order.
-    fn native_symbols(tree: &mut ScopeTree) -> Vec<SymbolId> {
+    /// A table of these natives, each given a fresh symbol, returned in registry order.
+    fn with_natives(natives: Vec<(&str, StaticType)>) -> (ScopeTree, Vec<SymbolId>) {
+        let mut tree = ScopeTree::from_global_scope(
+            natives
+                .into_iter()
+                .map(|(name, typ)| (name.to_string(), typ))
+                .collect(),
+        );
         let symbols = tree.native_names().map(|_| symbol()).collect::<Vec<_>>();
         tree.attach_native_symbols(symbols.clone());
-        symbols
+        (tree, symbols)
     }
 
     /// Candidates of these groups, each given oldest first as declared. The
@@ -1319,17 +666,59 @@ mod tests {
         )
     }
 
+    /// Asserts the call picks `expected` as its single overload. Each symbol in
+    /// `symbols` is located at its position, so the pick shows in the binding.
     fn assert_resolves_to(
-        tree: &mut ScopeTree,
+        tree: &ScopeTree,
+        symbols: &[SymbolId],
         candidates: &Candidates,
         sig: &[StaticType],
-        expected: ResolvedVar,
+        expected: SymbolId,
     ) {
-        let resolved = tree.resolve_call(candidates, sig, CallKind::Regular);
+        let locate = |symbol: SymbolId| ResolvedVar::Local {
+            slot: symbols
+                .iter()
+                .position(|&known| known == symbol)
+                .expect("the test knows every symbol"),
+        };
+        let resolved = tree.resolve_call(candidates, sig, CallKind::Regular, locate);
         match resolved.binding {
-            Binding::Resolved(Candidate::Scalar(var)) => assert_eq!(var, expected),
+            Binding::Resolved(Candidate::Scalar(var)) => assert_eq!(var, locate(expected)),
             other => panic!("expected Resolved Scalar, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn natives_get_their_types_by_symbol() {
+        let (tree, natives) = with_natives(vec![
+            ("len", fn_type(vec![StaticType::String], StaticType::Int)),
+            ("print", variadic_fn(StaticType::unit())),
+        ]);
+        assert_eq!(
+            tree.get_type(natives[0]),
+            &fn_type(vec![StaticType::String], StaticType::Int)
+        );
+        assert_eq!(tree.get_type(natives[1]), &variadic_fn(StaticType::unit()));
+    }
+
+    #[test]
+    fn inferred_types_widen_but_annotated_types_are_fixed() {
+        let mut tree = ScopeTree::from_global_scope(vec![]);
+        let inferred = symbol();
+        let annotated = symbol();
+        tree.declare(inferred, TypeBinding::Inferred(StaticType::Int));
+        tree.declare(annotated, TypeBinding::Annotated(StaticType::Int));
+
+        assert_eq!(
+            tree.update_binding_type(inferred, StaticType::Number),
+            Ok(())
+        );
+        assert_eq!(tree.get_type(inferred), &StaticType::Number);
+        assert_eq!(
+            tree.update_binding_type(annotated, StaticType::Number),
+            Err(StaticType::Int)
+        );
+        assert_eq!(tree.get_type(annotated), &StaticType::Int);
     }
 
     // Two overloads of `locate` registered in the same scope: a more-specific
@@ -1340,28 +729,27 @@ mod tests {
     fn more_specific_overload_wins_in_same_scope() {
         let seq_any = StaticType::Sequence(Box::new(StaticType::Any));
         let fn_any = variadic_fn(StaticType::Any);
-        let mut tree = ScopeTree::from_global_scope(vec![
+        let (tree, natives) = with_natives(vec![
             (
-                "locate".into(),
+                "locate",
                 fn_type(vec![seq_any.clone(), fn_any.clone()], StaticType::Any),
             ),
             (
-                "locate".into(),
+                "locate",
                 fn_type(vec![seq_any.clone(), StaticType::Any], StaticType::Any),
             ),
         ]);
-        let natives = native_symbols(&mut tree);
 
         let call_sig = [
             StaticType::List(Box::new(StaticType::Int)),
             fn_type(vec![StaticType::Any], StaticType::Bool),
         ];
-        // Slot 0 is the predicate version; it must win over slot 1 (element).
         assert_resolves_to(
-            &mut tree,
+            &tree,
+            &natives,
             &candidates(&[&natives]),
             &call_sig,
-            ResolvedVar::Global { slot: 0 },
+            natives[0],
         );
     }
 
@@ -1369,22 +757,16 @@ mod tests {
     // without treating the Number overload as a fallback candidate.
     #[test]
     fn more_specific_numeric_overload_wins() {
-        let mut tree = ScopeTree::from_global_scope(vec![
-            (
-                "foo".into(),
-                fn_type(vec![StaticType::Number], StaticType::String),
-            ),
-            (
-                "foo".into(),
-                fn_type(vec![StaticType::Int], StaticType::String),
-            ),
+        let (tree, natives) = with_natives(vec![
+            ("foo", fn_type(vec![StaticType::Number], StaticType::String)),
+            ("foo", fn_type(vec![StaticType::Int], StaticType::String)),
         ]);
-        let natives = native_symbols(&mut tree);
         assert_resolves_to(
-            &mut tree,
+            &tree,
+            &natives,
             &candidates(&[&natives]),
             &[StaticType::Int],
-            ResolvedVar::Global { slot: 1 },
+            natives[1],
         );
     }
 
@@ -1393,27 +775,22 @@ mod tests {
     // more-specific one. The walk must stop at the first scope with a match.
     #[test]
     fn inner_any_overload_shadows_parent() {
-        let mut tree = ScopeTree::from_global_scope(vec![(
-            "foo".into(),
+        let (mut tree, natives) = with_natives(vec![(
+            "foo",
             fn_type(vec![StaticType::Int], StaticType::Int),
         )]);
-        let natives = native_symbols(&mut tree);
-
-        // Push an inner scope holding `foo(Any) -> Any`.
-        tree.new_block_scope();
         let inner = symbol();
-        let inner_var = tree.create_local_binding(
-            "foo".into(),
-            TypeBinding::Inferred(fn_type(vec![StaticType::Any], StaticType::Any)),
+        tree.declare(
             inner,
+            TypeBinding::Inferred(fn_type(vec![StaticType::Any], StaticType::Any)),
         );
 
-        // Called with `Int`: inner `foo(Any)` matches and shadows the global.
         assert_resolves_to(
-            &mut tree,
+            &tree,
+            &[natives[0], inner],
             &candidates(&[&[inner], &natives]),
             &[StaticType::Int],
-            inner_var,
+            inner,
         );
     }
 
@@ -1421,27 +798,22 @@ mod tests {
     // different argument type must fall through to the parent scope's overload.
     #[test]
     fn inner_int_overload_does_not_shadow_other_types() {
-        let mut tree = ScopeTree::from_global_scope(vec![(
-            "foo".into(),
+        let (mut tree, natives) = with_natives(vec![(
+            "foo",
             fn_type(vec![StaticType::Any], StaticType::Int),
         )]);
-        let natives = native_symbols(&mut tree);
-
-        tree.new_block_scope();
         let inner = symbol();
-        tree.create_local_binding(
-            "foo".into(),
-            TypeBinding::Inferred(fn_type(vec![StaticType::Int], StaticType::Int)),
+        tree.declare(
             inner,
+            TypeBinding::Inferred(fn_type(vec![StaticType::Int], StaticType::Int)),
         );
 
-        // Called with `String`: inner `foo(Int)` doesn't match, falls through
-        // to the global `foo(Any)`.
         assert_resolves_to(
-            &mut tree,
+            &tree,
+            &[natives[0], inner],
             &candidates(&[&[inner], &natives]),
             &[StaticType::String],
-            ResolvedVar::Global { slot: 0 },
+            natives[0],
         );
     }
 
@@ -1449,49 +821,16 @@ mod tests {
     // same scope when both match the call.
     #[test]
     fn concrete_overload_beats_variadic() {
-        let mut tree = ScopeTree::from_global_scope(vec![
-            ("foo".into(), variadic_fn(StaticType::Any)),
-            (
-                "foo".into(),
-                fn_type(vec![StaticType::Int], StaticType::Int),
-            ),
+        let (tree, natives) = with_natives(vec![
+            ("foo", variadic_fn(StaticType::Any)),
+            ("foo", fn_type(vec![StaticType::Int], StaticType::Int)),
         ]);
-        let natives = native_symbols(&mut tree);
         assert_resolves_to(
-            &mut tree,
+            &tree,
+            &natives,
             &candidates(&[&natives]),
             &[StaticType::Int],
-            ResolvedVar::Global { slot: 1 },
-        );
-    }
-
-    // Simulates: fn foo(x: Int) {} { fn foo(x: String) {} fn f() { foo(1) } }
-    // `f` captures both overloads, as the resolver can't tell which one the
-    // call needs; the call resolves to the captured `foo(Int)`.
-    #[test]
-    fn call_resolves_to_a_captured_overload() {
-        let mut tree = empty_scope_tree();
-        let foo_int = symbol();
-        tree.create_local_binding(
-            "foo".into(),
-            TypeBinding::Inferred(fn_type(vec![StaticType::Int], StaticType::unit())),
-            foo_int,
-        );
-        tree.new_block_scope();
-        let foo_string = symbol();
-        tree.create_local_binding(
-            "foo".into(),
-            TypeBinding::Inferred(fn_type(vec![StaticType::String], StaticType::unit())),
-            foo_string,
-        );
-        tree.new_function_scope(); // f
-        tree.capture(&[foo_string, foo_int]);
-
-        assert_resolves_to(
-            &mut tree,
-            &candidates(&[&[foo_string], &[foo_int]]),
-            &[StaticType::Int],
-            ResolvedVar::Upvalue { slot: 1 },
+            natives[1],
         );
     }
 }
