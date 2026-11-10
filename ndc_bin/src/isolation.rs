@@ -12,7 +12,8 @@
 //! shell started stays behind as a supervisor that waits until the last REPL
 //! process has exited, so whoever started `ndc` keeps waiting until then. The
 //! REPL processes form a process group of their own, which the supervisor
-//! forwards termination signals to and, in a terminal, hands the terminal to.
+//! forwards termination signals to. In a terminal, that group takes the
+//! terminal, and the supervisor takes it back once the REPL has ended.
 //! It can't see that group being suspended, so Ctrl-Z doesn't suspend the REPL,
 //! and nothing can forward SIGKILL.
 #![allow(unsafe_code)]
@@ -54,6 +55,13 @@ pub fn start() -> io::Result<Session> {
         Fork::Child => {
             drop(reader);
             join_own_group(0);
+            if terminal {
+                // Take the terminal before reading from it: reading it from a
+                // background group would stop this process.
+                set_disposition(libc::SIGTTOU, Disposition::Ignore);
+                give_terminal(own_group());
+                set_disposition(libc::SIGTTOU, Disposition::Default);
+            }
             set_disposition(libc::SIGTSTP, Disposition::Ignore);
             Ok(Session { supervisor: writer })
         }
@@ -65,11 +73,9 @@ pub fn start() -> io::Result<Session> {
             for signal in FORWARD {
                 set_disposition(signal, Disposition::Forward);
             }
-            // Taking the terminal back happens from the background.
+            // The REPL takes the terminal itself; taking it back at the end
+            // happens from the background.
             set_disposition(libc::SIGTTOU, Disposition::Ignore);
-            if terminal {
-                give_terminal(repl);
-            }
 
             // Reads until every REPL process has closed its end.
             let mut messages = Vec::new();
