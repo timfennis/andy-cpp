@@ -1140,6 +1140,7 @@ dependencies = [
  "ahash",
  "itertools 0.15.0",
  "ndc_core",
+ "ndc_layout",
  "ndc_lexer",
  "ndc_parser",
  "ndc_resolver",
@@ -1186,6 +1187,15 @@ dependencies = [
  "ndc_parser",
  "ndc_vm",
  "thiserror",
+]
+
+[[package]]
+name = "ndc_layout"
+version = "0.3.0"
+dependencies = [
+ "ndc_lexer",
+ "ndc_parser",
+ "ndc_resolver",
 ]
 
 [[package]]

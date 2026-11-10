@@ -76,6 +76,7 @@ Source → [Lexer] → Tokens → [Parser] → AST → [Analyser] → Annotated 
 | `ndc_parser` | AST (`Expression`, `ExpressionLocation`), parser |
 | `ndc_core` | `Number` (BigInt/Rational/Complex), `StaticType`, `FunctionRegistry`, ordering, hashing |
 | `ndc_resolver` | Name resolution: `NameResolver`, `SymbolId`, per-use candidate symbols and closure captures |
+| `ndc_layout` | Storage layout: each resolver symbol's local slot, and each function's captures |
 | `ndc_analyser` | Semantic analyser (types, overload bindings, slots), runs the resolver first |
 | `ndc_interpreter` | `Interpreter` facade (analyse + compile + run via VM) |
 | `ndc_vm` | Bytecode `Compiler` and stack-based `Vm` |

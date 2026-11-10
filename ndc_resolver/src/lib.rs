@@ -8,6 +8,7 @@ mod name_resolution;
 mod symbols;
 
 pub use name_resolution::{
-    AugmentedCandidates, Candidates, NameResolutionError, NameResolver, StructSymbols,
+    AugmentedCandidates, Candidates, NameResolutionError, NameResolver, Scope, ScopeId, ScopeKind,
+    StructSymbols,
 };
 pub use symbols::{BindingKind, SymbolId, SymbolTable};

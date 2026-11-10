@@ -1,0 +1,11 @@
+[package]
+name = "ndc_layout"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+ndc_parser.workspace = true
+ndc_resolver.workspace = true
+
+[dev-dependencies]
+ndc_lexer.workspace = true

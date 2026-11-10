@@ -4,6 +4,7 @@ use itertools::{Itertools, izip};
 use ndc_core::static_type::StaticTypeConstructionError;
 use ndc_core::r#struct::{StructInfo, StructRegistry};
 use ndc_core::{StaticType, TypeSignature};
+use ndc_layout::Layout;
 use ndc_lexer::{NumericLiteral, Span};
 use ndc_parser::{
     AssignmentTarget, AssignmentTargetLocation, AugmentedAssignmentPlan, Binding, BindingPattern,
@@ -121,7 +122,16 @@ impl Analyser {
         symbol: SymbolId,
     ) -> ResolvedVar {
         debug_assert_eq!(self.resolver.symbol_name(symbol), name);
-        self.scope_tree.create_local_binding(name, binding, symbol)
+        let var = self.scope_tree.create_local_binding(name, binding, symbol);
+        debug_assert_eq!(
+            var,
+            ResolvedVar::Local {
+                slot: Layout::new(&self.resolver).local_slot(symbol)
+            },
+            "the layout disagrees with the old slot for `{}`",
+            self.resolver.symbol_name(symbol),
+        );
+        var
     }
 
     /// Record a non-fatal analysis error. The analyser continues with a
@@ -524,6 +534,11 @@ impl Analyser {
 
                 self.scope_tree.new_function_scope();
                 self.scope_tree.capture(self.resolver.captures_of(*id));
+                debug_assert_eq!(
+                    self.scope_tree.current_scope_captures(),
+                    Layout::new(&self.resolver).captures(*id),
+                    "the layout disagrees with the old upvalues of a function",
+                );
                 self.return_type_stack.push(None);
                 let parameter_nodes = parameters.iter().map(|p| p.lvalue.id).collect_vec();
                 let param_types =
@@ -777,16 +792,16 @@ impl Analyser {
         kind: CallKind,
         span: Span,
     ) -> Result<StaticType, AnalysisError> {
-        let mut type_sig = Vec::with_capacity(arguments.len());
-        for arg in arguments {
-            type_sig.push(self.analyse_or_any(arg));
-        }
-
         // Higher-order call shapes like `get_function()()` have a non-identifier
         // function position; in that case we just analyse the callee as a value
-        // and trust the runtime to dispatch.
+        // and trust the runtime to dispatch. The callee comes before the
+        // arguments, in source order like the resolver, so declarations in it
+        // get their slots first.
         let Expression::Identifier { name, resolved, .. } = &mut function.expression else {
             let callee_type = self.analyse_or_any(function);
+            for arg in arguments {
+                self.analyse_or_any(arg);
+            }
             return Ok(match callee_type {
                 StaticType::Function { return_type, .. } => *return_type,
                 StaticType::Any => StaticType::Any,
@@ -796,6 +811,13 @@ impl Analyser {
                 }
             });
         };
+
+        // A named callee declares nothing, so its overload can be picked after
+        // the arguments' types are known.
+        let mut type_sig = Vec::with_capacity(arguments.len());
+        for arg in arguments.iter_mut() {
+            type_sig.push(self.analyse_or_any(arg));
+        }
 
         let ResolvedCall {
             binding,
@@ -927,8 +949,9 @@ impl Analyser {
                 resolved_set,
                 resolved_get,
             } => {
-                let index_type = self.analyse_or_any(index);
+                // The container before the index, in source order like the resolver.
                 let type_of_index_target = self.analyse_or_any(value);
+                let index_type = self.analyse_or_any(index);
 
                 let get_args = [type_of_index_target.clone(), index_type.clone()];
                 let set_args = [
