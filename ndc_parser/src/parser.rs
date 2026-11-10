@@ -1280,7 +1280,6 @@ impl Parser {
                 parameters_span,
                 body: Box::new(body),
                 return_annotation,
-                resolved_return_type: None,
                 pure: is_pure,
             },
             span,
@@ -1686,7 +1685,6 @@ impl Parser {
         Ok(FunctionParameter {
             lvalue,
             annotation,
-            resolved_type: None,
             span,
         })
     }

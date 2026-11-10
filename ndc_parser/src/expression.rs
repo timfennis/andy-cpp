@@ -1,7 +1,7 @@
 use crate::operator::LogicalOperator;
 use crate::parser::Error as ParseError;
 use crate::type_expr::TypeExpr;
-use ndc_core::{NodeId, StaticType, TypeSignature};
+use ndc_core::NodeId;
 use ndc_lexer::{NumericLiteral, Span};
 
 #[derive(Eq, PartialEq, Clone, Debug)]
@@ -59,7 +59,6 @@ pub enum Expression {
         parameters_span: Span,
         body: Box<ExpressionLocation>,
         return_annotation: Option<TypeExpr>,
-        resolved_return_type: Option<StaticType>,
         pure: bool,
     },
     StructDeclaration {
@@ -154,28 +153,10 @@ pub struct StructField {
 pub struct FunctionParameter {
     pub lvalue: BindingPatternLocation,
     pub annotation: Option<TypeExpr>,
-    pub resolved_type: Option<StaticType>,
     pub span: Span,
 }
 
 impl FunctionParameter {
-    pub fn from_params(params: &[Self]) -> TypeSignature {
-        TypeSignature::from_annotated_bindings(
-            params
-                .iter()
-                .map(|p| {
-                    let BindingPattern::Identifier { identifier, .. } = &p.lvalue.pattern else {
-                        unreachable!(
-                            "parameter list may only contain identifiers {:?} found.",
-                            p.lvalue
-                        );
-                    };
-                    (identifier.clone(), p.resolved_type.clone())
-                })
-                .collect(),
-        )
-    }
-
     pub fn name(&self) -> &str {
         match &self.lvalue.pattern {
             BindingPattern::Identifier { identifier, .. } => identifier,
@@ -192,7 +173,6 @@ pub enum AssignmentTarget {
     Identifier {
         identifier: String,
         span: Span,
-        inferred_type: Option<StaticType>,
     },
     // Example: `foo()[1] = ...`
     Index {
@@ -326,7 +306,6 @@ pub enum BindingPattern {
         identifier: String,
         /// The identifier token, which may be narrower than the pattern's span.
         span: Span,
-        inferred_type: Option<StaticType>,
     },
     Sequence(Vec<BindingPatternLocation>),
 }
@@ -344,15 +323,9 @@ impl TryFrom<AssignmentTargetLocation> for BindingPatternLocation {
 
     fn try_from(value: AssignmentTargetLocation) -> Result<Self, Self::Error> {
         let pattern = match value.target {
-            AssignmentTarget::Identifier {
-                identifier,
-                span,
-                inferred_type,
-            } => BindingPattern::Identifier {
-                identifier,
-                span,
-                inferred_type,
-            },
+            AssignmentTarget::Identifier { identifier, span } => {
+                BindingPattern::Identifier { identifier, span }
+            }
             AssignmentTarget::Sequence(items) => BindingPattern::Sequence(
                 items
                     .into_iter()
@@ -386,7 +359,6 @@ impl TryFrom<ExpressionLocation> for AssignmentTargetLocation {
             } => AssignmentTarget::Identifier {
                 identifier: name,
                 span: identifier_span,
-                inferred_type: None,
             },
             Expression::Call {
                 function,

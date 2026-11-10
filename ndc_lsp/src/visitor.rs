@@ -1,5 +1,4 @@
 use ndc_core::NodeId;
-use ndc_core::StaticType;
 use ndc_lexer::Span;
 use ndc_parser::{
     AssignmentTarget, AssignmentTargetLocation, BindingPattern, BindingPatternLocation, Expression,
@@ -13,10 +12,12 @@ use ndc_parser::{
 /// new LSP features require them — existing visitors won't break.
 pub trait AstVisitor {
     /// An identifier in a declaration position (variable or for-loop binding).
+    /// `node` is its binding pattern or assignment target. The analysis keys a
+    /// declared name's type by its binding pattern; assignment targets have none.
     fn on_declaration(
         &mut self,
         _identifier: &str,
-        _inferred_type: Option<&StaticType>,
+        _node: NodeId,
         _has_annotation: bool,
         _span: Span,
     ) {
@@ -28,7 +29,7 @@ pub trait AstVisitor {
     /// A function declaration, called before the body is walked.
     fn on_function_declaration(
         &mut self,
-        _return_type: Option<&StaticType>,
+        _has_return_annotation: bool,
         _parameters_span: Span,
         _node_id: NodeId,
     ) {
@@ -231,7 +232,7 @@ fn walk_expression(visitor: &mut impl AstVisitor, expr: &ExpressionLocation) {
             walk_expression(visitor, value);
         }
         Expression::FunctionDeclaration {
-            resolved_return_type,
+            return_annotation,
             parameters,
             parameters_span,
             body,
@@ -240,11 +241,7 @@ fn walk_expression(visitor: &mut impl AstVisitor, expr: &ExpressionLocation) {
             for p in parameters {
                 walk_pattern(visitor, &p.lvalue, p.annotation.is_some());
             }
-            visitor.on_function_declaration(
-                resolved_return_type.as_ref(),
-                *parameters_span,
-                expr.id,
-            );
+            visitor.on_function_declaration(return_annotation.is_some(), *parameters_span, expr.id);
             walk_expression(visitor, body);
         }
         Expression::Statement(inner)
@@ -370,13 +367,8 @@ fn walk_expression(visitor: &mut impl AstVisitor, expr: &ExpressionLocation) {
 
 fn walk_target(visitor: &mut impl AstVisitor, target: &AssignmentTargetLocation) {
     match &target.target {
-        AssignmentTarget::Identifier {
-            identifier,
-            inferred_type,
-            span,
-            ..
-        } => {
-            visitor.on_declaration(identifier, inferred_type.as_ref(), false, *span);
+        AssignmentTarget::Identifier { identifier, span } => {
+            visitor.on_declaration(identifier, target.id, false, *span);
         }
         AssignmentTarget::Sequence(targets) => {
             for target in targets {
@@ -397,12 +389,9 @@ fn walk_pattern(
     has_annotation: bool,
 ) {
     match &pattern.pattern {
-        BindingPattern::Identifier {
-            identifier,
-            inferred_type,
-            span,
-            ..
-        } => visitor.on_declaration(identifier, inferred_type.as_ref(), has_annotation, *span),
+        BindingPattern::Identifier { identifier, span } => {
+            visitor.on_declaration(identifier, pattern.id, has_annotation, *span)
+        }
         BindingPattern::Sequence(patterns) => {
             for pattern in patterns {
                 walk_pattern(visitor, pattern, has_annotation);
