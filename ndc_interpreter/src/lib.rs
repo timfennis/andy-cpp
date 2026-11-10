@@ -6,12 +6,10 @@ use ndc_parser::ExpressionLocation;
 use ndc_vm::compiler::Compiler;
 use ndc_vm::value::CompiledFunction;
 use ndc_vm::{OutputSink, Vm};
-use std::cell::RefCell;
 use std::rc::Rc;
 use timing::{Phase, measure};
 
 pub use ndc_analyser::AnalysisResult;
-use ndc_core::r#struct::StructRegistry;
 #[cfg(feature = "trace")]
 pub use ndc_vm::tracer;
 pub use ndc_vm::{NativeFunction, Value};
@@ -21,7 +19,6 @@ mod timing;
 
 pub struct Interpreter {
     function_registry: FunctionRegistry<Rc<NativeFunction>>,
-    struct_registry: Rc<RefCell<StructRegistry>>,
     capturing: bool,
     analyser: Analyser,
     source_db: SourceDb,
@@ -49,12 +46,10 @@ impl Interpreter {
     }
 
     fn from_capturing(capturing: bool) -> Self {
-        let struct_registry: Rc<RefCell<StructRegistry>> = Default::default();
         Self {
             function_registry: FunctionRegistry::default(),
-            struct_registry: Rc::clone(&struct_registry),
             capturing,
-            analyser: Analyser::new(vec![], struct_registry),
+            analyser: Analyser::new(vec![]),
             source_db: SourceDb::new(),
             repl_state: None,
             resumable: true,
@@ -83,7 +78,7 @@ impl Interpreter {
             .map(|fun| (fun.name.clone(), fun.static_type.clone()))
             .collect();
 
-        self.analyser = Analyser::new(functions, Rc::clone(&self.struct_registry));
+        self.analyser = Analyser::new(functions);
     }
 
     #[cfg(feature = "trace")]
@@ -142,11 +137,7 @@ impl Interpreter {
     pub fn compile_str(&mut self, input: &str) -> Result<CompiledFunction, InterpreterError> {
         let source_id = self.source_db.add("<input>", input);
         let (expressions, result, _) = self.parse_and_analyse(input, source_id)?;
-        Ok(Compiler::compile(
-            expressions.into_iter(),
-            result.analysis,
-            Rc::clone(&self.struct_registry),
-        )?)
+        Ok(Compiler::compile(expressions.into_iter(), result.analysis)?)
     }
 
     /// Like [`Self::compile_str`] but skips the peephole optimizer.
@@ -160,7 +151,6 @@ impl Interpreter {
         Ok(Compiler::compile_unoptimized(
             expressions.into_iter(),
             result.analysis,
-            Rc::clone(&self.struct_registry),
         )?)
     }
 
@@ -273,7 +263,7 @@ impl Interpreter {
         let mut timings = ExecutionTimings::default();
         if !self.resumable {
             let code = measure(&mut timings, Phase::Compiling, || {
-                self.compile_one_shot(expressions, analysis)
+                Self::compile_one_shot(expressions, analysis)
             })?;
             let num_locals = code.num_locals();
             let output = if self.capturing {
@@ -301,11 +291,7 @@ impl Interpreter {
                     OutputSink::Stdout
                 };
                 let (code, checkpoint) = measure(&mut timings, Phase::Compiling, || {
-                    Compiler::compile_resumable(
-                        expressions,
-                        analysis,
-                        Rc::clone(&self.struct_registry),
-                    )
+                    Compiler::compile_resumable(expressions, analysis)
                 })?;
                 let mut vm = Vm::new(code, globals).with_output(output);
                 #[cfg(feature = "trace")]
@@ -351,11 +337,10 @@ impl Interpreter {
     }
 
     fn compile_one_shot(
-        &self,
         expressions: impl Iterator<Item = ExpressionLocation>,
         analysis: Analysis,
     ) -> Result<CompiledFunction, ndc_vm::CompileError> {
-        Compiler::compile(expressions, analysis, Rc::clone(&self.struct_registry))
+        Compiler::compile(expressions, analysis)
     }
 }
 
@@ -403,8 +388,7 @@ mod tests {
             .parse_and_analyse("1;", source_id)
             .expect("analysis should succeed");
 
-        let compiled = interpreter
-            .compile_one_shot(expressions.into_iter(), result.analysis)
+        let compiled = Interpreter::compile_one_shot(expressions.into_iter(), result.analysis)
             .expect("compilation should succeed");
 
         assert_eq!(compiled.opcodes(), [OpCode::Halt]);

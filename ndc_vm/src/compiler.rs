@@ -4,13 +4,11 @@ use crate::{Object, Value};
 use ndc_analysis::{Analysis, Binding, Candidate, ResolvedVar};
 use ndc_core::NodeId;
 use ndc_core::StaticType;
-use ndc_core::r#struct::StructRegistry;
 use ndc_lexer::{NumericLiteral, Span};
 use ndc_parser::{
     AssignmentTarget, AssignmentTargetLocation, BindingPattern, BindingPatternLocation, Expression,
     ExpressionLocation, ForBody, ForIteration, LogicalOperator,
 };
-use std::cell::RefCell;
 use std::rc::Rc;
 
 #[derive(Clone)]
@@ -22,13 +20,12 @@ pub struct Compiler {
     loop_stack: Vec<LoopContext>,
     allow_return: bool,
     optimize: bool,
-    struct_registry: Rc<RefCell<StructRegistry>>,
     /// What the analyser worked out about the batch being compiled.
     analysis: Rc<Analysis>,
 }
 
 impl Compiler {
-    pub fn new(struct_registry: Rc<RefCell<StructRegistry>>) -> Self {
+    fn new() -> Self {
         Self {
             ir: Default::default(),
             source_locals: 0,
@@ -37,12 +34,11 @@ impl Compiler {
             loop_stack: vec![],
             allow_return: false,
             optimize: true,
-            struct_registry,
             analysis: Rc::default(),
         }
     }
 
-    pub fn new_without_optimization(struct_registry: Rc<RefCell<StructRegistry>>) -> Self {
+    fn new_without_optimization() -> Self {
         Self {
             ir: Default::default(),
             source_locals: 0,
@@ -51,16 +47,14 @@ impl Compiler {
             loop_stack: vec![],
             allow_return: false,
             optimize: false,
-            struct_registry,
             analysis: Rc::default(),
         }
     }
     pub fn compile(
         expressions: impl Iterator<Item = ExpressionLocation>,
         analysis: Analysis,
-        struct_registry: Rc<RefCell<StructRegistry>>,
     ) -> Result<CompiledFunction, CompileError> {
-        let mut compiler = Self::new(struct_registry);
+        let mut compiler = Self::new();
         compiler.compile_batch(expressions, analysis)?;
         Ok(compiler.finish()?.0)
     }
@@ -71,9 +65,8 @@ impl Compiler {
     pub fn compile_unoptimized(
         expressions: impl Iterator<Item = ExpressionLocation>,
         analysis: Analysis,
-        struct_registry: Rc<RefCell<StructRegistry>>,
     ) -> Result<CompiledFunction, CompileError> {
-        let mut compiler = Self::new_without_optimization(struct_registry);
+        let mut compiler = Self::new_without_optimization();
         compiler.compile_batch(expressions, analysis)?;
         Ok(compiler.finish()?.0)
     }
@@ -89,9 +82,8 @@ impl Compiler {
     pub fn compile_resumable(
         expressions: impl Iterator<Item = ExpressionLocation>,
         analysis: Analysis,
-        struct_registry: Rc<RefCell<StructRegistry>>,
     ) -> Result<(CompiledFunction, Self), CompileError> {
-        let mut compiler = Self::new_without_optimization(struct_registry);
+        let mut compiler = Self::new_without_optimization();
         compiler.compile_batch(expressions, analysis)?;
         compiler.finish()
     }
@@ -364,7 +356,9 @@ impl Compiler {
             Expression::StructDeclaration { .. } => {
                 let analysis = Rc::clone(&self.analysis);
                 let declared = analysis.declared_struct(id);
-                let info = Rc::clone(&self.struct_registry.borrow()[declared.id]);
+                // The constructor and accessors share this one `Rc`: struct
+                // values and accessor checks compare their info by identity.
+                let info = Rc::new(declared.info.clone());
 
                 let idx = self
                     .ir
@@ -831,7 +825,6 @@ impl Compiler {
             loop_stack: vec![],
             allow_return: true,
             optimize: self.optimize,
-            struct_registry: Rc::clone(&self.struct_registry),
             analysis: Rc::clone(&self.analysis),
         };
         fn_compiler.compile_expr(body)?;

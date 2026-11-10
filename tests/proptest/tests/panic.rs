@@ -28,7 +28,6 @@
 
 use ndc_analyser::Analyser;
 use ndc_core::FunctionRegistry;
-use ndc_core::r#struct::StructRegistry;
 use ndc_lexer::{NumericLiteral, Span, Token, TokenLocation};
 use ndc_parser::Parser;
 use ndc_vm::compiler::Compiler;
@@ -36,7 +35,6 @@ use ndc_vm::value::{Function as VmFunction, Object as VmObject};
 use ndc_vm::{NativeFunction, OutputSink, Value as VmValue, Vm};
 use proptest::prelude::*;
 use proptest::test_runner::FileFailurePersistence;
-use std::cell::RefCell;
 use std::fmt;
 use std::panic::{self, AssertUnwindSafe};
 use std::rc::Rc;
@@ -247,8 +245,7 @@ fn run_pipeline(tokens: Vec<TokenLocation>) {
         .map(|f| (f.name.clone(), f.static_type.clone()))
         .collect();
 
-    let struct_registry = Rc::new(RefCell::new(StructRegistry::default()));
-    let mut analyser = Analyser::new(scope, Rc::clone(&struct_registry));
+    let mut analyser = Analyser::new(scope);
     for e in &mut expressions {
         if analyser.analyse(e).is_err() {
             return;
@@ -259,7 +256,7 @@ fn run_pipeline(tokens: Vec<TokenLocation>) {
     }
 
     let analysis = analyser.take_result().analysis;
-    let compiled = match Compiler::compile(expressions.into_iter(), analysis, struct_registry) {
+    let compiled = match Compiler::compile(expressions.into_iter(), analysis) {
         Ok(c) => c,
         Err(_) => return,
     };
