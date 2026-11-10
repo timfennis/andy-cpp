@@ -7,12 +7,17 @@ use ndc_parser::{
     ExpressionLocation, ForBody, ForIteration, NodeId, StructField, TypeExpr,
 };
 
+/// A scope in the resolver's scope tree.
 #[derive(Debug, Eq, PartialEq, Copy, Clone, Hash)]
-pub(crate) struct ScopeId(usize);
+pub struct ScopeId(usize);
 
+/// A lexical scope: what it binds, in order, and where it sits in the tree.
 #[derive(Debug, Clone)]
-pub(crate) struct Scope {
+pub struct Scope {
     parent: Option<ScopeId>,
+    /// How many values the parent had bound when this scope was entered. In
+    /// `let a = 1; { let b = 2; } let c = 3;`, the block was entered after 1.
+    entered_after: usize,
     bindings: Vec<SymbolId>,
     types: Vec<SymbolId>,
     kind: ScopeKind,
@@ -23,6 +28,8 @@ pub(crate) struct ScopeTree {
     current: ScopeId,
     scopes: Vec<Scope>,
     bound_in: AHashMap<SymbolId, ScopeId>,
+    /// The parameter scope of each function, keyed by its declaration node.
+    function_scopes: AHashMap<NodeId, ScopeId>,
 }
 
 #[derive(Debug, Clone)]
@@ -140,7 +147,7 @@ pub struct StructSymbols {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum ScopeKind {
+pub enum ScopeKind {
     /// Natives such as `len` and `+`. The VM keeps them as globals, so they're never captured.
     Builtins,
     /// The program's top level. In `let x = 1; fn f() { x }`, `x` lives here and `f` captures it.
@@ -152,13 +159,34 @@ pub(crate) enum ScopeKind {
 }
 
 impl Scope {
-    pub(crate) fn new(kind: ScopeKind, parent: Option<ScopeId>) -> Self {
+    pub(crate) fn new(kind: ScopeKind, parent: Option<ScopeId>, entered_after: usize) -> Self {
         Self {
             parent,
+            entered_after,
             bindings: Vec::default(),
             types: Vec::default(),
             kind,
         }
+    }
+
+    pub fn kind(&self) -> ScopeKind {
+        self.kind
+    }
+
+    /// The enclosing scope, or `None` for the builtins scope at the root.
+    pub fn parent(&self) -> Option<ScopeId> {
+        self.parent
+    }
+
+    /// The values this scope binds, in the order they were declared.
+    pub fn bindings(&self) -> &[SymbolId] {
+        &self.bindings
+    }
+
+    /// How many values the parent had bound when this scope was entered. In
+    /// `let a = 1; { let b = 2; } let c = 3;`, the block was entered after 1.
+    pub fn entered_after(&self) -> usize {
+        self.entered_after
     }
 
     pub(crate) fn bind(&mut self, symbol_id: SymbolId) {
@@ -199,8 +227,9 @@ impl ScopeTree {
     pub(crate) fn new() -> Self {
         Self {
             current: ScopeId(0),
-            scopes: vec![Scope::new(ScopeKind::Builtins, None)],
+            scopes: vec![Scope::new(ScopeKind::Builtins, None, 0)],
             bound_in: Default::default(),
+            function_scopes: Default::default(),
         }
     }
 
@@ -265,8 +294,13 @@ impl ScopeTree {
     }
 
     pub(crate) fn enter_scope(&mut self, kind: ScopeKind) {
-        self.scopes.push(Scope::new(kind, Some(self.current)));
+        let entered_after = self.scopes[self.current.0].bindings.len();
+        self.scopes
+            .push(Scope::new(kind, Some(self.current), entered_after));
         self.current = ScopeId(self.scopes.len() - 1);
+        if let ScopeKind::Function(node) = kind {
+            self.function_scopes.insert(node, self.current);
+        }
     }
 
     pub(crate) fn leave_scope(&mut self) {
@@ -406,6 +440,29 @@ impl NameResolver {
     /// The outer symbols the function declared at `node` captures, in order of first use.
     pub fn captures_of(&self, node: NodeId) -> &[SymbolId] {
         self.captures.get(&node).map_or(&[], Vec::as_slice)
+    }
+
+    /// Every scope, in the order they were entered, starting with the builtins.
+    pub fn scopes(&self) -> impl Iterator<Item = (ScopeId, &Scope)> {
+        self.scopes
+            .scopes
+            .iter()
+            .enumerate()
+            .map(|(index, scope)| (ScopeId(index), scope))
+    }
+
+    pub fn scope(&self, id: ScopeId) -> &Scope {
+        &self.scopes.scopes[id.0]
+    }
+
+    /// The scope that binds the value `symbol`.
+    pub fn scope_of(&self, symbol: SymbolId) -> ScopeId {
+        self.scopes.bound_in[&symbol]
+    }
+
+    /// The parameter scope of the function declared at `function`.
+    pub fn function_scope(&self, function: NodeId) -> ScopeId {
+        self.scopes.function_scopes[&function]
     }
 
     /// The type symbol the name in an annotation at `node` refers to.
@@ -934,7 +991,7 @@ mod test {
         let second = table.declare("foo".to_string(), BindingKind::Plain);
         let other = table.declare("another".to_string(), BindingKind::Plain);
 
-        let mut scope = Scope::new(ScopeKind::Block, None);
+        let mut scope = Scope::new(ScopeKind::Block, None, 0);
         scope.bind(first);
         scope.bind(second);
         scope.bind(other);

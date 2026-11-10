@@ -4,6 +4,7 @@ use itertools::{Itertools, izip};
 use ndc_core::static_type::StaticTypeConstructionError;
 use ndc_core::r#struct::{StructInfo, StructRegistry};
 use ndc_core::{StaticType, TypeSignature};
+use ndc_layout::Layout;
 use ndc_lexer::{NumericLiteral, Span};
 use ndc_parser::{
     AssignmentTarget, AssignmentTargetLocation, AugmentedAssignmentPlan, Binding, BindingPattern,
@@ -121,7 +122,16 @@ impl Analyser {
         symbol: SymbolId,
     ) -> ResolvedVar {
         debug_assert_eq!(self.resolver.symbol_name(symbol), name);
-        self.scope_tree.create_local_binding(name, binding, symbol)
+        let var = self.scope_tree.create_local_binding(name, binding, symbol);
+        debug_assert_eq!(
+            var,
+            ResolvedVar::Local {
+                slot: Layout::new(&self.resolver).local_slot(symbol)
+            },
+            "the layout disagrees with the old slot for `{}`",
+            self.resolver.symbol_name(symbol),
+        );
+        var
     }
 
     /// Record a non-fatal analysis error. The analyser continues with a
@@ -524,6 +534,11 @@ impl Analyser {
 
                 self.scope_tree.new_function_scope();
                 self.scope_tree.capture(self.resolver.captures_of(*id));
+                debug_assert_eq!(
+                    self.scope_tree.current_scope_captures(),
+                    Layout::new(&self.resolver).captures(*id),
+                    "the layout disagrees with the old upvalues of a function",
+                );
                 self.return_type_stack.push(None);
                 let parameter_nodes = parameters.iter().map(|p| p.lvalue.id).collect_vec();
                 let param_types =
