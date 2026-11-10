@@ -298,3 +298,43 @@ fn configure_after_a_line_ran_updates_the_globals() {
     let out = String::from_utf8(interp.get_output().unwrap()).unwrap();
     assert_eq!(out.trim(), "1");
 }
+
+/// Run REPL lines that are expected to succeed or fail as marked, and return
+/// the output of the ones that ran.
+fn repl_output_after_failures(lines: &[(&str, bool)]) -> String {
+    let mut interp = {
+        let mut i = Interpreter::capturing();
+        i.configure(ndc_stdlib::register);
+        i
+    };
+    for &(line, succeeds) in lines {
+        let result = interp.eval(line);
+        assert_eq!(result.is_ok(), succeeds, "{line}: {result:?}");
+    }
+    String::from_utf8(interp.get_output().expect("interpreter must have output"))
+        .expect("output must be valid UTF-8")
+}
+
+// A line that fails at runtime still boxed `x` for its closure before failing,
+// so later lines must keep reading `x` through its cell.
+#[test]
+fn failed_line_keeps_the_capture_of_an_earlier_variable() {
+    let out = repl_output_after_failures(&[
+        ("let x = 1;", true),
+        ("let f = fn() => x; [1][5]", false),
+        ("print(x + 1)", true),
+    ]);
+    assert_eq!(out.trim(), "2");
+}
+
+// A line that fails at runtime may already have assigned a value of another
+// type, so later lines must keep the widened type.
+#[test]
+fn failed_line_keeps_the_widened_type_of_an_earlier_variable() {
+    let out = repl_output_after_failures(&[
+        ("let x = 1;", true),
+        ("x = \"abc\"; [1][5]", false),
+        ("print(x.len())", true),
+    ]);
+    assert_eq!(out.trim(), "3");
+}

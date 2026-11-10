@@ -18,6 +18,11 @@ impl SymbolTable {
         SymbolId(self.symbols.len() - 1)
     }
 
+    /// Whether `id` was declared in this table.
+    pub fn contains(&self, id: SymbolId) -> bool {
+        id.0 < self.symbols.len()
+    }
+
     pub fn name(&self, id: SymbolId) -> &str {
         &self.symbols[id.0].name
     }

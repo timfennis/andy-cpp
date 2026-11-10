@@ -41,6 +41,16 @@ impl TypeTable {
             .typ()
     }
 
+    /// Takes the types `later` gives the values this table already has, keeping
+    /// none of the values `later` declared since.
+    pub(crate) fn keep_types_from(&mut self, later: Self) {
+        for (symbol, binding) in later.types {
+            if let Some(known) = self.types.get_mut(&symbol) {
+                *known = binding;
+            }
+        }
+    }
+
     /// Try to update a value's type. Returns `Err` with the annotated type if
     /// the value has an explicit type annotation and cannot be widened.
     pub(crate) fn update_binding_type(

@@ -1,4 +1,4 @@
-use ndc_analyser::Analyser;
+use ndc_analyser::{Analyser, Checkpoint};
 use ndc_analysis::Analysis;
 use ndc_core::FunctionRegistry;
 use ndc_lexer::{Lexer, SourceDb, SourceId, TokenLocation};
@@ -158,7 +158,8 @@ impl Interpreter {
 
     pub fn compile_str(&mut self, input: &str) -> Result<CompiledFunction, InterpreterError> {
         let source_id = self.source_db.add("<input>", input);
-        let (expressions, result, _) = self.parse_and_analyse(input, source_id)?;
+        let checkpoint = self.analyser.checkpoint();
+        let (expressions, result, _) = self.parse_and_analyse(input, source_id, &checkpoint)?;
         Ok(Compiler::compile(expressions.into_iter(), result.analysis)?)
     }
 
@@ -169,7 +170,8 @@ impl Interpreter {
         input: &str,
     ) -> Result<CompiledFunction, InterpreterError> {
         let source_id = self.source_db.add("<input>", input);
-        let (expressions, result, _) = self.parse_and_analyse(input, source_id)?;
+        let checkpoint = self.analyser.checkpoint();
+        let (expressions, result, _) = self.parse_and_analyse(input, source_id, &checkpoint)?;
         Ok(Compiler::compile_unoptimized(
             expressions.into_iter(),
             result.analysis,
@@ -207,14 +209,21 @@ impl Interpreter {
         input: &str,
     ) -> Result<(Value, ExecutionTimings), InterpreterError> {
         let source_id = self.source_db.add(name, input);
-        // Save the analyser state before parsing so we can roll it back if the VM
-        // fails — otherwise the analyser would remember declarations from a line
-        // that never actually ran.
-        let analyser_checkpoint = self.analyser.checkpoint();
-        let (expressions, result, mut timings) = self.parse_and_analyse(input, source_id)?;
+        // Save the analyser state before parsing so it can be rolled back if the
+        // line fails, or after it ran when nothing is kept between evaluations.
+        let checkpoint = self.analyser.checkpoint();
+        let (expressions, result, mut timings) =
+            self.parse_and_analyse(input, source_id, &checkpoint)?;
         let vm_result = self.interpret_vm(input, expressions.into_iter(), result.analysis);
-        if vm_result.is_err() || !self.resumable {
-            self.analyser.restore(analyser_checkpoint);
+        match &vm_result {
+            // The line ran up to the error, so the VM keeps what it did to the
+            // values of earlier lines.
+            Err(InterpreterError::Vm(_)) if self.resumable => {
+                self.analyser.restore_after_failed_run(checkpoint);
+            }
+            Err(_) => self.analyser.restore(checkpoint),
+            Ok(_) if !self.resumable => self.analyser.restore(checkpoint),
+            Ok(_) => {}
         }
         let (value, vm_timings) = vm_result?;
         timings.compiling = vm_timings.compiling;
@@ -222,10 +231,12 @@ impl Interpreter {
         Ok((value, timings))
     }
 
+    /// Parses and analyses `input`, going back to `checkpoint` if analysis fails.
     fn parse_and_analyse(
         &mut self,
         input: &str,
         source_id: SourceId,
+        checkpoint: &Checkpoint,
     ) -> Result<(Vec<ExpressionLocation>, AnalysisResult, ExecutionTimings), InterpreterError> {
         let mut timings = ExecutionTimings::default();
 
@@ -237,7 +248,6 @@ impl Interpreter {
             ndc_parser::Parser::from_tokens(tokens).parse()
         })?;
 
-        let checkpoint = self.analyser.checkpoint();
         measure(&mut timings, Phase::Analysing, || {
             for e in &mut expressions {
                 // Hard errors (structural issues) still abort immediately.
@@ -252,7 +262,7 @@ impl Interpreter {
         })?;
 
         if self.analyser.has_errors() {
-            self.analyser.restore(checkpoint);
+            self.analyser.restore(checkpoint.clone());
             let result = self.analyser.take_result();
             return Err(InterpreterError::Resolver {
                 causes: result.errors,
@@ -399,8 +409,9 @@ mod tests {
     fn one_shot_compilation_runs_the_optimizer() {
         let mut interpreter = Interpreter::one_shot();
         let source_id = interpreter.source_db.add("<test>", "1;");
+        let checkpoint = interpreter.analyser.checkpoint();
         let (expressions, result, _) = interpreter
-            .parse_and_analyse("1;", source_id)
+            .parse_and_analyse("1;", source_id, &checkpoint)
             .expect("analysis should succeed");
 
         let compiled = Interpreter::compile_one_shot(expressions.into_iter(), result.analysis)

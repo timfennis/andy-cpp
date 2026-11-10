@@ -28,9 +28,9 @@ pub struct AnalysisResult {
     pub errors: Vec<AnalysisError>,
 }
 
-/// A snapshot of the analyser's persistent state: the resolver, the scope
-/// tree, the struct types and the number of registered structs at the time of
-/// the snapshot. Restoring it discards every binding and struct declared since.
+/// A snapshot of the analyser's persistent state: the resolver, the types of
+/// the values declared so far, the struct types and the number of registered
+/// structs. Restoring it discards every binding and struct declared since.
 #[derive(Debug, Clone)]
 pub struct Checkpoint {
     resolver: NameResolver,
@@ -94,9 +94,22 @@ impl Analyser {
         }
     }
 
+    /// Goes back to `checkpoint`, for a batch that never ran.
     pub fn restore(&mut self, checkpoint: Checkpoint) {
         self.resolver = checkpoint.resolver;
         self.types = checkpoint.types;
+        self.struct_types = checkpoint.struct_types;
+        self.struct_registry.truncate(checkpoint.struct_count);
+    }
+
+    /// Goes back to `checkpoint` for a batch that failed while running. What it
+    /// declared is forgotten, since the VM drops those values, but what it did
+    /// to values declared before stays: running may already have boxed them for
+    /// a closure or assigned them a value of their widened type.
+    pub fn restore_after_failed_run(&mut self, checkpoint: Checkpoint) {
+        self.resolver.rewind_keeping_captures(checkpoint.resolver);
+        let later_types = std::mem::replace(&mut self.types, checkpoint.types);
+        self.types.keep_types_from(later_types);
         self.struct_types = checkpoint.struct_types;
         self.struct_registry.truncate(checkpoint.struct_count);
     }
@@ -107,6 +120,7 @@ impl Analyser {
         let mut result = std::mem::take(&mut self.result);
         result.errors = std::mem::take(&mut self.errors);
         result.analysis.top_level_frame_size = Layout::new(&self.resolver).frame_size(None);
+        self.resolver.end_batch();
         result
     }
 
