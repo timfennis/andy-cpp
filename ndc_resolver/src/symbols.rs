@@ -1,5 +1,5 @@
 #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
-pub(crate) struct SymbolId(usize);
+pub struct SymbolId(usize);
 
 #[derive(Debug, Clone)]
 struct Symbol {
@@ -8,27 +8,27 @@ struct Symbol {
 }
 
 #[derive(Debug, Default, Clone)]
-pub(crate) struct SymbolTable {
+pub struct SymbolTable {
     symbols: Vec<Symbol>,
 }
 
 impl SymbolTable {
-    pub(crate) fn declare(&mut self, name: String, kind: BindingKind) -> SymbolId {
+    pub fn declare(&mut self, name: String, kind: BindingKind) -> SymbolId {
         self.symbols.push(Symbol { name, kind });
         SymbolId(self.symbols.len() - 1)
     }
 
-    pub(crate) fn name(&self, id: SymbolId) -> &str {
+    pub fn name(&self, id: SymbolId) -> &str {
         &self.symbols[id.0].name
     }
 
-    pub(crate) fn kind(&self, id: SymbolId) -> BindingKind {
+    pub fn kind(&self, id: SymbolId) -> BindingKind {
         self.symbols[id.0].kind
     }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum BindingKind {
+pub enum BindingKind {
     /// Example: function declaration like `fn x(y)`: these join into an overload set
     Function,
     /// Example: bindings, parameters, and loop variables: these don't participate in overloading
