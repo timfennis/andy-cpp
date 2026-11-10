@@ -710,7 +710,7 @@ impl Parser {
                     };
 
                     let span = expr.span;
-                    let (function, arguments) = match expr.expression {
+                    let (function, arguments, method_syntax) = match expr.expression {
                         Expression::MemberAccess {
                             receiver,
                             member,
@@ -728,6 +728,7 @@ impl Parser {
                                     .to_location(member_span),
                                 ),
                                 arguments,
+                                true,
                             )
                         }
                         expression => (
@@ -737,6 +738,7 @@ impl Parser {
                                 id: expr.id,
                             }),
                             arguments,
+                            false,
                         ),
                     };
 
@@ -744,6 +746,7 @@ impl Parser {
                         expression: Expression::Call {
                             function,
                             arguments,
+                            method_syntax,
                         },
                         span: span.merge(arguments_span),
                         id: NodeId::next(),
@@ -827,6 +830,7 @@ impl Parser {
                                 .to_location(bracket_span),
                             ),
                             arguments: vec![expr, index_expression],
+                            method_syntax: false,
                         },
                         span,
                         id: NodeId::next(),

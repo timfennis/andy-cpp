@@ -581,6 +581,7 @@ impl NameResolver {
             Expression::Call {
                 function,
                 arguments,
+                ..
             }
             | Expression::OperatorCall {
                 function,

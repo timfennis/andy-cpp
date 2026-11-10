@@ -452,6 +452,7 @@ impl Compiler {
             Expression::Call {
                 function,
                 arguments,
+                ..
             }
             | Expression::OperatorCall {
                 function,

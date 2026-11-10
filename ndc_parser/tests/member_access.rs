@@ -39,11 +39,13 @@ fn invoked_dot_is_call_with_receiver_as_first_argument() {
     let Expression::Call {
         function,
         arguments,
+        method_syntax,
     } = expression.expression
     else {
         panic!("expected call, found {:?}", expression.expression);
     };
 
+    assert!(method_syntax, "a dot call is marked as method syntax");
     assert!(matches!(
         function.expression,
         Expression::Identifier { ref name, .. } if name == "bar"
@@ -143,4 +145,15 @@ fn index_is_not_a_declaration_target() {
         .expect_err("`let` must not accept an index target");
 
     assert!(error.to_string().contains("Invalid declaration target"));
+}
+
+#[test]
+fn plain_and_parenthesized_calls_are_not_method_syntax() {
+    for source in ["bar(foo)", "(foo.bar)()"] {
+        let expression = parse_one(source);
+        let Expression::Call { method_syntax, .. } = expression.expression else {
+            panic!("expected call, found {:?}", expression.expression);
+        };
+        assert!(!method_syntax, "{source} is not a method call");
+    }
 }

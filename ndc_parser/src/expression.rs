@@ -186,6 +186,9 @@ pub enum Expression {
     Call {
         function: Box<ExpressionLocation>,
         arguments: Vec<ExpressionLocation>,
+        /// Written as a method call: `xs.len()` is lowered to `len(xs)` with
+        /// this set. The dot form always names a function.
+        method_syntax: bool,
     },
     OperatorCall {
         function: Box<ExpressionLocation>,
@@ -395,6 +398,7 @@ impl AssignmentTarget {
             Expression::Call {
                 function,
                 arguments,
+                ..
             } if is_index_call(function, arguments) => true,
             Expression::List { values } | Expression::Tuple { values } => values
                 .iter()
@@ -504,6 +508,7 @@ impl TryFrom<ExpressionLocation> for AssignmentTargetLocation {
             Expression::Call {
                 function,
                 mut arguments,
+                ..
             } if is_index_call(&function, &arguments) => {
                 let index = arguments.remove(1);
                 let container = arguments.remove(0);
