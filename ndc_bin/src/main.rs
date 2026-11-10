@@ -16,6 +16,8 @@ mod repl;
 
 mod docs;
 mod highlighter;
+#[cfg(unix)]
+mod isolation;
 #[cfg(feature = "trace")]
 mod span_tracer;
 
