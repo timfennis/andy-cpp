@@ -1,6 +1,7 @@
 use crate::Layout;
 use Slot::{Global, Local};
 use ndc_analysis::CaptureSource;
+use ndc_core::StaticType;
 use ndc_lexer::{Lexer, SourceId};
 use ndc_parser::Parser;
 use ndc_resolver::{NameResolver, ScopeKind};
@@ -10,7 +11,10 @@ fn resolve_with_natives(source: &str, natives: &[&str]) -> NameResolver {
         .collect::<Result<Vec<_>, _>>()
         .expect("lex failed");
     let statements = Parser::from_tokens(tokens).parse().expect("parse failed");
-    let mut resolver = NameResolver::new(natives.iter().copied());
+    let mut resolver = NameResolver::new(
+        natives.iter().copied(),
+        StaticType::BUILTIN_TYPE_NAMES.iter().copied(),
+    );
     for statement in &statements {
         resolver.resolve_statement(statement);
     }

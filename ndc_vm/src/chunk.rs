@@ -1,8 +1,8 @@
 use crate::Value;
+use crate::hash_map::HashMap;
 use ahash::AHashSet;
 use ndc_analysis::CaptureSource;
 use ndc_core::StaticType;
-use ndc_core::hash_map::HashMap;
 use ndc_lexer::Span;
 use std::rc::Rc;
 

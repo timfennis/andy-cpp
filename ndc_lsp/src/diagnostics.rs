@@ -1,10 +1,16 @@
-use ndc_analyser::AnalysisError;
-use ndc_lexer::{Lexer, SourceId, Span, TokenLocation};
+use ndc_interpreter::{AnalysisError, InterpreterError};
+use ndc_lexer::{SourceId, Span};
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity};
 
 use crate::util::span_to_range;
 
-fn make_diagnostic(text: &str, span: Span, message: String) -> Diagnostic {
+/// An LSP diagnostic has no separate note channel the way a terminal report
+/// does, so help text is folded into the message instead of being dropped.
+fn make_diagnostic(text: &str, span: Span, message: String, help: Option<&str>) -> Diagnostic {
+    let message = match help {
+        Some(help) => format!("{message}. {help}"),
+        None => message,
+    };
     Diagnostic {
         range: span_to_range(text, span),
         severity: Some(DiagnosticSeverity::ERROR),
@@ -14,37 +20,66 @@ fn make_diagnostic(text: &str, span: Span, message: String) -> Diagnostic {
 }
 
 /// Convert an [`AnalysisError`] into an LSP [`Diagnostic`].
-///
-/// An LSP diagnostic has no separate note channel the way a terminal report
-/// does, so help text is folded into the message instead of being dropped.
 pub fn analysis_error_to_diagnostic(text: &str, err: &AnalysisError) -> Diagnostic {
-    let message = match err.help_text() {
-        Some(help) => format!("{err}. {help}"),
-        None => err.to_string(),
-    };
-    make_diagnostic(text, err.span(), message)
+    make_diagnostic(text, err.span(), err.to_string(), err.help_text())
 }
 
-/// Lex and parse the source text, returning any diagnostics and (on success)
-/// the token stream's parsed AST.
-pub fn lex_and_parse(text: &str) -> (Vec<Diagnostic>, Option<Vec<ndc_parser::ExpressionLocation>>) {
-    let scanner = Lexer::new(text, SourceId::SYNTHETIC);
-    let tokens: Result<Vec<TokenLocation>, _> = scanner.collect();
-
-    let tokens = match tokens {
-        Ok(t) => t,
-        Err(err) => {
-            let diag = make_diagnostic(text, err.location(), format!("{err}"));
-            return (vec![diag], None);
+/// Convert an error that stopped the analysis of `text` into LSP diagnostics.
+pub fn interpreter_error_to_diagnostics(text: &str, err: &InterpreterError) -> Vec<Diagnostic> {
+    match err {
+        InterpreterError::Lexer { cause } => {
+            vec![make_diagnostic(
+                text,
+                cause.span(),
+                cause.to_string(),
+                cause.help_text(),
+            )]
         }
-    };
-
-    let mut parser = ndc_parser::Parser::from_tokens(tokens);
-    match parser.parse() {
-        Ok(ast) => (vec![], Some(ast)),
-        Err(err) => {
-            let diag = make_diagnostic(text, err.location(), format!("{err}"));
-            (vec![diag], None)
+        InterpreterError::Parser { cause } => {
+            vec![make_diagnostic(
+                text,
+                cause.span(),
+                cause.to_string(),
+                cause.help_text(),
+            )]
         }
+        InterpreterError::Analysis { causes } => causes
+            .iter()
+            .map(|cause| analysis_error_to_diagnostic(text, cause))
+            .collect(),
+        InterpreterError::Compiler { cause } => {
+            vec![make_diagnostic(text, cause.span(), cause.to_string(), None)]
+        }
+        InterpreterError::Vm(err) => {
+            let span = err.span.unwrap_or(Span::new(SourceId::SYNTHETIC, 0, 0));
+            vec![make_diagnostic(text, span, err.message.clone(), None)]
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndc_interpreter::Interpreter;
+
+    fn syntax_diagnostics(source: &str) -> Vec<Diagnostic> {
+        let err = Interpreter::capturing()
+            .analyse_str(source)
+            .expect_err("source should not lex or parse");
+        interpreter_error_to_diagnostics(source, &err)
+    }
+
+    #[test]
+    fn a_parse_error_is_reported_where_it_happens() {
+        let diagnostics = syntax_diagnostics("let x = 1;\nlet = 2;");
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].range.start.line, 1);
+    }
+
+    #[test]
+    fn a_lexer_error_is_reported_where_it_happens() {
+        let diagnostics = syntax_diagnostics("let x = 1;\nlet y = \"open");
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].range.start.line, 1);
     }
 }

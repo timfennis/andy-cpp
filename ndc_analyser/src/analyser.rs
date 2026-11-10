@@ -58,7 +58,10 @@ impl Analyser {
     /// An analyser for programs that can call `natives`, given as name and
     /// type in registry order: the first is the native in global slot 0.
     pub fn new(natives: Vec<(String, StaticType)>) -> Self {
-        let resolver = NameResolver::new(natives.iter().map(|(name, _)| name.as_str()));
+        let resolver = NameResolver::new(
+            natives.iter().map(|(name, _)| name.as_str()),
+            StaticType::BUILTIN_TYPE_NAMES.iter().copied(),
+        );
         let mut types = TypeTable::default();
         for ((_, typ), symbol) in natives.into_iter().zip(resolver.native_symbols()) {
             types.declare(symbol, TypeBinding::Inferred(typ));

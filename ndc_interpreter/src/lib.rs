@@ -9,7 +9,8 @@ use ndc_vm::{OutputSink, Vm};
 use std::rc::Rc;
 use timing::{Phase, measure};
 
-pub use ndc_analyser::AnalysisResult;
+pub use ndc_analyser::{AnalysisError, AnalysisResult};
+pub use ndc_vm::duration::format_duration;
 #[cfg(feature = "trace")]
 pub use ndc_vm::tracer;
 pub use ndc_vm::{NativeFunction, Value};
@@ -305,9 +306,7 @@ pub enum InterpreterError {
         cause: ndc_parser::Error,
     },
     #[error("Error during static analysis")]
-    Analysis {
-        causes: Vec<ndc_analyser::AnalysisError>,
-    },
+    Analysis { causes: Vec<AnalysisError> },
     #[error("Compilation error")]
     Compiler {
         #[from]

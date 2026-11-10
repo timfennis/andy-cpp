@@ -10,10 +10,9 @@ pub use string::VmString;
 
 use ndc_analysis::ResolvedVar;
 
+use crate::hash_map::{DefaultHasher, HashMap};
 use crate::iterator::SharedIterator;
 use ndc_core::StaticType;
-use ndc_core::compare::FallibleOrd;
-use ndc_core::hash_map::{DefaultHasher, HashMap};
 use ndc_core::r#struct::StructInfo;
 use std::cell::RefCell;
 use std::cmp::{Ordering, Reverse};
@@ -933,10 +932,9 @@ impl PartialOrd for Object {
     }
 }
 
-impl FallibleOrd for Value {
-    type Error = String;
-
-    fn try_cmp(&self, other: &Self) -> Result<Ordering, String> {
+impl Value {
+    /// Like `partial_cmp`, but says why two values can't be compared.
+    pub fn try_cmp(&self, other: &Self) -> Result<Ordering, String> {
         self.partial_cmp(other).ok_or_else(|| {
             format!(
                 "{} cannot be compared to {}",
@@ -945,9 +943,7 @@ impl FallibleOrd for Value {
             )
         })
     }
-}
 
-impl Value {
     /// Compare a comparator return value to zero, returning the ordering.
     /// Comparators return a number: negative means less, zero means equal, positive means greater.
     pub fn cmp_to_zero(&self) -> Result<Ordering, String> {

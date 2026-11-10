@@ -1,5 +1,6 @@
 use crate::chunk::OpCode;
 use crate::error::VmError;
+use crate::hash_map::{DefaultHasher, HashMap};
 use crate::iterator::{
     HeapIter, MapIter, RangeInclusiveIter, RangeIter, SeqIter, StringIter, UnboundedRangeIter,
     VmIterator,
@@ -7,7 +8,6 @@ use crate::iterator::{
 use crate::value::{CompiledFunction, Function, NativeFunc, NativeFunction};
 use crate::{ClosureFunction, Object, Value};
 use ndc_analysis::{CaptureSource, ResolvedVar};
-use ndc_core::hash_map::{DefaultHasher, HashMap};
 use ndc_lexer::Span;
 use std::cell::RefCell;
 use std::hash::{Hash, Hasher};

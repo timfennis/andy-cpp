@@ -3,9 +3,14 @@ use super::{
 };
 use crate::symbols::{BindingKind, SymbolId};
 use itertools::Itertools;
-use ndc_core::NodeId;
+use ndc_core::{NodeId, StaticType};
 use ndc_lexer::{Lexer, SourceId};
 use ndc_parser::Parser;
+
+/// A resolver that knows the given functions and the built-in types.
+fn new_resolver<'a>(functions: impl IntoIterator<Item = &'a str>) -> NameResolver {
+    NameResolver::new(functions, StaticType::BUILTIN_TYPE_NAMES.iter().copied())
+}
 
 fn resolve_source(resolver: &mut NameResolver, source: &str) -> Result<(), NameResolutionError> {
     let tokens = Lexer::new(source, SourceId::new(0))
@@ -65,7 +70,7 @@ fn builtin(resolver: &NameResolver, name: &str) -> SymbolId {
 
 /// The name of the `UnknownName` error that resolving `source` reports.
 fn unknown_name(source: &str) -> String {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     match resolve_source(&mut resolver, source) {
         Err(NameResolutionError::UnknownName { name, .. }) => name,
         other => panic!("expected an unknown name in {source:?}, got {other:?}"),
@@ -124,7 +129,7 @@ fn only_reference(resolver: &NameResolver) -> &Candidates {
 
 #[test]
 fn initializer_reads_outer_binding_before_shadowing() {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     resolve_source(&mut resolver, "let x = 1; { let x = x; x; } x;").unwrap();
 
     let [outer, inner] = declared(&resolver);
@@ -137,7 +142,7 @@ fn initializer_reads_outer_binding_before_shadowing() {
 
 #[test]
 fn self_reference_reports_the_initializer_location() {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     let source = "let missing = missing;";
     let error = resolve_source(&mut resolver, source).unwrap_err();
     assert_eq!(
@@ -156,7 +161,7 @@ fn self_reference_reports_the_initializer_location() {
 
 #[test]
 fn destructuring_resolves_all_initializers_before_binding_names() {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     resolve_source(
         &mut resolver,
         "let x = 1; let y = 2; let (x, (y, z)) = (y, (x, 3)); x; y; z;",
@@ -174,7 +179,7 @@ fn destructuring_resolves_all_initializers_before_binding_names() {
 
 #[test]
 fn assignment_reuses_declared_symbols() {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     resolve_source(
         &mut resolver,
         "let x = 1; let y = 2; (x, y) = (y, x); x = 3;",
@@ -189,7 +194,7 @@ fn assignment_reuses_declared_symbols() {
 
 #[test]
 fn member_and_index_targets_resolve_receivers_without_declaring_names() {
-    let mut resolver = NameResolver::new(["field", "field=", "[]="]);
+    let mut resolver = new_resolver(["field", "field=", "[]="]);
     let field = builtin(&resolver, "field");
     resolve_source(
         &mut resolver,
@@ -244,7 +249,7 @@ fn traversal_reports_unknown_names_in_expression_children() {
         "missing.field = 1;",
     ];
     for source in sources {
-        let mut resolver = NameResolver::new(["callee", "+"]);
+        let mut resolver = new_resolver(["callee", "+"]);
         let error = resolve_source(&mut resolver, source).expect_err(source);
         let NameResolutionError::UnknownName { name, span } = error else {
             panic!("expected an unknown name in {source:?}, got {error:?}");
@@ -256,7 +261,7 @@ fn traversal_reports_unknown_names_in_expression_children() {
 
 #[test]
 fn errors_restore_visibility_after_nested_blocks() {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     resolve_source(
         &mut resolver,
         "let x = 1; { let x = 2; { let local = 3; missing; } }",
@@ -274,7 +279,7 @@ fn errors_restore_visibility_after_nested_blocks() {
 
 #[test]
 fn later_comprehension_clauses_see_earlier_binders() {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     resolve_source(
         &mut resolver,
         "let xs = [[true]]; [y for x in xs, y in x, if y];",
@@ -291,7 +296,7 @@ fn later_comprehension_clauses_see_earlier_binders() {
 
 #[test]
 fn iterable_uses_the_outer_binding_of_its_own_name() {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     resolve_source(&mut resolver, "let x = [1]; [x for x in x]; x;").unwrap();
 
     let [outer, inner] = declared(&resolver);
@@ -309,7 +314,7 @@ fn loop_body_forms_resolve_names_and_restore_scope_on_errors() {
         "%{x: missing for x in [1]};",
         "%{:missing, x: x for x in [1]};",
     ] {
-        let mut resolver = NameResolver::new([]);
+        let mut resolver = new_resolver([]);
         let error = resolve_source(&mut resolver, source).unwrap_err();
         assert!(
             matches!(error, NameResolutionError::UnknownName { ref name, .. } if name == "missing"),
@@ -325,7 +330,7 @@ fn loop_body_forms_resolve_names_and_restore_scope_on_errors() {
 
 #[test]
 fn candidates_in_one_scope_are_newest_first() {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     resolve_source(&mut resolver, "let x = 1; let x = 2; x;").unwrap();
 
     let [first, second] = declared(&resolver);
@@ -334,7 +339,7 @@ fn candidates_in_one_scope_are_newest_first() {
 
 #[test]
 fn candidates_are_grouped_by_scope_without_empty_scopes() {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     resolve_source(&mut resolver, "let x = 1; { let x = 2; let x = 3; { x; } }").unwrap();
 
     let [x1, x2, x3] = declared(&resolver);
@@ -343,7 +348,7 @@ fn candidates_are_grouped_by_scope_without_empty_scopes() {
 
 #[test]
 fn assignment_targets_resolve_to_the_innermost_symbol() {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     resolve_source(&mut resolver, "let x = 1; { let x = 2; x = 3; }").unwrap();
 
     let [_, inner] = declared(&resolver);
@@ -355,7 +360,7 @@ fn assignment_targets_resolve_to_the_innermost_symbol() {
 
 #[test]
 fn candidates_include_functions_and_plain_bindings() {
-    let mut resolver = NameResolver::new(["len"]);
+    let mut resolver = new_resolver(["len"]);
     let native = builtin(&resolver, "len");
     resolve_source(&mut resolver, "let len = 99; len;").unwrap();
 
@@ -367,7 +372,7 @@ fn candidates_include_functions_and_plain_bindings() {
 
 #[test]
 fn builtins_resolve_as_functions() {
-    let mut resolver = NameResolver::new(["len"]);
+    let mut resolver = new_resolver(["len"]);
     let native = builtin(&resolver, "len");
     resolve_source(&mut resolver, "len;").unwrap();
 
@@ -377,7 +382,7 @@ fn builtins_resolve_as_functions() {
 
 #[test]
 fn overloaded_builtins_share_a_group_newest_first() {
-    let mut resolver = NameResolver::new(["max", "max"]);
+    let mut resolver = new_resolver(["max", "max"]);
     resolve_source(&mut resolver, "max;").unwrap();
 
     let [group] = only_reference(&resolver).0.as_slice() else {
@@ -396,7 +401,7 @@ fn overloaded_builtins_share_a_group_newest_first() {
 
 #[test]
 fn function_names_are_visible_in_their_own_body() {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     resolve_source(&mut resolver, "fn fact(n) { fact(n); }").unwrap();
 
     let [fact, n] = declared(&resolver);
@@ -408,7 +413,7 @@ fn function_names_are_visible_in_their_own_body() {
 
 #[test]
 fn parameters_are_only_visible_inside_the_function() {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     resolve_source(&mut resolver, "fn f(x) { x; }").unwrap();
 
     assert_eq!(unknown_name("fn f(x) { 1; } x;"), "x");
@@ -416,7 +421,7 @@ fn parameters_are_only_visible_inside_the_function() {
 
 #[test]
 fn function_overloads_share_a_group_newest_first() {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     resolve_source(&mut resolver, "fn f(x) { 1; } fn f(x, y) { 1; } f;").unwrap();
 
     let [f1, _, f2, _, _] = declared(&resolver);
@@ -434,7 +439,7 @@ fn lambdas_do_not_bind_a_name() {
 
 #[test]
 fn named_function_expressions_bind_in_the_enclosing_scope() {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     resolve_source(&mut resolver, "let g = fn h(n) { n; }; h;").unwrap();
 
     let [h, n, g] = declared(&resolver);
@@ -445,7 +450,7 @@ fn named_function_expressions_bind_in_the_enclosing_scope() {
 
 #[test]
 fn function_bodies_see_enclosing_bindings() {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     resolve_source(&mut resolver, "let y = 1; fn f(x) { y; }").unwrap();
 
     let [y, _, _] = declared(&resolver);
@@ -454,7 +459,7 @@ fn function_bodies_see_enclosing_bindings() {
 
 #[test]
 fn duplicate_parameters_are_rejected() {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     let source = "fn f(x, x) { 1; }";
     let error = resolve_source(&mut resolver, source).unwrap_err();
     assert_eq!(error.to_string(), "Illegal redefinition of parameter x");
@@ -469,7 +474,7 @@ fn duplicate_parameters_are_rejected() {
 
 #[test]
 fn errors_in_function_bodies_restore_scope() {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     resolve_source(&mut resolver, "fn f(x) { missing; }").unwrap_err();
 
     assert_eq!(resolver.scopes.lookup("x", &resolver.symbols), None);
@@ -486,7 +491,7 @@ fn functions_cannot_redefine_variables_in_the_same_scope() {
         (&[], "fn f(a) => fn a() { 1; };"),
     ];
     for (builtins, source) in cases {
-        let mut resolver = NameResolver::new(builtins.iter().copied());
+        let mut resolver = new_resolver(builtins.iter().copied());
         let error = resolve_source(&mut resolver, source).expect_err(source);
         assert_eq!(
             error.to_string(),
@@ -527,14 +532,14 @@ fn functions_may_share_names_with_variables_in_other_scopes() {
         (&[], "fn f(a) { fn a() { 1; } }"),
     ];
     for (builtins, source) in cases {
-        let mut resolver = NameResolver::new(builtins.iter().copied());
+        let mut resolver = new_resolver(builtins.iter().copied());
         resolve_source(&mut resolver, source).unwrap_or_else(|error| panic!("{source}: {error:?}"));
     }
 }
 
 #[test]
 fn scopes_record_their_kind_in_creation_order() {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     resolve_source(&mut resolver, "fn f(x) { 1; } for i in [1] { 1; }").unwrap();
 
     let [f, _, _] = declared(&resolver);
@@ -565,7 +570,7 @@ fn scopes_record_their_kind_in_creation_order() {
 
 #[test]
 fn functions_capture_outer_bindings() {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     resolve_source(&mut resolver, "let x = 1; fn f() { x; }").unwrap();
 
     let [x, _] = declared(&resolver);
@@ -579,7 +584,7 @@ fn functions_capture_outer_bindings() {
 #[test]
 fn blocks_are_not_function_boundaries() {
     for source in ["let x = 1; { { x; } }", "fn f(a) { { a; } }"] {
-        let mut resolver = NameResolver::new([]);
+        let mut resolver = new_resolver([]);
         resolve_source(&mut resolver, source).unwrap();
 
         assert!(resolver.captures.is_empty(), "{source}");
@@ -589,7 +594,7 @@ fn blocks_are_not_function_boundaries() {
 
 #[test]
 fn captures_pass_through_intermediate_functions() {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     resolve_source(
         &mut resolver,
         "fn outer() { let x = 1; fn middle() { fn inner() { x; } } }",
@@ -607,7 +612,7 @@ fn captures_pass_through_intermediate_functions() {
 
 #[test]
 fn lambdas_capture_under_their_own_node() {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     resolve_source(&mut resolver, "let x = 1; let g = fn() { x; };").unwrap();
 
     let [x, _] = declared(&resolver);
@@ -619,7 +624,7 @@ fn lambdas_capture_under_their_own_node() {
 
 #[test]
 fn builtins_are_never_captured() {
-    let mut resolver = NameResolver::new(["len"]);
+    let mut resolver = new_resolver(["len"]);
     resolve_source(&mut resolver, "fn f() { len; }").unwrap();
 
     assert!(resolver.captures.is_empty());
@@ -628,7 +633,7 @@ fn builtins_are_never_captured() {
 
 #[test]
 fn assignments_capture_their_target() {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     resolve_source(&mut resolver, "let x = 1; fn f() { x = 2; }").unwrap();
 
     let [x, _] = declared(&resolver);
@@ -641,7 +646,7 @@ fn assignments_capture_their_target() {
 
 #[test]
 fn every_candidate_is_captured() {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     resolve_source(
         &mut resolver,
         "fn outer() { fn h(a) { 1; } fn h(a, b) { 1; } fn inner() { h; } }",
@@ -658,7 +663,7 @@ fn every_candidate_is_captured() {
 
 #[test]
 fn recursive_functions_capture_themselves() {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     resolve_source(&mut resolver, "fn fact(n) { fact(n); }").unwrap();
 
     let [fact, _] = declared(&resolver);
@@ -670,7 +675,7 @@ fn recursive_functions_capture_themselves() {
 
 #[test]
 fn captures_are_listed_once_in_first_use_order() {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     resolve_source(&mut resolver, "let a = 1; let b = 2; fn f() { b; a; b; }").unwrap();
 
     let [a, b, _] = declared(&resolver);
@@ -682,7 +687,7 @@ fn captures_are_listed_once_in_first_use_order() {
 
 #[test]
 fn loop_variables_can_be_captured() {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     resolve_source(&mut resolver, "for i in [1] { let g = fn() { i; }; }").unwrap();
 
     let [i, _] = declared(&resolver);
@@ -692,7 +697,7 @@ fn loop_variables_can_be_captured() {
 #[test]
 fn block_scoped_variables_can_be_captured() {
     // The shape from #227: `y` must outlive its block for `g` to read it.
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     resolve_source(&mut resolver, "let g = 0; { let y = 1; g = fn() { y; }; }").unwrap();
 
     let [_, y] = declared(&resolver);
@@ -701,7 +706,7 @@ fn block_scoped_variables_can_be_captured() {
 
 #[test]
 fn augmented_assignment_finds_the_plain_operator() {
-    let mut resolver = NameResolver::new(["+"]);
+    let mut resolver = new_resolver(["+"]);
     let plus = builtin(&resolver, "+");
     resolve_source(&mut resolver, "let x = 1; x += 2;").unwrap();
 
@@ -717,7 +722,7 @@ fn augmented_assignment_finds_the_plain_operator() {
 
 #[test]
 fn augmented_assignment_finds_both_operations() {
-    let mut resolver = NameResolver::new(["++", "++="]);
+    let mut resolver = new_resolver(["++", "++="]);
     let concat = builtin(&resolver, "++");
     let append = builtin(&resolver, "++=");
     resolve_source(&mut resolver, "let xs = []; xs ++= [1];").unwrap();
@@ -729,13 +734,13 @@ fn augmented_assignment_finds_both_operations() {
 
 #[test]
 fn augmented_assignment_resolves_index_and_member_targets() {
-    let mut resolver = NameResolver::new(["+", "[]", "[]="]);
+    let mut resolver = new_resolver(["+", "[]", "[]="]);
     resolve_source(&mut resolver, "let xs = [1]; let i = 0; xs[i] += 1;").unwrap();
     let [xs, i] = declared(&resolver);
     assert_eq!(uses(&resolver, xs), 1);
     assert_eq!(uses(&resolver, i), 1);
 
-    let mut resolver = NameResolver::new(["+", "x", "x="]);
+    let mut resolver = new_resolver(["+", "x", "x="]);
     resolve_source(&mut resolver, "let p = (); p.x += 1;").unwrap();
     let [p] = declared(&resolver);
     assert_eq!(uses(&resolver, p), 1);
@@ -743,7 +748,7 @@ fn augmented_assignment_resolves_index_and_member_targets() {
 
 #[test]
 fn augmented_assignment_rejects_sequence_targets() {
-    let mut resolver = NameResolver::new(["+"]);
+    let mut resolver = new_resolver(["+"]);
     let error = resolve_source(&mut resolver, "let a = 1; let b = 2; (a, b) += 1;").unwrap_err();
 
     assert_eq!(
@@ -764,7 +769,7 @@ fn augmented_assignment_without_any_operator_is_unknown() {
 
 #[test]
 fn augmented_assignment_captures_its_target() {
-    let mut resolver = NameResolver::new(["+"]);
+    let mut resolver = new_resolver(["+"]);
     resolve_source(&mut resolver, "let x = 1; fn f() { x += 1; }").unwrap();
 
     let [x, _] = declared(&resolver);
@@ -777,7 +782,7 @@ fn augmented_assignment_captures_its_target() {
 
 #[test]
 fn natives_resolve_as_properties() {
-    let mut resolver = NameResolver::new(["len"]);
+    let mut resolver = new_resolver(["len"]);
     let len = builtin(&resolver, "len");
     resolve_source(&mut resolver, "[1].len;").unwrap();
 
@@ -786,7 +791,7 @@ fn natives_resolve_as_properties() {
 
 #[test]
 fn user_functions_resolve_as_properties() {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     resolve_source(&mut resolver, "fn double(x) { x; } 5.double;").unwrap();
 
     let [double, _] = declared(&resolver);
@@ -796,7 +801,7 @@ fn user_functions_resolve_as_properties() {
 #[test]
 fn getters_keep_same_named_variables_as_candidates() {
     // The type pass skips the variable because it can't be called.
-    let mut resolver = NameResolver::new(["x"]);
+    let mut resolver = new_resolver(["x"]);
     let native = builtin(&resolver, "x");
     resolve_source(&mut resolver, "let p = 1; let x = 99; p.x;").unwrap();
 
@@ -806,7 +811,7 @@ fn getters_keep_same_named_variables_as_candidates() {
 
 #[test]
 fn getters_are_keyed_by_the_member_access_node() {
-    let mut resolver = NameResolver::new(["b", "c"]);
+    let mut resolver = new_resolver(["b", "c"]);
     resolve_source(&mut resolver, "let a = 1; a.b.c;").unwrap();
 
     // One lookup per member access; none of them under the receiver `a`.
@@ -822,7 +827,7 @@ fn getters_are_keyed_by_the_member_access_node() {
 // A member write also resolves the getter: the target's type is what it returns.
 #[test]
 fn member_writes_resolve_the_setter_and_the_getter() {
-    let mut resolver = NameResolver::new(["x", "x="]);
+    let mut resolver = new_resolver(["x", "x="]);
     let getter = builtin(&resolver, "x");
     let setter = builtin(&resolver, "x=");
     resolve_source(&mut resolver, "let p = 1; p.x = 5;").unwrap();
@@ -833,7 +838,7 @@ fn member_writes_resolve_the_setter_and_the_getter() {
 
 #[test]
 fn index_writes_resolve_the_setter_only() {
-    let mut resolver = NameResolver::new(["[]="]);
+    let mut resolver = new_resolver(["[]="]);
     let setter = builtin(&resolver, "[]=");
     resolve_source(&mut resolver, "let xs = [1]; xs[0] = 2;").unwrap();
 
@@ -843,7 +848,7 @@ fn index_writes_resolve_the_setter_only() {
 
 #[test]
 fn augmented_member_assignment_resolves_getter_and_setter() {
-    let mut resolver = NameResolver::new(["x", "x=", "+"]);
+    let mut resolver = new_resolver(["x", "x=", "+"]);
     let getter = builtin(&resolver, "x");
     let setter = builtin(&resolver, "x=");
     resolve_source(&mut resolver, "let p = 1; p.x += 1;").unwrap();
@@ -859,7 +864,7 @@ fn augmented_member_assignment_resolves_getter_and_setter() {
 
 #[test]
 fn augmented_index_assignment_resolves_getter_and_setter() {
-    let mut resolver = NameResolver::new(["[]", "[]=", "+"]);
+    let mut resolver = new_resolver(["[]", "[]=", "+"]);
     let getter = builtin(&resolver, "[]");
     let setter = builtin(&resolver, "[]=");
     resolve_source(&mut resolver, "let xs = [1]; xs[0] += 1;").unwrap();
@@ -886,7 +891,7 @@ fn type_names(resolver: &NameResolver) -> Vec<&str> {
 
 #[test]
 fn builtin_type_names_resolve_including_nested_ones() {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     resolve_source(&mut resolver, "let m: Map<String, (Int, List<Bool>)> = 1;").unwrap();
 
     assert_eq!(
@@ -910,7 +915,7 @@ fn unknown_types_are_reported_in_every_annotation_position() {
         "fn f() -> Nope { 1; }",
         "1 as Nope;",
     ] {
-        let mut resolver = NameResolver::new([]);
+        let mut resolver = new_resolver([]);
         let error = resolve_source(&mut resolver, source).expect_err(source);
         assert_eq!(error.to_string(), "unknown type `Nope`", "{source}");
         let NameResolutionError::UnknownType { span, .. } = error else {
@@ -928,7 +933,7 @@ fn unknown_types_are_reported_in_every_annotation_position() {
 
 #[test]
 fn types_and_values_are_separate_namespaces() {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     resolve_source(&mut resolver, "let Int = 5; let y: Int = Int;").unwrap();
 
     // The annotation still means the built-in type; the value is the `let`.
@@ -943,7 +948,7 @@ fn types_and_values_are_separate_namespaces() {
 #[test]
 fn annotations_resolve_before_values() {
     for source in ["let x: Nope = missing;", "missing as Nope;"] {
-        let mut resolver = NameResolver::new([]);
+        let mut resolver = new_resolver([]);
         let error = resolve_source(&mut resolver, source).expect_err(source);
         assert!(
             matches!(error, NameResolutionError::UnknownType { .. }),
@@ -954,7 +959,7 @@ fn annotations_resolve_before_values() {
 
 #[test]
 fn type_names_are_never_captured() {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     resolve_source(&mut resolver, "fn f() { let x: Int = 1; 1 as Int; }").unwrap();
 
     assert_eq!(type_names(&resolver), ["Int", "Int"]);
@@ -964,7 +969,7 @@ fn type_names_are_never_captured() {
 
 #[test]
 fn unannotated_code_records_no_type_names() {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     resolve_source(&mut resolver, "let x = 1; fn f(a) { a; }").unwrap();
 
     assert!(resolver.type_names.is_empty());
@@ -980,7 +985,7 @@ fn only_struct(resolver: &NameResolver) -> &StructSymbols {
 
 /// The message of the error that resolving `source` reports.
 fn error_message(source: &str) -> String {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     resolve_source(&mut resolver, source)
         .expect_err(source)
         .to_string()
@@ -988,7 +993,7 @@ fn error_message(source: &str) -> String {
 
 #[test]
 fn structs_bind_a_type_a_constructor_and_accessors() {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     resolve_source(
         &mut resolver,
         "struct Point { x: Int, y: Int } let p: Point = Point(1, 2); p.y = 3;",
@@ -1047,7 +1052,7 @@ fn structs_are_scoped_like_other_declarations() {
     );
 
     // An inner struct shadows an outer one of the same name.
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     resolve_source(
         &mut resolver,
         "struct P { x: Int } { struct P { y: Int } let p: P = P(2); p.y; }",
@@ -1081,7 +1086,7 @@ fn struct_redefinition_errors_keep_the_current_messages() {
     );
 
     let source = "struct Dup { a: Int, a: Int }";
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     let error = resolve_source(&mut resolver, source).unwrap_err();
     assert_eq!(
         error.to_string(),
@@ -1103,14 +1108,14 @@ fn constructors_cannot_redefine_variables_in_the_same_scope() {
         "struct P { x: Int } let P = 5;",
         "let P = 5; { struct P { x: Int } }",
     ] {
-        let mut resolver = NameResolver::new([]);
+        let mut resolver = new_resolver([]);
         resolve_source(&mut resolver, source).unwrap_or_else(|error| panic!("{source}: {error:?}"));
     }
 }
 
 #[test]
 fn field_accessors_may_share_names_with_variables() {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     resolve_source(
         &mut resolver,
         "let x = 5; struct Point { x: Int, y: Int } Point(1, 2).x;",
@@ -1125,7 +1130,7 @@ fn field_accessors_may_share_names_with_variables() {
 
 #[test]
 fn structs_sharing_a_field_name_overload_its_accessors() {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     resolve_source(
         &mut resolver,
         "struct A { x: Int } struct B { x: String } A(1).x;",
@@ -1146,7 +1151,7 @@ fn structs_sharing_a_field_name_overload_its_accessors() {
 
 #[test]
 fn struct_bindings_are_captured_like_functions() {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     resolve_source(
         &mut resolver,
         "fn outer() { struct P { x: Int } fn inner() { P(1).x; } }",
@@ -1163,7 +1168,7 @@ fn struct_bindings_are_captured_like_functions() {
 
 /// Every error resolving `source` reports, in order.
 fn all_errors(source: &str) -> Vec<String> {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     let tokens = Lexer::new(source, SourceId::new(0))
         .collect::<Result<Vec<_>, _>>()
         .expect("source lexes");
@@ -1206,7 +1211,7 @@ fn a_failing_statement_stops_at_its_first_error() {
 
 #[test]
 fn statements_after_an_error_still_resolve() {
-    let mut resolver = NameResolver::new([]);
+    let mut resolver = new_resolver([]);
     resolve_source(&mut resolver, "missing; let x = 1; x;").unwrap_err();
 
     let [x] = declared(&resolver);
@@ -1216,7 +1221,7 @@ fn statements_after_an_error_still_resolve() {
 
 #[test]
 fn natives_record_their_registry_slot() {
-    let mut resolver = NameResolver::new(["len", "+", "len"]);
+    let mut resolver = new_resolver(["len", "+", "len"]);
     resolve_source(&mut resolver, "let x = 1; len;").unwrap();
 
     // Overloads of one name keep their own slots, in registration order.

@@ -1,7 +1,6 @@
 use crate::symbols::{BindingKind, SymbolId, SymbolTable};
 use ahash::{AHashMap, AHashSet};
 use ndc_core::NodeId;
-use ndc_core::StaticType;
 use ndc_lexer::Span;
 use ndc_parser::{
     AssignmentTarget, AssignmentTargetLocation, BindingPattern, BindingPatternLocation, Expression,
@@ -293,6 +292,11 @@ impl ScopeTree {
         self.scopes[self.current.0].lookup_type(name, table)
     }
 
+    /// The built-in type named `name`, if there is one.
+    pub(crate) fn builtin_type(&self, name: &str, table: &SymbolTable) -> Option<SymbolId> {
+        self.scopes[0].lookup_type(name, table)
+    }
+
     /// The innermost type named `name`. Types never overload, so there's at most one.
     pub(crate) fn lookup_type(&self, name: &str, table: &SymbolTable) -> Option<SymbolId> {
         self.chain()
@@ -332,11 +336,14 @@ impl ScopeTree {
 }
 
 impl NameResolver {
-    /// Creates a new name resolver with the supplied `builtins` declared in a scope outside
-    /// the program. With `new(["len"])`, a top-level `let len = 99` shadows the native
-    /// instead of sharing its scope, so a later `len` resolves to `[[let len], [native len]]`.
-    /// The built-in type names (`Int`, `List`, …) are declared there too.
-    pub fn new<'a>(builtins: impl IntoIterator<Item = &'a str>) -> Self {
+    /// Creates a new name resolver with the supplied `builtins` and `builtin_types` declared
+    /// in a scope outside the program. With `new(["len"], ["Int"])`, a top-level
+    /// `let len = 99` shadows the native instead of sharing its scope, so a later `len`
+    /// resolves to `[[let len], [native len]]`, and `x: Int` names the built-in type.
+    pub fn new<'a>(
+        builtins: impl IntoIterator<Item = &'a str>,
+        builtin_types: impl IntoIterator<Item = &'a str>,
+    ) -> Self {
         let mut scopes = ScopeTree::new();
         let mut symbols = SymbolTable::default();
 
@@ -346,8 +353,8 @@ impl NameResolver {
             scopes.bind(symbol);
             native_slots.insert(symbol, slot);
         }
-        for name in StaticType::BUILTIN_TYPE_NAMES {
-            let symbol = symbols.declare((*name).to_string(), BindingKind::Type);
+        for name in builtin_types {
+            let symbol = symbols.declare(name.to_string(), BindingKind::Type);
             scopes.bind_type(symbol);
         }
 
@@ -789,7 +796,7 @@ impl NameResolver {
         for field in fields {
             self.resolve_type(&field.annotation)?;
         }
-        if StaticType::BUILTIN_TYPE_NAMES.contains(&name) {
+        if self.scopes.builtin_type(name, &self.symbols).is_some() {
             return Err(NameResolutionError::StructShadowsBuiltinType {
                 name: name.to_string(),
                 span,

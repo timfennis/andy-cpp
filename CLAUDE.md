@@ -76,7 +76,7 @@ The AST is syntax only. The analyser runs name resolution (`ndc_resolver`) and s
 |---|---|
 | `ndc_lexer` | Tokenisation, `Span` (offset+length) |
 | `ndc_parser` | AST (`Expression`, `ExpressionLocation`), parser |
-| `ndc_core` | `StaticType`, `FunctionRegistry`, `NodeId`, ordering, hashing |
+| `ndc_core` | `StaticType`, `FunctionRegistry`, `NodeId` |
 | `ndc_resolver` | Name resolution: `NameResolver`, `SymbolId`, per-use candidate symbols and closure captures |
 | `ndc_analysis` | What the analyser works out for the compiler and LSP: `Analysis` (tables keyed by `NodeId`), `ResolvedVar`, `Binding`, `Candidate`, `CaptureSource` |
 | `ndc_layout` | Storage layout: each resolver symbol's global or local slot, and each function's captures |

@@ -1,6 +1,6 @@
 use anyhow::{Context, bail};
-use ndc_core::hash_map::HashMap;
 use ndc_macros::export_module;
+use ndc_vm::hash_map::HashMap;
 use ndc_vm::value::AdvancedNumber;
 use ndc_vm::value::{Object, Value};
 use num::ToPrimitive;
