@@ -1,7 +1,7 @@
 use crate::chunk::{JumpTarget, LabelId, OpCode, OptimizerIr};
 use crate::value::{CompiledFunction, Function};
 use crate::{Object, Value};
-use ndc_analysis::{Analysis, AugmentedAssignmentPlan, Binding, Candidate, ResolvedVar};
+use ndc_analysis::{Analysis, Binding, Candidate, ResolvedVar};
 use ndc_core::NodeId;
 use ndc_core::r#struct::StructRegistry;
 use ndc_core::{StaticType, TypeSignature};
@@ -252,18 +252,15 @@ impl Compiler {
                 let analysis = Rc::clone(&self.analysis);
                 self.compile_binding(analysis.binding(id), span)?;
             }
-            Expression::Cast {
-                value,
-                resolved_type,
-                requires_check,
-                ..
-            } => {
+            Expression::Cast { value, .. } => {
                 self.compile_expr(*value)?;
-                if requires_check {
-                    let Some(target) = resolved_type else {
-                        return Err(CompileError::unresolved_cast(span));
-                    };
-                    self.ir.write(OpCode::CheckType(Rc::new(target)), span);
+                match self.analysis.cast_checks.get(&id) {
+                    None => return Err(CompileError::unresolved_cast(span)),
+                    Some(None) => {}
+                    Some(Some(target)) => {
+                        let target = Rc::new(target.clone());
+                        self.ir.write(OpCode::CheckType(target), span);
+                    }
                 }
             }
             Expression::Statement(stm) => {
@@ -308,11 +305,9 @@ impl Compiler {
                 AssignmentTarget::Index {
                     value: container,
                     index,
-                    resolved_set,
-                    ..
                 } => {
-                    let set_fn = resolved_set.expect("[]= must be resolved");
-                    self.compile_binding(&set_fn, span)?;
+                    let analysis = Rc::clone(&self.analysis);
+                    self.compile_binding(analysis.setter(l_value.id), span)?;
                     self.compile_expr(*container)?;
                     self.compile_expr(*index)?;
                     self.compile_expr(*value)?;
@@ -334,32 +329,26 @@ impl Compiler {
                 AssignmentTarget::Member {
                     receiver,
                     member_span,
-                    resolved_setter,
                     ..
                 } => {
-                    let setter = resolved_setter.expect("member setter must be resolved");
-                    self.compile_binding(&setter, member_span)?;
+                    let analysis = Rc::clone(&self.analysis);
+                    self.compile_binding(analysis.setter(l_value.id), member_span)?;
                     self.compile_expr(*receiver)?;
                     self.compile_expr(*value)?;
                     self.ir.write(OpCode::Call(2), member_span);
                 }
             },
             Expression::OpAssignment {
-                l_value,
-                r_value,
-                plan,
-                ..
+                l_value, r_value, ..
             } => {
                 let target = PreparedAssignmentTarget::prepare(self, l_value, span)?;
-                let binding = match plan {
-                    AugmentedAssignmentPlan::Resolved(binding) => binding,
-                    AugmentedAssignmentPlan::Unresolved => {
-                        return Err(CompileError::unresolved_binding(span));
-                    }
+                let analysis = Rc::clone(&self.analysis);
+                let Some(binding) = analysis.augmented_assignments.get(&id) else {
+                    return Err(CompileError::unresolved_binding(span));
                 };
 
-                let opcode = Self::call_opcode_for(&binding, 2);
-                self.compile_binding(&binding, span)?;
+                let opcode = Self::call_opcode_for(binding, 2);
+                self.compile_binding(binding, span)?;
                 target.emit_read(self)?;
                 self.compile_expr(*r_value)?;
                 self.ir.write(opcode, span);
@@ -386,13 +375,10 @@ impl Compiler {
                     span,
                 )?;
             }
-            Expression::StructDeclaration {
-                fields, resolved, ..
-            } => {
-                let info = Rc::clone(
-                    &self.struct_registry.borrow()
-                        [resolved.expect("must be resolved by the analyser")],
-                );
+            Expression::StructDeclaration { .. } => {
+                let analysis = Rc::clone(&self.analysis);
+                let declared = analysis.declared_struct(id);
+                let info = Rc::clone(&self.struct_registry.borrow()[declared.id]);
 
                 let idx = self
                     .ir
@@ -408,7 +394,7 @@ impl Compiler {
                     .expect("internal error: a struct declaration declares its constructor");
                 self.emit_declare(constructor, span);
 
-                for (field_offset, field) in fields.iter().enumerate() {
+                for (field_offset, field) in declared.fields.iter().enumerate() {
                     // GET
                     let get_idx = self
                         .ir
@@ -417,12 +403,7 @@ impl Compiler {
                             field_offset,
                         )));
                     self.ir.write(OpCode::Constant(get_idx), span);
-                    self.emit_declare(
-                        field
-                            .resolved_getter
-                            .expect("resolved_getter should have been resolved"),
-                        span,
-                    );
+                    self.emit_declare(field.getter, span);
 
                     // SET
                     let set_idx = self
@@ -432,12 +413,7 @@ impl Compiler {
                             field_offset,
                         )));
                     self.ir.write(OpCode::Constant(set_idx), span);
-                    self.emit_declare(
-                        field
-                            .resolved_setter
-                            .expect("resolved_setter should have been resolved"),
-                        span,
-                    );
+                    self.emit_declare(field.setter, span);
                 }
                 self.emit_unit();
             }
@@ -489,10 +465,13 @@ impl Compiler {
             Expression::MemberAccess {
                 receiver,
                 member_span,
-                resolved_getter,
                 ..
             } => {
-                self.compile_binding(&resolved_getter, member_span)?;
+                let analysis = Rc::clone(&self.analysis);
+                let getter = analysis
+                    .getter(id)
+                    .expect("internal error: every member access is analysed before it's compiled");
+                self.compile_binding(getter, member_span)?;
                 self.compile_expr(*receiver)?;
                 self.ir.write(OpCode::Call(1), member_span);
             }
@@ -585,12 +564,7 @@ impl Compiler {
             AssignmentTarget::Identifier { span: lv_span, .. } => {
                 self.emit_set_var(self.assigned_variable(l_value.id), lv_span);
             }
-            AssignmentTarget::Index {
-                value,
-                index,
-                resolved_set,
-                ..
-            } => {
+            AssignmentTarget::Index { value, index } => {
                 // Value to store is on top of stack. We need to:
                 // 1. Save it to a temp slot
                 // 2. Compile container and index
@@ -601,7 +575,8 @@ impl Compiler {
                 let tmp_value = self.allocate_temp();
                 self.write_temp(tmp_value, span, OpCode::SetLocal);
 
-                self.compile_binding(resolved_set.as_ref().expect("[]= must be resolved"), span)?;
+                let analysis = Rc::clone(&self.analysis);
+                self.compile_binding(analysis.setter(l_value.id), span)?;
                 self.compile_expr(*value)?;
                 self.compile_expr(*index)?;
                 self.write_temp(tmp_value, span, OpCode::GetLocal);
@@ -649,6 +624,14 @@ impl Compiler {
         self.analysis
             .variable(target)
             .expect("internal error: every assignment target is analysed before it's compiled")
+    }
+
+    /// The function an augmented assignment reads the target at `target` with.
+    fn target_getter(&self, target: NodeId) -> Binding {
+        self.analysis
+            .getter(target)
+            .expect("internal error: an augmented assignment's target has a getter")
+            .clone()
     }
 
     /// Emit code that puts the resolved callee on top of the stack.
@@ -1143,12 +1126,7 @@ impl PreparedAssignmentTarget {
                 variable: compiler.assigned_variable(l_value.id),
                 span,
             }),
-            AssignmentTarget::Index {
-                value,
-                index,
-                resolved_get,
-                resolved_set,
-            } => {
+            AssignmentTarget::Index { value, index } => {
                 let container_span = value.span;
                 let index_span = index.span;
                 let cached_container = compiler.allocate_temp();
@@ -1164,15 +1142,13 @@ impl PreparedAssignmentTarget {
                     cached_index,
                     container_span,
                     index_span,
-                    getter: resolved_get.expect("[] must be resolved"),
-                    setter: resolved_set.expect("[]= must be resolved"),
+                    getter: compiler.target_getter(l_value.id),
+                    setter: compiler.analysis.setter(l_value.id).clone(),
                 })
             }
             AssignmentTarget::Member {
                 receiver,
                 member_span,
-                resolved_getter,
-                resolved_setter,
                 ..
             } => {
                 let receiver_span = receiver.span;
@@ -1185,8 +1161,8 @@ impl PreparedAssignmentTarget {
                     cached_receiver,
                     receiver_span,
                     member_span,
-                    getter: resolved_getter.expect("member getter must be resolved"),
-                    setter: resolved_setter.expect("member setter must be resolved"),
+                    getter: compiler.target_getter(l_value.id),
+                    setter: compiler.analysis.setter(l_value.id).clone(),
                 })
             }
             AssignmentTarget::Sequence(_) => {

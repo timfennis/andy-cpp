@@ -1,4 +1,3 @@
-use ndc_analysis::{AugmentedAssignmentPlan, Binding};
 use ndc_core::NodeId;
 use std::fmt::Write;
 
@@ -396,7 +395,6 @@ impl Parser {
                         .expect("guaranteed to produce an assignment target"),
                     r_value: Box::new(expression),
                     operation: operation_identifier,
-                    plan: AugmentedAssignmentPlan::Unresolved,
                 };
 
                 Ok(op_assign.to_location(start.merge(end)))
@@ -649,8 +647,6 @@ impl Parser {
             expression = Expression::Cast {
                 value: Box::new(expression),
                 annotation,
-                resolved_type: None,
-                requires_check: true,
             }
             .to_location(span);
         }
@@ -758,7 +754,6 @@ impl Parser {
                         receiver: Box::new(expr),
                         member: identifier,
                         member_span: identifier_span,
-                        resolved_getter: Binding::None,
                     }
                     .to_location(span);
                 }
@@ -1309,7 +1304,6 @@ impl Parser {
             expression: Expression::StructDeclaration {
                 name: identifier.to_identifier(),
                 fields,
-                resolved: None,
             },
             span: struct_start.merge(field_span),
         })
@@ -1653,8 +1647,6 @@ impl Parser {
         Ok(StructField {
             identifier,
             annotation,
-            resolved_getter: None,
-            resolved_setter: None,
             span: identifier_span.merge(self.tokens[self.current - 1].span),
         })
     }
