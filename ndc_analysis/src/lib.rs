@@ -17,6 +17,14 @@ pub struct Analysis {
     /// What each identifier expression refers to, keyed by the identifier. For
     /// a call like `f(x)` that's the overload of `f` the call picks.
     pub bindings: AHashMap<NodeId, Binding>,
+    /// The variable each declared or assigned name is stored in, keyed by its
+    /// binding pattern, its assignment target, or the named function or struct
+    /// declaration. In `let x = 1; x = 2;` both the pattern `x` and the target
+    /// `x` map to the same local.
+    pub variables: AHashMap<NodeId, ResolvedVar>,
+    /// Where the values each function captures come from, in upvalue order,
+    /// keyed by its declaration.
+    pub captures: AHashMap<NodeId, Vec<CaptureSource>>,
     /// How many local slots each function's own variables use, parameters
     /// first, keyed by its declaration. The compiler places its temporaries
     /// after them.
@@ -31,6 +39,19 @@ impl Analysis {
     /// if it refers to nothing.
     pub fn binding(&self, identifier: NodeId) -> &Binding {
         self.bindings.get(&identifier).unwrap_or(&Binding::None)
+    }
+
+    /// The variable the name declared or assigned at `node` is stored in; `None`
+    /// for an anonymous function, which declares no name.
+    pub fn variable(&self, node: NodeId) -> Option<ResolvedVar> {
+        self.variables.get(&node).copied()
+    }
+
+    /// Where the values the function declared at `function` captures come from.
+    pub fn captures(&self, function: NodeId) -> &[CaptureSource] {
+        self.captures
+            .get(&function)
+            .expect("internal error: every function is analysed before it's compiled")
     }
 
     /// The frame size of the function declared at `function`.

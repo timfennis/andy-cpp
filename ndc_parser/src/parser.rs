@@ -1286,8 +1286,6 @@ impl Parser {
                 body: Box::new(body),
                 return_annotation,
                 resolved_return_type: None,
-                resolved_name: None,
-                captures: vec![],
                 pure: is_pure,
             },
             span,
@@ -1311,7 +1309,6 @@ impl Parser {
             expression: Expression::StructDeclaration {
                 name: identifier.to_identifier(),
                 fields,
-                resolved_name: None,
                 resolved: None,
             },
             span: struct_start.merge(field_span),
