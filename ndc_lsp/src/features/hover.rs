@@ -30,29 +30,40 @@ pub fn hover(
 
     let node = node_at_offset(&state.ast, offset)?;
     let markdown = match &node.expression {
-        Expression::Identifier { name, .. }
-            if resolves_to_global(state.analysis.binding(node.id)) =>
-        {
-            function_hover(name, functions).or_else(|| type_hover(state, node.id))
-        }
+        Expression::Identifier { .. } => native_hover(state.analysis.binding(node.id), functions)
+            .or_else(|| type_hover(state, node.id)),
         _ => type_hover(state, node.id),
     }?;
 
     Some(markup(state, node.span, markdown))
 }
 
-/// Did the analyser resolve this identifier to a global (a native function)?
-/// Locals and parameters that shadow a built-in resolve to `Local`/`Upvalue`.
-fn resolves_to_global(binding: &Binding) -> bool {
-    let is_global = |v: ResolvedVar| matches!(v, ResolvedVar::Global { .. });
-    match binding {
-        Binding::Resolved(candidate) => is_global(candidate.var()),
-        // Dynamic dispatch is a global native only if every candidate is global.
-        Binding::Dynamic(candidates) => {
-            !candidates.is_empty() && candidates.iter().all(|c| is_global(c.var()))
-        }
-        Binding::None => false,
-    }
+/// Markdown for an identifier the analyser resolved to built-in functions: the
+/// signature and documentation of the overload it picked, or of each one it
+/// leaves to runtime dispatch. `None` unless every candidate is a built-in, so a
+/// local that shadows one (e.g. `let len = 1; len`) shows the local's type.
+fn native_hover(binding: &Binding, functions: &[FunctionInfo]) -> Option<String> {
+    let candidates = match binding {
+        Binding::Resolved(candidate) => std::slice::from_ref(candidate),
+        Binding::Dynamic(candidates) => candidates.as_slice(),
+        Binding::None => return None,
+    };
+    // A built-in's global slot is its position in the registry, which is the
+    // order of `functions`.
+    let mut slots = candidates
+        .iter()
+        .map(|candidate| match candidate.var() {
+            ResolvedVar::Global { slot } => Some(slot),
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>()?;
+    // A broadcast candidate names the same overload as the scalar one.
+    slots.dedup();
+    let overloads = slots
+        .into_iter()
+        .map(|slot| functions.get(slot).map(function_markdown))
+        .collect::<Option<Vec<_>>>()?;
+    (!overloads.is_empty()).then(|| overloads.join("\n\n---\n\n"))
 }
 
 fn markup(state: &DocumentState, span: Span, value: String) -> Hover {
@@ -100,10 +111,8 @@ impl AstVisitor for DeclFinder<'_> {
     }
 }
 
-/// Markdown for an identifier that names a built-in function: a fenced
-/// signature followed by its documentation.
-fn function_hover(name: &str, functions: &[FunctionInfo]) -> Option<String> {
-    let fun = functions.iter().find(|f| f.name == name)?;
+/// A built-in function's fenced signature followed by its documentation.
+fn function_markdown(fun: &FunctionInfo) -> String {
     let mut out = format!(
         "```ndc\n{}\n```",
         format_signature(&fun.name, &fun.static_type)
@@ -112,7 +121,7 @@ fn function_hover(name: &str, functions: &[FunctionInfo]) -> Option<String> {
         out.push_str("\n\n");
         out.push_str(doc);
     }
-    Some(out)
+    out
 }
 
 /// Markdown showing the inferred type of an expression.
@@ -183,6 +192,25 @@ mod tests {
         assert!(
             content.value.contains("abs("),
             "expected a signature for abs, got: {}",
+            content.value
+        );
+    }
+
+    #[test]
+    fn hover_on_builtin_shows_the_overload_the_call_picks() {
+        let (state, functions) = analyse("let n = abs(-3);");
+        let hover = hover(&state, Position::new(0, 9), &functions).expect("hover present");
+        let HoverContents::Markup(content) = hover.contents else {
+            panic!("expected markup");
+        };
+        assert!(
+            content.value.contains("abs(Int) -> Int"),
+            "expected the Int overload, got: {}",
+            content.value
+        );
+        assert!(
+            !content.value.contains("abs(Float)"),
+            "expected only the picked overload, got: {}",
             content.value
         );
     }
