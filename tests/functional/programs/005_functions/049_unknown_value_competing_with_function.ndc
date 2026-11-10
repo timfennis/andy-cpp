@@ -1,0 +1,7 @@
+// An unannotated parameter might hold a function, so calling it by a name a
+// function also has, where that function accepts the call, is ambiguous.
+// expect-error: Ambiguous call to 'greet'
+fn greet(name) { "Hello " ++ name }
+fn welcome(greet) {
+    greet("Ada")
+}
