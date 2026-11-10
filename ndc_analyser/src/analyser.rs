@@ -1,4 +1,5 @@
-use crate::scope::{CallKind, ResolvedCall, ScopeTree, TypeBinding};
+use crate::overloads::{CallKind, Overloads, ResolvedCall};
+use crate::types::{TypeBinding, TypeTable};
 use ahash::AHashMap;
 use itertools::{Itertools, izip};
 use ndc_core::static_type::StaticTypeConstructionError;
@@ -37,7 +38,7 @@ pub struct AnalysisResult {
 #[derive(Debug, Clone)]
 pub struct Checkpoint {
     resolver: NameResolver,
-    scope_tree: ScopeTree,
+    types: TypeTable,
     struct_types: AHashMap<SymbolId, Rc<StructInfo>>,
     struct_count: usize,
 }
@@ -48,7 +49,8 @@ pub struct Analyser {
     /// until the type pass reads names from it instead.
     resolver: NameResolver,
     struct_registry: Rc<RefCell<StructRegistry>>,
-    scope_tree: ScopeTree,
+    /// The type of every value declared so far.
+    types: TypeTable,
     /// What each struct's type symbol stands for, so `p: Point` lowers to
     /// `Point`'s struct type. Every other type name is built in.
     struct_types: AHashMap<SymbolId, Rc<StructInfo>>,
@@ -66,23 +68,20 @@ pub struct Analyser {
 }
 
 impl Analyser {
-    pub fn from_scope_tree(
-        scope_tree: ScopeTree,
+    /// An analyser for programs that can call `natives`, given as name and
+    /// type in registry order: the first is the native in global slot 0.
+    pub fn new(
+        natives: Vec<(String, StaticType)>,
         struct_registry: Rc<RefCell<StructRegistry>>,
     ) -> Self {
-        let resolver = NameResolver::new(scope_tree.native_names());
-        let mut scope_tree = scope_tree;
-        let natives = resolver.native_symbols();
-        debug_assert!(
-            scope_tree
-                .native_names()
-                .zip(&natives)
-                .all(|(name, &symbol)| resolver.symbol_name(symbol) == name)
-        );
-        scope_tree.attach_native_symbols(natives);
+        let resolver = NameResolver::new(natives.iter().map(|(name, _)| name.as_str()));
+        let mut types = TypeTable::default();
+        for ((_, typ), symbol) in natives.into_iter().zip(resolver.native_symbols()) {
+            types.declare(symbol, TypeBinding::Inferred(typ));
+        }
         Self {
             resolver,
-            scope_tree,
+            types,
             struct_registry,
             struct_types: AHashMap::new(),
             functions: Vec::new(),
@@ -95,7 +94,7 @@ impl Analyser {
     pub fn checkpoint(&self) -> Checkpoint {
         Checkpoint {
             resolver: self.resolver.clone(),
-            scope_tree: self.scope_tree.clone(),
+            types: self.types.clone(),
             struct_types: self.struct_types.clone(),
             struct_count: self.struct_registry.borrow().len(),
         }
@@ -103,7 +102,7 @@ impl Analyser {
 
     pub fn restore(&mut self, checkpoint: Checkpoint) {
         self.resolver = checkpoint.resolver;
-        self.scope_tree = checkpoint.scope_tree;
+        self.types = checkpoint.types;
         self.struct_types = checkpoint.struct_types;
         self.struct_registry
             .borrow_mut()
@@ -121,7 +120,7 @@ impl Analyser {
     /// Records the type of a value the resolver declared, and returns its
     /// slot. A declaration is always local to the frame being analysed.
     fn declare(&mut self, symbol: SymbolId, binding: TypeBinding) -> ResolvedVar {
-        self.scope_tree.declare(symbol, binding);
+        self.types.declare(symbol, binding);
         ResolvedVar::Local {
             slot: Layout::new(&self.resolver).local_slot(symbol),
         }
@@ -140,7 +139,7 @@ impl Analyser {
         scope.bindings()[..self.resolver.binding_position(symbol)]
             .iter()
             .filter(|&&earlier| self.resolver.symbol_name(earlier) == name)
-            .any(|&earlier| match self.scope_tree.get_type(earlier) {
+            .any(|&earlier| match self.types.get_type(earlier) {
                 StaticType::Function {
                     parameters: Some(parameters),
                     ..
@@ -354,7 +353,7 @@ impl Analyser {
             Expression::Identifier { resolved, .. } => {
                 let symbol = self.resolver.innermost_reference(*id);
                 *resolved = Binding::Resolved(Candidate::Scalar(self.locate(symbol)));
-                Ok(self.scope_tree.get_type(symbol).clone())
+                Ok(self.types.get_type(symbol).clone())
             }
             Expression::Statement(inner) => {
                 let typ = self.analyse_or_any(inner);
@@ -427,7 +426,7 @@ impl Analyser {
                 let ResolvedCall {
                     binding: assign_binding,
                     return_type: assign_return,
-                } = self.scope_tree.resolve_call(
+                } = Overloads::new(&self.types).resolve_call(
                     &self.resolver.augmented_candidates(*id).in_place,
                     &arg_types,
                     CallKind::Operator,
@@ -436,7 +435,7 @@ impl Analyser {
                 let ResolvedCall {
                     binding: op_binding,
                     return_type: op_return,
-                } = self.scope_tree.resolve_call(
+                } = Overloads::new(&self.types).resolve_call(
                     &self.resolver.augmented_candidates(*id).operator,
                     &arg_types,
                     CallKind::Operator,
@@ -595,7 +594,7 @@ impl Analyser {
 
                 if let Some((symbol, slot)) = declared {
                     let _ = self
-                        .scope_tree
+                        .types
                         .update_binding_type(symbol, function_type.clone());
                     *resolved_name = Some(slot);
                 }
@@ -659,7 +658,7 @@ impl Analyser {
                 let ResolvedCall {
                     binding,
                     return_type,
-                } = self.scope_tree.resolve_call(
+                } = Overloads::new(&self.types).resolve_call(
                     getters,
                     std::slice::from_ref(&receiver_type),
                     CallKind::Regular,
@@ -668,11 +667,17 @@ impl Analyser {
 
                 if matches!(binding, Binding::None) {
                     let args = [receiver_type];
-                    self.emit(if self.scope_tree.a_cast_could_resolve(getters, &args) {
-                        AnalysisError::function_not_found_suggest_cast(member, &args, *member_span)
-                    } else {
-                        AnalysisError::function_not_found(member, &args, *member_span)
-                    });
+                    self.emit(
+                        if Overloads::new(&self.types).a_cast_could_resolve(getters, &args) {
+                            AnalysisError::function_not_found_suggest_cast(
+                                member,
+                                &args,
+                                *member_span,
+                            )
+                        } else {
+                            AnalysisError::function_not_found(member, &args, *member_span)
+                        },
+                    );
                 }
 
                 *resolved_getter = binding;
@@ -821,7 +826,7 @@ impl Analyser {
         let ResolvedCall {
             binding,
             return_type,
-        } = self.scope_tree.resolve_call(
+        } = Overloads::new(&self.types).resolve_call(
             self.resolver.reference_candidates(function.id),
             &type_sig,
             kind,
@@ -831,7 +836,7 @@ impl Analyser {
         if matches!(binding, Binding::None) {
             let candidates = self.resolver.reference_candidates(function.id);
             self.emit(
-                if self.scope_tree.a_cast_could_resolve(candidates, &type_sig) {
+                if Overloads::new(&self.types).a_cast_could_resolve(candidates, &type_sig) {
                     AnalysisError::function_not_found_suggest_cast(name, &type_sig, span)
                 } else {
                     AnalysisError::function_not_found(name, &type_sig, span)
@@ -928,7 +933,7 @@ impl Analyser {
             AssignmentTarget::Identifier { resolved, .. } => {
                 let symbol = self.resolver.assigned_symbol(lvalue.id);
                 *resolved = Some(self.locate(symbol));
-                Ok(self.scope_tree.get_type(symbol).clone())
+                Ok(self.types.get_type(symbol).clone())
             }
             AssignmentTarget::Index {
                 index,
@@ -951,14 +956,14 @@ impl Analyser {
                 // natural broadcast story for `(list_a, list_b)[i]`. Only an
                 // augmented assignment reads the old value through `[]`.
                 *resolved_get = self.resolver.getter_candidates(lvalue.id).map(|getters| {
-                    self.scope_tree
+                    Overloads::new(&self.types)
                         .resolve_call(getters, &get_args, CallKind::Regular, |symbol| {
                             self.locate(symbol)
                         })
                         .binding
                 });
                 *resolved_set = Some(
-                    self.scope_tree
+                    Overloads::new(&self.types)
                         .resolve_call(
                             self.resolver.setter_candidates(lvalue.id),
                             &set_args,
@@ -1004,14 +1009,14 @@ impl Analyser {
                     .resolver
                     .getter_candidates(lvalue.id)
                     .expect("internal error: member target without getter candidates");
-                let getter = self.scope_tree.resolve_call(
+                let getter = Overloads::new(&self.types).resolve_call(
                     getters,
                     &getter_args,
                     CallKind::Regular,
                     |symbol| self.locate(symbol),
                 );
                 let setter_name = format!("{member}=");
-                let setter = self.scope_tree.resolve_call(
+                let setter = Overloads::new(&self.types).resolve_call(
                     self.resolver.setter_candidates(lvalue.id),
                     &setter_args,
                     CallKind::Regular,
@@ -1101,8 +1106,7 @@ impl Analyser {
                 let target = self.resolver.assigned_symbol(lvalue.id);
                 let widened = stored_type.lub(value_type);
                 if widened != *stored_type
-                    && let Err(annotated_type) =
-                        self.scope_tree.update_binding_type(target, widened)
+                    && let Err(annotated_type) = self.types.update_binding_type(target, widened)
                     && !value_type.is_subtype(&annotated_type)
                 {
                     self.emit(AnalysisError::mismatched_types(
@@ -1159,12 +1163,12 @@ impl Analyser {
                 } = &value.expression
                 {
                     let target = self.resolver.innermost_reference(value.id);
-                    let container_type = self.scope_tree.get_type(target).clone();
+                    let container_type = self.types.get_type(target).clone();
                     let widened_container = container_type
                         .with_element_type(stored_element_type.lub(&value_element_type));
                     if widened_container != container_type
                         && self
-                            .scope_tree
+                            .types
                             .update_binding_type(target, widened_container)
                             .is_ok()
                     {
@@ -1509,8 +1513,7 @@ mod tests {
             .collect::<Result<Vec<_>, _>>()
             .expect("lex failed");
         let mut expressions = Parser::from_tokens(tokens).parse().expect("parse failed");
-        let mut analyser =
-            Analyser::from_scope_tree(ScopeTree::from_global_scope(globals), Default::default());
+        let mut analyser = Analyser::new(globals, Default::default());
         let mut last_type = StaticType::unit();
         for expression in &mut expressions {
             last_type = analyser.analyse(expression).expect("analysis failed");
@@ -1856,6 +1859,31 @@ mod tests {
                  let u: T = T(1);
                  u.a;
                  inner()"
+            ),
+            StaticType::String,
+        );
+    }
+
+    // Each native is typed by its own registry entry: mixing them up would
+    // give `second()` the type of `first()`.
+    #[test]
+    fn natives_are_typed_by_their_registry_entry() {
+        let native = |name: &str, return_type| {
+            (
+                name.to_string(),
+                StaticType::Function {
+                    parameters: Some(vec![]),
+                    return_type: Box::new(return_type),
+                },
+            )
+        };
+        assert_eq!(
+            analyse_last_type_with_globals(
+                "second()",
+                vec![
+                    native("first", StaticType::Int),
+                    native("second", StaticType::String)
+                ],
             ),
             StaticType::String,
         );

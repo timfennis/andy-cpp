@@ -1,4 +1,4 @@
-use ahash::AHashMap;
+use crate::types::TypeTable;
 use ndc_core::StaticType;
 use ndc_parser::{Binding, Candidate, ResolvedVar};
 use ndc_resolver::{Candidates, SymbolId};
@@ -13,7 +13,7 @@ pub enum CallKind {
     Operator,
 }
 
-/// What [`ScopeTree::resolve_call`] hands back: the binding the analyser will
+/// What [`Overloads::resolve_call`] hands back: the binding the analyser will
 /// store on the call node, plus the inferred return type of the call.
 ///
 /// Folding the return-type computation into the same walk that produces the
@@ -25,7 +25,7 @@ pub(crate) struct ResolvedCall {
 }
 
 /// Per-position vec resolution result for an operator-form call. See
-/// [`ScopeTree::resolve_vec`] for the case breakdown.
+/// [`Overloads::resolve_vec`] for the case breakdown.
 pub(crate) enum VecResolution {
     Static {
         axis_len: usize,
@@ -50,7 +50,7 @@ struct ScalarWalk {
 
 /// Returns `true` iff `more` is a strict subtype of `less` pointwise — i.e.
 /// every position satisfies `more[i] <: less[i]` and at least one position is
-/// not bidirectionally equivalent. Used by [`ScopeTree::most_specific_match`] to order
+/// not bidirectionally equivalent. Used by [`Overloads::most_specific_match`] to order
 /// matching overloads by specificity: an overload with `more` parameters
 /// accepts strictly fewer call signatures than one with `less` parameters.
 fn is_strictly_more_specific(more: &[StaticType], less: &[StaticType]) -> bool {
@@ -92,86 +92,16 @@ fn push_unique<T: PartialEq>(out: &mut Vec<T>, item: T) {
     }
 }
 
-#[derive(Debug, Clone)]
-pub(crate) enum TypeBinding {
-    Inferred(StaticType),
-    Annotated(StaticType),
+/// Overload resolution over the type table: which of the candidates a call
+/// could mean accepts its arguments.
+#[derive(Clone, Copy)]
+pub(crate) struct Overloads<'a> {
+    types: &'a TypeTable,
 }
 
-impl TypeBinding {
-    pub fn typ(&self) -> &StaticType {
-        match self {
-            Self::Inferred(t) | Self::Annotated(t) => t,
-        }
-    }
-
-    pub fn is_annotated(&self) -> bool {
-        matches!(self, Self::Annotated(_))
-    }
-}
-
-/// The type of every value the name resolver declared, natives included,
-/// keyed by its symbol. An assignment can widen an inferred type, but an
-/// annotated one is fixed.
-#[derive(Debug, Clone)]
-pub struct ScopeTree {
-    /// The natives in registry order: the first is the native in global slot 0.
-    natives: Vec<(String, StaticType)>,
-    types: AHashMap<SymbolId, TypeBinding>,
-}
-
-impl ScopeTree {
-    /// A table seeded with the natives' types, in registry order. They're keyed
-    /// by symbol once the resolver has declared them, see
-    /// [`Self::attach_native_symbols`].
-    pub fn from_global_scope(natives: Vec<(String, StaticType)>) -> Self {
-        Self {
-            natives,
-            types: AHashMap::new(),
-        }
-    }
-
-    /// The names of the natives, in registry order.
-    pub(crate) fn native_names(&self) -> impl Iterator<Item = &str> {
-        self.natives.iter().map(|(name, _)| name.as_str())
-    }
-
-    /// Gives each native's type to its resolver symbol, in registry order.
-    pub(crate) fn attach_native_symbols(&mut self, symbols: impl IntoIterator<Item = SymbolId>) {
-        for ((_, typ), symbol) in self.natives.iter().zip(symbols) {
-            self.types
-                .insert(symbol, TypeBinding::Inferred(typ.clone()));
-        }
-    }
-
-    /// Records the type of a value the resolver declared.
-    pub(crate) fn declare(&mut self, symbol: SymbolId, binding: TypeBinding) {
-        self.types.insert(symbol, binding);
-    }
-
-    pub(crate) fn get_type(&self, symbol: SymbolId) -> &StaticType {
-        self.types
-            .get(&symbol)
-            .expect("internal error: a value is analysed after its declaration")
-            .typ()
-    }
-
-    /// Try to update a value's type. Returns `Err` with the annotated type if
-    /// the value has an explicit type annotation and cannot be widened.
-    pub(crate) fn update_binding_type(
-        &mut self,
-        symbol: SymbolId,
-        new_type: StaticType,
-    ) -> Result<(), StaticType> {
-        let binding = self
-            .types
-            .get_mut(&symbol)
-            .expect("internal error: a value is analysed after its declaration");
-        if binding.is_annotated() {
-            return Err(binding.typ().clone());
-        }
-        *binding = TypeBinding::Inferred(new_type);
-        Ok(())
+impl<'a> Overloads<'a> {
+    pub(crate) fn new(types: &'a TypeTable) -> Self {
+        Self { types }
     }
 
     /// Whether some overload among `candidates` would accept these arguments
@@ -180,12 +110,12 @@ impl ScopeTree {
     /// fit. A failed call that satisfies this can be fixed with a cast, so the
     /// diagnostic says so; one that does not is a genuine mismatch and gets no
     /// misleading advice.
-    pub(crate) fn a_cast_could_resolve(&self, candidates: &Candidates, sig: &[StaticType]) -> bool {
+    pub(crate) fn a_cast_could_resolve(self, candidates: &Candidates, sig: &[StaticType]) -> bool {
         candidates.iter().flatten().any(|&symbol| {
             let StaticType::Function {
                 parameters: Some(parameters),
                 ..
-            } = self.get_type(symbol)
+            } = self.types.get_type(symbol)
             else {
                 return false;
             };
@@ -228,7 +158,7 @@ impl ScopeTree {
     ///      Returns `Binding::Dynamic`, return type = `Any`.
     ///   5. Nothing found — `Binding::None`, return type = `Any`.
     pub(crate) fn resolve_call(
-        &self,
+        self,
         candidates: &Candidates,
         sig: &[StaticType],
         kind: CallKind,
@@ -343,7 +273,7 @@ impl ScopeTree {
     /// short-circuit; `loose` holds the first scope's compatibility candidates;
     /// `all_by_name` accumulates every callable candidate across the chain for
     /// the runtime-narrowing fallback.
-    fn scalar_walk(&self, candidates: &Candidates, sig: &[StaticType]) -> ScalarWalk {
+    fn scalar_walk(self, candidates: &Candidates, sig: &[StaticType]) -> ScalarWalk {
         let mut loose: Option<Vec<SymbolId>> = None;
         let mut all_by_name = Vec::new();
 
@@ -373,7 +303,7 @@ impl ScopeTree {
                     .iter()
                     .rev()
                     .copied()
-                    .filter(|&symbol| self.get_type(symbol).could_be_callable()),
+                    .filter(|&symbol| self.types.get_type(symbol).could_be_callable()),
             );
         }
 
@@ -402,15 +332,15 @@ impl ScopeTree {
     /// When multiple undominated overloads remain (genuinely incomparable
     /// shapes, e.g. `fn(Int, Any)` vs `fn(Any, Int)` called with `(Int, Int)`),
     /// the latest-registered one wins — preserving shadow semantics.
-    fn most_specific_match(&self, group: &[SymbolId], sig: &[StaticType]) -> Option<SymbolId> {
+    fn most_specific_match(self, group: &[SymbolId], sig: &[StaticType]) -> Option<SymbolId> {
         let matches = group
             .iter()
             .copied()
-            .filter(|&symbol| self.get_type(symbol).is_fn_and_matches(sig))
+            .filter(|&symbol| self.types.get_type(symbol).is_fn_and_matches(sig))
             .collect::<Vec<_>>();
 
         let params_of = |symbol: SymbolId| -> Option<&[StaticType]> {
-            match self.get_type(symbol) {
+            match self.types.get_type(symbol) {
                 StaticType::Function {
                     parameters: Some(p),
                     ..
@@ -441,8 +371,8 @@ impl ScopeTree {
 
     /// Whether `symbol` is a function whose parameters don't provably conflict
     /// with `sig`, so it might accept the call at runtime.
-    fn is_compatible(&self, symbol: SymbolId, sig: &[StaticType]) -> bool {
-        let StaticType::Function { parameters, .. } = self.get_type(symbol) else {
+    fn is_compatible(self, symbol: SymbolId, sig: &[StaticType]) -> bool {
+        let StaticType::Function { parameters, .. } = self.types.get_type(symbol) else {
             return false;
         };
         let Some(parameters) = parameters else {
@@ -465,7 +395,7 @@ impl ScopeTree {
     /// * `AnyFallback` — no static tuple shape but at least one arg is `Any`,
     ///   so vec might still apply at runtime; the runtime narrows per pair.
     /// * `None` — no possible vec interpretation.
-    fn resolve_vec(&self, candidates: &Candidates, sig: &[StaticType]) -> Option<VecResolution> {
+    fn resolve_vec(self, candidates: &Candidates, sig: &[StaticType]) -> Option<VecResolution> {
         if let Some((axis_len, positions)) = self.resolve_vec_static(candidates, sig) {
             return Some(VecResolution::Static {
                 axis_len,
@@ -485,7 +415,7 @@ impl ScopeTree {
     }
 
     fn resolve_vec_static(
-        &self,
+        self,
         candidates: &Candidates,
         sig: &[StaticType],
     ) -> Option<(usize, Vec<Vec<SymbolId>>)> {
@@ -521,7 +451,7 @@ impl ScopeTree {
     /// Priority-ordered scalar candidates for one signature, used by per-position
     /// vec resolution. Exact match (if any) first, then loose-compat candidates
     /// with the exact entry deduplicated.
-    fn candidates_for_sig(&self, candidates: &Candidates, sig: &[StaticType]) -> Vec<SymbolId> {
+    fn candidates_for_sig(self, candidates: &Candidates, sig: &[StaticType]) -> Vec<SymbolId> {
         let walk = self.scalar_walk(candidates, sig);
         let mut out = Vec::new();
         out.extend(walk.exact);
@@ -534,8 +464,8 @@ impl ScopeTree {
     /// Whether a candidate could still accept a call with this signature at
     /// runtime: its type is `Any`, a variadic function, or a function whose
     /// parameters don't provably conflict with `sig`.
-    fn could_accept_call(&self, symbol: SymbolId, sig: &[StaticType]) -> bool {
-        match self.get_type(symbol) {
+    fn could_accept_call(self, symbol: SymbolId, sig: &[StaticType]) -> bool {
+        match self.types.get_type(symbol) {
             StaticType::Function {
                 parameters: Some(parameters),
                 ..
@@ -556,8 +486,8 @@ impl ScopeTree {
 
     /// Return type of a scalar candidate. Falls back to `Any` if the binding
     /// turned out not to carry a function type (e.g. `Any`-typed callee).
-    fn scalar_return_type(&self, symbol: SymbolId) -> StaticType {
-        match self.get_type(symbol) {
+    fn scalar_return_type(self, symbol: SymbolId) -> StaticType {
+        match self.types.get_type(symbol) {
             StaticType::Function { return_type, .. } => return_type.as_ref().clone(),
             _ => StaticType::Any,
         }
@@ -566,7 +496,7 @@ impl ScopeTree {
     /// LUB the return types of a list of scalar candidates. Used when every
     /// candidate in a Dynamic binding came from the compat-filtered walk and
     /// is therefore guaranteed to be a function.
-    fn lub_scalar_returns(&self, symbols: &[SymbolId]) -> StaticType {
+    fn lub_scalar_returns(self, symbols: &[SymbolId]) -> StaticType {
         symbols
             .iter()
             .map(|&symbol| self.scalar_return_type(symbol))
@@ -577,7 +507,7 @@ impl ScopeTree {
     /// Return type for a `Binding::Dynamic`. See [`ResolvedCall`] for the
     /// case breakdown.
     fn dynamic_return_type(
-        &self,
+        self,
         scalar_loose: &[SymbolId],
         vec_resolution: Option<&VecResolution>,
     ) -> StaticType {
@@ -616,6 +546,7 @@ impl ScopeTree {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::TypeBinding;
     use ndc_resolver::{BindingKind, SymbolTable};
     use std::cell::RefCell;
 
@@ -642,17 +573,18 @@ mod tests {
         }
     }
 
-    /// A table of these natives, each given a fresh symbol, returned in registry order.
-    fn with_natives(natives: Vec<(&str, StaticType)>) -> (ScopeTree, Vec<SymbolId>) {
-        let mut tree = ScopeTree::from_global_scope(
-            natives
-                .into_iter()
-                .map(|(name, typ)| (name.to_string(), typ))
-                .collect(),
-        );
-        let symbols = tree.native_names().map(|_| symbol()).collect::<Vec<_>>();
-        tree.attach_native_symbols(symbols.clone());
-        (tree, symbols)
+    /// A table holding these types, each under a fresh symbol, returned in order.
+    fn table(types: Vec<StaticType>) -> (TypeTable, Vec<SymbolId>) {
+        let mut table = TypeTable::default();
+        let symbols = types
+            .into_iter()
+            .map(|typ| {
+                let symbol = symbol();
+                table.declare(symbol, TypeBinding::Inferred(typ));
+                symbol
+            })
+            .collect();
+        (table, symbols)
     }
 
     /// Candidates of these groups, each given oldest first as declared. The
@@ -669,7 +601,7 @@ mod tests {
     /// Asserts the call picks `expected` as its single overload. Each symbol in
     /// `symbols` is located at its position, so the pick shows in the binding.
     fn assert_resolves_to(
-        tree: &ScopeTree,
+        types: &TypeTable,
         symbols: &[SymbolId],
         candidates: &Candidates,
         sig: &[StaticType],
@@ -681,44 +613,12 @@ mod tests {
                 .position(|&known| known == symbol)
                 .expect("the test knows every symbol"),
         };
-        let resolved = tree.resolve_call(candidates, sig, CallKind::Regular, locate);
+        let resolved =
+            Overloads::new(types).resolve_call(candidates, sig, CallKind::Regular, locate);
         match resolved.binding {
             Binding::Resolved(Candidate::Scalar(var)) => assert_eq!(var, locate(expected)),
             other => panic!("expected Resolved Scalar, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn natives_get_their_types_by_symbol() {
-        let (tree, natives) = with_natives(vec![
-            ("len", fn_type(vec![StaticType::String], StaticType::Int)),
-            ("print", variadic_fn(StaticType::unit())),
-        ]);
-        assert_eq!(
-            tree.get_type(natives[0]),
-            &fn_type(vec![StaticType::String], StaticType::Int)
-        );
-        assert_eq!(tree.get_type(natives[1]), &variadic_fn(StaticType::unit()));
-    }
-
-    #[test]
-    fn inferred_types_widen_but_annotated_types_are_fixed() {
-        let mut tree = ScopeTree::from_global_scope(vec![]);
-        let inferred = symbol();
-        let annotated = symbol();
-        tree.declare(inferred, TypeBinding::Inferred(StaticType::Int));
-        tree.declare(annotated, TypeBinding::Annotated(StaticType::Int));
-
-        assert_eq!(
-            tree.update_binding_type(inferred, StaticType::Number),
-            Ok(())
-        );
-        assert_eq!(tree.get_type(inferred), &StaticType::Number);
-        assert_eq!(
-            tree.update_binding_type(annotated, StaticType::Number),
-            Err(StaticType::Int)
-        );
-        assert_eq!(tree.get_type(annotated), &StaticType::Int);
     }
 
     // Two overloads of `locate` registered in the same scope: a more-specific
@@ -729,15 +629,9 @@ mod tests {
     fn more_specific_overload_wins_in_same_scope() {
         let seq_any = StaticType::Sequence(Box::new(StaticType::Any));
         let fn_any = variadic_fn(StaticType::Any);
-        let (tree, natives) = with_natives(vec![
-            (
-                "locate",
-                fn_type(vec![seq_any.clone(), fn_any.clone()], StaticType::Any),
-            ),
-            (
-                "locate",
-                fn_type(vec![seq_any.clone(), StaticType::Any], StaticType::Any),
-            ),
+        let (types, locates) = table(vec![
+            fn_type(vec![seq_any.clone(), fn_any], StaticType::Any),
+            fn_type(vec![seq_any, StaticType::Any], StaticType::Any),
         ]);
 
         let call_sig = [
@@ -745,11 +639,11 @@ mod tests {
             fn_type(vec![StaticType::Any], StaticType::Bool),
         ];
         assert_resolves_to(
-            &tree,
-            &natives,
-            &candidates(&[&natives]),
+            &types,
+            &locates,
+            &candidates(&[&locates]),
             &call_sig,
-            natives[0],
+            locates[0],
         );
     }
 
@@ -757,16 +651,16 @@ mod tests {
     // without treating the Number overload as a fallback candidate.
     #[test]
     fn more_specific_numeric_overload_wins() {
-        let (tree, natives) = with_natives(vec![
-            ("foo", fn_type(vec![StaticType::Number], StaticType::String)),
-            ("foo", fn_type(vec![StaticType::Int], StaticType::String)),
+        let (types, foos) = table(vec![
+            fn_type(vec![StaticType::Number], StaticType::String),
+            fn_type(vec![StaticType::Int], StaticType::String),
         ]);
         assert_resolves_to(
-            &tree,
-            &natives,
-            &candidates(&[&natives]),
+            &types,
+            &foos,
+            &candidates(&[&foos]),
             &[StaticType::Int],
-            natives[1],
+            foos[1],
         );
     }
 
@@ -775,20 +669,16 @@ mod tests {
     // more-specific one. The walk must stop at the first scope with a match.
     #[test]
     fn inner_any_overload_shadows_parent() {
-        let (mut tree, natives) = with_natives(vec![(
-            "foo",
+        let (types, foos) = table(vec![
             fn_type(vec![StaticType::Int], StaticType::Int),
-        )]);
-        let inner = symbol();
-        tree.declare(
-            inner,
-            TypeBinding::Inferred(fn_type(vec![StaticType::Any], StaticType::Any)),
-        );
+            fn_type(vec![StaticType::Any], StaticType::Any),
+        ]);
+        let (outer, inner) = (foos[0], foos[1]);
 
         assert_resolves_to(
-            &tree,
-            &[natives[0], inner],
-            &candidates(&[&[inner], &natives]),
+            &types,
+            &foos,
+            &candidates(&[&[inner], &[outer]]),
             &[StaticType::Int],
             inner,
         );
@@ -798,22 +688,18 @@ mod tests {
     // different argument type must fall through to the parent scope's overload.
     #[test]
     fn inner_int_overload_does_not_shadow_other_types() {
-        let (mut tree, natives) = with_natives(vec![(
-            "foo",
+        let (types, foos) = table(vec![
             fn_type(vec![StaticType::Any], StaticType::Int),
-        )]);
-        let inner = symbol();
-        tree.declare(
-            inner,
-            TypeBinding::Inferred(fn_type(vec![StaticType::Int], StaticType::Int)),
-        );
+            fn_type(vec![StaticType::Int], StaticType::Int),
+        ]);
+        let (outer, inner) = (foos[0], foos[1]);
 
         assert_resolves_to(
-            &tree,
-            &[natives[0], inner],
-            &candidates(&[&[inner], &natives]),
+            &types,
+            &foos,
+            &candidates(&[&[inner], &[outer]]),
             &[StaticType::String],
-            natives[0],
+            outer,
         );
     }
 
@@ -821,16 +707,16 @@ mod tests {
     // same scope when both match the call.
     #[test]
     fn concrete_overload_beats_variadic() {
-        let (tree, natives) = with_natives(vec![
-            ("foo", variadic_fn(StaticType::Any)),
-            ("foo", fn_type(vec![StaticType::Int], StaticType::Int)),
+        let (types, foos) = table(vec![
+            variadic_fn(StaticType::Any),
+            fn_type(vec![StaticType::Int], StaticType::Int),
         ]);
         assert_resolves_to(
-            &tree,
-            &natives,
-            &candidates(&[&natives]),
+            &types,
+            &foos,
+            &candidates(&[&foos]),
             &[StaticType::Int],
-            natives[1],
+            foos[1],
         );
     }
 }
