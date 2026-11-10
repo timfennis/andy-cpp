@@ -514,6 +514,21 @@ impl NameResolver {
         std::mem::take(&mut self.errors)
     }
 
+    /// Forgets what was recorded about the nodes of the batch just resolved: a
+    /// program, or one REPL line. Later batches only need the symbols, scopes
+    /// and captures, so a long REPL session doesn't keep every line's tables.
+    pub fn end_batch(&mut self) {
+        self.declarations.clear();
+        self.references.clear();
+        self.assignments.clear();
+        self.captures.clear();
+        self.augmented.clear();
+        self.getters.clear();
+        self.setters.clear();
+        self.type_names.clear();
+        self.structs.clear();
+    }
+
     /// Resolve lexical names: values, accessors, and the type names in annotations.
     /// Choosing overloads, checking types and validating control flow belong to
     /// later passes.

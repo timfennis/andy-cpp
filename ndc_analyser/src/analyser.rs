@@ -111,6 +111,7 @@ impl Analyser {
         let mut result = std::mem::take(&mut self.result);
         result.errors = std::mem::take(&mut self.errors);
         result.analysis.top_level_frame_size = Layout::new(&self.resolver).frame_size(None);
+        self.resolver.end_batch();
         result
     }
 
