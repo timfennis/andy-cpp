@@ -524,6 +524,7 @@ impl Analyser {
                 };
 
                 self.scope_tree.new_function_scope();
+                self.scope_tree.capture(self.resolver.captures_of(*id));
                 self.return_type_stack.push(None);
                 let parameter_nodes = parameters.iter().map(|p| p.lvalue.id).collect_vec();
                 let param_types =
