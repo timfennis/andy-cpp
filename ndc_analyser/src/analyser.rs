@@ -12,7 +12,7 @@ use ndc_parser::{
     BindingPatternLocation, Candidate, Expression, ExpressionLocation, ForBody, ForIteration,
     FunctionParameter, NodeId, ResolvedVar, TypeExpr,
 };
-use ndc_resolver::{NameResolutionError, NameResolver, SymbolId};
+use ndc_resolver::{Candidates, NameResolutionError, NameResolver, SymbolId};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -130,6 +130,31 @@ impl Analyser {
         Layout::new(&self.resolver).location(symbol, self.functions.last().copied())
     }
 
+    /// Why no candidate accepts a call of `name` with arguments of these types:
+    /// a variable holding a function ended the search, a cast would make an
+    /// overload fit, or nothing fits.
+    fn no_match(
+        &self,
+        candidates: &Candidates,
+        name: &str,
+        types: &[StaticType],
+        span: Span,
+    ) -> AnalysisError {
+        let overloads = self.overloads();
+        if overloads.variable_ending_search(candidates).is_some() {
+            AnalysisError::variable_rejects_arguments(name, types, span)
+        } else if overloads.a_cast_could_resolve(candidates, types) {
+            AnalysisError::function_not_found_suggest_cast(name, types, span)
+        } else {
+            AnalysisError::function_not_found(name, types, span)
+        }
+    }
+
+    /// Overload resolution over the types declared so far.
+    fn overloads(&self) -> Overloads<'_> {
+        Overloads::new(&self.types, self.resolver.symbols())
+    }
+
     /// Reports a read `x.name`, the call `name(x)`, that a value of unknown
     /// type named `name` makes ambiguous, as [`Overloads::any_value_hiding_function`]
     /// describes. `node` is the read's, which holds its getter candidates.
@@ -138,7 +163,7 @@ impl Analyser {
             .resolver
             .getter_candidates(node)
             .is_some_and(|getters| {
-                Overloads::new(&self.types)
+                self.overloads()
                     .any_value_hiding_function(getters, std::slice::from_ref(receiver))
                     .is_some()
             });
@@ -457,7 +482,7 @@ impl Analyser {
                 let ResolvedCall {
                     binding: assign_binding,
                     return_type: assign_return,
-                } = Overloads::new(&self.types).resolve_call(
+                } = self.overloads().resolve_call(
                     &self.resolver.augmented_candidates(*id).in_place,
                     &arg_types,
                     CallKind::Operator,
@@ -466,7 +491,7 @@ impl Analyser {
                 let ResolvedCall {
                     binding: op_binding,
                     return_type: op_return,
-                } = Overloads::new(&self.types).resolve_call(
+                } = self.overloads().resolve_call(
                     &self.resolver.augmented_candidates(*id).operator,
                     &arg_types,
                     CallKind::Operator,
@@ -695,7 +720,7 @@ impl Analyser {
                 let ResolvedCall {
                     binding,
                     return_type,
-                } = Overloads::new(&self.types).resolve_call(
+                } = self.overloads().resolve_call(
                     getters,
                     std::slice::from_ref(&receiver_type),
                     CallKind::Regular,
@@ -703,18 +728,8 @@ impl Analyser {
                 );
 
                 if matches!(binding, Binding::None) {
-                    let args = [receiver_type];
-                    self.emit(
-                        if Overloads::new(&self.types).a_cast_could_resolve(getters, &args) {
-                            AnalysisError::function_not_found_suggest_cast(
-                                member,
-                                &args,
-                                *member_span,
-                            )
-                        } else {
-                            AnalysisError::function_not_found(member, &args, *member_span)
-                        },
-                    );
+                    let error = self.no_match(getters, member, &[receiver_type], *member_span);
+                    self.emit(error);
                 }
 
                 *resolved_getter = binding;
@@ -863,7 +878,8 @@ impl Analyser {
         // A value whose type isn't known may hold a function itself, so one
         // standing nearer than a function that accepts the call makes it
         // ambiguous. `xs.len()` is the call `len(xs)`, so it's checked too.
-        if Overloads::new(&self.types)
+        if self
+            .overloads()
             .any_value_hiding_function(self.resolver.reference_candidates(function.id), &type_sig)
             .is_some()
         {
@@ -873,7 +889,7 @@ impl Analyser {
         let ResolvedCall {
             binding,
             return_type,
-        } = Overloads::new(&self.types).resolve_call(
+        } = self.overloads().resolve_call(
             self.resolver.reference_candidates(function.id),
             &type_sig,
             kind,
@@ -882,13 +898,8 @@ impl Analyser {
 
         if matches!(binding, Binding::None) {
             let candidates = self.resolver.reference_candidates(function.id);
-            self.emit(
-                if Overloads::new(&self.types).a_cast_could_resolve(candidates, &type_sig) {
-                    AnalysisError::function_not_found_suggest_cast(name, &type_sig, span)
-                } else {
-                    AnalysisError::function_not_found(name, &type_sig, span)
-                },
-            );
+            let error = self.no_match(candidates, name, &type_sig, span);
+            self.emit(error);
             *resolved = binding;
             return Ok(StaticType::Any);
         }
@@ -1003,14 +1014,14 @@ impl Analyser {
                 // natural broadcast story for `(list_a, list_b)[i]`. Only an
                 // augmented assignment reads the old value through `[]`.
                 *resolved_get = self.resolver.getter_candidates(lvalue.id).map(|getters| {
-                    Overloads::new(&self.types)
+                    self.overloads()
                         .resolve_call(getters, &get_args, CallKind::Regular, |symbol| {
                             self.locate(symbol)
                         })
                         .binding
                 });
                 *resolved_set = Some(
-                    Overloads::new(&self.types)
+                    self.overloads()
                         .resolve_call(
                             self.resolver.setter_candidates(lvalue.id),
                             &set_args,
@@ -1056,14 +1067,14 @@ impl Analyser {
                     .resolver
                     .getter_candidates(lvalue.id)
                     .expect("internal error: member target without getter candidates");
-                let getter = Overloads::new(&self.types).resolve_call(
+                let getter = self.overloads().resolve_call(
                     getters,
                     &getter_args,
                     CallKind::Regular,
                     |symbol| self.locate(symbol),
                 );
                 let setter_name = format!("{member}=");
-                let setter = Overloads::new(&self.types).resolve_call(
+                let setter = self.overloads().resolve_call(
                     self.resolver.setter_candidates(lvalue.id),
                     &setter_args,
                     CallKind::Regular,
@@ -1523,6 +1534,19 @@ impl AnalysisError {
             text: "This lvalue is required to be a single identifier".to_string(),
             span,
             help_text: None,
+        }
+    }
+
+    fn variable_rejects_arguments(name: &str, types: &[StaticType], span: Span) -> Self {
+        Self {
+            text: format!(
+                "The variable '{name}' holds a function that doesn't accept the arguments '{}'",
+                types.iter().join(", ")
+            ),
+            span,
+            help_text: Some(format!(
+                "A variable hides the functions named '{name}' further out: it doesn't join their overloads"
+            )),
         }
     }
 

@@ -187,14 +187,15 @@ fn foo(a, b) { "outer-two" }
 }
 ```
 
-**A `let` holding a function** shadows the functions with that name. It doesn't join their overloads:
+**A `let` holding a function** shadows the functions with that name. It doesn't join their overloads, so a call it doesn't accept is an error, even when one of the functions would accept it:
 
 ```ndc
 fn foo(a) { "one" }
 fn foo(a, b) { "two" }
 
 let foo = fn(a) => "let";
-foo("x");      // "let"
+foo("x");        // "let"
+foo("x", "y");   // ERROR: The variable 'foo' holds a function that doesn't accept the arguments 'String, String'
 ```
 
 **A `let` holding a value that can't be called** is skipped, so the call reaches the function:
