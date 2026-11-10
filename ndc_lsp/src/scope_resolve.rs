@@ -28,11 +28,10 @@ pub struct Decl {
     /// bindings this is the END of the initializer (RHS / sequence), so the
     /// binding is not visible inside its own initializer — matching the analyser,
     /// which resolves the initializer before creating the binding (`let x = x`
-    /// must resolve the RHS to an outer `x`). Ignored for hoisted functions.
+    /// must resolve the RHS to an outer `x`). Functions and structs are
+    /// visible from the start of their declaration, so a function can call
+    /// itself; like the language, nothing is hoisted.
     pub visible_from: usize,
-    /// Functions are hoisted: visible throughout their scope regardless of
-    /// whether the use textually precedes the declaration.
-    pub is_function: bool,
 }
 
 /// The outermost (document) scope. Its end is one past the source length so a
@@ -51,10 +50,10 @@ pub fn collect_declarations(ast: &[ExpressionLocation], file_scope: Span) -> Vec
     out
 }
 
-/// Is `decl` visible at `offset`? It must be in an enclosing scope, and — unless
-/// it is a hoisted function — the use must come at or after `visible_from`.
+/// Is `decl` visible at `offset`? It must be in an enclosing scope, and the use
+/// must come at or after `visible_from`.
 pub fn is_visible(decl: &Decl, offset: usize) -> bool {
-    contains(decl.scope_span, offset) && (decl.is_function || decl.visible_from <= offset)
+    contains(decl.scope_span, offset) && decl.visible_from <= offset
 }
 
 pub fn contains(span: Span, offset: usize) -> bool {
@@ -87,7 +86,6 @@ fn collect(expr: &ExpressionLocation, scope: Span, out: &mut Vec<Decl>) {
                     name_span: expr.span,
                     scope_span: scope,
                     visible_from: expr.span.offset(),
-                    is_function: true,
                 });
             }
             // Parameters and body locals are scoped to the body; parameters are
@@ -220,7 +218,6 @@ fn collect(expr: &ExpressionLocation, scope: Span, out: &mut Vec<Decl>) {
                 name_span: expr.span,
                 scope_span: scope,
                 visible_from: expr.span.offset(),
-                is_function: false,
             });
         }
     }
@@ -240,7 +237,6 @@ fn push_pattern(
             name_span: *span,
             scope_span: scope,
             visible_from,
-            is_function: false,
         }),
         BindingPattern::Sequence(patterns) => {
             for pattern in patterns {
