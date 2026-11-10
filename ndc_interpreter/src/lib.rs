@@ -97,6 +97,10 @@ impl Interpreter {
 
         self.analyser = Analyser::new(functions);
         self.globals = ndc_vm::native_globals(self.function_registry.iter());
+        // A REPL VM from an earlier evaluation must see the new natives too.
+        if let Some((vm, _)) = &mut self.repl_state {
+            vm.set_globals(self.globals.clone());
+        }
     }
 
     #[cfg(feature = "trace")]

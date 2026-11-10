@@ -770,6 +770,11 @@ impl Vm {
         }
     }
 
+    /// Replaces the globals, for natives registered after the VM was created.
+    pub fn set_globals(&mut self, globals: Vec<Value>) {
+        self.globals = globals;
+    }
+
     /// Resume execution with a new (extended) compiled function, starting at
     /// `resume_ip` — the instruction index where the previous `Halt` was.
     /// Used by the REPL to keep a single VM alive across lines.

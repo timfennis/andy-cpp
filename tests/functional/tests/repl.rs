@@ -287,3 +287,14 @@ fn closures_from_a_while_loop_keep_their_iteration_across_lines() {
     ]);
     assert_eq!(out.trim(), "[0,1,2]");
 }
+
+// Registering functions after a line already ran must reach the REPL's VM too.
+#[test]
+fn configure_after_a_line_ran_updates_the_globals() {
+    let mut interp = Interpreter::capturing();
+    interp.eval("1;").unwrap();
+    interp.configure(ndc_stdlib::register);
+    interp.eval("print(1)").unwrap();
+    let out = String::from_utf8(interp.get_output().unwrap()).unwrap();
+    assert_eq!(out.trim(), "1");
+}
