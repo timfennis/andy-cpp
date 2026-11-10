@@ -110,6 +110,28 @@ impl<'a> Overloads<'a> {
     /// fit. A failed call that satisfies this can be fixed with a cast, so the
     /// diagnostic says so; one that does not is a genuine mismatch and gets no
     /// misleading advice.
+    /// A value whose type isn't known that stands nearer than a function
+    /// accepting this call, so the call could mean either: in
+    /// `fn foo(x) { 1 } fn test(foo) { foo(2) }`, the parameter `foo`. A
+    /// function nearer than every such value shadows them, and where no
+    /// function accepts the call, the value is what gets called.
+    pub(crate) fn any_value_hiding_function(
+        self,
+        candidates: &Candidates,
+        sig: &[StaticType],
+    ) -> Option<SymbolId> {
+        let mut any_value = None;
+        for &symbol in candidates.iter().flatten() {
+            let typ = self.types.get_type(symbol);
+            if *typ == StaticType::Any {
+                any_value.get_or_insert(symbol);
+            } else if typ.is_fn_and_matches(sig) || self.is_compatible(symbol, sig) {
+                return any_value;
+            }
+        }
+        None
+    }
+
     pub(crate) fn a_cast_could_resolve(self, candidates: &Candidates, sig: &[StaticType]) -> bool {
         candidates.iter().flatten().any(|&symbol| {
             let StaticType::Function {

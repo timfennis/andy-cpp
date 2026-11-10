@@ -141,17 +141,17 @@ A return-type annotation also helps the analyser understand recursive calls — 
 
 ## Function overloading
 
-You can overload functions by declaring multiple `fn` definitions with the same name and different parameter counts or parameter types.
+A name can refer to several functions, called overloads, as long as they differ in their number of parameters, their parameter types, or both:
 
 ```ndc
-fn add(n) { n + 1 };
-fn add(x, y) { x + y };
+fn add(n) { n + 1 }
+fn add(x, y) { x + y }
 
 assert_eq(10, add(9));
 assert_eq(12, add(8, 4));
 ```
 
-Overloads with the same parameter count are told apart by their parameter types. A call uses the most specific overload whose parameter types accept its arguments:
+A call uses the overload whose parameters accept its arguments. When several accept them, the most specific one wins:
 
 ```ndc
 fn describe(x: Int) { "int" }
@@ -163,16 +163,18 @@ assert_eq("string", describe("a"));
 assert_eq("something else", describe([1]));
 ```
 
-Declaring two `fn` definitions with the same name and the same parameter types in the same scope is an error. Parameter names don't count, and a parameter without a type annotation has type `Any`:
+Two overloads in the same scope can't have the same parameter types. Parameter names don't count, and a parameter without a type annotation has type `Any`:
 
 ```ndc
 fn foo(a) { a + 1 }
-fn foo(b) { b + 2 } // ERROR: redefinition of 'foo' with parameters (Any)
+fn foo(b) { b + 2 }   // ERROR: Illegal redefinition of function 'foo' with parameters (Any)
 ```
 
-## Function shadowing
+## How a call finds its function
 
-A `fn` declaration in a nested scope shadows outer overloads only for the calls it accepts. Other overloads remain available:
+A call such as `foo(x)` looks for `foo` in the scope it's written in first, then in each enclosing scope in turn, and finally among the built-in functions. A method call `x.foo()` and a property read `x.foo` are both the call `foo(x)`, and are looked up the same way.
+
+**Functions in a nested scope** take over only the calls they accept. Other calls still reach the overloads further out:
 
 ```ndc
 fn foo(a) { "outer-one" }
@@ -180,24 +182,46 @@ fn foo(a, b) { "outer-two" }
 
 {
     fn foo(a) { "inner-one" }
-    foo("x");        // "inner-one": inner 1-arg shadows outer 1-arg
-    foo("x", "y");   // "outer-two": outer 2-arg still reachable
+    foo("x");        // "inner-one"
+    foo("x", "y");   // "outer-two": the inner foo doesn't take two arguments
 }
-
-foo("x");  // "outer-one": shadow is gone after the block
 ```
 
-A `let` binding with a function value replaces all previous bindings with the same name. It does not participate in function overloading:
+**A `let` holding a function** shadows the functions with that name. It doesn't join their overloads:
 
 ```ndc
 fn foo(a) { "one" }
 fn foo(a, b) { "two" }
 
 let foo = fn(a) => "let";
-foo("x");      // "let": both fn overloads are shadowed
+foo("x");      // "let"
 ```
 
-The reverse order is an error within one scope: a scope holds a name either as `let` bindings or as functions. In a nested scope, the `fn` shadows the outer `let` as usual. The same rule applies to a struct's constructor.
+**A `let` holding a value that can't be called** is skipped, so the call reaches the function:
+
+```ndc
+let len = 300;
+len;           // 300
+len("test");   // 4: the built-in len
+```
+
+**A value whose type isn't known**, such as a parameter without a type annotation, might hold a function. If a function further out also accepts the call, the call is ambiguous, which is an error. Rename the value if it holds a function, or annotate its type if it doesn't. If no function accepts the call, the value is called.
+
+```ndc
+fn label(len) {
+    len("abc")          // ERROR: Ambiguous call to 'len'
+}
+
+fn measure(len) {
+    "abc".len()         // ERROR: the same call, written as a method call
+}
+
+fn padded(len: Int) {
+    len("abc") + len    // fine: an Int can't be called, so this calls the built-in len
+}
+```
+
+**Within one scope**, a name belongs either to `let` bindings or to functions, not both. A `fn` after a `let` with the same name in the same scope is an error, while in a nested scope it's fine. The same applies to a struct's constructor:
 
 ```ndc
 let foo = fn(a) => "let";
@@ -207,15 +231,6 @@ let bar = 1;
 {
     fn bar(a) { a }      // fine: a different scope
 }
-```
-
-A non-function `let` binding shadows the name for value access, but function calls still resolve to the underlying function:
-
-```ndc
-let len = 300;
-len;           // 300: the value
-len("test");   // 4: calls the stdlib function, skipping the non-function binding
-"test".len;    // 4: method call also resolves to the function
 ```
 
 ## Method call syntax

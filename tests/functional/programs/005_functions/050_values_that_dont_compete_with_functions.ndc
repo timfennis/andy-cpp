@@ -1,0 +1,21 @@
+// A value of unknown type only makes a call ambiguous when it stands nearer
+// than a function that accepts the call.
+
+// No function accepts one argument, so the parameter is called.
+fn pick(a, b) { "function" }
+fn call_pick(pick) { pick(1) }
+print(call_pick(fn(x) { "parameter" }));
+// expect-output: parameter
+
+// An annotated value that can't be called leaves the name to the function.
+fn padded(len: Int) { len("abc") + len }
+print(padded(10));
+// expect-output: 13
+
+// A function nearer than the value shadows it.
+fn inner(f) {
+    fn f(x) { "inner function" }
+    f(1)
+}
+print(inner(5));
+// expect-output: inner function
