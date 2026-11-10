@@ -321,7 +321,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn one_shot_execution_does_not_retain_declarations() {
+    fn a_one_shot_interpreter_forgets_earlier_declarations() {
         let mut interpreter = Interpreter::one_shot();
         interpreter
             .eval("let value = 1;")

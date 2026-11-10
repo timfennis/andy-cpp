@@ -117,6 +117,14 @@ fn top_level_blocks_number_their_locals_from_zero() {
 }
 
 #[test]
+fn redeclaring_a_local_takes_a_new_slot() {
+    assert_eq!(
+        slots("fn f() { let x = 1; let x = 2; }"),
+        named(&[("f", Global(0)), ("x", Local(0)), ("x", Local(1))])
+    );
+}
+
+#[test]
 fn block_slots_are_free_again_after_the_block() {
     assert_eq!(
         slots("fn f() { let a = 1; { let b = 2; } let c = 3; }"),
@@ -199,7 +207,7 @@ fn top_level_values_are_not_captured() {
 }
 
 #[test]
-fn captures_from_the_enclosing_frame_are_its_locals() {
+fn captures_are_enclosing_locals_in_order_of_first_use() {
     assert_eq!(
         captures("fn outer() { let a = 1; let b = 2; fn f() { b; a } }"),
         vec![
@@ -296,7 +304,7 @@ fn a_batch_lays_out_only_the_scopes_it_created() {
 }
 
 #[test]
-fn a_pick_is_located_from_the_function_its_use_sits_in() {
+fn a_captured_local_is_a_cell_in_its_frame_and_an_upvalue_in_the_closure() {
     let mut resolver = resolve("");
     let statements = resolve_batch(&mut resolver, "fn f() { let x = 1; x; fn g() { x } }");
     let mut picks = Picks::default();

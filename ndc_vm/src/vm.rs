@@ -40,11 +40,6 @@ pub struct Vm {
     stack: Vec<Value>,
     globals: Vec<Value>,
     frames: Vec<CallFrame>,
-    /// All currently-open upvalue cells, keyed by absolute stack slot.
-    /// When a frame exits, cells pointing into that frame's stack region are
-    /// "closed" — the live value is copied out of the stack into the cell so
-    /// the closure can still read/write it after the frame is gone.
-    /// Two closures capturing the same local share one cell via this list.
     /// Output sink for `print`, `dbg`, and similar I/O built-ins.
     output: OutputSink,
     #[cfg(feature = "trace")]

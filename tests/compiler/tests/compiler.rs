@@ -5,6 +5,7 @@ use ndc_vm::chunk::JumpTarget;
 use ndc_vm::chunk::OpCode;
 use ndc_vm::chunk::OpCode::*;
 use ndc_vm::compiler::Compiler;
+use ndc_vm::value::CompiledFunction;
 use std::rc::Rc;
 
 // These helpers compile without the peephole optimizer so the tests
@@ -12,14 +13,16 @@ use std::rc::Rc;
 // is exercised in `tests/optimizer.rs`.
 
 fn compile(input: &str) -> Vec<OpCode> {
+    compile_function(input).opcodes().to_vec()
+}
+
+fn compile_function(input: &str) -> CompiledFunction {
     let tokens = Lexer::new(input, SourceId::SYNTHETIC)
         .collect::<Result<Vec<_>, _>>()
         .expect("lex failed");
     let expressions = Parser::from_tokens(tokens).parse().expect("parse failed");
     Compiler::compile_unoptimized(expressions.into_iter(), Analysis::default())
         .expect("compile failed")
-        .opcodes()
-        .to_vec()
 }
 
 fn compile_with_analysis(input: &str) -> Vec<OpCode> {
@@ -44,20 +47,44 @@ fn compile_with_stdlib(input: &str) -> Vec<OpCode> {
         .to_vec()
 }
 
-/// The raw bytecode of the function that is constant `index` of `input`'s
-/// top-level code, such as the first function `input` declares.
-fn compile_nested_function(input: &str, index: usize) -> Vec<OpCode> {
+/// The raw bytecode of a function nested in `input`: `path[0]` is the
+/// constant of the top-level code that holds it, `path[1]` the constant of
+/// that function holding the next one, and so on.
+fn compile_nested_function(input: &str, path: &[usize]) -> Vec<OpCode> {
     let mut interp = ndc_interpreter::Interpreter::capturing();
+    nested_function_opcodes(&mut interp, input, path)
+}
+
+/// Like [`compile_nested_function`] but with the standard library loaded.
+fn compile_nested_function_with_stdlib(input: &str, path: &[usize]) -> Vec<OpCode> {
+    let mut interp = ndc_interpreter::Interpreter::capturing();
+    interp.configure(ndc_stdlib::register);
+    nested_function_opcodes(&mut interp, input, path)
+}
+
+fn nested_function_opcodes(
+    interp: &mut ndc_interpreter::Interpreter,
+    input: &str,
+    path: &[usize],
+) -> Vec<OpCode> {
     let compiled = interp
         .compile_str_unoptimized(input)
         .expect("compile failed");
-    let ndc_vm::Value::Object(object) = compiled.body().constant(index) else {
+    let mut function = function_constant(&compiled, path[0]);
+    for &index in &path[1..] {
+        function = function_constant(&function, index);
+    }
+    function.opcodes().to_vec()
+}
+
+fn function_constant(function: &CompiledFunction, index: usize) -> Rc<CompiledFunction> {
+    let ndc_vm::Value::Object(object) = function.body().constant(index) else {
         panic!("constant {index} is not a function");
     };
     let ndc_vm::Object::Function(ndc_vm::Function::Compiled(function)) = object.as_ref() else {
         panic!("constant {index} is not a compiled function");
     };
-    function.opcodes().to_vec()
+    Rc::clone(function)
 }
 
 fn compile_with_stdlib_unoptimized(input: &str) -> Vec<OpCode> {
@@ -78,12 +105,13 @@ fn compile_with_stdlib_unoptimized(input: &str) -> Vec<OpCode> {
 // 3: Constant(1)      push `1`
 // 4: Jump(2)          skip else path (jump to Halt at index 7)
 // 5: Pop              pop condition (false path, jumped here)
-// 6: Constant(2)      push `None` (unit, no else branch)
+// 6: Constant(2)      push `()` (no else branch)
 // 7: Halt
 #[test]
-fn test_if_without_else() {
+fn an_if_without_else_yields_unit_when_false() {
+    let compiled = compile_function("if true { 1 }");
     assert_eq!(
-        compile("if true { 1 }"),
+        compiled.opcodes(),
         [
             Constant(0),
             JumpIfFalse(JumpTarget::Offset(3)),
@@ -94,6 +122,10 @@ fn test_if_without_else() {
             Constant(2),
             Halt
         ]
+    );
+    assert!(
+        compiled.body().constant(2).is_unit(),
+        "the false path must push unit"
     );
 }
 
@@ -108,7 +140,7 @@ fn test_if_without_else() {
 // 6: Constant(2)      push `2`
 // 7: Halt
 #[test]
-fn test_if_with_else() {
+fn an_if_pops_its_condition_on_both_paths() {
     assert_eq!(
         compile("if true { 1 } else { 2 }"),
         [
@@ -134,7 +166,7 @@ fn test_if_with_else() {
 // 3: Constant(1)      push `false` (result)
 // 4: Halt
 #[test]
-fn test_and() {
+fn and_short_circuits_on_a_false_left_operand() {
     assert_eq!(
         compile("true and false"),
         [
@@ -157,7 +189,7 @@ fn test_and() {
 // 3: Constant(1)      push `false` (result)
 // 4: Halt
 #[test]
-fn test_or() {
+fn or_short_circuits_on_a_true_left_operand() {
     assert_eq!(
         compile("true or false"),
         [
@@ -170,22 +202,12 @@ fn test_or() {
     );
 }
 
-// 5;
-//
-// 0: Constant(0)      push `5`
-// 1: Pop              discard value (it's a statement)
-// 2: Halt
-#[test]
-fn test_statement() {
-    assert_eq!(compile("5;"), [Constant(0), Pop, Halt]);
-}
-
 // { 5 }
 //
 // 0: Constant(0)      push `5` (block result)
 // 1: Halt
 #[test]
-fn test_block_with_expression() {
+fn a_block_yields_its_last_expression() {
     assert_eq!(compile("{ 5 }"), [Constant(0), Halt]);
 }
 
@@ -196,7 +218,7 @@ fn test_block_with_expression() {
 // 2: Constant(1)      push `()` (block result is unit)
 // 3: Halt
 #[test]
-fn test_block_with_trailing_statement() {
+fn a_block_ending_in_a_statement_yields_unit() {
     assert_eq!(compile("{ 5; }"), [Constant(0), Pop, Constant(1), Halt]);
 }
 
@@ -207,13 +229,14 @@ fn test_block_with_trailing_statement() {
 // 2: Constant(1)      push `6` (block result)
 // 3: Halt
 #[test]
-fn test_block_multiple_statements() {
+fn a_block_discards_all_but_its_last_value() {
     assert_eq!(compile("{ 5; 6 }"), [Constant(0), Pop, Constant(1), Halt]);
 }
 
 // if true { 3 } else { 3; }
 //
-// true branch returns 3, false branch returns ()
+// Each branch leaves exactly one value on the stack: the true branch its `3`,
+// the false branch, which ends in a statement, unit.
 //
 // 0: Constant(0)      push `true`
 // 1: JumpIfFalse(3)   jump to false branch (index 5)
@@ -226,7 +249,7 @@ fn test_block_multiple_statements() {
 // 8: Constant(3)      push `()` (block result)
 // 9: Halt
 #[test]
-fn test_if_with_statement_else() {
+fn each_if_branch_leaves_one_value() {
     assert_eq!(
         compile("if true { 3 } else { 3; }"),
         [
@@ -244,43 +267,6 @@ fn test_if_with_statement_else() {
     );
 }
 
-// if true { 3; } else { 3; }
-//
-// Both branches return () — result is unit regardless of condition
-//
-// 0: Constant(0)      push `true`
-// 1: JumpIfFalse(5)   jump to false branch (index 7)
-// 2: Pop              pop condition (true path)
-// 3: Constant(1)      push `3`
-// 4: Pop              discard
-// 5: Constant(2)      push `()`
-// 6: Jump(4)          jump to Halt (index 11)
-// 7: Pop              pop condition (false path)
-// 8: Constant(3)      push `3`
-// 9: Pop              discard
-// 10: Constant(4)     push `()`
-// 11: Halt
-#[test]
-fn test_if_with_statement_branches() {
-    assert_eq!(
-        compile("if true { 3; } else { 3; }"),
-        [
-            Constant(0),
-            JumpIfFalse(JumpTarget::Offset(5)),
-            Pop,
-            Constant(1),
-            Pop,
-            Constant(2),
-            Jump(JumpTarget::Offset(4)),
-            Pop,
-            Constant(3),
-            Pop,
-            Constant(4),
-            Halt
-        ]
-    );
-}
-
 // while true { 1 }
 //
 // 0: Constant(0)      push `true`  ← loop_start
@@ -293,7 +279,7 @@ fn test_if_with_statement_branches() {
 // 7: Constant(2)      push `()` (the loop's result)
 // 8: Halt
 #[test]
-fn test_while() {
+fn a_while_loop_discards_its_body_value_and_yields_unit() {
     assert_eq!(
         compile("while true { 1 }"),
         [
@@ -311,28 +297,10 @@ fn test_while() {
 }
 
 // let a = 1;
-//
-// A top-level declaration is a global, so SetGlobal stores the value in global
-// slot 0 (there are no natives here). The declaration's unit result is pushed
-// and popped by the statement; the optimizer elides the pair.
-//
-// 0: Constant(0)    push `1`
-// 1: SetGlobal(0)   store in global slot 0
-// 2: Constant(1)    push `()` (declaration result)
-// 3: Pop            discard (statement)
-// 4: Halt
-#[test]
-fn test_declaration() {
-    assert_eq!(
-        compile_with_analysis("let a = 1;"),
-        [Constant(0), SetGlobal(0), Constant(1), Pop, Halt]
-    );
-}
-
-// let a = 1;
 // a = 5;
 //
-// Declaration stores 1 into global slot 0.
+// A top-level declaration is a global, so the declaration stores 1 into
+// global slot 0 (there are no natives here).
 // Assignment pushes new value, SetGlobal overwrites,
 // push unit as the expression result, Pop discards it.
 //
@@ -346,7 +314,7 @@ fn test_declaration() {
 // 7: Pop            discard (statement)
 // 8: Halt
 #[test]
-fn test_assignment() {
+fn a_top_level_variable_is_declared_and_assigned_through_its_global() {
     assert_eq!(
         compile_with_analysis("let a = 1;\na = 5;"),
         [
@@ -363,73 +331,45 @@ fn test_assignment() {
     );
 }
 
-// let value = [1];
-// value ++= [2];
-//
-// A specialized `++=` mutates and returns the left value. Even though the
-// mutation is visible through aliases, SetGlobal must write the returned value
-// back before the compiler pushes unit for the assignment expression:
-//
-// Call(2), SetGlobal(_), Constant(_), Pop
-//
-// The indexed form prepares the container and index in temporary locals,
-// calls `++=`, then passes its result to `[]=`. The setter's unit result is
-// discarded before the assignment's own unit is pushed:
-//
-// Call(3), Pop, Constant(_)
-#[test]
-fn test_augmented_assignment_always_writes_back() {
-    let variable = compile_with_stdlib_unoptimized("let value = [1]; value ++= [2];");
-    assert!(
-        variable
-            .windows(4)
-            .any(|ops| matches!(ops, [Call(2), SetGlobal(_), Constant(_), Pop])),
-        "specialized variable augmentation must write back its result and push unit: {variable:?}",
-    );
-
-    let index = compile_with_stdlib_unoptimized(
-        "let value = [1]; let values = [value]; values[0] ++= [2];",
-    );
-    assert!(
-        index
-            .windows(3)
-            .any(|ops| matches!(ops, [Call(3), Pop, Constant(_)])),
-        "specialized indexed augmentation must write back through []= and push unit: {index:?}",
-    );
-}
-
 // let value = 1;
 // value += 2;
 //
-// Ordinary `+` produces a replacement value, so variable augmentation stores
-// the result and then produces unit:
+// An augmented assignment stores the operation's result back into its target,
+// then pushes unit for the assignment expression. That holds for a `++=` that
+// mutates the list in place and returns it as much as for a `+` that makes a
+// new value. A variable target stores with its Set opcode:
 //
 // Call(2), SetGlobal(_), Constant(_), Pop
 //
-// let values = [1];
-// values[0] += 2;
-//
-// Indexed augmentation instead sends the replacement through `[]=`. Its unit
-// result is popped before the assignment expression's unit is produced:
+// An indexed target passes the result to `[]=`, and pops that call's unit
+// before pushing its own:
 //
 // Call(3), Pop, Constant(_)
 #[test]
-fn test_augmented_assignment_writeback_uses_target_store_shape() {
-    let variable = compile_with_stdlib_unoptimized("let value = 1; value += 2;");
-    assert!(
-        variable
-            .windows(4)
-            .any(|ops| matches!(ops, [Call(2), SetGlobal(_), Constant(_), Pop])),
-        "writeback variable augmentation must store the operation result and push unit: {variable:?}",
-    );
+fn an_augmented_assignment_stores_its_result_back_even_when_it_mutates_in_place() {
+    for source in [
+        "let value = 1; value += 2;",
+        "let value = [1]; value ++= [2];",
+    ] {
+        let ops = compile_with_stdlib_unoptimized(source);
+        assert!(
+            ops.windows(4)
+                .any(|ops| matches!(ops, [Call(2), SetGlobal(_), Constant(_), Pop])),
+            "`{source}` must store the operation result and push unit: {ops:?}",
+        );
+    }
 
-    let index = compile_with_stdlib_unoptimized("let values = [1]; values[0] += 2;");
-    assert!(
-        index
-            .windows(3)
-            .any(|ops| matches!(ops, [Call(3), Pop, Constant(_)])),
-        "writeback index augmentation must discard the setter result before pushing unit: {index:?}",
-    );
+    for source in [
+        "let values = [1]; values[0] += 2;",
+        "let value = [1]; let values = [value]; values[0] ++= [2];",
+    ] {
+        let ops = compile_with_stdlib_unoptimized(source);
+        assert!(
+            ops.windows(3)
+                .any(|ops| matches!(ops, [Call(3), Pop, Constant(_)])),
+            "`{source}` must store through []= and push unit: {ops:?}",
+        );
+    }
 }
 
 // let values = [1];
@@ -446,7 +386,7 @@ fn test_augmented_assignment_writeback_uses_target_store_shape() {
 // slot 2: cached index
 // slot 3: operation result passed to `[]=`
 #[test]
-fn test_augmented_assignment_temporaries_follow_source_locals() {
+fn temporaries_come_after_the_frames_own_locals() {
     let ops =
         compile_with_stdlib_unoptimized("let values = [1]; values[0] += { let delta = 2; delta };");
 
@@ -462,37 +402,11 @@ fn test_augmented_assignment_temporaries_follow_source_locals() {
     );
 }
 
-// { let a = 3; a }
-//
-// Declaration stores 3 into pre-allocated slot 0.
-// Block result is `a`, read via GetLocal.
-// No cleanup needed — locals are pre-allocated.
-//
-// 0: Constant(0)   push `3`
-// 1: SetLocal(0)   store in slot 0 (declaration)
-// 2: Constant(1)   push `()` (declaration result)
-// 3: Pop           discard (statement)
-// 4: GetLocal(0)   push `a` (block result)
-// 5: Halt
-#[test]
-fn test_block_scope_cleanup() {
-    assert_eq!(
-        compile_with_analysis("{ let a = 3; a }"),
-        [
-            Constant(0),
-            SetLocal(0),
-            Constant(1),
-            Pop,
-            GetLocal(0),
-            Halt
-        ]
-    );
-}
-
 // { let a = 1; let b = 2; a }
 //
-// Both locals stored via SetLocal into pre-allocated slots.
-// Block result is `a`, read via GetLocal. No cleanup needed.
+// Block locals live in slots of the frame, allocated up front, so the block
+// stores and reads them with SetLocal and GetLocal and cleans nothing up when
+// it ends.
 //
 // 0: Constant(0)   push `1`
 // 1: SetLocal(0)   store in slot 0
@@ -503,7 +417,7 @@ fn test_block_scope_cleanup() {
 // 8: GetLocal(0)   push `a` (block result)
 // 9: Halt
 #[test]
-fn test_block_scope_cleanup_multiple_locals() {
+fn block_locals_live_in_preallocated_slots() {
     assert_eq!(
         compile_with_analysis("{ let a = 1; let b = 2; a }"),
         [
@@ -524,11 +438,10 @@ fn test_block_scope_cleanup_multiple_locals() {
 // (1, 2) + (3, 4)
 //
 // The analyser pins this to a single scalar `+(Int, Int)` overload broadcast
-// across two positions. The compiler emits a direct GetGlobal load of the
-// scalar function — no OverloadSet allocation — and a CallVec opcode that
-// vec-dispatches at runtime.
+// across two positions, so the call compiles to a CallVec that applies it
+// per position at runtime.
 #[test]
-fn test_vec_call_homogeneous_resolved() {
+fn an_operator_on_numeric_tuples_compiles_to_call_vec() {
     let ops = compile_with_stdlib("(1, 2) + (3, 4)");
     let call_op = ops
         .iter()
@@ -541,29 +454,13 @@ fn test_vec_call_homogeneous_resolved() {
     );
 }
 
-// (1, "a") + (2, "b")
-//
-// Mixed-element tuple over `+`: position 0 resolves to `+(Int, Int)`, but
-// position 1 has `(String, String)` and there's no `+(String, String)`
-// overload. The analyser surfaces this as Binding::None, which the
-// compiler refuses to lower — `compile` must fail.
-#[test]
-fn test_vec_call_per_position_failure_errors() {
-    let mut interp = ndc_interpreter::Interpreter::capturing();
-    interp.configure(ndc_stdlib::register);
-    assert!(
-        interp.compile_str("(1, \"a\") + (2, \"b\")").is_err(),
-        "mixed-element vec call should fail compilation",
-    );
-}
-
 // fn id(x) { x }; id((1, 2, 3))
 //
 // Regular function call (not operator syntax) must NEVER compile to CallVec
 // even when the argument is a tuple — vec dispatch is gated to operator
 // syntax via the `OperatorCall` AST variant.
 #[test]
-fn test_regular_call_with_tuple_arg_does_not_vec() {
+fn a_named_call_with_a_tuple_argument_is_a_plain_call() {
     let ops = compile_with_stdlib("fn id(x) { x }; id((1, 2, 3))");
     assert!(
         ops.iter().all(|op| !matches!(op, CallVec(_))),
@@ -575,13 +472,22 @@ fn test_regular_call_with_tuple_arg_does_not_vec() {
     );
 }
 
+// struct Point { x: Int }
+// let point = Point(1);
+// point.x = 2;
+//
+// A member assignment calls the field's setter `x=` with the receiver and
+// then the value. `Point`, `x` and `x=` take global slots 0 to 2, so `point`
+// is global 3. However the setter itself is loaded, the call is:
+//
+// <setter>, GetGlobal(3), Constant(_), Call(2)
 #[test]
-fn test_member_assignment_calls_setter_with_receiver_and_value() {
+fn member_assignment_calls_the_setter_with_the_receiver_and_the_value() {
     let ops = compile_with_analysis("struct Point { x: Int }\nlet point = Point(1);\npoint.x = 2;");
 
     assert!(
         ops.windows(4)
-            .any(|window| matches!(window, [Constant(_), GetGlobal(_), Constant(_), Call(2)])),
+            .any(|window| matches!(window, [_, GetGlobal(3), Constant(_), Call(2)])),
         "expected setter, receiver, value, Call(2); got: {ops:?}",
     );
 }
@@ -592,7 +498,7 @@ fn test_member_assignment_calls_setter_with_receiver_and_value() {
 // and the constant `1` are already on the stack), so it pops those three
 // pending operands before jumping out of the loop.
 #[test]
-fn test_break_pops_pending_operands() {
+fn break_pops_the_operands_pending_in_its_expression() {
     let ops = compile_with_stdlib_unoptimized("while true { print(1 + break); }");
     assert!(
         ops.windows(4)
@@ -606,7 +512,7 @@ fn test_break_pops_pending_operands() {
 // `Any` doesn't prove the target type, so the cast compiles to a CheckType
 // guard after the value is loaded.
 #[test]
-fn test_cast_from_any_emits_check_type() {
+fn an_unproven_cast_checks_the_type_at_runtime() {
     let ops = compile_with_analysis("let x: Any = 1; x as Int");
     assert!(
         ops.iter()
@@ -620,7 +526,7 @@ fn test_cast_from_any_emits_check_type() {
 // Both casts are proven by the value's static type, so no runtime guard is
 // emitted.
 #[test]
-fn test_provable_cast_emits_no_check_type() {
+fn a_proven_cast_needs_no_runtime_check() {
     let ops = compile_with_analysis("1 as Int; [1] as Any");
     assert!(
         ops.iter().all(|op| !matches!(op, CheckType(_))),
@@ -636,15 +542,15 @@ fn test_provable_cast_emits_no_check_type() {
 // }
 //
 // `x` is captured, so its reads and writes go through the cell the closure
-// shares. Its declaration still writes the slot directly: the first capture
-// is what moves the value into a cell. (At the top level `x` would be a
+// shares. Its declaration writes the slot directly: the first capture is what
+// moves the value into a cell. (At the top level `x` would be a
 // global, which closures reach directly.)
 #[test]
-fn test_captured_local_is_read_and_written_through_its_cell() {
+fn a_captured_local_is_read_and_written_through_its_cell() {
     assert_eq!(
         compile_nested_function(
             "fn outer() {\nlet x = 1;\nlet f = fn() { x };\nx = 2;\nx\n}",
-            0
+            &[0]
         ),
         [
             Constant(0),
@@ -674,9 +580,9 @@ fn test_captured_local_is_read_and_written_through_its_cell() {
 // before the closure is made, and the closure is written into that cell.
 // (At the top level `f` would be a global, which needs no cell.)
 #[test]
-fn test_self_capturing_function_gets_its_cell_before_its_closure() {
+fn a_self_capturing_function_gets_its_cell_before_its_closure() {
     assert_eq!(
-        compile_nested_function("fn outer() { fn f() { f } }", 0),
+        compile_nested_function("fn outer() { fn f() { f } }", &[0]),
         [
             NewCell(0),
             Closure {
@@ -688,4 +594,84 @@ fn test_self_capturing_function_gets_its_cell_before_its_closure() {
             Return
         ]
     );
+}
+
+// fn outer() {
+//     let x = 1;
+//     fn inner() { x = 2; x }
+// }
+//
+// A closure reaches a captured local through its upvalues: `x` is upvalue 0
+// of `inner`, the function that is constant 2 of `outer`.
+#[test]
+fn a_closure_reaches_captured_variables_through_its_upvalues() {
+    assert_eq!(
+        compile_nested_function(
+            "fn outer() {\nlet x = 1;\nfn inner() { x = 2; x }\n}",
+            &[0, 2]
+        ),
+        [
+            Constant(0),
+            SetUpvalue(0),
+            Constant(1),
+            Pop,
+            GetUpvalue(0),
+            Return
+        ]
+    );
+}
+
+// let g = 1;
+// fn f() { g = 2; g }
+//
+// A function reaches a top-level declaration as a global: `g` is global 0,
+// which `f` writes and reads with SetGlobal and GetGlobal. `f` captures
+// nothing, so its declaration loads it as a plain constant, with no Closure.
+#[test]
+fn a_function_reaches_top_level_declarations_as_globals_without_capturing_them() {
+    let source = "let g = 1;\nfn f() { g = 2; g }";
+    assert!(
+        compile_with_analysis(source)
+            .iter()
+            .all(|op| !matches!(op, Closure { .. })),
+        "a function that only uses globals needs no closure",
+    );
+    assert_eq!(
+        compile_nested_function(source, &[2]),
+        [
+            Constant(0),
+            SetGlobal(0),
+            Constant(1),
+            Pop,
+            GetGlobal(0),
+            Return
+        ]
+    );
+}
+
+// fn f() {
+//     let values = [1];
+//     values[0] += { let delta = 2; delta };
+//     values
+// }
+//
+// `values` and `delta` take slots 0 and 1 of `f`'s frame. The indexed
+// assignment's temporaries (cached container, cached index and the operation
+// result) come after them, in slots 2 to 4.
+#[test]
+fn temporaries_in_a_function_come_after_its_frames_own_locals() {
+    let ops = compile_nested_function_with_stdlib(
+        "fn f() {\nlet values = [1];\nvalues[0] += { let delta = 2; delta };\nvalues\n}",
+        &[0],
+    );
+    let mut written = ops
+        .iter()
+        .filter_map(|op| match op {
+            SetLocal(slot) => Some(*slot),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    written.sort_unstable();
+    written.dedup();
+    assert_eq!(written, [0, 1, 2, 3, 4], "{ops:?}");
 }

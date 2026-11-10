@@ -1181,7 +1181,7 @@ mod tests {
     }
 
     #[test]
-    fn numeric_ref_owns_checked_numeric_conversions() {
+    fn numeric_ref_reports_its_mode_and_converts_checked() {
         let integer = Value::Int(42);
         let float = Value::Float(42.75);
         let rational = Value::number(AdvancedNumber::rational(num::BigRational::new(
@@ -1201,7 +1201,7 @@ mod tests {
     }
 
     #[test]
-    fn equal_numeric_modes_keep_equal_hashes() {
+    fn equal_numbers_hash_alike_in_every_representation() {
         let values = [
             Value::Int(1),
             Value::Float(1.0),
@@ -1264,7 +1264,7 @@ mod tests {
     }
 
     #[test]
-    fn same_representation_numbers_compare_without_changing_semantics() {
+    fn numbers_of_one_representation_compare_by_value() {
         assert!(Value::int(-1) < Value::int(1));
         assert_eq!(Value::float(-0.0), Value::float(0.0));
         assert_eq!(Value::float(f64::NAN), Value::float(f64::NAN));
@@ -1276,7 +1276,7 @@ mod tests {
     }
 
     #[test]
-    fn cross_representation_numbers_keep_exact_comparison_semantics() {
+    fn int_float_comparison_is_exact() {
         let integers = [
             i64::MIN,
             i64::MIN + 1,
