@@ -141,7 +141,7 @@ fn initializer_reads_outer_binding_before_shadowing() {
 }
 
 #[test]
-fn self_reference_reports_the_initializer_location() {
+fn a_let_cannot_refer_to_itself_in_its_initializer() {
     let mut resolver = new_resolver([]);
     let source = "let missing = missing;";
     let error = resolve_source(&mut resolver, source).unwrap_err();
@@ -160,7 +160,7 @@ fn self_reference_reports_the_initializer_location() {
 }
 
 #[test]
-fn destructuring_resolves_all_initializers_before_binding_names() {
+fn destructuring_binds_names_after_the_whole_initializer() {
     let mut resolver = new_resolver([]);
     resolve_source(
         &mut resolver,
@@ -178,7 +178,7 @@ fn destructuring_resolves_all_initializers_before_binding_names() {
 }
 
 #[test]
-fn assignment_reuses_declared_symbols() {
+fn assignments_declare_nothing() {
     let mut resolver = new_resolver([]);
     resolve_source(
         &mut resolver,
@@ -217,7 +217,7 @@ fn member_and_index_targets_resolve_receivers_without_declaring_names() {
 }
 
 #[test]
-fn traversal_reports_unknown_names_in_expression_children() {
+fn unknown_names_are_reported_in_every_expression_position() {
     let sources = [
         "(missing);",
         "true and missing;",
@@ -247,6 +247,13 @@ fn traversal_reports_unknown_names_in_expression_children() {
         "let xs = []; xs[missing] = 1;",
         "missing[0] = 1;",
         "missing.field = 1;",
+        "for x in missing { 1; }",
+        "for x in [1] { missing; }",
+        "[missing for x in [1]];",
+        "[x for x in [1], if missing];",
+        "%{missing: x for x in [1]};",
+        "%{x: missing for x in [1]};",
+        "%{:missing, x: x for x in [1]};",
     ];
     for source in sources {
         let mut resolver = new_resolver(["callee", "+"]);
@@ -257,24 +264,6 @@ fn traversal_reports_unknown_names_in_expression_children() {
         assert_eq!(name, "missing", "{source}");
         assert!(source[span.range()].contains("missing"), "{source}");
     }
-}
-
-#[test]
-fn errors_restore_visibility_after_nested_blocks() {
-    let mut resolver = new_resolver([]);
-    resolve_source(
-        &mut resolver,
-        "let x = 1; { let x = 2; { let local = 3; missing; } }",
-    )
-    .unwrap_err();
-    let [outer, _, _] = declared(&resolver);
-    assert_eq!(resolver.scopes.lookup("x", &resolver.symbols), Some(outer));
-    assert_eq!(resolver.scopes.lookup("local", &resolver.symbols), None);
-    resolve_source(&mut resolver, "x;").unwrap();
-    assert_eq!(
-        resolver.references.values().map(innermost).collect_vec(),
-        vec![outer]
-    );
 }
 
 #[test]
@@ -295,7 +284,7 @@ fn later_comprehension_clauses_see_earlier_binders() {
 }
 
 #[test]
-fn iterable_uses_the_outer_binding_of_its_own_name() {
+fn a_for_binder_is_not_visible_in_its_own_iterable() {
     let mut resolver = new_resolver([]);
     resolve_source(&mut resolver, "let x = [1]; [x for x in x]; x;").unwrap();
 
@@ -305,21 +294,22 @@ fn iterable_uses_the_outer_binding_of_its_own_name() {
 }
 
 #[test]
-fn loop_body_forms_resolve_names_and_restore_scope_on_errors() {
+fn a_failed_statement_leaves_the_scopes_it_entered() {
+    // A block catches errors in its own statements, so each of these fails
+    // where nothing catches it: in a parameter list, in an arrow body (which
+    // shares the parameter scope), or in a comprehension.
     for source in [
-        "for x in [1] { missing; }",
+        "fn f(x: Nope) { 1; }",
+        "fn f(x) => missing;",
         "[missing for x in [1]];",
         "[x for x in [1], if missing];",
-        "%{missing: x for x in [1]};",
-        "%{x: missing for x in [1]};",
-        "%{:missing, x: x for x in [1]};",
+        "fn f(a) => [missing for x in [a]];",
     ] {
         let mut resolver = new_resolver([]);
-        let error = resolve_source(&mut resolver, source).unwrap_err();
-        assert!(
-            matches!(error, NameResolutionError::UnknownName { ref name, .. } if name == "missing"),
-            "{source}: {error:?}"
-        );
+        resolve_source(&mut resolver, source).expect_err(source);
+
+        let current = &resolver.scopes.scopes[resolver.scopes.current.0];
+        assert_eq!(current.kind, ScopeKind::Program, "{source}");
         assert_eq!(
             resolver.scopes.lookup("x", &resolver.symbols),
             None,
@@ -359,6 +349,27 @@ fn assignment_targets_resolve_to_the_innermost_symbol() {
 }
 
 #[test]
+fn natives_cannot_be_assigned_but_a_let_shadowing_one_can() {
+    let source = "len = 5;";
+    let mut resolver = new_resolver(["len"]);
+    let NameResolutionError::AssignToBuiltin { name, span } =
+        resolve_source(&mut resolver, source).unwrap_err()
+    else {
+        panic!("expected an assignment to a builtin");
+    };
+    assert_eq!(name, "len");
+    assert_eq!(&source[span.range()], "len");
+
+    let mut resolver = new_resolver(["len"]);
+    resolve_source(&mut resolver, "let len = 1; len = 2;").unwrap();
+    let [local] = declared(&resolver);
+    assert_eq!(
+        resolver.assignments.values().copied().collect_vec(),
+        vec![local]
+    );
+}
+
+#[test]
 fn candidates_include_functions_and_plain_bindings() {
     let mut resolver = new_resolver(["len"]);
     let native = builtin(&resolver, "len");
@@ -368,16 +379,6 @@ fn candidates_include_functions_and_plain_bindings() {
     // The native lives in the built-in scope, outside the program's top level.
     let [local] = declared(&resolver);
     assert_eq!(only_reference(&resolver).0, vec![vec![local], vec![native]]);
-}
-
-#[test]
-fn builtins_resolve_as_functions() {
-    let mut resolver = new_resolver(["len"]);
-    let native = builtin(&resolver, "len");
-    resolve_source(&mut resolver, "len;").unwrap();
-
-    assert_eq!(only_reference(&resolver).0, vec![vec![native]]);
-    assert_eq!(resolver.symbols.kind(native), BindingKind::Function);
 }
 
 #[test]
@@ -431,7 +432,7 @@ fn function_overloads_share_a_group_newest_first() {
 }
 
 #[test]
-fn lambdas_do_not_bind_a_name() {
+fn a_lambda_cannot_refer_to_the_let_it_initializes() {
     // The initializer is resolved before `g` is declared, and the lambda has
     // no name of its own.
     assert_eq!(unknown_name("let g = fn(x) { g; };"), "g");
@@ -449,15 +450,6 @@ fn named_function_expressions_bind_in_the_enclosing_scope() {
 }
 
 #[test]
-fn function_bodies_see_enclosing_bindings() {
-    let mut resolver = new_resolver([]);
-    resolve_source(&mut resolver, "let y = 1; fn f(x) { y; }").unwrap();
-
-    let [y, _, _] = declared(&resolver);
-    assert_eq!(uses(&resolver, y), 1);
-}
-
-#[test]
 fn duplicate_parameters_are_rejected() {
     let mut resolver = new_resolver([]);
     let source = "fn f(x, x) { 1; }";
@@ -469,14 +461,6 @@ fn duplicate_parameters_are_rejected() {
     };
     assert_eq!(name, "x");
     assert_eq!(span.offset(), source.rfind('x').unwrap());
-    assert_eq!(resolver.scopes.lookup("x", &resolver.symbols), None);
-}
-
-#[test]
-fn errors_in_function_bodies_restore_scope() {
-    let mut resolver = new_resolver([]);
-    resolve_source(&mut resolver, "fn f(x) { missing; }").unwrap_err();
-
     assert_eq!(resolver.scopes.lookup("x", &resolver.symbols), None);
 }
 
@@ -520,16 +504,33 @@ fn functions_cannot_redefine_variables_in_the_same_scope() {
 }
 
 #[test]
+fn a_let_may_shadow_a_function_in_the_same_scope() {
+    let mut resolver = new_resolver([]);
+    resolve_source(&mut resolver, "fn a(x) { 1; } let a = 1; a;").unwrap();
+
+    let [function, _, variable] = declared(&resolver);
+    assert_eq!(only_reference(&resolver).0, vec![vec![variable, function]]);
+}
+
+#[test]
 fn functions_may_share_names_with_variables_in_other_scopes() {
-    let cases: [(&[&str], &str); 6] = [
-        (&[], "fn a(x) { 1; } let a = 1;"),
-        (&[], "let a = 1; { fn a(x) { 1; } }"),
-        (&[], "let a = 1; fn b() { fn a(x) { 1; } }"),
-        (&["len"], "fn len(x) { 1; }"),
-        // Rejecting identical overloads needs parameter types: the type pass's job.
-        (&[], "fn a(x) { 1; } fn a(x) { 1; }"),
+    for source in [
+        "let a = 1; { fn a(x) { 1; } }",
+        "let a = 1; fn b() { fn a(x) { 1; } }",
         // A block body is its own scope, separate from the parameters.
-        (&[], "fn f(a) { fn a() { 1; } }"),
+        "fn f(a) { fn a() { 1; } }",
+    ] {
+        let mut resolver = new_resolver([]);
+        resolve_source(&mut resolver, source).unwrap_or_else(|error| panic!("{source}: {error:?}"));
+    }
+}
+
+#[test]
+fn functions_sharing_a_name_never_conflict_during_resolution() {
+    // Rejecting identical overloads needs parameter types: the type pass's job.
+    let cases: [(&[&str], &str); 2] = [
+        (&[], "fn a(x) { 1; } fn a(x) { 1; }"),
+        (&["len"], "fn len(x) { 1; }"),
     ];
     for (builtins, source) in cases {
         let mut resolver = new_resolver(builtins.iter().copied());
@@ -633,15 +634,37 @@ fn builtins_are_never_captured() {
 
 #[test]
 fn assignments_capture_their_target() {
-    let mut resolver = new_resolver([]);
-    resolve_source(&mut resolver, "let x = 1; fn f() { x = 2; }").unwrap();
+    for source in [
+        "let x = 1; fn f() { x = 2; }",
+        "let x = 1; fn f() { x += 2; }",
+    ] {
+        let mut resolver = new_resolver(["+"]);
+        resolve_source(&mut resolver, source).unwrap();
 
-    let [x, _] = declared(&resolver);
-    let [f] = functions(&resolver)[..] else {
-        panic!("expected one function");
+        let [x, _] = declared(&resolver);
+        let [f] = functions(&resolver)[..] else {
+            panic!("expected one function");
+        };
+        // The native `+` is never captured.
+        assert_eq!(captures_of(&resolver, f), [x], "{source}");
+        assert!(resolver.captured.contains(&x), "{source}");
+    }
+}
+
+#[test]
+fn augmented_assignment_captures_a_user_defined_operation() {
+    let mut resolver = new_resolver([]);
+    resolve_source(
+        &mut resolver,
+        "fn outer() { fn add(a, b) { a; } let x = 1; fn inner() { x add= 1; } }",
+    )
+    .unwrap();
+
+    let [_, add, _, _, x, _] = declared(&resolver);
+    let [_, _, inner] = functions(&resolver)[..] else {
+        panic!("expected three functions");
     };
-    assert_eq!(captures_of(&resolver, f), [x]);
-    assert!(resolver.captured.contains(&x));
+    assert_eq!(captures_of(&resolver, inner), [x, add]);
 }
 
 #[test]
@@ -686,7 +709,29 @@ fn captures_are_listed_once_in_first_use_order() {
 }
 
 #[test]
-fn loop_variables_can_be_captured() {
+fn uses_record_the_innermost_function_they_sit_in() {
+    let mut resolver = new_resolver([]);
+    resolve_source(
+        &mut resolver,
+        "let x = 1; x; fn f() { x; fn g() { x; { x; } } }",
+    )
+    .unwrap();
+
+    let [f, g] = functions(&resolver)[..] else {
+        panic!("expected two functions");
+    };
+    // At the top level, then in `f`, then twice in `g`: a block is no function.
+    let sites = resolver
+        .references
+        .keys()
+        .sorted_by_key(|node| node.0)
+        .map(|&node| resolver.use_site(node))
+        .collect_vec();
+    assert_eq!(sites, [None, Some(f), Some(g), Some(g)]);
+}
+
+#[test]
+fn loop_variables_used_by_closures_are_captured() {
     let mut resolver = new_resolver([]);
     resolve_source(&mut resolver, "for i in [1] { let g = fn() { i; }; }").unwrap();
 
@@ -695,7 +740,7 @@ fn loop_variables_can_be_captured() {
 }
 
 #[test]
-fn block_scoped_variables_can_be_captured() {
+fn block_locals_used_by_closures_are_captured() {
     // The shape from #227: `y` must outlive its block for `g` to read it.
     let mut resolver = new_resolver([]);
     resolve_source(&mut resolver, "let g = 0; { let y = 1; g = fn() { y; }; }").unwrap();
@@ -733,20 +778,6 @@ fn augmented_assignment_finds_both_operations() {
 }
 
 #[test]
-fn augmented_assignment_resolves_index_and_member_targets() {
-    let mut resolver = new_resolver(["+", "[]", "[]="]);
-    resolve_source(&mut resolver, "let xs = [1]; let i = 0; xs[i] += 1;").unwrap();
-    let [xs, i] = declared(&resolver);
-    assert_eq!(uses(&resolver, xs), 1);
-    assert_eq!(uses(&resolver, i), 1);
-
-    let mut resolver = new_resolver(["+", "x", "x="]);
-    resolve_source(&mut resolver, "let p = (); p.x += 1;").unwrap();
-    let [p] = declared(&resolver);
-    assert_eq!(uses(&resolver, p), 1);
-}
-
-#[test]
 fn augmented_assignment_rejects_sequence_targets() {
     let mut resolver = new_resolver(["+"]);
     let error = resolve_source(&mut resolver, "let a = 1; let b = 2; (a, b) += 1;").unwrap_err();
@@ -763,21 +794,8 @@ fn augmented_assignment_rejects_sequence_targets() {
 }
 
 #[test]
-fn augmented_assignment_without_any_operator_is_unknown() {
+fn augmented_assignment_without_any_operator_reports_the_operator_as_unknown() {
     assert_eq!(unknown_name("let x = 1; x += 2;"), "+");
-}
-
-#[test]
-fn augmented_assignment_captures_its_target() {
-    let mut resolver = new_resolver(["+"]);
-    resolve_source(&mut resolver, "let x = 1; fn f() { x += 1; }").unwrap();
-
-    let [x, _] = declared(&resolver);
-    let [f] = functions(&resolver)[..] else {
-        panic!("expected one function");
-    };
-    // The native `+` is a global, so only `x` is captured.
-    assert_eq!(captures_of(&resolver, f), [x]);
 }
 
 #[test]
@@ -810,7 +828,7 @@ fn getters_keep_same_named_variables_as_candidates() {
 }
 
 #[test]
-fn getters_are_keyed_by_the_member_access_node() {
+fn each_member_access_has_its_own_getter_lookup() {
     let mut resolver = new_resolver(["b", "c"]);
     resolve_source(&mut resolver, "let a = 1; a.b.c;").unwrap();
 
@@ -827,13 +845,23 @@ fn getters_are_keyed_by_the_member_access_node() {
 // A member write also resolves the getter: the target's type is what it returns.
 #[test]
 fn member_writes_resolve_the_setter_and_the_getter() {
-    let mut resolver = new_resolver(["x", "x="]);
-    let getter = builtin(&resolver, "x");
-    let setter = builtin(&resolver, "x=");
-    resolve_source(&mut resolver, "let p = 1; p.x = 5;").unwrap();
+    for source in ["let p = 1; p.x = 5;", "let p = 1; p.x += 1;"] {
+        let mut resolver = new_resolver(["x", "x=", "+"]);
+        let getter = builtin(&resolver, "x");
+        let setter = builtin(&resolver, "x=");
+        resolve_source(&mut resolver, source).unwrap();
 
-    assert_eq!(only_setter(&resolver).0, vec![vec![setter]]);
-    assert_eq!(only_getter(&resolver).0, vec![vec![getter]]);
+        let [p] = declared(&resolver);
+        assert_eq!(uses(&resolver, p), 1, "{source}");
+        assert_eq!(only_setter(&resolver).0, vec![vec![setter]], "{source}");
+        assert_eq!(only_getter(&resolver).0, vec![vec![getter]], "{source}");
+        // Both belong to the target node.
+        assert_eq!(
+            resolver.getters.keys().collect_vec(),
+            resolver.setters.keys().collect_vec(),
+            "{source}"
+        );
+    }
 }
 
 #[test]
@@ -847,28 +875,15 @@ fn index_writes_resolve_the_setter_only() {
 }
 
 #[test]
-fn augmented_member_assignment_resolves_getter_and_setter() {
-    let mut resolver = new_resolver(["x", "x=", "+"]);
-    let getter = builtin(&resolver, "x");
-    let setter = builtin(&resolver, "x=");
-    resolve_source(&mut resolver, "let p = 1; p.x += 1;").unwrap();
-
-    assert_eq!(only_getter(&resolver).0, vec![vec![getter]]);
-    assert_eq!(only_setter(&resolver).0, vec![vec![setter]]);
-    // Both belong to the same target node.
-    assert_eq!(
-        resolver.getters.keys().collect_vec(),
-        resolver.setters.keys().collect_vec()
-    );
-}
-
-#[test]
 fn augmented_index_assignment_resolves_getter_and_setter() {
     let mut resolver = new_resolver(["[]", "[]=", "+"]);
     let getter = builtin(&resolver, "[]");
     let setter = builtin(&resolver, "[]=");
-    resolve_source(&mut resolver, "let xs = [1]; xs[0] += 1;").unwrap();
+    resolve_source(&mut resolver, "let xs = [1]; let i = 0; xs[i] += 1;").unwrap();
 
+    let [xs, i] = declared(&resolver);
+    assert_eq!(uses(&resolver, xs), 1);
+    assert_eq!(uses(&resolver, i), 1);
     assert_eq!(only_getter(&resolver).0, vec![vec![getter]]);
     assert_eq!(only_setter(&resolver).0, vec![vec![setter]]);
 }
@@ -922,12 +937,6 @@ fn unknown_types_are_reported_in_every_annotation_position() {
             unreachable!("the message identifies the variant");
         };
         assert_eq!(&source[span.range()], "Nope", "{source}");
-        // A failed parameter annotation leaves the function's scope.
-        assert_eq!(
-            resolver.scopes.lookup("x", &resolver.symbols),
-            None,
-            "{source}"
-        );
     }
 }
 
@@ -946,18 +955,6 @@ fn types_and_values_are_separate_namespaces() {
 }
 
 #[test]
-fn annotations_resolve_before_values() {
-    for source in ["let x: Nope = missing;", "missing as Nope;"] {
-        let mut resolver = new_resolver([]);
-        let error = resolve_source(&mut resolver, source).expect_err(source);
-        assert!(
-            matches!(error, NameResolutionError::UnknownType { .. }),
-            "{source}: {error:?}"
-        );
-    }
-}
-
-#[test]
 fn type_names_are_never_captured() {
     let mut resolver = new_resolver([]);
     resolve_source(&mut resolver, "fn f() { let x: Int = 1; 1 as Int; }").unwrap();
@@ -965,14 +962,6 @@ fn type_names_are_never_captured() {
     assert_eq!(type_names(&resolver), ["Int", "Int"]);
     assert!(resolver.captures.is_empty());
     assert!(resolver.captured.is_empty());
-}
-
-#[test]
-fn unannotated_code_records_no_type_names() {
-    let mut resolver = new_resolver([]);
-    resolve_source(&mut resolver, "let x = 1; fn f(a) { a; }").unwrap();
-
-    assert!(resolver.type_names.is_empty());
 }
 
 fn only_struct(resolver: &NameResolver) -> &StructSymbols {
@@ -983,12 +972,15 @@ fn only_struct(resolver: &NameResolver) -> &StructSymbols {
         .expect("exactly one struct declaration")
 }
 
-/// The message of the error that resolving `source` reports.
-fn error_message(source: &str) -> String {
+/// The first error that resolving `source` reports.
+fn first_error(source: &str) -> NameResolutionError {
     let mut resolver = new_resolver([]);
-    resolve_source(&mut resolver, source)
-        .expect_err(source)
-        .to_string()
+    resolve_source(&mut resolver, source).expect_err(source)
+}
+
+/// The message of the first error that resolving `source` reports.
+fn error_message(source: &str) -> String {
+    first_error(source).to_string()
 }
 
 #[test]
@@ -1045,13 +1037,7 @@ fn structs_cannot_refer_to_themselves_or_later_structs() {
 }
 
 #[test]
-fn structs_are_scoped_like_other_declarations() {
-    assert_eq!(
-        error_message("fn make() { struct S { v: Int } S(1); } fn check(x: S) { x.v; }"),
-        "unknown type `S`"
-    );
-
-    // An inner struct shadows an outer one of the same name.
+fn an_inner_struct_shadows_an_outer_one() {
     let mut resolver = new_resolver([]);
     resolve_source(
         &mut resolver,
@@ -1075,31 +1061,41 @@ fn structs_are_scoped_like_other_declarations() {
 }
 
 #[test]
-fn struct_redefinition_errors_keep_the_current_messages() {
-    assert_eq!(
-        error_message("struct Int { x: Int }"),
-        "Struct 'Int' is not allowed to shadow the built-in type 'Int'"
+fn structs_cannot_shadow_builtin_types() {
+    let error = first_error("struct Int { x: Int }");
+    assert!(
+        matches!(error, NameResolutionError::StructShadowsBuiltinType { ref name, .. } if name == "Int"),
+        "{error:?}"
     );
-    assert_eq!(
-        error_message("struct P { x: Int } struct P { y: Int }"),
-        "Illegal redefinition of struct 'P'"
-    );
+}
 
-    let source = "struct Dup { a: Int, a: Int }";
-    let mut resolver = new_resolver([]);
-    let error = resolve_source(&mut resolver, source).unwrap_err();
-    assert_eq!(
-        error.to_string(),
-        "Illegal redefinition of field 'a' in struct 'Dup'"
-    );
-    let NameResolutionError::DuplicateField { span, .. } = error else {
-        unreachable!("the message identifies the variant");
+#[test]
+fn structs_cannot_be_redefined_in_the_same_scope() {
+    let source = "struct P { x: Int } struct P { y: Int }";
+    let NameResolutionError::StructRedefinition { name, span } = first_error(source) else {
+        panic!("expected a struct redefinition");
     };
+    assert_eq!(name, "P");
+    assert_eq!(span.offset(), source.rfind("struct P").unwrap());
+}
+
+#[test]
+fn struct_fields_must_be_unique() {
+    let source = "struct Dup { a: Int, a: Int }";
+    let NameResolutionError::DuplicateField {
+        field,
+        struct_name,
+        span,
+    } = first_error(source)
+    else {
+        panic!("expected a duplicate field");
+    };
+    assert_eq!((field.as_str(), struct_name.as_str()), ("a", "Dup"));
     assert_eq!(span.offset(), source.rfind("a: Int").unwrap());
 }
 
 #[test]
-fn constructors_cannot_redefine_variables_in_the_same_scope() {
+fn structs_cannot_redefine_variables_in_the_same_scope() {
     assert_eq!(
         error_message("let P = 5; struct P { x: Int }"),
         "Illegal redefinition of variable P as a struct in the same scope"
@@ -1217,6 +1213,17 @@ fn statements_after_an_error_still_resolve() {
     let [x] = declared(&resolver);
     assert_eq!(uses(&resolver, x), 1);
     assert!(resolver.take_errors().is_empty());
+}
+
+#[test]
+fn a_function_whose_declaration_fails_still_binds_its_name() {
+    let mut resolver = new_resolver([]);
+    resolve_source(&mut resolver, "fn f() => missing;").unwrap_err();
+    resolve_source(&mut resolver, "f;").unwrap();
+
+    let [f] = declared(&resolver);
+    assert_eq!(resolver.symbols.kind(f), BindingKind::Function);
+    assert_eq!(only_reference(&resolver).0, vec![vec![f]]);
 }
 
 #[test]

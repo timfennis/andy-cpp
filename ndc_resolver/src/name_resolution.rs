@@ -427,7 +427,7 @@ impl NameResolver {
     }
 
     /// The value symbols bound in the current scope, oldest first. A failed
-    /// statement keeps what it bound before its error: `fn f() { missing }`
+    /// statement keeps what it bound before its error: `fn f() => missing`
     /// still binds `f`.
     pub fn current_bindings(&self) -> &[SymbolId] {
         self.scopes.current_bindings()
@@ -1074,7 +1074,7 @@ mod test {
     use crate::symbols::{BindingKind, SymbolTable};
 
     #[test]
-    fn binding_follows_shadowing_rules() {
+    fn a_scope_looks_up_its_newest_binding() {
         let mut table = SymbolTable::default();
         let first = table.declare("foo".to_string(), BindingKind::Plain);
         let second = table.declare("foo".to_string(), BindingKind::Plain);
@@ -1096,10 +1096,11 @@ mod test {
     }
 
     #[test]
-    fn scope_tree_traverses() {
+    fn lookup_searches_enclosing_scopes() {
         let mut table = SymbolTable::default();
         let first = table.declare("foo".to_string(), BindingKind::Plain);
         let middle = table.declare("bar".to_string(), BindingKind::Plain);
+        let late = table.declare("baz".to_string(), BindingKind::Plain);
 
         let mut tree = ScopeTree::new();
         tree.bind(first);
@@ -1110,7 +1111,11 @@ mod test {
         assert_eq!(tree.lookup("bar", &table), Some(middle));
         assert_eq!(tree.lookup("missing", &table), None);
 
+        // Looking further out doesn't move where new bindings go.
+        tree.bind(late);
+        assert_eq!(tree.lookup("baz", &table), Some(late));
         tree.leave_scope();
+        assert_eq!(tree.lookup("baz", &table), None);
         assert_eq!(tree.lookup("bar", &table), Some(middle));
         tree.leave_scope();
         assert_eq!(tree.lookup("foo", &table), Some(first));
@@ -1118,7 +1123,7 @@ mod test {
     }
 
     #[test]
-    fn scope_tree_shadows() {
+    fn inner_bindings_shadow_outer_ones_until_their_scope_ends() {
         let mut table = SymbolTable::default();
         let first = table.declare("foo".to_string(), BindingKind::Plain);
         let second = table.declare("foo".to_string(), BindingKind::Plain);
@@ -1152,25 +1157,6 @@ mod test {
         tree.leave_scope();
         assert_eq!(tree.lookup("first", &table), None);
         assert_eq!(tree.lookup("second", &table), None);
-    }
-
-    #[test]
-    fn lookup_does_not_change_where_new_bindings_are_created() {
-        let mut table = SymbolTable::default();
-        let outer = table.declare("outer".to_string(), BindingKind::Plain);
-        let inner = table.declare("inner".to_string(), BindingKind::Plain);
-
-        let mut tree = ScopeTree::new();
-        tree.bind(outer);
-        tree.enter_scope(ScopeKind::Block);
-        assert_eq!(tree.lookup("outer", &table), Some(outer));
-        assert_eq!(tree.lookup("missing", &table), None);
-
-        tree.bind(inner);
-        assert_eq!(tree.lookup("inner", &table), Some(inner));
-        tree.leave_scope();
-        assert_eq!(tree.lookup("inner", &table), None);
-        assert_eq!(tree.lookup("outer", &table), Some(outer));
     }
 
     #[test]

@@ -42,27 +42,7 @@ mod test {
     use crate::symbols::{BindingKind, SymbolTable};
 
     #[test]
-    fn it_tracks_multiple_identifiers() {
-        let mut table = SymbolTable::default();
-        let a = table.declare("foo".to_string(), BindingKind::Plain);
-        let b = table.declare("bar".to_string(), BindingKind::Plain);
-
-        assert_ne!(a, b);
-        assert_eq!(table.name(a), "foo");
-        assert_eq!(table.name(b), "bar");
-    }
-
-    #[test]
-    fn identifiers_with_the_same_name_are_not_equal() {
-        let mut table = SymbolTable::default();
-        let a = table.declare("foo".to_string(), BindingKind::Function);
-        let b = table.declare("foo".to_string(), BindingKind::Plain);
-
-        assert_ne!(a, b);
-    }
-
-    #[test]
-    fn it_tracks_binding_kinds() {
+    fn a_symbol_keeps_its_name_and_kind() {
         let mut table = SymbolTable::default();
         let function = table.declare("foo".to_string(), BindingKind::Function);
         let plain = table.declare("bar".to_string(), BindingKind::Plain);
@@ -71,5 +51,14 @@ mod test {
         assert_eq!(table.kind(function), BindingKind::Function);
         assert_eq!(table.name(plain), "bar");
         assert_eq!(table.kind(plain), BindingKind::Plain);
+    }
+
+    #[test]
+    fn each_declaration_gets_its_own_symbol() {
+        let mut table = SymbolTable::default();
+        let first = table.declare("foo".to_string(), BindingKind::Plain);
+        let second = table.declare("foo".to_string(), BindingKind::Plain);
+
+        assert_ne!(first, second);
     }
 }
