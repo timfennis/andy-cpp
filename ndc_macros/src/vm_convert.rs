@@ -1,8 +1,8 @@
 //! Code generation for VM-native function parameter extraction and return conversion.
 //!
-//! Each `try_vm_*` function returns `None` when the type cannot be represented
-//! without the interpreter bridge, causing `export_module` to silently skip
-//! `vm_native` generation for that function.
+//! Each `try_vm_*` function returns `None` when the type has no conversion to
+//! or from a VM value, and `export_module` then rejects the function with a
+//! compile error.
 
 use crate::types::{NdcType, classify, unwrap_result};
 use proc_macro2::TokenStream;

@@ -27,8 +27,4 @@ impl<T> FunctionRegistry<T> {
     pub fn iter(&'_ self) -> Iter<'_, T> {
         self.functions.iter()
     }
-
-    pub fn take(&mut self) -> Vec<T> {
-        std::mem::take(&mut self.functions)
-    }
 }

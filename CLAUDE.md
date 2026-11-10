@@ -54,12 +54,14 @@ When making changes that affect language behaviour or runtime semantics, update 
 This is a custom language interpreter ("Andy C++") with a bytecode VM backend:
 
 ```
-Source → [Lexer] → Tokens → [Parser] → AST → [Analyser] → Annotated AST
-                                                                  ↓
-                                                            [Compiler]
-                                                                  ↓
-                                                          [Bytecode VM] → Value
+Source → [Lexer] → Tokens → [Parser] → AST → [Analyser] → Analysis
+                                        │                     │
+                                        └───→ [Compiler] ←────┘
+                                                   ↓
+                                             [Bytecode VM] → Value
 ```
+
+The AST is syntax only. The analyser runs name resolution (`ndc_resolver`) and storage layout (`ndc_layout`) itself, and records what it works out in an `Analysis` keyed by each node's `NodeId`.
 
 ### Git Workflow
 - Use Conventional Commit subjects for commits and pull request titles: `feat`, `fix`, `refactor`, `perf`, `style`, `test`, `docs`, `build`, `ops`, `chore`
@@ -74,22 +76,22 @@ Source → [Lexer] → Tokens → [Parser] → AST → [Analyser] → Annotated 
 |---|---|
 | `ndc_lexer` | Tokenisation, `Span` (offset+length) |
 | `ndc_parser` | AST (`Expression`, `ExpressionLocation`), parser |
-| `ndc_core` | `Number` (BigInt/Rational/Complex), `StaticType`, `FunctionRegistry`, `NodeId`, ordering, hashing |
+| `ndc_core` | `StaticType`, `FunctionRegistry`, `NodeId`, ordering, hashing |
 | `ndc_resolver` | Name resolution: `NameResolver`, `SymbolId`, per-use candidate symbols and closure captures |
 | `ndc_analysis` | What the analyser works out for the compiler and LSP: `Analysis` (tables keyed by `NodeId`), `ResolvedVar`, `Binding`, `Candidate`, `CaptureSource` |
-| `ndc_layout` | Storage layout: each resolver symbol's local slot, and each function's captures |
+| `ndc_layout` | Storage layout: each resolver symbol's global or local slot, and each function's captures |
 | `ndc_analyser` | Semantic analyser (types, overload bindings), runs the resolver first and takes slots from the layout |
 | `ndc_interpreter` | `Interpreter` facade (analyse + compile + run via VM) |
-| `ndc_vm` | Bytecode `Compiler` and stack-based `Vm` |
+| `ndc_vm` | Bytecode `Compiler`, stack-based `Vm`, and the runtime `Value` (including `Number`) |
 | `ndc_stdlib` | Built-in functions registered via `FunctionRegistry` |
 | `ndc_lsp` | LSP backend (hover, inlay hints) |
 | `ndc_bin` | CLI entry point, REPL, syntax highlighting |
 
 ### Key Concepts
 
-**Single execution path** — The bytecode VM in `ndc_vm` is the only execution path. `ndc_interpreter` acts as a facade: it runs the semantic analyser, compiles to bytecode via `ndc_vm::Compiler`, and executes via `ndc_vm::Vm`. `vm_bridge.rs` handles value conversion between `ndc_interpreter::Value` and `ndc_vm::Value`.
+**Single execution path** — The bytecode VM in `ndc_vm` is the only execution path. `ndc_interpreter` acts as a facade: it runs the semantic analyser, compiles to bytecode via `ndc_vm::Compiler`, and executes via `ndc_vm::Vm`.
 
-**Value types** — `ndc_interpreter/src/value.rs` and `ndc_vm/src/value.rs` are separate enums. The VM `Value` is constrained to 16 bytes (`Int(i64)`, `Float(f64)`, `Bool`, `None`, `Object(Box<Object>)`).
+**Value type** — `ndc_vm/src/value/mod.rs` defines the one runtime `Value`. It is constrained to 16 bytes: `Int(i64)`, `Float(f64)`, `Number(Rc<AdvancedNumber>)` (BigInt/Rational/Complex), `Bool`, `None`, `Object(Rc<Object>)`, and `Cell` for captured locals.
 
 **Function overloading** — Functions are matched by name and arity. The semantic analyser produces `Binding::Resolved` (exact compile-time match) or `Binding::Dynamic(Vec<ResolvedVar>)` (runtime dispatch among candidates). Binary operators like `+` are parsed as `Expression::Call`.
 

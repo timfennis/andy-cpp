@@ -213,33 +213,8 @@ impl Function {
         }
     }
 
-    /// Returns true if this function accepts arguments of the given types,
-    /// without allocating any intermediate `StaticType` values.
-    pub fn matches_arg_types(&self, arg_types: &[StaticType]) -> bool {
-        let st = match self {
-            Self::Native(f) => &f.static_type,
-            Self::Compiled(f) => &f.static_type,
-            Self::Closure(c) => &c.prototype.static_type,
-            Self::Memoized { function, .. } => return function.matches_arg_types(arg_types),
-        };
-        let StaticType::Function { parameters, .. } = st else {
-            return false;
-        };
-        match parameters {
-            None => true, // variadic: always matches
-            Some(params) => {
-                params.len() == arg_types.len()
-                    && params
-                        .iter()
-                        .zip(arg_types.iter())
-                        .all(|(param, actual)| actual.is_subtype(param))
-            }
-        }
-    }
-
-    /// Like [`matches_arg_types`] but takes runtime [`Value`]s directly,
-    /// avoiding any `StaticType` allocation for parameters typed `Any`
-    /// (the common case for stdlib functions).
+    /// Returns true if this function accepts the given arguments, without
+    /// allocating a `StaticType` for each of them.
     pub fn matches_value_args(&self, args: &[Value]) -> bool {
         let st = match self {
             Self::Native(f) => &f.static_type,

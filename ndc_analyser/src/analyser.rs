@@ -577,7 +577,7 @@ impl Analyser {
                 let outer_loop_depth = std::mem::take(&mut self.loop_depth);
                 let parameter_nodes = parameters.iter().map(|p| p.lvalue.id).collect_vec();
                 let param_types =
-                    self.resolve_parameters_declarative(&type_signature, &parameter_nodes, *span);
+                    self.resolve_parameters_declarative(&type_signature, &parameter_nodes);
 
                 for (param, typ) in parameters.iter().zip(&param_types) {
                     self.result
@@ -912,11 +912,9 @@ impl Analyser {
                     .sequence_element_type()
                     .unwrap_or(StaticType::Any);
 
-                // TOOD: get this from the AST when the parser adds it
-                let expected_type = None;
-
                 self.loop_depth += 1;
-                self.resolve_binding_pattern(l_value, expected_type, found_type, sequence_span);
+                // A `for` binder has no type annotation.
+                self.resolve_binding_pattern(l_value, None, found_type, sequence_span);
             }
             ForIteration::Guard(expr) => {
                 self.analyse_expr(expr);
@@ -1246,26 +1244,17 @@ impl Analyser {
         }
     }
 
-    /// Resolve expressions as arguments to a function and return the function arity
+    /// Declares a function's parameters and returns their types.
     fn resolve_parameters_declarative(
         &mut self,
         type_signature: &TypeSignature,
         parameter_nodes: &[NodeId],
-        span: Span,
     ) -> Vec<StaticType> {
         let TypeSignature::Exact(parameters) = type_signature else {
             return vec![];
         };
 
-        for param in parameters.iter().duplicates_by(|param| &param.name) {
-            self.emit(AnalysisError::parameter_redefined(&param.name, span));
-        }
-
-        for (param, &node) in parameters
-            .iter()
-            .zip(parameter_nodes)
-            .unique_by(|(param, _)| &param.name)
-        {
+        for (param, &node) in parameters.iter().zip(parameter_nodes) {
             let has_annotation = param.type_name != StaticType::Any;
             let binding = if has_annotation {
                 TypeBinding::Annotated(param.type_name.clone())
@@ -1507,13 +1496,6 @@ impl AnalysisError {
         }
     }
 
-    fn parameter_redefined(param: &str, span: Span) -> Self {
-        Self {
-            text: format!("Illegal redefinition of parameter {param}"),
-            span,
-            help_text: None,
-        }
-    }
     fn unable_to_index_into(typ: &StaticType, span: Span) -> Self {
         Self {
             text: format!("Unable to index into {typ}"),

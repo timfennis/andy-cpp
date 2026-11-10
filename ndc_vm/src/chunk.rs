@@ -18,19 +18,6 @@ pub enum JumpTarget {
 impl JumpTarget {
     pub const PLACEHOLDER: Self = Self::Label(LabelId(usize::MAX));
 
-    #[inline]
-    pub fn new(offset: isize) -> Self {
-        Self::Offset(offset)
-    }
-
-    #[inline]
-    pub fn raw(self) -> isize {
-        match self {
-            Self::Offset(i) => i,
-            Self::Label(_) => panic!("cannot get raw offset of unresolved label"),
-        }
-    }
-
     /// Advance `ip` by this offset using wrapping signed arithmetic.
     #[inline]
     pub fn apply(self, ip: usize) -> usize {
@@ -494,12 +481,6 @@ pub struct Chunk {
 impl Chunk {
     pub fn len(&self) -> usize {
         self.code.len()
-    }
-
-    pub fn write(&mut self, op: OpCode, span: Span) -> usize {
-        self.code.push(op);
-        self.spans.push(span);
-        self.code.len() - 1
     }
 
     pub fn is_empty(&self) -> bool {

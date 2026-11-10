@@ -110,7 +110,7 @@ impl Value {
 }
 
 /// Newtype wrapper around `Value` that imposes a total order so values can be
-/// stored in a `BinaryHeap`.  The ordering mirrors the interpreter's `HeapValue`.
+/// stored in a `BinaryHeap`.
 #[derive(Clone)]
 pub struct OrdValue(pub Value);
 
@@ -798,7 +798,7 @@ impl fmt::Display for Object {
                 }
                 write!(f, "]")
             }
-            // Empty tuple is the unit value — prints as nothing, matching the interpreter.
+            // Empty tuple is the unit value, which prints as nothing.
             Self::Tuple(vs) if vs.is_empty() => Ok(()),
             Self::Tuple(vs) => {
                 write!(f, "(")?;
@@ -1104,7 +1104,6 @@ impl Hash for Object {
             Self::Map { entries, .. } => {
                 state.write_u8(8);
                 // Order-independent hash: XOR-fold of pair hashes
-                // (same approach as the non-VM interpreter)
                 // NOTE: the default value is not part of the identity of the map
                 let mut acc = 0u64;
                 let mut cube_acc = 0u64;
