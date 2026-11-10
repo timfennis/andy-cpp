@@ -22,13 +22,13 @@ The cache key is computed by hashing **all arguments**. For container types like
 is an O(n) operation proportional to the number of elements. Passing large containers as arguments
 to a `pure fn` therefore adds hashing overhead on every call, even on cache hits.
 
-If a container is large and does not change between recursive calls, such as a lookup table or graph, capture it as an **upvalue** instead of passing it as an argument. The upvalue is not part of the cache key, so memoization cost depends only on the arguments that change.
+If a container is large and does not change between recursive calls, such as a lookup table or graph, let the function use it from outside instead of passing it as an argument. A value the function uses from outside is not part of the cache key, so memoization cost depends only on the arguments that change.
 
 ```ndc
 // Slow: `graph` is hashed on every call
 pure fn count(graph, node, visited) { ... }
 
-// Fast: `graph` captured as upvalue, only (node, visited) are hashed
+// Fast: `graph` is used from outside, only (node, visited) are hashed
 let graph = build_graph();
 pure fn count(node, visited) {
     // use graph here

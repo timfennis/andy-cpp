@@ -102,6 +102,8 @@ pub enum NameResolutionError {
     },
     #[error("Illegal redefinition of variable {name} as a struct in the same scope")]
     IllegalStructRedefinition { name: String, span: Span },
+    #[error("Can't assign to the built-in function '{name}'")]
+    AssignToBuiltin { name: String, span: Span },
 }
 
 impl NameResolutionError {
@@ -115,7 +117,8 @@ impl NameResolutionError {
             | Self::StructShadowsBuiltinType { span, .. }
             | Self::StructRedefinition { span, .. }
             | Self::DuplicateField { span, .. }
-            | Self::IllegalStructRedefinition { span, .. } => *span,
+            | Self::IllegalStructRedefinition { span, .. }
+            | Self::AssignToBuiltin { span, .. } => *span,
         }
     }
 }
@@ -478,6 +481,11 @@ impl NameResolver {
     /// slot in the VM. `None` for anything that isn't a native.
     pub fn native_slot(&self, symbol: SymbolId) -> Option<usize> {
         self.native_slots.get(&symbol).copied()
+    }
+
+    /// How many natives the resolver was created with.
+    pub fn native_count(&self) -> usize {
+        self.native_slots.len()
     }
 
     /// The parameter scope of the function declared at `function`.
@@ -901,6 +909,12 @@ impl NameResolver {
                 identifier, span, ..
             } => {
                 let symbol = self.lookup(identifier, *span)?;
+                if self.native_slots.contains_key(&symbol) {
+                    return Err(NameResolutionError::AssignToBuiltin {
+                        name: identifier.clone(),
+                        span: *span,
+                    });
+                }
                 self.record_use(symbol);
                 self.assignments.insert(target.id, symbol);
             }

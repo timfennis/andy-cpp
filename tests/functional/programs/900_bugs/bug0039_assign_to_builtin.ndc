@@ -1,0 +1,3 @@
+// Assigning to a built-in function used to crash the compiler.
+// expect-error: Can't assign to the built-in function 'len'
+len = 5;

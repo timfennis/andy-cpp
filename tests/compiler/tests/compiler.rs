@@ -44,6 +44,22 @@ fn compile_with_stdlib(input: &str) -> Vec<OpCode> {
         .to_vec()
 }
 
+/// The raw bytecode of the function that is constant `index` of `input`'s
+/// top-level code, such as the first function `input` declares.
+fn compile_nested_function(input: &str, index: usize) -> Vec<OpCode> {
+    let mut interp = ndc_interpreter::Interpreter::capturing();
+    let compiled = interp
+        .compile_str_unoptimized(input)
+        .expect("compile failed");
+    let ndc_vm::Value::Object(object) = compiled.body().constant(index) else {
+        panic!("constant {index} is not a function");
+    };
+    let ndc_vm::Object::Function(ndc_vm::Function::Compiled(function)) = object.as_ref() else {
+        panic!("constant {index} is not a compiled function");
+    };
+    function.opcodes().to_vec()
+}
+
 fn compile_with_stdlib_unoptimized(input: &str) -> Vec<OpCode> {
     let mut interp = ndc_interpreter::Interpreter::capturing();
     interp.configure(ndc_stdlib::register);
@@ -296,38 +312,38 @@ fn test_while() {
 
 // let a = 1;
 //
-// Value is compiled, then SetLocal stores it in pre-allocated slot 0.
-// The declaration's unit result is pushed and popped by the statement;
-// the optimizer elides the pair.
+// A top-level declaration is a global, so SetGlobal stores the value in global
+// slot 0 (there are no natives here). The declaration's unit result is pushed
+// and popped by the statement; the optimizer elides the pair.
 //
-// 0: Constant(0)   push `1`
-// 1: SetLocal(0)   store in slot 0
-// 2: Constant(1)   push `()` (declaration result)
-// 3: Pop           discard (statement)
+// 0: Constant(0)    push `1`
+// 1: SetGlobal(0)   store in global slot 0
+// 2: Constant(1)    push `()` (declaration result)
+// 3: Pop            discard (statement)
 // 4: Halt
 #[test]
 fn test_declaration() {
     assert_eq!(
         compile_with_analysis("let a = 1;"),
-        [Constant(0), SetLocal(0), Constant(1), Pop, Halt]
+        [Constant(0), SetGlobal(0), Constant(1), Pop, Halt]
     );
 }
 
 // let a = 1;
 // a = 5;
 //
-// Declaration stores 1 into pre-allocated slot 0.
-// Assignment pushes new value, SetLocal overwrites,
+// Declaration stores 1 into global slot 0.
+// Assignment pushes new value, SetGlobal overwrites,
 // push unit as the expression result, Pop discards it.
 //
-// 0: Constant(0)   push `1`
-// 1: SetLocal(0)   store in slot 0 (declaration)
-// 2: Constant(1)   push `()` (declaration result)
-// 3: Pop           discard (statement)
-// 4: Constant(2)   push `5`
-// 5: SetLocal(0)   overwrite slot 0 (assignment)
-// 6: Constant(3)   push `()` (assignment result)
-// 7: Pop           discard (statement)
+// 0: Constant(0)    push `1`
+// 1: SetGlobal(0)   store in global slot 0 (declaration)
+// 2: Constant(1)    push `()` (declaration result)
+// 3: Pop            discard (statement)
+// 4: Constant(2)    push `5`
+// 5: SetGlobal(0)   overwrite global slot 0 (assignment)
+// 6: Constant(3)    push `()` (assignment result)
+// 7: Pop            discard (statement)
 // 8: Halt
 #[test]
 fn test_assignment() {
@@ -335,11 +351,11 @@ fn test_assignment() {
         compile_with_analysis("let a = 1;\na = 5;"),
         [
             Constant(0),
-            SetLocal(0),
+            SetGlobal(0),
             Constant(1),
             Pop,
             Constant(2),
-            SetLocal(0),
+            SetGlobal(0),
             Constant(3),
             Pop,
             Halt
@@ -351,10 +367,10 @@ fn test_assignment() {
 // value ++= [2];
 //
 // A specialized `++=` mutates and returns the left value. Even though the
-// mutation is visible through aliases, SetLocal must write the returned value
+// mutation is visible through aliases, SetGlobal must write the returned value
 // back before the compiler pushes unit for the assignment expression:
 //
-// Call(2), SetLocal(0), Constant(_), Pop
+// Call(2), SetGlobal(_), Constant(_), Pop
 //
 // The indexed form prepares the container and index in temporary locals,
 // calls `++=`, then passes its result to `[]=`. The setter's unit result is
@@ -367,7 +383,7 @@ fn test_augmented_assignment_always_writes_back() {
     assert!(
         variable
             .windows(4)
-            .any(|ops| matches!(ops, [Call(2), SetLocal(0), Constant(_), Pop])),
+            .any(|ops| matches!(ops, [Call(2), SetGlobal(_), Constant(_), Pop])),
         "specialized variable augmentation must write back its result and push unit: {variable:?}",
     );
 
@@ -388,7 +404,7 @@ fn test_augmented_assignment_always_writes_back() {
 // Ordinary `+` produces a replacement value, so variable augmentation stores
 // the result and then produces unit:
 //
-// Call(2), SetLocal(0), Constant(_), Pop
+// Call(2), SetGlobal(_), Constant(_), Pop
 //
 // let values = [1];
 // values[0] += 2;
@@ -403,7 +419,7 @@ fn test_augmented_assignment_writeback_uses_target_store_shape() {
     assert!(
         variable
             .windows(4)
-            .any(|ops| matches!(ops, [Call(2), SetLocal(0), Constant(_), Pop])),
+            .any(|ops| matches!(ops, [Call(2), SetGlobal(_), Constant(_), Pop])),
         "writeback variable augmentation must store the operation result and push unit: {variable:?}",
     );
 
@@ -419,31 +435,30 @@ fn test_augmented_assignment_writeback_uses_target_store_shape() {
 // let values = [1];
 // values[0] += { let delta = 2; delta };
 //
-// Source locals are assigned first:
+// `values` is a global. The top-level code's own locals are assigned first:
 //
-// slot 0: values
-// slot 1: delta
+// slot 0: delta
 //
 // Preparing an indexed assignment then reserves non-overlapping compiler
 // temporaries after the source-local high-water mark:
 //
-// slot 2: cached container
-// slot 3: cached index
-// slot 4: operation result passed to `[]=`
+// slot 1: cached container
+// slot 2: cached index
+// slot 3: operation result passed to `[]=`
 #[test]
 fn test_augmented_assignment_temporaries_follow_source_locals() {
     let ops =
         compile_with_stdlib_unoptimized("let values = [1]; values[0] += { let delta = 2; delta };");
 
     assert!(
-        ops.iter().any(|op| matches!(op, SetLocal(1))),
-        "the rhs block local should retain analyser-assigned slot 1: {ops:?}",
+        ops.iter().any(|op| matches!(op, SetLocal(0))),
+        "the rhs block local should retain analyser-assigned slot 0: {ops:?}",
     );
     assert!(
-        ops.iter().any(|op| matches!(op, SetLocal(2)))
-            && ops.iter().any(|op| matches!(op, SetLocal(3)))
-            && ops.iter().any(|op| matches!(op, SetLocal(4))),
-        "prepared-target temporaries must be allocated after both source locals: {ops:?}",
+        ops.iter().any(|op| matches!(op, SetLocal(1)))
+            && ops.iter().any(|op| matches!(op, SetLocal(2)))
+            && ops.iter().any(|op| matches!(op, SetLocal(3))),
+        "prepared-target temporaries must be allocated after the source local: {ops:?}",
     );
 }
 
@@ -566,7 +581,7 @@ fn test_member_assignment_calls_setter_with_receiver_and_value() {
 
     assert!(
         ops.windows(4)
-            .any(|window| matches!(window, [Constant(_), GetLocal(_), Constant(_), Call(2)])),
+            .any(|window| matches!(window, [Constant(_), GetGlobal(_), Constant(_), Call(2)])),
         "expected setter, receiver, value, Call(2); got: {ops:?}",
     );
 }
@@ -613,18 +628,24 @@ fn test_provable_cast_emits_no_check_type() {
     );
 }
 
-// let x = 1;
-// let f = fn() { x };
-// x = 2;
-// x
+// fn outer() {
+//     let x = 1;
+//     let f = fn() { x };
+//     x = 2;
+//     x
+// }
 //
 // `x` is captured, so its reads and writes go through the cell the closure
 // shares. Its declaration still writes the slot directly: the first capture
-// is what moves the value into a cell.
+// is what moves the value into a cell. (At the top level `x` would be a
+// global, which closures reach directly.)
 #[test]
 fn test_captured_local_is_read_and_written_through_its_cell() {
     assert_eq!(
-        compile_with_analysis("let x = 1;\nlet f = fn() { x };\nx = 2;\nx"),
+        compile_nested_function(
+            "fn outer() {\nlet x = 1;\nlet f = fn() { x };\nx = 2;\nx\n}",
+            0
+        ),
         [
             Constant(0),
             SetLocal(0),
@@ -642,19 +663,20 @@ fn test_captured_local_is_read_and_written_through_its_cell() {
             Constant(5),
             Pop,
             GetCell(0),
-            Halt
+            Return
         ]
     );
 }
 
-// fn f() { f }
+// fn outer() { fn f() { f } }
 //
 // `f` captures itself before its value exists, so its slot gets a fresh cell
 // before the closure is made, and the closure is written into that cell.
+// (At the top level `f` would be a global, which needs no cell.)
 #[test]
 fn test_self_capturing_function_gets_its_cell_before_its_closure() {
     assert_eq!(
-        compile_with_analysis("fn f() { f }"),
+        compile_nested_function("fn outer() { fn f() { f } }", 0),
         [
             NewCell(0),
             Closure {
@@ -663,7 +685,7 @@ fn test_self_capturing_function_gets_its_cell_before_its_closure() {
             },
             SetCell(0),
             Constant(1),
-            Halt
+            Return
         ]
     );
 }

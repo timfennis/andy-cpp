@@ -259,6 +259,14 @@ impl Vm {
                     let slot = *slot;
                     self.stack.push(self.globals[slot].clone());
                 }
+                OpCode::SetGlobal(slot) => {
+                    let slot = *slot;
+                    let value = self.stack.pop().expect("stack underflow");
+                    if slot >= self.globals.len() {
+                        self.globals.resize(slot + 1, Value::unit());
+                    }
+                    self.globals[slot] = value;
+                }
                 OpCode::SetLocal(slot) => {
                     let slot = *slot;
                     let value = self.stack.pop().expect("stack underflow");
@@ -770,40 +778,9 @@ impl Vm {
         }
     }
 
-    /// Replaces the globals, for natives registered after the VM was created.
-    pub fn set_globals(&mut self, globals: Vec<Value>) {
-        self.globals = globals;
-    }
-
-    /// Resume execution with a new (extended) compiled function, starting at
-    /// `resume_ip` — the instruction index where the previous `Halt` was.
-    /// Used by the REPL to keep a single VM alive across lines.
-    ///
-    /// The stack is trimmed to `prev_num_locals` (discarding any leftover
-    /// expression result from the previous run) and then extended with
-    /// `Value::unit()` for any new local slots the new function introduces.
-    /// Closures keep their captured cells, so trimming the stack loses nothing
-    /// they need.
-    pub fn resume_from_halt(
-        &mut self,
-        function: CompiledFunction,
-        resume_ip: usize,
-        prev_num_locals: usize,
-    ) {
-        let new_num_locals = function.num_locals;
-        self.stack.truncate(prev_num_locals);
-        for _ in prev_num_locals..new_num_locals {
-            self.stack.push(Value::unit());
-        }
-        self.frames = vec![CallFrame {
-            closure: ClosureFunction {
-                prototype: Rc::new(function),
-                upvalues: Vec::new(),
-            },
-            ip: resume_ip,
-            frame_pointer: 0,
-            memo: None,
-        }];
+    /// The globals as the program left them, for the next REPL line.
+    pub fn into_globals(self) -> Vec<Value> {
+        self.globals
     }
 
     /// Resolves the callee on the stack to a scalar `Function`. Direct

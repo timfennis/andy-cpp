@@ -19,20 +19,17 @@ mod timing;
 
 pub struct Interpreter {
     function_registry: FunctionRegistry<Rc<NativeFunction>>,
-    /// The VM's globals for the registered functions, built with the analyser
-    /// so both number them the same way.
+    /// The VM's globals: the registered functions, numbered the way the
+    /// analyser numbers them, then the values of the program's top-level
+    /// declarations. A resumable interpreter keeps them from one evaluation to
+    /// the next, which is how a REPL line sees what earlier lines declared.
     globals: Vec<Value>,
     capturing: bool,
     analyser: Analyser,
     source_db: SourceDb,
-    /// Persistent REPL VM and the compiler checkpoint from the last run.
-    /// `None` until the first `eval` call; kept alive afterwards so that
-    /// variables declared on one line are visible on subsequent lines.
-    repl_state: Option<(Vm, Compiler)>,
     resumable: bool,
-    /// Output captured from VMs that are gone: one-shot runs, and REPL sessions
-    /// that started over after an error.
-    earlier_output: Vec<u8>,
+    /// What the evaluations printed, if output is captured.
+    output: Vec<u8>,
     #[cfg(feature = "trace")]
     tracer: Option<Box<dyn tracer::VmTracer>>,
 }
@@ -58,9 +55,8 @@ impl Interpreter {
             capturing,
             analyser: Analyser::new(vec![]),
             source_db: SourceDb::new(),
-            repl_state: None,
             resumable: true,
-            earlier_output: Vec::new(),
+            output: Vec::new(),
             #[cfg(feature = "trace")]
             tracer: None,
         }
@@ -68,8 +64,8 @@ impl Interpreter {
 
     /// Create an interpreter for executing a complete program once.
     ///
-    /// Unlike the default resumable interpreter used by the REPL, this uses
-    /// the optimizing compiler and does not retain state after execution.
+    /// Unlike the default resumable interpreter used by the REPL, this does
+    /// not retain what one evaluation declared for the next.
     #[must_use]
     pub fn one_shot() -> Self {
         Self {
@@ -78,24 +74,9 @@ impl Interpreter {
         }
     }
 
-    /// Like [`Self::one_shot`], but captures output like [`Self::capturing`],
-    /// so tests can run a program the way `ndc script.ndc` does.
-    #[must_use]
-    pub fn capturing_one_shot() -> Self {
-        Self {
-            resumable: false,
-            ..Self::from_capturing(true)
-        }
-    }
-
     pub fn configure<F: FnOnce(&mut FunctionRegistry<Rc<NativeFunction>>)>(&mut self, f: F) {
         f(&mut self.function_registry);
-        self.analyser = self.new_analyser();
-        self.globals = ndc_vm::native_globals(self.function_registry.iter());
-        // A REPL VM from an earlier evaluation must see the new natives too.
-        if let Some((vm, _)) = &mut self.repl_state {
-            vm.set_globals(self.globals.clone());
-        }
+        self.start_over();
     }
 
     /// An analyser that knows the registered functions and nothing else.
@@ -110,17 +91,8 @@ impl Interpreter {
 
     /// Forgets everything evaluated so far, keeping only what was printed.
     fn start_over(&mut self) {
-        if let Some((vm, _)) = self.repl_state.take() {
-            self.keep_output(&vm);
-        }
         self.analyser = self.new_analyser();
-    }
-
-    /// Keeps what `vm` printed, if output is captured, for when it's gone.
-    fn keep_output(&mut self, vm: &Vm) {
-        if let Some(output) = vm.get_output() {
-            self.earlier_output.extend_from_slice(output);
-        }
+        self.globals = ndc_vm::native_globals(self.function_registry.iter());
     }
 
     #[cfg(feature = "trace")]
@@ -136,12 +108,7 @@ impl Interpreter {
     /// Returns `Some(vec![])` for a capturing interpreter that hasn't run yet.
     pub fn get_output(&self) -> Option<Vec<u8>> {
         if self.capturing {
-            let repl_output = self
-                .repl_state
-                .as_ref()
-                .and_then(|(vm, _)| vm.get_output())
-                .unwrap_or_default();
-            Some([self.earlier_output.as_slice(), repl_output].concat())
+            Some(self.output.clone())
         } else {
             None
         }
@@ -291,6 +258,8 @@ impl Interpreter {
         Ok((expressions, analysis, timings))
     }
 
+    /// Compiles and runs analysed code on a VM that gets the globals, and
+    /// takes them back afterwards.
     fn interpret_vm(
         &mut self,
         #[cfg(feature = "trace")] input: &str,
@@ -299,93 +268,32 @@ impl Interpreter {
         analysis: Analysis,
     ) -> Result<(Value, ExecutionTimings), InterpreterError> {
         let mut timings = ExecutionTimings::default();
-        if !self.resumable {
-            let code = measure(&mut timings, Phase::Compiling, || {
-                Self::compile_one_shot(expressions, analysis)
-            })?;
-            let num_locals = code.num_locals();
-            let output = if self.capturing {
-                OutputSink::Buffer(Vec::new())
-            } else {
-                OutputSink::Stdout
-            };
-            let mut vm = Vm::new(code, self.globals.clone()).with_output(output);
-            #[cfg(feature = "trace")]
-            {
-                vm = vm.with_source(input);
-                if let Some(tracer) = self.tracer.take() {
-                    vm = vm.with_tracer(tracer);
-                }
-            }
-            let run = measure(&mut timings, Phase::Running, || vm.run());
-            // Keep what the run printed, up to an error too, as the VM goes away.
-            self.keep_output(&vm);
-            run?;
-            return Ok((vm.last_value(num_locals), timings));
-        }
-
-        let result = match self.repl_state.take() {
-            None => {
-                let output = if self.capturing {
-                    OutputSink::Buffer(Vec::new())
-                } else {
-                    OutputSink::Stdout
-                };
-                let (code, checkpoint) = measure(&mut timings, Phase::Compiling, || {
-                    Compiler::compile_resumable(expressions, analysis)
-                })?;
-                let mut vm = Vm::new(code, self.globals.clone()).with_output(output);
-                #[cfg(feature = "trace")]
-                {
-                    vm = vm.with_source(input);
-                    if let Some(tracer) = self.tracer.take() {
-                        vm = vm.with_tracer(tracer);
-                    }
-                }
-                if let Err(error) = measure(&mut timings, Phase::Running, || vm.run()) {
-                    self.keep_output(&vm);
-                    return Err(error.into());
-                }
-                let result = vm.last_value(checkpoint.num_locals());
-                self.repl_state = Some((vm, checkpoint));
-                result
-            }
-            Some((mut vm, checkpoint)) => {
-                let resume_ip = checkpoint.halt_ip();
-                let prev_num_locals = checkpoint.num_locals();
-                let compiled = measure(&mut timings, Phase::Compiling, || {
-                    checkpoint.resume(expressions, analysis)
-                });
-                let (code, new_checkpoint) = match compiled {
-                    Ok(compiled) => compiled,
-                    Err(error) => {
-                        self.keep_output(&vm);
-                        return Err(error.into());
-                    }
-                };
-                vm.resume_from_halt(code, resume_ip, prev_num_locals);
-                #[cfg(feature = "trace")]
-                {
-                    vm.set_source(input);
-                }
-                if let Err(error) = measure(&mut timings, Phase::Running, || vm.run()) {
-                    self.keep_output(&vm);
-                    return Err(InterpreterError::Vm(error));
-                }
-                let result = vm.last_value(new_checkpoint.num_locals());
-                self.repl_state = Some((vm, new_checkpoint));
-                result
-            }
+        let code = measure(&mut timings, Phase::Compiling, || {
+            Compiler::compile(expressions, analysis)
+        })?;
+        let num_locals = code.num_locals();
+        let output = if self.capturing {
+            OutputSink::Buffer(Vec::new())
+        } else {
+            OutputSink::Stdout
         };
-
-        Ok((result, timings))
-    }
-
-    fn compile_one_shot(
-        expressions: impl Iterator<Item = ExpressionLocation>,
-        analysis: Analysis,
-    ) -> Result<CompiledFunction, ndc_vm::CompileError> {
-        Compiler::compile(expressions, analysis)
+        let mut vm = Vm::new(code, std::mem::take(&mut self.globals)).with_output(output);
+        #[cfg(feature = "trace")]
+        {
+            vm = vm.with_source(input);
+            if let Some(tracer) = self.tracer.take() {
+                vm = vm.with_tracer(tracer);
+            }
+        }
+        let run = measure(&mut timings, Phase::Running, || vm.run());
+        // What was printed stays printed, even when the run failed.
+        if let Some(output) = vm.get_output() {
+            self.output.extend_from_slice(output);
+        }
+        let value = vm.last_value(num_locals);
+        self.globals = vm.into_globals();
+        run?;
+        Ok((value, timings))
     }
 }
 
@@ -423,21 +331,6 @@ pub enum InterpreterError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndc_vm::chunk::OpCode;
-
-    #[test]
-    fn one_shot_compilation_runs_the_optimizer() {
-        let mut interpreter = Interpreter::one_shot();
-        let source_id = interpreter.source_db.add("<test>", "1;");
-        let (expressions, result, _) = interpreter
-            .parse_and_analyse("1;", source_id)
-            .expect("analysis should succeed");
-
-        let compiled = Interpreter::compile_one_shot(expressions.into_iter(), result.analysis)
-            .expect("compilation should succeed");
-
-        assert_eq!(compiled.opcodes(), [OpCode::Halt]);
-    }
 
     #[test]
     fn one_shot_execution_does_not_retain_declarations() {
