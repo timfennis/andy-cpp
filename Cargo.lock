@@ -1148,6 +1148,7 @@ dependencies = [
  "ndc_core",
  "ndc_lexer",
  "ndc_parser",
+ "ndc_resolver",
  "thiserror",
 ]
 
@@ -1233,6 +1234,18 @@ dependencies = [
  "derive_more",
  "ndc_core",
  "ndc_lexer",
+ "thiserror",
+]
+
+[[package]]
+name = "ndc_resolver"
+version = "0.3.0"
+dependencies = [
+ "ahash",
+ "itertools 0.15.0",
+ "ndc_core",
+ "ndc_lexer",
+ "ndc_parser",
  "thiserror",
 ]
 
