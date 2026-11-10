@@ -1,6 +1,6 @@
 use ndc_core::r#struct::StructRegistry;
 use ndc_lexer::{Lexer, SourceId};
-use ndc_parser::Parser;
+use ndc_parser::{CaptureSource, Parser};
 use ndc_vm::chunk::JumpTarget;
 use ndc_vm::chunk::OpCode;
 use ndc_vm::chunk::OpCode::*;
@@ -614,5 +614,60 @@ fn test_provable_cast_emits_no_check_type() {
     assert!(
         ops.iter().all(|op| !matches!(op, CheckType(_))),
         "provable casts must not emit CheckType, got: {ops:?}",
+    );
+}
+
+// let x = 1;
+// let f = fn() { x };
+// x = 2;
+// x
+//
+// `x` is captured, so its reads and writes go through the cell the closure
+// shares. Its declaration still writes the slot directly: the first capture
+// is what moves the value into a cell.
+#[test]
+fn test_captured_local_is_read_and_written_through_its_cell() {
+    assert_eq!(
+        compile_with_analysis("let x = 1;\nlet f = fn() { x };\nx = 2;\nx"),
+        [
+            Constant(0),
+            SetLocal(0),
+            Constant(1),
+            Pop,
+            Closure {
+                constant_idx: 2,
+                values: Rc::from([CaptureSource::Local(0)]),
+            },
+            SetLocal(1),
+            Constant(3),
+            Pop,
+            Constant(4),
+            SetCell(0),
+            Constant(5),
+            Pop,
+            GetCell(0),
+            Halt
+        ]
+    );
+}
+
+// fn f() { f }
+//
+// `f` captures itself before its value exists, so its slot gets a fresh cell
+// before the closure is made, and the closure is written into that cell.
+#[test]
+fn test_self_capturing_function_gets_its_cell_before_its_closure() {
+    assert_eq!(
+        compile_with_analysis("fn f() { f }"),
+        [
+            NewCell(0),
+            Closure {
+                constant_idx: 0,
+                values: Rc::from([CaptureSource::Local(0)]),
+            },
+            SetCell(0),
+            Constant(1),
+            Halt
+        ]
     );
 }

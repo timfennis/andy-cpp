@@ -59,6 +59,10 @@ pub enum Value {
     Bool(bool),
     None,
     Object(Rc<Object>),
+    /// A captured local, shared by the frame that declares it and the
+    /// closures that capture it. It lives in a stack slot or a closure's
+    /// upvalues and is never a value a program can see.
+    Cell(Rc<RefCell<Self>>),
 }
 
 #[derive(Clone)]
@@ -90,6 +94,16 @@ pub enum Object {
     Deque(RefCell<VecDeque<Value>>),
     MinHeap(RefCell<BinaryHeap<Reverse<OrdValue>>>),
     MaxHeap(RefCell<BinaryHeap<OrdValue>>),
+}
+
+impl Value {
+    /// The cell this value is, if a captured local's slot holds one.
+    pub(crate) fn as_cell(&self) -> Option<&Rc<RefCell<Self>>> {
+        match self {
+            Self::Cell(cell) => Some(cell),
+            _ => None,
+        }
+    }
 }
 
 /// Newtype wrapper around `Value` that imposes a total order so values can be
@@ -291,6 +305,7 @@ impl Value {
             Self::Bool(_) => StaticType::Bool,
             Self::None => StaticType::Option(Box::new(StaticType::Any)),
             Self::Object(obj) => obj.static_type_with_budget(depth, budget),
+            Self::Cell(cell) => cell.borrow().static_type_with_budget(depth, budget),
         }
     }
 
@@ -571,7 +586,7 @@ impl Value {
             Self::Int(value) => Some(NumericRef::Int(*value)),
             Self::Float(value) => Some(NumericRef::Float(*value)),
             Self::Number(value) => Some(NumericRef::Number(value.as_ref())),
-            Self::Bool(_) | Self::None | Self::Object(_) => None,
+            Self::Bool(_) | Self::None | Self::Object(_) | Self::Cell(_) => None,
         }
     }
 
@@ -757,6 +772,7 @@ impl fmt::Display for Value {
             Self::Bool(b) => write!(f, "{b}"),
             Self::None => write!(f, "None"),
             Self::Object(obj) => write!(f, "{obj}"),
+            Self::Cell(cell) => write!(f, "{}", cell.borrow()),
         }
     }
 }
@@ -990,6 +1006,7 @@ impl Hash for Value {
                 state.write_u8(6);
                 o.hash(state);
             }
+            Self::Cell(_) => unreachable!("internal error: a cell is never hashed"),
             Self::Int(_) | Self::Float(_) | Self::Number(_) => unreachable!("handled above"),
         }
     }

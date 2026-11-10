@@ -31,14 +31,18 @@ impl<'a> Layout<'a> {
     /// How code in `function` reaches `symbol` (`None` for the program's top
     /// level): a native by its global slot, a value of the same frame by its
     /// local slot, and anything further out through the function's upvalues.
-    /// In `let x = 1; fn f() { x }`, `x` is local 0 at the top level and
-    /// upvalue 0 inside `f`.
+    /// A local that closures capture is a cell, which they share. In
+    /// `let x = 1; fn f() { x }`, `x` is cell 0 at the top level and upvalue 0
+    /// inside `f`.
     pub fn location(self, symbol: SymbolId, function: Option<NodeId>) -> ResolvedVar {
         if let Some(slot) = self.resolver.native_slot(symbol) {
             return ResolvedVar::Global { slot };
         }
-        let local = ResolvedVar::Local {
-            slot: self.local_slot(symbol),
+        let slot = self.local_slot(symbol);
+        let local = if self.resolver.is_captured(symbol) {
+            ResolvedVar::Cell { slot }
+        } else {
+            ResolvedVar::Local { slot }
         };
         let Some(function) = function else {
             return local;
