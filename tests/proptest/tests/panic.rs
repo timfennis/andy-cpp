@@ -233,7 +233,7 @@ fn build_stdlib_registry() -> FunctionRegistry<Rc<NativeFunction>> {
 /// `len`, `sum`, etc. Returns `()` on any error — the test only cares
 /// about panics, not error variants.
 fn run_pipeline(tokens: Vec<TokenLocation>) {
-    let mut expressions = match Parser::from_tokens(tokens).parse() {
+    let expressions = match Parser::from_tokens(tokens).parse() {
         Ok(e) => e,
         Err(_) => return,
     };
@@ -245,7 +245,7 @@ fn run_pipeline(tokens: Vec<TokenLocation>) {
         .collect();
 
     let mut analyser = Analyser::new(scope);
-    for e in &mut expressions {
+    for e in &expressions {
         analyser.analyse(e);
     }
     let result = analyser.take_result();

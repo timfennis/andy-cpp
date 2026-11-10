@@ -216,7 +216,7 @@ impl Analyser {
     /// unresolved names isn't analysed further, which would only repeat its errors.
     /// The names it still declared are bound as `Any`, so in
     /// `fn f() { missing } let g = f`, only `missing` is reported.
-    pub fn analyse(&mut self, expr_loc: &mut ExpressionLocation) -> StaticType {
+    pub fn analyse(&mut self, expr_loc: &ExpressionLocation) -> StaticType {
         let bound_before = self.resolver.current_bindings().len();
         self.resolver.resolve_statement(expr_loc);
         let name_errors = self.resolver.take_errors();
@@ -233,7 +233,7 @@ impl Analyser {
         self.analyse_expr(expr_loc)
     }
 
-    fn analyse_expr(&mut self, expr_loc: &mut ExpressionLocation) -> StaticType {
+    fn analyse_expr(&mut self, expr_loc: &ExpressionLocation) -> StaticType {
         let typ = self.analyse_inner(expr_loc);
         self.result
             .analysis
@@ -255,10 +255,10 @@ impl Analyser {
     /// be typed with fresh type variables instead of adopting the annotation.
     fn analyse_with_expected(
         &mut self,
-        expr_loc: &mut ExpressionLocation,
+        expr_loc: &ExpressionLocation,
         expected: &StaticType,
     ) -> StaticType {
-        let typ = match (&mut expr_loc.expression, expected) {
+        let typ = match (&expr_loc.expression, expected) {
             (
                 Expression::List { values },
                 StaticType::List(element) | StaticType::Sequence(element),
@@ -304,7 +304,7 @@ impl Analyser {
                 if values.len() == elements.len() =>
             {
                 let types = values
-                    .iter_mut()
+                    .iter()
                     .zip(elements)
                     .map(|(value, element)| self.analyse_with_expected(value, element))
                     .collect();
@@ -325,7 +325,7 @@ impl Analyser {
             expression,
             span,
             id,
-        }: &mut ExpressionLocation,
+        }: &ExpressionLocation,
     ) -> StaticType {
         match expression {
             Expression::BoolLiteral(_) => StaticType::Bool,
@@ -777,7 +777,7 @@ impl Analyser {
                     .collect();
 
                 let struct_id = self.struct_registry.register(
-                    &*name,
+                    name,
                     fields
                         .iter()
                         .zip(&field_types)
@@ -827,8 +827,8 @@ impl Analyser {
     /// Only operator-form calls are eligible for vec dispatch.
     fn analyse_call(
         &mut self,
-        function: &mut ExpressionLocation,
-        arguments: &mut [ExpressionLocation],
+        function: &ExpressionLocation,
+        arguments: &[ExpressionLocation],
         kind: CallKind,
         span: Span,
     ) -> StaticType {
@@ -837,7 +837,7 @@ impl Analyser {
         // and trust the runtime to dispatch. The callee comes before the
         // arguments, in source order like the resolver, so declarations in it
         // get their slots first.
-        let Expression::Identifier { name, .. } = &mut function.expression else {
+        let Expression::Identifier { name, .. } = &function.expression else {
             let callee_type = self.analyse_expr(function);
             for arg in arguments {
                 self.analyse_expr(arg);
@@ -855,7 +855,7 @@ impl Analyser {
         // A named callee declares nothing, so its overload can be picked after
         // the arguments' types are known.
         let mut type_sig = Vec::with_capacity(arguments.len());
-        for arg in arguments.iter_mut() {
+        for arg in arguments.iter() {
             type_sig.push(self.analyse_expr(arg));
         }
 
@@ -898,11 +898,11 @@ impl Analyser {
     /// `for`, where a map comprehension's default is evaluated.
     fn resolve_for_iterations(
         &mut self,
-        iterations: &mut [ForIteration],
-        body: &mut ForBody,
+        iterations: &[ForIteration],
+        body: &ForBody,
         outer_loop_depth: usize,
     ) -> StaticType {
-        let Some((iteration, tail)) = iterations.split_first_mut() else {
+        let Some((iteration, tail)) = iterations.split_first() else {
             unreachable!("because this function is never called with an empty slice");
         };
 
@@ -966,10 +966,10 @@ impl Analyser {
 
     fn resolve_assignment_target(
         &mut self,
-        lvalue: &mut AssignmentTargetLocation,
+        lvalue: &AssignmentTargetLocation,
         span: Span,
     ) -> StaticType {
-        match &mut lvalue.target {
+        match &lvalue.target {
             AssignmentTarget::Identifier { .. } => {
                 let symbol = self.resolver.assigned_symbol(lvalue.id);
                 let variable = self.locate(symbol);
@@ -1029,7 +1029,7 @@ impl Analyser {
             }
             // What `(a, b) = …` can store is a tuple of what each target can.
             AssignmentTarget::Sequence(seq) => StaticType::Tuple(
-                seq.iter_mut()
+                seq.iter()
                     .map(|sub_lvalue| self.resolve_assignment_target(sub_lvalue, span))
                     .collect(),
             ),
@@ -1276,12 +1276,12 @@ impl Analyser {
     }
     fn resolve_binding_pattern(
         &mut self,
-        lvalue: &mut BindingPatternLocation,
+        lvalue: &BindingPatternLocation,
         expected_type: Option<StaticType>,
         found_type: StaticType,
         span: Span,
     ) {
-        match &mut lvalue.pattern {
+        match &lvalue.pattern {
             BindingPattern::Identifier { span, .. } => {
                 // If there is a type annotation and the given type is not a subtype of the annotated type we emit an error
                 if let Some(expected_type) = &expected_type
@@ -1344,8 +1344,7 @@ impl Analyser {
                 let desired_length = seq.len();
                 let mut actual_len = 0;
 
-                for (sub_lvalue, sub_type, found_type) in
-                    izip!(seq.iter_mut(), sub_types, found_types)
+                for (sub_lvalue, sub_type, found_type) in izip!(seq.iter(), sub_types, found_types)
                 {
                     let sub_expected = if is_annotated {
                         Some(sub_type.clone())
@@ -1364,7 +1363,7 @@ impl Analyser {
 
                 if desired_length != actual_len {
                     self.emit(AnalysisError::unable_to_unpack_type(&found_type, span));
-                    self.bind_patterns_as_any(&mut seq[actual_len..], span);
+                    self.bind_patterns_as_any(&seq[actual_len..], span);
                 }
             }
         }
@@ -1373,7 +1372,7 @@ impl Analyser {
     /// Binds every name in `patterns` as `Any`, so a pattern that failed to
     /// type-check still declares its names. In `let (a, b, c) = (1, 2)`, `c`
     /// is bound and a later `print(c)` reports nothing further.
-    fn bind_patterns_as_any(&mut self, patterns: &mut [BindingPatternLocation], span: Span) {
+    fn bind_patterns_as_any(&mut self, patterns: &[BindingPatternLocation], span: Span) {
         for pattern in patterns {
             self.resolve_binding_pattern(pattern, None, StaticType::Any, span);
         }
@@ -1381,7 +1380,7 @@ impl Analyser {
 
     fn analyse_multiple_expression_with_same_type(
         &mut self,
-        expressions: &mut Vec<ExpressionLocation>,
+        expressions: &Vec<ExpressionLocation>,
     ) -> Option<StaticType> {
         let mut element_type: Option<StaticType> = None;
         for expression in expressions {
@@ -1599,10 +1598,10 @@ mod tests {
         let tokens = Lexer::new(source, SourceId::SYNTHETIC)
             .collect::<Result<Vec<_>, _>>()
             .expect("lex failed");
-        let mut expressions = Parser::from_tokens(tokens).parse().expect("parse failed");
+        let expressions = Parser::from_tokens(tokens).parse().expect("parse failed");
         let mut analyser = Analyser::new(globals);
         let mut last_type = StaticType::unit();
-        for expression in &mut expressions {
+        for expression in &expressions {
             last_type = analyser.analyse(expression);
         }
         (last_type, analyser.take_result())
