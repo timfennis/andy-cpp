@@ -61,13 +61,6 @@ pub(crate) struct NameResolver {
     structs: AHashMap<NodeId, StructSymbols>,
     /// Each native's position in the function registry, which is also its
     /// global slot in the VM. With `new(["len", "+"])`, `len` is 0 and `+` is 1.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "read by the layout pass, which is not written yet"
-        )
-    )]
     native_slots: AHashMap<SymbolId, usize>,
     /// Errors from statements that failed to resolve. Resolution carries on with
     /// the next statement, so `a; b;` reports both unknown names.
@@ -147,9 +140,9 @@ pub(crate) struct StructSymbols {
     /// `Point` in annotations such as `let p: Point`.
     type_symbol: SymbolId,
     /// `Point` in calls such as `Point(1)`.
-    constructor: SymbolId,
+    pub(crate) constructor: SymbolId,
     /// The getter and setter of each field, in declaration order.
-    accessors: Vec<(SymbolId, SymbolId)>,
+    pub(crate) accessors: Vec<(SymbolId, SymbolId)>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -363,6 +356,28 @@ impl NameResolver {
         if let Err(error) = self.resolve(statement) {
             self.errors.push(error);
         }
+    }
+
+    /// The native symbols in registry order: the first is the native in slot 0.
+    pub(crate) fn native_symbols(&self) -> Vec<SymbolId> {
+        let mut natives = self.native_slots.iter().collect::<Vec<_>>();
+        natives.sort_by_key(|&(_, &slot)| slot);
+        natives.into_iter().map(|(&symbol, _)| symbol).collect()
+    }
+
+    /// The symbol a resolved declaration introduced: a binding pattern identifier's
+    /// or a named function's, keyed by its node.
+    pub(crate) fn declared_symbol(&self, node: NodeId) -> SymbolId {
+        self.declarations[&node]
+    }
+
+    pub(crate) fn symbol_name(&self, symbol: SymbolId) -> &str {
+        self.symbols.name(symbol)
+    }
+
+    /// What the struct declared at `node` bound.
+    pub(crate) fn struct_symbols(&self, node: NodeId) -> &StructSymbols {
+        &self.structs[&node]
     }
 
     /// The errors recorded so far, leaving none behind.
