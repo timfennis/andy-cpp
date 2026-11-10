@@ -403,6 +403,11 @@ impl NameResolver {
         &self.augmented[&node]
     }
 
+    /// The outer symbols the function declared at `node` captures, in order of first use.
+    pub(crate) fn captures_of(&self, node: NodeId) -> &[SymbolId] {
+        self.captures.get(&node).map_or(&[], Vec::as_slice)
+    }
+
     /// The type symbol the name in an annotation at `node` refers to.
     pub(crate) fn type_name_symbol(&self, node: NodeId) -> SymbolId {
         self.type_names[&node]
