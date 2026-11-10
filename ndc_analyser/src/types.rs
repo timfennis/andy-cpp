@@ -66,7 +66,7 @@ mod tests {
     use ndc_resolver::{BindingKind, SymbolTable};
 
     #[test]
-    fn inferred_types_widen_but_annotated_types_are_fixed() {
+    fn inferred_types_can_change_but_annotated_types_are_fixed() {
         let mut symbols = SymbolTable::default();
         let inferred = symbols.declare("a".to_string(), BindingKind::Plain);
         let annotated = symbols.declare("b".to_string(), BindingKind::Plain);

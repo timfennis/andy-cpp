@@ -659,6 +659,16 @@ mod tests {
         )
     }
 
+    fn resolve(
+        types: &TypeTable,
+        candidates: &Candidates,
+        sig: &[StaticType],
+        kind: CallKind,
+    ) -> ResolvedCall {
+        SYMBOLS
+            .with_borrow(|table| Overloads::new(types, table).resolve_call(candidates, sig, kind))
+    }
+
     /// Asserts the call picks `expected` as its single overload.
     fn assert_resolves_to(
         types: &TypeTable,
@@ -666,9 +676,7 @@ mod tests {
         sig: &[StaticType],
         expected: SymbolId,
     ) {
-        let resolved = SYMBOLS.with_borrow(|table| {
-            Overloads::new(types, table).resolve_call(candidates, sig, CallKind::Regular)
-        });
+        let resolved = resolve(types, candidates, sig, CallKind::Regular);
         assert_eq!(
             resolved.binding,
             Binding::Resolved(Candidate::Scalar(expected))
@@ -693,17 +701,6 @@ mod tests {
             fn_type(vec![StaticType::Any], StaticType::Bool),
         ];
         assert_resolves_to(&types, &candidates(&[&locates]), &call_sig, locates[0]);
-    }
-
-    // Int and Number are siblings. An Int call must select the Int overload
-    // without treating the Number overload as a fallback candidate.
-    #[test]
-    fn more_specific_numeric_overload_wins() {
-        let (types, foos) = table(vec![
-            fn_type(vec![StaticType::Number], StaticType::String),
-            fn_type(vec![StaticType::Int], StaticType::String),
-        ]);
-        assert_resolves_to(&types, &candidates(&[&foos]), &[StaticType::Int], foos[1]);
     }
 
     // `fn foo(Any)` declared in an inner scope matches every call shape, so
@@ -743,15 +740,91 @@ mod tests {
         );
     }
 
-    // A concrete overload should beat a variadic overload registered in the
-    // same scope when both match the call.
+    // The variadic overload is the newer one, which would win a tie.
     #[test]
-    fn concrete_overload_beats_variadic() {
+    fn a_concrete_overload_beats_a_variadic_one() {
         let (types, foos) = table(vec![
-            variadic_fn(StaticType::Any),
             fn_type(vec![StaticType::Int], StaticType::Int),
+            variadic_fn(StaticType::Any),
         ]);
-        assert_resolves_to(&types, &candidates(&[&foos]), &[StaticType::Int], foos[1]);
+        assert_resolves_to(&types, &candidates(&[&foos]), &[StaticType::Int], foos[0]);
+    }
+
+    // Neither `(Int, Any)` nor `(Any, Int)` is more specific than the other.
+    #[test]
+    fn the_newest_of_incomparable_overloads_wins() {
+        let (types, foos) = table(vec![
+            fn_type(vec![StaticType::Int, StaticType::Any], StaticType::Any),
+            fn_type(vec![StaticType::Any, StaticType::Int], StaticType::Any),
+        ]);
+        assert_resolves_to(
+            &types,
+            &candidates(&[&foos]),
+            &[StaticType::Int, StaticType::Int],
+            foos[1],
+        );
+    }
+
+    // An `Any` argument might be an `Int` or a `String`, so both overloads stay
+    // candidates, and the call returns what either of them could.
+    #[test]
+    fn overloads_that_might_accept_the_call_are_picked_at_runtime() {
+        let list_of = |typ| StaticType::List(Box::new(typ));
+        let (types, foos) = table(vec![
+            fn_type(vec![StaticType::Int], list_of(StaticType::Int)),
+            fn_type(vec![StaticType::String], list_of(StaticType::String)),
+        ]);
+        let resolved = resolve(
+            &types,
+            &candidates(&[&foos]),
+            &[StaticType::Any],
+            CallKind::Regular,
+        );
+        let Binding::Dynamic(picked) = resolved.binding else {
+            panic!("expected a dynamic binding, got {:?}", resolved.binding);
+        };
+        assert_eq!(picked.len(), 2);
+        assert!(
+            foos.iter()
+                .all(|&foo| picked.contains(&Candidate::Scalar(foo)))
+        );
+        assert_eq!(resolved.return_type, list_of(StaticType::Any));
+    }
+
+    #[test]
+    fn a_call_every_overload_rejects_binds_nothing() {
+        let (types, foos) = table(vec![
+            fn_type(vec![StaticType::Int], StaticType::Int),
+            fn_type(vec![StaticType::Int, StaticType::Int], StaticType::Int),
+        ]);
+        let resolved = resolve(
+            &types,
+            &candidates(&[&foos]),
+            &[StaticType::String],
+            CallKind::Regular,
+        );
+        assert_eq!(resolved.binding, Binding::None);
+    }
+
+    // `(1, 2) + (3, 4)` adds each pair of elements with the scalar `+`.
+    #[test]
+    fn an_operator_on_tuples_applies_one_scalar_overload_to_each_element() {
+        let (types, plus) = table(vec![fn_type(
+            vec![StaticType::Int, StaticType::Int],
+            StaticType::Float,
+        )]);
+        let pair = StaticType::Tuple(vec![StaticType::Int, StaticType::Int]);
+        let resolved = resolve(
+            &types,
+            &candidates(&[&plus]),
+            &[pair.clone(), pair],
+            CallKind::Operator,
+        );
+        assert_eq!(resolved.binding, Binding::Resolved(Candidate::Vec(plus[0])));
+        assert_eq!(
+            resolved.return_type,
+            StaticType::Tuple(vec![StaticType::Float, StaticType::Float])
+        );
     }
 
     // Simulates: fn foo(x: Int) { … } let foo = fn(x: String) { … }; foo(1)

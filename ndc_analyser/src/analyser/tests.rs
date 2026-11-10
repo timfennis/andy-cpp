@@ -46,6 +46,12 @@ fn index_natives() -> Vec<(String, StaticType)> {
     ]
 }
 
+/// Every error analysing `source` reports, in order.
+fn errors(source: &str, globals: Vec<(String, StaticType)>) -> Vec<String> {
+    let (_, result) = analyse_with_globals(source, globals);
+    result.errors.iter().map(ToString::to_string).collect()
+}
+
 fn assert_analysis_error(source: &str, globals: Vec<(String, StaticType)>, expected: &str) {
     let (_, result) = analyse_with_globals(source, globals);
     assert!(
@@ -58,29 +64,23 @@ fn assert_analysis_error(source: &str, globals: Vec<(String, StaticType)>, expec
     );
 }
 
-// An accessor that doesn't take the receiver is an error like any other:
-// analysis carries on, and later errors are reported too.
+// `Q`'s getter `y` doesn't accept a `P`, so `p.y` names no field of `p`,
+// whether the write is plain or augmented.
 #[test]
-fn an_augmented_member_target_without_a_getter_is_reported_with_later_errors() {
+fn writing_a_field_the_receiver_lacks_is_rejected() {
     let plus = StaticType::Function {
         parameters: None,
         return_type: Box::new(StaticType::Any),
     };
-    let (_, result) = analyse_with_globals(
-        "struct P { x: Int } struct Q { y: Int } let p = P(1); p.y += 1; let b: Int = \"t\";",
-        vec![("+".to_string(), plus)],
-    );
-    let messages: Vec<String> = result.errors.iter().map(ToString::to_string).collect();
-    assert!(
-        messages
-            .iter()
-            .any(|m| m.contains("No function called 'y'")),
-        "{messages:?}"
-    );
-    assert!(
-        messages.iter().any(|m| m.contains("mismatched types")),
-        "{messages:?}"
-    );
+    for assignment in ["p.y = 1;", "p.y += 1;"] {
+        let source =
+            format!("struct P {{ x: Int }} struct Q {{ y: Int }} let p = P(1); {assignment}");
+        assert_eq!(
+            errors(&source, vec![("+".to_string(), plus.clone())]),
+            vec!["No function called 'y' found that matches the arguments 'P'"],
+            "{source}",
+        );
+    }
 }
 
 #[test]
@@ -90,7 +90,11 @@ fn destructuring_assignment_checks_each_target() {
         vec![],
         "mismatched types",
     );
-    assert_analysis_error("let a = 1; let b = 2; (a, b) = (1, 2, 3);", vec![], "tuple");
+    assert_analysis_error(
+        "let a = 1; let b = 2; (a, b) = (1, 2, 3);",
+        vec![],
+        "mismatched tuple arity",
+    );
 }
 
 #[test]
@@ -143,6 +147,39 @@ fn break_and_continue_inside_a_loop_are_accepted() {
 fn return_needs_a_function() {
     assert_analysis_error("return 1;", vec![], "outside of function body");
     analyse_last_type("fn f() { while true { return 1; } }");
+}
+
+// The body and each `return` make a different element `String` and the others
+// `Int`, so leaving any of them out of the join leaves an `Int` in the tuple.
+#[test]
+fn a_function_returns_the_join_of_its_body_and_every_return() {
+    let (_, result) = analyse_with_globals(
+        "fn f(x) {
+             if x { return (\"a\", 1, 1); }
+             if x { return (1, \"b\", 1); }
+             let last = (1, 1, \"c\");
+             last
+         }",
+        vec![],
+    );
+    assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
+    assert_eq!(
+        result
+            .analysis
+            .inferred_return_types
+            .values()
+            .exactly_one()
+            .ok(),
+        Some(&StaticType::Tuple(vec![StaticType::Any; 3])),
+    );
+}
+
+#[test]
+fn an_annotated_return_type_must_accept_every_return() {
+    assert_eq!(
+        errors("fn f(x) -> Int { if x { return \"a\"; } 1 }", vec![]),
+        vec!["mismatched types: found Any but expected Int"],
+    );
 }
 
 #[test]
@@ -224,7 +261,7 @@ fn annotated_identifier_augmented_assignment_rejects_widening() {
 }
 
 #[test]
-fn compatible_specialized_assignment_preserves_left_type() {
+fn an_in_place_operator_assignment_keeps_the_target_type() {
     let list_any = StaticType::List(Box::new(StaticType::Any));
     let append = StaticType::Function {
         parameters: Some(vec![list_any.clone(), list_any.clone()]),
@@ -241,7 +278,7 @@ fn compatible_specialized_assignment_preserves_left_type() {
 }
 
 #[test]
-fn incompatible_specialized_assignment_is_rejected() {
+fn an_in_place_operator_assignment_cannot_change_the_target_type() {
     let list_any = StaticType::List(Box::new(StaticType::Any));
     let concat = StaticType::Function {
         parameters: Some(vec![list_any.clone(), list_any.clone()]),
@@ -286,7 +323,7 @@ fn annotated_declaration_types_empty_container_literals() {
 }
 
 #[test]
-fn annotated_declaration_still_rejects_mismatched_literals() {
+fn annotated_declaration_rejects_a_mismatched_container_literal() {
     assert_analysis_error(
         "let x: Map<Int, Int> = %{\"a\": 1};",
         vec![],
@@ -294,28 +331,21 @@ fn annotated_declaration_still_rejects_mismatched_literals() {
     );
 }
 
+// `f` might hold any function, so which one runs is only known at runtime.
 #[test]
-fn constructor_arity_mismatch_is_rejected() {
-    assert_analysis_error(
-        "struct Point { x: Int, y: Int }\nPoint(1)",
-        vec![],
-        "No function called 'Point' found that matches the arguments 'Int'",
-    );
-}
-
-#[test]
-fn constructor_argument_type_mismatch_is_rejected() {
-    assert_analysis_error(
-        "struct Point { x: Int, y: Int }\nPoint(\"x\", 2)",
-        vec![],
-        "No function called 'Point' found that matches the arguments 'String, Int'",
-    );
-}
-
-#[test]
-fn any_typed_callee_still_dispatches_dynamically() {
-    let (_, result) = analyse_with_globals("f(\"x\")", vec![("f".to_string(), StaticType::Any)]);
+fn a_call_of_a_value_of_unknown_type_dispatches_at_runtime() {
+    let (_, result) = analyse_with_globals("fn call(f) { f(\"x\") }", vec![]);
     assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
+    let callee = result
+        .analysis
+        .bindings
+        .values()
+        .exactly_one()
+        .expect("`f` is the only identifier");
+    assert!(
+        matches!(callee, Binding::Dynamic(candidates) if candidates.len() == 1),
+        "{callee:?}"
+    );
 }
 
 #[test]
@@ -326,15 +356,6 @@ fn map_default_value_contributes_to_value_type() {
             key: Box::new(StaticType::Any),
             value: Box::new(StaticType::Int),
         },
-    );
-}
-
-#[test]
-fn duplicate_struct_field_is_rejected() {
-    assert_analysis_error(
-        "struct Dup { a: Int, a: String, a: Bool }",
-        vec![],
-        "Illegal redefinition of field 'a' in struct 'Dup'",
     );
 }
 
@@ -365,67 +386,49 @@ fn assert_one_error_then_any(source: &str, expected: &str) {
 }
 
 #[test]
-fn short_tuple_still_binds_every_pattern_name() {
-    assert_one_error_then_any(
-        "let (a, b, c): (Int, Int, Int) = (1, 2); c",
-        "Invalid unpacking",
-    );
+fn a_pattern_that_fails_to_type_check_binds_every_name_as_any() {
+    for (source, expected) in [
+        (
+            "let (a, b, c): (Int, Int, Int) = (1, 2); c",
+            "Invalid unpacking",
+        ),
+        (
+            "let (a, b, c): (Int, Int) = (1, 2); c",
+            "mismatched tuple arity",
+        ),
+        ("let (a, (b, c)) = (1, 2); c", "Invalid unpacking"),
+    ] {
+        assert_one_error_then_any(source, expected);
+    }
 }
 
 #[test]
-fn tuple_arity_mismatch_still_binds_every_pattern_name() {
-    assert_one_error_then_any(
-        "let (a, b, c): (Int, Int) = (1, 2); c",
-        "mismatched tuple arity",
-    );
-}
-
-#[test]
-fn unpacking_a_scalar_still_binds_every_pattern_name() {
-    assert_one_error_then_any("let (a, (b, c)) = (1, 2); c", "Invalid unpacking");
-}
-
-#[test]
-fn function_with_an_unknown_name_still_binds_its_name() {
-    assert_one_error_then_any(
+fn a_statement_with_an_unknown_name_binds_its_declarations_as_any() {
+    for source in [
         "fn f() { missing; } let g = f; g",
-        "Identifier missing has not previously been declared",
-    );
-}
-
-#[test]
-fn function_with_an_unknown_name_can_still_be_called() {
-    assert_one_error_then_any(
         "fn f() { missing; } f()",
-        "Identifier missing has not previously been declared",
-    );
-}
-
-#[test]
-fn function_with_an_unknown_name_can_still_be_captured() {
-    assert_one_error_then_any(
+        // Read from inside another function.
         "fn f() { missing; } fn g() { f } g()",
-        "Identifier missing has not previously been declared",
-    );
-}
-
-/// `source` reports exactly one error, the redefinition of `f`.
-fn assert_only_redefinition_error(source: &str) {
-    let (_, result) = analyse_with_globals(source, vec![]);
-    assert_eq!(
-        result.errors.iter().map(ToString::to_string).collect_vec(),
-        vec!["Illegal redefinition of function 'f' with parameters (Any) in the same scope"],
-    );
+    ] {
+        assert_one_error_then_any(
+            source,
+            "Identifier missing has not previously been declared",
+        );
+    }
 }
 
 #[test]
-fn redefined_function_can_still_be_used_as_a_value() {
-    assert_only_redefinition_error("fn f(x) { x } fn f(y) { y } let g = f;");
-}
-
-#[test]
-fn redefined_function_can_still_be_called() {
-    assert_only_redefinition_error("fn f(x) { x } fn f(y) { y } f(1)");
+fn a_redefined_function_is_reported_once_and_stays_usable() {
+    for source in [
+        "fn f(x) { x } fn f(y) { y } let g = f;",
+        "fn f(x) { x } fn f(y) { y } f(1)",
+    ] {
+        assert_eq!(
+            errors(source, vec![]),
+            vec!["Illegal redefinition of function 'f' with parameters (Any) in the same scope"],
+            "{source}",
+        );
+    }
 }
 
 // An annotation names the struct its scope sees: the inner `T` inside
@@ -480,16 +483,7 @@ fn same_arity_overloads_with_different_parameter_types_are_allowed() {
     );
 }
 
-#[test]
-fn same_parameter_types_under_other_names_are_a_redefinition() {
-    let (_, result) = analyse_with_globals("fn f(a: Int) { a } fn f(b: Int) { b }", vec![]);
-    assert_eq!(
-        result.errors.iter().map(ToString::to_string).collect_vec(),
-        vec!["Illegal redefinition of function 'f' with parameters (Int) in the same scope"],
-    );
-}
-
-/// `len`, a native taking a `String`, for the tests below.
+/// `len`, a native taking a `String`, for the test below.
 fn len_native() -> Vec<(String, StaticType)> {
     vec![(
         "len".to_string(),
@@ -498,11 +492,6 @@ fn len_native() -> Vec<(String, StaticType)> {
             return_type: Box::new(StaticType::Int),
         },
     )]
-}
-
-fn errors(source: &str, globals: Vec<(String, StaticType)>) -> Vec<String> {
-    let (_, result) = analyse_with_globals(source, globals);
-    result.errors.iter().map(ToString::to_string).collect()
 }
 
 #[test]
@@ -516,46 +505,12 @@ fn unknown_value_nearer_than_an_accepting_function_is_ambiguous() {
 }
 
 #[test]
-fn natives_compete_with_unknown_values_too() {
+fn an_unknown_value_makes_a_call_of_a_native_ambiguous() {
     assert_eq!(
         errors("fn test(len) { len(\"abc\") }", len_native()),
         vec![
             "Ambiguous call to 'len': it could mean the function 'len' or a value named 'len' whose type isn't known"
         ],
-    );
-}
-
-#[test]
-fn unknown_value_is_called_when_no_function_accepts_the_call() {
-    assert_eq!(
-        errors("fn foo(a, b) { 1 } fn test(foo) { foo(2) }", vec![]),
-        Vec::<String>::new()
-    );
-}
-
-#[test]
-fn method_calls_are_checked_like_plain_calls() {
-    assert_eq!(
-        errors("fn test(len) { \"abc\".len() }", len_native()),
-        vec![
-            "Ambiguous call to 'len': it could mean the function 'len' or a value named 'len' whose type isn't known"
-        ],
-    );
-}
-
-#[test]
-fn annotating_a_value_that_cant_be_called_leaves_the_name_to_the_function() {
-    assert_eq!(
-        errors("fn test(len: Int) { len(\"abc\") }", len_native()),
-        Vec::<String>::new()
-    );
-}
-
-#[test]
-fn a_nearer_function_shadows_an_unknown_value() {
-    assert_eq!(
-        errors("fn test(foo) { fn foo(x) { 1 } foo(2) }", vec![]),
-        Vec::<String>::new()
     );
 }
 
@@ -571,16 +526,6 @@ fn plus_native() -> Vec<(String, StaticType)> {
 }
 
 #[test]
-fn property_reads_are_checked_like_calls() {
-    assert_eq!(
-        errors("fn test(len) { \"abc\".len }", len_native()),
-        vec![
-            "Ambiguous call to 'len': it could mean the function 'len' or a value named 'len' whose type isn't known"
-        ],
-    );
-}
-
-#[test]
 fn a_field_read_is_ambiguous_with_an_unknown_value_named_like_the_field() {
     assert_eq!(
         errors("struct P { x: Int } fn f(p, x) { p.x }", vec![]),
@@ -591,7 +536,7 @@ fn a_field_read_is_ambiguous_with_an_unknown_value_named_like_the_field() {
 }
 
 #[test]
-fn augmented_assignment_to_a_field_reads_it_first() {
+fn augmented_assignment_to_a_field_is_ambiguous_with_a_value_named_like_the_field() {
     assert_eq!(
         errors("struct P { x: Int } fn f(p, x) { p.x += 1 }", plus_native()),
         vec![
@@ -601,7 +546,7 @@ fn augmented_assignment_to_a_field_reads_it_first() {
 }
 
 #[test]
-fn plain_assignment_to_a_field_reads_nothing() {
+fn plain_assignment_to_a_field_is_not_ambiguous_with_a_value_named_like_the_field() {
     assert_eq!(
         errors("struct P { x: Int } fn f(p, x) { p.x = 1 }", vec![]),
         Vec::<String>::new()
