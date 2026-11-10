@@ -1,4 +1,5 @@
-// Redefining a named function with the same arity in the same scope is an error.
+// Redefining a named function with the same parameter types in the same scope
+// is an error. Unannotated parameters are `Any`, so these two collide.
 // expect-error: redefinition
 fn foo(a) { a + 1 }
 fn foo(a) { a + 2 }

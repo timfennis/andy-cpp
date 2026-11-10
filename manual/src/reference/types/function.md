@@ -141,7 +141,7 @@ A return-type annotation also helps the analyser understand recursive calls — 
 
 ## Function overloading
 
-You can overload functions by declaring multiple `fn` definitions with the same name and different parameter counts.
+You can overload functions by declaring multiple `fn` definitions with the same name and different parameter counts or parameter types.
 
 ```ndc
 fn add(n) { n + 1 };
@@ -151,18 +151,28 @@ assert_eq(10, add(9));
 assert_eq(12, add(8, 4));
 ```
 
-Declaring two `fn` definitions with the same name and the same number of parameters in the same scope is an error:
+Overloads with the same parameter count are told apart by their parameter types. A call uses the most specific overload whose parameter types accept its arguments:
+
+```ndc
+fn describe(x: Int) { "int" }
+fn describe(x: String) { "string" }
+fn describe(x: Any) { "something else" }
+
+assert_eq("int", describe(1));
+assert_eq("string", describe("a"));
+assert_eq("something else", describe([1]));
+```
+
+Declaring two `fn` definitions with the same name and the same parameter types in the same scope is an error. Parameter names don't count, and a parameter without a type annotation has type `Any`:
 
 ```ndc
 fn foo(a) { a + 1 }
-fn foo(a) { a + 2 } // ERROR: redefinition of 'foo' with 1 parameter
+fn foo(b) { b + 2 } // ERROR: redefinition of 'foo' with parameters (Any)
 ```
-
-> **Note:** The engine can also dispatch by argument type, and the standard library uses that to register specialised overloads (for example, an `Int`-only fast path for `+`). User code can't declare two overloads with the same name and arity yet, even when the parameter types differ — the resolver only distinguishes overloads by parameter count.
 
 ## Function shadowing
 
-A `fn` declaration in a nested scope shadows only the overload with the same parameter count from outer scopes. Other overloads remain available:
+A `fn` declaration in a nested scope shadows outer overloads only for the calls it accepts. Other overloads remain available:
 
 ```ndc
 fn foo(a) { "outer-one" }

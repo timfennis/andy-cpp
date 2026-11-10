@@ -1,0 +1,4 @@
+// Parameter names don't tell overloads apart: these two both take one Int.
+// expect-error: Illegal redefinition of function 'f' with parameters (Int) in the same scope
+fn f(a: Int) { a }
+fn f(b: Int) { b }
