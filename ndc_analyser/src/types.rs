@@ -23,7 +23,7 @@ impl TypeBinding {
 /// The type of every value the name resolver declared, natives included,
 /// keyed by its symbol. An assignment can widen an inferred type, but an
 /// annotated one is fixed.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub(crate) struct TypeTable {
     types: AHashMap<SymbolId, TypeBinding>,
 }

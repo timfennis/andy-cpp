@@ -7,7 +7,7 @@ struct Symbol {
     kind: BindingKind,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default)]
 pub struct SymbolTable {
     symbols: Vec<Symbol>,
 }
