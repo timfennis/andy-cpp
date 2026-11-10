@@ -402,16 +402,18 @@ impl Analyser {
                     binding: assign_binding,
                     return_type: assign_return,
                 } = self.scope_tree.resolve_call(
-                    &format!("{operation}="),
+                    &self.resolver.augmented_candidates(*id).in_place,
                     &arg_types,
                     CallKind::Operator,
                 );
                 let ResolvedCall {
                     binding: op_binding,
                     return_type: op_return,
-                } = self
-                    .scope_tree
-                    .resolve_call(operation, &arg_types, CallKind::Operator);
+                } = self.scope_tree.resolve_call(
+                    &self.resolver.augmented_candidates(*id).operator,
+                    &arg_types,
+                    CallKind::Operator,
+                );
                 let has_op_binding = !matches!(op_binding, Binding::None);
                 let assign_is_eligible = Self::augmented_rhs_is_compatible(&left_type, &right_type);
 
@@ -626,18 +628,22 @@ impl Analyser {
                 resolved_getter,
             } => {
                 let receiver_type = self.analyse_or_any(receiver);
+                let getters = self
+                    .resolver
+                    .getter_candidates(*id)
+                    .expect("internal error: member access without getter candidates");
                 let ResolvedCall {
                     binding,
                     return_type,
                 } = self.scope_tree.resolve_call(
-                    member,
+                    getters,
                     std::slice::from_ref(&receiver_type),
                     CallKind::Regular,
                 );
 
                 if matches!(binding, Binding::None) {
                     let args = [receiver_type];
-                    self.emit(if self.scope_tree.a_cast_could_resolve(member, &args) {
+                    self.emit(if self.scope_tree.a_cast_could_resolve(getters, &args) {
                         AnalysisError::function_not_found_suggest_cast(member, &args, *member_span)
                     } else {
                         AnalysisError::function_not_found(member, &args, *member_span)
@@ -816,14 +822,21 @@ impl Analyser {
         let ResolvedCall {
             binding,
             return_type,
-        } = self.scope_tree.resolve_call(name, &type_sig, kind);
+        } = self.scope_tree.resolve_call(
+            self.resolver.reference_candidates(function.id),
+            &type_sig,
+            kind,
+        );
 
         if matches!(binding, Binding::None) {
-            self.emit(if self.scope_tree.a_cast_could_resolve(name, &type_sig) {
-                AnalysisError::function_not_found_suggest_cast(name, &type_sig, span)
-            } else {
-                AnalysisError::function_not_found(name, &type_sig, span)
-            });
+            let candidates = self.resolver.reference_candidates(function.id);
+            self.emit(
+                if self.scope_tree.a_cast_could_resolve(candidates, &type_sig) {
+                    AnalysisError::function_not_found_suggest_cast(name, &type_sig, span)
+                } else {
+                    AnalysisError::function_not_found(name, &type_sig, span)
+                },
+            );
             *resolved = binding;
             return Ok(StaticType::Any);
         }
@@ -947,15 +960,20 @@ impl Analyser {
                 ];
 
                 // Indexing isn't operator-form for vec purposes: there's no
-                // natural broadcast story for `(list_a, list_b)[i]`.
-                *resolved_get = Some(
+                // natural broadcast story for `(list_a, list_b)[i]`. Only an
+                // augmented assignment reads the old value through `[]`.
+                *resolved_get = self.resolver.getter_candidates(lvalue.id).map(|getters| {
                     self.scope_tree
-                        .resolve_call("[]", &get_args, CallKind::Regular)
-                        .binding,
-                );
+                        .resolve_call(getters, &get_args, CallKind::Regular)
+                        .binding
+                });
                 *resolved_set = Some(
                     self.scope_tree
-                        .resolve_call("[]=", &set_args, CallKind::Regular)
+                        .resolve_call(
+                            self.resolver.setter_candidates(lvalue.id),
+                            &set_args,
+                            CallKind::Regular,
+                        )
                         .binding,
                 );
 
@@ -991,13 +1009,19 @@ impl Analyser {
                 let receiver_type = self.analyse_or_any(receiver);
                 let getter_args = [receiver_type.clone()];
                 let setter_args = [receiver_type, StaticType::Any];
+                let getters = self
+                    .resolver
+                    .getter_candidates(lvalue.id)
+                    .expect("internal error: member target without getter candidates");
                 let getter = self
                     .scope_tree
-                    .resolve_call(member, &getter_args, CallKind::Regular);
+                    .resolve_call(getters, &getter_args, CallKind::Regular);
                 let setter_name = format!("{member}=");
-                let setter =
-                    self.scope_tree
-                        .resolve_call(&setter_name, &setter_args, CallKind::Regular);
+                let setter = self.scope_tree.resolve_call(
+                    self.resolver.setter_candidates(lvalue.id),
+                    &setter_args,
+                    CallKind::Regular,
+                );
                 let getter_missing = matches!(getter.binding, Binding::None);
                 let setter_missing = matches!(setter.binding, Binding::None);
 
