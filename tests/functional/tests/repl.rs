@@ -143,6 +143,21 @@ fn error_does_not_corrupt_state() {
     assert_eq!(out.trim(), "99");
 }
 
+// A line rejected before it runs leaves the earlier lines' variables alone.
+#[test]
+fn rejected_line_keeps_earlier_variables() {
+    let mut interp = {
+        let mut i = Interpreter::capturing();
+        i.configure(ndc_stdlib::register);
+        i
+    };
+    interp.eval("let x = 41;").unwrap();
+    assert!(interp.eval("break;").is_err());
+    interp.eval("print(x + 1)").unwrap();
+    let out = String::from_utf8(interp.get_output().unwrap()).unwrap();
+    assert_eq!(out.trim(), "42");
+}
+
 #[test]
 fn vm_error_does_not_panic_on_subsequent_local_access() {
     // Regression test for GitHub issue #130.

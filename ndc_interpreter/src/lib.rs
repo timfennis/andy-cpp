@@ -328,9 +328,18 @@ impl Interpreter {
                 // repl_state if the VM errors, so subsequent REPL lines can still
                 // find their locals on the stack.
                 let old_checkpoint = checkpoint.clone();
-                let (code, new_checkpoint) = measure(&mut timings, Phase::Compiling, || {
+                let compiled = measure(&mut timings, Phase::Compiling, || {
                     checkpoint.resume(expressions, analysis)
-                })?;
+                });
+                let (code, new_checkpoint) = match compiled {
+                    Ok(compiled) => compiled,
+                    Err(error) => {
+                        // Nothing ran, so the VM and the old checkpoint still
+                        // describe the earlier lines.
+                        self.repl_state = Some((vm, old_checkpoint));
+                        return Err(error.into());
+                    }
+                };
                 vm.resume_from_halt(code, resume_ip, prev_num_locals);
                 #[cfg(feature = "trace")]
                 {
