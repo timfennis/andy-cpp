@@ -571,12 +571,10 @@ impl Analyser {
             }
             Expression::FunctionDeclaration {
                 name,
-                resolved_name,
                 parameters,
                 body,
                 return_annotation,
                 resolved_return_type,
-                captures,
                 ..
             } => {
                 for param in parameters.iter_mut() {
@@ -627,7 +625,8 @@ impl Analyser {
                 let implicit_return = self.analyse_or_any(body);
                 let explicit_return = self.return_type_stack.pop().unwrap();
                 self.functions.pop();
-                *captures = Layout::new(&self.resolver).captures(*id);
+                let captures = Layout::new(&self.resolver).captures(*id);
+                self.result.analysis.captures.insert(*id, captures);
                 self.result
                     .analysis
                     .frame_sizes
@@ -667,7 +666,7 @@ impl Analyser {
                     let _ = self
                         .types
                         .update_binding_type(symbol, function_type.clone());
-                    *resolved_name = Some(slot);
+                    self.result.analysis.variables.insert(*id, slot);
                 }
 
                 Ok(function_type)
@@ -805,7 +804,6 @@ impl Analyser {
                 name,
                 fields,
                 resolved,
-                resolved_name,
             } => {
                 let field_types: Vec<StaticType> = fields
                     .iter()
@@ -830,10 +828,11 @@ impl Analyser {
                 let symbols = self.resolver.struct_symbols(*id).clone();
                 self.struct_types
                     .insert(symbols.type_symbol, Rc::clone(&info));
-                *resolved_name = Some(self.declare(
+                let constructor = self.declare(
                     symbols.constructor,
                     TypeBinding::Annotated(info.constructor_type()),
-                ));
+                );
+                self.result.analysis.variables.insert(*id, constructor);
 
                 for (index, (field, &(getter, setter))) in
                     fields.iter_mut().zip(&symbols.accessors).enumerate()
@@ -999,9 +998,10 @@ impl Analyser {
         span: Span,
     ) -> Result<StaticType, AnalysisError> {
         match &mut lvalue.target {
-            AssignmentTarget::Identifier { resolved, .. } => {
+            AssignmentTarget::Identifier { .. } => {
                 let symbol = self.resolver.assigned_symbol(lvalue.id);
-                *resolved = Some(self.locate(symbol));
+                let variable = self.locate(symbol);
+                self.result.analysis.variables.insert(lvalue.id, variable);
                 Ok(self.types.get_type(symbol).clone())
             }
             AssignmentTarget::Index {
@@ -1169,9 +1169,9 @@ impl Analyser {
         span: Span,
     ) {
         match &lvalue.target {
-            AssignmentTarget::Identifier {
-                resolved: Some(_), ..
-            } => {
+            AssignmentTarget::Identifier { .. }
+                if self.result.analysis.variables.contains_key(&lvalue.id) =>
+            {
                 let target = self.resolver.assigned_symbol(lvalue.id);
                 let widened = stored_type.lub(value_type);
                 if widened != *stored_type
@@ -1251,8 +1251,7 @@ impl Analyser {
                     span,
                 ));
             }
-            AssignmentTarget::Identifier { resolved: None, .. } | AssignmentTarget::Sequence(_) => {
-            }
+            AssignmentTarget::Identifier { .. } | AssignmentTarget::Sequence(_) => {}
         }
     }
 
@@ -1301,7 +1300,6 @@ impl Analyser {
     ) {
         match &mut lvalue.pattern {
             BindingPattern::Identifier {
-                resolved,
                 inferred_type,
                 span,
                 ..
@@ -1323,7 +1321,8 @@ impl Analyser {
                 };
 
                 let symbol = self.resolver.declared_symbol(lvalue.id);
-                *resolved = Some(self.declare(symbol, type_binding.clone()));
+                let variable = self.declare(symbol, type_binding.clone());
+                self.result.analysis.variables.insert(lvalue.id, variable);
 
                 *inferred_type = Some(type_binding.typ().clone())
             }

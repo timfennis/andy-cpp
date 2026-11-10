@@ -1,16 +1,14 @@
 use crate::chunk::{JumpTarget, LabelId, OpCode, OptimizerIr};
 use crate::value::{CompiledFunction, Function};
 use crate::{Object, Value};
-use ndc_analysis::{
-    Analysis, AugmentedAssignmentPlan, Binding, Candidate, CaptureSource, ResolvedVar,
-};
+use ndc_analysis::{Analysis, AugmentedAssignmentPlan, Binding, Candidate, ResolvedVar};
 use ndc_core::NodeId;
 use ndc_core::r#struct::StructRegistry;
 use ndc_core::{StaticType, TypeSignature};
 use ndc_lexer::{NumericLiteral, Span};
 use ndc_parser::{
-    AssignmentTarget, BindingPattern, BindingPatternLocation, Expression, ExpressionLocation,
-    ForBody, ForIteration, FunctionParameter, LogicalOperator,
+    AssignmentTarget, AssignmentTargetLocation, BindingPattern, BindingPatternLocation, Expression,
+    ExpressionLocation, ForBody, ForIteration, FunctionParameter, LogicalOperator,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -320,16 +318,16 @@ impl Compiler {
                     self.compile_expr(*value)?;
                     self.ir.write(OpCode::Call(3), span);
                 }
-                l_value @ AssignmentTarget::Identifier { .. } => {
+                AssignmentTarget::Identifier { span: lv_span, .. } => {
                     self.compile_expr(*value)?;
-                    self.compile_assignment_target(l_value, span)?;
+                    self.emit_set_var(self.assigned_variable(l_value.id), lv_span);
                     self.emit_unit();
                 }
                 AssignmentTarget::Sequence(seq) => {
                     self.compile_expr(*value)?;
                     self.ir.write(OpCode::Unpack(seq.len()), span);
                     for l_value in seq {
-                        self.compile_assignment_target(l_value.target, span)?;
+                        self.compile_assignment_target(l_value, span)?;
                     }
                     self.emit_unit();
                 }
@@ -352,7 +350,7 @@ impl Compiler {
                 plan,
                 ..
             } => {
-                let target = PreparedAssignmentTarget::prepare(self, l_value.target, span)?;
+                let target = PreparedAssignmentTarget::prepare(self, l_value, span)?;
                 let binding = match plan {
                     AugmentedAssignmentPlan::Resolved(binding) => binding,
                     AugmentedAssignmentPlan::Unresolved => {
@@ -371,11 +369,9 @@ impl Compiler {
             }
             Expression::FunctionDeclaration {
                 name,
-                resolved_name,
                 body,
                 parameters,
                 resolved_return_type,
-                captures,
                 pure,
                 ..
             } => {
@@ -383,20 +379,15 @@ impl Compiler {
                 self.compile_function_decl(
                     id,
                     name,
-                    resolved_name,
                     *body,
                     &type_signature,
                     resolved_return_type,
-                    captures,
                     pure,
                     span,
                 )?;
             }
             Expression::StructDeclaration {
-                fields,
-                resolved,
-                resolved_name,
-                ..
+                fields, resolved, ..
             } => {
                 let info = Rc::clone(
                     &self.struct_registry.borrow()
@@ -411,10 +402,11 @@ impl Compiler {
 
                 self.ir.write(OpCode::Constant(idx), span);
 
-                self.emit_declare(
-                    resolved_name.expect("resolved_name should have been resolved"),
-                    span,
-                );
+                let constructor = self
+                    .analysis
+                    .variable(id)
+                    .expect("internal error: a struct declaration declares its constructor");
+                self.emit_declare(constructor, span);
 
                 for (field_offset, field) in fields.iter().enumerate() {
                     // GET
@@ -586,16 +578,12 @@ impl Compiler {
 
     fn compile_assignment_target(
         &mut self,
-        l_value: AssignmentTarget,
+        l_value: AssignmentTargetLocation,
         span: Span,
     ) -> Result<(), CompileError> {
-        match l_value {
-            AssignmentTarget::Identifier {
-                resolved,
-                span: lv_span,
-                ..
-            } => {
-                self.emit_set_var(resolved.expect("identifiers must be resolved"), lv_span);
+        match l_value.target {
+            AssignmentTarget::Identifier { span: lv_span, .. } => {
+                self.emit_set_var(self.assigned_variable(l_value.id), lv_span);
             }
             AssignmentTarget::Index {
                 value,
@@ -623,7 +611,7 @@ impl Compiler {
             AssignmentTarget::Sequence(seq) => {
                 self.ir.write(OpCode::Unpack(seq.len()), span);
                 for lv in seq {
-                    self.compile_assignment_target(lv.target, span)?;
+                    self.compile_assignment_target(lv, span)?;
                 }
             }
             AssignmentTarget::Member { .. } => unreachable!(
@@ -640,8 +628,11 @@ impl Compiler {
         span: Span,
     ) -> Result<(), CompileError> {
         match pattern.pattern {
-            BindingPattern::Identifier { resolved, .. } => {
-                self.emit_declare(resolved.expect("binding pattern must be resolved"), span);
+            BindingPattern::Identifier { .. } => {
+                let variable = self.analysis.variable(pattern.id).expect(
+                    "internal error: every binding pattern is analysed before it's compiled",
+                );
+                self.emit_declare(variable, span);
             }
             BindingPattern::Sequence(seq) => {
                 self.ir.write(OpCode::Unpack(seq.len()), span);
@@ -651,6 +642,13 @@ impl Compiler {
             }
         }
         Ok(())
+    }
+
+    /// The variable the identifier assignment target at `target` writes to.
+    fn assigned_variable(&self, target: NodeId) -> ResolvedVar {
+        self.analysis
+            .variable(target)
+            .expect("internal error: every assignment target is analysed before it's compiled")
     }
 
     /// Emit code that puts the resolved callee on top of the stack.
@@ -851,14 +849,13 @@ impl Compiler {
         &mut self,
         id: NodeId,
         name: Option<String>,
-        resolved_name: Option<ResolvedVar>,
         body: ExpressionLocation,
         type_signature: &TypeSignature,
         return_type: Option<StaticType>,
-        captures: Vec<CaptureSource>,
         pure: bool,
         span: Span,
     ) -> Result<(), CompileError> {
+        let resolved_name = self.analysis.variable(id);
         let return_type = return_type.unwrap_or_default();
         let static_type = StaticType::Function {
             parameters: match &type_signature {
@@ -905,11 +902,13 @@ impl Compiler {
             self.ir.write(OpCode::NewCell(slot), span);
         }
 
+        let captures = self.analysis.captures(id);
         if !captures.is_empty() {
+            let values = captures.into();
             self.ir.write(
                 OpCode::Closure {
                     constant_idx: idx,
-                    values: captures.into(),
+                    values,
                 },
                 span,
             );
@@ -1136,12 +1135,12 @@ enum PreparedAssignmentTarget {
 impl PreparedAssignmentTarget {
     fn prepare(
         compiler: &mut Compiler,
-        l_value: AssignmentTarget,
+        l_value: AssignmentTargetLocation,
         span: Span,
     ) -> Result<Self, CompileError> {
-        match l_value {
-            AssignmentTarget::Identifier { resolved, span, .. } => Ok(Self::Variable {
-                variable: resolved.expect("lvalue must be resolved"),
+        match l_value.target {
+            AssignmentTarget::Identifier { span, .. } => Ok(Self::Variable {
+                variable: compiler.assigned_variable(l_value.id),
                 span,
             }),
             AssignmentTarget::Index {

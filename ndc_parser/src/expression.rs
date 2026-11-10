@@ -1,7 +1,7 @@
 use crate::operator::LogicalOperator;
 use crate::parser::Error as ParseError;
 use crate::type_expr::TypeExpr;
-use ndc_analysis::{AugmentedAssignmentPlan, Binding, CaptureSource, ResolvedVar};
+use ndc_analysis::{AugmentedAssignmentPlan, Binding, ResolvedVar};
 use ndc_core::r#struct::StructId;
 use ndc_core::{NodeId, StaticType, TypeSignature};
 use ndc_lexer::{NumericLiteral, Span};
@@ -61,20 +61,17 @@ pub enum Expression {
     },
     FunctionDeclaration {
         name: Option<String>,
-        resolved_name: Option<ResolvedVar>,
         parameters: Vec<FunctionParameter>,
         parameters_span: Span,
         body: Box<ExpressionLocation>,
         return_annotation: Option<TypeExpr>,
         resolved_return_type: Option<StaticType>,
-        captures: Vec<CaptureSource>,
         pure: bool,
     },
     StructDeclaration {
         name: String,
         fields: Vec<StructField>,
         resolved: Option<StructId>,
-        resolved_name: Option<ResolvedVar>,
     },
     Block {
         statements: Vec<ExpressionLocation>,
@@ -204,7 +201,6 @@ pub enum AssignmentTarget {
     // Example: `foo = ...`
     Identifier {
         identifier: String,
-        resolved: Option<ResolvedVar>,
         span: Span,
         inferred_type: Option<StaticType>,
     },
@@ -342,7 +338,6 @@ pub struct BindingPatternLocation {
 pub enum BindingPattern {
     Identifier {
         identifier: String,
-        resolved: Option<ResolvedVar>,
         /// The identifier token, which may be narrower than the pattern's span.
         span: Span,
         inferred_type: Option<StaticType>,
@@ -365,12 +360,10 @@ impl TryFrom<AssignmentTargetLocation> for BindingPatternLocation {
         let pattern = match value.target {
             AssignmentTarget::Identifier {
                 identifier,
-                resolved,
                 span,
                 inferred_type,
             } => BindingPattern::Identifier {
                 identifier,
-                resolved,
                 span,
                 inferred_type,
             },
@@ -406,7 +399,6 @@ impl TryFrom<ExpressionLocation> for AssignmentTargetLocation {
                 ..
             } => AssignmentTarget::Identifier {
                 identifier: name,
-                resolved: None,
                 span: identifier_span,
                 inferred_type: None,
             },
