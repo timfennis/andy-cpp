@@ -95,7 +95,7 @@ The AST is syntax only. The analyser runs name resolution (`ndc_resolver`) and s
 
 **Function overloading** — Functions are matched by name and arity. The semantic analyser produces `Binding::Resolved` (exact compile-time match) or `Binding::Dynamic(Vec<ResolvedVar>)` (runtime dispatch among candidates). Binary operators like `+` are parsed as `Expression::Call`.
 
-**Semantic analyser** — `ndc_analyser/src/analyser.rs` infers `StaticType` and resolves function bindings. `StaticType::Any` is the fallback when inference fails.
+**Semantic analyser** — `ndc_analyser/src/analyser/` infers `StaticType` and resolves function bindings: `mod.rs` holds the expression match, with calls, assignments and declarations in their own modules. `StaticType::Any` is the fallback when inference fails.
 
 **`FunctionRegistry`** — Lives in `ndc_core`. Holds all registered built-in functions as `Rc<NativeFunction>`. Replaces the old `Environment`-based function registry. At runtime, natives are passed to the VM as global slots.
 
