@@ -1066,12 +1066,12 @@ impl Analyser {
                     Ok(StaticType::Any)
                 }
             }
-            AssignmentTarget::Sequence(seq) => {
-                for sub_lvalue in seq {
-                    self.resolve_assignment_target_or_any(sub_lvalue, span);
-                }
-                Ok(StaticType::unit())
-            }
+            // What `(a, b) = …` can store is a tuple of what each target can.
+            AssignmentTarget::Sequence(seq) => Ok(StaticType::Tuple(
+                seq.iter_mut()
+                    .map(|sub_lvalue| self.resolve_assignment_target_or_any(sub_lvalue, span))
+                    .collect(),
+            )),
             AssignmentTarget::Member {
                 receiver,
                 member,
@@ -1245,10 +1245,15 @@ impl Analyser {
                 ) {
                     let target = self.resolver.innermost_reference(value.id);
                     let container_type = self.types.get_type(target).clone();
-                    let widened_container = container_type
-                        .with_element_type(stored_element_type.lub(&value_element_type));
-                    if widened_container != container_type
-                        && self
+                    // An earlier target of the same destructuring may already
+                    // have widened the container, as in `l[0], l[1] = …`, so
+                    // widen from its current type rather than `stored_type`.
+                    let widened_container = container_type.lub(
+                        &container_type
+                            .with_element_type(stored_element_type.lub(&value_element_type)),
+                    );
+                    if widened_container == container_type
+                        || self
                             .types
                             .update_binding_type(target, widened_container)
                             .is_ok()
@@ -1263,7 +1268,30 @@ impl Analyser {
                     span,
                 ));
             }
-            AssignmentTarget::Identifier { .. } | AssignmentTarget::Sequence(_) => {}
+            // Each target gets the element unpacked for it, as in a `let`.
+            AssignmentTarget::Sequence(targets) => {
+                let StaticType::Tuple(stored_types) = stored_type else {
+                    unreachable!("internal error: a sequence target stores a tuple")
+                };
+                if let StaticType::Tuple(value_types) = value_type
+                    && value_types.len() != targets.len()
+                {
+                    self.emit(AnalysisError::tuple_arity_mismatch(
+                        targets.len(),
+                        value_types.len(),
+                        span,
+                    ));
+                    return;
+                }
+                let Some(value_types) = value_type.unpack() else {
+                    self.emit(AnalysisError::unable_to_unpack_type(value_type, span));
+                    return;
+                };
+                for (target, stored_type, value_type) in izip!(targets, stored_types, value_types) {
+                    self.validate_assignment_write(target, stored_type, value_type, span);
+                }
+            }
+            AssignmentTarget::Identifier { .. } => {}
         }
     }
 
@@ -1667,6 +1695,22 @@ mod tests {
             "expected an error containing {expected:?}, got {:?}",
             result.errors,
         );
+    }
+
+    #[test]
+    fn destructuring_assignment_checks_each_target() {
+        assert_analysis_error(
+            "let a: Int = 1; let b = 2; (a, b) = (\"s\", 2);",
+            vec![],
+            "mismatched types",
+        );
+        assert_analysis_error("let a = 1; let b = 2; (a, b) = (1, 2, 3);", vec![], "tuple");
+    }
+
+    #[test]
+    fn destructuring_assignment_widens_each_target() {
+        let typ = analyse_last_type("let a = 1; let b = 2; (a, b) = (\"s\", 2); a");
+        assert_eq!(typ, StaticType::Int.lub(&StaticType::String));
     }
 
     #[test]

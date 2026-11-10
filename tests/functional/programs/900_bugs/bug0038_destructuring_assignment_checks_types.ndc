@@ -1,0 +1,7 @@
+// Destructuring assignment used to skip type checks, so an Int-annotated
+// variable could end up holding a String.
+// expect-error: mismatched types
+let a: Int = 1;
+let b = 2;
+(a, b) = ("s", 2);
+print(a);
