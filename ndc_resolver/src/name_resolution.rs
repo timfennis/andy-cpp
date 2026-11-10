@@ -26,7 +26,7 @@ pub(crate) struct ScopeTree {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct NameResolver {
+pub struct NameResolver {
     symbols: SymbolTable,
     scopes: ScopeTree,
     /// The symbol each binding pattern identifier or named function
@@ -70,7 +70,7 @@ pub(crate) struct NameResolver {
 }
 
 #[derive(Debug, Clone, thiserror::Error)]
-pub(crate) enum NameResolutionError {
+pub enum NameResolutionError {
     #[error("Identifier {name} has not previously been declared")]
     UnknownName { name: String, span: Span },
     #[error("Illegal redefinition of parameter {name}")]
@@ -96,7 +96,7 @@ pub(crate) enum NameResolutionError {
 }
 
 impl NameResolutionError {
-    pub(crate) fn span(&self) -> Span {
+    pub fn span(&self) -> Span {
         match self {
             Self::UnknownName { span, .. }
             | Self::DuplicateParameter { span, .. }
@@ -116,27 +116,27 @@ impl NameResolutionError {
 /// Identifiers always have at least one candidate, augmented operators may
 /// not.
 #[derive(Debug, Clone)]
-pub(crate) struct Candidates(Vec<Vec<SymbolId>>);
+pub struct Candidates(Vec<Vec<SymbolId>>);
 
 /// The two operations an augmented assignment can use. For `xs ++= ys`:
 /// `in_place` holds `++=` (mutates `xs`), `operator` holds `++` (builds a new value
 /// that is written back). Either may be empty; the type pass picks.
 #[derive(Debug, Clone)]
-pub(crate) struct AugmentedCandidates {
-    pub(crate) in_place: Candidates,
-    pub(crate) operator: Candidates,
+pub struct AugmentedCandidates {
+    pub in_place: Candidates,
+    pub operator: Candidates,
 }
 
 /// The symbols a struct declaration binds. For `struct Point { x: Int }`: the
 /// type `Point`, the constructor `Point`, and the getter `x` with the setter `x=`.
 #[derive(Debug, Clone)]
-pub(crate) struct StructSymbols {
+pub struct StructSymbols {
     /// `Point` in annotations such as `let p: Point`.
-    pub(crate) type_symbol: SymbolId,
+    pub type_symbol: SymbolId,
     /// `Point` in calls such as `Point(1)`.
-    pub(crate) constructor: SymbolId,
+    pub constructor: SymbolId,
     /// The getter and setter of each field, in declaration order.
-    pub(crate) accessors: Vec<(SymbolId, SymbolId)>,
+    pub accessors: Vec<(SymbolId, SymbolId)>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -296,7 +296,7 @@ impl NameResolver {
     /// the program. With `new(["len"])`, a top-level `let len = 99` shadows the native
     /// instead of sharing its scope, so a later `len` resolves to `[[let len], [native len]]`.
     /// The built-in type names (`Int`, `List`, …) are declared there too.
-    pub(crate) fn new<'a>(builtins: impl IntoIterator<Item = &'a str>) -> Self {
+    pub fn new<'a>(builtins: impl IntoIterator<Item = &'a str>) -> Self {
         let mut scopes = ScopeTree::new();
         let mut symbols = SymbolTable::default();
 
@@ -351,7 +351,7 @@ impl NameResolver {
 
     /// Resolves `statement`, recording its error instead of returning it so the
     /// statements after it still resolve. A failed statement stops at its first error.
-    pub(crate) fn resolve_statement(&mut self, statement: &ExpressionLocation) {
+    pub fn resolve_statement(&mut self, statement: &ExpressionLocation) {
         if let Err(error) = self.resolve(statement) {
             self.errors.push(error);
         }
@@ -360,12 +360,12 @@ impl NameResolver {
     /// The value symbols bound in the current scope, oldest first. A failed
     /// statement keeps what it bound before its error: `fn f() { missing }`
     /// still binds `f`.
-    pub(crate) fn current_bindings(&self) -> &[SymbolId] {
+    pub fn current_bindings(&self) -> &[SymbolId] {
         self.scopes.current_bindings()
     }
 
     /// The native symbols in registry order: the first is the native in slot 0.
-    pub(crate) fn native_symbols(&self) -> Vec<SymbolId> {
+    pub fn native_symbols(&self) -> Vec<SymbolId> {
         let mut natives = self.native_slots.iter().collect::<Vec<_>>();
         natives.sort_by_key(|&(_, &slot)| slot);
         natives.into_iter().map(|(&symbol, _)| symbol).collect()
@@ -373,62 +373,62 @@ impl NameResolver {
 
     /// The symbol a resolved declaration introduced: a binding pattern identifier's
     /// or a named function's, keyed by its node.
-    pub(crate) fn declared_symbol(&self, node: NodeId) -> SymbolId {
+    pub fn declared_symbol(&self, node: NodeId) -> SymbolId {
         self.declarations[&node]
     }
 
     /// The innermost symbol the identifier at `node` could mean.
-    pub(crate) fn innermost_reference(&self, node: NodeId) -> SymbolId {
+    pub fn innermost_reference(&self, node: NodeId) -> SymbolId {
         self.references[&node].innermost()
     }
 
     /// Every symbol the identifier at `node` could mean.
-    pub(crate) fn reference_candidates(&self, node: NodeId) -> &Candidates {
+    pub fn reference_candidates(&self, node: NodeId) -> &Candidates {
         &self.references[&node]
     }
 
     /// The getters a read through the accessor at `node` could use. `None`
     /// where nothing reads through a getter, like the target of `xs[i] = 1`.
-    pub(crate) fn getter_candidates(&self, node: NodeId) -> Option<&Candidates> {
+    pub fn getter_candidates(&self, node: NodeId) -> Option<&Candidates> {
         self.getters.get(&node)
     }
 
     /// The setters a write through the assignment target at `node` could use.
-    pub(crate) fn setter_candidates(&self, node: NodeId) -> &Candidates {
+    pub fn setter_candidates(&self, node: NodeId) -> &Candidates {
         &self.setters[&node]
     }
 
     /// The operations the augmented assignment at `node` could use.
-    pub(crate) fn augmented_candidates(&self, node: NodeId) -> &AugmentedCandidates {
+    pub fn augmented_candidates(&self, node: NodeId) -> &AugmentedCandidates {
         &self.augmented[&node]
     }
 
     /// The outer symbols the function declared at `node` captures, in order of first use.
-    pub(crate) fn captures_of(&self, node: NodeId) -> &[SymbolId] {
+    pub fn captures_of(&self, node: NodeId) -> &[SymbolId] {
         self.captures.get(&node).map_or(&[], Vec::as_slice)
     }
 
     /// The type symbol the name in an annotation at `node` refers to.
-    pub(crate) fn type_name_symbol(&self, node: NodeId) -> SymbolId {
+    pub fn type_name_symbol(&self, node: NodeId) -> SymbolId {
         self.type_names[&node]
     }
 
     /// The symbol the identifier assignment target at `node` writes to.
-    pub(crate) fn assigned_symbol(&self, node: NodeId) -> SymbolId {
+    pub fn assigned_symbol(&self, node: NodeId) -> SymbolId {
         self.assignments[&node]
     }
 
-    pub(crate) fn symbol_name(&self, symbol: SymbolId) -> &str {
+    pub fn symbol_name(&self, symbol: SymbolId) -> &str {
         self.symbols.name(symbol)
     }
 
     /// What the struct declared at `node` bound.
-    pub(crate) fn struct_symbols(&self, node: NodeId) -> &StructSymbols {
+    pub fn struct_symbols(&self, node: NodeId) -> &StructSymbols {
         &self.structs[&node]
     }
 
     /// The errors recorded so far, leaving none behind.
-    pub(crate) fn take_errors(&mut self) -> Vec<NameResolutionError> {
+    pub fn take_errors(&mut self) -> Vec<NameResolutionError> {
         std::mem::take(&mut self.errors)
     }
 
@@ -903,13 +903,12 @@ impl NameResolver {
 
 impl Candidates {
     /// The groups, nearest scope first.
-    pub(crate) fn iter(&self) -> impl Iterator<Item = &Vec<SymbolId>> {
+    pub fn iter(&self) -> impl Iterator<Item = &Vec<SymbolId>> {
         self.0.iter()
     }
 
     /// Candidates made of these groups, nearest scope first.
-    #[cfg(test)]
-    pub(crate) fn from_groups(groups: Vec<Vec<SymbolId>>) -> Self {
+    pub fn from_groups(groups: Vec<Vec<SymbolId>>) -> Self {
         Self(groups)
     }
 

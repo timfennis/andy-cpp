@@ -75,7 +75,9 @@ Source → [Lexer] → Tokens → [Parser] → AST → [Analyser] → Annotated 
 | `ndc_lexer` | Tokenisation, `Span` (offset+length) |
 | `ndc_parser` | AST (`Expression`, `ExpressionLocation`), parser |
 | `ndc_core` | `Number` (BigInt/Rational/Complex), `StaticType`, `FunctionRegistry`, ordering, hashing |
-| `ndc_interpreter` | Semantic analyser, `Interpreter` facade (compile + run via VM) |
+| `ndc_resolver` | Name resolution: `NameResolver`, `SymbolId`, per-use candidate symbols and closure captures |
+| `ndc_analyser` | Semantic analyser (types, overload bindings, slots), runs the resolver first |
+| `ndc_interpreter` | `Interpreter` facade (analyse + compile + run via VM) |
 | `ndc_vm` | Bytecode `Compiler` and stack-based `Vm` |
 | `ndc_stdlib` | Built-in functions registered via `FunctionRegistry` |
 | `ndc_lsp` | LSP backend (hover, inlay hints) |
@@ -89,7 +91,7 @@ Source → [Lexer] → Tokens → [Parser] → AST → [Analyser] → Annotated 
 
 **Function overloading** — Functions are matched by name and arity. The semantic analyser produces `Binding::Resolved` (exact compile-time match) or `Binding::Dynamic(Vec<ResolvedVar>)` (runtime dispatch among candidates). Binary operators like `+` are parsed as `Expression::Call`.
 
-**Semantic analyser** — `ndc_interpreter/src/semantic/analyser.rs` infers `StaticType` and resolves function bindings. `StaticType::Any` is the fallback when inference fails.
+**Semantic analyser** — `ndc_analyser/src/analyser.rs` infers `StaticType` and resolves function bindings. `StaticType::Any` is the fallback when inference fails.
 
 **`FunctionRegistry`** — Lives in `ndc_core`. Holds all registered built-in functions as `Rc<NativeFunction>`. Replaces the old `Environment`-based function registry. At runtime, natives are passed to the VM as global slots.
 

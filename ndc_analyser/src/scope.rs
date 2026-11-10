@@ -1,7 +1,6 @@
-use crate::name_resolution::Candidates;
-use crate::symbols::SymbolId;
 use ndc_core::StaticType;
 use ndc_parser::{Binding, Candidate, CaptureSource, ResolvedVar};
+use ndc_resolver::{Candidates, SymbolId};
 use std::fmt::{Debug, Formatter};
 
 /// Whether a call site can fall back to element-wise tuple broadcast when no
@@ -966,8 +965,8 @@ impl Debug for ScopeTree {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::symbols::{BindingKind, SymbolTable};
     use ndc_parser::ResolvedVar;
+    use ndc_resolver::{BindingKind, SymbolTable};
     use std::cell::RefCell;
 
     thread_local! {

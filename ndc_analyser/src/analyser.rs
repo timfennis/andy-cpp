@@ -1,6 +1,4 @@
-use crate::name_resolution::{NameResolutionError, NameResolver};
 use crate::scope::{CallKind, ResolvedCall, ScopeTree, TypeBinding};
-use crate::symbols::SymbolId;
 use ahash::AHashMap;
 use itertools::{Itertools, izip};
 use ndc_core::static_type::StaticTypeConstructionError;
@@ -12,6 +10,7 @@ use ndc_parser::{
     BindingPatternLocation, Candidate, Expression, ExpressionLocation, ForBody, ForIteration,
     FunctionParameter, NodeId, ResolvedVar, TypeExpr,
 };
+use ndc_resolver::{NameResolutionError, NameResolver, SymbolId};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::Debug;
