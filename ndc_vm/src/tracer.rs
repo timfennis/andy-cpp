@@ -1,5 +1,5 @@
 use crate::chunk::OpCode;
-use ndc_core::duration::format_duration;
+use crate::duration::format_duration;
 use ndc_lexer::Span;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};

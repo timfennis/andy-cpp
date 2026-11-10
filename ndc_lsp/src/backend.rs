@@ -89,21 +89,24 @@ impl Backend {
     /// commit the analysis and publish diagnostics only if no later edit has
     /// superseded it. `update_source` must have run for this `version` first.
     async fn validate(&self, uri: &Url, text: &str, version: i32) {
-        let (mut diagnostics, _ast) = diagnostics::lex_and_parse(text);
-
-        // Run full semantic analysis. The interpreter uses Rc internally
-        // (non-Send), so it must be fully dropped before the next await point.
-        let analysed = {
+        // The interpreter uses Rc internally (non-Send), so it must be fully
+        // dropped before the next await point.
+        let (diagnostics, analysed) = {
             let mut interpreter = self.make_interpreter();
-            interpreter
-                .analyse_str(text)
-                .ok()
-                .map(|(expressions, analysis_result)| {
-                    for err in &analysis_result.errors {
-                        diagnostics.push(diagnostics::analysis_error_to_diagnostic(text, err));
-                    }
-                    (expressions, analysis_result)
-                })
+            match interpreter.analyse_str(text) {
+                Ok((expressions, result)) => {
+                    let diagnostics = result
+                        .errors
+                        .iter()
+                        .map(|err| diagnostics::analysis_error_to_diagnostic(text, err))
+                        .collect();
+                    (diagnostics, Some((expressions, result)))
+                }
+                Err(err) => (
+                    diagnostics::interpreter_error_to_diagnostics(text, &err),
+                    None,
+                ),
+            }
         };
 
         // Hold the write lock across the commit AND the publish. `did_close`

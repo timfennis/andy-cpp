@@ -8,7 +8,6 @@ version.workspace = true
 ndc_analysis.workspace = true
 tokio = { version = "1.52.3", features = ["full"] }
 ahash.workspace = true
-ndc_analyser.workspace = true
 ndc_lexer.workspace = true
 ndc_interpreter.workspace = true
 ndc_core.workspace = true

@@ -1,8 +1,8 @@
 use super::{Object, Value};
 use crate::chunk::{Chunk, OpCode};
 use crate::error::VmError;
+use crate::hash_map::HashMap;
 use ndc_core::StaticType;
-use ndc_core::hash_map::HashMap;
 use ndc_core::r#struct::StructInfo;
 use std::cell::RefCell;
 use std::fmt;
