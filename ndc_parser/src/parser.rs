@@ -211,7 +211,6 @@ impl Parser {
                 function: Box::new(
                     Expression::Identifier {
                         name: operator_token_loc.token.to_string(),
-                        resolved: Binding::None,
                         identifier_span: operator_token_loc.span,
                     }
                     .to_location(operator_token_loc.span),
@@ -225,7 +224,6 @@ impl Parser {
                     function: Box::new(
                         Expression::Identifier {
                             name: not_token.token.to_string(),
-                            resolved: Binding::None,
                             identifier_span: not_token.span,
                         }
                         .to_location(not_token.span),
@@ -258,7 +256,6 @@ impl Parser {
                 function: Box::new(
                     Expression::Identifier {
                         name: operator.to_string(),
-                        resolved: Binding::None,
                         identifier_span: operator_span,
                     }
                     .to_location(operator_span),
@@ -526,7 +523,6 @@ impl Parser {
                 function: Box::new(
                     Expression::Identifier {
                         name: operator_token_loc.token.to_string(),
-                        resolved: Binding::None,
                         identifier_span: operator_span,
                     }
                     .to_location(operator_span),
@@ -674,7 +670,6 @@ impl Parser {
                 function: Box::new(
                     Expression::Identifier {
                         name: operator_token_loc.token.to_string(),
-                        resolved: Binding::None,
                         identifier_span: token_span,
                     }
                     .to_location(token_span),
@@ -723,7 +718,6 @@ impl Parser {
                                 Box::new(
                                     Expression::Identifier {
                                         name: member,
-                                        resolved: Binding::None,
                                         identifier_span: member_span,
                                     }
                                     .to_location(member_span),
@@ -822,7 +816,6 @@ impl Parser {
                             function: Box::new(
                                 Expression::Identifier {
                                     name: "[]".to_string(),
-                                    resolved: Binding::None,
                                     identifier_span: bracket_span,
                                 }
                                 .to_location(bracket_span),
@@ -1081,7 +1074,6 @@ impl Parser {
             Token::String(value) => Expression::StringLiteral(value),
             Token::Identifier(identifier) => Expression::Identifier {
                 name: identifier,
-                resolved: Binding::None,
                 identifier_span: token_location.span,
             },
             _ => {

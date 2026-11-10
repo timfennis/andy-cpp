@@ -14,6 +14,9 @@ pub struct Analysis {
     /// The inferred return type of each function without a return type
     /// annotation, keyed by its declaration.
     pub inferred_return_types: AHashMap<NodeId, StaticType>,
+    /// What each identifier expression refers to, keyed by the identifier. For
+    /// a call like `f(x)` that's the overload of `f` the call picks.
+    pub bindings: AHashMap<NodeId, Binding>,
     /// How many local slots each function's own variables use, parameters
     /// first, keyed by its declaration. The compiler places its temporaries
     /// after them.
@@ -24,6 +27,12 @@ pub struct Analysis {
 }
 
 impl Analysis {
+    /// What the identifier expression `identifier` refers to; `Binding::None`
+    /// if it refers to nothing.
+    pub fn binding(&self, identifier: NodeId) -> &Binding {
+        self.bindings.get(&identifier).unwrap_or(&Binding::None)
+    }
+
     /// The frame size of the function declared at `function`.
     pub fn frame_size(&self, function: NodeId) -> usize {
         *self
