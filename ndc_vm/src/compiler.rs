@@ -292,7 +292,7 @@ impl Compiler {
             Expression::OpAssignment {
                 l_value, r_value, ..
             } => {
-                let target = PreparedAssignmentTarget::prepare(self, l_value, span)?;
+                let target = PreparedAssignmentTarget::prepare(self, l_value)?;
                 let analysis = Rc::clone(&self.analysis);
                 let Some(binding) = analysis.augmented_assignments.get(&id) else {
                     return Err(CompileError::unresolved_binding(span));
@@ -1052,7 +1052,6 @@ impl PreparedAssignmentTarget {
     fn prepare(
         compiler: &mut Compiler,
         l_value: AssignmentTargetLocation,
-        span: Span,
     ) -> Result<Self, CompileError> {
         match l_value.target {
             AssignmentTarget::Identifier { span, .. } => Ok(Self::Variable {
@@ -1098,9 +1097,9 @@ impl PreparedAssignmentTarget {
                     setter: compiler.analysis.setter(l_value.id).clone(),
                 })
             }
-            AssignmentTarget::Sequence(_) => {
-                Err(CompileError::lvalue_required_to_be_single_identifier(span))
-            }
+            AssignmentTarget::Sequence(_) => unreachable!(
+                "internal error: name resolution rejects a sequence as an augmented assignment target"
+            ),
         }
     }
 
@@ -1200,13 +1199,6 @@ impl CompileError {
             text:
                 "encountered unresolved cast during compilation, this is probably an internal error"
                     .to_string(),
-            span,
-        }
-    }
-
-    fn lvalue_required_to_be_single_identifier(span: Span) -> Self {
-        Self {
-            text: "This lvalue is required to be a single identifier".to_string(),
             span,
         }
     }

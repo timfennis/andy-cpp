@@ -133,10 +133,7 @@ impl Interpreter {
         let mut expressions = ndc_parser::Parser::from_tokens(tokens).parse()?;
 
         for e in &mut expressions {
-            // Hard errors (structural issues) are accumulated too.
-            if let Err(e) = self.analyser.analyse(e) {
-                self.analyser.emit_external(e);
-            }
+            self.analyser.analyse(e);
         }
 
         let result = self.analyser.take_result();
@@ -237,25 +234,17 @@ impl Interpreter {
 
         measure(&mut timings, Phase::Analysing, || {
             for e in &mut expressions {
-                // Hard errors (structural issues) still abort immediately.
-                if let Err(e) = self.analyser.analyse(e) {
-                    self.analyser.take_result();
-                    return Err(InterpreterError::Resolver { causes: vec![e] });
-                }
+                self.analyser.analyse(e);
             }
+        });
 
-            Ok(())
-        })?;
-
-        if self.analyser.has_errors() {
-            let result = self.analyser.take_result();
-            return Err(InterpreterError::Resolver {
+        let result = self.analyser.take_result();
+        if !result.errors.is_empty() {
+            return Err(InterpreterError::Analysis {
                 causes: result.errors,
             });
         }
-
-        let analysis = self.analyser.take_result();
-        Ok((expressions, analysis, timings))
+        Ok((expressions, result, timings))
     }
 
     /// Compiles and runs analysed code on a VM that gets the globals, and
@@ -316,7 +305,7 @@ pub enum InterpreterError {
         cause: ndc_parser::Error,
     },
     #[error("Error during static analysis")]
-    Resolver {
+    Analysis {
         causes: Vec<ndc_analyser::AnalysisError>,
     },
     #[error("Compilation error")]

@@ -35,11 +35,7 @@ pub enum Phase {
     Running,
 }
 
-pub fn measure<T, E>(
-    timings: &mut ExecutionTimings,
-    phase: Phase,
-    f: impl FnOnce() -> Result<T, E>,
-) -> Result<T, E> {
+pub fn measure<T>(timings: &mut ExecutionTimings, phase: Phase, f: impl FnOnce() -> T) -> T {
     let start = Instant::now();
     let result = f();
     timings.set(phase, start.elapsed());
