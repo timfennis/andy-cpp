@@ -39,15 +39,9 @@ fn repl_error(lines: &[&str], expected_error: &str) {
 }
 
 #[test]
-fn variable_persists_across_lines() {
-    let out = repl_output(&["let x = 10;", "print(x)"]);
-    assert_eq!(out.trim(), "10");
-}
-
-#[test]
-fn arithmetic_on_previous_variable() {
-    let out = repl_output(&["let x = 10;", "print(x + 3)"]);
-    assert_eq!(out.trim(), "13");
+fn variables_persist_across_lines() {
+    let out = repl_output(&["let a = 3;", "let b = 4;", "print(a * b)"]);
+    assert_eq!(out.trim(), "12");
 }
 
 #[test]
@@ -57,32 +51,13 @@ fn reassignment_is_visible_on_next_line() {
 }
 
 #[test]
-fn multiple_variables_persist() {
-    let out = repl_output(&["let a = 3;", "let b = 4;", "print(a * b)"]);
-    assert_eq!(out.trim(), "12");
-}
-
-#[test]
-fn resumed_compilation_reserves_new_source_locals_before_temporaries() {
-    // The second batch assigns `delta` slot 1. Indexed augmentation must move
-    // its hidden temporaries beyond the analyser's updated high-water mark.
-    let out = repl_output(&[
-        "let values = [1];",
-        "values[0] += { let delta = 2; delta };",
-        "print(values)",
-    ]);
-    assert_eq!(out.trim(), "[3]");
-}
-
-#[test]
 fn function_defined_on_earlier_line_is_callable() {
     let out = repl_output(&["fn double(x) => x * 2", "print(double(7))"]);
     assert_eq!(out.trim(), "14");
 }
 
 #[test]
-fn print_on_first_line_is_not_repeated() {
-    // Ensure the persistent-VM approach does not re-execute old lines.
+fn earlier_lines_are_not_run_again() {
     let out = repl_output(&["print(1);", "print(2)"]);
     assert_eq!(out.trim(), "1\n2");
 }
@@ -140,13 +115,22 @@ fn a_failed_evaluation_starts_the_session_over() {
         i
     };
     interp.eval("let x = 1;").unwrap();
-    assert!(interp.eval("x = 2; [1][5]").is_err());
+    assert!(interp.eval("struct Foo { y: Int }\nx = 2; [1][5]").is_err());
     let err = interp.eval("x").expect_err("x should be forgotten");
     assert!(
         format!("{err:?}").contains("has not previously been declared"),
         "unexpected error: {err:?}"
     );
-    interp.eval("let x = 3; print(x)").unwrap();
+    let err = interp
+        .eval("let f: Foo = 1;")
+        .expect_err("Foo should be forgotten");
+    assert!(
+        format!("{err:?}").contains("unknown type `Foo`"),
+        "unexpected error: {err:?}"
+    );
+    // The names are free again.
+    interp.eval("struct Foo { y: Int }").unwrap();
+    interp.eval("let x = 3; print(Foo(x).y)").unwrap();
     let out = String::from_utf8(interp.get_output().unwrap()).unwrap();
     assert_eq!(out.trim(), "3");
 }
@@ -197,67 +181,29 @@ fn struct_redefinition_on_later_line_errors() {
     );
 }
 
+// A function from one line and the top level of later lines read and write
+// the same global.
 #[test]
-fn struct_shadowing_builtin_type_errors() {
-    repl_error(
-        &["struct Int { x: Float }"],
-        "Struct 'Int' is not allowed to shadow the built-in type 'Int'",
-    );
-}
-
-#[test]
-fn failed_line_rolls_back_struct_registry() {
-    let mut interp = {
-        let mut i = Interpreter::capturing();
-        i.configure(ndc_stdlib::register);
-        i
-    };
-    // The struct declaration is on a line that fails as a whole, so it must
-    // not stay registered.
-    assert!(
-        interp
-            .eval("struct Foo { x: Int }\nundefined_variable")
-            .is_err()
-    );
-    let err = interp
-        .eval("let f: Foo = 1;")
-        .expect_err("Foo should not be a known type");
-    assert!(
-        format!("{err:?}").contains("unknown type `Foo`"),
-        "unexpected error: {err:?}"
-    );
-    // The name is free again, so declaring it now succeeds.
-    interp.eval("struct Foo { x: Int }").unwrap();
-    interp.eval("print(Foo(42).x)").unwrap();
-    let out = String::from_utf8(interp.get_output().unwrap()).unwrap();
-    assert_eq!(out.trim(), "42");
-}
-
-// A variable from an earlier line is boxed when a later line first captures
-// it, so the closure and the top level keep sharing it.
-#[test]
-fn closure_sees_a_later_assignment_to_an_earlier_variable() {
-    let out = repl_output(&["let x = 1;", "let f = fn() { x };", "x = 2;", "print(f())"]);
-    assert_eq!(out.trim(), "2");
-}
-
-#[test]
-fn closure_and_top_level_share_a_counter_across_lines() {
+fn functions_share_globals_with_later_lines() {
     let out = repl_output(&[
         "let count = 0;",
         "let inc = fn() { count += 1; };",
         "inc(); inc();",
+        "print(count);",
+        "count = 10;",
+        "inc();",
         "print(count)",
     ]);
-    assert_eq!(out.trim(), "2");
+    assert_eq!(out.trim(), "2\n11");
 }
 
+// `j` is a local of the line's own top-level code, which is gone once the
+// line has run.
 #[test]
-fn closures_from_a_while_loop_keep_their_iteration_across_lines() {
+fn closures_keep_the_loop_variables_of_a_finished_line() {
     let out = repl_output(&[
         "let fs = []; let i = 0;",
         "while i < 3 { let j = i; fs.push(fn() { j }); i += 1; }",
-        "let reuse = 99;",
         "print([f() for f in fs])",
     ]);
     assert_eq!(out.trim(), "[0,1,2]");

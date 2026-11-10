@@ -1,17 +1,17 @@
-// Regression test: dynamic dispatch through an OverloadSet containing an
-// upvalue candidate previously panicked with "upvalue resolution in overload
-// sets".  foo(x, y) is a local in the script scope; inner() crosses two
-// environment boundaries (outer + inner), so the analyser's Tier-3 fallback
-// produces a Binding::Dynamic([Upvalue{slot}]).  At runtime resolve_var must
-// correctly dereference the upvalue cell rather than hitting todo!().
-// expect-output: 7
-fn foo(x, y) { x + y }
-
+// A call dispatched at run time among overloads that the calling function
+// captured. `inner` calls `describe` with an argument of unknown type, so the
+// call goes through an overload set whose candidates are upvalues, passed
+// through `middle`. Resolving such a candidate used to panic with "upvalue
+// resolution in overload sets".
 fn outer() {
-    fn inner() {
-        print(foo(3, 4))
+    fn describe(x: Int) { "int" }
+    fn describe(x: String) { "string" }
+    fn middle() {
+        fn inner(v) { describe(v) }
+        inner(1) ++ " " ++ inner("a")
     }
-    inner()
+    middle()
 }
 
-outer()
+print(outer());
+// expect-output: int string

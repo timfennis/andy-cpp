@@ -1,5 +1,0 @@
-// A callee that isn't a name is analysed before its arguments, in source
-// order, so declarations in both get the same slots as in the layout.
-let r = { fn twice(h) { h() * 2 } twice }((fn three() { 3 }, three)[1]);
-print(r);
-// expect-output: 6

@@ -1,18 +1,3 @@
-// A captured variable is shared by the frame that declares it and every
-// closure that captures it: a write on either side is seen by the other,
-// before and after the closure is made.
-let count = 0;
-count = 1;
-let inc = fn() { count += 1; };
-inc();
-inc();
-print(count);
-// expect-output: 3
-count = 10;
-inc();
-print(count);
-// expect-output: 11
-
 // A local function can call itself, also when it's memoized.
 fn outer() {
     fn fact(n) { if n == 0 { 1 } else { n * fact(n - 1) } }

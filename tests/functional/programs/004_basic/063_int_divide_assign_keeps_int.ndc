@@ -1,0 +1,5 @@
+// `/` on two Ints is integer division, so `/=` keeps an Int-annotated
+// variable an Int.
+let x: Int = 3;
+x /= 4;
+assert_eq(x, 0);

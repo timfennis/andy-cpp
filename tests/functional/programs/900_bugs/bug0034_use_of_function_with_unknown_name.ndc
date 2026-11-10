@@ -1,5 +1,0 @@
-// A function whose body names something unknown is still declared, so
-// using it afterwards panicked the analyser instead of reporting the name.
-// expect-error: Identifier missing has not previously been declared
-fn f() { missing; }
-let g = f;

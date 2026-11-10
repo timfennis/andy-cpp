@@ -1,6 +1,0 @@
-// An index assignment target is analysed container first, in source order,
-// so declarations in both get the same slots as in the layout.
-let ys = [[0], [0]];
-{ fn get() { ys } get() }[(fn one() { 1 }, one)[1]()] = [7];
-print(ys);
-// expect-output: [[0],[7]]

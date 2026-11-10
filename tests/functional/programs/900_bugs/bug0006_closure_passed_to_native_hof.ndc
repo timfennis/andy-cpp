@@ -1,0 +1,31 @@
+// A closure passed straight to a native higher-order function (like `any`)
+// can read the locals it captures. The native used to call it back where the
+// captured stack slots no longer existed, and panicked.
+fn main() {
+    let x = 10;
+    let y = 20;
+
+    let found = [1, 5, 10, 15].any(fn(v) => v == x);
+    assert_eq(found, true);
+
+    let found2 = [1, 5, 7, 15].any(fn(v) => v == x);
+    assert_eq(found2, false);
+
+    // Multiple captured variables
+    let result = [1, 2, 3, 4, 5].any(fn(v) => v > x and v < y);
+    assert_eq(result, false);
+
+    // Inside a loop: a new closure each iteration, capturing that iteration's
+    // variable.
+    let hits = 0;
+    for threshold in [3, 6, 9] {
+        if [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].any(fn(v) => v == threshold) {
+            hits += 1;
+        }
+    }
+    assert_eq(hits, 3);
+}
+
+main();
+print("ok");
+// expect-output: ok
