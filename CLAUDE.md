@@ -97,7 +97,7 @@ Source → [Lexer] → Tokens → [Parser] → AST → [Analyser] → Annotated 
 
 **`FunctionRegistry`** — Lives in `ndc_core`. Holds all registered built-in functions as `Rc<NativeFunction>`. Replaces the old `Environment`-based function registry. At runtime, natives are passed to the VM as global slots.
 
-**Persistent REPL** — The `Interpreter` keeps `repl_state: Option<(Vm, Compiler)>` so variables declared on one REPL line are visible on subsequent lines (resume-from-halt pattern).
+**Persistent REPL** — The `Interpreter` keeps `repl_state: Option<(Vm, Compiler)>` so variables declared on one REPL line are visible on subsequent lines (resume-from-halt pattern). A resumable `Interpreter` starts the session over after an evaluation that fails past parsing, as the failed code may have done only part of its work; there is no in-process rollback. On Unix, `ndc_bin/src/isolation.rs` instead runs each REPL line in a forked copy of the REPL process, so a line that fails (error, panic, stack overflow, Ctrl-C) leaves the session exactly as it was. `ndc_bin/tests/repl.rs` drives the built binary to test this.
 
 ### Test Infrastructure
 
@@ -109,4 +109,5 @@ Test crates live under `tests/`:
   // expect-error: divide   ← assert error message contains this substring
   ```
 - `tests/compiler/` (`compiler_tests`) — validates the bytecode compiler by asserting exact `OpCode` sequences. Use when adding new VM instructions.
+- `ndc_bin/tests/repl.rs` — feeds lines to the built `ndc` binary's REPL (Unix only) and checks what it prints, e.g. that a failed line leaves no trace.
 - `tests/proptest/` (`proptest_tests`) — property-based panic fuzzer over random token streams. The fresh-fuzz test is `#[ignore]`d; regression replay (from `panic.regressions`) runs by default. See [CONTRIBUTING.md](CONTRIBUTING.md) for run commands.

@@ -1,4 +1,5 @@
 use ndc_analysis::Analysis;
+use ndc_core as _;
 use ndc_lexer::{Lexer, SourceId};
 use ndc_parser::Parser;
 use ndc_stdlib as _;

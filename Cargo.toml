@@ -22,6 +22,7 @@ derive_builder = { version = "0.20.2" }
 derive_more = { version = "2.1.1", features = ["deref", "deref_mut", "from", "display", "constructor"] }
 factorial = "0.4.0"
 itertools = "0.15.0"
+libc = "0.2.186"
 ndc_core = { path = "ndc_core", version = "0.3.0" }
 ndc_lexer = { path = "ndc_lexer", version = "0.3.0" }
 ndc_analyser = { path = "ndc_analyser", version = "0.3.0" }

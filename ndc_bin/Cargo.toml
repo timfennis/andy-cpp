@@ -26,5 +26,8 @@ rustyline.workspace = true
 termimad = "0.34.1"
 tokio.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
 [features]
 trace = ["ndc_interpreter/trace"]

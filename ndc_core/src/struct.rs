@@ -74,11 +74,6 @@ impl StructRegistry {
     pub fn is_empty(&self) -> bool {
         self.data.is_empty()
     }
-
-    /// Discards every struct registered after the registry had `len` entries.
-    pub fn truncate(&mut self, len: usize) {
-        self.data.truncate(len);
-    }
 }
 
 impl Index<StructId> for StructRegistry {

@@ -13,7 +13,7 @@ use ndc_parser::{
 pub struct ScopeId(usize);
 
 /// A lexical scope: what it binds, in order, and where it sits in the tree.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Scope {
     parent: Option<ScopeId>,
     /// How many values the parent had bound when this scope was entered. In
@@ -24,7 +24,7 @@ pub struct Scope {
     kind: ScopeKind,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct ScopeTree {
     current: ScopeId,
     scopes: Vec<Scope>,
@@ -34,7 +34,7 @@ pub(crate) struct ScopeTree {
     function_scopes: AHashMap<NodeId, ScopeId>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct NameResolver {
     symbols: SymbolTable,
     scopes: ScopeTree,

@@ -1172,6 +1172,7 @@ dependencies = [
  "clap",
  "codespan-reporting",
  "itertools 0.15.0",
+ "libc",
  "ndc_core",
  "ndc_interpreter",
  "ndc_lexer",
