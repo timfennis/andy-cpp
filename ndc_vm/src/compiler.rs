@@ -389,13 +389,10 @@ impl Compiler {
 
                 self.ir.write(OpCode::Constant(idx), span);
 
-                match resolved_name {
-                    Some(var @ ResolvedVar::Local { .. }) => {
-                        self.emit_set_var(var, span);
-                    }
-                    Some(_) => unreachable!("declarations always bind locally"),
-                    None => unreachable!("resolved_name should have been resolved"),
-                };
+                self.emit_declare(
+                    resolved_name.expect("resolved_name should have been resolved"),
+                    span,
+                );
 
                 for (field_offset, field) in fields.iter().enumerate() {
                     // GET
@@ -406,13 +403,12 @@ impl Compiler {
                             field_offset,
                         )));
                     self.ir.write(OpCode::Constant(get_idx), span);
-                    match field.resolved_getter {
-                        Some(var @ ResolvedVar::Local { .. }) => {
-                            self.emit_set_var(var, span);
-                        }
-                        Some(_) => unreachable!("declarations always bind locally"),
-                        None => unreachable!("resolved_name should have been resolved"),
-                    }
+                    self.emit_declare(
+                        field
+                            .resolved_getter
+                            .expect("resolved_getter should have been resolved"),
+                        span,
+                    );
 
                     // SET
                     let set_idx = self
@@ -422,13 +418,12 @@ impl Compiler {
                             field_offset,
                         )));
                     self.ir.write(OpCode::Constant(set_idx), span);
-                    match field.resolved_setter {
-                        Some(var @ ResolvedVar::Local { .. }) => {
-                            self.emit_set_var(var, span);
-                        }
-                        Some(_) => unreachable!("declarations always bind locally"),
-                        None => unreachable!("resolved_name should have been resolved"),
-                    }
+                    self.emit_declare(
+                        field
+                            .resolved_setter
+                            .expect("resolved_setter should have been resolved"),
+                        span,
+                    );
                 }
                 self.emit_unit();
             }
@@ -624,12 +619,7 @@ impl Compiler {
     ) -> Result<(), CompileError> {
         match pattern.pattern {
             BindingPattern::Identifier { resolved, .. } => {
-                let slot = match resolved.expect("binding pattern must be resolved") {
-                    ResolvedVar::Local { slot } => slot,
-                    _ => unreachable!("binding pattern must be a local"),
-                };
-                self.ir.write(OpCode::SetLocal(slot), span);
-                self.source_locals = self.source_locals.max(slot + 1);
+                self.emit_declare(resolved.expect("binding pattern must be resolved"), span);
             }
             BindingPattern::Sequence(seq) => {
                 self.ir.write(OpCode::Unpack(seq.len()), span);
@@ -693,6 +683,7 @@ impl Compiler {
     fn emit_get_var(&mut self, var: ResolvedVar, span: Span) {
         match var {
             ResolvedVar::Local { slot } => self.ir.write(OpCode::GetLocal(slot), span),
+            ResolvedVar::Cell { slot } => self.ir.write(OpCode::GetCell(slot), span),
             ResolvedVar::Upvalue { slot } => self.ir.write(OpCode::GetUpvalue(slot), span),
             ResolvedVar::Global { slot } => self.ir.write(OpCode::GetGlobal(slot), span),
         };
@@ -704,10 +695,29 @@ impl Compiler {
                 self.ir.write(OpCode::SetLocal(slot), span);
                 self.source_locals = self.source_locals.max(slot + 1);
             }
+            ResolvedVar::Cell { slot } => {
+                self.ir.write(OpCode::SetCell(slot), span);
+            }
             ResolvedVar::Upvalue { slot } => {
                 self.ir.write(OpCode::SetUpvalue(slot), span);
             }
             ResolvedVar::Global { .. } => unreachable!("globals are native, never assigned"),
+        }
+    }
+
+    /// Stores the value on top of the stack in a variable being declared. The
+    /// declaration replaces whatever the slot held, so a captured local declared
+    /// again, as in each loop iteration, gets a new variable instead of writing
+    /// through the cell an earlier closure kept.
+    fn emit_declare(&mut self, var: ResolvedVar, span: Span) {
+        match var {
+            ResolvedVar::Local { slot } | ResolvedVar::Cell { slot } => {
+                self.ir.write(OpCode::SetLocal(slot), span);
+                self.source_locals = self.source_locals.max(slot + 1);
+            }
+            ResolvedVar::Upvalue { .. } | ResolvedVar::Global { .. } => {
+                unreachable!("the analyser never assigns a declaration to a non-local binding")
+            }
         }
     }
 
@@ -866,6 +876,13 @@ impl Compiler {
             .ir
             .add_constant(Value::function(Function::Compiled(Rc::new(compiled))));
 
+        // A captured function may capture itself, before its value exists, so
+        // its cell must be in place before the closure is made.
+        if let Some(ResolvedVar::Cell { slot }) = resolved_name {
+            self.ir.write(OpCode::NewCell(slot), span);
+            self.source_locals = self.source_locals.max(slot + 1);
+        }
+
         if !captures.is_empty() {
             self.ir.write(
                 OpCode::Closure {
@@ -886,9 +903,12 @@ impl Compiler {
         }
 
         match resolved_name {
-            Some(ResolvedVar::Local { slot }) => {
-                self.ir.write(OpCode::SetLocal(slot), span);
-                self.source_locals = self.source_locals.max(slot + 1);
+            Some(var @ ResolvedVar::Local { .. }) => {
+                self.emit_declare(var, span);
+                self.emit_unit();
+            }
+            Some(ResolvedVar::Cell { slot }) => {
+                self.ir.write(OpCode::SetCell(slot), span);
                 self.emit_unit();
             }
             Some(ResolvedVar::Upvalue { .. } | ResolvedVar::Global { .. }) => {
@@ -989,12 +1009,6 @@ impl Compiler {
                 self.compile_binding_pattern(l_value.clone(), span)?;
 
                 self.compile_for_iterations(rest, span, compile_leaf)?;
-
-                // Close upvalues for the loop variable so each iteration's closures
-                // get their own frozen copy rather than sharing a mutable slot.
-                if let Some(slot) = min_binding_slot(l_value) {
-                    self.ir.write(OpCode::CloseUpvalue(slot), span);
-                }
 
                 self.write_jump_back(loop_start, span);
 
@@ -1233,19 +1247,6 @@ impl PreparedAssignmentTarget {
             }
         }
         Ok(())
-    }
-}
-
-/// Returns the minimum local slot referenced by a binding pattern, used to determine
-/// which upvalues to close at the end of a loop iteration.
-fn min_binding_slot(pattern: &BindingPatternLocation) -> Option<usize> {
-    match &pattern.pattern {
-        BindingPattern::Identifier {
-            resolved: Some(ResolvedVar::Local { slot }),
-            ..
-        } => Some(*slot),
-        BindingPattern::Sequence(seq) => seq.iter().filter_map(min_binding_slot).min(),
-        _ => None,
     }
 }
 

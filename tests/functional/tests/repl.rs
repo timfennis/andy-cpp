@@ -257,3 +257,33 @@ fn failed_line_rolls_back_struct_registry() {
     let out = String::from_utf8(interp.get_output().unwrap()).unwrap();
     assert_eq!(out.trim(), "42");
 }
+
+// A variable from an earlier line is boxed when a later line first captures
+// it, so the closure and the top level keep sharing it.
+#[test]
+fn closure_sees_a_later_assignment_to_an_earlier_variable() {
+    let out = repl_output(&["let x = 1;", "let f = fn() { x };", "x = 2;", "print(f())"]);
+    assert_eq!(out.trim(), "2");
+}
+
+#[test]
+fn closure_and_top_level_share_a_counter_across_lines() {
+    let out = repl_output(&[
+        "let count = 0;",
+        "let inc = fn() { count += 1; };",
+        "inc(); inc();",
+        "print(count)",
+    ]);
+    assert_eq!(out.trim(), "2");
+}
+
+#[test]
+fn closures_from_a_while_loop_keep_their_iteration_across_lines() {
+    let out = repl_output(&[
+        "let fs = []; let i = 0;",
+        "while i < 3 { let j = i; fs.push(fn() { j }); i += 1; }",
+        "let reuse = 99;",
+        "print([f() for f in fs])",
+    ]);
+    assert_eq!(out.trim(), "[0,1,2]");
+}

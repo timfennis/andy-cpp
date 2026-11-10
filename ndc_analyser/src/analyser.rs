@@ -117,13 +117,12 @@ impl Analyser {
         result
     }
 
-    /// Records the type of a value the resolver declared, and returns its
-    /// slot. A declaration is always local to the frame being analysed.
+    /// Records the type of a value the resolver declared, and returns where
+    /// it lives: a local, or a cell if closures capture it. A declaration is
+    /// always in the frame being analysed.
     fn declare(&mut self, symbol: SymbolId, binding: TypeBinding) -> ResolvedVar {
         self.types.declare(symbol, binding);
-        ResolvedVar::Local {
-            slot: Layout::new(&self.resolver).local_slot(symbol),
-        }
+        self.locate(symbol)
     }
 
     /// How the code being analysed reaches `symbol`: see [`Layout::location`].

@@ -53,12 +53,9 @@ pub struct CompiledFunction {
 #[derive(Clone)]
 pub struct ClosureFunction {
     pub(crate) prototype: Rc<CompiledFunction>,
-    pub(crate) upvalues: Vec<Rc<RefCell<UpvalueCell>>>,
-}
-
-pub enum UpvalueCell {
-    Open(usize),
-    Closed(Value),
+    /// The cells of the variables the closure captured, each shared with the
+    /// frame that declared it, see [`Value::Cell`].
+    pub(crate) upvalues: Vec<Rc<RefCell<Value>>>,
 }
 
 impl CompiledFunction {

@@ -47,6 +47,29 @@ assert_eq(15, my_function(5));
 assert_eq([10, 5], x);
 ```
 
+A function captures the variable itself, not a copy of its value. It sees later assignments, and its own assignments are seen outside:
+
+```ndc
+let count = 0;
+let increment = fn() { count += 1; };
+increment();
+increment();
+assert_eq(count, 2);
+```
+
+Each block and each loop iteration has its own variables, so a function keeps the one from the iteration that created it:
+
+```ndc
+let getters = [];
+let i = 0;
+while i < 3 {
+    let j = i;
+    getters.push(fn() { j });
+    i += 1;
+}
+assert_eq([g() for g in getters], [0, 1, 2]);
+```
+
 ## Anonymous functions
 
 Anonymous functions let you write inline function values.

@@ -1,0 +1,81 @@
+// Closures that capture a block-scoped variable keep reading that variable after
+// the block ends, even when a later binding reuses its stack slot (#227).
+
+// A `let` captured inside a block.
+let g = fn() { 0 };
+{
+    let y = 10;
+    g = fn() { y };
+}
+let reuse_block = 99;
+assert_eq(g(), 10);
+
+// A `let` in a `while` body: each iteration gets its own variable.
+let fs = [];
+let n = 0;
+while n < 3 {
+    let j = n * 10;
+    fs.push(fn() { j });
+    n = n + 1;
+}
+let reuse_while = 7;
+assert_eq([f() for f in fs], [0, 10, 20]);
+
+// `break` and `continue` leave blocks without reaching their end.
+let broken = [];
+let m = 0;
+while true {
+    let j = m * 10;
+    broken.push(fn() { j });
+    if m == 1 { break; }
+    m = m + 1;
+}
+let continued = [];
+let k = 0;
+while k < 3 {
+    let j = k * 10;
+    continued.push(fn() { j });
+    k = k + 1;
+    if true { continue; }
+}
+let reuse_jumps = 7;
+assert_eq([f() for f in broken], [0, 10]);
+assert_eq([f() for f in continued], [0, 10, 20]);
+
+// The same for `for` loop variables.
+let early = [];
+for i in [1, 2, 3] {
+    early.push(fn() { i });
+    if i == 2 { break; }
+}
+let skipped = [];
+for i in [1, 2, 3] {
+    skipped.push(fn() { i });
+    if true { continue; }
+}
+let reuse_for = 99;
+assert_eq([f() for f in early], [1, 2]);
+assert_eq([f() for f in skipped], [1, 2, 3]);
+
+// Block-local functions and structs, and writes after the block ends.
+let call = fn() { 0 };
+let build = fn() { 0 };
+let get = fn() { 0 };
+let set = fn() { 0 };
+{
+    fn helper() { 5 }
+    call = fn() { helper() };
+    struct P { x: Int }
+    build = fn() { P(3).x };
+    let y = 1;
+    get = fn() { y };
+    set = fn() { y = 2; };
+}
+set();
+let reuse_rest = 99;
+assert_eq(call(), 5);
+assert_eq(build(), 3);
+assert_eq(get(), 2);
+
+print("ok");
+// expect-output: ok
