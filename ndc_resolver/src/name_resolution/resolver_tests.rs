@@ -156,7 +156,13 @@ fn a_let_cannot_refer_to_itself_in_its_initializer() {
     assert_eq!(span.source_id(), SourceId::new(0));
     assert_eq!(&source[span.range()], "missing");
     assert_eq!(span.offset(), source.rfind("missing").unwrap());
-    assert!(resolver.declarations.is_empty());
+}
+
+#[test]
+fn a_let_whose_value_fails_still_declares_its_names() {
+    let mut resolver = new_resolver([]);
+    resolve_source(&mut resolver, "let (a, b) = missing;").unwrap_err();
+    resolve_source(&mut resolver, "a; b;").unwrap();
 }
 
 #[test]

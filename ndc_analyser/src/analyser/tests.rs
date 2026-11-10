@@ -392,12 +392,21 @@ fn a_statement_with_an_unknown_name_binds_its_declarations_as_any() {
         "fn f() { missing; } f()",
         // Read from inside another function.
         "fn f() { missing; } fn g() { f } g()",
+        "let a = missing; a",
+        "let (a, b) = missing; b",
     ] {
         assert_one_error_then_any(
             source,
             "Identifier missing has not previously been declared",
         );
     }
+}
+
+#[test]
+fn a_named_function_declaration_evaluates_to_unit() {
+    let (last_type, result) = analyse_with_globals("fn g() { fn h() { 1 } } g()", vec![]);
+    assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
+    assert_eq!(last_type, StaticType::unit());
 }
 
 #[test]

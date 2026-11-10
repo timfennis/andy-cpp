@@ -785,8 +785,10 @@ mod tests {
 
         for value in &five {
             assert_eq!(value.as_exact_i64(), Some(5));
-            assert_eq!(*value, five[0]);
-            assert_eq!(hash(value), hash(&five[0]));
+            for other in &five {
+                assert_eq!(value, other);
+                assert_eq!(hash(value), hash(other));
+            }
         }
     }
 

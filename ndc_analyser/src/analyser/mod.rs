@@ -398,8 +398,16 @@ impl Analyser {
                 StaticType::unit()
             }
             Expression::For { iterations, body } => {
-                let loop_depth = self.loop_depth;
-                self.analyse_for_iterations(iterations, body, loop_depth)
+                // A map comprehension's default is evaluated once, before the
+                // loop starts.
+                if let ForBody::Map {
+                    default: Some(default),
+                    ..
+                } = body.as_ref()
+                {
+                    self.analyse_expr(default);
+                }
+                self.analyse_for_iterations(iterations, body)
             }
             Expression::Call {
                 function,
@@ -476,13 +484,11 @@ impl Analyser {
 
     /// Analyses the iterations of a `for` from the first, and then its body.
     /// Each iteration's sequence is evaluated outside of its own loop, and what
-    /// follows it inside. `outer_loop_depth` is the loop depth around the whole
-    /// `for`, where a map comprehension's default is evaluated.
+    /// follows it inside. A map comprehension's default is analysed before.
     fn analyse_for_iterations(
         &mut self,
         iterations: &[ForIteration],
         body: &ForBody,
-        outer_loop_depth: usize,
     ) -> StaticType {
         let Some((iteration, tail)) = iterations.split_first() else {
             unreachable!("because this function is never called with an empty slice");
@@ -507,7 +513,7 @@ impl Analyser {
         }
 
         let typ = if !tail.is_empty() {
-            self.analyse_for_iterations(tail, body, outer_loop_depth)
+            self.analyse_for_iterations(tail, body)
         } else {
             match body {
                 ForBody::Block(block) => {
@@ -515,23 +521,13 @@ impl Analyser {
                     StaticType::unit()
                 }
                 ForBody::List { expr } => StaticType::List(Box::new(self.analyse_expr(expr))),
-                ForBody::Map {
-                    key,
-                    value,
-                    default,
-                } => {
+                ForBody::Map { key, value, .. } => {
                     let key_type = self.analyse_expr(key);
                     let value_type = if let Some(value) = value {
                         self.analyse_expr(value)
                     } else {
                         StaticType::unit()
                     };
-
-                    if let Some(default) = default {
-                        let loop_depth = std::mem::replace(&mut self.loop_depth, outer_loop_depth);
-                        self.analyse_expr(default);
-                        self.loop_depth = loop_depth;
-                    }
 
                     StaticType::Map {
                         key: Box::new(key_type),

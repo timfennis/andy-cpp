@@ -127,16 +127,25 @@ impl AnalysisError {
         }
     }
 
-    pub(crate) fn variable_rejects_arguments(name: &str, types: &[StaticType], span: Span) -> Self {
+    /// `hides_functions` says whether the variable hides functions with its
+    /// name further out, which the help then explains.
+    pub(crate) fn variable_rejects_arguments(
+        name: &str,
+        types: &[StaticType],
+        hides_functions: bool,
+        span: Span,
+    ) -> Self {
         Self {
             text: format!(
                 "The variable '{name}' holds a function that doesn't accept the arguments '{}'",
                 types.iter().join(", ")
             ),
             span,
-            help_text: Some(format!(
-                "A variable hides the functions named '{name}' further out: it doesn't join their overloads"
-            )),
+            help_text: hides_functions.then(|| {
+                format!(
+                    "A variable hides the functions named '{name}' further out: it doesn't join their overloads"
+                )
+            }),
         }
     }
 

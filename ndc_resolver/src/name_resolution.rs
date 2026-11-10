@@ -599,11 +599,15 @@ impl NameResolver {
                 annotated_type,
                 value,
             } => {
-                if let Some(annotation) = annotated_type {
-                    self.resolve_type(annotation)?;
+                let resolved = match annotated_type {
+                    Some(annotation) => self.resolve_type(annotation),
+                    None => Ok(()),
                 }
-                self.resolve(value)?;
+                .and_then(|()| self.resolve(value));
+                // The names are declared even when the annotation or value
+                // fails, so that later uses of them report nothing further.
                 self.declare_pattern(l_value);
+                resolved?;
             }
             Expression::Assignment { l_value, r_value } => {
                 self.resolve_target(l_value)?;
@@ -635,7 +639,18 @@ impl NameResolver {
                 self.resolve(expression)?;
                 self.resolve(loop_body)?;
             }
-            Expression::For { iterations, body } => self.resolve_for(iterations, body)?,
+            Expression::For { iterations, body } => {
+                // A map comprehension's default is evaluated once, before the
+                // loop starts, so it can't see the loop's binders.
+                if let ForBody::Map {
+                    default: Some(default),
+                    ..
+                } = body.as_ref()
+                {
+                    self.resolve(default)?;
+                }
+                self.resolve_for(iterations, body)?;
+            }
             Expression::Call {
                 function,
                 arguments,
@@ -1028,17 +1043,10 @@ impl NameResolver {
             }
             None => match body {
                 ForBody::Block(block) | ForBody::List { expr: block } => self.resolve(block),
-                ForBody::Map {
-                    key,
-                    value,
-                    default,
-                } => {
+                ForBody::Map { key, value, .. } => {
                     self.resolve(key)?;
                     if let Some(value) = value {
                         self.resolve(value)?;
-                    }
-                    if let Some(default) = default {
-                        self.resolve(default)?;
                     }
                     Ok(())
                 }

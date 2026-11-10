@@ -20,7 +20,8 @@ impl Analyser {
     ) -> AnalysisError {
         let overloads = self.overloads();
         if overloads.variable_ending_search(candidates).is_some() {
-            AnalysisError::variable_rejects_arguments(name, types, span)
+            let hides_functions = overloads.hides_functions(candidates);
+            AnalysisError::variable_rejects_arguments(name, types, hides_functions, span)
         } else if overloads.a_cast_could_resolve(candidates, types) {
             AnalysisError::function_not_found_suggest_cast(name, types, span)
         } else {

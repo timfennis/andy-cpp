@@ -113,14 +113,16 @@ impl Analyser {
             return_type: Box::new(effective_return),
         };
 
-        if let Some(symbol) = declared {
-            let _ = self
-                .types
-                .update_binding_type(symbol, function_type.clone());
-            self.picks.variables.insert(id, symbol);
+        // A named declaration stores the function under its name and, like
+        // `let`, evaluates to unit. An anonymous one evaluates to the function.
+        match declared {
+            Some(symbol) => {
+                let _ = self.types.update_binding_type(symbol, function_type);
+                self.picks.variables.insert(id, symbol);
+                StaticType::unit()
+            }
+            None => function_type,
         }
-
-        function_type
     }
 
     /// Declares a struct's type, constructor and field accessors.

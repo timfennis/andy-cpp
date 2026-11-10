@@ -137,18 +137,24 @@ impl<'a> Overloads<'a> {
             .filter(|&symbol| self.ends_search(symbol))
     }
 
+    /// Whether the search for a call of these candidates stops before some
+    /// functions with the name: in `fn foo(a) { … } let foo = fn(a, b) { … };`,
+    /// the `let` hides `fn foo`.
+    pub(crate) fn hides_functions(self, candidates: &Candidates) -> bool {
+        let reachable: usize = self.reachable(candidates).map(<[SymbolId]>::len).sum();
+        candidates
+            .iter()
+            .flatten()
+            .skip(reachable)
+            .any(|&symbol| self.symbols.kind(symbol) == BindingKind::Function)
+    }
+
     /// Whether `symbol` is a plain binding known to hold a function.
     fn ends_search(self, symbol: SymbolId) -> bool {
         self.symbols.kind(symbol) == BindingKind::Plain
             && matches!(self.types.get_type(symbol), StaticType::Function { .. })
     }
 
-    /// Whether some overload among `candidates` would accept these arguments
-    /// if their types were known more precisely: every parameter overlaps the
-    /// argument in that position, and at least one argument does not already
-    /// fit. A failed call that satisfies this can be fixed with a cast, so the
-    /// diagnostic says so; one that does not is a genuine mismatch and gets no
-    /// misleading advice.
     /// A value whose type isn't known that stands nearer than a function
     /// accepting this call, so the call could mean either: in
     /// `fn foo(x) { 1 } fn test(foo) { foo(2) }`, the parameter `foo`. A
@@ -171,6 +177,12 @@ impl<'a> Overloads<'a> {
         None
     }
 
+    /// Whether some overload among `candidates` would accept these arguments
+    /// if their types were known more precisely: every parameter overlaps the
+    /// argument in that position, and at least one argument does not already
+    /// fit. A failed call that satisfies this can be fixed with a cast, so the
+    /// diagnostic says so; one that does not is a genuine mismatch and gets no
+    /// misleading advice.
     pub(crate) fn a_cast_could_resolve(self, candidates: &Candidates, sig: &[StaticType]) -> bool {
         self.reachable(candidates).flatten().any(|&symbol| {
             let StaticType::Function {
@@ -849,6 +861,22 @@ mod tests {
                 overloads.variable_ending_search(&candidates),
                 Some(variable)
             );
+        });
+    }
+
+    #[test]
+    fn a_variable_ending_the_search_hides_only_the_functions_further_out() {
+        let (mut types, fns) = table(vec![fn_type(vec![StaticType::Int], StaticType::Int)]);
+        let variable = symbol(BindingKind::Plain);
+        types.declare(
+            variable,
+            TypeBinding::Inferred(fn_type(vec![StaticType::String], StaticType::Int)),
+        );
+
+        SYMBOLS.with_borrow(|table| {
+            let overloads = Overloads::new(&types, table);
+            assert!(overloads.hides_functions(&candidates(&[&[variable], &[fns[0]]])));
+            assert!(!overloads.hides_functions(&candidates(&[&[variable]])));
         });
     }
 
