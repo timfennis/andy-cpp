@@ -371,6 +371,16 @@ impl NameResolver {
         self.declarations[&node]
     }
 
+    /// The innermost symbol the identifier at `node` could mean.
+    pub(crate) fn innermost_reference(&self, node: NodeId) -> SymbolId {
+        self.references[&node].innermost()
+    }
+
+    /// The symbol the identifier assignment target at `node` writes to.
+    pub(crate) fn assigned_symbol(&self, node: NodeId) -> SymbolId {
+        self.assignments[&node]
+    }
+
     pub(crate) fn symbol_name(&self, symbol: SymbolId) -> &str {
         self.symbols.name(symbol)
     }
@@ -862,6 +872,12 @@ impl NameResolver {
 impl Candidates {
     fn iter(&self) -> impl Iterator<Item = &Vec<SymbolId>> {
         self.0.iter()
+    }
+
+    /// The newest symbol in the nearest scope. For `x` in
+    /// `let x = 1; { let x = 2; x }`: the inner `x`.
+    fn innermost(&self) -> SymbolId {
+        self.0[0][0]
     }
 }
 

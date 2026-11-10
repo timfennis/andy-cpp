@@ -313,17 +313,10 @@ impl Analyser {
                 | NumericLiteral::Complex(_),
             ) => Ok(StaticType::Number),
             Expression::Continue | Expression::Break => Ok(StaticType::Never),
-            Expression::Identifier {
-                name: ident,
-                resolved,
-                ..
-            } => {
-                let Some(binding) = self.scope_tree.get_binding_any(ident) else {
-                    self.emit(AnalysisError::identifier_not_previously_declared(
-                        ident, *span,
-                    ));
-                    return Ok(StaticType::Any);
-                };
+            Expression::Identifier { resolved, .. } => {
+                let binding = self
+                    .scope_tree
+                    .get_binding(self.resolver.innermost_reference(*id));
 
                 *resolved = Binding::Resolved(Candidate::Scalar(binding));
 
@@ -925,16 +918,10 @@ impl Analyser {
         span: Span,
     ) -> Result<StaticType, AnalysisError> {
         match &mut lvalue.target {
-            AssignmentTarget::Identifier {
-                identifier,
-                resolved,
-                ..
-            } => {
-                let Some(target) = self.scope_tree.get_binding_any(identifier) else {
-                    return Err(AnalysisError::identifier_not_previously_declared(
-                        identifier, span,
-                    ));
-                };
+            AssignmentTarget::Identifier { resolved, .. } => {
+                let target = self
+                    .scope_tree
+                    .get_binding(self.resolver.assigned_symbol(lvalue.id));
 
                 *resolved = Some(target);
                 Ok(self.scope_tree.get_type(target).clone())
@@ -1506,14 +1493,6 @@ impl AnalysisError {
     fn not_callable(typ: &StaticType, span: Span) -> Self {
         Self {
             text: format!("Unable to invoke {typ} as a function."),
-            span,
-            help_text: None,
-        }
-    }
-
-    fn identifier_not_previously_declared(ident: &str, span: Span) -> Self {
-        Self {
-            text: format!("Identifier {ident} has not previously been declared"),
             span,
             help_text: None,
         }
