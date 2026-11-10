@@ -30,8 +30,8 @@ A closure that captures a variable which holds a reference back to itself create
     let f = ();
     f = fn(x) { if x > 0 then f(x - 1) else 0 };
 }
-// The upvalue for f is now closed over a closure
-// that itself holds a reference to the same upvalue.
+// f now holds the closure, and the closure holds
+// f, because it captured f to call it.
 ```
 
 ## Practical Impact

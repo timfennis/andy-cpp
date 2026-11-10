@@ -34,6 +34,7 @@ fn value_to_json(
         Value::Float(_) if lossy => Ok(JsonValue::Null),
         Value::Float(f) => bail!("cannot convert non-finite float {f} to JSON"),
         Value::Number(number) => advanced_number_to_json(number, lossy),
+        Value::Cell(_) => unreachable!("internal error: a cell is never a program's value"),
         Value::Object(obj) => {
             // Only these variants have interior mutability through which a
             // value can contain itself; all other variants are leaves or

@@ -1158,6 +1158,7 @@ fn convert_to_int(value: &Value) -> Result<i64, VmError> {
             _ => None,
         },
         Value::None => None,
+        Value::Cell(_) => unreachable!("internal error: a cell is never a program's value"),
         Value::Int(_) | Value::Float(_) | Value::Number(_) => unreachable!("handled above"),
     };
     converted.ok_or_else(cannot_convert)
@@ -1177,6 +1178,7 @@ fn convert_to_float(value: &Value) -> Result<f64, VmError> {
             _ => Err(VmError::native("cannot convert value to Float".to_string())),
         },
         Value::None => Err(VmError::native("cannot convert None to Float".to_string())),
+        Value::Cell(_) => unreachable!("internal error: a cell is never a program's value"),
         Value::Int(_) | Value::Float(_) | Value::Number(_) => unreachable!("handled above"),
     }
 }

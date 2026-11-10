@@ -39,15 +39,30 @@ pub enum AugmentedAssignmentPlan {
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub enum ResolvedVar {
-    Local { slot: usize },
-    Upvalue { slot: usize },
-    Global { slot: usize },
+    Local {
+        slot: usize,
+    },
+    /// A local that closures capture. Its slot holds the value until the first
+    /// capture moves it into a heap cell the closures share, so reads and
+    /// writes go through the cell once there is one.
+    Cell {
+        slot: usize,
+    },
+    Upvalue {
+        slot: usize,
+    },
+    Global {
+        slot: usize,
+    },
 }
 
 impl ResolvedVar {
     pub fn slot(self) -> usize {
         match self {
-            Self::Local { slot } | Self::Upvalue { slot, .. } | Self::Global { slot } => slot,
+            Self::Local { slot }
+            | Self::Cell { slot }
+            | Self::Upvalue { slot, .. }
+            | Self::Global { slot } => slot,
         }
     }
 }

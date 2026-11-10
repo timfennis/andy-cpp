@@ -62,9 +62,11 @@ impl std::fmt::Debug for JumpTarget {
 /// | `Constant`    | `[… → … value]`                        | +1                                         |
 /// | `Pop`         | `[… value → …]`                        | −1                                         |
 /// | `GetLocal`    | `[… → … value]`                        | +1 (copies from slot)                      |
+/// | `GetCell`     | `[… → … value]`                        | +1 (reads through the slot's cell)         |
 /// | `GetUpvalue`  | `[… → … value]`                        | +1 (reads upvalue cell)                    |
 /// | `GetGlobal`   | `[… → … value]`                        | +1 (copies from globals)                   |
 /// | `SetLocal`    | `[… value → …]`                        | −1 (pops, writes to slot)                  |
+/// | `SetCell`     | `[… value → …]`                        | −1 (pops, writes through the slot's cell)  |
 /// | `SetUpvalue`  | `[… value → …]`                        | −1 (pops, writes to upvalue cell)          |
 /// | `Call`        | `[… callee a1…an → … result]`          | −n (pops callee + args, pushes result)     |
 /// | `CallVec`     | `[… callee a1…an → … tuple]`           | −n (pops callee + args, pushes result)     |
@@ -83,7 +85,7 @@ impl std::fmt::Debug for JumpTarget {
 /// | `ListPush`    | `[… value → …]`                        | −1 (pops value, mutates list in slot)      |
 /// | `MapInsert`   | `[… key value → …]`                    | −2 (pops both, mutates map in slot)        |
 /// | `Unpack`      | `[… compound → … v1…vn]`               | +(n−1) (pops 1, pushes n)                  |
-/// | `CloseUpvalue`| `[…]`                                   | 0 (closes upvalue cells, no stack change)  |
+/// | `NewCell`     | `[…]`                                   | 0 (puts a fresh cell in a slot)            |
 /// | `Memoize`     | `[… fn → … memoized_fn]`               | 0 (pops and pushes)                        |
 // NOTE: OpCode cannot be Copy because the Closure variant holds Rc<[CaptureSource]>.
 // The dispatch loop accesses opcodes by reference to avoid cloning the 32-byte enum on
@@ -110,10 +112,16 @@ pub enum OpCode {
     Constant(usize),
     /// Copies local slot onto stack. `[… → … value]`
     GetLocal(usize),
+    /// Reads a captured local onto the stack: through the cell in its slot,
+    /// or the slot's own value before the first capture. `[… → … value]`
+    GetCell(usize),
     /// Reads upvalue cell onto stack. `[… → … value]`
     GetUpvalue(usize),
     /// Pops top and writes to local slot. `[… value → …]`
     SetLocal(usize),
+    /// Pops top and writes to a captured local: through the cell in its slot,
+    /// or to the slot itself before the first capture. `[… value → …]`
+    SetCell(usize),
     /// Pops top and writes to upvalue cell. `[… value → …]`
     SetUpvalue(usize),
     /// Copies global slot onto stack. `[… → … value]`
@@ -145,8 +153,9 @@ pub enum OpCode {
     Halt,
     /// Returns from function call. Pops return value, truncates frame, pushes return value.
     Return,
-    /// Closes open upvalues at or above `frame_pointer + slot`. No stack change.
-    CloseUpvalue(usize),
+    /// Puts a fresh cell holding unit in a local slot, so a closure created
+    /// before the local's value exists can capture it. No stack change.
+    NewCell(usize),
     /// Pops function, pushes memoized wrapper. `[… fn → … memoized_fn]`
     Memoize,
     /// Peeks top; errors if the value does not conform to the type. `[… value → … value]`
@@ -171,8 +180,12 @@ impl OpCode {
             // The conditional jumps peek at the condition without popping it;
             // the branch they land in pops it instead.
             Self::Jump(_) | Self::JumpIfTrue(_) | Self::JumpIfFalse(_) => 0,
-            Self::Constant(_) | Self::GetLocal(_) | Self::GetUpvalue(_) | Self::GetGlobal(_) => 1,
-            Self::SetLocal(_) | Self::SetUpvalue(_) => -1,
+            Self::Constant(_)
+            | Self::GetLocal(_)
+            | Self::GetCell(_)
+            | Self::GetUpvalue(_)
+            | Self::GetGlobal(_) => 1,
+            Self::SetLocal(_) | Self::SetCell(_) | Self::SetUpvalue(_) => -1,
             // Pops `n` elements, pushes the collection: -n+1.
             Self::MakeList(n) | Self::MakeTuple(n) => 1 - *n as isize,
             // Pops a key and a value per pair plus the optional default,
@@ -199,7 +212,7 @@ impl OpCode {
             // Pops the return value; the frame teardown that discards the
             // rest of the frame happens in the VM, outside this accounting.
             Self::Return => -1,
-            Self::CloseUpvalue(_) => 0,
+            Self::NewCell(_) => 0,
             Self::Memoize => 0,
             // Peeks the value without popping it.
             Self::CheckType(_) => 0,
@@ -220,6 +233,9 @@ impl std::fmt::Debug for OpCode {
             Self::GetLocal(n) => write!(f, "GetLocal({n})"),
             Self::SetLocal(n) => write!(f, "SetLocal({n})"),
             Self::GetGlobal(n) => write!(f, "GetGlobal({n})"),
+            Self::GetCell(n) => write!(f, "GetCell({n})"),
+            Self::SetCell(n) => write!(f, "SetCell({n})"),
+            Self::NewCell(n) => write!(f, "NewCell({n})"),
             Self::GetUpvalue(n) => write!(f, "GetUpvalue({n})"),
             Self::SetUpvalue(n) => write!(f, "SetUpvalue({n})"),
             Self::MakeList(n) => write!(f, "MakeList({n})"),
@@ -250,7 +266,6 @@ impl std::fmt::Debug for OpCode {
             Self::Halt => write!(f, "Halt"),
             Self::Return => write!(f, "Return"),
             Self::Unpack(n) => write!(f, "Unpack({n})"),
-            Self::CloseUpvalue(n) => write!(f, "CloseUpvalue({n})"),
             Self::Memoize => write!(f, "Memoize"),
             Self::CheckType(typ) => write!(f, "CheckType({typ})"),
         }
@@ -340,7 +355,10 @@ impl OptimizerIr {
                 let elide = i + 1 < self.code.len()
                     && matches!(
                         self.code[i].1,
-                        OpCode::Constant(_) | OpCode::GetGlobal(_) | OpCode::GetLocal(_)
+                        OpCode::Constant(_)
+                            | OpCode::GetGlobal(_)
+                            | OpCode::GetLocal(_)
+                            | OpCode::GetCell(_)
                     )
                     && matches!(self.code[i + 1].1, OpCode::Pop)
                     && !targets.contains(&self.code[i].0)

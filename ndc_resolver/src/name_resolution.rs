@@ -468,6 +468,11 @@ impl NameResolver {
         self.scopes.bound_in[&symbol].1
     }
 
+    /// Whether some closure captures `symbol`, so it must outlive its scope.
+    pub fn is_captured(&self, symbol: SymbolId) -> bool {
+        self.captured.contains(&symbol)
+    }
+
     /// The native's position in the function registry, which is also its global
     /// slot in the VM. `None` for anything that isn't a native.
     pub fn native_slot(&self, symbol: SymbolId) -> Option<usize> {
