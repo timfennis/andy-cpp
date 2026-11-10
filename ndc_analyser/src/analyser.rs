@@ -641,18 +641,11 @@ impl Analyser {
             Expression::Call {
                 function,
                 arguments,
-                method_syntax,
-            } => self.analyse_call(
-                function,
-                arguments,
-                CallKind::Regular,
-                *method_syntax,
-                *span,
-            ),
+            } => self.analyse_call(function, arguments, CallKind::Regular, *span),
             Expression::OperatorCall {
                 function,
                 arguments,
-            } => self.analyse_call(function, arguments, CallKind::Operator, false, *span),
+            } => self.analyse_call(function, arguments, CallKind::Operator, *span),
             Expression::MemberAccess {
                 receiver,
                 member,
@@ -803,7 +796,6 @@ impl Analyser {
         function: &mut ExpressionLocation,
         arguments: &mut [ExpressionLocation],
         kind: CallKind,
-        method_syntax: bool,
         span: Span,
     ) -> Result<StaticType, AnalysisError> {
         // Higher-order call shapes like `get_function()()` have a non-identifier
@@ -835,14 +827,10 @@ impl Analyser {
 
         // A value whose type isn't known may hold a function itself, so one
         // standing nearer than a function that accepts the call makes it
-        // ambiguous. A method call always means a function.
-        if !method_syntax
-            && Overloads::new(&self.types)
-                .any_value_hiding_function(
-                    self.resolver.reference_candidates(function.id),
-                    &type_sig,
-                )
-                .is_some()
+        // ambiguous. `xs.len()` is the call `len(xs)`, so it's checked too.
+        if Overloads::new(&self.types)
+            .any_value_hiding_function(self.resolver.reference_candidates(function.id), &type_sig)
+            .is_some()
         {
             self.emit(AnalysisError::ambiguous_call(name, function.span));
         }
@@ -1992,10 +1980,12 @@ mod tests {
     }
 
     #[test]
-    fn method_calls_always_mean_the_function() {
+    fn method_calls_are_checked_like_plain_calls() {
         assert_eq!(
             errors("fn test(len) { \"abc\".len() }", len_native()),
-            Vec::<String>::new()
+            vec![
+                "Ambiguous call to 'len': it could mean the function 'len' or a value named 'len' whose type isn't known"
+            ],
         );
     }
 

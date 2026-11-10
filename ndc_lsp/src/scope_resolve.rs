@@ -167,7 +167,6 @@ fn collect(expr: &ExpressionLocation, scope: Span, out: &mut Vec<Decl>) {
         Expression::Call {
             function,
             arguments,
-            ..
         }
         | Expression::OperatorCall {
             function,

@@ -218,19 +218,19 @@ len("test");   // 4: calls the stdlib function, skipping the non-function bindin
 "test".len;    // 4: method call also resolves to the function
 ```
 
-A value whose type isn't known, such as a parameter without a type annotation, might hold a function. Calling it by a name that a function also has is an error when that function accepts the call and the value is the nearer of the two, because the call could mean either. Rename the value if it holds a function, or annotate its type if it doesn't. A method call always means the function:
+A value whose type isn't known, such as a parameter without a type annotation, might hold a function. Calling it by a name that a function also has is an error when that function accepts the call and the value is the nearer of the two, because the call could mean either. A method call like `"abc".len()` is the call `len("abc")`, so the same applies. Rename the value if it holds a function, or annotate its type if it doesn't:
 
 ```ndc
 fn label(len) {
     len("abc")          // ERROR: Ambiguous call to 'len'
 }
 
-fn padded(len: Int) {
-    len("abc") + len    // fine: an Int can't be called, so this calls the function
+fn measure(len) {
+    "abc".len()         // ERROR: the same call, written as a method call
 }
 
-fn measure(len) {
-    "abc".len()         // fine: a method call always means the function
+fn padded(len: Int) {
+    len("abc") + len    // fine: an Int can't be called, so this calls the function
 }
 ```
 

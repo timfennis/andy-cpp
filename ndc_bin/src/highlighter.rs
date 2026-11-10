@@ -121,7 +121,6 @@ fn collect_function_spans(expr: &ExpressionLocation, spans: &mut AHashSet<usize>
         Expression::Call {
             function,
             arguments,
-            ..
         }
         | Expression::OperatorCall {
             function,

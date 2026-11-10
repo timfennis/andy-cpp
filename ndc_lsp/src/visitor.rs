@@ -155,7 +155,6 @@ fn child_expressions(expr: &ExpressionLocation) -> Vec<&ExpressionLocation> {
         Expression::Call {
             function,
             arguments,
-            ..
         }
         | Expression::OperatorCall {
             function,
@@ -320,7 +319,6 @@ fn walk_expression(visitor: &mut impl AstVisitor, expr: &ExpressionLocation) {
         Expression::Call {
             function,
             arguments,
-            ..
         }
         | Expression::OperatorCall {
             function,

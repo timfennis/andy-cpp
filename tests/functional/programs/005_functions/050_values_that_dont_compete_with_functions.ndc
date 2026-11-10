@@ -7,11 +7,6 @@ fn call_pick(pick) { pick(1) }
 print(call_pick(fn(x) { "parameter" }));
 // expect-output: parameter
 
-// A method call always means a function.
-fn measure(len) { "abcd".len() }
-print(measure(99));
-// expect-output: 4
-
 // An annotated value that can't be called leaves the name to the function.
 fn padded(len: Int) { len("abc") + len }
 print(padded(10));
