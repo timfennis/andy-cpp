@@ -394,7 +394,7 @@ impl Analyser {
                     None => self.analyse_expr(value),
                 };
 
-                self.resolve_binding_pattern(
+                self.declare_binding_pattern(
                     l_value,
                     annotated_type,
                     found_type.clone(),
@@ -403,7 +403,7 @@ impl Analyser {
                 StaticType::unit()
             }
             Expression::Assignment { l_value, r_value } => {
-                let old_type = self.resolve_assignment_target(l_value, *span);
+                let old_type = self.analyse_assignment_target(l_value, *span);
                 let new_type = self.analyse_with_expected(r_value, &old_type);
                 self.validate_assignment_write(l_value, &old_type, &new_type, *span);
 
@@ -414,7 +414,7 @@ impl Analyser {
                 r_value,
                 operation,
             } => {
-                let left_type = self.resolve_assignment_target(l_value, *span);
+                let left_type = self.analyse_assignment_target(l_value, *span);
                 // `p.x += 1` reads `p.x`, the call `x(p)`, first.
                 if let AssignmentTarget::Member {
                     receiver,
@@ -579,8 +579,7 @@ impl Analyser {
                 // leave the function to end a loop around its declaration.
                 let outer_loop_depth = std::mem::take(&mut self.loop_depth);
                 let parameter_nodes = parameters.iter().map(|p| p.lvalue.id).collect_vec();
-                let param_types =
-                    self.resolve_parameters_declarative(&type_signature, &parameter_nodes);
+                let param_types = self.declare_parameters(&type_signature, &parameter_nodes);
 
                 for (param, typ) in parameters.iter().zip(&param_types) {
                     self.result
@@ -676,7 +675,7 @@ impl Analyser {
             }
             Expression::For { iterations, body } => {
                 let loop_depth = self.loop_depth;
-                self.resolve_for_iterations(iterations, body, loop_depth)
+                self.analyse_for_iterations(iterations, body, loop_depth)
             }
             Expression::Call {
                 function,
@@ -896,7 +895,7 @@ impl Analyser {
     /// Each iteration's sequence is evaluated outside of its own loop, and what
     /// follows it inside. `outer_loop_depth` is the loop depth around the whole
     /// `for`, where a map comprehension's default is evaluated.
-    fn resolve_for_iterations(
+    fn analyse_for_iterations(
         &mut self,
         iterations: &[ForIteration],
         body: &ForBody,
@@ -917,7 +916,7 @@ impl Analyser {
 
                 self.loop_depth += 1;
                 // A `for` binder has no type annotation.
-                self.resolve_binding_pattern(l_value, None, found_type, sequence_span);
+                self.declare_binding_pattern(l_value, None, found_type, sequence_span);
             }
             ForIteration::Guard(expr) => {
                 self.analyse_expr(expr);
@@ -925,7 +924,7 @@ impl Analyser {
         }
 
         let typ = if !tail.is_empty() {
-            self.resolve_for_iterations(tail, body, outer_loop_depth)
+            self.analyse_for_iterations(tail, body, outer_loop_depth)
         } else {
             match body {
                 ForBody::Block(block) => {
@@ -964,7 +963,9 @@ impl Analyser {
         typ
     }
 
-    fn resolve_assignment_target(
+    /// Records where an assignment stores its value, and returns the type of
+    /// what is stored there.
+    fn analyse_assignment_target(
         &mut self,
         lvalue: &AssignmentTargetLocation,
         span: Span,
@@ -1030,7 +1031,7 @@ impl Analyser {
             // What `(a, b) = …` can store is a tuple of what each target can.
             AssignmentTarget::Sequence(seq) => StaticType::Tuple(
                 seq.iter()
-                    .map(|sub_lvalue| self.resolve_assignment_target(sub_lvalue, span))
+                    .map(|sub_lvalue| self.analyse_assignment_target(sub_lvalue, span))
                     .collect(),
             ),
             AssignmentTarget::Member {
@@ -1248,7 +1249,7 @@ impl Analyser {
     }
 
     /// Declares a function's parameters and returns their types.
-    fn resolve_parameters_declarative(
+    fn declare_parameters(
         &mut self,
         type_signature: &TypeSignature,
         parameter_nodes: &[NodeId],
@@ -1274,7 +1275,10 @@ impl Analyser {
             .map(|param| param.type_name.clone())
             .collect()
     }
-    fn resolve_binding_pattern(
+
+    /// Declares each name in a `let` or `for` pattern, checking
+    /// `found_type` against the annotation and the pattern's shape.
+    fn declare_binding_pattern(
         &mut self,
         lvalue: &BindingPatternLocation,
         expected_type: Option<StaticType>,
@@ -1351,7 +1355,7 @@ impl Analyser {
                     } else {
                         None
                     };
-                    self.resolve_binding_pattern(
+                    self.declare_binding_pattern(
                         sub_lvalue,
                         sub_expected,
                         found_type.clone(),
@@ -1374,7 +1378,7 @@ impl Analyser {
     /// is bound and a later `print(c)` reports nothing further.
     fn bind_patterns_as_any(&mut self, patterns: &[BindingPatternLocation], span: Span) {
         for pattern in patterns {
-            self.resolve_binding_pattern(pattern, None, StaticType::Any, span);
+            self.declare_binding_pattern(pattern, None, StaticType::Any, span);
         }
     }
 
