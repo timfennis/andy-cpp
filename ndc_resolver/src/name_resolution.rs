@@ -27,7 +27,8 @@ pub struct Scope {
 pub(crate) struct ScopeTree {
     current: ScopeId,
     scopes: Vec<Scope>,
-    bound_in: AHashMap<SymbolId, ScopeId>,
+    /// The scope that binds each value, and its position among that scope's bindings.
+    bound_in: AHashMap<SymbolId, (ScopeId, usize)>,
     /// The parameter scope of each function, keyed by its declaration node.
     function_scopes: AHashMap<NodeId, ScopeId>,
 }
@@ -234,8 +235,9 @@ impl ScopeTree {
     }
 
     pub(crate) fn bind(&mut self, symbol_id: SymbolId) {
+        let position = self.scopes[self.current.0].bindings.len();
         self.scopes[self.current.0].bind(symbol_id);
-        self.bound_in.insert(symbol_id, self.current);
+        self.bound_in.insert(symbol_id, (self.current, position));
     }
 
     /// Binds a type name in the current scope. Types aren't runtime values, so
@@ -263,7 +265,7 @@ impl ScopeTree {
     /// first. In `fn f() { let y = 1; fn g() { y } }`, a use of `y` in `g` crosses `[g]`.
     /// Natives are globals, so uses of them cross nothing.
     pub(crate) fn crossed_functions(&self, symbol: SymbolId) -> Vec<NodeId> {
-        let bound_in = self.bound_in[&symbol];
+        let (bound_in, _) = self.bound_in[&symbol];
 
         if self.scopes[bound_in.0].kind == ScopeKind::Builtins {
             return Vec::new();
@@ -457,7 +459,19 @@ impl NameResolver {
 
     /// The scope that binds the value `symbol`.
     pub fn scope_of(&self, symbol: SymbolId) -> ScopeId {
-        self.scopes.bound_in[&symbol]
+        self.scopes.bound_in[&symbol].0
+    }
+
+    /// Where `symbol` comes among its scope's bindings: in `let a = 1; let b = 2;`,
+    /// `a` is 0 and `b` is 1.
+    pub fn binding_position(&self, symbol: SymbolId) -> usize {
+        self.scopes.bound_in[&symbol].1
+    }
+
+    /// The native's position in the function registry, which is also its global
+    /// slot in the VM. `None` for anything that isn't a native.
+    pub fn native_slot(&self, symbol: SymbolId) -> Option<usize> {
+        self.native_slots.get(&symbol).copied()
     }
 
     /// The parameter scope of the function declared at `function`.
