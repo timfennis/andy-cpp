@@ -10,8 +10,8 @@ use crate::visitor::{AstVisitor, node_at_offset, walk_ast};
 /// Resolve the declaration of the identifier under the cursor.
 ///
 /// Gathers every declaration with the scope region in which it is visible, keeps
-/// only those visible at the cursor (enclosing scope + declared-before-use, with
-/// functions hoisted), then picks the innermost-scoped one.
+/// only those visible at the cursor (enclosing scope + declared-before-use),
+/// then picks the innermost-scoped one.
 ///
 /// NOTE: this is name-only — it does not disambiguate function overloads, so a
 /// call to one of several same-named functions resolves to whichever visible
@@ -185,6 +185,24 @@ mod tests {
         let state = analyse(src);
         let loc = def_at(&state, src.rfind("total").unwrap()).expect("definition found");
         assert_eq!(start_offset(&state, &loc), 4);
+    }
+
+    #[test]
+    fn function_not_visible_before_declaration() {
+        // Functions aren't hoisted, so the call before the declaration (an
+        // analysis error) finds nothing.
+        let src = "f();\nfn f() { 1 }";
+        let state = analyse(src);
+        assert!(def_at(&state, src.find('f').unwrap()).is_none());
+    }
+
+    #[test]
+    fn recursive_call_jumps_to_its_own_function() {
+        let src = "fn count(n) { if n > 0 { count(n - 1) } }";
+        let state = analyse(src);
+        let loc = def_at(&state, src.rfind("count").unwrap()).expect("definition found");
+        // Resolves to the whole declaration until a dedicated name span exists.
+        assert_eq!(start_offset(&state, &loc), 0);
     }
 
     #[test]
