@@ -63,6 +63,9 @@ pub fn scope_len(span: Span) -> usize {
     span.end().saturating_sub(span.offset())
 }
 
+/// Records the declarations in `expr`, which sits in `scope`. Only the nodes
+/// that declare names or open a scope need matching here; every other node's
+/// children are in the same scope as the node.
 fn collect(expr: &ExpressionLocation, scope: Span, out: &mut Vec<Decl>) {
     match &expr.expression {
         Expression::VariableDeclaration { l_value, value, .. } => {
@@ -100,27 +103,6 @@ fn collect(expr: &ExpressionLocation, scope: Span, out: &mut Vec<Decl>) {
                 collect(s, expr.span, out);
             }
         }
-        Expression::Statement(inner)
-        | Expression::Grouping(inner)
-        | Expression::Cast { value: inner, .. } => collect(inner, scope, out),
-        Expression::If {
-            condition,
-            on_true,
-            on_false,
-        } => {
-            collect(condition, scope, out);
-            collect(on_true, scope, out);
-            if let Some(f) = on_false {
-                collect(f, scope, out);
-            }
-        }
-        Expression::While {
-            expression,
-            loop_body,
-        } => {
-            collect(expression, scope, out);
-            collect(loop_body, scope, out);
-        }
         Expression::For { iterations, body } => {
             // For-loop bindings are visible across the loop expression, but only
             // after their own sequence (so `for x in x` resolves the sequence to
@@ -153,71 +135,22 @@ fn collect(expr: &ExpressionLocation, scope: Span, out: &mut Vec<Decl>) {
                 }
             }
         }
-        Expression::Return { value } => collect(value, scope, out),
-        Expression::Logical { left, right, .. } => {
-            collect(left, scope, out);
-            collect(right, scope, out);
-        }
-        Expression::Assignment { r_value, .. } | Expression::OpAssignment { r_value, .. } => {
-            collect(r_value, scope, out);
-        }
-        Expression::Call {
-            function,
-            arguments,
-        }
-        | Expression::OperatorCall {
-            function,
-            arguments,
-        } => {
-            collect(function, scope, out);
-            for arg in arguments {
-                collect(arg, scope, out);
-            }
-        }
-        Expression::MemberAccess { receiver, .. } => collect(receiver, scope, out),
-        Expression::Tuple { values } | Expression::List { values } => {
-            for v in values {
-                collect(v, scope, out);
-            }
-        }
-        Expression::Map { values, default } => {
-            for (key, value) in values {
-                collect(key, scope, out);
-                if let Some(v) = value {
-                    collect(v, scope, out);
-                }
-            }
-            if let Some(d) = default {
-                collect(d, scope, out);
-            }
-        }
-        Expression::RangeInclusive { start, end } | Expression::RangeExclusive { start, end } => {
-            if let Some(s) = start {
-                collect(s, scope, out);
-            }
-            if let Some(e) = end {
-                collect(e, scope, out);
-            }
-        }
-        Expression::Identifier { .. }
-        | Expression::BoolLiteral(_)
-        | Expression::NoneLiteral
-        | Expression::StringLiteral(_)
-        | Expression::NumericLiteral(_)
-        | Expression::Break
-        | Expression::Continue => {}
         Expression::StructDeclaration { name, .. } => {
             // The declaration binds the constructor, visible from the
             // declaration onward (structs are not hoisted, matching the
-            // analyser). Fields are names + type annotations, not expressions,
-            // so there is nothing to descend into. No dedicated name span
-            // exists yet (the parser keeps only the whole-declaration span).
+            // analyser). No dedicated name span exists yet (the parser keeps
+            // only the whole-declaration span).
             out.push(Decl {
                 name: name.clone(),
                 name_span: expr.span,
                 scope_span: scope,
                 visible_from: expr.span.offset(),
             });
+        }
+        _ => {
+            for child in expr.children() {
+                collect(child, scope, out);
+            }
         }
     }
 }
