@@ -1,5 +1,5 @@
 use crate::types::TypeTable;
-use ndc_analysis::{Binding, Candidate, ResolvedVar};
+use ndc_analysis::{Binding, Candidate};
 use ndc_core::StaticType;
 use ndc_resolver::{BindingKind, Candidates, SymbolId, SymbolTable};
 
@@ -20,7 +20,7 @@ pub enum CallKind {
 /// binding lets the analyser avoid doing per-position resolution twice on
 /// every Dynamic operator-form call.
 pub(crate) struct ResolvedCall {
-    pub binding: Binding,
+    pub binding: Binding<SymbolId>,
     pub return_type: StaticType,
 }
 
@@ -195,8 +195,8 @@ impl<'a> Overloads<'a> {
     /// Resolve a function call to a binding and an inferred return type.
     ///
     /// `candidates` are the resolver's same-named symbols for the callee,
-    /// grouped by scope, nearest first. `locate` says how the call site
-    /// reaches the symbols it picks.
+    /// grouped by scope, nearest first. The binding names the symbols it picks;
+    /// the layout works out later where they live.
     ///
     /// Single entry point for both regular calls (`f(x)`) and operator-form
     /// calls (`a + b`, `-x`, `op=`). The two differ only in whether
@@ -223,14 +223,13 @@ impl<'a> Overloads<'a> {
         candidates: &Candidates,
         sig: &[StaticType],
         kind: CallKind,
-        locate: impl Fn(SymbolId) -> ResolvedVar,
     ) -> ResolvedCall {
         let walk = self.scalar_walk(candidates, sig);
 
         // 1. Scalar exact match.
         if let Some(exact) = walk.exact {
             return ResolvedCall {
-                binding: Binding::Resolved(Candidate::Scalar(locate(exact))),
+                binding: Binding::Resolved(Candidate::Scalar(exact)),
                 return_type: self.scalar_return_type(exact),
             };
         }
@@ -271,7 +270,7 @@ impl<'a> Overloads<'a> {
         {
             let scalar_return = self.scalar_return_type(scalar);
             return ResolvedCall {
-                binding: Binding::Resolved(Candidate::Vec(locate(scalar))),
+                binding: Binding::Resolved(Candidate::Vec(scalar)),
                 return_type: StaticType::Tuple(vec![scalar_return; *axis_len]),
             };
         }
@@ -288,11 +287,11 @@ impl<'a> Overloads<'a> {
             };
             let mut combined = Vec::new();
             for symbol in scalar_loose {
-                let candidate = Candidate::Scalar(locate(symbol));
+                let candidate = Candidate::Scalar(symbol);
                 push_unique(&mut combined, candidate);
             }
             for symbol in vec_symbols {
-                let candidate = Candidate::Vec(locate(symbol));
+                let candidate = Candidate::Vec(symbol);
                 push_unique(&mut combined, candidate);
             }
             return ResolvedCall {
@@ -315,7 +314,7 @@ impl<'a> Overloads<'a> {
             let candidates = walk
                 .all_by_name
                 .into_iter()
-                .map(|symbol| Candidate::Scalar(locate(symbol)))
+                .map(Candidate::Scalar)
                 .collect();
             return ResolvedCall {
                 binding: Binding::Dynamic(candidates),
@@ -660,28 +659,20 @@ mod tests {
         )
     }
 
-    /// Asserts the call picks `expected` as its single overload. Each symbol in
-    /// `symbols` is located at its position, so the pick shows in the binding.
+    /// Asserts the call picks `expected` as its single overload.
     fn assert_resolves_to(
         types: &TypeTable,
-        symbols: &[SymbolId],
         candidates: &Candidates,
         sig: &[StaticType],
         expected: SymbolId,
     ) {
-        let locate = |symbol: SymbolId| ResolvedVar::Local {
-            slot: symbols
-                .iter()
-                .position(|&known| known == symbol)
-                .expect("the test knows every symbol"),
-        };
         let resolved = SYMBOLS.with_borrow(|table| {
-            Overloads::new(types, table).resolve_call(candidates, sig, CallKind::Regular, locate)
+            Overloads::new(types, table).resolve_call(candidates, sig, CallKind::Regular)
         });
-        match resolved.binding {
-            Binding::Resolved(Candidate::Scalar(var)) => assert_eq!(var, locate(expected)),
-            other => panic!("expected Resolved Scalar, got {other:?}"),
-        }
+        assert_eq!(
+            resolved.binding,
+            Binding::Resolved(Candidate::Scalar(expected))
+        );
     }
 
     // Two overloads of `locate` registered in the same scope: a more-specific
@@ -701,13 +692,7 @@ mod tests {
             StaticType::List(Box::new(StaticType::Int)),
             fn_type(vec![StaticType::Any], StaticType::Bool),
         ];
-        assert_resolves_to(
-            &types,
-            &locates,
-            &candidates(&[&locates]),
-            &call_sig,
-            locates[0],
-        );
+        assert_resolves_to(&types, &candidates(&[&locates]), &call_sig, locates[0]);
     }
 
     // Int and Number are siblings. An Int call must select the Int overload
@@ -718,13 +703,7 @@ mod tests {
             fn_type(vec![StaticType::Number], StaticType::String),
             fn_type(vec![StaticType::Int], StaticType::String),
         ]);
-        assert_resolves_to(
-            &types,
-            &foos,
-            &candidates(&[&foos]),
-            &[StaticType::Int],
-            foos[1],
-        );
+        assert_resolves_to(&types, &candidates(&[&foos]), &[StaticType::Int], foos[1]);
     }
 
     // `fn foo(Any)` declared in an inner scope matches every call shape, so
@@ -740,7 +719,6 @@ mod tests {
 
         assert_resolves_to(
             &types,
-            &foos,
             &candidates(&[&[inner], &[outer]]),
             &[StaticType::Int],
             inner,
@@ -759,7 +737,6 @@ mod tests {
 
         assert_resolves_to(
             &types,
-            &foos,
             &candidates(&[&[inner], &[outer]]),
             &[StaticType::String],
             outer,
@@ -774,13 +751,7 @@ mod tests {
             variadic_fn(StaticType::Any),
             fn_type(vec![StaticType::Int], StaticType::Int),
         ]);
-        assert_resolves_to(
-            &types,
-            &foos,
-            &candidates(&[&foos]),
-            &[StaticType::Int],
-            foos[1],
-        );
+        assert_resolves_to(&types, &candidates(&[&foos]), &[StaticType::Int], foos[1]);
     }
 
     // Simulates: fn foo(x: Int) { … } let foo = fn(x: String) { … }; foo(1)
@@ -799,9 +770,7 @@ mod tests {
         SYMBOLS.with_borrow(|table| {
             let overloads = Overloads::new(&types, table);
             let resolved =
-                overloads.resolve_call(&candidates, &[StaticType::Int], CallKind::Regular, |_| {
-                    ResolvedVar::Local { slot: 0 }
-                });
+                overloads.resolve_call(&candidates, &[StaticType::Int], CallKind::Regular);
             assert_eq!(resolved.binding, Binding::None);
             assert_eq!(
                 overloads.variable_ending_search(&candidates),
@@ -819,7 +788,6 @@ mod tests {
 
         assert_resolves_to(
             &types,
-            &[fns[0], variable],
             &candidates(&[&[variable], &[fns[0]]]),
             &[StaticType::Int],
             fns[0],

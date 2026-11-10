@@ -61,7 +61,7 @@ Source → [Lexer] → Tokens → [Parser] → AST → [Analyser] → Analysis
                                              [Bytecode VM] → Value
 ```
 
-The AST is syntax only. The analyser runs name resolution (`ndc_resolver`) and storage layout (`ndc_layout`) itself, and records what it works out in an `Analysis` keyed by each node's `NodeId`.
+The AST is syntax only. The analyser runs name resolution (`ndc_resolver`) on each statement before typing it, and storage layout (`ndc_layout`) once at the end of each batch, and records what it works out in an `Analysis` keyed by each node's `NodeId`. The analyser itself only deals in symbols and types; the layout pass turns the symbols it picked into slots.
 
 ### Git Workflow
 - Use Conventional Commit subjects for commits and pull request titles: `feat`, `fix`, `refactor`, `perf`, `style`, `test`, `docs`, `build`, `ops`, `chore`
@@ -79,8 +79,8 @@ The AST is syntax only. The analyser runs name resolution (`ndc_resolver`) and s
 | `ndc_core` | `StaticType`, `FunctionRegistry`, `NodeId` |
 | `ndc_resolver` | Name resolution: `NameResolver`, `SymbolId`, per-use candidate symbols and closure captures |
 | `ndc_analysis` | What the analyser works out for the compiler and LSP: `Analysis` (tables keyed by `NodeId`), `ResolvedVar`, `Binding`, `Candidate`, `CaptureSource` |
-| `ndc_layout` | Storage layout: each resolver symbol's global or local slot, and each function's captures |
-| `ndc_analyser` | Semantic analyser (types, overload bindings), runs the resolver first and takes slots from the layout |
+| `ndc_layout` | Storage layout: each resolver symbol's global or local slot, each function's captures and frame size; `Layout::lay_out` fills the location tables of `Analysis` from the analyser's `Picks` |
+| `ndc_analyser` | Semantic analyser (types, overload bindings by symbol), runs the resolver first and the layout pass last |
 | `ndc_interpreter` | `Interpreter` facade (analyse + compile + run via VM) |
 | `ndc_vm` | Bytecode `Compiler`, stack-based `Vm`, and the runtime `Value` (including `Number`) |
 | `ndc_stdlib` | Built-in functions registered via `FunctionRegistry` |

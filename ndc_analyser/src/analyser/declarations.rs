@@ -2,10 +2,8 @@ use super::Analyser;
 use crate::error::AnalysisError;
 use crate::types::TypeBinding;
 use itertools::{Itertools, izip};
-use ndc_analysis::{DeclaredStruct, FieldAccessors};
 use ndc_core::r#struct::StructInfo;
 use ndc_core::{NodeId, StaticType, TypeSignature};
-use ndc_layout::Layout;
 use ndc_lexer::Span;
 use ndc_parser::{
     BindingPattern, BindingPatternLocation, ExpressionLocation, FunctionParameter, StructField,
@@ -60,13 +58,13 @@ impl Analyser {
                 parameters: type_signature.types(),
                 return_type: Box::new(annotated_return.clone().unwrap_or_default()),
             };
-            let slot = self.declare(symbol, TypeBinding::Inferred(placeholder));
-            Some((symbol, slot))
+            self.types
+                .declare(symbol, TypeBinding::Inferred(placeholder));
+            Some(symbol)
         } else {
             None
         };
 
-        self.functions.push(id);
         self.return_type_stack.push(None);
         // A function body starts outside of any loop: `break` can't
         // leave the function to end a loop around its declaration.
@@ -84,13 +82,6 @@ impl Analyser {
         let implicit_return = self.analyse_expr(body);
         let explicit_return = self.return_type_stack.pop().unwrap();
         self.loop_depth = outer_loop_depth;
-        self.functions.pop();
-        let captures = Layout::new(&self.resolver).captures(id);
-        self.result.analysis.captures.insert(id, captures);
-        self.result
-            .analysis
-            .frame_sizes
-            .insert(id, Layout::new(&self.resolver).frame_size(Some(id)));
 
         // Combine explicit `return` types with the block's implicit return type.
         let inferred_return = match explicit_return {
@@ -122,11 +113,11 @@ impl Analyser {
             return_type: Box::new(effective_return),
         };
 
-        if let Some((symbol, slot)) = declared {
+        if let Some(symbol) = declared {
             let _ = self
                 .types
                 .update_binding_type(symbol, function_type.clone());
-            self.result.analysis.variables.insert(id, slot);
+            self.picks.variables.insert(id, symbol);
         }
 
         function_type
@@ -161,28 +152,18 @@ impl Analyser {
         let symbols = self.resolver.struct_symbols(id).clone();
         self.struct_types
             .insert(symbols.type_symbol, Rc::clone(&info));
-        let constructor = self.declare(
+        self.types.declare(
             symbols.constructor,
             TypeBinding::Annotated(info.constructor_type()),
         );
-        self.result.analysis.variables.insert(id, constructor);
-
-        let fields = symbols
-            .accessors
-            .iter()
-            .enumerate()
-            .map(|(index, &(getter, setter))| FieldAccessors {
-                getter: self.declare(getter, TypeBinding::Annotated(info.getter_type(index))),
-                setter: self.declare(setter, TypeBinding::Annotated(info.setter_type(index))),
-            })
-            .collect();
-        self.result.analysis.structs.insert(
-            id,
-            DeclaredStruct {
-                info: StructInfo::clone(&info),
-                fields,
-            },
-        );
+        self.picks.variables.insert(id, symbols.constructor);
+        for (index, &(getter, setter)) in symbols.accessors.iter().enumerate() {
+            self.types
+                .declare(getter, TypeBinding::Annotated(info.getter_type(index)));
+            self.types
+                .declare(setter, TypeBinding::Annotated(info.setter_type(index)));
+        }
+        self.picks.structs.insert(id, StructInfo::clone(&info));
 
         StaticType::unit()
     }
@@ -225,7 +206,7 @@ impl Analyser {
             };
 
             let symbol = self.resolver.declared_symbol(node);
-            self.declare(symbol, binding);
+            self.types.declare(symbol, binding);
         }
 
         parameters
@@ -262,8 +243,8 @@ impl Analyser {
                 };
 
                 let symbol = self.resolver.declared_symbol(lvalue.id);
-                let variable = self.declare(symbol, type_binding.clone());
-                self.result.analysis.variables.insert(lvalue.id, variable);
+                self.types.declare(symbol, type_binding.clone());
+                self.picks.variables.insert(lvalue.id, symbol);
                 self.result
                     .analysis
                     .variable_types

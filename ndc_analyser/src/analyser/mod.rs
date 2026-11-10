@@ -2,10 +2,10 @@ use crate::error::AnalysisError;
 use crate::overloads::CallKind;
 use crate::types::{TypeBinding, TypeTable};
 use ahash::AHashMap;
-use ndc_analysis::{Analysis, Binding, Candidate, ResolvedVar};
+use ndc_analysis::{Analysis, Binding, Candidate};
+use ndc_core::StaticType;
 use ndc_core::r#struct::{StructInfo, StructRegistry};
-use ndc_core::{NodeId, StaticType};
-use ndc_layout::Layout;
+use ndc_layout::{Layout, Picks};
 use ndc_lexer::NumericLiteral;
 use ndc_parser::{Expression, ExpressionLocation, ForBody, ForIteration, TypeExpr};
 use ndc_resolver::{NameResolver, SymbolId};
@@ -40,9 +40,6 @@ pub struct Analyser {
     /// What each struct's type symbol stands for, so `p: Point` lowers to
     /// `Point`'s struct type. Every other type name is built in.
     struct_types: AHashMap<SymbolId, Rc<StructInfo>>,
-    /// The function declarations being analysed, innermost last. Empty at the
-    /// top level.
-    functions: Vec<NodeId>,
     /// Stack of explicit `return` types for each enclosing function scope.
     /// Pushed on function entry, popped on exit. The value accumulates the
     /// lub of all `return <expr>` types seen so far.
@@ -52,6 +49,12 @@ pub struct Analyser {
     loop_depth: usize,
     /// What the current batch's analysis has found so far.
     result: AnalysisResult,
+    /// The symbols the current batch's uses pick, which the layout turns into
+    /// locations at the end of the batch.
+    picks: Picks,
+    /// How many resolver scopes earlier batches created. The current batch's
+    /// scopes come after them.
+    laid_out_scopes: usize,
 }
 
 impl Analyser {
@@ -71,10 +74,11 @@ impl Analyser {
             types,
             struct_registry: StructRegistry::default(),
             struct_types: AHashMap::new(),
-            functions: Vec::new(),
             return_type_stack: Vec::new(),
             loop_depth: 0,
             result: AnalysisResult::default(),
+            picks: Picks::default(),
+            laid_out_scopes: 0,
         }
     }
 
@@ -82,23 +86,13 @@ impl Analyser {
     /// resetting it for the next analysis.
     pub fn take_result(&mut self) -> AnalysisResult {
         let mut result = std::mem::take(&mut self.result);
-        let layout = Layout::new(&self.resolver);
-        result.analysis.top_level_frame_size = layout.frame_size(None);
-        result.analysis.global_count = layout.global_count();
+        Layout::new(&self.resolver).lay_out(
+            std::mem::take(&mut self.picks),
+            self.laid_out_scopes,
+            &mut result.analysis,
+        );
+        self.laid_out_scopes = self.resolver.scope_count();
         result
-    }
-
-    /// Records the type of a value the resolver declared, and returns where
-    /// it lives: a local, or a cell if closures capture it. A declaration is
-    /// always in the frame being analysed.
-    fn declare(&mut self, symbol: SymbolId, binding: TypeBinding) -> ResolvedVar {
-        self.types.declare(symbol, binding);
-        self.locate(symbol)
-    }
-
-    /// How the code being analysed reaches `symbol`: see [`Layout::location`].
-    fn locate(&self, symbol: SymbolId) -> ResolvedVar {
-        Layout::new(&self.resolver).location(symbol, self.functions.last().copied())
     }
 
     /// Records an analysis error. The analyser continues with a fallback type
@@ -165,7 +159,8 @@ impl Analyser {
                 .extend(name_errors.into_iter().map(AnalysisError::from));
             let declared = self.resolver.current_bindings()[bound_before..].to_vec();
             for symbol in declared {
-                self.declare(symbol, TypeBinding::Inferred(StaticType::Any));
+                self.types
+                    .declare(symbol, TypeBinding::Inferred(StaticType::Any));
             }
             return StaticType::Any;
         }
@@ -291,8 +286,8 @@ impl Analyser {
             }
             Expression::Identifier { .. } => {
                 let symbol = self.resolver.innermost_reference(*id);
-                let binding = Binding::Resolved(Candidate::Scalar(self.locate(symbol)));
-                self.result.analysis.bindings.insert(*id, binding);
+                let binding = Binding::Resolved(Candidate::Scalar(symbol));
+                self.picks.bindings.insert(*id, binding);
                 self.types.get_type(symbol).clone()
             }
             Expression::Statement(inner) => {

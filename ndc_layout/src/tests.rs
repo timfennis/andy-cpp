@@ -1,25 +1,31 @@
-use crate::Layout;
+use crate::{Layout, Picks};
 use Slot::{Global, Local};
-use ndc_analysis::CaptureSource;
+use ndc_analysis::{Analysis, Binding, Candidate, CaptureSource, ResolvedVar};
 use ndc_core::StaticType;
 use ndc_lexer::{Lexer, SourceId};
-use ndc_parser::Parser;
+use ndc_parser::{Expression, ExpressionLocation, Parser};
 use ndc_resolver::{NameResolver, ScopeKind};
 
 fn resolve_with_natives(source: &str, natives: &[&str]) -> NameResolver {
-    let tokens = Lexer::new(source, SourceId::SYNTHETIC)
-        .collect::<Result<Vec<_>, _>>()
-        .expect("lex failed");
-    let statements = Parser::from_tokens(tokens).parse().expect("parse failed");
     let mut resolver = NameResolver::new(
         natives.iter().copied(),
         StaticType::BUILTIN_TYPE_NAMES.iter().copied(),
     );
+    resolve_batch(&mut resolver, source);
+    resolver
+}
+
+/// Resolves `source` as one more batch for `resolver` and returns its statements.
+fn resolve_batch(resolver: &mut NameResolver, source: &str) -> Vec<ExpressionLocation> {
+    let tokens = Lexer::new(source, SourceId::SYNTHETIC)
+        .collect::<Result<Vec<_>, _>>()
+        .expect("lex failed");
+    let statements = Parser::from_tokens(tokens).parse().expect("parse failed");
     for statement in &statements {
         resolver.resolve_statement(statement);
     }
     assert!(resolver.take_errors().is_empty(), "resolution failed");
-    resolver
+    statements
 }
 
 fn resolve(source: &str) -> NameResolver {
@@ -228,5 +234,95 @@ fn captures_from_a_block_of_the_enclosing_function_use_its_slot() {
     assert_eq!(
         captures("fn f() { let a = 1; { let b = 2; fn g() { b } } }"),
         vec![vec![], vec![CaptureSource::Local(1)]]
+    );
+}
+
+/// Lays out a batch with no picks, which still sizes its frames.
+fn lay_out_batch(resolver: &NameResolver, first_scope: usize) -> Analysis {
+    let mut analysis = Analysis::default();
+    Layout::new(resolver).lay_out(Picks::default(), first_scope, &mut analysis);
+    analysis
+}
+
+/// Every node in `statements` that is an identifier named `name`.
+fn identifiers<'a>(
+    statements: &'a [ExpressionLocation],
+    name: &str,
+) -> Vec<&'a ExpressionLocation> {
+    let mut found = Vec::new();
+    let mut pending: Vec<&ExpressionLocation> = statements.iter().collect();
+    while let Some(expression) = pending.pop() {
+        if matches!(&expression.expression, Expression::Identifier { name: n, .. } if n == name) {
+            found.push(expression);
+        }
+        pending.extend(expression.children());
+    }
+    found
+}
+
+#[test]
+fn a_frame_is_as_large_as_its_deepest_block() {
+    let mut resolver = resolve("");
+    let statements = resolve_batch(&mut resolver, "fn f(a) { let b = 1; { let c = 2; } }");
+    let analysis = lay_out_batch(&resolver, 0);
+    assert_eq!(analysis.frame_size(statements[0].id), 3);
+    assert_eq!(analysis.top_level_frame_size, 0);
+}
+
+#[test]
+fn the_top_level_frame_holds_only_blocks_and_loops() {
+    let mut resolver = resolve("");
+    resolve_batch(
+        &mut resolver,
+        "let a = 1; { let b = 2; { let c = 3; } } for x in [] {}",
+    );
+    assert_eq!(lay_out_batch(&resolver, 0).top_level_frame_size, 2);
+}
+
+#[test]
+fn a_batch_lays_out_only_the_scopes_it_created() {
+    let mut resolver = resolve("");
+    resolve_batch(
+        &mut resolver,
+        "fn f() { let a = 1; } { let b = 1; let c = 2; }",
+    );
+    let first_scope = resolver.scope_count();
+    resolve_batch(&mut resolver, "{ let d = 1; }");
+
+    let analysis = lay_out_batch(&resolver, first_scope);
+    assert!(analysis.frame_sizes.is_empty());
+    assert!(analysis.captures.is_empty());
+    assert_eq!(analysis.top_level_frame_size, 1);
+}
+
+#[test]
+fn a_pick_is_located_from_the_function_its_use_sits_in() {
+    let mut resolver = resolve("");
+    let statements = resolve_batch(&mut resolver, "fn f() { let x = 1; x; fn g() { x } }");
+    let mut picks = Picks::default();
+    for use_of_x in identifiers(&statements, "x") {
+        let symbol = resolver.innermost_reference(use_of_x.id);
+        picks
+            .bindings
+            .insert(use_of_x.id, Binding::Resolved(Candidate::Scalar(symbol)));
+    }
+    let mut analysis = Analysis::default();
+    Layout::new(&resolver).lay_out(picks, 0, &mut analysis);
+
+    let mut locations = analysis
+        .bindings
+        .values()
+        .map(|binding| match binding {
+            Binding::Resolved(candidate) => candidate.var(),
+            other => panic!("expected one candidate, got {other:?}"),
+        })
+        .collect::<Vec<_>>();
+    locations.sort_by_key(|location| matches!(location, ResolvedVar::Upvalue { .. }));
+    assert_eq!(
+        locations,
+        [
+            ResolvedVar::Cell { slot: 0 },
+            ResolvedVar::Upvalue { slot: 0 }
+        ]
     );
 }

@@ -120,11 +120,29 @@ impl Analysis {
     }
 }
 
+/// What a use of a name refers to. The analyser picks symbols, and the layout
+/// turns each into the [`ResolvedVar`] the compiler reads.
 #[derive(Debug, Eq, PartialEq, Clone)]
-pub enum Binding {
+pub enum Binding<V = ResolvedVar> {
     None,
-    Resolved(Candidate),
-    Dynamic(Vec<Candidate>), // figure it out at runtime
+    Resolved(Candidate<V>),
+    Dynamic(Vec<Candidate<V>>), // figure it out at runtime
+}
+
+impl<V> Binding<V> {
+    /// The same binding with each candidate's target mapped by `f`.
+    pub fn map<W>(self, mut f: impl FnMut(V) -> W) -> Binding<W> {
+        match self {
+            Self::None => Binding::None,
+            Self::Resolved(candidate) => Binding::Resolved(candidate.map(f)),
+            Self::Dynamic(candidates) => Binding::Dynamic(
+                candidates
+                    .into_iter()
+                    .map(|candidate| candidate.map(&mut f))
+                    .collect(),
+            ),
+        }
+    }
 }
 
 /// What a struct declaration declares besides its constructor. In
@@ -180,17 +198,25 @@ impl ResolvedVar {
 /// what kind of call this candidate is — a direct scalar call, or an element-wise
 /// tuple broadcast over the scalar overload that `var()` returns.
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
-pub enum Candidate {
-    Scalar(ResolvedVar),
-    /// Element-wise tuple broadcast. The inner `ResolvedVar` points to the
-    /// scalar overload that fires for each element pair.
-    Vec(ResolvedVar),
+pub enum Candidate<V = ResolvedVar> {
+    Scalar(V),
+    /// Element-wise tuple broadcast. The inner value points to the scalar
+    /// overload that fires for each element pair.
+    Vec(V),
 }
 
-impl Candidate {
-    pub fn var(self) -> ResolvedVar {
+impl<V> Candidate<V> {
+    pub fn var(self) -> V {
         match self {
             Self::Scalar(v) | Self::Vec(v) => v,
+        }
+    }
+
+    /// The same kind of candidate with its target mapped by `f`.
+    pub fn map<W>(self, f: impl FnOnce(V) -> W) -> Candidate<W> {
+        match self {
+            Self::Scalar(v) => Candidate::Scalar(f(v)),
+            Self::Vec(v) => Candidate::Vec(f(v)),
         }
     }
 }

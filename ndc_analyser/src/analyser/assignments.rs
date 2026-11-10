@@ -47,7 +47,6 @@ impl Analyser {
             &self.resolver.augmented_candidates(id).in_place,
             &arg_types,
             CallKind::Operator,
-            |symbol| self.locate(symbol),
         );
         let ResolvedCall {
             binding: op_binding,
@@ -56,15 +55,13 @@ impl Analyser {
             &self.resolver.augmented_candidates(id).operator,
             &arg_types,
             CallKind::Operator,
-            |symbol| self.locate(symbol),
         );
         let has_op_binding = !matches!(op_binding, Binding::None);
         let assign_is_eligible = Self::augmented_rhs_is_compatible(&left_type, &right_type);
 
         let writeback_type = match assign_binding {
             Binding::Resolved(candidate) if assign_is_eligible => {
-                self.result
-                    .analysis
+                self.picks
                     .augmented_assignments
                     .insert(id, Binding::Resolved(candidate));
                 None
@@ -91,8 +88,7 @@ impl Analyser {
                 } else {
                     assign_return
                 };
-                self.result
-                    .analysis
+                self.picks
                     .augmented_assignments
                     .insert(id, Binding::Dynamic(assign_candidates));
                 Some(result_type)
@@ -110,10 +106,7 @@ impl Analyser {
                 None
             }
             Binding::None if has_op_binding => {
-                self.result
-                    .analysis
-                    .augmented_assignments
-                    .insert(id, op_binding);
+                self.picks.augmented_assignments.insert(id, op_binding);
                 Some(op_return)
             }
             Binding::None => {
@@ -141,8 +134,7 @@ impl Analyser {
         match &lvalue.target {
             AssignmentTarget::Identifier { .. } => {
                 let symbol = self.resolver.assigned_symbol(lvalue.id);
-                let variable = self.locate(symbol);
-                self.result.analysis.variables.insert(lvalue.id, variable);
+                self.picks.variables.insert(lvalue.id, symbol);
                 self.types.get_type(symbol).clone()
             }
             AssignmentTarget::Index { index, value } => {
@@ -163,11 +155,9 @@ impl Analyser {
                 if let Some(getters) = self.resolver.getter_candidates(lvalue.id) {
                     let getter = self
                         .overloads()
-                        .resolve_call(getters, &get_args, CallKind::Regular, |symbol| {
-                            self.locate(symbol)
-                        })
+                        .resolve_call(getters, &get_args, CallKind::Regular)
                         .binding;
-                    self.result.analysis.getters.insert(lvalue.id, getter);
+                    self.picks.getters.insert(lvalue.id, getter);
                 }
                 let setter = self
                     .overloads()
@@ -175,10 +165,9 @@ impl Analyser {
                         self.resolver.setter_candidates(lvalue.id),
                         &set_args,
                         CallKind::Regular,
-                        |symbol| self.locate(symbol),
                     )
                     .binding;
-                self.result.analysis.setters.insert(lvalue.id, setter);
+                self.picks.setters.insert(lvalue.id, setter);
 
                 if Self::index_type_is_slice(&index_type)
                     && let StaticType::List(element) = &type_of_index_target
@@ -214,30 +203,20 @@ impl Analyser {
                     .resolver
                     .getter_candidates(lvalue.id)
                     .expect("internal error: member target without getter candidates");
-                let getter = self.overloads().resolve_call(
-                    getters,
-                    &getter_args,
-                    CallKind::Regular,
-                    |symbol| self.locate(symbol),
-                );
+                let getter =
+                    self.overloads()
+                        .resolve_call(getters, &getter_args, CallKind::Regular);
                 let setter_name = format!("{member}=");
                 let setter = self.overloads().resolve_call(
                     self.resolver.setter_candidates(lvalue.id),
                     &setter_args,
                     CallKind::Regular,
-                    |symbol| self.locate(symbol),
                 );
                 let getter_missing = matches!(getter.binding, Binding::None);
                 let setter_missing = matches!(setter.binding, Binding::None);
 
-                self.result
-                    .analysis
-                    .getters
-                    .insert(lvalue.id, getter.binding);
-                self.result
-                    .analysis
-                    .setters
-                    .insert(lvalue.id, setter.binding);
+                self.picks.getters.insert(lvalue.id, getter.binding);
+                self.picks.setters.insert(lvalue.id, setter.binding);
 
                 if getter_missing {
                     self.emit(AnalysisError::function_not_found(
@@ -297,7 +276,7 @@ impl Analyser {
     ) {
         match &lvalue.target {
             AssignmentTarget::Identifier { .. }
-                if self.result.analysis.variables.contains_key(&lvalue.id) =>
+                if self.picks.variables.contains_key(&lvalue.id) =>
             {
                 let target = self.resolver.assigned_symbol(lvalue.id);
                 let widened = stored_type.lub(value_type);
@@ -355,8 +334,8 @@ impl Analyser {
                 };
 
                 if matches!(
-                    self.result.analysis.binding(value.id),
-                    Binding::Resolved(Candidate::Scalar(_))
+                    self.picks.bindings.get(&value.id),
+                    Some(Binding::Resolved(Candidate::Scalar(_)))
                 ) {
                     let target = self.resolver.innermost_reference(value.id);
                     let container_type = self.types.get_type(target).clone();
