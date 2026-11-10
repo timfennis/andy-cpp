@@ -246,15 +246,14 @@ fn run_pipeline(tokens: Vec<TokenLocation>) {
 
     let mut analyser = Analyser::new(scope);
     for e in &mut expressions {
-        if analyser.analyse(e).is_err() {
-            return;
-        }
+        analyser.analyse(e);
     }
-    if analyser.has_errors() {
+    let result = analyser.take_result();
+    if !result.errors.is_empty() {
         return;
     }
 
-    let analysis = analyser.take_result().analysis;
+    let analysis = result.analysis;
     let compiled = match Compiler::compile(expressions.into_iter(), analysis) {
         Ok(c) => c,
         Err(_) => return,

@@ -80,12 +80,12 @@ fn into_diagnostics(err: InterpreterError) -> Vec<Diagnostic<SourceId>> {
             }
             vec![d]
         }
-        InterpreterError::Resolver { causes } => causes
+        InterpreterError::Analysis { causes } => causes
             .iter()
             .map(|cause| {
                 let span = cause.span();
                 let mut d = Diagnostic::error()
-                    .with_code("resolver")
+                    .with_code("analysis")
                     .with_message(cause.to_string())
                     .with_labels(vec![
                         Label::primary(span.source_id(), span.range())

@@ -23,8 +23,8 @@ use std::rc::Rc;
 pub struct AnalysisResult {
     /// What the analyser worked out, keyed by AST node.
     pub analysis: Analysis,
-    /// Errors accumulated during analysis. Non-empty when the analyser
-    /// encountered problems but was able to continue with fallback types.
+    /// The errors analysis found. It carries on past each with a fallback
+    /// type, usually `Any`, so one pass reports every error it can.
     pub errors: Vec<AnalysisError>,
 }
 
@@ -50,10 +50,8 @@ pub struct Analyser {
     /// How many loops enclose the expression being analysed in the current
     /// function, so `break` and `continue` outside of one are reported.
     loop_depth: usize,
-    /// Side table populated during analysis.
+    /// What the current batch's analysis has found so far.
     result: AnalysisResult,
-    /// Non-fatal errors accumulated during the current analysis pass.
-    errors: Vec<AnalysisError>,
 }
 
 impl Analyser {
@@ -74,7 +72,6 @@ impl Analyser {
             return_type_stack: Vec::new(),
             loop_depth: 0,
             result: AnalysisResult::default(),
-            errors: Vec::new(),
         }
     }
 
@@ -82,7 +79,6 @@ impl Analyser {
     /// resetting it for the next analysis.
     pub fn take_result(&mut self) -> AnalysisResult {
         let mut result = std::mem::take(&mut self.result);
-        result.errors = std::mem::take(&mut self.errors);
         let layout = Layout::new(&self.resolver);
         result.analysis.top_level_frame_size = layout.frame_size(None);
         result.analysis.global_count = layout.global_count();
@@ -163,15 +159,10 @@ impl Analyser {
             })
     }
 
-    /// Record a non-fatal analysis error. The analyser continues with a
-    /// fallback type (usually `Any`) so that subsequent code is still checked.
+    /// Records an analysis error. The analyser continues with a fallback type
+    /// (usually `Any`) so that subsequent code is still checked.
     fn emit(&mut self, err: AnalysisError) {
-        self.errors.push(err);
-    }
-
-    /// Record an error from outside the analyser (e.g. a hard error caught by the caller).
-    pub fn emit_external(&mut self, err: AnalysisError) {
-        self.errors.push(err);
+        self.result.errors.push(err);
     }
 
     /// Resolves a syntactic type annotation to a `StaticType`: `Int` becomes
@@ -218,57 +209,34 @@ impl Analyser {
         annotation.map(|expr| self.lower_type_expr(expr))
     }
 
-    /// Returns `true` if any errors have been recorded during the current
-    /// analysis pass.
-    pub fn has_errors(&self) -> bool {
-        !self.errors.is_empty()
-    }
-
     /// Analyses a top-level statement. Names resolve first; a statement with
     /// unresolved names isn't analysed further, which would only repeat its errors.
     /// The names it still declared are bound as `Any`, so in
     /// `fn f() { missing } let g = f`, only `missing` is reported.
-    pub fn analyse(
-        &mut self,
-        expr_loc: &mut ExpressionLocation,
-    ) -> Result<StaticType, AnalysisError> {
+    pub fn analyse(&mut self, expr_loc: &mut ExpressionLocation) -> StaticType {
         let bound_before = self.resolver.current_bindings().len();
         self.resolver.resolve_statement(expr_loc);
         let name_errors = self.resolver.take_errors();
         if !name_errors.is_empty() {
-            self.errors
+            self.result
+                .errors
                 .extend(name_errors.into_iter().map(AnalysisError::from));
             let declared = self.resolver.current_bindings()[bound_before..].to_vec();
             for symbol in declared {
                 self.declare(symbol, TypeBinding::Inferred(StaticType::Any));
             }
-            return Ok(StaticType::Any);
+            return StaticType::Any;
         }
         self.analyse_expr(expr_loc)
     }
 
-    fn analyse_expr(
-        &mut self,
-        expr_loc: &mut ExpressionLocation,
-    ) -> Result<StaticType, AnalysisError> {
-        let typ = self.analyse_inner(expr_loc)?;
+    fn analyse_expr(&mut self, expr_loc: &mut ExpressionLocation) -> StaticType {
+        let typ = self.analyse_inner(expr_loc);
         self.result
             .analysis
             .expr_types
             .insert(expr_loc.id, typ.clone());
-        Ok(typ)
-    }
-
-    /// Like [`analyse`], but on error emits the error and returns `Any`
-    /// so that analysis can continue.
-    fn analyse_or_any(&mut self, expr_loc: &mut ExpressionLocation) -> StaticType {
-        match self.analyse_expr(expr_loc) {
-            Ok(t) => t,
-            Err(e) => {
-                self.emit(e);
-                StaticType::Any
-            }
-        }
+        typ
     }
 
     /// Like [`analyse_or_any`], but with an expected type from an annotation
@@ -339,7 +307,7 @@ impl Analyser {
                     .collect();
                 StaticType::Tuple(types)
             }
-            _ => return self.analyse_or_any(expr_loc),
+            _ => return self.analyse_expr(expr_loc),
         };
         self.result
             .analysis
@@ -355,50 +323,50 @@ impl Analyser {
             span,
             id,
         }: &mut ExpressionLocation,
-    ) -> Result<StaticType, AnalysisError> {
+    ) -> StaticType {
         match expression {
-            Expression::BoolLiteral(_) => Ok(StaticType::Bool),
-            Expression::NoneLiteral => Ok(StaticType::Option(Box::new(StaticType::Any))),
-            Expression::StringLiteral(_) => Ok(StaticType::String),
-            Expression::NumericLiteral(NumericLiteral::Int64(_)) => Ok(StaticType::Int),
-            Expression::NumericLiteral(NumericLiteral::Float64(_)) => Ok(StaticType::Float),
+            Expression::BoolLiteral(_) => StaticType::Bool,
+            Expression::NoneLiteral => StaticType::Option(Box::new(StaticType::Any)),
+            Expression::StringLiteral(_) => StaticType::String,
+            Expression::NumericLiteral(NumericLiteral::Int64(_)) => StaticType::Int,
+            Expression::NumericLiteral(NumericLiteral::Float64(_)) => StaticType::Float,
             Expression::NumericLiteral(
                 NumericLiteral::NumberInt(_)
                 | NumericLiteral::NumberFloat(_)
                 | NumericLiteral::Complex(_),
-            ) => Ok(StaticType::Number),
+            ) => StaticType::Number,
             Expression::Break => {
                 if self.loop_depth == 0 {
                     self.emit(AnalysisError::break_outside_loop(*span));
                 }
-                Ok(StaticType::Never)
+                StaticType::Never
             }
             Expression::Continue => {
                 if self.loop_depth == 0 {
                     self.emit(AnalysisError::continue_outside_loop(*span));
                 }
-                Ok(StaticType::Never)
+                StaticType::Never
             }
             Expression::Identifier { .. } => {
                 let symbol = self.resolver.innermost_reference(*id);
                 let binding = Binding::Resolved(Candidate::Scalar(self.locate(symbol)));
                 self.result.analysis.bindings.insert(*id, binding);
-                Ok(self.types.get_type(symbol).clone())
+                self.types.get_type(symbol).clone()
             }
             Expression::Statement(inner) => {
-                let typ = self.analyse_or_any(inner);
+                let typ = self.analyse_expr(inner);
                 // Diverging statements (return/break/continue) propagate Never
                 // so that blocks can see that control doesn't fall through.
                 if typ == StaticType::Never {
-                    Ok(StaticType::Never)
+                    StaticType::Never
                 } else {
-                    Ok(StaticType::unit())
+                    StaticType::unit()
                 }
             }
             Expression::Logical { left, right, .. } => {
-                self.analyse_or_any(left);
-                self.analyse_or_any(right);
-                Ok(StaticType::Bool)
+                self.analyse_expr(left);
+                self.analyse_expr(right);
+                StaticType::Bool
             }
             Expression::Grouping(expr) => self.analyse_expr(expr),
             Expression::Cast { value, annotation } => {
@@ -409,7 +377,7 @@ impl Analyser {
                 }
                 let check = (!found.is_subtype(&target)).then(|| target.clone());
                 self.result.analysis.cast_checks.insert(*id, check);
-                Ok(target)
+                target
             }
             Expression::VariableDeclaration {
                 l_value,
@@ -420,7 +388,7 @@ impl Analyser {
                 let value_span = value.span;
                 let found_type = match &annotated_type {
                     Some(expected) => self.analyse_with_expected(value, expected),
-                    None => self.analyse_or_any(value),
+                    None => self.analyse_expr(value),
                 };
 
                 self.resolve_binding_pattern(
@@ -429,21 +397,21 @@ impl Analyser {
                     found_type.clone(),
                     value_span,
                 );
-                Ok(StaticType::unit())
+                StaticType::unit()
             }
             Expression::Assignment { l_value, r_value } => {
-                let old_type = self.resolve_assignment_target_or_any(l_value, *span);
+                let old_type = self.resolve_assignment_target(l_value, *span);
                 let new_type = self.analyse_with_expected(r_value, &old_type);
                 self.validate_assignment_write(l_value, &old_type, &new_type, *span);
 
-                Ok(StaticType::unit())
+                StaticType::unit()
             }
             Expression::OpAssignment {
                 l_value,
                 r_value,
                 operation,
             } => {
-                let left_type = self.resolve_single_assignment_target(l_value, *span)?;
+                let left_type = self.resolve_assignment_target(l_value, *span);
                 // `p.x += 1` reads `p.x`, the call `x(p)`, first.
                 if let AssignmentTarget::Member {
                     receiver,
@@ -461,7 +429,7 @@ impl Analyser {
                         .unwrap_or(StaticType::Any);
                     self.check_member_read(l_value.id, &receiver_type, member, *member_span);
                 }
-                let right_type = self.analyse_or_any(r_value);
+                let right_type = self.analyse_expr(r_value);
                 let arg_types = vec![left_type.clone(), right_type.clone()];
 
                 let ResolvedCall {
@@ -552,7 +520,7 @@ impl Analyser {
                     self.validate_assignment_write(l_value, &left_type, &result_type, *span);
                 }
 
-                Ok(StaticType::unit())
+                StaticType::unit()
             }
             Expression::FunctionDeclaration {
                 name,
@@ -618,7 +586,7 @@ impl Analyser {
                         .insert(param.lvalue.id, typ.clone());
                 }
 
-                let implicit_return = self.analyse_or_any(body);
+                let implicit_return = self.analyse_expr(body);
                 let explicit_return = self.return_type_stack.pop().unwrap();
                 self.loop_depth = outer_loop_depth;
                 self.functions.pop();
@@ -666,30 +634,30 @@ impl Analyser {
                     self.result.analysis.variables.insert(*id, slot);
                 }
 
-                Ok(function_type)
+                function_type
             }
             Expression::Block { statements } => {
                 let mut last = None;
                 for s in statements {
-                    last = Some(self.analyse_or_any(s));
+                    last = Some(self.analyse_expr(s));
                 }
 
-                Ok(last.unwrap_or_else(StaticType::unit))
+                last.unwrap_or_else(StaticType::unit)
             }
             Expression::If {
                 condition,
                 on_true,
                 on_false,
             } => {
-                self.analyse_or_any(condition);
-                let true_type = self.analyse_or_any(on_true);
+                self.analyse_expr(condition);
+                let true_type = self.analyse_expr(on_true);
                 let false_type = if let Some(on_false) = on_false {
-                    self.analyse_or_any(on_false)
+                    self.analyse_expr(on_false)
                 } else {
                     StaticType::unit()
                 };
 
-                Ok(true_type.lub(&false_type))
+                true_type.lub(&false_type)
             }
             Expression::While {
                 expression,
@@ -698,15 +666,14 @@ impl Analyser {
                 // The condition is part of the loop too, as it runs on every
                 // iteration.
                 self.loop_depth += 1;
-                self.analyse_or_any(expression);
-                self.analyse_or_any(loop_body);
+                self.analyse_expr(expression);
+                self.analyse_expr(loop_body);
                 self.loop_depth -= 1;
-                Ok(StaticType::unit())
+                StaticType::unit()
             }
             Expression::For { iterations, body } => {
                 let loop_depth = self.loop_depth;
-                let return_type = self.resolve_for_iterations(iterations, body, loop_depth);
-                Ok(return_type)
+                self.resolve_for_iterations(iterations, body, loop_depth)
             }
             Expression::Call {
                 function,
@@ -721,7 +688,7 @@ impl Analyser {
                 member,
                 member_span,
             } => {
-                let receiver_type = self.analyse_or_any(receiver);
+                let receiver_type = self.analyse_expr(receiver);
                 // `xs.len` is the call `len(xs)`, checked like any other call.
                 self.check_member_read(*id, &receiver_type, member, *member_span);
                 let getters = self
@@ -744,63 +711,61 @@ impl Analyser {
                 }
 
                 self.result.analysis.getters.insert(*id, binding);
-                Ok(return_type)
+                return_type
             }
             Expression::Tuple { values } => {
                 let mut types = Vec::with_capacity(values.len());
                 for v in values {
-                    types.push(self.analyse_or_any(v));
+                    types.push(self.analyse_expr(v));
                 }
 
-                Ok(StaticType::Tuple(types))
+                StaticType::Tuple(types)
             }
             Expression::List { values } => {
                 let element_type = self.analyse_multiple_expression_with_same_type(values);
 
-                Ok(StaticType::List(Box::new(
-                    element_type.unwrap_or(StaticType::Any),
-                )))
+                StaticType::List(Box::new(element_type.unwrap_or(StaticType::Any)))
             }
             Expression::Map { values, default } => {
                 let mut key_type: Option<StaticType> = None;
                 let mut value_type: Option<StaticType> = None;
                 for (key, value) in values {
-                    Self::fold_lub(&mut key_type, self.analyse_or_any(key));
+                    Self::fold_lub(&mut key_type, self.analyse_expr(key));
                     if let Some(value) = value {
-                        Self::fold_lub(&mut value_type, self.analyse_or_any(value));
+                        Self::fold_lub(&mut value_type, self.analyse_expr(value));
                     }
                 }
 
                 // Reads can produce the default value, so its type is part of
                 // the map's value type.
                 if let Some(default) = default {
-                    let default_type = self.analyse_or_any(default);
+                    let default_type = self.analyse_expr(default);
                     Self::fold_lub(&mut value_type, default_type);
                 }
 
-                Ok(StaticType::Map {
+                StaticType::Map {
                     key: Box::new(key_type.unwrap_or(StaticType::Any)),
                     value: Box::new(value_type.unwrap_or_else(StaticType::unit)),
-                })
+                }
             }
             Expression::Return { value } => {
-                let typ = self.analyse_or_any(value);
+                let typ = self.analyse_expr(value);
                 match self.return_type_stack.last_mut() {
                     Some(slot) => Self::fold_lub(slot, typ),
                     None => self.emit(AnalysisError::return_outside_function(*span)),
                 }
-                Ok(StaticType::Never)
+                StaticType::Never
             }
             Expression::RangeInclusive { start, end }
             | Expression::RangeExclusive { start, end } => {
                 if let Some(start) = start {
-                    self.analyse_or_any(start);
+                    self.analyse_expr(start);
                 }
                 if let Some(end) = end {
-                    self.analyse_or_any(end);
+                    self.analyse_expr(end);
                 }
 
-                Ok(StaticType::Iterator(Box::new(StaticType::Int)))
+                StaticType::Iterator(Box::new(StaticType::Int))
             }
             Expression::StructDeclaration { name, fields } => {
                 let field_types: Vec<StaticType> = fields
@@ -850,7 +815,7 @@ impl Analyser {
                     },
                 );
 
-                Ok(StaticType::unit())
+                StaticType::unit()
             }
         }
     }
@@ -863,32 +828,32 @@ impl Analyser {
         arguments: &mut [ExpressionLocation],
         kind: CallKind,
         span: Span,
-    ) -> Result<StaticType, AnalysisError> {
+    ) -> StaticType {
         // Higher-order call shapes like `get_function()()` have a non-identifier
         // function position; in that case we just analyse the callee as a value
         // and trust the runtime to dispatch. The callee comes before the
         // arguments, in source order like the resolver, so declarations in it
         // get their slots first.
         let Expression::Identifier { name, .. } = &mut function.expression else {
-            let callee_type = self.analyse_or_any(function);
+            let callee_type = self.analyse_expr(function);
             for arg in arguments {
-                self.analyse_or_any(arg);
+                self.analyse_expr(arg);
             }
-            return Ok(match callee_type {
+            return match callee_type {
                 StaticType::Function { return_type, .. } => *return_type,
                 StaticType::Any => StaticType::Any,
                 other => {
                     self.emit(AnalysisError::not_callable(&other, span));
                     StaticType::Any
                 }
-            });
+            };
         };
 
         // A named callee declares nothing, so its overload can be picked after
         // the arguments' types are known.
         let mut type_sig = Vec::with_capacity(arguments.len());
         for arg in arguments.iter_mut() {
-            type_sig.push(self.analyse_or_any(arg));
+            type_sig.push(self.analyse_expr(arg));
         }
 
         // A value whose type isn't known may hold a function itself, so one
@@ -917,11 +882,11 @@ impl Analyser {
             let error = self.no_match(candidates, name, &type_sig, span);
             self.emit(error);
             self.result.analysis.bindings.insert(function.id, binding);
-            return Ok(StaticType::Any);
+            return StaticType::Any;
         }
 
         self.result.analysis.bindings.insert(function.id, binding);
-        Ok(return_type)
+        return_type
     }
 
     /// Analyses the iterations of a `for` from the first, and then its body.
@@ -941,7 +906,7 @@ impl Analyser {
         match iteration {
             ForIteration::Iteration { l_value, sequence } => {
                 let sequence_span = sequence.span;
-                let sequence_type = self.analyse_or_any(sequence);
+                let sequence_type = self.analyse_expr(sequence);
 
                 let found_type = sequence_type
                     .sequence_element_type()
@@ -954,7 +919,7 @@ impl Analyser {
                 self.resolve_binding_pattern(l_value, expected_type, found_type, sequence_span);
             }
             ForIteration::Guard(expr) => {
-                self.analyse_or_any(expr);
+                self.analyse_expr(expr);
             }
         }
 
@@ -963,25 +928,25 @@ impl Analyser {
         } else {
             match body {
                 ForBody::Block(block) => {
-                    self.analyse_or_any(block);
+                    self.analyse_expr(block);
                     StaticType::unit()
                 }
-                ForBody::List { expr } => StaticType::List(Box::new(self.analyse_or_any(expr))),
+                ForBody::List { expr } => StaticType::List(Box::new(self.analyse_expr(expr))),
                 ForBody::Map {
                     key,
                     value,
                     default,
                 } => {
-                    let key_type = self.analyse_or_any(key);
+                    let key_type = self.analyse_expr(key);
                     let value_type = if let Some(value) = value {
-                        self.analyse_or_any(value)
+                        self.analyse_expr(value)
                     } else {
                         StaticType::unit()
                     };
 
                     if let Some(default) = default {
                         let loop_depth = std::mem::replace(&mut self.loop_depth, outer_loop_depth);
-                        self.analyse_or_any(default);
+                        self.analyse_expr(default);
                         self.loop_depth = loop_depth;
                     }
 
@@ -998,33 +963,22 @@ impl Analyser {
         typ
     }
 
-    fn resolve_single_assignment_target(
-        &mut self,
-        lvalue: &mut AssignmentTargetLocation,
-        span: Span,
-    ) -> Result<StaticType, AnalysisError> {
-        if matches!(lvalue.target, AssignmentTarget::Sequence(_)) {
-            return Err(AnalysisError::lvalue_required_to_be_single_identifier(span));
-        }
-        self.resolve_assignment_target(lvalue, span)
-    }
-
     fn resolve_assignment_target(
         &mut self,
         lvalue: &mut AssignmentTargetLocation,
         span: Span,
-    ) -> Result<StaticType, AnalysisError> {
+    ) -> StaticType {
         match &mut lvalue.target {
             AssignmentTarget::Identifier { .. } => {
                 let symbol = self.resolver.assigned_symbol(lvalue.id);
                 let variable = self.locate(symbol);
                 self.result.analysis.variables.insert(lvalue.id, variable);
-                Ok(self.types.get_type(symbol).clone())
+                self.types.get_type(symbol).clone()
             }
             AssignmentTarget::Index { index, value } => {
                 // The container before the index, in source order like the resolver.
-                let type_of_index_target = self.analyse_or_any(value);
-                let index_type = self.analyse_or_any(index);
+                let type_of_index_target = self.analyse_expr(value);
+                let index_type = self.analyse_expr(index);
 
                 let get_args = [type_of_index_target.clone(), index_type.clone()];
                 let set_args = [
@@ -1059,31 +1013,31 @@ impl Analyser {
                 if Self::index_type_is_slice(&index_type)
                     && let StaticType::List(element) = &type_of_index_target
                 {
-                    return Ok(StaticType::List(element.clone()));
+                    return StaticType::List(element.clone());
                 }
 
                 if let Some(t) = type_of_index_target.index_element_type() {
-                    Ok(t)
+                    t
                 } else {
                     self.emit(AnalysisError::unable_to_index_into(
                         &type_of_index_target,
                         span,
                     ));
-                    Ok(StaticType::Any)
+                    StaticType::Any
                 }
             }
             // What `(a, b) = …` can store is a tuple of what each target can.
-            AssignmentTarget::Sequence(seq) => Ok(StaticType::Tuple(
+            AssignmentTarget::Sequence(seq) => StaticType::Tuple(
                 seq.iter_mut()
-                    .map(|sub_lvalue| self.resolve_assignment_target_or_any(sub_lvalue, span))
+                    .map(|sub_lvalue| self.resolve_assignment_target(sub_lvalue, span))
                     .collect(),
-            )),
+            ),
             AssignmentTarget::Member {
                 receiver,
                 member,
                 member_span,
             } => {
-                let receiver_type = self.analyse_or_any(receiver);
+                let receiver_type = self.analyse_expr(receiver);
                 let getter_args = [receiver_type.clone()];
                 let setter_args = [receiver_type, StaticType::Any];
                 let getters = self
@@ -1116,35 +1070,20 @@ impl Analyser {
                     .insert(lvalue.id, setter.binding);
 
                 if getter_missing {
-                    return Err(AnalysisError::function_not_found(
+                    self.emit(AnalysisError::function_not_found(
                         member,
                         &getter_args,
                         *member_span,
                     ));
-                }
-                if setter_missing {
-                    return Err(AnalysisError::function_not_found(
+                } else if setter_missing {
+                    self.emit(AnalysisError::function_not_found(
                         &setter_name,
                         &setter_args,
                         *member_span,
                     ));
                 }
 
-                Ok(getter.return_type)
-            }
-        }
-    }
-
-    fn resolve_assignment_target_or_any(
-        &mut self,
-        lvalue: &mut AssignmentTargetLocation,
-        span: Span,
-    ) -> StaticType {
-        match self.resolve_assignment_target(lvalue, span) {
-            Ok(t) => t,
-            Err(e) => {
-                self.emit(e);
-                StaticType::Any
+                getter.return_type
             }
         }
     }
@@ -1454,7 +1393,7 @@ impl Analyser {
     ) -> Option<StaticType> {
         let mut element_type: Option<StaticType> = None;
         for expression in expressions {
-            Self::fold_lub(&mut element_type, self.analyse_or_any(expression));
+            Self::fold_lub(&mut element_type, self.analyse_expr(expression));
         }
         element_type
     }
@@ -1589,13 +1528,6 @@ impl AnalysisError {
             help_text: None,
         }
     }
-    fn lvalue_required_to_be_single_identifier(span: Span) -> Self {
-        Self {
-            text: "This lvalue is required to be a single identifier".to_string(),
-            span,
-            help_text: None,
-        }
-    }
 
     fn variable_rejects_arguments(name: &str, types: &[StaticType], span: Span) -> Self {
         Self {
@@ -1686,7 +1618,7 @@ mod tests {
         let mut analyser = Analyser::new(globals);
         let mut last_type = StaticType::unit();
         for expression in &mut expressions {
-            last_type = analyser.analyse(expression).expect("analysis failed");
+            last_type = analyser.analyse(expression);
         }
         (last_type, analyser.take_result())
     }
@@ -1730,6 +1662,31 @@ mod tests {
                 .any(|error| error.to_string().contains(expected)),
             "expected an error containing {expected:?}, got {:?}",
             result.errors,
+        );
+    }
+
+    // An accessor that doesn't take the receiver is an error like any other:
+    // analysis carries on, and later errors are reported too.
+    #[test]
+    fn an_augmented_member_target_without_a_getter_is_reported_with_later_errors() {
+        let plus = StaticType::Function {
+            parameters: None,
+            return_type: Box::new(StaticType::Any),
+        };
+        let (_, result) = analyse_with_globals(
+            "struct P { x: Int } struct Q { y: Int } let p = P(1); p.y += 1; let b: Int = \"t\";",
+            vec![("+".to_string(), plus)],
+        );
+        let messages: Vec<String> = result.errors.iter().map(ToString::to_string).collect();
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.contains("No function called 'y'")),
+            "{messages:?}"
+        );
+        assert!(
+            messages.iter().any(|m| m.contains("mismatched types")),
+            "{messages:?}"
         );
     }
 
