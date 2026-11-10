@@ -172,7 +172,7 @@ fn foo(b) { b + 2 }   // ERROR: Illegal redefinition of function 'foo' with para
 
 ## How a call finds its function
 
-A call such as `foo(x)` looks for `foo` in the scope it's written in first, then in each enclosing scope in turn, and finally among the built-in functions. A method call `x.foo()` is the call `foo(x)` and is looked up the same way.
+A call such as `foo(x)` looks for `foo` in the scope it's written in first, then in each enclosing scope in turn, and finally among the built-in functions. A method call `x.foo()` and a property read `x.foo` are both the call `foo(x)`, and are looked up the same way.
 
 **Functions in a nested scope** take over only the calls they accept. Other calls still reach the overloads further out:
 

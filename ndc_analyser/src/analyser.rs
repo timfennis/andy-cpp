@@ -130,6 +130,23 @@ impl Analyser {
         Layout::new(&self.resolver).location(symbol, self.functions.last().copied())
     }
 
+    /// Reports a read `x.name`, the call `name(x)`, that a value of unknown
+    /// type named `name` makes ambiguous, as [`Overloads::any_value_hiding_function`]
+    /// describes. `node` is the read's, which holds its getter candidates.
+    fn check_member_read(&mut self, node: NodeId, receiver: &StaticType, member: &str, span: Span) {
+        let ambiguous = self
+            .resolver
+            .getter_candidates(node)
+            .is_some_and(|getters| {
+                Overloads::new(&self.types)
+                    .any_value_hiding_function(getters, std::slice::from_ref(receiver))
+                    .is_some()
+            });
+        if ambiguous {
+            self.emit(AnalysisError::ambiguous_call(member, span));
+        }
+    }
+
     /// Whether a function declared earlier in the same scope as `symbol` has
     /// its name and the same parameter types, which makes `symbol` an illegal
     /// redefinition. `fn f(x: Int)` and `fn f(x: String)` are two overloads,
@@ -418,6 +435,22 @@ impl Analyser {
                 plan,
             } => {
                 let left_type = self.resolve_single_assignment_target(l_value, *span)?;
+                // `p.x += 1` reads `p.x`, the call `x(p)`, first.
+                if let AssignmentTarget::Member {
+                    receiver,
+                    member,
+                    member_span,
+                    ..
+                } = &l_value.target
+                {
+                    let receiver_type = self
+                        .result
+                        .expr_types
+                        .get(&receiver.id)
+                        .cloned()
+                        .unwrap_or(StaticType::Any);
+                    self.check_member_read(l_value.id, &receiver_type, member, *member_span);
+                }
                 let right_type = self.analyse_or_any(r_value);
                 let arg_types = vec![left_type.clone(), right_type.clone()];
 
@@ -653,6 +686,8 @@ impl Analyser {
                 resolved_getter,
             } => {
                 let receiver_type = self.analyse_or_any(receiver);
+                // `xs.len` is the call `len(xs)`, checked like any other call.
+                self.check_member_read(*id, &receiver_type, member, *member_span);
                 let getters = self
                     .resolver
                     .getter_candidates(*id)
@@ -2001,6 +2036,55 @@ mod tests {
     fn a_nearer_function_shadows_an_unknown_value() {
         assert_eq!(
             errors("fn test(foo) { fn foo(x) { 1 } foo(2) }", vec![]),
+            Vec::<String>::new()
+        );
+    }
+
+    /// `+`, which augmented assignment needs, for the tests below.
+    fn plus_native() -> Vec<(String, StaticType)> {
+        vec![(
+            "+".to_string(),
+            StaticType::Function {
+                parameters: Some(vec![StaticType::Int, StaticType::Int]),
+                return_type: Box::new(StaticType::Int),
+            },
+        )]
+    }
+
+    #[test]
+    fn property_reads_are_checked_like_calls() {
+        assert_eq!(
+            errors("fn test(len) { \"abc\".len }", len_native()),
+            vec![
+                "Ambiguous call to 'len': it could mean the function 'len' or a value named 'len' whose type isn't known"
+            ],
+        );
+    }
+
+    #[test]
+    fn a_field_read_is_ambiguous_with_an_unknown_value_named_like_the_field() {
+        assert_eq!(
+            errors("struct P { x: Int } fn f(p, x) { p.x }", vec![]),
+            vec![
+                "Ambiguous call to 'x': it could mean the function 'x' or a value named 'x' whose type isn't known"
+            ],
+        );
+    }
+
+    #[test]
+    fn augmented_assignment_to_a_field_reads_it_first() {
+        assert_eq!(
+            errors("struct P { x: Int } fn f(p, x) { p.x += 1 }", plus_native()),
+            vec![
+                "Ambiguous call to 'x': it could mean the function 'x' or a value named 'x' whose type isn't known"
+            ],
+        );
+    }
+
+    #[test]
+    fn plain_assignment_to_a_field_reads_nothing() {
+        assert_eq!(
+            errors("struct P { x: Int } fn f(p, x) { p.x = 1 }", vec![]),
             Vec::<String>::new()
         );
     }
