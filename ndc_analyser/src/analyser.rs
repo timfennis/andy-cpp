@@ -52,6 +52,9 @@ pub struct Analyser {
     /// What each struct's type symbol stands for, so `p: Point` lowers to
     /// `Point`'s struct type. Every other type name is built in.
     struct_types: AHashMap<SymbolId, Rc<StructInfo>>,
+    /// The function declarations being analysed, innermost last. Empty at the
+    /// top level.
+    functions: Vec<NodeId>,
     /// Stack of explicit `return` types for each enclosing function scope.
     /// Pushed on function entry, popped on exit. The value accumulates the
     /// lub of all `return <expr>` types seen so far.
@@ -82,6 +85,7 @@ impl Analyser {
             scope_tree,
             struct_registry,
             struct_types: AHashMap::new(),
+            functions: Vec::new(),
             return_type_stack: Vec::new(),
             result: AnalysisResult::default(),
             errors: Vec::new(),
@@ -114,24 +118,38 @@ impl Analyser {
         result
     }
 
-    /// Binds `name` in the current scope as the resolver's `symbol` for it.
-    fn create_local_binding(
-        &mut self,
-        name: String,
-        binding: TypeBinding,
-        symbol: SymbolId,
-    ) -> ResolvedVar {
-        debug_assert_eq!(self.resolver.symbol_name(symbol), name);
-        let var = self.scope_tree.create_local_binding(name, binding, symbol);
-        debug_assert_eq!(
-            var,
-            ResolvedVar::Local {
-                slot: Layout::new(&self.resolver).local_slot(symbol)
-            },
-            "the layout disagrees with the old slot for `{}`",
-            self.resolver.symbol_name(symbol),
-        );
-        var
+    /// Records the type of a value the resolver declared, and returns its
+    /// slot. A declaration is always local to the frame being analysed.
+    fn declare(&mut self, symbol: SymbolId, binding: TypeBinding) -> ResolvedVar {
+        self.scope_tree.declare(symbol, binding);
+        ResolvedVar::Local {
+            slot: Layout::new(&self.resolver).local_slot(symbol),
+        }
+    }
+
+    /// How the code being analysed reaches `symbol`: see [`Layout::location`].
+    fn locate(&self, symbol: SymbolId) -> ResolvedVar {
+        Layout::new(&self.resolver).location(symbol, self.functions.last().copied())
+    }
+
+    /// Whether a function declared earlier in the same scope as `symbol` has
+    /// its name and arity, which makes `symbol` an illegal redefinition.
+    fn redefines_function(&self, symbol: SymbolId, arity: Option<usize>) -> bool {
+        let name = self.resolver.symbol_name(symbol);
+        let scope = self.resolver.scope(self.resolver.scope_of(symbol));
+        scope.bindings()[..self.resolver.binding_position(symbol)]
+            .iter()
+            .filter(|&&earlier| self.resolver.symbol_name(earlier) == name)
+            .any(|&earlier| match self.scope_tree.get_type(earlier) {
+                StaticType::Function {
+                    parameters: Some(parameters),
+                    ..
+                } => arity == Some(parameters.len()),
+                StaticType::Function {
+                    parameters: None, ..
+                } => arity.is_none(),
+                _ => false,
+            })
     }
 
     /// Record a non-fatal analysis error. The analyser continues with a
@@ -211,8 +229,7 @@ impl Analyser {
                 .extend(name_errors.into_iter().map(AnalysisError::from));
             let declared = self.resolver.current_bindings()[bound_before..].to_vec();
             for symbol in declared {
-                let name = self.resolver.symbol_name(symbol).to_string();
-                self.create_local_binding(name, TypeBinding::Inferred(StaticType::Any), symbol);
+                self.declare(symbol, TypeBinding::Inferred(StaticType::Any));
             }
             return Ok(StaticType::Any);
         }
@@ -335,13 +352,9 @@ impl Analyser {
             ) => Ok(StaticType::Number),
             Expression::Continue | Expression::Break => Ok(StaticType::Never),
             Expression::Identifier { resolved, .. } => {
-                let binding = self
-                    .scope_tree
-                    .get_binding(self.resolver.innermost_reference(*id));
-
-                *resolved = Binding::Resolved(Candidate::Scalar(binding));
-
-                Ok(self.scope_tree.get_type(binding).clone())
+                let symbol = self.resolver.innermost_reference(*id);
+                *resolved = Binding::Resolved(Candidate::Scalar(self.locate(symbol)));
+                Ok(self.scope_tree.get_type(symbol).clone())
             }
             Expression::Statement(inner) => {
                 let typ = self.analyse_or_any(inner);
@@ -418,6 +431,7 @@ impl Analyser {
                     &self.resolver.augmented_candidates(*id).in_place,
                     &arg_types,
                     CallKind::Operator,
+                    |symbol| self.locate(symbol),
                 );
                 let ResolvedCall {
                     binding: op_binding,
@@ -426,6 +440,7 @@ impl Analyser {
                     &self.resolver.augmented_candidates(*id).operator,
                     &arg_types,
                     CallKind::Operator,
+                    |symbol| self.locate(symbol),
                 );
                 let has_op_binding = !matches!(op_binding, Binding::None);
                 let assign_is_eligible = Self::augmented_rhs_is_compatible(&left_type, &right_type);
@@ -514,31 +529,23 @@ impl Analyser {
                 // Pre-register the function before analyzing its body so recursive calls can
                 // resolve the name. The return type is unknown at this point so we use Any.
                 // A redefinition is reported but still bound, since the resolver declared it.
-                let pre_slot = if let Some(name) = name {
+                let declared = if let Some(name) = name {
+                    let symbol = self.resolver.declared_symbol(*id);
                     let arity = type_signature.types().map(|t| t.len());
-                    if self.scope_tree.has_function_in_current_scope(name, arity) {
+                    if self.redefines_function(symbol, arity) {
                         self.emit(AnalysisError::function_redefinition(name, arity, *span));
                     }
                     let placeholder = StaticType::Function {
                         parameters: type_signature.types(),
                         return_type: Box::new(return_type_slot.clone().unwrap_or(StaticType::Any)),
                     };
-                    Some(self.create_local_binding(
-                        name.clone(),
-                        TypeBinding::Inferred(placeholder),
-                        self.resolver.declared_symbol(*id),
-                    ))
+                    let slot = self.declare(symbol, TypeBinding::Inferred(placeholder));
+                    Some((symbol, slot))
                 } else {
                     None
                 };
 
-                self.scope_tree.new_function_scope();
-                self.scope_tree.capture(self.resolver.captures_of(*id));
-                debug_assert_eq!(
-                    self.scope_tree.current_scope_captures(),
-                    Layout::new(&self.resolver).captures(*id),
-                    "the layout disagrees with the old upvalues of a function",
-                );
+                self.functions.push(*id);
                 self.return_type_stack.push(None);
                 let parameter_nodes = parameters.iter().map(|p| p.lvalue.id).collect_vec();
                 let param_types =
@@ -554,8 +561,8 @@ impl Analyser {
 
                 let implicit_return = self.analyse_or_any(body);
                 let explicit_return = self.return_type_stack.pop().unwrap();
-                *captures = self.scope_tree.current_scope_captures();
-                self.scope_tree.destroy_scope();
+                self.functions.pop();
+                *captures = Layout::new(&self.resolver).captures(*id);
 
                 // Combine explicit `return` types with the block's implicit return type.
                 let inferred_return = match explicit_return {
@@ -586,22 +593,20 @@ impl Analyser {
                     return_type: Box::new(effective_return),
                 };
 
-                if let Some(slot) = pre_slot {
+                if let Some((symbol, slot)) = declared {
                     let _ = self
                         .scope_tree
-                        .update_binding_type(slot, function_type.clone());
+                        .update_binding_type(symbol, function_type.clone());
                     *resolved_name = Some(slot);
                 }
 
                 Ok(function_type)
             }
             Expression::Block { statements } => {
-                self.scope_tree.new_block_scope();
                 let mut last = None;
                 for s in statements {
                     last = Some(self.analyse_or_any(s));
                 }
-                self.scope_tree.destroy_scope();
 
                 Ok(last.unwrap_or_else(StaticType::unit))
             }
@@ -658,6 +663,7 @@ impl Analyser {
                     getters,
                     std::slice::from_ref(&receiver_type),
                     CallKind::Regular,
+                    |symbol| self.locate(symbol),
                 );
 
                 if matches!(binding, Binding::None) {
@@ -756,26 +762,19 @@ impl Analyser {
                 let symbols = self.resolver.struct_symbols(*id).clone();
                 self.struct_types
                     .insert(symbols.type_symbol, Rc::clone(&info));
-                *resolved_name = Some(self.create_local_binding(
-                    name.clone(),
-                    TypeBinding::Annotated(info.constructor_type()),
+                *resolved_name = Some(self.declare(
                     symbols.constructor,
+                    TypeBinding::Annotated(info.constructor_type()),
                 ));
 
                 for (index, (field, &(getter, setter))) in
                     fields.iter_mut().zip(&symbols.accessors).enumerate()
                 {
-                    field.resolved_getter = Some(self.create_local_binding(
-                        field.identifier.clone(),
-                        TypeBinding::Annotated(info.getter_type(index)),
-                        getter,
-                    ));
+                    field.resolved_getter =
+                        Some(self.declare(getter, TypeBinding::Annotated(info.getter_type(index))));
 
-                    field.resolved_setter = Some(self.create_local_binding(
-                        format!("{}=", field.identifier),
-                        TypeBinding::Annotated(info.setter_type(index)),
-                        setter,
-                    ));
+                    field.resolved_setter =
+                        Some(self.declare(setter, TypeBinding::Annotated(info.setter_type(index))));
                 }
 
                 Ok(StaticType::unit())
@@ -826,6 +825,7 @@ impl Analyser {
             self.resolver.reference_candidates(function.id),
             &type_sig,
             kind,
+            |symbol| self.locate(symbol),
         );
 
         if matches!(binding, Binding::None) {
@@ -855,13 +855,10 @@ impl Analyser {
             unreachable!("because this function is never called with an empty slice");
         };
 
-        let mut do_destroy = false;
         match iteration {
             ForIteration::Iteration { l_value, sequence } => {
                 let sequence_span = sequence.span;
                 let sequence_type = self.analyse_or_any(sequence);
-
-                self.scope_tree.new_iteration_scope();
 
                 let found_type = sequence_type
                     .sequence_element_type()
@@ -871,14 +868,13 @@ impl Analyser {
                 let expected_type = None;
 
                 self.resolve_binding_pattern(l_value, expected_type, found_type, sequence_span);
-                do_destroy = true;
             }
             ForIteration::Guard(expr) => {
                 self.analyse_or_any(expr);
             }
         }
 
-        let out_type = if !tail.is_empty() {
+        if !tail.is_empty() {
             self.resolve_for_iterations(tail, body, _span)
         } else {
             match body {
@@ -909,13 +905,7 @@ impl Analyser {
                     }
                 }
             }
-        };
-
-        if do_destroy {
-            self.scope_tree.destroy_scope();
         }
-
-        out_type
     }
 
     fn resolve_single_assignment_target(
@@ -936,12 +926,9 @@ impl Analyser {
     ) -> Result<StaticType, AnalysisError> {
         match &mut lvalue.target {
             AssignmentTarget::Identifier { resolved, .. } => {
-                let target = self
-                    .scope_tree
-                    .get_binding(self.resolver.assigned_symbol(lvalue.id));
-
-                *resolved = Some(target);
-                Ok(self.scope_tree.get_type(target).clone())
+                let symbol = self.resolver.assigned_symbol(lvalue.id);
+                *resolved = Some(self.locate(symbol));
+                Ok(self.scope_tree.get_type(symbol).clone())
             }
             AssignmentTarget::Index {
                 index,
@@ -965,7 +952,9 @@ impl Analyser {
                 // augmented assignment reads the old value through `[]`.
                 *resolved_get = self.resolver.getter_candidates(lvalue.id).map(|getters| {
                     self.scope_tree
-                        .resolve_call(getters, &get_args, CallKind::Regular)
+                        .resolve_call(getters, &get_args, CallKind::Regular, |symbol| {
+                            self.locate(symbol)
+                        })
                         .binding
                 });
                 *resolved_set = Some(
@@ -974,6 +963,7 @@ impl Analyser {
                             self.resolver.setter_candidates(lvalue.id),
                             &set_args,
                             CallKind::Regular,
+                            |symbol| self.locate(symbol),
                         )
                         .binding,
                 );
@@ -1014,14 +1004,18 @@ impl Analyser {
                     .resolver
                     .getter_candidates(lvalue.id)
                     .expect("internal error: member target without getter candidates");
-                let getter = self
-                    .scope_tree
-                    .resolve_call(getters, &getter_args, CallKind::Regular);
+                let getter = self.scope_tree.resolve_call(
+                    getters,
+                    &getter_args,
+                    CallKind::Regular,
+                    |symbol| self.locate(symbol),
+                );
                 let setter_name = format!("{member}=");
                 let setter = self.scope_tree.resolve_call(
                     self.resolver.setter_candidates(lvalue.id),
                     &setter_args,
                     CallKind::Regular,
+                    |symbol| self.locate(symbol),
                 );
                 let getter_missing = matches!(getter.binding, Binding::None);
                 let setter_missing = matches!(setter.binding, Binding::None);
@@ -1102,13 +1096,13 @@ impl Analyser {
     ) {
         match &lvalue.target {
             AssignmentTarget::Identifier {
-                resolved: Some(target),
-                ..
+                resolved: Some(_), ..
             } => {
+                let target = self.resolver.assigned_symbol(lvalue.id);
                 let widened = stored_type.lub(value_type);
                 if widened != *stored_type
                     && let Err(annotated_type) =
-                        self.scope_tree.update_binding_type(*target, widened)
+                        self.scope_tree.update_binding_type(target, widened)
                     && !value_type.is_subtype(&annotated_type)
                 {
                     self.emit(AnalysisError::mismatched_types(
@@ -1160,17 +1154,18 @@ impl Analyser {
                 };
 
                 if let Expression::Identifier {
-                    resolved: Binding::Resolved(Candidate::Scalar(target)),
+                    resolved: Binding::Resolved(Candidate::Scalar(_)),
                     ..
                 } = &value.expression
                 {
-                    let container_type = self.scope_tree.get_type(*target).clone();
+                    let target = self.resolver.innermost_reference(value.id);
+                    let container_type = self.scope_tree.get_type(target).clone();
                     let widened_container = container_type
                         .with_element_type(stored_element_type.lub(&value_element_type));
                     if widened_container != container_type
                         && self
                             .scope_tree
-                            .update_binding_type(*target, widened_container)
+                            .update_binding_type(target, widened_container)
                             .is_ok()
                     {
                         return;
@@ -1216,7 +1211,7 @@ impl Analyser {
             };
 
             let symbol = self.resolver.declared_symbol(node);
-            self.create_local_binding(param.name.clone(), binding, symbol);
+            self.declare(symbol, binding);
         }
 
         parameters
@@ -1233,10 +1228,10 @@ impl Analyser {
     ) {
         match &mut lvalue.pattern {
             BindingPattern::Identifier {
-                identifier,
                 resolved,
                 inferred_type,
                 span,
+                ..
             } => {
                 // If there is a type annotation and the given type is not a subtype of the annotated type we emit an error
                 if let Some(expected_type) = &expected_type
@@ -1255,11 +1250,7 @@ impl Analyser {
                 };
 
                 let symbol = self.resolver.declared_symbol(lvalue.id);
-                *resolved = Some(self.create_local_binding(
-                    identifier.clone(),
-                    type_binding.clone(),
-                    symbol,
-                ));
+                *resolved = Some(self.declare(symbol, type_binding.clone()));
 
                 *inferred_type = Some(type_binding.typ().clone())
             }
