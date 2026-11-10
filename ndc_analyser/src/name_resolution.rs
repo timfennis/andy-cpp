@@ -50,6 +50,8 @@ pub(crate) struct NameResolver {
     augmented: AHashMap<NodeId, AugmentedCandidates>,
     /// Getter candidates for reads through an accessor, keyed by the reading node.
     /// For `p.x`, the member access node's `x`. For `xs[i] += 1`, the target node's `[]`.
+    /// Member targets always get one, as their type is what the getter returns:
+    /// for `p.x = 1`, the target node's `x`.
     getters: AHashMap<NodeId, Candidates>,
     /// Setter candidates for writes through an accessor, keyed by the target node.
     /// In `p.x = 1`, `x=`. In `xs[i] = 1`, `[]=`.
@@ -120,13 +122,9 @@ pub(crate) struct Candidates(Vec<Vec<SymbolId>>);
 /// `in_place` holds `++=` (mutates `xs`), `operator` holds `++` (builds a new value
 /// that is written back). Either may be empty; the type pass picks.
 #[derive(Debug, Clone)]
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "read by the type pass, which is not written yet")
-)]
 pub(crate) struct AugmentedCandidates {
-    in_place: Candidates,
-    operator: Candidates,
+    pub(crate) in_place: Candidates,
+    pub(crate) operator: Candidates,
 }
 
 /// The symbols a struct declaration binds. For `struct Point { x: Int }`: the
@@ -388,6 +386,27 @@ impl NameResolver {
         self.references[&node].innermost()
     }
 
+    /// Every symbol the identifier at `node` could mean.
+    pub(crate) fn reference_candidates(&self, node: NodeId) -> &Candidates {
+        &self.references[&node]
+    }
+
+    /// The getters a read through the accessor at `node` could use. `None`
+    /// where nothing reads through a getter, like the target of `xs[i] = 1`.
+    pub(crate) fn getter_candidates(&self, node: NodeId) -> Option<&Candidates> {
+        self.getters.get(&node)
+    }
+
+    /// The setters a write through the assignment target at `node` could use.
+    pub(crate) fn setter_candidates(&self, node: NodeId) -> &Candidates {
+        &self.setters[&node]
+    }
+
+    /// The operations the augmented assignment at `node` could use.
+    pub(crate) fn augmented_candidates(&self, node: NodeId) -> &AugmentedCandidates {
+        &self.augmented[&node]
+    }
+
     /// The symbol the identifier assignment target at `node` writes to.
     pub(crate) fn assigned_symbol(&self, node: NodeId) -> SymbolId {
         self.assignments[&node]
@@ -585,18 +604,11 @@ impl NameResolver {
                 }
 
                 self.resolve_target(l_value)?;
-                // Reading the old value goes through the target's getter.
-                // Identifiers are read directly, and sequences were rejected above.
-                let getter = match &l_value.target {
-                    AssignmentTarget::Index { .. } => Some(self.use_name("[]", l_value.span)?),
-                    AssignmentTarget::Member {
-                        member,
-                        member_span,
-                        ..
-                    } => Some(self.use_name(member, *member_span)?),
-                    AssignmentTarget::Identifier { .. } | AssignmentTarget::Sequence(_) => None,
-                };
-                if let Some(getter) = getter {
+                // Reading the old value goes through the target's getter. Member targets
+                // recorded theirs already, identifiers are read directly, and sequences
+                // were rejected above.
+                if let AssignmentTarget::Index { .. } = l_value.target {
+                    let getter = self.use_name("[]", l_value.span)?;
                     self.getters.insert(l_value.id, getter);
                 }
                 self.resolve(r_value)?;
@@ -822,8 +834,10 @@ impl NameResolver {
                 ..
             } => {
                 self.resolve(receiver)?;
-                let candidates = self.use_name(&format!("{member}="), *member_span)?;
-                self.setters.insert(target.id, candidates);
+                let setter = self.use_name(&format!("{member}="), *member_span)?;
+                self.setters.insert(target.id, setter);
+                let getter = self.use_name(member, *member_span)?;
+                self.getters.insert(target.id, getter);
             }
         }
         Ok(())
@@ -882,8 +896,15 @@ impl NameResolver {
 }
 
 impl Candidates {
-    fn iter(&self) -> impl Iterator<Item = &Vec<SymbolId>> {
+    /// The groups, nearest scope first.
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &Vec<SymbolId>> {
         self.0.iter()
+    }
+
+    /// Candidates made of these groups, nearest scope first.
+    #[cfg(test)]
+    pub(crate) fn from_groups(groups: Vec<Vec<SymbolId>>) -> Self {
+        Self(groups)
     }
 
     /// The newest symbol in the nearest scope. For `x` in
