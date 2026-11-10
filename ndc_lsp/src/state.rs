@@ -99,7 +99,7 @@ struct MapCollector<'a> {
 
 impl AstVisitor for MapCollector<'_> {
     fn on_expression(&mut self, expr: &ExpressionLocation) {
-        if let Some(typ) = self.analysis.expr_types.get(&expr.id) {
+        if let Some(typ) = self.analysis.analysis.expr_types.get(&expr.id) {
             self.expression_types.insert(expr.span.end(), typ.clone());
         }
     }

@@ -258,7 +258,8 @@ fn run_pipeline(tokens: Vec<TokenLocation>) {
         return;
     }
 
-    let compiled = match Compiler::compile(expressions.into_iter(), struct_registry) {
+    let analysis = analyser.take_result().analysis;
+    let compiled = match Compiler::compile(expressions.into_iter(), analysis, struct_registry) {
         Ok(c) => c,
         Err(_) => return,
     };

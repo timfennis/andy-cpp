@@ -4,9 +4,7 @@
 //! here is read off the resolver's scope tree.
 
 use ndc_analysis::{CaptureSource, ResolvedVar};
-
 use ndc_core::NodeId;
-
 use ndc_resolver::{NameResolver, ScopeId, ScopeKind, SymbolId};
 
 #[cfg(test)]
@@ -60,6 +58,26 @@ impl<'a> Layout<'a> {
             .position(|&captured| captured == symbol)
             .expect("internal error: a function captures every outer value it uses");
         ResolvedVar::Upvalue { slot }
+    }
+
+    /// How many local slots the frame of `function` (`None` for the program's
+    /// top level) needs for its own values: one past the highest slot any of
+    /// its scopes uses. In `fn f(a) { let b = 1; { let c = 2; } }` that's 3.
+    pub fn frame_size(self, function: Option<NodeId>) -> usize {
+        let frame = function.map(|function| self.resolver.function_scope(function));
+        self.resolver
+            .scopes()
+            .filter(|(_, scope)| scope.kind() != ScopeKind::Builtins)
+            .filter(|&(id, _)| {
+                let own = self.frame_of(id);
+                match frame {
+                    Some(frame) => own == frame,
+                    None => self.resolver.scope(own).kind() == ScopeKind::Program,
+                }
+            })
+            .map(|(id, scope)| self.first_slot(id) + scope.bindings().len())
+            .max()
+            .unwrap_or(0)
     }
 
     /// Where each upvalue of the function declared at `function` comes from,

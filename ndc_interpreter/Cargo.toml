@@ -9,6 +9,7 @@ trace = ["ndc_vm/trace"]
 
 [dependencies]
 ndc_analyser.workspace = true
+ndc_analysis.workspace = true
 ndc_core.workspace = true
 ndc_vm = { workspace = true }
 ndc_lexer.workspace = true

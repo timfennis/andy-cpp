@@ -1,4 +1,4 @@
-use ndc_analysis::CaptureSource;
+use ndc_analysis::{Analysis, CaptureSource};
 use ndc_core::r#struct::StructRegistry;
 use ndc_lexer::{Lexer, SourceId};
 use ndc_parser::Parser;
@@ -20,6 +20,7 @@ fn compile(input: &str) -> Vec<OpCode> {
     let expressions = Parser::from_tokens(tokens).parse().expect("parse failed");
     Compiler::compile_unoptimized(
         expressions.into_iter(),
+        Analysis::default(),
         Rc::new(RefCell::new(StructRegistry::default())),
     )
     .expect("compile failed")

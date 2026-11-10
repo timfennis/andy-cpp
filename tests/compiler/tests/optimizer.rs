@@ -1,4 +1,4 @@
-use ndc_analysis as _;
+use ndc_analysis::Analysis;
 use ndc_core::r#struct::StructRegistry;
 use ndc_lexer::{Lexer, SourceId};
 use ndc_parser::Parser;
@@ -21,17 +21,25 @@ fn empty_registry() -> Rc<RefCell<StructRegistry>> {
 }
 
 fn unoptimized(input: &str) -> Vec<OpCode> {
-    Compiler::compile_unoptimized(parse(input).into_iter(), empty_registry())
-        .expect("compile failed")
-        .opcodes()
-        .to_vec()
+    Compiler::compile_unoptimized(
+        parse(input).into_iter(),
+        Analysis::default(),
+        empty_registry(),
+    )
+    .expect("compile failed")
+    .opcodes()
+    .to_vec()
 }
 
 fn optimized(input: &str) -> Vec<OpCode> {
-    Compiler::compile(parse(input).into_iter(), empty_registry())
-        .expect("compile failed")
-        .opcodes()
-        .to_vec()
+    Compiler::compile(
+        parse(input).into_iter(),
+        Analysis::default(),
+        empty_registry(),
+    )
+    .expect("compile failed")
+    .opcodes()
+    .to_vec()
 }
 
 // `5;` — a discarded constant. The peephole eliminates the `Constant; Pop`

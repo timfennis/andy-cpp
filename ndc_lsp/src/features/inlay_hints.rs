@@ -68,7 +68,11 @@ impl AstVisitor for HintCollector<'_> {
         // return_type is Some only when explicitly annotated by the user — skip the hint.
         // Inferred return types are stored in the side table.
         if return_type.is_none()
-            && let Some(rt) = self.analysis_result.inferred_return_types.get(&node_id)
+            && let Some(rt) = self
+                .analysis_result
+                .analysis
+                .inferred_return_types
+                .get(&node_id)
         {
             self.hints.push(InlayHint {
                 position: self.line_index.position(self.text, parameters_span.end()),

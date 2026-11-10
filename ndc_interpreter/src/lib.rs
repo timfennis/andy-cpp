@@ -1,4 +1,5 @@
 use ndc_analyser::Analyser;
+use ndc_analysis::Analysis;
 use ndc_core::FunctionRegistry;
 use ndc_lexer::{Lexer, SourceDb, SourceId, TokenLocation};
 use ndc_parser::ExpressionLocation;
@@ -140,9 +141,10 @@ impl Interpreter {
 
     pub fn compile_str(&mut self, input: &str) -> Result<CompiledFunction, InterpreterError> {
         let source_id = self.source_db.add("<input>", input);
-        let (expressions, _, _) = self.parse_and_analyse(input, source_id)?;
+        let (expressions, result, _) = self.parse_and_analyse(input, source_id)?;
         Ok(Compiler::compile(
             expressions.into_iter(),
+            result.analysis,
             Rc::clone(&self.struct_registry),
         )?)
     }
@@ -154,9 +156,10 @@ impl Interpreter {
         input: &str,
     ) -> Result<CompiledFunction, InterpreterError> {
         let source_id = self.source_db.add("<input>", input);
-        let (expressions, _, _) = self.parse_and_analyse(input, source_id)?;
+        let (expressions, result, _) = self.parse_and_analyse(input, source_id)?;
         Ok(Compiler::compile_unoptimized(
             expressions.into_iter(),
+            result.analysis,
             Rc::clone(&self.struct_registry),
         )?)
     }
@@ -196,8 +199,8 @@ impl Interpreter {
         // fails — otherwise the analyser would remember declarations from a line
         // that never actually ran.
         let analyser_checkpoint = self.analyser.checkpoint();
-        let (expressions, _, mut timings) = self.parse_and_analyse(input, source_id)?;
-        let vm_result = self.interpret_vm(input, expressions.into_iter());
+        let (expressions, result, mut timings) = self.parse_and_analyse(input, source_id)?;
+        let vm_result = self.interpret_vm(input, expressions.into_iter(), result.analysis);
         if vm_result.is_err() || !self.resumable {
             self.analyser.restore(analyser_checkpoint);
         }
@@ -253,6 +256,7 @@ impl Interpreter {
         #[cfg(feature = "trace")] input: &str,
         #[cfg(not(feature = "trace"))] _input: &str,
         expressions: impl Iterator<Item = ExpressionLocation>,
+        analysis: Analysis,
     ) -> Result<(Value, ExecutionTimings), InterpreterError> {
         use ndc_vm::{Function as VmFunction, Object as VmObject, Value as VmValue};
 
@@ -269,7 +273,7 @@ impl Interpreter {
         let mut timings = ExecutionTimings::default();
         if !self.resumable {
             let code = measure(&mut timings, Phase::Compiling, || {
-                self.compile_one_shot(expressions)
+                self.compile_one_shot(expressions, analysis)
             })?;
             let num_locals = code.num_locals();
             let output = if self.capturing {
@@ -297,7 +301,11 @@ impl Interpreter {
                     OutputSink::Stdout
                 };
                 let (code, checkpoint) = measure(&mut timings, Phase::Compiling, || {
-                    Compiler::compile_resumable(expressions, Rc::clone(&self.struct_registry))
+                    Compiler::compile_resumable(
+                        expressions,
+                        analysis,
+                        Rc::clone(&self.struct_registry),
+                    )
                 })?;
                 let mut vm = Vm::new(code, globals).with_output(output);
                 #[cfg(feature = "trace")]
@@ -320,7 +328,7 @@ impl Interpreter {
                 // find their locals on the stack.
                 let old_checkpoint = checkpoint.clone();
                 let (code, new_checkpoint) = measure(&mut timings, Phase::Compiling, || {
-                    checkpoint.resume(expressions)
+                    checkpoint.resume(expressions, analysis)
                 })?;
                 vm.resume_from_halt(code, globals, resume_ip, prev_num_locals);
                 #[cfg(feature = "trace")]
@@ -345,8 +353,9 @@ impl Interpreter {
     fn compile_one_shot(
         &self,
         expressions: impl Iterator<Item = ExpressionLocation>,
+        analysis: Analysis,
     ) -> Result<CompiledFunction, ndc_vm::CompileError> {
-        Compiler::compile(expressions, Rc::clone(&self.struct_registry))
+        Compiler::compile(expressions, analysis, Rc::clone(&self.struct_registry))
     }
 }
 
@@ -390,12 +399,12 @@ mod tests {
     fn one_shot_compilation_runs_the_optimizer() {
         let mut interpreter = Interpreter::one_shot();
         let source_id = interpreter.source_db.add("<test>", "1;");
-        let (expressions, _, _) = interpreter
+        let (expressions, result, _) = interpreter
             .parse_and_analyse("1;", source_id)
             .expect("analysis should succeed");
 
         let compiled = interpreter
-            .compile_one_shot(expressions.into_iter())
+            .compile_one_shot(expressions.into_iter(), result.analysis)
             .expect("compilation should succeed");
 
         assert_eq!(compiled.opcodes(), [OpCode::Halt]);
