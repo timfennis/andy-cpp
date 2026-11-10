@@ -1,6 +1,8 @@
 use ahash::AHashMap;
 
-use ndc_core::StaticType;
+use ndc_analysis::Analysis;
+use ndc_core::{NodeId, StaticType};
+#[cfg(test)]
 use ndc_interpreter::AnalysisResult;
 use ndc_lexer::Span;
 use ndc_parser::ExpressionLocation;
@@ -10,7 +12,7 @@ use crate::visitor::{AstVisitor, walk_ast};
 
 /// Per-document analysis state cached between edits.
 ///
-/// The analysed AST plus its [`AnalysisResult`] side tables are the source of
+/// The analysed AST plus its [`Analysis`] side tables are the source of
 /// truth for position-based features (hover, document symbols, go-to-definition).
 /// They reflect the last *successful* analysis.
 pub struct DocumentState {
@@ -29,9 +31,9 @@ pub struct DocumentState {
     pub analysis_matches_source: bool,
     /// Analysed AST from the last successful analysis.
     pub ast: Vec<ExpressionLocation>,
-    /// Side tables (per-expression types, declaration spans, ...) from the last
-    /// successful analysis.
-    pub analysis: AnalysisResult,
+    /// What the last successful analysis worked out about `ast`: types,
+    /// bindings and so on, keyed by node.
+    pub analysis: Analysis,
     /// Variable name -> inferred type. Derived from `ast`, but kept as a flat map
     /// so that simple `ident.` dot-completion keeps working while the user is
     /// mid-edit and the buffer doesn't parse (the AST is stale then, but the
@@ -52,7 +54,7 @@ impl DocumentState {
             version: 0,
             analysis_matches_source: false,
             ast: Vec::new(),
-            analysis: AnalysisResult::default(),
+            analysis: Analysis::default(),
             variable_types: AHashMap::new(),
             expression_types: AHashMap::new(),
         }
@@ -64,10 +66,10 @@ impl DocumentState {
     pub fn from_analysis(
         source: String,
         ast: Vec<ExpressionLocation>,
-        analysis: AnalysisResult,
+        result: AnalysisResult,
     ) -> Self {
         let mut state = Self::from_source(source);
-        state.set_analysis(ast, analysis);
+        state.set_analysis(ast, result.analysis);
         state
     }
 
@@ -75,7 +77,7 @@ impl DocumentState {
     /// place, leaving `source`/`line_index`/`version` untouched, and mark the
     /// analysis as matching the current source. Callers must ensure `ast` was
     /// produced from the current `source`.
-    pub fn set_analysis(&mut self, ast: Vec<ExpressionLocation>, analysis: AnalysisResult) {
+    pub fn set_analysis(&mut self, ast: Vec<ExpressionLocation>, analysis: Analysis) {
         let mut collector = MapCollector {
             analysis: &analysis,
             variable_types: AHashMap::new(),
@@ -92,14 +94,14 @@ impl DocumentState {
 
 /// Collects the flat lookup maps used by dot-completion from an analysed AST.
 struct MapCollector<'a> {
-    analysis: &'a AnalysisResult,
+    analysis: &'a Analysis,
     variable_types: AHashMap<String, StaticType>,
     expression_types: AHashMap<usize, StaticType>,
 }
 
 impl AstVisitor for MapCollector<'_> {
     fn on_expression(&mut self, expr: &ExpressionLocation) {
-        if let Some(typ) = self.analysis.analysis.expr_types.get(&expr.id) {
+        if let Some(typ) = self.analysis.expr_types.get(&expr.id) {
             self.expression_types.insert(expr.span.end(), typ.clone());
         }
     }
@@ -107,11 +109,11 @@ impl AstVisitor for MapCollector<'_> {
     fn on_declaration(
         &mut self,
         identifier: &str,
-        inferred_type: Option<&StaticType>,
+        node: NodeId,
         _has_annotation: bool,
         _span: Span,
     ) {
-        if let Some(typ) = inferred_type {
+        if let Some(typ) = self.analysis.variable_types.get(&node) {
             self.variable_types
                 .insert(identifier.to_string(), typ.clone());
         }

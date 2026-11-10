@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 
-/// Unique identity for an AST node. Used as a key in side tables (e.g. the
-/// analyser's expression type map) so that tooling data doesn't bloat the AST.
+/// Unique identity for an AST node. Everything the analyser works out about a
+/// node is keyed by it, so the AST itself stays purely syntactic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NodeId(pub u32);
 

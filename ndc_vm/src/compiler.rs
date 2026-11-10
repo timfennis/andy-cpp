@@ -3,12 +3,12 @@ use crate::value::{CompiledFunction, Function};
 use crate::{Object, Value};
 use ndc_analysis::{Analysis, Binding, Candidate, ResolvedVar};
 use ndc_core::NodeId;
+use ndc_core::StaticType;
 use ndc_core::r#struct::StructRegistry;
-use ndc_core::{StaticType, TypeSignature};
 use ndc_lexer::{NumericLiteral, Span};
 use ndc_parser::{
     AssignmentTarget, AssignmentTargetLocation, BindingPattern, BindingPatternLocation, Expression,
-    ExpressionLocation, ForBody, ForIteration, FunctionParameter, LogicalOperator,
+    ExpressionLocation, ForBody, ForIteration, LogicalOperator,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -357,23 +357,9 @@ impl Compiler {
                 self.emit_unit();
             }
             Expression::FunctionDeclaration {
-                name,
-                body,
-                parameters,
-                resolved_return_type,
-                pure,
-                ..
+                name, body, pure, ..
             } => {
-                let type_signature = FunctionParameter::from_params(&parameters);
-                self.compile_function_decl(
-                    id,
-                    name,
-                    *body,
-                    &type_signature,
-                    resolved_return_type,
-                    pure,
-                    span,
-                )?;
+                self.compile_function_decl(id, name, *body, pure, span)?;
             }
             Expression::StructDeclaration { .. } => {
                 let analysis = Rc::clone(&self.analysis);
@@ -827,28 +813,16 @@ impl Compiler {
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn compile_function_decl(
         &mut self,
         id: NodeId,
         name: Option<String>,
         body: ExpressionLocation,
-        type_signature: &TypeSignature,
-        return_type: Option<StaticType>,
         pure: bool,
         span: Span,
     ) -> Result<(), CompileError> {
-        let resolved_name = self.analysis.variable(id);
-        let return_type = return_type.unwrap_or_default();
-        let static_type = StaticType::Function {
-            parameters: match &type_signature {
-                TypeSignature::Variadic => None,
-                TypeSignature::Exact(types) => {
-                    Some(types.iter().map(|x| x.type_name.clone()).collect())
-                }
-            },
-            return_type: Box::new(return_type.clone()),
-        };
+        let name_variable = self.analysis.variable(id);
+        let static_type = self.analysis.function_type(id).clone();
         let mut fn_compiler = Self {
             ir: Default::default(),
             source_locals: self.analysis.frame_size(id),
@@ -881,7 +855,7 @@ impl Compiler {
 
         // A captured function may capture itself, before its value exists, so
         // its cell must be in place before the closure is made.
-        if let Some(ResolvedVar::Cell { slot }) = resolved_name {
+        if let Some(ResolvedVar::Cell { slot }) = name_variable {
             self.ir.write(OpCode::NewCell(slot), span);
         }
 
@@ -906,7 +880,7 @@ impl Compiler {
             self.ir.write(OpCode::Memoize, span);
         }
 
-        match resolved_name {
+        match name_variable {
             Some(var @ ResolvedVar::Local { .. }) => {
                 self.emit_declare(var, span);
                 self.emit_unit();

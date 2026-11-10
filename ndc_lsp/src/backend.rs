@@ -126,8 +126,8 @@ impl Backend {
         // On success, commit in place (keeps the current source/line_index).
         // On parse failure, keep the last good AST; `analysis_matches_source`
         // is already false, so AST-backed features stay disabled.
-        if let Some((ast, analysis)) = analysed {
-            state.set_analysis(ast, analysis);
+        if let Some((ast, result)) = analysed {
+            state.set_analysis(ast, result.analysis);
         }
 
         self.client
@@ -254,6 +254,7 @@ impl LanguageServer for Backend {
             .map(|state| {
                 DocumentSymbolResponse::Nested(symbols::document_symbols(
                     &state.ast,
+                    &state.analysis,
                     &state.source,
                     &state.line_index,
                 ))

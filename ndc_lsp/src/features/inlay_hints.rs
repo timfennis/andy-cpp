@@ -1,6 +1,5 @@
+use ndc_analysis::Analysis;
 use ndc_core::NodeId;
-use ndc_core::StaticType;
-use ndc_interpreter::AnalysisResult;
 use ndc_lexer::Span;
 use ndc_parser::ExpressionLocation;
 use tower_lsp::lsp_types::{InlayHint, InlayHintKind, InlayHintLabel};
@@ -14,14 +13,14 @@ use crate::visitor::{AstVisitor, walk_ast};
 /// AST. Only unannotated declarations and inferred return types get a hint.
 pub fn collect(
     expressions: &[ExpressionLocation],
-    analysis_result: &AnalysisResult,
+    analysis: &Analysis,
     text: &str,
     line_index: &LineIndex,
 ) -> Vec<InlayHint> {
     let mut collector = HintCollector {
         text,
         line_index,
-        analysis_result,
+        analysis,
         hints: Vec::new(),
     };
     walk_ast(&mut collector, expressions);
@@ -31,7 +30,7 @@ pub fn collect(
 struct HintCollector<'a> {
     text: &'a str,
     line_index: &'a LineIndex,
-    analysis_result: &'a AnalysisResult,
+    analysis: &'a Analysis,
     hints: Vec<InlayHint>,
 }
 
@@ -39,11 +38,11 @@ impl AstVisitor for HintCollector<'_> {
     fn on_declaration(
         &mut self,
         _identifier: &str,
-        inferred_type: Option<&StaticType>,
+        node: NodeId,
         has_annotation: bool,
         span: Span,
     ) {
-        if let Some(typ) = inferred_type
+        if let Some(typ) = self.analysis.variable_types.get(&node)
             && !has_annotation
         {
             self.hints.push(InlayHint {
@@ -61,18 +60,14 @@ impl AstVisitor for HintCollector<'_> {
 
     fn on_function_declaration(
         &mut self,
-        return_type: Option<&StaticType>,
+        has_return_annotation: bool,
         parameters_span: Span,
         node_id: NodeId,
     ) {
-        // return_type is Some only when explicitly annotated by the user — skip the hint.
-        // Inferred return types are stored in the side table.
-        if return_type.is_none()
-            && let Some(rt) = self
-                .analysis_result
-                .analysis
-                .inferred_return_types
-                .get(&node_id)
+        // An annotated return type needs no hint; the analysis only infers the
+        // return types of functions without one.
+        if !has_return_annotation
+            && let Some(rt) = self.analysis.inferred_return_types.get(&node_id)
         {
             self.hints.push(InlayHint {
                 position: self.line_index.position(self.text, parameters_span.end()),
@@ -96,11 +91,11 @@ mod tests {
     fn collect_hints(source: &str) -> Vec<InlayHint> {
         let mut interpreter = Interpreter::capturing();
         interpreter.configure(ndc_stdlib::register);
-        let (expressions, analysis_result) = interpreter
+        let (expressions, result) = interpreter
             .analyse_str(source)
             .expect("analysis should succeed");
         let line_index = LineIndex::new(source);
-        collect(&expressions, &analysis_result, source, &line_index)
+        collect(&expressions, &result.analysis, source, &line_index)
     }
 
     fn has_label(hints: &[InlayHint], pred: impl Fn(&str) -> bool) -> bool {

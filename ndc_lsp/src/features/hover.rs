@@ -1,5 +1,5 @@
-use ndc_analysis::{Binding, ResolvedVar};
-use ndc_core::StaticType;
+use ndc_analysis::{Analysis, Binding, ResolvedVar};
+use ndc_core::{NodeId, StaticType};
 use ndc_lexer::Span;
 use ndc_parser::Expression;
 use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position};
@@ -31,7 +31,7 @@ pub fn hover(
     let node = node_at_offset(&state.ast, offset)?;
     let markdown = match &node.expression {
         Expression::Identifier { name, .. }
-            if resolves_to_global(state.analysis.analysis.binding(node.id)) =>
+            if resolves_to_global(state.analysis.binding(node.id)) =>
         {
             function_hover(name, functions).or_else(|| type_hover(state, node.id))
         }
@@ -69,6 +69,7 @@ fn markup(state: &DocumentState, span: Span, value: String) -> Hover {
 /// span and inferred type.
 fn declaration_at(state: &DocumentState, offset: usize) -> Option<(Span, StaticType)> {
     let mut finder = DeclFinder {
+        analysis: &state.analysis,
         offset,
         found: None,
     };
@@ -76,22 +77,23 @@ fn declaration_at(state: &DocumentState, offset: usize) -> Option<(Span, StaticT
     finder.found
 }
 
-struct DeclFinder {
+struct DeclFinder<'a> {
+    analysis: &'a Analysis,
     offset: usize,
     found: Option<(Span, StaticType)>,
 }
 
-impl AstVisitor for DeclFinder {
+impl AstVisitor for DeclFinder<'_> {
     fn on_declaration(
         &mut self,
         _identifier: &str,
-        inferred_type: Option<&StaticType>,
+        node: NodeId,
         _has_annotation: bool,
         span: Span,
     ) {
         if self.offset >= span.offset()
             && self.offset < span.end()
-            && let Some(typ) = inferred_type
+            && let Some(typ) = self.analysis.variable_types.get(&node)
         {
             self.found = Some((span, typ.clone()));
         }
@@ -114,8 +116,8 @@ fn function_hover(name: &str, functions: &[FunctionInfo]) -> Option<String> {
 }
 
 /// Markdown showing the inferred type of an expression.
-fn type_hover(state: &DocumentState, id: ndc_core::NodeId) -> Option<String> {
-    let typ = state.analysis.analysis.expr_types.get(&id)?;
+fn type_hover(state: &DocumentState, id: NodeId) -> Option<String> {
+    let typ = state.analysis.expr_types.get(&id)?;
     Some(format!("```ndc\n{typ}\n```"))
 }
 

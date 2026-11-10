@@ -15,6 +15,14 @@ pub struct Analysis {
     /// The inferred return type of each function without a return type
     /// annotation, keyed by its declaration.
     pub inferred_return_types: AHashMap<NodeId, StaticType>,
+    /// The type of each name a binding pattern declares, keyed by the pattern:
+    /// its annotation, or what the analyser inferred from the value. A
+    /// parameter's type is its annotation, `Any` if it has none.
+    pub variable_types: AHashMap<NodeId, StaticType>,
+    /// The type each function declaration gives the function value, keyed by
+    /// the declaration: its annotated parameter and return types, `Any` where
+    /// there is no annotation. `fn f(x: Int) { x }` is `Function(Int) -> Any`.
+    pub function_types: AHashMap<NodeId, StaticType>,
     /// What each identifier expression refers to, keyed by the identifier. For
     /// a call like `f(x)` that's the overload of `f` the call picks.
     pub bindings: AHashMap<NodeId, Binding>,
@@ -91,6 +99,13 @@ impl Analysis {
         self.structs
             .get(&declaration)
             .expect("internal error: every struct is analysed before it's compiled")
+    }
+
+    /// The type the function declared at `function` gives its value.
+    pub fn function_type(&self, function: NodeId) -> &StaticType {
+        self.function_types
+            .get(&function)
+            .expect("internal error: every function is analysed before it's compiled")
     }
 
     /// The frame size of the function declared at `function`.

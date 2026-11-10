@@ -11,15 +11,15 @@ use ndc_layout::Layout;
 use ndc_lexer::{NumericLiteral, Span};
 use ndc_parser::{
     AssignmentTarget, AssignmentTargetLocation, BindingPattern, BindingPatternLocation, Expression,
-    ExpressionLocation, ForBody, ForIteration, FunctionParameter, TypeExpr,
+    ExpressionLocation, ForBody, ForIteration, TypeExpr,
 };
 use ndc_resolver::{Candidates, NameResolutionError, NameResolver, SymbolId};
 use std::cell::RefCell;
 use std::fmt::Debug;
 use std::rc::Rc;
 
-/// Side table holding semantic information keyed by AST node identity.
-/// Keeps tooling-specific data (like per-expression types) out of the AST.
+/// What analysing one batch produced: the analysis, and the errors found on
+/// the way.
 #[derive(Debug, Default)]
 pub struct AnalysisResult {
     /// What the analyser worked out, keyed by AST node.
@@ -574,16 +574,25 @@ impl Analyser {
                 parameters,
                 body,
                 return_annotation,
-                resolved_return_type,
                 ..
             } => {
-                for param in parameters.iter_mut() {
-                    param.resolved_type = self.lower_annotation(param.annotation.as_ref());
-                }
-                *resolved_return_type = self.lower_annotation(return_annotation.as_ref());
-                let return_type_slot: &Option<StaticType> = resolved_return_type;
-
-                let type_signature = FunctionParameter::from_params(parameters);
+                let type_signature = TypeSignature::from_annotated_bindings(
+                    parameters
+                        .iter()
+                        .map(|param| {
+                            let annotation = self.lower_annotation(param.annotation.as_ref());
+                            (param.name().to_string(), annotation)
+                        })
+                        .collect(),
+                );
+                let annotated_return = self.lower_annotation(return_annotation.as_ref());
+                self.result.analysis.function_types.insert(
+                    *id,
+                    StaticType::Function {
+                        parameters: type_signature.types(),
+                        return_type: Box::new(annotated_return.clone().unwrap_or_default()),
+                    },
+                );
 
                 // Pre-register the function before analyzing its body so recursive calls can
                 // resolve the name. The return type is unknown at this point so we use Any.
@@ -600,7 +609,7 @@ impl Analyser {
                     }
                     let placeholder = StaticType::Function {
                         parameters: type_signature.types(),
-                        return_type: Box::new(return_type_slot.clone().unwrap_or(StaticType::Any)),
+                        return_type: Box::new(annotated_return.clone().unwrap_or_default()),
                     };
                     let slot = self.declare(symbol, TypeBinding::Inferred(placeholder));
                     Some((symbol, slot))
@@ -614,12 +623,11 @@ impl Analyser {
                 let param_types =
                     self.resolve_parameters_declarative(&type_signature, &parameter_nodes, *span);
 
-                // Fill inferred_type on parameter binding patterns for LSP hints.
-                for (p, typ) in parameters.iter_mut().zip(&param_types) {
-                    if let BindingPattern::Identifier { inferred_type, .. } = &mut p.lvalue.pattern
-                    {
-                        *inferred_type = Some(typ.clone());
-                    }
+                for (param, typ) in parameters.iter().zip(&param_types) {
+                    self.result
+                        .analysis
+                        .variable_types
+                        .insert(param.lvalue.id, typ.clone());
                 }
 
                 let implicit_return = self.analyse_or_any(body);
@@ -639,8 +647,8 @@ impl Analyser {
                 };
 
                 // If there is an annotated return type, validate it;
-                // otherwise record the inferred type in the side table.
-                if let Some(annotated) = return_type_slot {
+                // otherwise record the inferred type in the analysis.
+                if let Some(annotated) = &annotated_return {
                     if !inferred_return.is_subtype(annotated) {
                         self.emit(AnalysisError::mismatched_types(
                             &inferred_return,
@@ -655,7 +663,7 @@ impl Analyser {
                         .insert(*id, inferred_return.clone());
                 }
 
-                let effective_return = return_type_slot.clone().unwrap_or(inferred_return);
+                let effective_return = annotated_return.unwrap_or(inferred_return);
 
                 let function_type = StaticType::Function {
                     parameters: Some(param_types.clone()),
@@ -1303,11 +1311,7 @@ impl Analyser {
         span: Span,
     ) {
         match &mut lvalue.pattern {
-            BindingPattern::Identifier {
-                inferred_type,
-                span,
-                ..
-            } => {
+            BindingPattern::Identifier { span, .. } => {
                 // If there is a type annotation and the given type is not a subtype of the annotated type we emit an error
                 if let Some(expected_type) = &expected_type
                     && !found_type.is_subtype(expected_type)
@@ -1327,8 +1331,10 @@ impl Analyser {
                 let symbol = self.resolver.declared_symbol(lvalue.id);
                 let variable = self.declare(symbol, type_binding.clone());
                 self.result.analysis.variables.insert(lvalue.id, variable);
-
-                *inferred_type = Some(type_binding.typ().clone())
+                self.result
+                    .analysis
+                    .variable_types
+                    .insert(lvalue.id, type_binding.typ().clone());
             }
             BindingPattern::Sequence(seq) => {
                 // If the type is a fixed-length Tuple whose arity doesn't match

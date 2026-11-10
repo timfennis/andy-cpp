@@ -1,4 +1,4 @@
-use ndc_core::StaticType;
+use ndc_core::NodeId;
 use ndc_lexer::{SourceId, Span};
 use ndc_parser::Expression;
 use tower_lsp::lsp_types::{Location, Position, Url};
@@ -70,7 +70,7 @@ impl AstVisitor for BindingIdentFinder {
     fn on_declaration(
         &mut self,
         identifier: &str,
-        _inferred_type: Option<&StaticType>,
+        _node: NodeId,
         _has_annotation: bool,
         span: Span,
     ) {
