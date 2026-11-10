@@ -1250,7 +1250,6 @@ name = "ndc_parser"
 version = "0.3.0"
 dependencies = [
  "derive_more",
- "ndc_analysis",
  "ndc_core",
  "ndc_lexer",
  "thiserror",

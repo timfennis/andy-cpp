@@ -1,8 +1,6 @@
 use crate::operator::LogicalOperator;
 use crate::parser::Error as ParseError;
 use crate::type_expr::TypeExpr;
-use ndc_analysis::{AugmentedAssignmentPlan, Binding, ResolvedVar};
-use ndc_core::r#struct::StructId;
 use ndc_core::{NodeId, StaticType, TypeSignature};
 use ndc_lexer::{NumericLiteral, Span};
 
@@ -40,9 +38,6 @@ pub enum Expression {
     Cast {
         value: Box<ExpressionLocation>,
         annotation: TypeExpr,
-        resolved_type: Option<StaticType>,
-        /// Cleared by the analyser when the value's static type proves the cast.
-        requires_check: bool,
     },
     VariableDeclaration {
         l_value: BindingPatternLocation,
@@ -57,7 +52,6 @@ pub enum Expression {
         l_value: AssignmentTargetLocation,
         r_value: Box<ExpressionLocation>,
         operation: String,
-        plan: AugmentedAssignmentPlan,
     },
     FunctionDeclaration {
         name: Option<String>,
@@ -71,7 +65,6 @@ pub enum Expression {
     StructDeclaration {
         name: String,
         fields: Vec<StructField>,
-        resolved: Option<StructId>,
     },
     Block {
         statements: Vec<ExpressionLocation>,
@@ -102,7 +95,6 @@ pub enum Expression {
         receiver: Box<ExpressionLocation>,
         member: String,
         member_span: Span,
-        resolved_getter: Binding,
     },
     Tuple {
         values: Vec<ExpressionLocation>,
@@ -155,8 +147,6 @@ pub enum ForBody {
 pub struct StructField {
     pub identifier: String,
     pub annotation: TypeExpr,
-    pub resolved_getter: Option<ResolvedVar>,
-    pub resolved_setter: Option<ResolvedVar>,
     pub span: Span,
 }
 
@@ -208,8 +198,6 @@ pub enum AssignmentTarget {
     Index {
         value: Box<ExpressionLocation>,
         index: Box<ExpressionLocation>,
-        resolved_set: Option<Binding>,
-        resolved_get: Option<Binding>,
     },
     // Example: `a, b = ...`
     Sequence(Vec<AssignmentTargetLocation>),
@@ -218,8 +206,6 @@ pub enum AssignmentTarget {
         receiver: Box<ExpressionLocation>,
         member: String,
         member_span: Span,
-        resolved_getter: Option<Binding>,
-        resolved_setter: Option<Binding>,
     },
 }
 
@@ -411,8 +397,6 @@ impl TryFrom<ExpressionLocation> for AssignmentTargetLocation {
                 AssignmentTarget::Index {
                     value: Box::new(container),
                     index: Box::new(index),
-                    resolved_set: None,
-                    resolved_get: None,
                 }
             }
             Expression::MemberAccess {
@@ -424,8 +408,6 @@ impl TryFrom<ExpressionLocation> for AssignmentTargetLocation {
                 receiver,
                 member,
                 member_span,
-                resolved_getter: None,
-                resolved_setter: None,
             },
             Expression::List { values } | Expression::Tuple { values } => {
                 AssignmentTarget::Sequence(

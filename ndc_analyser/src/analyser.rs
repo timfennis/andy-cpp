@@ -2,7 +2,7 @@ use crate::overloads::{CallKind, Overloads, ResolvedCall};
 use crate::types::{TypeBinding, TypeTable};
 use ahash::AHashMap;
 use itertools::{Itertools, izip};
-use ndc_analysis::{Analysis, AugmentedAssignmentPlan, Binding, Candidate, ResolvedVar};
+use ndc_analysis::{Analysis, Binding, Candidate, DeclaredStruct, FieldAccessors, ResolvedVar};
 use ndc_core::NodeId;
 use ndc_core::static_type::StaticTypeConstructionError;
 use ndc_core::r#struct::{StructInfo, StructRegistry};
@@ -416,19 +416,14 @@ impl Analyser {
                 Ok(StaticType::Bool)
             }
             Expression::Grouping(expr) => self.analyse_expr(expr),
-            Expression::Cast {
-                value,
-                annotation,
-                resolved_type,
-                requires_check,
-            } => {
+            Expression::Cast { value, annotation } => {
                 let target = self.lower_type_expr(annotation);
                 let found = self.analyse_with_expected(value, &target);
                 if !found.overlaps(&target) {
                     self.emit(AnalysisError::impossible_cast(&found, &target, *span));
                 }
-                *requires_check = !found.is_subtype(&target);
-                *resolved_type = Some(target.clone());
+                let check = (!found.is_subtype(&target)).then(|| target.clone());
+                self.result.analysis.cast_checks.insert(*id, check);
                 Ok(target)
             }
             Expression::VariableDeclaration {
@@ -462,7 +457,6 @@ impl Analyser {
                 l_value,
                 r_value,
                 operation,
-                plan,
             } => {
                 let left_type = self.resolve_single_assignment_target(l_value, *span)?;
                 // `p.x += 1` reads `p.x`, the call `x(p)`, first.
@@ -508,7 +502,10 @@ impl Analyser {
 
                 let writeback_type = match assign_binding {
                     Binding::Resolved(candidate) if assign_is_eligible => {
-                        *plan = AugmentedAssignmentPlan::Resolved(Binding::Resolved(candidate));
+                        self.result
+                            .analysis
+                            .augmented_assignments
+                            .insert(*id, Binding::Resolved(candidate));
                         None
                     }
                     Binding::Dynamic(mut assign_candidates) if assign_is_eligible => {
@@ -533,8 +530,10 @@ impl Analyser {
                         } else {
                             assign_return
                         };
-                        *plan =
-                            AugmentedAssignmentPlan::Resolved(Binding::Dynamic(assign_candidates));
+                        self.result
+                            .analysis
+                            .augmented_assignments
+                            .insert(*id, Binding::Dynamic(assign_candidates));
                         Some(result_type)
                     }
                     Binding::Resolved(_) | Binding::Dynamic(_) => {
@@ -547,18 +546,19 @@ impl Analyser {
                             &left_type,
                             *span,
                         ));
-                        *plan = AugmentedAssignmentPlan::Unresolved;
                         None
                     }
                     Binding::None if has_op_binding => {
-                        *plan = AugmentedAssignmentPlan::Resolved(op_binding);
+                        self.result
+                            .analysis
+                            .augmented_assignments
+                            .insert(*id, op_binding);
                         Some(op_return)
                     }
                     Binding::None => {
                         self.emit(AnalysisError::function_not_found(
                             operation, &arg_types, *span,
                         ));
-                        *plan = AugmentedAssignmentPlan::Unresolved;
                         None
                     }
                 };
@@ -718,7 +718,6 @@ impl Analyser {
                 receiver,
                 member,
                 member_span,
-                resolved_getter,
             } => {
                 let receiver_type = self.analyse_or_any(receiver);
                 // `xs.len` is the call `len(xs)`, checked like any other call.
@@ -742,7 +741,7 @@ impl Analyser {
                     self.emit(error);
                 }
 
-                *resolved_getter = binding;
+                self.result.analysis.getters.insert(*id, binding);
                 Ok(return_type)
             }
             Expression::Tuple { values } => {
@@ -800,11 +799,7 @@ impl Analyser {
 
                 Ok(StaticType::Iterator(Box::new(StaticType::Int)))
             }
-            Expression::StructDeclaration {
-                name,
-                fields,
-                resolved,
-            } => {
+            Expression::StructDeclaration { name, fields } => {
                 let field_types: Vec<StaticType> = fields
                     .iter()
                     .map(|f| self.lower_type_expr(&f.annotation))
@@ -818,7 +813,6 @@ impl Analyser {
                         .map(|(f, t)| (f.identifier.clone(), t.clone()))
                         .collect(),
                 );
-                *resolved = Some(struct_id);
 
                 // Bind the constructor and per-field accessors with the same
                 // types the runtime functions report (StructInfo is the source
@@ -834,15 +828,24 @@ impl Analyser {
                 );
                 self.result.analysis.variables.insert(*id, constructor);
 
-                for (index, (field, &(getter, setter))) in
-                    fields.iter_mut().zip(&symbols.accessors).enumerate()
-                {
-                    field.resolved_getter =
-                        Some(self.declare(getter, TypeBinding::Annotated(info.getter_type(index))));
-
-                    field.resolved_setter =
-                        Some(self.declare(setter, TypeBinding::Annotated(info.setter_type(index))));
-                }
+                let fields = symbols
+                    .accessors
+                    .iter()
+                    .enumerate()
+                    .map(|(index, &(getter, setter))| FieldAccessors {
+                        getter: self
+                            .declare(getter, TypeBinding::Annotated(info.getter_type(index))),
+                        setter: self
+                            .declare(setter, TypeBinding::Annotated(info.setter_type(index))),
+                    })
+                    .collect();
+                self.result.analysis.structs.insert(
+                    *id,
+                    DeclaredStruct {
+                        id: struct_id,
+                        fields,
+                    },
+                );
 
                 Ok(StaticType::unit())
             }
@@ -1004,12 +1007,7 @@ impl Analyser {
                 self.result.analysis.variables.insert(lvalue.id, variable);
                 Ok(self.types.get_type(symbol).clone())
             }
-            AssignmentTarget::Index {
-                index,
-                value,
-                resolved_set,
-                resolved_get,
-            } => {
+            AssignmentTarget::Index { index, value } => {
                 // The container before the index, in source order like the resolver.
                 let type_of_index_target = self.analyse_or_any(value);
                 let index_type = self.analyse_or_any(index);
@@ -1024,23 +1022,25 @@ impl Analyser {
                 // Indexing isn't operator-form for vec purposes: there's no
                 // natural broadcast story for `(list_a, list_b)[i]`. Only an
                 // augmented assignment reads the old value through `[]`.
-                *resolved_get = self.resolver.getter_candidates(lvalue.id).map(|getters| {
-                    self.overloads()
+                if let Some(getters) = self.resolver.getter_candidates(lvalue.id) {
+                    let getter = self
+                        .overloads()
                         .resolve_call(getters, &get_args, CallKind::Regular, |symbol| {
                             self.locate(symbol)
                         })
-                        .binding
-                });
-                *resolved_set = Some(
-                    self.overloads()
-                        .resolve_call(
-                            self.resolver.setter_candidates(lvalue.id),
-                            &set_args,
-                            CallKind::Regular,
-                            |symbol| self.locate(symbol),
-                        )
-                        .binding,
-                );
+                        .binding;
+                    self.result.analysis.getters.insert(lvalue.id, getter);
+                }
+                let setter = self
+                    .overloads()
+                    .resolve_call(
+                        self.resolver.setter_candidates(lvalue.id),
+                        &set_args,
+                        CallKind::Regular,
+                        |symbol| self.locate(symbol),
+                    )
+                    .binding;
+                self.result.analysis.setters.insert(lvalue.id, setter);
 
                 if Self::index_type_is_slice(&index_type)
                     && let StaticType::List(element) = &type_of_index_target
@@ -1068,8 +1068,6 @@ impl Analyser {
                 receiver,
                 member,
                 member_span,
-                resolved_getter,
-                resolved_setter,
             } => {
                 let receiver_type = self.analyse_or_any(receiver);
                 let getter_args = [receiver_type.clone()];
@@ -1094,8 +1092,14 @@ impl Analyser {
                 let getter_missing = matches!(getter.binding, Binding::None);
                 let setter_missing = matches!(setter.binding, Binding::None);
 
-                *resolved_getter = Some(getter.binding);
-                *resolved_setter = Some(setter.binding);
+                self.result
+                    .analysis
+                    .getters
+                    .insert(lvalue.id, getter.binding);
+                self.result
+                    .analysis
+                    .setters
+                    .insert(lvalue.id, setter.binding);
 
                 if getter_missing {
                     return Err(AnalysisError::function_not_found(

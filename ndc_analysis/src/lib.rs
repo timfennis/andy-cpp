@@ -3,6 +3,7 @@
 //! about it after parsing belongs here.
 
 use ahash::AHashMap;
+use ndc_core::r#struct::StructId;
 use ndc_core::{NodeId, StaticType};
 
 /// What the analyser worked out about one batch of statements: a whole program,
@@ -25,6 +26,24 @@ pub struct Analysis {
     /// Where the values each function captures come from, in upvalue order,
     /// keyed by its declaration.
     pub captures: AHashMap<NodeId, Vec<CaptureSource>>,
+    /// The function that reads through each member access or member or index
+    /// assignment target, keyed by it. `p.x` calls the getter `x(p)`; an index
+    /// target has one only when it's read, as in `xs[0] += 1`.
+    pub getters: AHashMap<NodeId, Binding>,
+    /// The function that writes through each member or index assignment
+    /// target, keyed by it: `x=` for `p.x = 1`, `[]=` for `xs[0] = 1`.
+    pub setters: AHashMap<NodeId, Binding>,
+    /// The function each augmented assignment like `x += 1` calls, keyed by the
+    /// assignment: a mutating overload such as `+=` when one fits, otherwise
+    /// the plain operator `+`. Either returns the updated left value, which the
+    /// compiler writes back through the target. Absent when neither fits.
+    pub augmented_assignments: AHashMap<NodeId, Binding>,
+    /// What each struct declaration declares, keyed by the declaration.
+    pub structs: AHashMap<NodeId, DeclaredStruct>,
+    /// The type each `as` cast checks its value against at runtime, keyed by
+    /// the cast. `None` when the value is already known to have the type, as
+    /// in `1 as Int`, so there is nothing to check.
+    pub cast_checks: AHashMap<NodeId, Option<StaticType>>,
     /// How many local slots each function's own variables use, parameters
     /// first, keyed by its declaration. The compiler places its temporaries
     /// after them.
@@ -54,6 +73,26 @@ impl Analysis {
             .expect("internal error: every function is analysed before it's compiled")
     }
 
+    /// The function that reads through the member access or assignment target
+    /// at `node`, if it reads.
+    pub fn getter(&self, node: NodeId) -> Option<&Binding> {
+        self.getters.get(&node)
+    }
+
+    /// The function that writes through the assignment target at `target`.
+    pub fn setter(&self, target: NodeId) -> &Binding {
+        self.setters
+            .get(&target)
+            .expect("internal error: every assignment target is analysed before it's compiled")
+    }
+
+    /// What the struct declared at `declaration` declares.
+    pub fn declared_struct(&self, declaration: NodeId) -> &DeclaredStruct {
+        self.structs
+            .get(&declaration)
+            .expect("internal error: every struct is analysed before it's compiled")
+    }
+
     /// The frame size of the function declared at `function`.
     pub fn frame_size(&self, function: NodeId) -> usize {
         *self
@@ -70,15 +109,21 @@ pub enum Binding {
     Dynamic(Vec<Candidate>), // figure it out at runtime
 }
 
-/// The operation selected by the analyser for an augmented assignment.
-///
-/// Every selected operation returns the updated left value internally. The
-/// compiler writes that value back through the assignment target, while the
-/// augmented-assignment expression itself evaluates to unit.
+/// What a struct declaration declares besides its constructor. In
+/// `struct Point { x: Int, y: Int }` that's the struct itself and the accessor
+/// functions `x`, `x=`, `y` and `y=`.
 #[derive(Debug, Eq, PartialEq, Clone)]
-pub enum AugmentedAssignmentPlan {
-    Unresolved,
-    Resolved(Binding),
+pub struct DeclaredStruct {
+    pub id: StructId,
+    /// Each field's accessors, in field order.
+    pub fields: Vec<FieldAccessors>,
+}
+
+/// Where a struct field's getter (`x`) and setter (`x=`) are stored.
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
+pub struct FieldAccessors {
+    pub getter: ResolvedVar,
+    pub setter: ResolvedVar,
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
