@@ -221,6 +221,11 @@ impl ScopeTree {
         self.scopes[self.current.0].bind_type(symbol_id);
     }
 
+    /// The value symbols bound in the current scope, oldest first.
+    pub(crate) fn current_bindings(&self) -> &[SymbolId] {
+        &self.scopes[self.current.0].bindings
+    }
+
     /// The current scope followed by its ancestors, ending at the root.
     fn chain(&self) -> impl Iterator<Item = &Scope> {
         self.ancestors(self.current).map(|id| &self.scopes[id.0])
@@ -356,6 +361,13 @@ impl NameResolver {
         if let Err(error) = self.resolve(statement) {
             self.errors.push(error);
         }
+    }
+
+    /// The value symbols bound in the current scope, oldest first. A failed
+    /// statement keeps what it bound before its error: `fn f() { missing }`
+    /// still binds `f`.
+    pub(crate) fn current_bindings(&self) -> &[SymbolId] {
+        self.scopes.current_bindings()
     }
 
     /// The native symbols in registry order: the first is the native in slot 0.

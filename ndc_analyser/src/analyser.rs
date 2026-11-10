@@ -184,15 +184,23 @@ impl Analyser {
 
     /// Analyses a top-level statement. Names resolve first; a statement with
     /// unresolved names isn't analysed further, which would only repeat its errors.
+    /// The names it still declared are bound as `Any`, so in
+    /// `fn f() { missing } let g = f`, only `missing` is reported.
     pub fn analyse(
         &mut self,
         expr_loc: &mut ExpressionLocation,
     ) -> Result<StaticType, AnalysisError> {
+        let bound_before = self.resolver.current_bindings().len();
         self.resolver.resolve_statement(expr_loc);
         let name_errors = self.resolver.take_errors();
         if !name_errors.is_empty() {
             self.errors
                 .extend(name_errors.into_iter().map(AnalysisError::from));
+            let declared = self.resolver.current_bindings()[bound_before..].to_vec();
+            for symbol in declared {
+                let name = self.resolver.symbol_name(symbol).to_string();
+                self.create_local_binding(name, TypeBinding::Inferred(StaticType::Any), symbol);
+            }
             return Ok(StaticType::Any);
         }
         self.analyse_expr(expr_loc)
@@ -490,25 +498,21 @@ impl Analyser {
 
                 // Pre-register the function before analyzing its body so recursive calls can
                 // resolve the name. The return type is unknown at this point so we use Any.
+                // A redefinition is reported but still bound, since the resolver declared it.
                 let pre_slot = if let Some(name) = name {
                     let arity = type_signature.types().map(|t| t.len());
                     if self.scope_tree.has_function_in_current_scope(name, arity) {
                         self.emit(AnalysisError::function_redefinition(name, arity, *span));
-                        // Skip re-registering but still analyse the body below.
-                        None
-                    } else {
-                        let placeholder = StaticType::Function {
-                            parameters: type_signature.types(),
-                            return_type: Box::new(
-                                return_type_slot.clone().unwrap_or(StaticType::Any),
-                            ),
-                        };
-                        Some(self.create_local_binding(
-                            name.clone(),
-                            TypeBinding::Inferred(placeholder),
-                            self.resolver.declared_symbol(*id),
-                        ))
                     }
+                    let placeholder = StaticType::Function {
+                        parameters: type_signature.types(),
+                        return_type: Box::new(return_type_slot.clone().unwrap_or(StaticType::Any)),
+                    };
+                    Some(self.create_local_binding(
+                        name.clone(),
+                        TypeBinding::Inferred(placeholder),
+                        self.resolver.declared_symbol(*id),
+                    ))
                 } else {
                     None
                 };
@@ -1770,9 +1774,10 @@ mod tests {
         );
     }
 
-    /// A pattern that fails to type-check reports one error and still binds
-    /// its names as `Any`, so the use of `c` after it adds no second error.
-    fn assert_failed_pattern_binds_any(source: &str, expected: &str) {
+    /// `source` reports exactly one error, containing `expected`, and its last
+    /// expression is `Any`. For code after a failed declaration: the names it
+    /// declared are bound as `Any`, so using them adds no second error.
+    fn assert_one_error_then_any(source: &str, expected: &str) {
         let (last_type, result) = analyse_with_globals(source, vec![]);
         assert_eq!(result.errors.len(), 1, "errors: {:?}", result.errors);
         assert!(
@@ -1785,7 +1790,7 @@ mod tests {
 
     #[test]
     fn short_tuple_still_binds_every_pattern_name() {
-        assert_failed_pattern_binds_any(
+        assert_one_error_then_any(
             "let (a, b, c): (Int, Int, Int) = (1, 2); c",
             "Invalid unpacking",
         );
@@ -1793,7 +1798,7 @@ mod tests {
 
     #[test]
     fn tuple_arity_mismatch_still_binds_every_pattern_name() {
-        assert_failed_pattern_binds_any(
+        assert_one_error_then_any(
             "let (a, b, c): (Int, Int) = (1, 2); c",
             "mismatched tuple arity",
         );
@@ -1801,6 +1806,49 @@ mod tests {
 
     #[test]
     fn unpacking_a_scalar_still_binds_every_pattern_name() {
-        assert_failed_pattern_binds_any("let (a, (b, c)) = (1, 2); c", "Invalid unpacking");
+        assert_one_error_then_any("let (a, (b, c)) = (1, 2); c", "Invalid unpacking");
+    }
+
+    #[test]
+    fn function_with_an_unknown_name_still_binds_its_name() {
+        assert_one_error_then_any(
+            "fn f() { missing; } let g = f; g",
+            "Identifier missing has not previously been declared",
+        );
+    }
+
+    #[test]
+    fn function_with_an_unknown_name_can_still_be_called() {
+        assert_one_error_then_any(
+            "fn f() { missing; } f()",
+            "Identifier missing has not previously been declared",
+        );
+    }
+
+    #[test]
+    fn function_with_an_unknown_name_can_still_be_captured() {
+        assert_one_error_then_any(
+            "fn f() { missing; } fn g() { f } g()",
+            "Identifier missing has not previously been declared",
+        );
+    }
+
+    /// `source` reports exactly one error, the redefinition of `f`.
+    fn assert_only_redefinition_error(source: &str) {
+        let (_, result) = analyse_with_globals(source, vec![]);
+        assert_eq!(
+            result.errors.iter().map(ToString::to_string).collect_vec(),
+            vec!["Illegal redefinition of function 'f' with 1 parameter in the same scope"],
+        );
+    }
+
+    #[test]
+    fn redefined_function_can_still_be_used_as_a_value() {
+        assert_only_redefinition_error("fn f(x) { x } fn f(y) { y } let g = f;");
+    }
+
+    #[test]
+    fn redefined_function_can_still_be_called() {
+        assert_only_redefinition_error("fn f(x) { x } fn f(y) { y } f(1)");
     }
 }
