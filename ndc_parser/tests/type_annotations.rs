@@ -63,7 +63,7 @@ fn every_type_name_has_its_own_id() {
 }
 
 #[test]
-fn cast_targets_before_a_comparison_have_ids() {
+fn a_cast_target_before_a_comparison_gets_its_own_id() {
     // `Int < 5` is not a type argument list, so the parser reads `Int` on its own.
     let expression = parse_one("[x as Int < 5, y as Int < 6]");
     let Expression::List { values } = expression.expression else {

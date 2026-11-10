@@ -156,4 +156,24 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn a_member_name_nested_in_a_loop_or_lambda_is_coloured_as_a_function() {
+        // A member is not followed by `(`, so only the parsed AST marks it.
+        for (line, member) in [
+            ("for x in xs { x.len }", "len"),
+            ("let f = fn(s) => s.trim;", "trim"),
+        ] {
+            let highlighted = AndycppHighlighter::highlight_parsed(line);
+            let painted = highlighted
+                .iter()
+                .find(|painted| painted.value.trim() == member)
+                .unwrap_or_else(|| panic!("no token {member} in {line:?}"));
+            assert_eq!(
+                painted.style.foreground,
+                Some(Color::Rgb(229, 192, 123)),
+                "unexpected color for {member} in {line:?}"
+            );
+        }
+    }
 }

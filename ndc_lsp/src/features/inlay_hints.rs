@@ -147,14 +147,16 @@ mod tests {
     }
 
     #[test]
-    fn lambda_inside_call_gets_return_type_inlay() {
-        let hints = collect_hints("[1,2,3].map(fn(y) => y / 2.0);");
-        assert!(has_label(&hints, |l| l.starts_with(" -> ")));
-    }
-
-    #[test]
-    fn lambda_inside_list_literal_gets_return_type_inlay() {
-        let hints = collect_hints("let fns = [fn(x) => x + 1];");
-        assert!(has_label(&hints, |l| l.starts_with(" -> ")));
+    fn a_lambda_nested_in_an_expression_gets_a_return_type_hint() {
+        for (source, label) in [
+            ("[1, 2, 3].map(fn(y: Int) => y / 2.0);", " -> Float"),
+            ("let fns = [fn(x: Int) => x + 1];", " -> Int"),
+        ] {
+            let hints = collect_hints(source);
+            assert!(
+                has_label(&hints, |l| l == label),
+                "expected {label:?} in {source:?}, got {hints:?}"
+            );
+        }
     }
 }

@@ -29,8 +29,11 @@ fn an_assignment_target_contributes_its_expressions() {
 }
 
 #[test]
-fn for_children_are_its_sequences_then_its_body() {
-    assert_eq!(children("for x in xs { x }"), ["xs", "{ x }"]);
+fn for_children_are_its_sequences_and_guards_in_order_then_its_body() {
+    assert_eq!(
+        children("for x in xs, if x > 0, y in ys { x }"),
+        ["xs", "x > 0", "ys", "{ x }"]
+    );
 }
 
 #[test]
@@ -39,7 +42,7 @@ fn a_function_declaration_has_only_its_body_as_a_child() {
 }
 
 #[test]
-fn declarations_without_expressions_have_no_children() {
+fn structs_and_leaves_have_no_children() {
     assert!(children("struct P { x: Int }").is_empty());
     assert!(children("x").is_empty());
 }

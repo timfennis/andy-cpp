@@ -65,7 +65,7 @@ fn nested_binding_patterns_have_distinct_ids_and_complete_spans() {
 }
 
 #[test]
-fn assignment_conversion_preserves_ids_and_index_expression_children() {
+fn an_assignment_target_keeps_the_ids_and_spans_it_was_parsed_with() {
     let source = "[(a), values[next()]]";
     let expression = parse_one(source);
     let id = expression.id;
@@ -129,7 +129,7 @@ fn grouped_member_target_keeps_outer_identity_and_precise_member_span() {
 }
 
 #[test]
-fn declaration_conversion_retains_each_pattern_identity() {
+fn a_binding_pattern_keeps_each_target_id() {
     let expression = parse_one("[x, [y]]");
     let target = AssignmentTargetLocation::try_from(expression).unwrap();
     let root_id = target.id;
@@ -152,7 +152,7 @@ fn declaration_conversion_retains_each_pattern_identity() {
 }
 
 #[test]
-fn function_parameters_and_loop_binders_carry_pattern_metadata() {
+fn parameter_and_loop_patterns_have_exact_spans_and_own_ids() {
     let source = "fn identity((x): Int) => x";
     let expression = parse_one(source);
     let Expression::FunctionDeclaration { parameters, .. } = expression.expression else {
@@ -187,21 +187,28 @@ fn function_parameters_and_loop_binders_carry_pattern_metadata() {
 }
 
 #[test]
-fn split_targets_preserve_rejected_syntax() {
-    for source in [
-        "let [xs[0]] = input",
-        "let [object.field] = input",
-        "for [xs[0]] in input { 0 }",
-        "for [object.field] in input { 0 }",
-        "fn destructure((x, y)) => x",
-        "[(object.field)] = input",
+fn destructuring_accepts_only_names() {
+    for (source, message) in [
+        ("let [xs[0]] = input", "Invalid declaration target"),
+        ("let [object.field] = input", "Invalid declaration target"),
+        ("for [xs[0]] in input { 0 }", "Invalid iteration variable"),
+        (
+            "for [object.field] in input { 0 }",
+            "Invalid iteration variable",
+        ),
+        ("fn destructure((x, y)) => x", "Expected parameter name"),
+        ("[object.field] = input", "Invalid assignment target"),
+        ("[(object.field)] = input", "Invalid assignment target"),
     ] {
         let tokens = Lexer::new(source, SourceId::SYNTHETIC)
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
+        let error = Parser::from_tokens(tokens)
+            .parse()
+            .expect_err(&format!("must reject {source}"));
         assert!(
-            Parser::from_tokens(tokens).parse().is_err(),
-            "must reject {source}"
+            error.to_string().contains(message),
+            "{source}: expected {message:?}, got {error}"
         );
     }
 }

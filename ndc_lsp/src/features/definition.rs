@@ -117,7 +117,17 @@ mod tests {
             .unwrap()
     }
 
-    /// Resolve at the byte offset of the `needle`th occurrence of `name`.
+    /// Does `location` cover the `len` bytes at `offset`?
+    fn covers(state: &DocumentState, location: &Location, offset: usize, len: usize) -> bool {
+        let start = start_offset(state, location);
+        let end = state
+            .line_index
+            .offset(&state.source, location.range.end)
+            .unwrap();
+        start <= offset && offset + len <= end
+    }
+
+    /// Resolve at `byte`.
     fn def_at(state: &DocumentState, byte: usize) -> Option<Location> {
         let pos = state.line_index.position(&state.source, byte);
         goto_definition(state, pos, uri())
@@ -162,12 +172,16 @@ mod tests {
     }
 
     #[test]
-    fn jump_from_constructor_call_to_struct_declaration() {
+    fn a_constructor_call_jumps_to_its_struct_declaration() {
         let src = "struct Point {\n    x: Int,\n    y: Int,\n}\nlet p = Point(1, 2);";
         let state = analyse(src);
         let loc = def_at(&state, src.rfind("Point").unwrap()).expect("definition found");
-        // Resolves to the whole declaration until a dedicated name span exists.
-        assert_eq!(start_offset(&state, &loc), 0);
+        assert!(covers(
+            &state,
+            &loc,
+            src.find("Point").unwrap(),
+            "Point".len()
+        ));
     }
 
     #[test]
@@ -197,12 +211,16 @@ mod tests {
     }
 
     #[test]
-    fn recursive_call_jumps_to_its_own_function() {
+    fn a_recursive_call_jumps_to_its_own_function() {
         let src = "fn count(n) { if n > 0 { count(n - 1) } }";
         let state = analyse(src);
         let loc = def_at(&state, src.rfind("count").unwrap()).expect("definition found");
-        // Resolves to the whole declaration until a dedicated name span exists.
-        assert_eq!(start_offset(&state, &loc), 0);
+        assert!(covers(
+            &state,
+            &loc,
+            src.find("count").unwrap(),
+            "count".len()
+        ));
     }
 
     #[test]
@@ -243,12 +261,28 @@ mod tests {
     }
 
     #[test]
-    fn indexed_assignment_visits_receiver_and_index_expressions() {
+    fn names_in_an_indexed_assignment_target_jump_to_their_declarations() {
         let src = "let values = [1]; let index = 0; values[index] = 2;";
         let state = analyse(src);
         for name in ["values", "index"] {
             let loc = def_at(&state, src.rfind(name).unwrap()).expect("definition found");
             assert_eq!(start_offset(&state, &loc), src.find(name).unwrap());
         }
+    }
+
+    #[test]
+    fn a_for_binding_is_visible_in_the_body_but_not_in_its_own_sequence() {
+        let src = "let x = [1];\nfor x in x { x }";
+        let state = analyse(src);
+        let outer = src.find("x =").unwrap();
+        let binder = src.find("for x").unwrap() + "for ".len();
+
+        let sequence = src.find("in x").unwrap() + "in ".len();
+        let loc = def_at(&state, sequence).expect("definition found");
+        assert_eq!(start_offset(&state, &loc), outer);
+
+        let body = src.rfind('x').unwrap();
+        let loc = def_at(&state, body).expect("definition found");
+        assert_eq!(start_offset(&state, &loc), binder);
     }
 }

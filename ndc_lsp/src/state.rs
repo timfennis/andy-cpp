@@ -123,21 +123,10 @@ impl AstVisitor for MapCollector<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndc_interpreter::Interpreter;
 
     #[test]
-    fn from_source_is_not_fresh_until_analysed() {
+    fn a_document_without_analysis_does_not_match_its_source() {
         let state = DocumentState::from_source("let x = 1;".to_string());
         assert!(!state.analysis_matches_source);
-    }
-
-    #[test]
-    fn from_analysis_is_fresh() {
-        let mut interpreter = Interpreter::capturing();
-        interpreter.configure(ndc_stdlib::register);
-        let source = "let x = 1;";
-        let (ast, analysis) = interpreter.analyse_str(source).expect("analysis succeeds");
-        let state = DocumentState::from_analysis(source.to_string(), ast, analysis);
-        assert!(state.analysis_matches_source);
     }
 }

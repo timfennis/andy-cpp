@@ -212,14 +212,13 @@ mod tests {
     }
 
     #[test]
-    fn function_signature_in_detail() {
+    fn a_function_symbol_shows_its_parameters_and_annotated_return_type() {
         let syms = symbols("fn add(a, b) -> Int { a + b }");
         let func = syms
             .iter()
             .find(|s| s.name == "add")
             .expect("add symbol present");
-        let detail = func.detail.as_deref().unwrap_or_default();
-        assert!(detail.contains("a, b"), "got detail: {detail}");
+        assert_eq!(func.detail.as_deref(), Some("(a, b) -> Int"));
     }
 
     #[test]
@@ -241,20 +240,14 @@ mod tests {
     }
 
     #[test]
-    fn cast_does_not_hide_a_declaration() {
-        let syms = symbols("(fn identity(value) => value) as Any");
-        assert!(
-            syms.iter()
-                .any(|s| s.name == "identity" && s.kind == SymbolKind::FUNCTION),
-            "expected function `identity` in {syms:?}"
-        );
-    }
-
-    #[test]
-    fn declarations_inside_control_flow_are_listed() {
-        let syms = symbols("if true { fn helper() { 1 } }\nfor x in [1] { let doubled = x * 2; }");
+    fn declarations_nested_in_any_expression_are_listed() {
+        let syms = symbols(concat!(
+            "if true { fn helper() { 1 } }\n",
+            "for x in [1] { let doubled = x * 2; }\n",
+            "(fn identity(value) => value) as Any",
+        ));
         let names = syms.iter().map(|s| s.name.as_str()).collect::<Vec<_>>();
-        assert_eq!(names, ["helper", "doubled"]);
+        assert_eq!(names, ["helper", "doubled", "identity"]);
     }
 
     #[test]

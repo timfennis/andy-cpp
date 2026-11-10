@@ -1,5 +1,6 @@
-use ndc_interpreter::{AnalysisError, InterpreterError};
+use ndc_interpreter::{AnalysisError, AnalysisResult, InterpreterError};
 use ndc_lexer::{SourceId, Span};
+use ndc_parser::ExpressionLocation;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity};
 
 use crate::util::span_to_range;
@@ -19,13 +20,29 @@ fn make_diagnostic(text: &str, span: Span, message: String, help: Option<&str>) 
     }
 }
 
+/// Every diagnostic from one analysis of `text`: one per error the analysis
+/// found, or those of the error that stopped it.
+pub fn analysis_diagnostics(
+    text: &str,
+    analysed: &Result<(Vec<ExpressionLocation>, AnalysisResult), InterpreterError>,
+) -> Vec<Diagnostic> {
+    match analysed {
+        Ok((_, result)) => result
+            .errors
+            .iter()
+            .map(|err| analysis_error_to_diagnostic(text, err))
+            .collect(),
+        Err(err) => interpreter_error_to_diagnostics(text, err),
+    }
+}
+
 /// Convert an [`AnalysisError`] into an LSP [`Diagnostic`].
-pub fn analysis_error_to_diagnostic(text: &str, err: &AnalysisError) -> Diagnostic {
+fn analysis_error_to_diagnostic(text: &str, err: &AnalysisError) -> Diagnostic {
     make_diagnostic(text, err.span(), err.to_string(), err.help_text())
 }
 
 /// Convert an error that stopped the analysis of `text` into LSP diagnostics.
-pub fn interpreter_error_to_diagnostics(text: &str, err: &InterpreterError) -> Vec<Diagnostic> {
+fn interpreter_error_to_diagnostics(text: &str, err: &InterpreterError) -> Vec<Diagnostic> {
     match err {
         InterpreterError::Lexer { cause } => {
             vec![make_diagnostic(
@@ -62,24 +79,54 @@ mod tests {
     use super::*;
     use ndc_interpreter::Interpreter;
 
-    fn syntax_diagnostics(source: &str) -> Vec<Diagnostic> {
-        let err = Interpreter::capturing()
-            .analyse_str(source)
-            .expect_err("source should not lex or parse");
-        interpreter_error_to_diagnostics(source, &err)
+    fn diagnostics(source: &str) -> Vec<Diagnostic> {
+        let mut interpreter = Interpreter::capturing();
+        interpreter.configure(ndc_stdlib::register);
+        analysis_diagnostics(source, &interpreter.analyse_str(source))
     }
 
     #[test]
     fn a_parse_error_is_reported_where_it_happens() {
-        let diagnostics = syntax_diagnostics("let x = 1;\nlet = 2;");
+        let diagnostics = diagnostics("let x = 1;\nlet = 2;");
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].range.start.line, 1);
     }
 
     #[test]
     fn a_lexer_error_is_reported_where_it_happens() {
-        let diagnostics = syntax_diagnostics("let x = 1;\nlet y = \"open");
+        let diagnostics = diagnostics("let x = 1;\nlet y = \"open");
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].range.start.line, 1);
+    }
+
+    #[test]
+    fn an_analysis_error_is_reported_at_its_span_with_its_help() {
+        // Redefining an overload in the same scope is an error with help text.
+        let source = "fn f(x) { 1 }\nfn f(y) { 2 }";
+        let mut interpreter = Interpreter::capturing();
+        let analysed = interpreter.analyse_str(source);
+        let (_, result) = analysed.as_ref().expect("source parses");
+        let [error] = result.errors.as_slice() else {
+            panic!("expected one analysis error, got {:?}", result.errors);
+        };
+        let help = error.help_text().expect("the error has help text");
+
+        let diagnostics = analysis_diagnostics(source, &analysed);
+        let [diagnostic] = diagnostics.as_slice() else {
+            panic!("expected one diagnostic, got {diagnostics:?}");
+        };
+        assert_eq!(diagnostic.range, span_to_range(source, error.span()));
+        assert_eq!(diagnostic.range.start.line, 1);
+        assert_eq!(diagnostic.message, format!("{error}. {help}"));
+    }
+
+    #[test]
+    fn every_analysis_error_becomes_a_diagnostic() {
+        let diagnostics = diagnostics("let x: Nonsense = 1;\nlet y: Gibberish = 2;");
+        let lines = diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.range.start.line)
+            .collect::<Vec<_>>();
+        assert_eq!(lines, [0, 1]);
     }
 }

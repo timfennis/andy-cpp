@@ -93,20 +93,11 @@ impl Backend {
         // dropped before the next await point.
         let (diagnostics, analysed) = {
             let mut interpreter = self.make_interpreter();
-            match interpreter.analyse_str(text) {
-                Ok((expressions, result)) => {
-                    let diagnostics = result
-                        .errors
-                        .iter()
-                        .map(|err| diagnostics::analysis_error_to_diagnostic(text, err))
-                        .collect();
-                    (diagnostics, Some((expressions, result)))
-                }
-                Err(err) => (
-                    diagnostics::interpreter_error_to_diagnostics(text, &err),
-                    None,
-                ),
-            }
+            let analysed = interpreter.analyse_str(text);
+            (
+                diagnostics::analysis_diagnostics(text, &analysed),
+                analysed.ok(),
+            )
         };
 
         // Hold the write lock across the commit AND the publish. `did_close`

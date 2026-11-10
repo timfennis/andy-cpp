@@ -166,8 +166,15 @@ mod tests {
         (state, functions)
     }
 
+    fn markdown(hover: Hover) -> String {
+        let HoverContents::Markup(content) = hover.contents else {
+            panic!("expected markup");
+        };
+        content.value
+    }
+
     #[test]
-    fn hover_on_variable_shows_type() {
+    fn hovering_a_declared_name_shows_its_type() {
         let (state, functions) = analyse("let count = 41 + 1;");
         // Cursor on `count` (character 4..9 on line 0).
         let hover = hover(&state, Position::new(0, 6), &functions).expect("hover present");
@@ -182,22 +189,8 @@ mod tests {
     }
 
     #[test]
-    fn hover_on_builtin_function_shows_signature_and_docs() {
-        let (state, functions) = analyse("let n = abs(-3);");
+    fn hover_on_a_builtin_shows_the_overload_the_call_picks_and_its_docs() {
         // `abs` starts at byte 8 in "let n = abs(-3);".
-        let hover = hover(&state, Position::new(0, 9), &functions).expect("hover present");
-        let HoverContents::Markup(content) = hover.contents else {
-            panic!("expected markup");
-        };
-        assert!(
-            content.value.contains("abs("),
-            "expected a signature for abs, got: {}",
-            content.value
-        );
-    }
-
-    #[test]
-    fn hover_on_builtin_shows_the_overload_the_call_picks() {
         let (state, functions) = analyse("let n = abs(-3);");
         let hover = hover(&state, Position::new(0, 9), &functions).expect("hover present");
         let HoverContents::Markup(content) = hover.contents else {
@@ -213,13 +206,37 @@ mod tests {
             "expected only the picked overload, got: {}",
             content.value
         );
+        assert!(
+            content
+                .value
+                .contains("Returns the absolute value of a number."),
+            "expected the documentation of abs, got: {}",
+            content.value
+        );
     }
 
     #[test]
-    fn hover_outside_any_node_is_none() {
-        let (state, functions) = analyse("let n = 1;");
-        // Way past the end of the document.
-        assert!(hover(&state, Position::new(5, 0), &functions).is_none());
+    fn hover_on_a_dynamically_dispatched_builtin_lists_every_candidate() {
+        // `x` is untyped, so which `abs` the call reaches is decided at runtime.
+        let src = "fn f(x) { abs(x) }";
+        let (state, functions) = analyse(src);
+        let pos = state
+            .line_index
+            .position(&state.source, src.find("abs").unwrap());
+        let value = markdown(hover(&state, pos, &functions).expect("hover present"));
+        for signature in ["abs(Int) -> Int", "abs(Float) -> Float"] {
+            assert!(
+                value.contains(signature),
+                "expected {signature} among the candidates, got: {value}"
+            );
+        }
+    }
+
+    #[test]
+    fn hover_between_expressions_is_none() {
+        let (state, functions) = analyse("let n = 1;\n\nlet m = 2;");
+        // The blank line between the two declarations.
+        assert!(hover(&state, Position::new(1, 0), &functions).is_none());
     }
 
     #[test]
