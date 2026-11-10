@@ -792,16 +792,16 @@ impl Analyser {
         kind: CallKind,
         span: Span,
     ) -> Result<StaticType, AnalysisError> {
-        let mut type_sig = Vec::with_capacity(arguments.len());
-        for arg in arguments {
-            type_sig.push(self.analyse_or_any(arg));
-        }
-
         // Higher-order call shapes like `get_function()()` have a non-identifier
         // function position; in that case we just analyse the callee as a value
-        // and trust the runtime to dispatch.
+        // and trust the runtime to dispatch. The callee comes before the
+        // arguments, in source order like the resolver, so declarations in it
+        // get their slots first.
         let Expression::Identifier { name, resolved, .. } = &mut function.expression else {
             let callee_type = self.analyse_or_any(function);
+            for arg in arguments {
+                self.analyse_or_any(arg);
+            }
             return Ok(match callee_type {
                 StaticType::Function { return_type, .. } => *return_type,
                 StaticType::Any => StaticType::Any,
@@ -811,6 +811,13 @@ impl Analyser {
                 }
             });
         };
+
+        // A named callee declares nothing, so its overload can be picked after
+        // the arguments' types are known.
+        let mut type_sig = Vec::with_capacity(arguments.len());
+        for arg in arguments.iter_mut() {
+            type_sig.push(self.analyse_or_any(arg));
+        }
 
         let ResolvedCall {
             binding,
@@ -942,8 +949,9 @@ impl Analyser {
                 resolved_set,
                 resolved_get,
             } => {
-                let index_type = self.analyse_or_any(index);
+                // The container before the index, in source order like the resolver.
                 let type_of_index_target = self.analyse_or_any(value);
+                let index_type = self.analyse_or_any(index);
 
                 let get_args = [type_of_index_target.clone(), index_type.clone()];
                 let set_args = [
