@@ -818,14 +818,16 @@ fn getters_are_keyed_by_the_member_access_node() {
     );
 }
 
+// A member write also resolves the getter: the target's type is what it returns.
 #[test]
-fn member_writes_resolve_the_setter_only() {
-    let mut resolver = NameResolver::new(["x="]);
+fn member_writes_resolve_the_setter_and_the_getter() {
+    let mut resolver = NameResolver::new(["x", "x="]);
+    let getter = builtin(&resolver, "x");
     let setter = builtin(&resolver, "x=");
     resolve_source(&mut resolver, "let p = 1; p.x = 5;").unwrap();
 
     assert_eq!(only_setter(&resolver).0, vec![vec![setter]]);
-    assert!(resolver.getters.is_empty());
+    assert_eq!(only_getter(&resolver).0, vec![vec![getter]]);
 }
 
 #[test]
@@ -988,7 +990,7 @@ fn structs_bind_a_type_a_constructor_and_accessors() {
     let mut resolver = NameResolver::new([]);
     resolve_source(
         &mut resolver,
-        "struct Point { x: Int, y: Int } let p: Point = Point(1, 2); p.x; p.y = 3;",
+        "struct Point { x: Int, y: Int } let p: Point = Point(1, 2); p.y = 3;",
     )
     .unwrap();
 
@@ -1019,7 +1021,8 @@ fn structs_bind_a_type_a_constructor_and_accessors() {
             .any(|&id| id == point.type_symbol)
     );
     assert_eq!(uses(&resolver, point.constructor), 1);
-    assert_eq!(only_getter(&resolver).0, vec![vec![x]]);
+    assert_eq!(uses(&resolver, x), 0);
+    assert_eq!(only_getter(&resolver).0, vec![vec![y]]);
     assert_eq!(only_setter(&resolver).0, vec![vec![y_set]]);
 }
 

@@ -1,3 +1,4 @@
+use crate::name_resolution::Candidates;
 use crate::symbols::SymbolId;
 use ndc_core::StaticType;
 use ndc_core::r#struct::StructInfo;
@@ -34,25 +35,25 @@ pub(crate) enum VecResolution {
         /// `positions[i]` is the priority-ordered scalar overloads compatible
         /// with the call's element types at position `i`. Always non-empty —
         /// an empty position cancels the whole vec resolution upstream.
-        positions: Vec<Vec<ResolvedVar>>,
+        positions: Vec<Vec<SymbolId>>,
     },
-    AnyFallback(Vec<ResolvedVar>),
+    AnyFallback(Vec<SymbolId>),
 }
 
 /// Output of a single scalar overload walk across the scope chain.
 struct ScalarWalk {
     /// First exact-subtype match found; short-circuits the walk.
-    exact: Option<ResolvedVar>,
+    exact: Option<SymbolId>,
     /// First-scope-wins loose-compatibility candidates.
-    loose: Option<Vec<ResolvedVar>>,
+    loose: Option<Vec<SymbolId>>,
     /// Every same-name callable across the whole chain, for runtime-narrowing
     /// fallback when the callee's static type is `Any`.
-    all_by_name: Vec<ResolvedVar>,
+    all_by_name: Vec<SymbolId>,
 }
 
 /// Returns `true` iff `more` is a strict subtype of `less` pointwise — i.e.
 /// every position satisfies `more[i] <: less[i]` and at least one position is
-/// not bidirectionally equivalent. Used by [`Scope::find_function`] to order
+/// not bidirectionally equivalent. Used by [`ScopeTree::most_specific_match`] to order
 /// matching overloads by specificity: an overload with `more` parameters
 /// accepts strictly fewer call signatures than one with `less` parameters.
 fn is_strictly_more_specific(more: &[StaticType], less: &[StaticType]) -> bool {
@@ -75,7 +76,7 @@ fn is_strictly_more_specific(more: &[StaticType], less: &[StaticType]) -> bool {
 /// all point to the same scalar overload, return it. This is the only case
 /// where `Binding::Resolved(Candidate::Vec)` is safe to emit: a single scalar
 /// fires for every element pair.
-fn unique_scalar(positions: &[Vec<ResolvedVar>]) -> Option<ResolvedVar> {
+fn unique_scalar(positions: &[Vec<SymbolId>]) -> Option<SymbolId> {
     let first = positions.first()?.first().copied()?;
     for pos in positions {
         if pos.len() != 1 || pos[0] != first {
@@ -85,21 +86,12 @@ fn unique_scalar(positions: &[Vec<ResolvedVar>]) -> Option<ResolvedVar> {
     Some(first)
 }
 
-/// Extend `out` with the result of mapping `vars` through `wrap`, skipping
-/// any entry equal to one already present. Compares by full `Candidate`
-/// (variant + var), so the same `ResolvedVar` can appear once as
-/// `Scalar` and once as `Vec` — they are distinct dispatch shapes that
-/// must each reach the runtime. Preserves first-seen order.
-fn extend_dedup(
-    out: &mut Vec<Candidate>,
-    vars: impl IntoIterator<Item = ResolvedVar>,
-    wrap: fn(ResolvedVar) -> Candidate,
-) {
-    for v in vars {
-        let candidate = wrap(v);
-        if !out.contains(&candidate) {
-            out.push(candidate);
-        }
+/// Push `item` unless `out` already holds it, preserving first-seen order. A
+/// symbol can appear once as `Candidate::Scalar` and once as `Candidate::Vec`:
+/// they are distinct dispatch shapes that must each reach the runtime.
+fn push_unique<T: PartialEq>(out: &mut Vec<T>, item: T) {
+    if !out.contains(&item) {
+        out.push(item);
     }
 }
 
@@ -145,7 +137,6 @@ pub(crate) struct ScopeBinding {
 /// A binding a function captures from an enclosing function.
 #[derive(Debug, Clone)]
 struct Upvalue {
-    name: String,
     /// The name resolver's symbol for the captured binding.
     symbol: SymbolId,
     source: CaptureSource,
@@ -213,134 +204,6 @@ impl Scope {
             .map(|idx| idx + self.base_offset)
     }
 
-    /// Returns slots for all bindings with the given name whose type could be
-    /// callable at runtime (`Function` or `Any`). Bindings with concrete
-    /// non-function types (e.g. `Int`, `String`) are excluded so they never
-    /// pollute the dynamic overload set used for function resolution.
-    fn find_all_callable_slots_by_name(&self, find_ident: &str) -> Vec<usize> {
-        self.identifiers
-            .iter()
-            .enumerate()
-            .filter_map(|(slot, b)| {
-                if b.name == find_ident && b.binding.typ().could_be_callable() {
-                    Some(slot + self.base_offset)
-                } else {
-                    None
-                }
-            })
-            .collect()
-    }
-
-    /// Parameter lists of every same-named function in this scope. Read-only,
-    /// for diagnostics — unlike the resolution walk it creates no upvalues.
-    fn callable_signatures(&self, find_ident: &str) -> Vec<Vec<StaticType>> {
-        self.identifiers
-            .iter()
-            .filter(|b| b.name == find_ident)
-            .filter_map(|b| match b.binding.typ() {
-                StaticType::Function {
-                    parameters: Some(parameters),
-                    ..
-                } => Some(parameters.clone()),
-                _ => None,
-            })
-            .collect()
-    }
-
-    fn find_function_candidates(&self, find_ident: &str, find_types: &[StaticType]) -> Vec<usize> {
-        self.identifiers.iter()
-            .enumerate()
-            .rev()
-            .filter_map(|(slot, b)| {
-                if b.name != find_ident {
-                    return None;
-                }
-
-                // If the thing is not a function we're not interested
-                let StaticType::Function { parameters, .. } = b.binding.typ() else {
-                    return None;
-                };
-
-                let Some(param_types) = parameters else {
-                    unreachable!("find_function_candidates should never be called when there are variadic matches");
-                };
-
-                let is_good = param_types.len() == find_types.len()
-                    && param_types.iter().zip(find_types.iter()).all(|(typ_1, typ_2)| !typ_1.is_incompatible_with(typ_2));
-
-                is_good.then_some(slot)
-            })
-            .map(|idx| idx + self.base_offset)
-            .collect()
-    }
-    /// Find the best-matching overload in this scope for a call of the given
-    /// signature, or `None` if no overload in this scope accepts the call.
-    ///
-    /// Resolution proceeds in two stages:
-    ///   1. Filter to overloads whose declared signature accepts `find_types`
-    ///      (the usual subtype check via [`StaticType::is_fn_and_matches`]).
-    ///   2. Among the survivors, pick the one whose parameter signature is
-    ///      most specific — i.e. not strictly dominated by any other match's
-    ///      parameter signature in the subtype partial order. A signature `b`
-    ///      strictly dominates `a` when `b <: a` and `a` is not `<: b`.
-    ///
-    /// Variadic overloads (`parameters: None`) match anything but are treated
-    /// as the least specific shape: any concrete overload that also matches
-    /// will dominate them.
-    ///
-    /// When multiple undominated overloads remain (genuinely incomparable
-    /// shapes, e.g. `fn(Int, Any)` vs `fn(Any, Int)` called with `(Int, Int)`),
-    /// the latest-registered one wins — preserving shadow semantics.
-    fn find_function(&self, find_ident: &str, find_types: &[StaticType]) -> Option<usize> {
-        let matches: Vec<usize> = self
-            .identifiers
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, b)| {
-                (b.name == find_ident && b.binding.typ().is_fn_and_matches(find_types))
-                    .then_some(idx)
-            })
-            .collect();
-
-        if matches.is_empty() {
-            return None;
-        }
-
-        let params_of = |idx: usize| -> Option<&[StaticType]> {
-            match self.identifiers[idx].binding.typ() {
-                StaticType::Function {
-                    parameters: Some(p),
-                    ..
-                } => Some(p.as_slice()),
-                // Variadic / non-function bindings have no concrete shape.
-                _ => None,
-            }
-        };
-
-        // Iterate latest-first so ties resolve to the most-recently registered overload.
-        matches
-            .iter()
-            .rev()
-            .copied()
-            .find(|&i| {
-                let Some(pi) = params_of(i) else {
-                    // Variadic only wins if every other match is also variadic.
-                    return matches.iter().all(|&j| params_of(j).is_none());
-                };
-                matches.iter().all(|&j| {
-                    if i == j {
-                        return true;
-                    }
-                    let Some(pj) = params_of(j) else {
-                        // Variadic never dominates a concrete overload.
-                        return true;
-                    };
-                    !is_strictly_more_specific(pj, pi)
-                })
-            })
-            .map(|idx| idx + self.base_offset)
-    }
-
     /// Check if this scope already contains a function with the given name and arity.
     fn has_function_with_arity(&self, name: &str, arity: Option<usize>) -> bool {
         self.identifiers.iter().any(|b| {
@@ -372,7 +235,7 @@ impl Scope {
         self.base_offset + self.identifiers.len() - 1
     }
 
-    fn add_upvalue(&mut self, name: &str, symbol: SymbolId, source: CaptureSource) -> usize {
+    fn add_upvalue(&mut self, symbol: SymbolId, source: CaptureSource) -> usize {
         if let Some(idx) = self
             .upvalues
             .iter()
@@ -381,24 +244,12 @@ impl Scope {
             return idx;
         }
 
-        self.upvalues.push(Upvalue {
-            name: name.to_string(),
-            symbol,
-            source,
-        });
+        self.upvalues.push(Upvalue { symbol, source });
         self.upvalues.len() - 1
     }
 
     fn find_upvalue_by_symbol(&self, symbol: SymbolId) -> Option<usize> {
         self.upvalues.iter().position(|u| u.symbol == symbol)
-    }
-
-    fn find_upvalues_by_name(&self, name: &str) -> Vec<usize> {
-        self.upvalues
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, u)| if u.name == name { Some(idx) } else { None })
-            .collect()
     }
 }
 
@@ -571,23 +422,41 @@ impl ScopeTree {
         }
     }
 
-    /// Whether some same-named overload would accept these arguments if their
-    /// types were known more precisely: every parameter overlaps the argument
-    /// in that position, and at least one argument does not already fit. A
-    /// failed call that satisfies this can be fixed with a cast, so the
+    /// The type of the binding for `symbol`. Unlike [`Self::get_binding`], it
+    /// creates no upvalues, so overload resolution can inspect every candidate
+    /// and capture only the ones it picks.
+    fn symbol_type(&self, symbol: SymbolId) -> &StaticType {
+        let mut scope_ptr = Some(self.current_scope_idx);
+        while let Some(idx) = scope_ptr {
+            let scope = &self.scopes[idx];
+            if let Some(slot) = scope.find_slot_by_symbol(symbol) {
+                return scope.identifiers[slot - scope.base_offset].binding.typ();
+            }
+            scope_ptr = scope.parent_idx;
+        }
+
+        let slot = self
+            .global_scope
+            .find_slot_by_symbol(symbol)
+            .expect("internal error: the resolver's symbol has no binding in scope");
+        self.global_scope.identifiers[slot].binding.typ()
+    }
+
+    /// Whether some overload among `candidates` would accept these arguments
+    /// if their types were known more precisely: every parameter overlaps the
+    /// argument in that position, and at least one argument does not already
+    /// fit. A failed call that satisfies this can be fixed with a cast, so the
     /// diagnostic says so; one that does not is a genuine mismatch and gets no
     /// misleading advice.
-    pub(crate) fn a_cast_could_resolve(&self, ident: &str, sig: &[StaticType]) -> bool {
-        let mut scope_ptr = Some(self.current_scope_idx);
-        let mut signatures = Vec::new();
-
-        while let Some(idx) = scope_ptr {
-            signatures.extend(self.scopes[idx].callable_signatures(ident));
-            scope_ptr = self.scopes[idx].parent_idx;
-        }
-        signatures.extend(self.global_scope.callable_signatures(ident));
-
-        signatures.iter().any(|parameters| {
+    pub(crate) fn a_cast_could_resolve(&self, candidates: &Candidates, sig: &[StaticType]) -> bool {
+        candidates.iter().flatten().any(|&symbol| {
+            let StaticType::Function {
+                parameters: Some(parameters),
+                ..
+            } = self.symbol_type(symbol)
+            else {
+                return false;
+            };
             parameters.len() == sig.len()
                 && parameters
                     .iter()
@@ -601,6 +470,10 @@ impl ScopeTree {
     }
 
     /// Resolve a function call to a binding and an inferred return type.
+    ///
+    /// `candidates` are the resolver's same-named symbols for the callee,
+    /// grouped by scope, nearest first. Only the symbols that end up in the
+    /// binding are captured as upvalues.
     ///
     /// Single entry point for both regular calls (`f(x)`) and operator-form
     /// calls (`a + b`, `-x`, `op=`). The two differ only in whether
@@ -624,24 +497,23 @@ impl ScopeTree {
     ///   5. Nothing found — `Binding::None`, return type = `Any`.
     pub(crate) fn resolve_call(
         &mut self,
-        ident: &str,
+        candidates: &Candidates,
         sig: &[StaticType],
         kind: CallKind,
     ) -> ResolvedCall {
-        let walk = self.scalar_walk(ident, sig);
+        let walk = self.scalar_walk(candidates, sig);
 
         // 1. Scalar exact match.
         if let Some(exact) = walk.exact {
-            let return_type = self.scalar_return_type(exact);
             return ResolvedCall {
-                binding: Binding::Resolved(Candidate::Scalar(exact)),
-                return_type,
+                binding: Binding::Resolved(Candidate::Scalar(self.get_binding(exact))),
+                return_type: self.scalar_return_type(exact),
             };
         }
 
         // 2. Per-position vec resolution, but only for operator-form calls.
         let vec_resolution = match kind {
-            CallKind::Operator => self.resolve_vec(ident, sig),
+            CallKind::Operator => self.resolve_vec(candidates, sig),
             CallKind::Regular => None,
         };
 
@@ -675,30 +547,29 @@ impl ScopeTree {
         {
             let scalar_return = self.scalar_return_type(scalar);
             return ResolvedCall {
-                binding: Binding::Resolved(Candidate::Vec(scalar)),
+                binding: Binding::Resolved(Candidate::Vec(self.get_binding(scalar))),
                 return_type: StaticType::Tuple(vec![scalar_return; *axis_len]),
             };
         }
 
         // 3. Dynamic: mix scalar loose candidates with vec candidates.
-        let has_vec_candidates = vec_resolution.is_some();
-        if !scalar_loose.is_empty() || has_vec_candidates {
+        if !scalar_loose.is_empty() || vec_resolution.is_some() {
             let return_type = self.dynamic_return_type(&scalar_loose, vec_resolution.as_ref());
-            let mut combined: Vec<Candidate> = scalar_loose
-                .iter()
-                .copied()
-                .map(Candidate::Scalar)
-                .collect();
-            match vec_resolution {
+            let vec_symbols = match vec_resolution {
                 Some(VecResolution::Static { positions, .. }) => {
-                    extend_dedup(&mut combined, positions.into_iter().flatten(), |v| {
-                        Candidate::Vec(v)
-                    });
+                    positions.into_iter().flatten().collect()
                 }
-                Some(VecResolution::AnyFallback(vars)) => {
-                    extend_dedup(&mut combined, vars, Candidate::Vec);
-                }
-                None => {}
+                Some(VecResolution::AnyFallback(symbols)) => symbols,
+                None => Vec::new(),
+            };
+            let mut combined = Vec::new();
+            for symbol in scalar_loose {
+                let candidate = Candidate::Scalar(self.get_binding(symbol));
+                push_unique(&mut combined, candidate);
+            }
+            for symbol in vec_symbols {
+                let candidate = Candidate::Vec(self.get_binding(symbol));
+                push_unique(&mut combined, candidate);
             }
             return ResolvedCall {
                 binding: Binding::Dynamic(combined),
@@ -715,15 +586,15 @@ impl ScopeTree {
         if walk
             .all_by_name
             .iter()
-            .any(|var| self.could_accept_call(*var, sig))
+            .any(|&symbol| self.could_accept_call(symbol, sig))
         {
+            let candidates = walk
+                .all_by_name
+                .into_iter()
+                .map(|symbol| Candidate::Scalar(self.get_binding(symbol)))
+                .collect();
             return ResolvedCall {
-                binding: Binding::Dynamic(
-                    walk.all_by_name
-                        .into_iter()
-                        .map(Candidate::Scalar)
-                        .collect(),
-                ),
+                binding: Binding::Dynamic(candidates),
                 return_type: StaticType::Any,
             };
         }
@@ -737,78 +608,40 @@ impl ScopeTree {
 
     /// Per-scope walk for scalar matches against `sig`. Exact matches
     /// short-circuit; `loose` holds the first scope's compatibility candidates;
-    /// `all_by_name` accumulates every same-name callable across the chain for
+    /// `all_by_name` accumulates every callable candidate across the chain for
     /// the runtime-narrowing fallback.
-    fn scalar_walk(&mut self, ident: &str, sig: &[StaticType]) -> ScalarWalk {
-        let mut scope_ptr = self.current_scope_idx;
-        let mut env_scopes: Vec<usize> = Vec::default();
-        let mut loose: Option<Vec<ResolvedVar>> = None;
-        let mut all_by_name: Vec<ResolvedVar> = Vec::new();
+    fn scalar_walk(&self, candidates: &Candidates, sig: &[StaticType]) -> ScalarWalk {
+        let mut loose: Option<Vec<SymbolId>> = None;
+        let mut all_by_name = Vec::new();
 
-        loop {
-            if let Some(slot) = self.scopes[scope_ptr].find_function(ident, sig) {
+        for group in candidates.iter() {
+            if let Some(exact) = self.most_specific_match(group, sig) {
                 return ScalarWalk {
-                    exact: Some(self.resolve_found_local(scope_ptr, slot, &env_scopes)),
+                    exact: Some(exact),
                     loose: None,
                     all_by_name: Vec::new(),
                 };
             }
 
-            for uv_slot in self.scopes[scope_ptr].find_upvalues_by_name(ident) {
-                all_by_name.push(self.resolve_found_upvalue(scope_ptr, uv_slot, &env_scopes));
-            }
-
             if loose.is_none() {
-                let candidates = self.scopes[scope_ptr].find_function_candidates(ident, sig);
-                if !candidates.is_empty() {
-                    loose = Some(
-                        candidates
-                            .into_iter()
-                            .map(|slot| self.resolve_found_local(scope_ptr, slot, &env_scopes))
-                            .collect(),
-                    );
+                let compatible = group
+                    .iter()
+                    .copied()
+                    .filter(|&symbol| self.is_compatible(symbol, sig))
+                    .collect::<Vec<_>>();
+                if !compatible.is_empty() {
+                    loose = Some(compatible);
                 }
             }
 
-            let slots = self.scopes[scope_ptr].find_all_callable_slots_by_name(ident);
+            // Oldest first within a scope, as the runtime tries them in order.
             all_by_name.extend(
-                slots
-                    .into_iter()
-                    .map(|slot| self.resolve_found_local(scope_ptr, slot, &env_scopes)),
+                group
+                    .iter()
+                    .rev()
+                    .copied()
+                    .filter(|&symbol| self.symbol_type(symbol).could_be_callable()),
             );
-
-            if let Some(parent_idx) = self.scopes[scope_ptr].parent_idx {
-                if self.scopes[scope_ptr].creates_environment {
-                    env_scopes.push(scope_ptr);
-                }
-                scope_ptr = parent_idx;
-            } else {
-                if let Some(slot) = self.global_scope.find_function(ident, sig) {
-                    return ScalarWalk {
-                        exact: Some(ResolvedVar::Global { slot }),
-                        loose: None,
-                        all_by_name: Vec::new(),
-                    };
-                }
-                if loose.is_none() {
-                    let candidates = self.global_scope.find_function_candidates(ident, sig);
-                    if !candidates.is_empty() {
-                        loose = Some(
-                            candidates
-                                .into_iter()
-                                .map(|slot| ResolvedVar::Global { slot })
-                                .collect(),
-                        );
-                    }
-                }
-                all_by_name.extend(
-                    self.global_scope
-                        .find_all_callable_slots_by_name(ident)
-                        .into_iter()
-                        .map(|slot| ResolvedVar::Global { slot }),
-                );
-                break;
-            }
         }
 
         ScalarWalk {
@@ -818,7 +651,80 @@ impl ScopeTree {
         }
     }
 
-    /// Try to resolve a vec candidate set for `(name, sig)`.
+    /// The best-matching overload in one scope's `group` (newest first) for a
+    /// call of the given signature, or `None` if none of them accepts the call.
+    ///
+    /// Resolution proceeds in two stages:
+    ///   1. Filter to overloads whose declared signature accepts `sig`
+    ///      (the usual subtype check via [`StaticType::is_fn_and_matches`]).
+    ///   2. Among the survivors, pick the one whose parameter signature is
+    ///      most specific — i.e. not strictly dominated by any other match's
+    ///      parameter signature in the subtype partial order. A signature `b`
+    ///      strictly dominates `a` when `b <: a` and `a` is not `<: b`.
+    ///
+    /// Variadic overloads (`parameters: None`) match anything but are treated
+    /// as the least specific shape: any concrete overload that also matches
+    /// will dominate them.
+    ///
+    /// When multiple undominated overloads remain (genuinely incomparable
+    /// shapes, e.g. `fn(Int, Any)` vs `fn(Any, Int)` called with `(Int, Int)`),
+    /// the latest-registered one wins — preserving shadow semantics.
+    fn most_specific_match(&self, group: &[SymbolId], sig: &[StaticType]) -> Option<SymbolId> {
+        let matches = group
+            .iter()
+            .copied()
+            .filter(|&symbol| self.symbol_type(symbol).is_fn_and_matches(sig))
+            .collect::<Vec<_>>();
+
+        let params_of = |symbol: SymbolId| -> Option<&[StaticType]> {
+            match self.symbol_type(symbol) {
+                StaticType::Function {
+                    parameters: Some(p),
+                    ..
+                } => Some(p.as_slice()),
+                // Variadic / non-function bindings have no concrete shape.
+                _ => None,
+            }
+        };
+
+        // `group` is newest first, so ties resolve to the most-recently registered overload.
+        matches.iter().copied().find(|&i| {
+            let Some(pi) = params_of(i) else {
+                // Variadic only wins if every other match is also variadic.
+                return matches.iter().all(|&j| params_of(j).is_none());
+            };
+            matches.iter().all(|&j| {
+                if i == j {
+                    return true;
+                }
+                let Some(pj) = params_of(j) else {
+                    // Variadic never dominates a concrete overload.
+                    return true;
+                };
+                !is_strictly_more_specific(pj, pi)
+            })
+        })
+    }
+
+    /// Whether `symbol` is a function whose parameters don't provably conflict
+    /// with `sig`, so it might accept the call at runtime.
+    fn is_compatible(&self, symbol: SymbolId, sig: &[StaticType]) -> bool {
+        let StaticType::Function { parameters, .. } = self.symbol_type(symbol) else {
+            return false;
+        };
+        let Some(parameters) = parameters else {
+            unreachable!(
+                "a variadic function always matches exactly before compatibility is checked"
+            );
+        };
+        parameters.len() == sig.len()
+            && parameters
+                .iter()
+                .zip(sig)
+                .all(|(param, arg)| !param.is_incompatible_with(arg))
+    }
+
+    /// Try to resolve a vec candidate set for `sig`.
     ///
     /// * `Static` — at least one arg is statically a non-empty tuple and
     ///   every tuple-shaped arg shares that length. Positions *may* contain
@@ -826,8 +732,8 @@ impl ScopeTree {
     /// * `AnyFallback` — no static tuple shape but at least one arg is `Any`,
     ///   so vec might still apply at runtime; the runtime narrows per pair.
     /// * `None` — no possible vec interpretation.
-    fn resolve_vec(&mut self, ident: &str, sig: &[StaticType]) -> Option<VecResolution> {
-        if let Some((axis_len, positions)) = self.resolve_vec_static(ident, sig) {
+    fn resolve_vec(&self, candidates: &Candidates, sig: &[StaticType]) -> Option<VecResolution> {
+        if let Some((axis_len, positions)) = self.resolve_vec_static(candidates, sig) {
             return Some(VecResolution::Static {
                 axis_len,
                 positions,
@@ -837,19 +743,19 @@ impl ScopeTree {
             return None;
         }
         let permissive: Vec<StaticType> = vec![StaticType::Any; sig.len()];
-        let vars = self.candidates_for_sig(ident, &permissive);
-        if vars.is_empty() {
+        let symbols = self.candidates_for_sig(candidates, &permissive);
+        if symbols.is_empty() {
             None
         } else {
-            Some(VecResolution::AnyFallback(vars))
+            Some(VecResolution::AnyFallback(symbols))
         }
     }
 
     fn resolve_vec_static(
-        &mut self,
-        ident: &str,
+        &self,
+        candidates: &Candidates,
         sig: &[StaticType],
-    ) -> Option<(usize, Vec<Vec<ResolvedVar>>)> {
+    ) -> Option<(usize, Vec<Vec<SymbolId>>)> {
         let mut axis: Option<usize> = None;
         for arg in sig {
             if let StaticType::Tuple(elems) = arg {
@@ -874,7 +780,7 @@ impl ScopeTree {
                     other => other.clone(),
                 })
                 .collect();
-            positions.push(self.candidates_for_sig(ident, &pos_sig));
+            positions.push(self.candidates_for_sig(candidates, &pos_sig));
         }
         Some((axis_len, positions))
     }
@@ -882,18 +788,12 @@ impl ScopeTree {
     /// Priority-ordered scalar candidates for one signature, used by per-position
     /// vec resolution. Exact match (if any) first, then loose-compat candidates
     /// with the exact entry deduplicated.
-    fn candidates_for_sig(&mut self, ident: &str, sig: &[StaticType]) -> Vec<ResolvedVar> {
-        let walk = self.scalar_walk(ident, sig);
-        let mut out: Vec<ResolvedVar> = Vec::new();
-        if let Some(e) = walk.exact {
-            out.push(e);
-        }
-        if let Some(loose) = walk.loose {
-            for v in loose {
-                if !out.contains(&v) {
-                    out.push(v);
-                }
-            }
+    fn candidates_for_sig(&self, candidates: &Candidates, sig: &[StaticType]) -> Vec<SymbolId> {
+        let walk = self.scalar_walk(candidates, sig);
+        let mut out = Vec::new();
+        out.extend(walk.exact);
+        for symbol in walk.loose.into_iter().flatten() {
+            push_unique(&mut out, symbol);
         }
         out
     }
@@ -901,8 +801,8 @@ impl ScopeTree {
     /// Whether a candidate could still accept a call with this signature at
     /// runtime: its type is `Any`, a variadic function, or a function whose
     /// parameters don't provably conflict with `sig`.
-    fn could_accept_call(&self, var: ResolvedVar, sig: &[StaticType]) -> bool {
-        match self.get_type(var) {
+    fn could_accept_call(&self, symbol: SymbolId, sig: &[StaticType]) -> bool {
+        match self.symbol_type(symbol) {
             StaticType::Function {
                 parameters: Some(parameters),
                 ..
@@ -923,8 +823,8 @@ impl ScopeTree {
 
     /// Return type of a scalar candidate. Falls back to `Any` if the binding
     /// turned out not to carry a function type (e.g. `Any`-typed callee).
-    fn scalar_return_type(&self, var: ResolvedVar) -> StaticType {
-        match self.get_type(var) {
+    fn scalar_return_type(&self, symbol: SymbolId) -> StaticType {
+        match self.symbol_type(symbol) {
             StaticType::Function { return_type, .. } => return_type.as_ref().clone(),
             _ => StaticType::Any,
         }
@@ -933,9 +833,10 @@ impl ScopeTree {
     /// LUB the return types of a list of scalar candidates. Used when every
     /// candidate in a Dynamic binding came from the compat-filtered walk and
     /// is therefore guaranteed to be a function.
-    fn lub_scalar_returns(&self, vars: &[ResolvedVar]) -> StaticType {
-        vars.iter()
-            .map(|v| self.scalar_return_type(*v))
+    fn lub_scalar_returns(&self, symbols: &[SymbolId]) -> StaticType {
+        symbols
+            .iter()
+            .map(|&symbol| self.scalar_return_type(symbol))
             .reduce(|a, b| a.lub(&b))
             .unwrap_or(StaticType::Any)
     }
@@ -944,7 +845,7 @@ impl ScopeTree {
     /// case breakdown.
     fn dynamic_return_type(
         &self,
-        scalar_loose: &[ResolvedVar],
+        scalar_loose: &[SymbolId],
         vec_resolution: Option<&VecResolution>,
     ) -> StaticType {
         let has_scalar = !scalar_loose.is_empty();
@@ -1116,12 +1017,10 @@ impl ScopeTree {
         }
 
         let scope = &self.scopes[scope_idx];
-        let binding = &scope.identifiers[slot - scope.base_offset];
-        let name = binding.name.clone();
-        let symbol = binding
+        let symbol = scope.identifiers[slot - scope.base_offset]
             .symbol
             .expect("internal error: local binding without a resolver symbol");
-        let slot = self.hoist_upvalue(&name, symbol, slot, env_scopes);
+        let slot = self.hoist_upvalue(symbol, slot, env_scopes);
         ResolvedVar::Upvalue { slot }
     }
 
@@ -1138,10 +1037,8 @@ impl ScopeTree {
             return ResolvedVar::Upvalue { slot };
         }
 
-        let upvalue = &self.scopes[scope_idx].upvalues[slot];
-        let name = upvalue.name.clone();
-        let symbol = upvalue.symbol;
-        let slot = self.hoist_from_upvalue(&name, symbol, slot, env_scopes);
+        let symbol = self.scopes[scope_idx].upvalues[slot].symbol;
+        let slot = self.hoist_from_upvalue(symbol, slot, env_scopes);
         ResolvedVar::Upvalue { slot }
     }
 
@@ -1153,7 +1050,6 @@ impl ScopeTree {
     // `env_scopes`: is a list of scopes that the analyser has already searched that will need to get this upvalue.
     fn hoist_upvalue(
         &mut self,
-        name: &str,
         symbol: SymbolId,
         local_slot: usize,
         env_scopes: &[usize],
@@ -1169,7 +1065,7 @@ impl ScopeTree {
             } else {
                 CaptureSource::Upvalue(capture_idx)
             };
-            capture_idx = self.scopes[scope_idx].add_upvalue(name, symbol, source);
+            capture_idx = self.scopes[scope_idx].add_upvalue(symbol, source);
             is_local = false; // only the first iteration is local
         }
 
@@ -1178,18 +1074,14 @@ impl ScopeTree {
 
     fn hoist_from_upvalue(
         &mut self,
-        name: &str,
         symbol: SymbolId,
         upvalue_slot: usize,
         env_scopes: &[usize],
     ) -> usize {
         let mut capture_idx = upvalue_slot;
         for &scope_idx in env_scopes.iter().rev() {
-            capture_idx = self.scopes[scope_idx].add_upvalue(
-                name,
-                symbol,
-                CaptureSource::Upvalue(capture_idx),
-            );
+            capture_idx =
+                self.scopes[scope_idx].add_upvalue(symbol, CaptureSource::Upvalue(capture_idx));
         }
 
         capture_idx
@@ -1542,15 +1434,33 @@ mod tests {
         }
     }
 
-    fn assert_resolves_to(tree: &mut ScopeTree, name: &str, sig: &[StaticType], slot: usize) {
-        let resolved = tree.resolve_call(name, sig, CallKind::Regular);
+    /// Gives each native in `tree` a fresh symbol, returned in registry order.
+    fn native_symbols(tree: &mut ScopeTree) -> Vec<SymbolId> {
+        let symbols = tree.native_names().map(|_| symbol()).collect::<Vec<_>>();
+        tree.attach_native_symbols(symbols.clone());
+        symbols
+    }
+
+    /// Candidates of these groups, each given oldest first as declared. The
+    /// resolver lists each group newest first.
+    fn candidates(groups: &[&[SymbolId]]) -> Candidates {
+        Candidates::from_groups(
+            groups
+                .iter()
+                .map(|group| group.iter().rev().copied().collect())
+                .collect(),
+        )
+    }
+
+    fn assert_resolves_to(
+        tree: &mut ScopeTree,
+        candidates: &Candidates,
+        sig: &[StaticType],
+        expected: ResolvedVar,
+    ) {
+        let resolved = tree.resolve_call(candidates, sig, CallKind::Regular);
         match resolved.binding {
-            Binding::Resolved(Candidate::Scalar(ResolvedVar::Global { slot: s })) => {
-                assert_eq!(s, slot, "expected global slot {slot} for {name}, got {s}");
-            }
-            Binding::Resolved(Candidate::Scalar(ResolvedVar::Local { slot: s })) => {
-                assert_eq!(s, slot, "expected local slot {slot} for {name}, got {s}");
-            }
+            Binding::Resolved(Candidate::Scalar(var)) => assert_eq!(var, expected),
             other => panic!("expected Resolved Scalar, got {other:?}"),
         }
     }
@@ -1573,13 +1483,19 @@ mod tests {
                 fn_type(vec![seq_any.clone(), StaticType::Any], StaticType::Any),
             ),
         ]);
+        let natives = native_symbols(&mut tree);
 
         let call_sig = [
             StaticType::List(Box::new(StaticType::Int)),
             fn_type(vec![StaticType::Any], StaticType::Bool),
         ];
         // Slot 0 is the predicate version; it must win over slot 1 (element).
-        assert_resolves_to(&mut tree, "locate", &call_sig, 0);
+        assert_resolves_to(
+            &mut tree,
+            &candidates(&[&natives]),
+            &call_sig,
+            ResolvedVar::Global { slot: 0 },
+        );
     }
 
     // Int and Number are siblings. An Int call must select the Int overload
@@ -1596,7 +1512,13 @@ mod tests {
                 fn_type(vec![StaticType::Int], StaticType::String),
             ),
         ]);
-        assert_resolves_to(&mut tree, "foo", &[StaticType::Int], 1);
+        let natives = native_symbols(&mut tree);
+        assert_resolves_to(
+            &mut tree,
+            &candidates(&[&natives]),
+            &[StaticType::Int],
+            ResolvedVar::Global { slot: 1 },
+        );
     }
 
     // `fn foo(Any)` declared in an inner scope matches every call shape, so
@@ -1608,29 +1530,24 @@ mod tests {
             "foo".into(),
             fn_type(vec![StaticType::Int], StaticType::Int),
         )]);
+        let natives = native_symbols(&mut tree);
 
         // Push an inner scope holding `foo(Any) -> Any`.
         tree.new_block_scope();
+        let inner = symbol();
         let inner_var = tree.create_local_binding(
             "foo".into(),
             TypeBinding::Inferred(fn_type(vec![StaticType::Any], StaticType::Any)),
-            symbol(),
+            inner,
         );
-        let ResolvedVar::Local { slot: inner_slot } = inner_var else {
-            panic!("expected local binding");
-        };
 
         // Called with `Int`: inner `foo(Any)` matches and shadows the global.
-        let resolved = tree.resolve_call("foo", &[StaticType::Int], CallKind::Regular);
-        match resolved.binding {
-            Binding::Resolved(Candidate::Scalar(ResolvedVar::Local { slot })) => {
-                assert_eq!(
-                    slot, inner_slot,
-                    "inner foo(Any) must shadow global foo(Int)"
-                );
-            }
-            other => panic!("expected inner local resolution, got {other:?}"),
-        }
+        assert_resolves_to(
+            &mut tree,
+            &candidates(&[&[inner], &natives]),
+            &[StaticType::Int],
+            inner_var,
+        );
     }
 
     // `fn foo(Int)` in an inner scope only matches `Int` calls; calls with a
@@ -1641,17 +1558,24 @@ mod tests {
             "foo".into(),
             fn_type(vec![StaticType::Any], StaticType::Int),
         )]);
+        let natives = native_symbols(&mut tree);
 
         tree.new_block_scope();
+        let inner = symbol();
         tree.create_local_binding(
             "foo".into(),
             TypeBinding::Inferred(fn_type(vec![StaticType::Int], StaticType::Int)),
-            symbol(),
+            inner,
         );
 
         // Called with `String`: inner `foo(Int)` doesn't match, falls through
         // to the global `foo(Any)`.
-        assert_resolves_to(&mut tree, "foo", &[StaticType::String], 0);
+        assert_resolves_to(
+            &mut tree,
+            &candidates(&[&[inner], &natives]),
+            &[StaticType::String],
+            ResolvedVar::Global { slot: 0 },
+        );
     }
 
     // A concrete overload should beat a variadic overload registered in the
@@ -1665,6 +1589,42 @@ mod tests {
                 fn_type(vec![StaticType::Int], StaticType::Int),
             ),
         ]);
-        assert_resolves_to(&mut tree, "foo", &[StaticType::Int], 1);
+        let natives = native_symbols(&mut tree);
+        assert_resolves_to(
+            &mut tree,
+            &candidates(&[&natives]),
+            &[StaticType::Int],
+            ResolvedVar::Global { slot: 1 },
+        );
+    }
+
+    // Simulates: fn foo(x: Int) {} { fn foo(x: String) {} fn f() { foo(1) } }
+    // The call inspects `foo(String)` on its way to `foo(Int)` but only
+    // captures the overload it picks.
+    #[test]
+    fn call_captures_only_the_overload_it_picks() {
+        let mut tree = empty_scope_tree();
+        let foo_int = symbol();
+        tree.create_local_binding(
+            "foo".into(),
+            TypeBinding::Inferred(fn_type(vec![StaticType::Int], StaticType::unit())),
+            foo_int,
+        );
+        tree.new_block_scope();
+        let foo_string = symbol();
+        tree.create_local_binding(
+            "foo".into(),
+            TypeBinding::Inferred(fn_type(vec![StaticType::String], StaticType::unit())),
+            foo_string,
+        );
+        tree.new_function_scope(); // f
+
+        assert_resolves_to(
+            &mut tree,
+            &candidates(&[&[foo_string], &[foo_int]]),
+            &[StaticType::Int],
+            ResolvedVar::Upvalue { slot: 0 },
+        );
+        assert_eq!(tree.scopes[tree.current_scope_idx].upvalues.len(), 1);
     }
 }
