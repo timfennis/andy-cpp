@@ -985,12 +985,12 @@ impl Parser {
     #[allow(clippy::too_many_lines)] // WERE BUILDING A PROGRAMMING LANGUAGE CLIPPY WHAT DO YOU WANT?
     fn primary(&mut self) -> Result<ExpressionLocation, Error> {
         // matches if expression like `if a < b { } else { }`
-        if self.consume_token_if(&[Token::If]).is_some() {
-            return self.if_expression();
+        if let Some(if_token) = self.consume_token_if(&[Token::If]) {
+            return self.if_expression(if_token.span);
         }
         // matches while loops like `while foo < bar { }`
-        else if self.consume_token_if(&[Token::While]).is_some() {
-            return self.while_expression();
+        else if let Some(while_token) = self.consume_token_if(&[Token::While]) {
+            return self.while_expression(while_token.span);
         }
         // matches for loops like `for x in xs { }`
         else if self.match_token(&[Token::For]).is_some() {
@@ -1096,13 +1096,15 @@ impl Parser {
     ///
     /// }
     /// ```
-    fn if_expression(&mut self) -> Result<ExpressionLocation, Error> {
+    /// Parses an `if` after its keyword, whose span is `if_span`. The expression
+    /// spans from the keyword to the end of its last branch.
+    fn if_expression(&mut self, if_span: Span) -> Result<ExpressionLocation, Error> {
         let expression = self.expression()?;
         let on_true = self.block()?;
 
         let on_false = if self.consume_token_if(&[Token::Else]).is_some() {
-            if self.consume_token_if(&[Token::If]).is_some() {
-                let expression = self.if_expression()?;
+            if let Some(if_token) = self.consume_token_if(&[Token::If]) {
+                let expression = self.if_expression(if_token.span)?;
                 Some(Box::new(expression))
             } else {
                 Some(Box::new(self.block()?))
@@ -1111,7 +1113,8 @@ impl Parser {
             None
         };
 
-        let span = expression.span;
+        let last_branch = on_false.as_deref().unwrap_or(&on_true);
+        let span = if_span.merge(last_branch.span);
         Ok(Expression::If {
             condition: Box::new(expression),
             on_true: Box::new(on_true),
@@ -1120,11 +1123,13 @@ impl Parser {
         .to_location(span))
     }
 
-    fn while_expression(&mut self) -> Result<ExpressionLocation, Error> {
+    /// Parses a `while` after its keyword, whose span is `while_span`. The
+    /// expression spans from the keyword to the end of its body.
+    fn while_expression(&mut self, while_span: Span) -> Result<ExpressionLocation, Error> {
         let expression = self.expression()?;
         let loop_body = self.block()?;
 
-        let span = expression.span;
+        let span = while_span.merge(loop_body.span);
         Ok(Expression::While {
             expression: Box::new(expression),
             loop_body: Box::new(loop_body),

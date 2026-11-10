@@ -180,6 +180,14 @@ mod tests {
     }
 
     #[test]
+    fn jump_from_inside_an_if_body() {
+        let src = "let total = 5;\nif true { total + 1 }";
+        let state = analyse(src);
+        let loc = def_at(&state, src.rfind("total").unwrap()).expect("definition found");
+        assert_eq!(start_offset(&state, &loc), 4);
+    }
+
+    #[test]
     fn let_binding_invisible_in_its_own_initializer() {
         // The RHS `x` must resolve to the outer (first) `x`, not the binding
         // currently being declared — the analyser binds after the initializer.
