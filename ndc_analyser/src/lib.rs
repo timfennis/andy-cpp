@@ -1,5 +1,5 @@
 mod analyser;
-mod scope;
+mod overloads;
+mod types;
 
 pub use analyser::{Analyser, AnalysisError, AnalysisResult};
-pub use scope::ScopeTree;

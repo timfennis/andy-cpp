@@ -26,7 +26,7 @@
 //! the seed to `panic.regressions`; the next default `cargo test` run
 //! will guard against the regression automatically.
 
-use ndc_analyser::{Analyser, ScopeTree};
+use ndc_analyser::Analyser;
 use ndc_core::FunctionRegistry;
 use ndc_core::r#struct::StructRegistry;
 use ndc_lexer::{NumericLiteral, Span, Token, TokenLocation};
@@ -248,10 +248,7 @@ fn run_pipeline(tokens: Vec<TokenLocation>) {
         .collect();
 
     let struct_registry = Rc::new(RefCell::new(StructRegistry::default()));
-    let mut analyser = Analyser::from_scope_tree(
-        ScopeTree::from_global_scope(scope),
-        Rc::clone(&struct_registry),
-    );
+    let mut analyser = Analyser::new(scope, Rc::clone(&struct_registry));
     for e in &mut expressions {
         if analyser.analyse(e).is_err() {
             return;
