@@ -64,6 +64,11 @@ pub struct NameResolver {
     /// Setter candidates for writes through an accessor, keyed by the target node.
     /// In `p.x = 1`, `x=`. In `xs[i] = 1`, `[]=`.
     setters: AHashMap<NodeId, Candidates>,
+    /// The function each recorded use sits in, keyed like the tables above:
+    /// the reference, assignment target, accessor use or augmented assignment.
+    /// Absent at the program's top level. In `fn f() { x }`, the `x` node maps
+    /// to `f`'s declaration.
+    use_sites: AHashMap<NodeId, NodeId>,
     /// The type each name in an annotation refers to, keyed by the name's node.
     /// In `let m: Map<String, P>`, the `Map`, `String` and `P` nodes.
     type_names: AHashMap<NodeId, SymbolId>,
@@ -254,6 +259,14 @@ impl ScopeTree {
         &self.scopes[self.current.0].bindings
     }
 
+    /// The innermost function declaration the current scope is in, if any.
+    pub(crate) fn current_function(&self) -> Option<NodeId> {
+        self.chain().find_map(|scope| match scope.kind {
+            ScopeKind::Function(node) => Some(node),
+            _ => None,
+        })
+    }
+
     /// The current scope followed by its ancestors, ending at the root.
     fn chain(&self) -> impl Iterator<Item = &Scope> {
         self.ancestors(self.current).map(|id| &self.scopes[id.0])
@@ -368,6 +381,7 @@ impl NameResolver {
             captures: Default::default(),
             captured: Default::default(),
             augmented: Default::default(),
+            use_sites: Default::default(),
             getters: Default::default(),
             setters: Default::default(),
             type_names: Default::default(),
@@ -394,6 +408,14 @@ impl NameResolver {
         }
 
         self.captured.insert(symbol);
+    }
+
+    /// Records that the use keyed by `node` sits in the current function, so
+    /// the layout knows which frame it is reached from.
+    fn record_use_site(&mut self, node: NodeId) {
+        if let Some(function) = self.scopes.current_function() {
+            self.use_sites.insert(node, function);
+        }
     }
 
     /// Resolves `statement`, recording its error instead of returning it so the
@@ -448,6 +470,20 @@ impl NameResolver {
     /// The operations the augmented assignment at `node` could use.
     pub fn augmented_candidates(&self, node: NodeId) -> &AugmentedCandidates {
         &self.augmented[&node]
+    }
+
+    /// The function declaration the use keyed by `node` sits in: a reference,
+    /// an assignment target, an accessor use or an augmented assignment.
+    /// `None` at the program's top level.
+    pub fn use_site(&self, node: NodeId) -> Option<NodeId> {
+        self.use_sites.get(&node).copied()
+    }
+
+    /// How many scopes the resolver has created, the builtins and program
+    /// scopes included. Scopes are only ever added, so the ones a batch
+    /// creates are those after the count before it.
+    pub fn scope_count(&self) -> usize {
+        self.scopes.scopes.len()
     }
 
     /// The outer symbols the function declared at `node` captures, in order of first use.
@@ -543,6 +579,7 @@ impl NameResolver {
             Expression::Identifier { name, .. } => {
                 let candidates = self.use_name(name, loc.span)?;
                 self.references.insert(loc.id, candidates);
+                self.record_use_site(loc.id);
             }
             Expression::Statement(inner)
             | Expression::Grouping(inner)
@@ -621,6 +658,7 @@ impl NameResolver {
                 self.resolve(receiver)?;
                 let candidates = self.use_name(member, *member_span)?;
                 self.getters.insert(loc.id, candidates);
+                self.record_use_site(loc.id);
             }
             Expression::Tuple { values } | Expression::List { values } => {
                 for value in values {
@@ -713,6 +751,7 @@ impl NameResolver {
                 if let AssignmentTarget::Index { .. } = l_value.target {
                     let getter = self.use_name("[]", l_value.span)?;
                     self.getters.insert(l_value.id, getter);
+                    self.record_use_site(l_value.id);
                 }
                 self.resolve(r_value)?;
 
@@ -735,6 +774,7 @@ impl NameResolver {
                     .flatten()
                     .for_each(|op| self.record_use(*op));
 
+                self.record_use_site(loc.id);
                 self.augmented.insert(
                     loc.id,
                     AugmentedCandidates {
@@ -924,6 +964,7 @@ impl NameResolver {
                 }
                 self.record_use(symbol);
                 self.assignments.insert(target.id, symbol);
+                self.record_use_site(target.id);
             }
             AssignmentTarget::Sequence(items) => {
                 for item in items {
@@ -935,6 +976,7 @@ impl NameResolver {
                 self.resolve(index)?;
                 let candidates = self.use_name("[]=", target.span)?;
                 self.setters.insert(target.id, candidates);
+                self.record_use_site(target.id);
             }
             AssignmentTarget::Member {
                 receiver,
@@ -947,6 +989,7 @@ impl NameResolver {
                 self.setters.insert(target.id, setter);
                 let getter = self.use_name(member, *member_span)?;
                 self.getters.insert(target.id, getter);
+                self.record_use_site(target.id);
             }
         }
         Ok(())

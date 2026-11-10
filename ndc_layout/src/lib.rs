@@ -3,13 +3,37 @@
 //! which every function reaches directly. A function call gets a frame of local
 //! slots, numbered from 0, and a closure reaches the locals it captures through
 //! upvalues. Everything here is read off the resolver's scope tree.
+//!
+//! The analyser picks symbols; [`Layout::lay_out`] then fills in where each of
+//! them lives, once per batch.
 
-use ndc_analysis::{CaptureSource, ResolvedVar};
+use ahash::AHashMap;
+use ndc_analysis::{Analysis, Binding, CaptureSource, DeclaredStruct, FieldAccessors, ResolvedVar};
 use ndc_core::NodeId;
+use ndc_core::r#struct::StructInfo;
 use ndc_resolver::{NameResolver, ScopeId, ScopeKind, SymbolId};
 
 #[cfg(test)]
 mod tests;
+
+/// What the analyser picked in one batch, by symbol. [`Layout::lay_out`] turns
+/// each into the location the matching [`Analysis`] table holds.
+#[derive(Debug, Default)]
+pub struct Picks {
+    /// For [`Analysis::bindings`].
+    pub bindings: AHashMap<NodeId, Binding<SymbolId>>,
+    /// For [`Analysis::getters`].
+    pub getters: AHashMap<NodeId, Binding<SymbolId>>,
+    /// For [`Analysis::setters`].
+    pub setters: AHashMap<NodeId, Binding<SymbolId>>,
+    /// For [`Analysis::augmented_assignments`].
+    pub augmented_assignments: AHashMap<NodeId, Binding<SymbolId>>,
+    /// For [`Analysis::variables`].
+    pub variables: AHashMap<NodeId, SymbolId>,
+    /// Each struct declaration's struct, for [`Analysis::structs`], which also
+    /// says where its field accessors live.
+    pub structs: AHashMap<NodeId, StructInfo>,
+}
 
 /// Where the resolver's symbols live at runtime.
 #[derive(Clone, Copy)]
@@ -85,28 +109,83 @@ impl<'a> Layout<'a> {
         ResolvedVar::Upvalue { slot }
     }
 
-    /// How many local slots the frame of `function` (`None` for the program's
-    /// top level) needs for its own values: one past the highest slot any of
-    /// its scopes uses. In `fn f(a) { let b = 1; { let c = 2; } }` that's 3.
-    /// At the top level only blocks and loops count, as the program scope's
-    /// own declarations are globals; in the REPL that includes earlier lines'.
-    pub fn frame_size(self, function: Option<NodeId>) -> usize {
-        let frame = function.map(|function| self.resolver.function_scope(function));
-        self.resolver
-            .scopes()
-            .filter(|(_, scope)| scope.kind() != ScopeKind::Builtins)
-            .filter(|&(id, _)| {
-                let own = self.frame_of(id);
-                match frame {
-                    Some(frame) => own == frame,
-                    None => self.resolver.scope(own).kind() == ScopeKind::Program,
+    /// Fills the location tables of `analysis` for a batch whose scopes are
+    /// those after the first `first_scope`: where each of the analyser's
+    /// `picks` lives, seen from the function its use sits in, and the frame
+    /// size and captures of each function the batch declares.
+    pub fn lay_out(self, picks: Picks, first_scope: usize, analysis: &mut Analysis) {
+        let locate_use =
+            |node: NodeId, symbol: SymbolId| self.location(symbol, self.resolver.use_site(node));
+        let locate_binding = |(node, binding): (NodeId, Binding<SymbolId>)| {
+            (node, binding.map(|symbol| locate_use(node, symbol)))
+        };
+        analysis
+            .bindings
+            .extend(picks.bindings.into_iter().map(locate_binding));
+        analysis
+            .getters
+            .extend(picks.getters.into_iter().map(locate_binding));
+        analysis
+            .setters
+            .extend(picks.setters.into_iter().map(locate_binding));
+        analysis
+            .augmented_assignments
+            .extend(picks.augmented_assignments.into_iter().map(locate_binding));
+        // A declaration is in the frame it is made in, so only an assignment
+        // target can be a use from a function further in.
+        analysis.variables.extend(
+            picks
+                .variables
+                .into_iter()
+                .map(|(node, symbol)| (node, locate_use(node, symbol))),
+        );
+        analysis
+            .structs
+            .extend(picks.structs.into_iter().map(|(node, info)| {
+                let fields = self
+                    .resolver
+                    .struct_symbols(node)
+                    .accessors
+                    .iter()
+                    .map(|&(getter, setter)| FieldAccessors {
+                        getter: self.location(getter, None),
+                        setter: self.location(setter, None),
+                    })
+                    .collect();
+                (node, DeclaredStruct { info, fields })
+            }));
+
+        // One sweep over the batch's scopes: each frame needs one past the
+        // highest slot any of its scopes uses. In
+        // `fn f(a) { let b = 1; { let c = 2; } }` that's 3. The program scope's
+        // own declarations are globals, so at the top level only blocks and
+        // loops count.
+        let mut frame_sizes: AHashMap<ScopeId, usize> = AHashMap::new();
+        for (id, scope) in self.resolver.scopes().skip(first_scope) {
+            match scope.kind() {
+                ScopeKind::Builtins | ScopeKind::Program => continue,
+                ScopeKind::Function(function) => {
+                    analysis.captures.insert(function, self.captures(function));
                 }
-            })
-            // The program scope's own bindings are globals.
-            .filter(|(_, scope)| scope.kind() != ScopeKind::Program)
-            .map(|(id, scope)| self.first_slot(id) + scope.bindings().len())
-            .max()
-            .unwrap_or(0)
+                ScopeKind::Block => {}
+            }
+            let size = self.first_slot(id) + scope.bindings().len();
+            let frame = frame_sizes.entry(self.frame_of(id)).or_default();
+            *frame = (*frame).max(size);
+        }
+        analysis.top_level_frame_size = 0;
+        for (frame, size) in frame_sizes {
+            match self.resolver.scope(frame).kind() {
+                ScopeKind::Function(function) => {
+                    analysis.frame_sizes.insert(function, size);
+                }
+                ScopeKind::Program => analysis.top_level_frame_size = size,
+                ScopeKind::Block | ScopeKind::Builtins => {
+                    unreachable!("internal error: a frame is the program or a function")
+                }
+            }
+        }
+        analysis.global_count = self.global_count();
     }
 
     /// Where each upvalue of the function declared at `function` comes from,

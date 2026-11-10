@@ -78,7 +78,6 @@ impl Analyser {
             getters,
             std::slice::from_ref(&receiver_type),
             CallKind::Regular,
-            |symbol| self.locate(symbol),
         );
 
         if matches!(binding, Binding::None) {
@@ -86,7 +85,7 @@ impl Analyser {
             self.emit(error);
         }
 
-        self.result.analysis.getters.insert(id, binding);
+        self.picks.getters.insert(id, binding);
         return_type
     }
 
@@ -144,18 +143,17 @@ impl Analyser {
             self.resolver.reference_candidates(function.id),
             &type_sig,
             kind,
-            |symbol| self.locate(symbol),
         );
 
         if matches!(binding, Binding::None) {
             let candidates = self.resolver.reference_candidates(function.id);
             let error = self.no_match(candidates, name, &type_sig, span);
             self.emit(error);
-            self.result.analysis.bindings.insert(function.id, binding);
+            self.picks.bindings.insert(function.id, binding);
             return StaticType::Any;
         }
 
-        self.result.analysis.bindings.insert(function.id, binding);
+        self.picks.bindings.insert(function.id, binding);
         return_type
     }
 }
