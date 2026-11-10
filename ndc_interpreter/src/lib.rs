@@ -131,9 +131,9 @@ impl Interpreter {
     ) -> Result<(Vec<ExpressionLocation>, AnalysisResult), InterpreterError> {
         let source_id = self.source_db.add("<input>", input);
         let tokens = Lexer::new(input, source_id).collect::<Result<Vec<TokenLocation>, _>>()?;
-        let mut expressions = ndc_parser::Parser::from_tokens(tokens).parse()?;
+        let expressions = ndc_parser::Parser::from_tokens(tokens).parse()?;
 
-        for e in &mut expressions {
+        for e in &expressions {
             self.analyser.analyse(e);
         }
 
@@ -229,12 +229,12 @@ impl Interpreter {
             Lexer::new(input, source_id).collect::<Result<Vec<TokenLocation>, _>>()
         })?;
 
-        let mut expressions = measure(&mut timings, Phase::Parsing, || {
+        let expressions = measure(&mut timings, Phase::Parsing, || {
             ndc_parser::Parser::from_tokens(tokens).parse()
         })?;
 
         measure(&mut timings, Phase::Analysing, || {
-            for e in &mut expressions {
+            for e in &expressions {
                 self.analyser.analyse(e);
             }
         });
