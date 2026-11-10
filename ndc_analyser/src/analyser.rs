@@ -2,15 +2,16 @@ use crate::overloads::{CallKind, Overloads, ResolvedCall};
 use crate::types::{TypeBinding, TypeTable};
 use ahash::AHashMap;
 use itertools::{Itertools, izip};
+use ndc_analysis::{AugmentedAssignmentPlan, Binding, Candidate, ResolvedVar};
+use ndc_core::NodeId;
 use ndc_core::static_type::StaticTypeConstructionError;
 use ndc_core::r#struct::{StructInfo, StructRegistry};
 use ndc_core::{StaticType, TypeSignature};
 use ndc_layout::Layout;
 use ndc_lexer::{NumericLiteral, Span};
 use ndc_parser::{
-    AssignmentTarget, AssignmentTargetLocation, AugmentedAssignmentPlan, Binding, BindingPattern,
-    BindingPatternLocation, Candidate, Expression, ExpressionLocation, ForBody, ForIteration,
-    FunctionParameter, NodeId, ResolvedVar, TypeExpr,
+    AssignmentTarget, AssignmentTargetLocation, BindingPattern, BindingPatternLocation, Expression,
+    ExpressionLocation, ForBody, ForIteration, FunctionParameter, TypeExpr,
 };
 use ndc_resolver::{Candidates, NameResolutionError, NameResolver, SymbolId};
 use std::cell::RefCell;

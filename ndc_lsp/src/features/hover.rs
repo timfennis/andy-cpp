@@ -1,6 +1,7 @@
+use ndc_analysis::{Binding, ResolvedVar};
 use ndc_core::StaticType;
 use ndc_lexer::Span;
-use ndc_parser::{Binding, Expression, ResolvedVar};
+use ndc_parser::Expression;
 use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position};
 
 use crate::features::completion::FunctionInfo;
@@ -111,7 +112,7 @@ fn function_hover(name: &str, functions: &[FunctionInfo]) -> Option<String> {
 }
 
 /// Markdown showing the inferred type of an expression.
-fn type_hover(state: &DocumentState, id: ndc_parser::NodeId) -> Option<String> {
+fn type_hover(state: &DocumentState, id: ndc_core::NodeId) -> Option<String> {
     let typ = state.analysis.expr_types.get(&id)?;
     Some(format!("```ndc\n{typ}\n```"))
 }

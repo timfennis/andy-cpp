@@ -1,4 +1,4 @@
-use crate::expression::NodeId;
+use ndc_core::NodeId;
 use ndc_lexer::Span;
 use std::fmt;
 

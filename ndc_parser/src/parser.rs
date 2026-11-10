@@ -1,9 +1,10 @@
+use ndc_analysis::{AugmentedAssignmentPlan, Binding};
+use ndc_core::NodeId;
 use std::fmt::Write;
 
 use crate::expression::{
-    AssignmentTarget, AssignmentTargetLocation, AugmentedAssignmentPlan, Binding, BindingPattern,
-    BindingPatternLocation, ExpressionLocation, ForBody, ForIteration, FunctionParameter, NodeId,
-    NonBindingTarget,
+    AssignmentTarget, AssignmentTargetLocation, BindingPattern, BindingPatternLocation,
+    ExpressionLocation, ForBody, ForIteration, FunctionParameter, NonBindingTarget,
 };
 use crate::expression::{Expression, StructField};
 use crate::operator::{BinaryOperator, LogicalOperator, UnaryOperator};

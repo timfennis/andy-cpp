@@ -1,7 +1,8 @@
+use ndc_core::NodeId;
 use ndc_core::StaticType;
 use ndc_interpreter::AnalysisResult;
 use ndc_lexer::Span;
-use ndc_parser::{ExpressionLocation, NodeId};
+use ndc_parser::ExpressionLocation;
 use tower_lsp::lsp_types::{InlayHint, InlayHintKind, InlayHintLabel};
 
 use crate::util::LineIndex;

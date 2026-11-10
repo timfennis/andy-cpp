@@ -1,9 +1,9 @@
 use crate::Value;
 use ahash::AHashSet;
+use ndc_analysis::CaptureSource;
 use ndc_core::StaticType;
 use ndc_core::hash_map::HashMap;
 use ndc_lexer::Span;
-use ndc_parser::CaptureSource;
 use std::rc::Rc;
 
 /// A jump destination: either a resolved displacement — "relative offset, in

@@ -1,11 +1,13 @@
 #![allow(unused_crate_dependencies)]
 
+use ndc_core::NodeId;
+
 use std::collections::HashSet;
 
 use ndc_lexer::{Lexer, SourceId, Span};
 use ndc_parser::{
     AssignmentTarget, AssignmentTargetLocation, BindingPattern, BindingPatternLocation, Expression,
-    ExpressionLocation, ForIteration, NodeId, Parser,
+    ExpressionLocation, ForIteration, Parser,
 };
 
 fn parse_one(source: &str) -> ExpressionLocation {

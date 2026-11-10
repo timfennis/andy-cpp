@@ -74,8 +74,9 @@ Source → [Lexer] → Tokens → [Parser] → AST → [Analyser] → Annotated 
 |---|---|
 | `ndc_lexer` | Tokenisation, `Span` (offset+length) |
 | `ndc_parser` | AST (`Expression`, `ExpressionLocation`), parser |
-| `ndc_core` | `Number` (BigInt/Rational/Complex), `StaticType`, `FunctionRegistry`, ordering, hashing |
+| `ndc_core` | `Number` (BigInt/Rational/Complex), `StaticType`, `FunctionRegistry`, `NodeId`, ordering, hashing |
 | `ndc_resolver` | Name resolution: `NameResolver`, `SymbolId`, per-use candidate symbols and closure captures |
+| `ndc_analysis` | What the analyser works out for the compiler and LSP: `ResolvedVar`, `Binding`, `Candidate`, `CaptureSource` |
 | `ndc_layout` | Storage layout: each resolver symbol's local slot, and each function's captures |
 | `ndc_analyser` | Semantic analyser (types, overload bindings), runs the resolver first and takes slots from the layout |
 | `ndc_interpreter` | `Interpreter` facade (analyse + compile + run via VM) |

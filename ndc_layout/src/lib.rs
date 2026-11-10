@@ -3,7 +3,10 @@
 //! and a closure reaches the values it captures through upvalues. Everything
 //! here is read off the resolver's scope tree.
 
-use ndc_parser::{CaptureSource, NodeId, ResolvedVar};
+use ndc_analysis::{CaptureSource, ResolvedVar};
+
+use ndc_core::NodeId;
+
 use ndc_resolver::{NameResolver, ScopeId, ScopeKind, SymbolId};
 
 #[cfg(test)]
