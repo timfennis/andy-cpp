@@ -31,8 +31,7 @@ use ndc_core::FunctionRegistry;
 use ndc_lexer::{NumericLiteral, Span, Token, TokenLocation};
 use ndc_parser::Parser;
 use ndc_vm::compiler::Compiler;
-use ndc_vm::value::{Function as VmFunction, Object as VmObject};
-use ndc_vm::{NativeFunction, OutputSink, Value as VmValue, Vm};
+use ndc_vm::{NativeFunction, OutputSink, Vm};
 use proptest::prelude::*;
 use proptest::test_runner::FileFailurePersistence;
 use std::fmt;
@@ -261,17 +260,7 @@ fn run_pipeline(tokens: Vec<TokenLocation>) {
         Err(_) => return,
     };
 
-    // Globals must be in the same iteration order as the analyser scope
-    // so the global slot indices match.
-    let globals: Vec<VmValue> = registry
-        .iter()
-        .map(|native| {
-            VmValue::Object(Rc::new(VmObject::Function(VmFunction::Native(Rc::clone(
-                native,
-            )))))
-        })
-        .collect();
-
+    let globals = ndc_vm::native_globals(registry.iter());
     let mut vm = Vm::new(compiled, globals).with_output(OutputSink::Buffer(Vec::new()));
     let _ = vm.run();
 }
