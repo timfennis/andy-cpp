@@ -1,0 +1,22 @@
+// How a call reaches functions and variables with the same name.
+
+// A `let` holding a function that accepts the call shadows the functions.
+fn foo(a) { "one" }
+fn foo(a, b) { "two" }
+let foo = fn(a) => "let";
+print(foo("x"));
+// expect-output: let
+
+// A nested `fn` takes over only the calls it accepts; the rest reach the
+// variable further out.
+let bar = fn(a) { "outer let" };
+{
+    fn bar(a, b) { "inner fn" }
+    print(bar(1, 2), bar(1));
+}
+// expect-output: inner fn outer let
+
+// A variable that can't be called is skipped.
+let len = 99;
+print("abc".len(), len);
+// expect-output: 3 99

@@ -1,0 +1,7 @@
+// A `let` holding a function is the last candidate for a call: it doesn't join
+// the overloads of the functions further out, so a call it doesn't accept is an
+// error even though an outer `fn` would accept it.
+// expect-error: The variable 'foo' holds a function that doesn't accept the arguments 'Int'
+fn foo(a) { "fn" }
+let foo = fn(a, b) { "let" };
+foo(1)
