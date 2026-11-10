@@ -130,13 +130,9 @@ pub(crate) struct AugmentedCandidates {
 /// The symbols a struct declaration binds. For `struct Point { x: Int }`: the
 /// type `Point`, the constructor `Point`, and the getter `x` with the setter `x=`.
 #[derive(Debug, Clone)]
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "read by the type pass, which is not written yet")
-)]
 pub(crate) struct StructSymbols {
     /// `Point` in annotations such as `let p: Point`.
-    type_symbol: SymbolId,
+    pub(crate) type_symbol: SymbolId,
     /// `Point` in calls such as `Point(1)`.
     pub(crate) constructor: SymbolId,
     /// The getter and setter of each field, in declaration order.
@@ -405,6 +401,11 @@ impl NameResolver {
     /// The operations the augmented assignment at `node` could use.
     pub(crate) fn augmented_candidates(&self, node: NodeId) -> &AugmentedCandidates {
         &self.augmented[&node]
+    }
+
+    /// The type symbol the name in an annotation at `node` refers to.
+    pub(crate) fn type_name_symbol(&self, node: NodeId) -> SymbolId {
+        self.type_names[&node]
     }
 
     /// The symbol the identifier assignment target at `node` writes to.

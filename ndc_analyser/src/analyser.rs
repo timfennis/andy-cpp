@@ -1,9 +1,10 @@
 use crate::name_resolution::{NameResolutionError, NameResolver};
-use crate::scope::{CallKind, ResolvedCall, ScopeTree, TypeBinding, TypeDef};
+use crate::scope::{CallKind, ResolvedCall, ScopeTree, TypeBinding};
 use crate::symbols::SymbolId;
+use ahash::AHashMap;
 use itertools::{Itertools, izip};
 use ndc_core::static_type::StaticTypeConstructionError;
-use ndc_core::r#struct::StructRegistry;
+use ndc_core::r#struct::{StructInfo, StructRegistry};
 use ndc_core::{StaticType, TypeSignature};
 use ndc_lexer::{NumericLiteral, Span};
 use ndc_parser::{
@@ -30,13 +31,14 @@ pub struct AnalysisResult {
     pub errors: Vec<AnalysisError>,
 }
 
-/// A snapshot of the analyser's persistent state: the scope tree and the
-/// number of registered structs at the time of the snapshot. Restoring it
-/// discards every binding and struct declared since.
+/// A snapshot of the analyser's persistent state: the resolver, the scope
+/// tree, the struct types and the number of registered structs at the time of
+/// the snapshot. Restoring it discards every binding and struct declared since.
 #[derive(Debug, Clone)]
 pub struct Checkpoint {
     resolver: NameResolver,
     scope_tree: ScopeTree,
+    struct_types: AHashMap<SymbolId, Rc<StructInfo>>,
     struct_count: usize,
 }
 
@@ -47,6 +49,9 @@ pub struct Analyser {
     resolver: NameResolver,
     struct_registry: Rc<RefCell<StructRegistry>>,
     scope_tree: ScopeTree,
+    /// What each struct's type symbol stands for, so `p: Point` lowers to
+    /// `Point`'s struct type. Every other type name is built in.
+    struct_types: AHashMap<SymbolId, Rc<StructInfo>>,
     /// Stack of explicit `return` types for each enclosing function scope.
     /// Pushed on function entry, popped on exit. The value accumulates the
     /// lub of all `return <expr>` types seen so far.
@@ -76,6 +81,7 @@ impl Analyser {
             resolver,
             scope_tree,
             struct_registry,
+            struct_types: AHashMap::new(),
             return_type_stack: Vec::new(),
             result: AnalysisResult::default(),
             errors: Vec::new(),
@@ -86,6 +92,7 @@ impl Analyser {
         Checkpoint {
             resolver: self.resolver.clone(),
             scope_tree: self.scope_tree.clone(),
+            struct_types: self.struct_types.clone(),
             struct_count: self.struct_registry.borrow().len(),
         }
     }
@@ -93,6 +100,7 @@ impl Analyser {
     pub fn restore(&mut self, checkpoint: Checkpoint) {
         self.resolver = checkpoint.resolver;
         self.scope_tree = checkpoint.scope_tree;
+        self.struct_types = checkpoint.struct_types;
         self.struct_registry
             .borrow_mut()
             .truncate(checkpoint.struct_count);
@@ -130,11 +138,9 @@ impl Analyser {
 
     /// Resolves a syntactic type annotation to a `StaticType`: `Int` becomes
     /// `StaticType::Int`, `Map<String, Int>` becomes `StaticType::Map { .. }`,
-    /// and a struct name declared in a surrounding scope becomes its
-    /// `StaticType::Struct`. Type names resolve through the lexical scope
-    /// chain; built-ins live in the global scope and can never be shadowed
-    /// (struct declarations reject built-in names). An unknown name or a
-    /// wrong generic-argument count is reported as an analysis error at the
+    /// and a struct name becomes that struct's `StaticType::Struct`. The
+    /// resolver has already matched each name to its type symbol. A wrong
+    /// generic-argument count is reported as an analysis error at the
     /// annotation's span, and the annotation falls back to `Any` so the rest
     /// of the program is still checked.
     fn lower_type_expr(&mut self, expr: &TypeExpr) -> StaticType {
@@ -143,30 +149,28 @@ impl Analyser {
                 StaticType::Tuple(elements.iter().map(|e| self.lower_type_expr(e)).collect())
             }
             TypeExpr::Name {
-                name, args, span, ..
+                name,
+                args,
+                span,
+                id,
             } => {
                 let has_args = !args.is_empty();
                 let args = args.iter().map(|a| self.lower_type_expr(a)).collect();
-                match self.scope_tree.resolve_type(name).cloned() {
-                    Some(TypeDef::Struct(info)) => {
-                        if has_args {
-                            self.emit(AnalysisError::type_does_not_take_generic_args(name, *span));
+                let symbol = self.resolver.type_name_symbol(*id);
+                match self.struct_types.get(&symbol) {
+                    Some(_) if has_args => {
+                        self.emit(AnalysisError::type_does_not_take_generic_args(name, *span));
+                        StaticType::Any
+                    }
+                    Some(info) => info.static_type(),
+                    // A built-in type: `from_name_and_args` checks its generic arity.
+                    None => match StaticType::from_name_and_args(name, args) {
+                        Ok(typ) => typ,
+                        Err(err) => {
+                            self.emit(AnalysisError::invalid_type_annotation(&err, *span));
                             StaticType::Any
-                        } else {
-                            info.static_type()
                         }
-                    }
-                    // `from_name_and_args` reports wrong generic arity for
-                    // built-ins and "unknown type" for unresolved names.
-                    Some(TypeDef::Builtin) | None => {
-                        match StaticType::from_name_and_args(name, args) {
-                            Ok(typ) => typ,
-                            Err(err) => {
-                                self.emit(AnalysisError::invalid_type_annotation(&err, *span));
-                                StaticType::Any
-                            }
-                        }
-                    }
+                    },
                 }
             }
         }
@@ -719,31 +723,6 @@ impl Analyser {
                     .map(|f| self.lower_type_expr(&f.annotation))
                     .collect();
 
-                if matches!(self.scope_tree.resolve_type(name), Some(TypeDef::Builtin)) {
-                    self.emit(AnalysisError::struct_shadows_builtin(name, *span));
-                    return Ok(StaticType::unit());
-                }
-
-                if self.scope_tree.has_type_in_current_scope(name) {
-                    self.emit(AnalysisError::struct_redefinition(name, *span));
-                    return Ok(StaticType::unit());
-                }
-
-                let duplicate_fields = fields
-                    .iter()
-                    .duplicates_by(|field| &field.identifier)
-                    .collect_vec();
-                if !duplicate_fields.is_empty() {
-                    for field in duplicate_fields {
-                        self.emit(AnalysisError::field_redefinition(
-                            &field.identifier,
-                            name,
-                            field.span,
-                        ));
-                    }
-                    return Ok(StaticType::unit());
-                }
-
                 let struct_id = self.struct_registry.borrow_mut().register(
                     &*name,
                     fields
@@ -759,10 +738,9 @@ impl Analyser {
                 // of truth), so static bindings and runtime dispatch agree.
                 let info = Rc::clone(&self.struct_registry.borrow()[struct_id]);
 
-                self.scope_tree
-                    .declare_type(name.clone(), TypeDef::Struct(Rc::clone(&info)));
-
                 let symbols = self.resolver.struct_symbols(*id).clone();
+                self.struct_types
+                    .insert(symbols.type_symbol, Rc::clone(&info));
                 *resolved_name = Some(self.create_local_binding(
                     name.clone(),
                     TypeBinding::Annotated(info.constructor_type()),
@@ -1399,30 +1377,6 @@ impl AnalysisError {
         }
     }
 
-    fn struct_shadows_builtin(name: &str, span: Span) -> Self {
-        Self {
-            text: format!("Struct '{name}' is not allowed to shadow the built-in type '{name}'"),
-            span,
-            help_text: None,
-        }
-    }
-
-    fn struct_redefinition(name: &str, span: Span) -> Self {
-        Self {
-            text: format!("Illegal redefinition of struct '{name}'"),
-            span,
-            help_text: None,
-        }
-    }
-
-    fn field_redefinition(field: &str, struct_name: &str, span: Span) -> Self {
-        Self {
-            text: format!("Illegal redefinition of field '{field}' in struct '{struct_name}'"),
-            span,
-            help_text: None,
-        }
-    }
-
     fn tuple_arity_mismatch(ident_len: usize, annotation_len: usize, span: Span) -> Self {
         Self {
             text: format!(
@@ -1874,5 +1828,22 @@ mod tests {
     #[test]
     fn redefined_function_can_still_be_called() {
         assert_only_redefinition_error("fn f(x) { x } fn f(y) { y } f(1)");
+    }
+
+    // An annotation names the struct its scope sees: the inner `T` inside
+    // `inner`, the outer `T` after it. Mixing them up would make `t.b` or
+    // `u.a` an unknown field.
+    #[test]
+    fn annotations_name_the_struct_in_scope() {
+        assert_eq!(
+            analyse_last_type(
+                "struct T { a: Int }
+                 fn inner() { struct T { b: String } let t: T = T(\"x\"); t.b }
+                 let u: T = T(1);
+                 u.a;
+                 inner()"
+            ),
+            StaticType::String,
+        );
     }
 }
