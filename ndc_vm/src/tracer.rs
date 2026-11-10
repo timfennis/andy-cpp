@@ -22,40 +22,6 @@ pub trait VmTracer {
     fn on_complete(&mut self);
 }
 
-/// Maps an `OpCode` variant to its name as a static string.
-fn opcode_name(op: &OpCode) -> &'static str {
-    match op {
-        OpCode::Call(_) => "Call",
-        OpCode::Pop => "Pop",
-        OpCode::Jump(_) => "Jump",
-        OpCode::JumpIfTrue(_) => "JumpIfTrue",
-        OpCode::JumpIfFalse(_) => "JumpIfFalse",
-        OpCode::Constant(_) => "Constant",
-        OpCode::GetLocal(_) => "GetLocal",
-        OpCode::GetCell(_) => "GetCell",
-        OpCode::GetUpvalue(_) => "GetUpvalue",
-        OpCode::SetLocal(_) => "SetLocal",
-        OpCode::SetCell(_) => "SetCell",
-        OpCode::SetUpvalue(_) => "SetUpvalue",
-        OpCode::GetGlobal(_) => "GetGlobal",
-        OpCode::MakeList(_) => "MakeList",
-        OpCode::MakeTuple(_) => "MakeTuple",
-        OpCode::MakeMap { .. } => "MakeMap",
-        OpCode::Closure { .. } => "Closure",
-        OpCode::GetIterator => "GetIterator",
-        OpCode::IterNext(_) => "IterNext",
-        OpCode::ListPush(_) => "ListPush",
-        OpCode::MapInsert(_) => "MapInsert",
-        OpCode::MakeRange { .. } => "MakeRange",
-        OpCode::Unpack(_) => "Unpack",
-        OpCode::Halt => "Halt",
-        OpCode::Return => "Return",
-        OpCode::NewCell(_) => "NewCell",
-        OpCode::Memoize => "Memoize",
-        OpCode::CheckType(_) => "CheckType",
-    }
-}
-
 // ---------------------------------------------------------------------------
 // PrintTracer
 // ---------------------------------------------------------------------------
@@ -105,7 +71,7 @@ impl Default for HistogramTracer {
 
 impl VmTracer for HistogramTracer {
     fn on_instruction(&mut self, ctx: &InstructionContext<'_>) {
-        *self.counts.entry(opcode_name(ctx.opcode)).or_insert(0) += 1;
+        *self.counts.entry(ctx.opcode.name()).or_insert(0) += 1;
     }
 
     fn on_complete(&mut self) {
@@ -158,7 +124,7 @@ impl VmTracer for TimingTracer {
         if let Some((prev_name, start)) = self.last.take() {
             *self.times.entry(prev_name).or_default() += now - start;
         }
-        self.last = Some((opcode_name(ctx.opcode), now));
+        self.last = Some((ctx.opcode.name(), now));
     }
 
     fn on_complete(&mut self) {
