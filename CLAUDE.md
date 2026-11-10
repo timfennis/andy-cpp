@@ -97,7 +97,9 @@ Source → [Lexer] → Tokens → [Parser] → AST → [Analyser] → Annotated 
 
 **`FunctionRegistry`** — Lives in `ndc_core`. Holds all registered built-in functions as `Rc<NativeFunction>`. Replaces the old `Environment`-based function registry. At runtime, natives are passed to the VM as global slots.
 
-**Persistent REPL** — The `Interpreter` keeps `repl_state: Option<(Vm, Compiler)>` so variables declared on one REPL line are visible on subsequent lines (resume-from-halt pattern). A resumable `Interpreter` starts the session over after an evaluation that fails past parsing, as the failed code may have done only part of its work; there is no in-process rollback. On Unix, `ndc_bin/src/isolation.rs` instead runs each REPL line in a forked copy of the REPL process, so a line that fails (error, panic, stack overflow, Ctrl-C) leaves the session exactly as it was. `ndc_bin/tests/repl.rs` drives the built binary to test this.
+**Top-level declarations are globals** — Natives take the first global slots, then every declaration in the program scope (`let`, `fn`, `struct` constructors and accessors) gets the next one, in order, via `ndc_layout::Layout::global_slot`. Functions reach them with `GetGlobal`/`SetGlobal` and never capture them; only locals of functions and of top-level blocks and loops are captured, through cells.
+
+**Persistent REPL** — Each evaluation compiles into its own top-level function and runs on a fresh VM. A resumable `Interpreter` keeps the analyser and the globals vector between evaluations, which is how a REPL line sees what earlier lines declared. A resumable `Interpreter` starts the session over after an evaluation that fails past parsing, as the failed code may have done only part of its work; there is no in-process rollback. On Unix, `ndc_bin/src/isolation.rs` instead runs each REPL line in a forked copy of the REPL process, so a line that fails (error, panic, stack overflow, Ctrl-C) leaves the session exactly as it was. `ndc_bin/tests/repl.rs` drives the built binary to test this.
 
 ### Test Infrastructure
 

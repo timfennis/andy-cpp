@@ -126,6 +126,8 @@ pub enum OpCode {
     SetUpvalue(usize),
     /// Copies global slot onto stack. `[… → … value]`
     GetGlobal(usize),
+    /// Pops top and writes to global slot. `[… value → …]`
+    SetGlobal(usize),
     /// Pops `n` values, pushes a list. `[… v1…vn → … list]`
     MakeList(usize),
     /// Pops `n` values, pushes a tuple. `[… v1…vn → … tuple]`
@@ -180,6 +182,7 @@ impl OpCode {
             Self::SetCell(_) => "SetCell",
             Self::SetUpvalue(_) => "SetUpvalue",
             Self::GetGlobal(_) => "GetGlobal",
+            Self::SetGlobal(_) => "SetGlobal",
             Self::MakeList(_) => "MakeList",
             Self::MakeTuple(_) => "MakeTuple",
             Self::MakeMap { .. } => "MakeMap",
@@ -220,7 +223,7 @@ impl OpCode {
             | Self::GetCell(_)
             | Self::GetUpvalue(_)
             | Self::GetGlobal(_) => 1,
-            Self::SetLocal(_) | Self::SetCell(_) | Self::SetUpvalue(_) => -1,
+            Self::SetLocal(_) | Self::SetCell(_) | Self::SetUpvalue(_) | Self::SetGlobal(_) => -1,
             // Pops `n` elements, pushes the collection: -n+1.
             Self::MakeList(n) | Self::MakeTuple(n) => 1 - *n as isize,
             // Pops a key and a value per pair plus the optional default,
@@ -268,6 +271,7 @@ impl std::fmt::Debug for OpCode {
             Self::GetLocal(n) => write!(f, "GetLocal({n})"),
             Self::SetLocal(n) => write!(f, "SetLocal({n})"),
             Self::GetGlobal(n) => write!(f, "GetGlobal({n})"),
+            Self::SetGlobal(n) => write!(f, "SetGlobal({n})"),
             Self::GetCell(n) => write!(f, "GetCell({n})"),
             Self::SetCell(n) => write!(f, "SetCell({n})"),
             Self::NewCell(n) => write!(f, "NewCell({n})"),

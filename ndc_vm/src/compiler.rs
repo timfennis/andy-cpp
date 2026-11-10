@@ -11,7 +11,6 @@ use ndc_parser::{
 };
 use std::rc::Rc;
 
-#[derive(Clone)]
 pub struct Compiler {
     ir: OptimizerIr,
     source_locals: usize,
@@ -50,13 +49,16 @@ impl Compiler {
             analysis: Rc::default(),
         }
     }
+    /// Compiles a program, or one REPL line, into a function the VM runs at
+    /// the top level. Its locals are only what the code's blocks declare; its
+    /// top-level declarations are globals.
     pub fn compile(
         expressions: impl Iterator<Item = ExpressionLocation>,
         analysis: Analysis,
     ) -> Result<CompiledFunction, CompileError> {
         let mut compiler = Self::new();
         compiler.compile_batch(expressions, analysis)?;
-        Ok(compiler.finish()?.0)
+        Ok(compiler.finish())
     }
 
     /// Compile expressions without running the peephole optimizer. Useful
@@ -68,41 +70,7 @@ impl Compiler {
     ) -> Result<CompiledFunction, CompileError> {
         let mut compiler = Self::new_without_optimization();
         compiler.compile_batch(expressions, analysis)?;
-        Ok(compiler.finish()?.0)
-    }
-
-    /// Compile expressions and return both the finished function and a
-    /// checkpoint that can be passed to `resume` to append more code later.
-    /// The checkpoint is the compiler state *before* the `Halt` instruction,
-    /// so `resume` can extend the bytecode without re-running old instructions.
-    ///
-    /// Optimization is disabled on this path: the REPL's resume-from-
-    /// halt machinery relies on `halt_ip` matching the position of `Halt` in
-    /// the emitted chunk, and shifting instructions invalidates that.
-    pub fn compile_resumable(
-        expressions: impl Iterator<Item = ExpressionLocation>,
-        analysis: Analysis,
-    ) -> Result<(CompiledFunction, Self), CompileError> {
-        let mut compiler = Self::new_without_optimization();
-        compiler.compile_batch(expressions, analysis)?;
-        compiler.finish()
-    }
-
-    /// Resume from a checkpoint produced by `compile_resumable` or a previous
-    /// `resume` call.  Compiles `new_expressions` starting where the checkpoint
-    /// left off, returning the extended function and a new checkpoint.
-    ///
-    /// The returned `CompiledFunction` contains all instructions (old + new),
-    /// so the VM can be pointed at `checkpoint.halt_ip()` to execute only the
-    /// new part while the stack already holds the old locals.
-    pub fn resume(
-        self,
-        new_expressions: impl Iterator<Item = ExpressionLocation>,
-        analysis: Analysis,
-    ) -> Result<(CompiledFunction, Self), CompileError> {
-        let mut compiler = self; // checkpoint has no trailing Halt
-        compiler.compile_batch(new_expressions, analysis)?;
-        compiler.finish()
+        Ok(compiler.finish())
     }
 
     /// Compiles one batch of top-level expressions, `analysis` being what the
@@ -160,22 +128,13 @@ impl Compiler {
         }
     }
 
-    /// The instruction index where the trailing `Halt` was written.
-    /// When resuming, this is the `ip` to start from in the new function.
-    pub fn halt_ip(&self) -> usize {
-        self.ir.len()
-    }
-
-    /// Number of top-level local slots used so far.
-    pub fn num_locals(&self) -> usize {
+    /// Number of local slots: the code's own variables, then the temporaries.
+    fn num_locals(&self) -> usize {
         self.source_locals + self.temp_count
     }
 
-    /// Internal: clone a checkpoint (pre-Halt), write Halt, return both.
-    fn finish(mut self) -> Result<(CompiledFunction, Self), CompileError> {
-        // Keep resumable IR symbolic so later batches can grow the source-local
-        // range and lay out every compiler temporary against the new boundary.
-        let checkpoint = self.clone();
+    /// Ends the top-level function with `Halt`.
+    fn finish(mut self) -> CompiledFunction {
         self.layout_temporaries();
         self.ir.write(OpCode::Halt, Span::synthetic());
         if self.optimize {
@@ -183,7 +142,7 @@ impl Compiler {
         }
 
         let num_locals = self.num_locals();
-        let function = CompiledFunction {
+        CompiledFunction {
             name: None,
             static_type: StaticType::Function {
                 parameters: Some(vec![]),
@@ -191,8 +150,8 @@ impl Compiler {
             },
             body: self.ir.into_chunk(),
             num_locals,
-        };
-        Ok((function, checkpoint))
+            num_globals: self.analysis.global_count,
+        }
     }
 
     /// Compile one expression. Leaves exactly one result value on the stack,
@@ -684,7 +643,9 @@ impl Compiler {
             ResolvedVar::Upvalue { slot } => {
                 self.ir.write(OpCode::SetUpvalue(slot), span);
             }
-            ResolvedVar::Global { .. } => unreachable!("globals are native, never assigned"),
+            ResolvedVar::Global { slot } => {
+                self.ir.write(OpCode::SetGlobal(slot), span);
+            }
         }
     }
 
@@ -702,8 +663,11 @@ impl Compiler {
                 );
                 self.ir.write(OpCode::SetLocal(slot), span);
             }
-            ResolvedVar::Upvalue { .. } | ResolvedVar::Global { .. } => {
-                unreachable!("the analyser never assigns a declaration to a non-local binding")
+            ResolvedVar::Global { slot } => {
+                self.ir.write(OpCode::SetGlobal(slot), span);
+            }
+            ResolvedVar::Upvalue { .. } => {
+                unreachable!("the analyser never assigns a declaration to an upvalue")
             }
         }
     }
@@ -842,6 +806,7 @@ impl Compiler {
             static_type,
             body: fn_compiler.ir.into_chunk(),
             num_locals,
+            num_globals: 0,
         };
         let idx = self
             .ir
@@ -875,7 +840,7 @@ impl Compiler {
         }
 
         match name_variable {
-            Some(var @ ResolvedVar::Local { .. }) => {
+            Some(var @ (ResolvedVar::Local { .. } | ResolvedVar::Global { .. })) => {
                 self.emit_declare(var, span);
                 self.emit_unit();
             }
@@ -883,8 +848,8 @@ impl Compiler {
                 self.ir.write(OpCode::SetCell(slot), span);
                 self.emit_unit();
             }
-            Some(ResolvedVar::Upvalue { .. } | ResolvedVar::Global { .. }) => {
-                unreachable!("the analyser never assigns a declaration to a non-local binding")
+            Some(ResolvedVar::Upvalue { .. }) => {
+                unreachable!("the analyser never assigns a declaration to an upvalue")
             }
             None => {}
         }

@@ -56,9 +56,12 @@ pub struct Analysis {
     /// first, keyed by its declaration. The compiler places its temporaries
     /// after them.
     pub frame_sizes: AHashMap<NodeId, usize>,
-    /// How many local slots the program's top-level variables use, counting
-    /// earlier REPL lines too.
+    /// How many local slots the top-level code needs for the variables of its
+    /// blocks and loops. Its own top-level declarations are globals.
     pub top_level_frame_size: usize,
+    /// How many global slots the program needs: the natives and every
+    /// top-level declaration, counting earlier REPL lines.
+    pub global_count: usize,
 }
 
 impl Analysis {
