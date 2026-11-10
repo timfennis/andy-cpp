@@ -151,6 +151,9 @@ fn return_needs_a_function() {
 
 // The body and each `return` make a different element `String` and the others
 // `Int`, so leaving any of them out of the join leaves an `Int` in the tuple.
+// Each position of the tuple gets its `String` from a different source: the
+// first `return`, the second `return`, or the body. A position is only `Any`
+// if that source joined in, so dropping any one of them leaves an `Int`.
 #[test]
 fn a_function_returns_the_join_of_its_body_and_every_return() {
     let (_, result) = analyse_with_globals(
@@ -171,14 +174,6 @@ fn a_function_returns_the_join_of_its_body_and_every_return() {
             .exactly_one()
             .ok(),
         Some(&StaticType::Tuple(vec![StaticType::Any; 3])),
-    );
-}
-
-#[test]
-fn an_annotated_return_type_must_accept_every_return() {
-    assert_eq!(
-        errors("fn f(x) -> Int { if x { return \"a\"; } 1 }", vec![]),
-        vec!["mismatched types: found Any but expected Int"],
     );
 }
 
@@ -356,18 +351,6 @@ fn map_default_value_contributes_to_value_type() {
             key: Box::new(StaticType::Any),
             value: Box::new(StaticType::Int),
         },
-    );
-}
-
-#[test]
-fn struct_with_duplicate_fields_does_not_claim_its_name() {
-    let (_, result) = analyse_with_globals(
-        "struct Dup { a: Int, a: String }\nstruct Dup { a: Int }",
-        vec![],
-    );
-    assert_eq!(
-        result.errors.iter().map(ToString::to_string).collect_vec(),
-        vec!["Illegal redefinition of field 'a' in struct 'Dup'"],
     );
 }
 

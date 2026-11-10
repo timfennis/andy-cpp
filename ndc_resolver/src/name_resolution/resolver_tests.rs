@@ -1095,6 +1095,14 @@ fn struct_fields_must_be_unique() {
 }
 
 #[test]
+fn a_struct_that_fails_to_declare_leaves_its_name_free() {
+    assert_eq!(
+        all_errors("struct Dup { a: Int, a: String }\nstruct Dup { a: Int }"),
+        vec!["Illegal redefinition of field 'a' in struct 'Dup'"],
+    );
+}
+
+#[test]
 fn structs_cannot_redefine_variables_in_the_same_scope() {
     assert_eq!(
         error_message("let P = 5; struct P { x: Int }"),
