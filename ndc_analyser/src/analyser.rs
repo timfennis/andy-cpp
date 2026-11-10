@@ -1264,6 +1264,7 @@ impl Analyser {
                                 elems.len(),
                                 span,
                             ));
+                            self.bind_patterns_as_any(seq, span);
                             return;
                         } else {
                             Box::new(elems.iter())
@@ -1272,6 +1273,7 @@ impl Analyser {
                         iter
                     } else {
                         self.emit(AnalysisError::unable_to_unpack_type(&resolved_type, span));
+                        self.bind_patterns_as_any(seq, span);
                         return;
                     };
 
@@ -1302,10 +1304,21 @@ impl Analyser {
 
                 if desired_length != actual_len {
                     self.emit(AnalysisError::unable_to_unpack_type(&found_type, span));
+                    self.bind_patterns_as_any(&mut seq[actual_len..], span);
                 }
             }
         }
     }
+
+    /// Binds every name in `patterns` as `Any`, so a pattern that failed to
+    /// type-check still declares its names. In `let (a, b, c) = (1, 2)`, `c`
+    /// is bound and a later `print(c)` reports nothing further.
+    fn bind_patterns_as_any(&mut self, patterns: &mut [BindingPatternLocation], span: Span) {
+        for pattern in patterns {
+            self.resolve_binding_pattern(pattern, None, StaticType::Any, span);
+        }
+    }
+
     fn analyse_multiple_expression_with_same_type(
         &mut self,
         expressions: &mut Vec<ExpressionLocation>,
@@ -1776,5 +1789,39 @@ mod tests {
             result.errors.iter().map(ToString::to_string).collect_vec(),
             vec!["Illegal redefinition of field 'a' in struct 'Dup'"],
         );
+    }
+
+    /// A pattern that fails to type-check reports one error and still binds
+    /// its names as `Any`, so the use of `c` after it adds no second error.
+    fn assert_failed_pattern_binds_any(source: &str, expected: &str) {
+        let (last_type, result) = analyse_with_globals(source, vec![]);
+        assert_eq!(result.errors.len(), 1, "errors: {:?}", result.errors);
+        assert!(
+            result.errors[0].to_string().contains(expected),
+            "expected an error containing {expected:?}, got {:?}",
+            result.errors,
+        );
+        assert_eq!(last_type, StaticType::Any);
+    }
+
+    #[test]
+    fn short_tuple_still_binds_every_pattern_name() {
+        assert_failed_pattern_binds_any(
+            "let (a, b, c): (Int, Int, Int) = (1, 2); c",
+            "Invalid unpacking",
+        );
+    }
+
+    #[test]
+    fn tuple_arity_mismatch_still_binds_every_pattern_name() {
+        assert_failed_pattern_binds_any(
+            "let (a, b, c): (Int, Int) = (1, 2); c",
+            "mismatched tuple arity",
+        );
+    }
+
+    #[test]
+    fn unpacking_a_scalar_still_binds_every_pattern_name() {
+        assert_failed_pattern_binds_any("let (a, (b, c)) = (1, 2); c", "Invalid unpacking");
     }
 }
