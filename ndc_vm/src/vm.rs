@@ -720,28 +720,6 @@ impl Vm {
         Ok(Dispatch::FramePushed)
     }
 
-    /// Call a VM function with the given arguments, using a fresh VM instance.
-    /// Used by the interpreter bridge (`vm_to_interp_callable`) to re-enter the
-    /// VM from the tree-walk interpreter side. The hot path for VM-native HOFs
-    /// uses `call_callback` instead, which runs inline on the parent VM.
-    pub fn call_function(
-        func: Function,
-        args: &[Value],
-        globals: Vec<Value>,
-    ) -> Result<Value, VmError> {
-        let mut vm = Self {
-            stack: Vec::new(),
-            globals,
-            frames: Vec::new(),
-            output: OutputSink::Stdout,
-            #[cfg(feature = "trace")]
-            source: None,
-            #[cfg(feature = "trace")]
-            tracer: None,
-        };
-        vm.call_callback(func, args)
-    }
-
     /// Call a function inline on this VM, without spawning a child VM.
     /// Used by `VmCallable::call` so stdlib HOFs run their predicates/mappers
     /// directly on the parent stack — zero allocation per callback invocation.
@@ -761,11 +739,6 @@ impl Vm {
             }
             Ok(self.stack.pop().expect("callback must produce a value"))
         }
-    }
-
-    /// Expose the globals slice for use by the interpreter bridge.
-    pub fn globals(&self) -> &[Value] {
-        &self.globals
     }
 
     /// Returns the expression result left on top of the stack after `run()`.

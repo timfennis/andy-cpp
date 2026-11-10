@@ -7,10 +7,9 @@
 //!
 //! Resolution is done structurally (not via the analyser's resolved slots)
 //! because local slot numbers are stack-relative — they reset to 0 per function,
-//! so they are not unique across the document and can't key a global map. The
-//! follow-up that exposes the analyser's resolution will replace go-to-definition
-//! here; completion's visibility enumeration is a pure structural query that
-//! stays.
+//! so they are not unique across the document and can't key a global map.
+//! Issue #254 tracks moving go-to-definition onto the resolver's symbols;
+//! completion's visibility enumeration is a pure structural query that stays.
 
 use ndc_lexer::{SourceId, Span};
 use ndc_parser::{

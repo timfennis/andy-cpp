@@ -193,10 +193,6 @@ impl Candidate {
             Self::Scalar(v) | Self::Vec(v) => v,
         }
     }
-
-    pub fn is_vec(self) -> bool {
-        matches!(self, Self::Vec(_))
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

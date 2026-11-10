@@ -220,25 +220,9 @@ impl ExpressionLocation {
         }
     }
 
-    pub fn as_identifier(&self) -> &str {
-        match &self.expression {
-            Expression::Identifier { name, .. } => name,
-            _ => panic!("the parser should have guaranteed us the right type of expression"),
-        }
-    }
-
     pub fn to_identifier(self) -> String {
         match self.expression {
             Expression::Identifier { name, .. } => name,
-            _ => panic!("the parser should have guaranteed us the right type of expression"),
-        }
-    }
-
-    pub fn as_parameters(&self) -> Vec<&str> {
-        match &self.expression {
-            Expression::Tuple {
-                values: tuple_values,
-            } => tuple_values.iter().map(|it| it.as_identifier()).collect(),
             _ => panic!("the parser should have guaranteed us the right type of expression"),
         }
     }

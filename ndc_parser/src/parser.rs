@@ -8,7 +8,6 @@ use crate::expression::{
 use crate::expression::{Expression, StructField};
 use crate::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
 use crate::type_expr::TypeExpr;
-use ndc_core::{Parameter, StaticType, TypeSignature};
 use ndc_lexer::{NumericLiteral, Span, Token, TokenLocation};
 
 pub struct Parser {
@@ -1809,31 +1808,4 @@ fn tokens_to_string(tokens: &[Token]) -> String {
         }
     }
     buf
-}
-
-impl TryFrom<ExpressionLocation> for TypeSignature {
-    type Error = ();
-
-    fn try_from(
-        ExpressionLocation { expression, .. }: ExpressionLocation,
-    ) -> Result<Self, Self::Error> {
-        let Expression::Tuple { values } = expression else {
-            return Err(());
-        };
-
-        values
-            .into_iter()
-            .map(|expression_location| {
-                let ExpressionLocation { expression, .. } = expression_location;
-
-                match expression {
-                    Expression::Identifier { name, .. } => {
-                        Ok(Parameter::new(name, StaticType::Any))
-                    }
-                    _ => Err(()),
-                }
-            })
-            .collect::<Result<Vec<_>, ()>>()
-            .map(TypeSignature::Exact)
-    }
 }
