@@ -30,6 +30,8 @@ pub struct Interpreter {
     /// variables declared on one line are visible on subsequent lines.
     repl_state: Option<(Vm, Compiler)>,
     resumable: bool,
+    /// Output captured from one-shot runs, whose VM doesn't outlive the run.
+    one_shot_output: Vec<u8>,
     #[cfg(feature = "trace")]
     tracer: Option<Box<dyn tracer::VmTracer>>,
 }
@@ -58,6 +60,7 @@ impl Interpreter {
             source_db: SourceDb::new(),
             repl_state: None,
             resumable: true,
+            one_shot_output: Vec::new(),
             #[cfg(feature = "trace")]
             tracer: None,
         }
@@ -72,6 +75,16 @@ impl Interpreter {
         Self {
             resumable: false,
             ..Self::from_capturing(false)
+        }
+    }
+
+    /// Like [`Self::one_shot`], but captures output like [`Self::capturing`],
+    /// so tests can run a program the way `ndc script.ndc` does.
+    #[must_use]
+    pub fn capturing_one_shot() -> Self {
+        Self {
+            resumable: false,
+            ..Self::from_capturing(true)
         }
     }
 
@@ -99,12 +112,12 @@ impl Interpreter {
     /// Returns `Some(vec![])` for a capturing interpreter that hasn't run yet.
     pub fn get_output(&self) -> Option<Vec<u8>> {
         if self.capturing {
-            Some(
-                self.repl_state
-                    .as_ref()
-                    .and_then(|(vm, _)| vm.get_output().map(<[u8]>::to_vec))
-                    .unwrap_or_default(),
-            )
+            let repl_output = self
+                .repl_state
+                .as_ref()
+                .and_then(|(vm, _)| vm.get_output())
+                .unwrap_or_default();
+            Some([self.one_shot_output.as_slice(), repl_output].concat())
         } else {
             None
         }
@@ -289,7 +302,12 @@ impl Interpreter {
                     vm = vm.with_tracer(tracer);
                 }
             }
-            measure(&mut timings, Phase::Running, || vm.run())?;
+            let run = measure(&mut timings, Phase::Running, || vm.run());
+            // Keep what the run printed, up to an error too, as the VM goes away.
+            if let Some(output) = vm.get_output() {
+                self.one_shot_output.extend_from_slice(output);
+            }
+            run?;
             return Ok((vm.last_value(num_locals), timings));
         }
 

@@ -21,11 +21,40 @@ fn run_ndc_test(path: PathBuf) -> Result<(), std::io::Error> {
         .collect::<Vec<_>>()
         .join("\n");
 
-    print!("Running {path:?}...");
+    // Each program runs the way `ndc script.ndc` does (one-shot, optimized)
+    // and the way the REPL does (resumable, unoptimized), since the two
+    // compile differently.
+    for (mode, new_interpreter) in [
+        (
+            "one-shot",
+            Interpreter::capturing_one_shot as fn() -> Interpreter,
+        ),
+        ("REPL", Interpreter::capturing),
+    ] {
+        print!("Running {path:?} ({mode})...");
+        run_in(
+            new_interpreter(),
+            &contents,
+            &path,
+            mode,
+            &expect_error,
+            &expect_output,
+        );
+    }
 
-    let mut interpreter = Interpreter::capturing();
+    Ok(())
+}
+
+fn run_in(
+    mut interpreter: Interpreter,
+    contents: &str,
+    path: &PathBuf,
+    mode: &str,
+    expect_error: &str,
+    expect_output: &str,
+) {
     interpreter.configure(ndc_stdlib::register);
-    let interpreter_result = interpreter.eval(&contents);
+    let interpreter_result = interpreter.eval(contents);
 
     let program_had_error = interpreter_result.is_err();
     let actual_error = interpreter_result
@@ -34,13 +63,13 @@ fn run_ndc_test(path: PathBuf) -> Result<(), std::io::Error> {
 
     assert!(
         !expect_error.is_empty() || !program_had_error,
-        "Unexpected error when running program: {actual_error}"
+        "Unexpected error when running program ({mode}): {actual_error}"
     );
 
     if !expect_error.is_empty() && !actual_error.trim().contains(expect_error.trim()) {
         println!(" {}", "ERR".red().bold());
         panic!(
-            "\n\tThere was a problem running {path:?}\n\tExpected error:\t{}\n\tActual error:\t{}\n",
+            "\n\tThere was a problem running {path:?} ({mode})\n\tExpected error:\t{}\n\tActual error:\t{}\n",
             expect_error.trim(),
             actual_error.trim()
         );
@@ -55,7 +84,7 @@ fn run_ndc_test(path: PathBuf) -> Result<(), std::io::Error> {
         if output.trim_end() != expect_output.trim_end() {
             println!(" {}", "ERR".red().bold());
             panic!(
-                "\n\tThere was a problem running {path:?}\n\tActual output: {}\n\tdid not match\n\tExpected output: {}\n",
+                "\n\tThere was a problem running {path:?} ({mode})\n\tActual output: {}\n\tdid not match\n\tExpected output: {}\n",
                 output.trim_end(),
                 expect_output.trim_end()
             );
@@ -63,6 +92,4 @@ fn run_ndc_test(path: PathBuf) -> Result<(), std::io::Error> {
     }
 
     println!(" {}", "OK".green().bold());
-
-    Ok(())
 }
