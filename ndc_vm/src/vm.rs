@@ -4,7 +4,7 @@ use crate::iterator::{
     HeapIter, MapIter, RangeInclusiveIter, RangeIter, SeqIter, StringIter, UnboundedRangeIter,
     VmIterator,
 };
-use crate::value::{CompiledFunction, Function, NativeFunc};
+use crate::value::{CompiledFunction, Function, NativeFunc, NativeFunction};
 use crate::{ClosureFunction, Object, Value};
 use ndc_analysis::{CaptureSource, ResolvedVar};
 use ndc_core::hash_map::{DefaultHasher, HashMap};
@@ -79,6 +79,19 @@ pub struct CallFrame {
     /// cache to write into and the hash key when the frame returns.  `None`
     /// for ordinary (non-memoized) calls.
     memo: Option<MemoCache>,
+}
+
+/// The VM's globals for `natives`: native `i` is global slot `i`. The analyser
+/// numbers natives the same way, given them in the same order.
+pub fn native_globals<'a>(natives: impl IntoIterator<Item = &'a Rc<NativeFunction>>) -> Vec<Value> {
+    natives
+        .into_iter()
+        .map(|native| {
+            Value::Object(Rc::new(Object::Function(Function::Native(Rc::clone(
+                native,
+            )))))
+        })
+        .collect()
 }
 
 impl Vm {
@@ -769,12 +782,10 @@ impl Vm {
     pub fn resume_from_halt(
         &mut self,
         function: CompiledFunction,
-        globals: Vec<Value>,
         resume_ip: usize,
         prev_num_locals: usize,
     ) {
         let new_num_locals = function.num_locals;
-        self.globals = globals;
         self.stack.truncate(prev_num_locals);
         for _ in prev_num_locals..new_num_locals {
             self.stack.push(Value::unit());

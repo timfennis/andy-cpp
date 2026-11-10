@@ -19,6 +19,9 @@ mod timing;
 
 pub struct Interpreter {
     function_registry: FunctionRegistry<Rc<NativeFunction>>,
+    /// The VM's globals for the registered functions, built with the analyser
+    /// so both number them the same way.
+    globals: Vec<Value>,
     capturing: bool,
     analyser: Analyser,
     source_db: SourceDb,
@@ -50,6 +53,7 @@ impl Interpreter {
     fn from_capturing(capturing: bool) -> Self {
         Self {
             function_registry: FunctionRegistry::default(),
+            globals: Vec::new(),
             capturing,
             analyser: Analyser::new(vec![]),
             source_db: SourceDb::new(),
@@ -92,6 +96,7 @@ impl Interpreter {
             .collect();
 
         self.analyser = Analyser::new(functions);
+        self.globals = ndc_vm::native_globals(self.function_registry.iter());
     }
 
     #[cfg(feature = "trace")]
@@ -261,18 +266,6 @@ impl Interpreter {
         expressions: impl Iterator<Item = ExpressionLocation>,
         analysis: Analysis,
     ) -> Result<(Value, ExecutionTimings), InterpreterError> {
-        use ndc_vm::{Function as VmFunction, Object as VmObject, Value as VmValue};
-
-        let globals: Vec<VmValue> = self
-            .function_registry
-            .iter()
-            .map(|native| {
-                VmValue::Object(Rc::new(VmObject::Function(VmFunction::Native(Rc::clone(
-                    native,
-                )))))
-            })
-            .collect();
-
         let mut timings = ExecutionTimings::default();
         if !self.resumable {
             let code = measure(&mut timings, Phase::Compiling, || {
@@ -284,7 +277,7 @@ impl Interpreter {
             } else {
                 OutputSink::Stdout
             };
-            let mut vm = Vm::new(code, globals).with_output(output);
+            let mut vm = Vm::new(code, self.globals.clone()).with_output(output);
             #[cfg(feature = "trace")]
             {
                 vm = vm.with_source(input);
@@ -311,7 +304,7 @@ impl Interpreter {
                 let (code, checkpoint) = measure(&mut timings, Phase::Compiling, || {
                     Compiler::compile_resumable(expressions, analysis)
                 })?;
-                let mut vm = Vm::new(code, globals).with_output(output);
+                let mut vm = Vm::new(code, self.globals.clone()).with_output(output);
                 #[cfg(feature = "trace")]
                 {
                     vm = vm.with_source(input);
@@ -334,7 +327,7 @@ impl Interpreter {
                 let (code, new_checkpoint) = measure(&mut timings, Phase::Compiling, || {
                     checkpoint.resume(expressions, analysis)
                 })?;
-                vm.resume_from_halt(code, globals, resume_ip, prev_num_locals);
+                vm.resume_from_halt(code, resume_ip, prev_num_locals);
                 #[cfg(feature = "trace")]
                 {
                     vm.set_source(input);
