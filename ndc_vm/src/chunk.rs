@@ -163,6 +163,41 @@ pub enum OpCode {
 }
 
 impl OpCode {
+    /// The variant's name, e.g. `"GetLocal"` for `GetLocal(0)`.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Call(_) => "Call",
+            Self::CallVec(_) => "CallVec",
+            Self::Pop => "Pop",
+            Self::Jump(_) => "Jump",
+            Self::JumpIfTrue(_) => "JumpIfTrue",
+            Self::JumpIfFalse(_) => "JumpIfFalse",
+            Self::Constant(_) => "Constant",
+            Self::GetLocal(_) => "GetLocal",
+            Self::GetCell(_) => "GetCell",
+            Self::GetUpvalue(_) => "GetUpvalue",
+            Self::SetLocal(_) => "SetLocal",
+            Self::SetCell(_) => "SetCell",
+            Self::SetUpvalue(_) => "SetUpvalue",
+            Self::GetGlobal(_) => "GetGlobal",
+            Self::MakeList(_) => "MakeList",
+            Self::MakeTuple(_) => "MakeTuple",
+            Self::MakeMap { .. } => "MakeMap",
+            Self::Closure { .. } => "Closure",
+            Self::GetIterator => "GetIterator",
+            Self::IterNext(_) => "IterNext",
+            Self::ListPush(_) => "ListPush",
+            Self::MapInsert(_) => "MapInsert",
+            Self::MakeRange { .. } => "MakeRange",
+            Self::Unpack(_) => "Unpack",
+            Self::Halt => "Halt",
+            Self::Return => "Return",
+            Self::NewCell(_) => "NewCell",
+            Self::Memoize => "Memoize",
+            Self::CheckType(_) => "CheckType",
+        }
+    }
+
     /// The net stack effect of executing this instruction on its fall-through
     /// path, matching the `[… → …]` comments on the enum variants. The
     /// compiler simulates the stack depth from these deltas so that `break`

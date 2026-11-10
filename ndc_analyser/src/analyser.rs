@@ -14,7 +14,6 @@ use ndc_parser::{
     ExpressionLocation, ForBody, ForIteration, TypeExpr,
 };
 use ndc_resolver::{Candidates, NameResolutionError, NameResolver, SymbolId};
-use std::cell::RefCell;
 use std::fmt::Debug;
 use std::rc::Rc;
 
@@ -45,7 +44,8 @@ pub struct Analyser {
     /// Resolves names before analysis. It runs alongside the scope tree below
     /// until the type pass reads names from it instead.
     resolver: NameResolver,
-    struct_registry: Rc<RefCell<StructRegistry>>,
+    /// Every struct declared so far, which hands out their ids.
+    struct_registry: StructRegistry,
     /// The type of every value declared so far.
     types: TypeTable,
     /// What each struct's type symbol stands for, so `p: Point` lowers to
@@ -67,10 +67,7 @@ pub struct Analyser {
 impl Analyser {
     /// An analyser for programs that can call `natives`, given as name and
     /// type in registry order: the first is the native in global slot 0.
-    pub fn new(
-        natives: Vec<(String, StaticType)>,
-        struct_registry: Rc<RefCell<StructRegistry>>,
-    ) -> Self {
+    pub fn new(natives: Vec<(String, StaticType)>) -> Self {
         let resolver = NameResolver::new(natives.iter().map(|(name, _)| name.as_str()));
         let mut types = TypeTable::default();
         for ((_, typ), symbol) in natives.into_iter().zip(resolver.native_symbols()) {
@@ -79,7 +76,7 @@ impl Analyser {
         Self {
             resolver,
             types,
-            struct_registry,
+            struct_registry: StructRegistry::default(),
             struct_types: AHashMap::new(),
             functions: Vec::new(),
             return_type_stack: Vec::new(),
@@ -93,7 +90,7 @@ impl Analyser {
             resolver: self.resolver.clone(),
             types: self.types.clone(),
             struct_types: self.struct_types.clone(),
-            struct_count: self.struct_registry.borrow().len(),
+            struct_count: self.struct_registry.len(),
         }
     }
 
@@ -101,9 +98,7 @@ impl Analyser {
         self.resolver = checkpoint.resolver;
         self.types = checkpoint.types;
         self.struct_types = checkpoint.struct_types;
-        self.struct_registry
-            .borrow_mut()
-            .truncate(checkpoint.struct_count);
+        self.struct_registry.truncate(checkpoint.struct_count);
     }
 
     /// Take the accumulated analysis result (including any errors),
@@ -813,7 +808,7 @@ impl Analyser {
                     .map(|f| self.lower_type_expr(&f.annotation))
                     .collect();
 
-                let struct_id = self.struct_registry.borrow_mut().register(
+                let struct_id = self.struct_registry.register(
                     &*name,
                     fields
                         .iter()
@@ -825,7 +820,7 @@ impl Analyser {
                 // Bind the constructor and per-field accessors with the same
                 // types the runtime functions report (StructInfo is the source
                 // of truth), so static bindings and runtime dispatch agree.
-                let info = Rc::clone(&self.struct_registry.borrow()[struct_id]);
+                let info = Rc::clone(&self.struct_registry[struct_id]);
 
                 let symbols = self.resolver.struct_symbols(*id).clone();
                 self.struct_types
@@ -850,7 +845,7 @@ impl Analyser {
                 self.result.analysis.structs.insert(
                     *id,
                     DeclaredStruct {
-                        id: struct_id,
+                        info: StructInfo::clone(&info),
                         fields,
                     },
                 );
@@ -1653,7 +1648,7 @@ mod tests {
             .collect::<Result<Vec<_>, _>>()
             .expect("lex failed");
         let mut expressions = Parser::from_tokens(tokens).parse().expect("parse failed");
-        let mut analyser = Analyser::new(globals, Default::default());
+        let mut analyser = Analyser::new(globals);
         let mut last_type = StaticType::unit();
         for expression in &mut expressions {
             last_type = analyser.analyse(expression).expect("analysis failed");

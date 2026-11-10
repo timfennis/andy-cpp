@@ -21,3 +21,5 @@ jobs:
         run: cargo test --verbose
       - name: Build no default
         run: cargo build --verbose --no-default-features
+      - name: Build with tracing
+        run: cargo build --verbose --features trace

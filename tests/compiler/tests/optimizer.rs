@@ -1,13 +1,10 @@
 use ndc_analysis::Analysis;
-use ndc_core::r#struct::StructRegistry;
 use ndc_lexer::{Lexer, SourceId};
 use ndc_parser::Parser;
 use ndc_stdlib as _;
 use ndc_vm::chunk::OpCode;
 use ndc_vm::chunk::OpCode::*;
 use ndc_vm::compiler::Compiler;
-use std::cell::RefCell;
-use std::rc::Rc;
 
 fn parse(input: &str) -> Vec<ndc_parser::ExpressionLocation> {
     let tokens = Lexer::new(input, SourceId::SYNTHETIC)
@@ -16,30 +13,18 @@ fn parse(input: &str) -> Vec<ndc_parser::ExpressionLocation> {
     Parser::from_tokens(tokens).parse().expect("parse failed")
 }
 
-fn empty_registry() -> Rc<RefCell<StructRegistry>> {
-    Rc::new(RefCell::new(StructRegistry::default()))
-}
-
 fn unoptimized(input: &str) -> Vec<OpCode> {
-    Compiler::compile_unoptimized(
-        parse(input).into_iter(),
-        Analysis::default(),
-        empty_registry(),
-    )
-    .expect("compile failed")
-    .opcodes()
-    .to_vec()
+    Compiler::compile_unoptimized(parse(input).into_iter(), Analysis::default())
+        .expect("compile failed")
+        .opcodes()
+        .to_vec()
 }
 
 fn optimized(input: &str) -> Vec<OpCode> {
-    Compiler::compile(
-        parse(input).into_iter(),
-        Analysis::default(),
-        empty_registry(),
-    )
-    .expect("compile failed")
-    .opcodes()
-    .to_vec()
+    Compiler::compile(parse(input).into_iter(), Analysis::default())
+        .expect("compile failed")
+        .opcodes()
+        .to_vec()
 }
 
 // `5;` — a discarded constant. The peephole eliminates the `Constant; Pop`

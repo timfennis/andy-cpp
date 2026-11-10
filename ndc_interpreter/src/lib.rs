@@ -6,12 +6,10 @@ use ndc_parser::ExpressionLocation;
 use ndc_vm::compiler::Compiler;
 use ndc_vm::value::CompiledFunction;
 use ndc_vm::{OutputSink, Vm};
-use std::cell::RefCell;
 use std::rc::Rc;
 use timing::{Phase, measure};
 
 pub use ndc_analyser::AnalysisResult;
-use ndc_core::r#struct::StructRegistry;
 #[cfg(feature = "trace")]
 pub use ndc_vm::tracer;
 pub use ndc_vm::{NativeFunction, Value};
@@ -21,7 +19,6 @@ mod timing;
 
 pub struct Interpreter {
     function_registry: FunctionRegistry<Rc<NativeFunction>>,
-    struct_registry: Rc<RefCell<StructRegistry>>,
     capturing: bool,
     analyser: Analyser,
     source_db: SourceDb,
@@ -30,6 +27,8 @@ pub struct Interpreter {
     /// variables declared on one line are visible on subsequent lines.
     repl_state: Option<(Vm, Compiler)>,
     resumable: bool,
+    /// Output captured from one-shot runs, whose VM doesn't outlive the run.
+    one_shot_output: Vec<u8>,
     #[cfg(feature = "trace")]
     tracer: Option<Box<dyn tracer::VmTracer>>,
 }
@@ -49,15 +48,14 @@ impl Interpreter {
     }
 
     fn from_capturing(capturing: bool) -> Self {
-        let struct_registry: Rc<RefCell<StructRegistry>> = Default::default();
         Self {
             function_registry: FunctionRegistry::default(),
-            struct_registry: Rc::clone(&struct_registry),
             capturing,
-            analyser: Analyser::new(vec![], struct_registry),
+            analyser: Analyser::new(vec![]),
             source_db: SourceDb::new(),
             repl_state: None,
             resumable: true,
+            one_shot_output: Vec::new(),
             #[cfg(feature = "trace")]
             tracer: None,
         }
@@ -75,6 +73,16 @@ impl Interpreter {
         }
     }
 
+    /// Like [`Self::one_shot`], but captures output like [`Self::capturing`],
+    /// so tests can run a program the way `ndc script.ndc` does.
+    #[must_use]
+    pub fn capturing_one_shot() -> Self {
+        Self {
+            resumable: false,
+            ..Self::from_capturing(true)
+        }
+    }
+
     pub fn configure<F: FnOnce(&mut FunctionRegistry<Rc<NativeFunction>>)>(&mut self, f: F) {
         f(&mut self.function_registry);
         let functions = self
@@ -83,7 +91,7 @@ impl Interpreter {
             .map(|fun| (fun.name.clone(), fun.static_type.clone()))
             .collect();
 
-        self.analyser = Analyser::new(functions, Rc::clone(&self.struct_registry));
+        self.analyser = Analyser::new(functions);
     }
 
     #[cfg(feature = "trace")]
@@ -99,12 +107,12 @@ impl Interpreter {
     /// Returns `Some(vec![])` for a capturing interpreter that hasn't run yet.
     pub fn get_output(&self) -> Option<Vec<u8>> {
         if self.capturing {
-            Some(
-                self.repl_state
-                    .as_ref()
-                    .and_then(|(vm, _)| vm.get_output().map(<[u8]>::to_vec))
-                    .unwrap_or_default(),
-            )
+            let repl_output = self
+                .repl_state
+                .as_ref()
+                .and_then(|(vm, _)| vm.get_output())
+                .unwrap_or_default();
+            Some([self.one_shot_output.as_slice(), repl_output].concat())
         } else {
             None
         }
@@ -142,11 +150,7 @@ impl Interpreter {
     pub fn compile_str(&mut self, input: &str) -> Result<CompiledFunction, InterpreterError> {
         let source_id = self.source_db.add("<input>", input);
         let (expressions, result, _) = self.parse_and_analyse(input, source_id)?;
-        Ok(Compiler::compile(
-            expressions.into_iter(),
-            result.analysis,
-            Rc::clone(&self.struct_registry),
-        )?)
+        Ok(Compiler::compile(expressions.into_iter(), result.analysis)?)
     }
 
     /// Like [`Self::compile_str`] but skips the peephole optimizer.
@@ -160,7 +164,6 @@ impl Interpreter {
         Ok(Compiler::compile_unoptimized(
             expressions.into_iter(),
             result.analysis,
-            Rc::clone(&self.struct_registry),
         )?)
     }
 
@@ -273,7 +276,7 @@ impl Interpreter {
         let mut timings = ExecutionTimings::default();
         if !self.resumable {
             let code = measure(&mut timings, Phase::Compiling, || {
-                self.compile_one_shot(expressions, analysis)
+                Self::compile_one_shot(expressions, analysis)
             })?;
             let num_locals = code.num_locals();
             let output = if self.capturing {
@@ -289,7 +292,12 @@ impl Interpreter {
                     vm = vm.with_tracer(tracer);
                 }
             }
-            measure(&mut timings, Phase::Running, || vm.run())?;
+            let run = measure(&mut timings, Phase::Running, || vm.run());
+            // Keep what the run printed, up to an error too, as the VM goes away.
+            if let Some(output) = vm.get_output() {
+                self.one_shot_output.extend_from_slice(output);
+            }
+            run?;
             return Ok((vm.last_value(num_locals), timings));
         }
 
@@ -301,11 +309,7 @@ impl Interpreter {
                     OutputSink::Stdout
                 };
                 let (code, checkpoint) = measure(&mut timings, Phase::Compiling, || {
-                    Compiler::compile_resumable(
-                        expressions,
-                        analysis,
-                        Rc::clone(&self.struct_registry),
-                    )
+                    Compiler::compile_resumable(expressions, analysis)
                 })?;
                 let mut vm = Vm::new(code, globals).with_output(output);
                 #[cfg(feature = "trace")]
@@ -351,11 +355,10 @@ impl Interpreter {
     }
 
     fn compile_one_shot(
-        &self,
         expressions: impl Iterator<Item = ExpressionLocation>,
         analysis: Analysis,
     ) -> Result<CompiledFunction, ndc_vm::CompileError> {
-        Compiler::compile(expressions, analysis, Rc::clone(&self.struct_registry))
+        Compiler::compile(expressions, analysis)
     }
 }
 
@@ -403,8 +406,7 @@ mod tests {
             .parse_and_analyse("1;", source_id)
             .expect("analysis should succeed");
 
-        let compiled = interpreter
-            .compile_one_shot(expressions.into_iter(), result.analysis)
+        let compiled = Interpreter::compile_one_shot(expressions.into_iter(), result.analysis)
             .expect("compilation should succeed");
 
         assert_eq!(compiled.opcodes(), [OpCode::Halt]);
