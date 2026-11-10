@@ -4,3 +4,5 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
+ahash.workspace = true
+ndc_core.workspace = true

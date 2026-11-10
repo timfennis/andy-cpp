@@ -113,7 +113,7 @@ fn function_hover(name: &str, functions: &[FunctionInfo]) -> Option<String> {
 
 /// Markdown showing the inferred type of an expression.
 fn type_hover(state: &DocumentState, id: ndc_core::NodeId) -> Option<String> {
-    let typ = state.analysis.expr_types.get(&id)?;
+    let typ = state.analysis.analysis.expr_types.get(&id)?;
     Some(format!("```ndc\n{typ}\n```"))
 }
 

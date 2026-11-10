@@ -1152,6 +1152,10 @@ dependencies = [
 [[package]]
 name = "ndc_analysis"
 version = "0.3.0"
+dependencies = [
+ "ahash",
+ "ndc_core",
+]
 
 [[package]]
 name = "ndc_bin"
@@ -1188,6 +1192,7 @@ name = "ndc_interpreter"
 version = "0.3.0"
 dependencies = [
  "ndc_analyser",
+ "ndc_analysis",
  "ndc_core",
  "ndc_lexer",
  "ndc_parser",

@@ -1,7 +1,10 @@
 use crate::chunk::{JumpTarget, LabelId, OpCode, OptimizerIr};
 use crate::value::{CompiledFunction, Function};
 use crate::{Object, Value};
-use ndc_analysis::{AugmentedAssignmentPlan, Binding, Candidate, CaptureSource, ResolvedVar};
+use ndc_analysis::{
+    Analysis, AugmentedAssignmentPlan, Binding, Candidate, CaptureSource, ResolvedVar,
+};
+use ndc_core::NodeId;
 use ndc_core::r#struct::StructRegistry;
 use ndc_core::{StaticType, TypeSignature};
 use ndc_lexer::{NumericLiteral, Span};
@@ -22,6 +25,8 @@ pub struct Compiler {
     allow_return: bool,
     optimize: bool,
     struct_registry: Rc<RefCell<StructRegistry>>,
+    /// What the analyser worked out about the batch being compiled.
+    analysis: Rc<Analysis>,
 }
 
 impl Compiler {
@@ -35,6 +40,7 @@ impl Compiler {
             allow_return: false,
             optimize: true,
             struct_registry,
+            analysis: Rc::default(),
         }
     }
 
@@ -48,14 +54,16 @@ impl Compiler {
             allow_return: false,
             optimize: false,
             struct_registry,
+            analysis: Rc::default(),
         }
     }
     pub fn compile(
         expressions: impl Iterator<Item = ExpressionLocation>,
+        analysis: Analysis,
         struct_registry: Rc<RefCell<StructRegistry>>,
     ) -> Result<CompiledFunction, CompileError> {
         let mut compiler = Self::new(struct_registry);
-        compiler.compile_batch(expressions)?;
+        compiler.compile_batch(expressions, analysis)?;
         Ok(compiler.finish()?.0)
     }
 
@@ -64,10 +72,11 @@ impl Compiler {
     /// debugging tools (e.g. a future `--no-optimize` disassembler flag).
     pub fn compile_unoptimized(
         expressions: impl Iterator<Item = ExpressionLocation>,
+        analysis: Analysis,
         struct_registry: Rc<RefCell<StructRegistry>>,
     ) -> Result<CompiledFunction, CompileError> {
         let mut compiler = Self::new_without_optimization(struct_registry);
-        compiler.compile_batch(expressions)?;
+        compiler.compile_batch(expressions, analysis)?;
         Ok(compiler.finish()?.0)
     }
 
@@ -81,10 +90,11 @@ impl Compiler {
     /// the emitted chunk, and shifting instructions invalidates that.
     pub fn compile_resumable(
         expressions: impl Iterator<Item = ExpressionLocation>,
+        analysis: Analysis,
         struct_registry: Rc<RefCell<StructRegistry>>,
     ) -> Result<(CompiledFunction, Self), CompileError> {
         let mut compiler = Self::new_without_optimization(struct_registry);
-        compiler.compile_batch(expressions)?;
+        compiler.compile_batch(expressions, analysis)?;
         compiler.finish()
     }
 
@@ -98,16 +108,22 @@ impl Compiler {
     pub fn resume(
         self,
         new_expressions: impl Iterator<Item = ExpressionLocation>,
+        analysis: Analysis,
     ) -> Result<(CompiledFunction, Self), CompileError> {
         let mut compiler = self; // checkpoint has no trailing Halt
-        compiler.compile_batch(new_expressions)?;
+        compiler.compile_batch(new_expressions, analysis)?;
         compiler.finish()
     }
 
+    /// Compiles one batch of top-level expressions, `analysis` being what the
+    /// analyser worked out about them.
     fn compile_batch(
         &mut self,
         expressions: impl Iterator<Item = ExpressionLocation>,
+        analysis: Analysis,
     ) -> Result<(), CompileError> {
+        self.source_locals = analysis.top_level_frame_size;
+        self.analysis = Rc::new(analysis);
         for expression in expressions {
             self.compile_expr(expression)?;
         }
@@ -198,7 +214,9 @@ impl Compiler {
         expression_location: ExpressionLocation,
     ) -> Result<(), CompileError> {
         let ExpressionLocation {
-            expression, span, ..
+            id,
+            expression,
+            span,
         } = expression_location;
         let entry_depth = self.ir.stack_depth();
         // A `;`-statement pops its own value and is the one expression that
@@ -360,6 +378,7 @@ impl Compiler {
             } => {
                 let type_signature = FunctionParameter::from_params(&parameters);
                 self.compile_function_decl(
+                    id,
                     name,
                     resolved_name,
                     *body,
@@ -693,7 +712,6 @@ impl Compiler {
         match var {
             ResolvedVar::Local { slot } => {
                 self.ir.write(OpCode::SetLocal(slot), span);
-                self.source_locals = self.source_locals.max(slot + 1);
             }
             ResolvedVar::Cell { slot } => {
                 self.ir.write(OpCode::SetCell(slot), span);
@@ -712,8 +730,12 @@ impl Compiler {
     fn emit_declare(&mut self, var: ResolvedVar, span: Span) {
         match var {
             ResolvedVar::Local { slot } | ResolvedVar::Cell { slot } => {
+                debug_assert!(
+                    slot < self.source_locals,
+                    "internal error: slot {slot} is outside the frame of {} variables",
+                    self.source_locals
+                );
                 self.ir.write(OpCode::SetLocal(slot), span);
-                self.source_locals = self.source_locals.max(slot + 1);
             }
             ResolvedVar::Upvalue { .. } | ResolvedVar::Global { .. } => {
                 unreachable!("the analyser never assigns a declaration to a non-local binding")
@@ -824,6 +846,7 @@ impl Compiler {
     #[allow(clippy::too_many_arguments)]
     fn compile_function_decl(
         &mut self,
+        id: NodeId,
         name: Option<String>,
         resolved_name: Option<ResolvedVar>,
         body: ExpressionLocation,
@@ -833,10 +856,6 @@ impl Compiler {
         pure: bool,
         span: Span,
     ) -> Result<(), CompileError> {
-        let num_params = match &type_signature {
-            TypeSignature::Exact(params) => params.len(),
-            TypeSignature::Variadic => 0,
-        };
         let return_type = return_type.unwrap_or_default();
         let static_type = StaticType::Function {
             parameters: match &type_signature {
@@ -849,13 +868,14 @@ impl Compiler {
         };
         let mut fn_compiler = Self {
             ir: Default::default(),
-            source_locals: num_params,
+            source_locals: self.analysis.frame_size(id),
             temp_count: 0,
             temp_uses: Vec::new(),
             loop_stack: vec![],
             allow_return: true,
             optimize: self.optimize,
             struct_registry: Rc::clone(&self.struct_registry),
+            analysis: Rc::clone(&self.analysis),
         };
         fn_compiler.compile_expr(body)?;
         fn_compiler.ir.write(OpCode::Return, Span::synthetic());
@@ -880,7 +900,6 @@ impl Compiler {
         // its cell must be in place before the closure is made.
         if let Some(ResolvedVar::Cell { slot }) = resolved_name {
             self.ir.write(OpCode::NewCell(slot), span);
-            self.source_locals = self.source_locals.max(slot + 1);
         }
 
         if !captures.is_empty() {

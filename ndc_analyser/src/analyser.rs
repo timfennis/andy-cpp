@@ -2,7 +2,7 @@ use crate::overloads::{CallKind, Overloads, ResolvedCall};
 use crate::types::{TypeBinding, TypeTable};
 use ahash::AHashMap;
 use itertools::{Itertools, izip};
-use ndc_analysis::{AugmentedAssignmentPlan, Binding, Candidate, ResolvedVar};
+use ndc_analysis::{Analysis, AugmentedAssignmentPlan, Binding, Candidate, ResolvedVar};
 use ndc_core::NodeId;
 use ndc_core::static_type::StaticTypeConstructionError;
 use ndc_core::r#struct::{StructInfo, StructRegistry};
@@ -15,7 +15,6 @@ use ndc_parser::{
 };
 use ndc_resolver::{Candidates, NameResolutionError, NameResolver, SymbolId};
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std::rc::Rc;
 
@@ -23,11 +22,8 @@ use std::rc::Rc;
 /// Keeps tooling-specific data (like per-expression types) out of the AST.
 #[derive(Debug, Default)]
 pub struct AnalysisResult {
-    /// Maps each expression node to its inferred result type.
-    pub expr_types: HashMap<NodeId, StaticType>,
-    /// Inferred return types for functions without explicit annotations.
-    /// Keyed by the `FunctionDeclaration`'s `NodeId`.
-    pub inferred_return_types: HashMap<NodeId, StaticType>,
+    /// What the analyser worked out, keyed by AST node.
+    pub analysis: Analysis,
     /// Errors accumulated during analysis. Non-empty when the analyser
     /// encountered problems but was able to continue with fallback types.
     pub errors: Vec<AnalysisError>,
@@ -115,6 +111,7 @@ impl Analyser {
     pub fn take_result(&mut self) -> AnalysisResult {
         let mut result = std::mem::take(&mut self.result);
         result.errors = std::mem::take(&mut self.errors);
+        result.analysis.top_level_frame_size = Layout::new(&self.resolver).frame_size(None);
         result
     }
 
@@ -281,7 +278,10 @@ impl Analyser {
         expr_loc: &mut ExpressionLocation,
     ) -> Result<StaticType, AnalysisError> {
         let typ = self.analyse_inner(expr_loc)?;
-        self.result.expr_types.insert(expr_loc.id, typ.clone());
+        self.result
+            .analysis
+            .expr_types
+            .insert(expr_loc.id, typ.clone());
         Ok(typ)
     }
 
@@ -367,7 +367,10 @@ impl Analyser {
             }
             _ => return self.analyse_or_any(expr_loc),
         };
-        self.result.expr_types.insert(expr_loc.id, typ.clone());
+        self.result
+            .analysis
+            .expr_types
+            .insert(expr_loc.id, typ.clone());
         typ
     }
 
@@ -471,6 +474,7 @@ impl Analyser {
                 {
                     let receiver_type = self
                         .result
+                        .analysis
                         .expr_types
                         .get(&receiver.id)
                         .cloned()
@@ -623,6 +627,10 @@ impl Analyser {
                 let explicit_return = self.return_type_stack.pop().unwrap();
                 self.functions.pop();
                 *captures = Layout::new(&self.resolver).captures(*id);
+                self.result
+                    .analysis
+                    .frame_sizes
+                    .insert(*id, Layout::new(&self.resolver).frame_size(Some(*id)));
 
                 // Combine explicit `return` types with the block's implicit return type.
                 let inferred_return = match explicit_return {
@@ -642,6 +650,7 @@ impl Analyser {
                     }
                 } else {
                     self.result
+                        .analysis
                         .inferred_return_types
                         .insert(*id, inferred_return.clone());
                 }
@@ -1191,6 +1200,7 @@ impl Analyser {
 
                 let is_slice = self
                     .result
+                    .analysis
                     .expr_types
                     .get(&index.id)
                     .is_some_and(Self::index_type_is_slice);

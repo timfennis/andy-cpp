@@ -2,6 +2,37 @@
 //! editor tooling to read. The parser's output is syntax; everything decided
 //! about it after parsing belongs here.
 
+use ahash::AHashMap;
+use ndc_core::{NodeId, StaticType};
+
+/// What the analyser worked out about one batch of statements: a whole program,
+/// or one line of the REPL.
+#[derive(Debug, Default, Clone)]
+pub struct Analysis {
+    /// Each expression's inferred type.
+    pub expr_types: AHashMap<NodeId, StaticType>,
+    /// The inferred return type of each function without a return type
+    /// annotation, keyed by its declaration.
+    pub inferred_return_types: AHashMap<NodeId, StaticType>,
+    /// How many local slots each function's own variables use, parameters
+    /// first, keyed by its declaration. The compiler places its temporaries
+    /// after them.
+    pub frame_sizes: AHashMap<NodeId, usize>,
+    /// How many local slots the program's top-level variables use, counting
+    /// earlier REPL lines too.
+    pub top_level_frame_size: usize,
+}
+
+impl Analysis {
+    /// The frame size of the function declared at `function`.
+    pub fn frame_size(&self, function: NodeId) -> usize {
+        *self
+            .frame_sizes
+            .get(&function)
+            .expect("internal error: every function is analysed before it's compiled")
+    }
+}
+
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Binding {
     None,
