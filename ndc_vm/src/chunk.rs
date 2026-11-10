@@ -126,8 +126,7 @@ pub enum OpCode {
     SetUpvalue(usize),
     /// Copies global slot onto stack. `[… → … value]`
     GetGlobal(usize),
-    /// Pops top and writes to a global slot, adding slots up to it if the
-    /// program has more globals than before. `[… value → …]`
+    /// Pops top and writes to global slot. `[… value → …]`
     SetGlobal(usize),
     /// Pops `n` values, pushes a list. `[… v1…vn → … list]`
     MakeList(usize),

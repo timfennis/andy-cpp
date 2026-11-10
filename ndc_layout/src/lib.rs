@@ -35,6 +35,18 @@ impl<'a> Layout<'a> {
             .then(|| self.resolver.native_count() + self.resolver.binding_position(symbol))
     }
 
+    /// How many global slots the program needs: the natives and every top-level
+    /// declaration, counting earlier REPL lines.
+    pub fn global_count(self) -> usize {
+        let declarations: usize = self
+            .resolver
+            .scopes()
+            .filter(|(_, scope)| scope.kind() == ScopeKind::Program)
+            .map(|(_, scope)| scope.bindings().len())
+            .sum();
+        self.resolver.native_count() + declarations
+    }
+
     /// The slot `symbol` occupies among the locals of the frame that declares
     /// it. A frame starts at 0, with a function's parameters first. A block
     /// numbers on from its parent, and its slots are free again once it ends:

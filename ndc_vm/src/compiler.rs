@@ -150,6 +150,7 @@ impl Compiler {
             },
             body: self.ir.into_chunk(),
             num_locals,
+            num_globals: self.analysis.global_count,
         }
     }
 
@@ -805,6 +806,7 @@ impl Compiler {
             static_type,
             body: fn_compiler.ir.into_chunk(),
             num_locals,
+            num_globals: 0,
         };
         let idx = self
             .ir

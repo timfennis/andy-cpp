@@ -83,7 +83,9 @@ impl Analyser {
     pub fn take_result(&mut self) -> AnalysisResult {
         let mut result = std::mem::take(&mut self.result);
         result.errors = std::mem::take(&mut self.errors);
-        result.analysis.top_level_frame_size = Layout::new(&self.resolver).frame_size(None);
+        let layout = Layout::new(&self.resolver);
+        result.analysis.top_level_frame_size = layout.frame_size(None);
+        result.analysis.global_count = layout.global_count();
         result
     }
 

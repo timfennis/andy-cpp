@@ -95,8 +95,13 @@ pub fn native_globals<'a>(natives: impl IntoIterator<Item = &'a Rc<NativeFunctio
 }
 
 impl Vm {
-    pub fn new(function: CompiledFunction, globals: Vec<Value>) -> Self {
+    pub fn new(function: CompiledFunction, mut globals: Vec<Value>) -> Self {
         let num_locals = function.num_locals;
+        // Every global the program declares has a slot, holding unit until its
+        // declaration runs, like a local.
+        if globals.len() < function.num_globals {
+            globals.resize(function.num_globals, Value::unit());
+        }
         let mut vm = Self {
             stack: Vec::with_capacity(256),
             globals,
@@ -262,9 +267,6 @@ impl Vm {
                 OpCode::SetGlobal(slot) => {
                     let slot = *slot;
                     let value = self.stack.pop().expect("stack underflow");
-                    if slot >= self.globals.len() {
-                        self.globals.resize(slot + 1, Value::unit());
-                    }
                     self.globals[slot] = value;
                 }
                 OpCode::SetLocal(slot) => {

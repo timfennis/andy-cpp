@@ -48,6 +48,10 @@ pub struct CompiledFunction {
     pub(crate) static_type: StaticType,
     pub(crate) body: Chunk,
     pub(crate) num_locals: usize,
+    /// For a program run at the top level, how many global slots it needs, so
+    /// a declaration that never runs still has its slot; 0 for any other
+    /// function.
+    pub(crate) num_globals: usize,
 }
 
 #[derive(Clone)]

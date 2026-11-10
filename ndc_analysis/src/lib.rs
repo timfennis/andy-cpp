@@ -59,6 +59,9 @@ pub struct Analysis {
     /// How many local slots the top-level code needs for the variables of its
     /// blocks and loops. Its own top-level declarations are globals.
     pub top_level_frame_size: usize,
+    /// How many global slots the program needs: the natives and every
+    /// top-level declaration, counting earlier REPL lines.
+    pub global_count: usize,
 }
 
 impl Analysis {

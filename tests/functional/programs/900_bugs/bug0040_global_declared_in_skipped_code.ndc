@@ -1,0 +1,4 @@
+// A top-level declaration that never runs still has a global slot, holding
+// unit, as a local would. Reading it used to index past the globals.
+false and (fn f() { 1 });
+assert_eq(f, ());
