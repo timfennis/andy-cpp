@@ -1,8 +1,9 @@
+use ndc_core::NodeId;
 use ndc_core::StaticType;
 use ndc_lexer::Span;
 use ndc_parser::{
     AssignmentTarget, AssignmentTargetLocation, BindingPattern, BindingPatternLocation, Expression,
-    ExpressionLocation, ForBody, ForIteration, NodeId,
+    ExpressionLocation, ForBody, ForIteration,
 };
 
 /// Trait for visiting interesting nodes during an AST walk.

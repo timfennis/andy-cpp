@@ -3,8 +3,9 @@ use super::{
 };
 use crate::symbols::{BindingKind, SymbolId};
 use itertools::Itertools;
+use ndc_core::NodeId;
 use ndc_lexer::{Lexer, SourceId};
-use ndc_parser::{NodeId, Parser};
+use ndc_parser::Parser;
 
 fn resolve_source(resolver: &mut NameResolver, source: &str) -> Result<(), NameResolutionError> {
     let tokens = Lexer::new(source, SourceId::new(0))

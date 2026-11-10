@@ -1,6 +1,7 @@
 use crate::Layout;
+use ndc_analysis::CaptureSource;
 use ndc_lexer::{Lexer, SourceId};
-use ndc_parser::{CaptureSource, Parser};
+use ndc_parser::Parser;
 use ndc_resolver::{NameResolver, ScopeKind};
 
 fn resolve(source: &str) -> NameResolver {

@@ -1,9 +1,11 @@
 #![allow(unused_crate_dependencies)]
 
+use ndc_core::NodeId;
+
 use std::collections::HashSet;
 
 use ndc_lexer::{Lexer, SourceId};
-use ndc_parser::{Expression, ExpressionLocation, NodeId, Parser, TypeExpr};
+use ndc_parser::{Expression, ExpressionLocation, Parser, TypeExpr};
 
 fn parse_one(source: &str) -> ExpressionLocation {
     let tokens = Lexer::new(source, SourceId::SYNTHETIC)

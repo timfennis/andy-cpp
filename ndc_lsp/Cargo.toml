@@ -5,6 +5,7 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
+ndc_analysis.workspace = true
 tokio = { version = "1.52.3", features = ["full"] }
 ahash.workspace = true
 ndc_analyser.workspace = true

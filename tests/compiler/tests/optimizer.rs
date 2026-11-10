@@ -1,3 +1,4 @@
+use ndc_analysis as _;
 use ndc_core::r#struct::StructRegistry;
 use ndc_lexer::{Lexer, SourceId};
 use ndc_parser::Parser;

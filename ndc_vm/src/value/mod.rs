@@ -6,12 +6,13 @@ pub use function::*;
 pub use number::{AdvancedNumber, BinaryOperatorError, ExactFraction, NumberToFloatError};
 pub use numeric::{NumericMode, NumericRef};
 
+use ndc_analysis::ResolvedVar;
+
 use crate::iterator::SharedIterator;
 use ndc_core::StaticType;
 use ndc_core::compare::FallibleOrd;
 use ndc_core::hash_map::{DefaultHasher, HashMap};
 use ndc_core::r#struct::StructInfo;
-use ndc_parser::ResolvedVar;
 use std::cell::RefCell;
 use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;

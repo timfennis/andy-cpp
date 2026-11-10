@@ -1,6 +1,7 @@
+use ndc_analysis::CaptureSource;
 use ndc_core::r#struct::StructRegistry;
 use ndc_lexer::{Lexer, SourceId};
-use ndc_parser::{CaptureSource, Parser};
+use ndc_parser::Parser;
 use ndc_vm::chunk::JumpTarget;
 use ndc_vm::chunk::OpCode;
 use ndc_vm::chunk::OpCode::*;

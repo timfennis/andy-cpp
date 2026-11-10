@@ -1,0 +1,6 @@
+[package]
+name = "ndc_analysis"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]

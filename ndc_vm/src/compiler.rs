@@ -1,13 +1,13 @@
 use crate::chunk::{JumpTarget, LabelId, OpCode, OptimizerIr};
 use crate::value::{CompiledFunction, Function};
 use crate::{Object, Value};
+use ndc_analysis::{AugmentedAssignmentPlan, Binding, Candidate, CaptureSource, ResolvedVar};
 use ndc_core::r#struct::StructRegistry;
 use ndc_core::{StaticType, TypeSignature};
 use ndc_lexer::{NumericLiteral, Span};
 use ndc_parser::{
-    AssignmentTarget, AugmentedAssignmentPlan, Binding, BindingPattern, BindingPatternLocation,
-    Candidate, CaptureSource, Expression, ExpressionLocation, ForBody, ForIteration,
-    FunctionParameter, LogicalOperator, ResolvedVar,
+    AssignmentTarget, BindingPattern, BindingPatternLocation, Expression, ExpressionLocation,
+    ForBody, ForIteration, FunctionParameter, LogicalOperator,
 };
 use std::cell::RefCell;
 use std::rc::Rc;

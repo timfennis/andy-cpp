@@ -6,9 +6,9 @@ use crate::iterator::{
 };
 use crate::value::{CompiledFunction, Function, NativeFunc};
 use crate::{ClosureFunction, Object, Value};
+use ndc_analysis::{CaptureSource, ResolvedVar};
 use ndc_core::hash_map::{DefaultHasher, HashMap};
 use ndc_lexer::Span;
-use ndc_parser::{CaptureSource, ResolvedVar};
 use std::cell::RefCell;
 use std::hash::{Hash, Hasher};
 use std::io::Write;

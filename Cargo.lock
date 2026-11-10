@@ -318,6 +318,7 @@ checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
 name = "compiler_tests"
 version = "0.3.0"
 dependencies = [
+ "ndc_analysis",
  "ndc_core",
  "ndc_interpreter",
  "ndc_lexer",
@@ -1139,6 +1140,7 @@ version = "0.3.0"
 dependencies = [
  "ahash",
  "itertools 0.15.0",
+ "ndc_analysis",
  "ndc_core",
  "ndc_layout",
  "ndc_lexer",
@@ -1146,6 +1148,10 @@ dependencies = [
  "ndc_resolver",
  "thiserror",
 ]
+
+[[package]]
+name = "ndc_analysis"
+version = "0.3.0"
 
 [[package]]
 name = "ndc_bin"
@@ -1193,6 +1199,8 @@ dependencies = [
 name = "ndc_layout"
 version = "0.3.0"
 dependencies = [
+ "ndc_analysis",
+ "ndc_core",
  "ndc_lexer",
  "ndc_parser",
  "ndc_resolver",
@@ -1213,6 +1221,7 @@ version = "0.3.0"
 dependencies = [
  "ahash",
  "ndc_analyser",
+ "ndc_analysis",
  "ndc_core",
  "ndc_interpreter",
  "ndc_lexer",
@@ -1236,6 +1245,7 @@ name = "ndc_parser"
 version = "0.3.0"
 dependencies = [
  "derive_more",
+ "ndc_analysis",
  "ndc_core",
  "ndc_lexer",
  "thiserror",
@@ -1278,6 +1288,7 @@ name = "ndc_vm"
 version = "0.3.0"
 dependencies = [
  "ahash",
+ "ndc_analysis",
  "ndc_core",
  "ndc_lexer",
  "ndc_parser",

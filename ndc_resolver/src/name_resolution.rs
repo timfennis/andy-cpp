@@ -1,10 +1,11 @@
 use crate::symbols::{BindingKind, SymbolId, SymbolTable};
 use ahash::{AHashMap, AHashSet};
+use ndc_core::NodeId;
 use ndc_core::StaticType;
 use ndc_lexer::Span;
 use ndc_parser::{
     AssignmentTarget, AssignmentTargetLocation, BindingPattern, BindingPatternLocation, Expression,
-    ExpressionLocation, ForBody, ForIteration, NodeId, StructField, TypeExpr,
+    ExpressionLocation, ForBody, ForIteration, StructField, TypeExpr,
 };
 
 /// A scope in the resolver's scope tree.

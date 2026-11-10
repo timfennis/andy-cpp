@@ -1,6 +1,6 @@
 use crate::types::TypeTable;
+use ndc_analysis::{Binding, Candidate, ResolvedVar};
 use ndc_core::StaticType;
-use ndc_parser::{Binding, Candidate, ResolvedVar};
 use ndc_resolver::{BindingKind, Candidates, SymbolId, SymbolTable};
 
 /// Whether a call site can fall back to element-wise tuple broadcast when no
