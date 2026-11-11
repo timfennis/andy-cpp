@@ -1,12 +1,11 @@
 use ndc_interpreter::Interpreter;
 use std::fs;
-use std::path::PathBuf;
-use yansi::Paint;
+use std::path::Path;
 
 include!(concat!(env!("OUT_DIR"), "/generated_tests.rs"));
 
-fn run_ndc_test(path: PathBuf) -> Result<(), std::io::Error> {
-    let contents = fs::read_to_string(&path)?;
+fn run_ndc_test(path: &Path) -> Result<(), std::io::Error> {
+    let contents = fs::read_to_string(path)?;
 
     let expect_error = contents
         .lines()
@@ -21,16 +20,12 @@ fn run_ndc_test(path: PathBuf) -> Result<(), std::io::Error> {
         .collect::<Vec<_>>()
         .join("\n");
 
-    print!("Running {path:?}...");
-
     let mut interpreter = Interpreter::capturing();
     interpreter.configure(ndc_stdlib::register);
     let interpreter_result = interpreter.eval(&contents);
 
     let program_had_error = interpreter_result.is_err();
-    let actual_error = interpreter_result
-        .map(|v| v.to_string())
-        .unwrap_or_else(|err| format!("{err:?}"));
+    let actual_error = interpreter_result.map_or_else(|err| format!("{err:?}"), |v| v.to_string());
 
     assert!(
         !expect_error.is_empty() || !program_had_error,
@@ -38,7 +33,6 @@ fn run_ndc_test(path: PathBuf) -> Result<(), std::io::Error> {
     );
 
     if !expect_error.is_empty() && !actual_error.trim().contains(expect_error.trim()) {
-        println!(" {}", "ERR".red().bold());
         panic!(
             "\n\tThere was a problem running {path:?}\n\tExpected error:\t{}\n\tActual error:\t{}\n",
             expect_error.trim(),
@@ -53,7 +47,6 @@ fn run_ndc_test(path: PathBuf) -> Result<(), std::io::Error> {
         let output = String::from_utf8(output).expect("test output must be valid UTF-8");
 
         if output.trim_end() != expect_output.trim_end() {
-            println!(" {}", "ERR".red().bold());
             panic!(
                 "\n\tThere was a problem running {path:?}\n\tActual output: {}\n\tdid not match\n\tExpected output: {}\n",
                 output.trim_end(),
@@ -61,8 +54,6 @@ fn run_ndc_test(path: PathBuf) -> Result<(), std::io::Error> {
             );
         }
     }
-
-    println!(" {}", "OK".green().bold());
 
     Ok(())
 }

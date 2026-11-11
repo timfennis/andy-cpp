@@ -675,7 +675,6 @@ version = "0.3.0"
 dependencies = [
  "ndc_interpreter",
  "ndc_stdlib",
- "yansi",
 ]
 
 [[package]]

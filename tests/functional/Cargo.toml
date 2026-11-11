@@ -6,4 +6,3 @@ version.workspace = true
 [dev-dependencies]
 ndc_interpreter.workspace = true
 ndc_stdlib.workspace = true
-yansi.workspace = true

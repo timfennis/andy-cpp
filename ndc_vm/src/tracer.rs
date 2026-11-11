@@ -76,7 +76,7 @@ impl VmTracer for HistogramTracer {
 
     fn on_complete(&mut self) {
         let mut entries: Vec<_> = self.counts.drain().collect();
-        entries.sort_by(|a, b| b.1.cmp(&a.1));
+        entries.sort_by_key(|entry| std::cmp::Reverse(entry.1));
 
         let total: u64 = entries.iter().map(|(_, c)| c).sum();
         eprintln!("\n{:-<50}", "");
@@ -133,7 +133,7 @@ impl VmTracer for TimingTracer {
         }
 
         let mut entries: Vec<_> = self.times.drain().collect();
-        entries.sort_by(|a, b| b.1.cmp(&a.1));
+        entries.sort_by_key(|entry| std::cmp::Reverse(entry.1));
 
         let total: Duration = entries.iter().map(|(_, d)| d).sum();
         eprintln!("\n{:-<60}", "");

@@ -37,7 +37,7 @@ fn generate_tests(output: &mut impl Write, base: &Path, dir: &Path) {
             writeln!(output, "fn {test_name}() {{").unwrap();
             writeln!(
                 output,
-                "    run_ndc_test(std::path::Path::new(env!(\"CARGO_MANIFEST_DIR\")).join(\"programs/{path_str}\")).expect(\"test failed\");",
+                "    run_ndc_test(&Path::new(env!(\"CARGO_MANIFEST_DIR\")).join(\"programs/{path_str}\")).expect(\"test failed\");",
             )
             .unwrap();
             writeln!(output, "}}").unwrap();

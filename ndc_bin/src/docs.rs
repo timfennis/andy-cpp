@@ -11,8 +11,7 @@ fn string_match(needle: &str, haystack: &str) -> bool {
 
 fn terminal_width() -> usize {
     termimad::crossterm::terminal::size()
-        .map(|(w, _)| w as usize)
-        .unwrap_or(80)
+        .map_or(80, |(w, _)| w as usize)
         .min(120)
 }
 

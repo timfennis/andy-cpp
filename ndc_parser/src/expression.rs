@@ -459,7 +459,7 @@ impl TryFrom<AssignmentTargetLocation> for BindingPatternLocation {
 impl TryFrom<ExpressionLocation> for AssignmentTargetLocation {
     type Error = ParseError;
 
-    /// Convert a parsed expression into an assignment target, reusing its NodeId
+    /// Convert a parsed expression into an assignment target, reusing its `NodeId`
     /// and source span. For `(object.field)`, remove the Grouping wrapper and use
     /// its ID and span for the resulting member target. Discard the inner member
     /// node's ID; keep the receiver expression and its ID.

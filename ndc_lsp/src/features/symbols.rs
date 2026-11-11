@@ -139,7 +139,7 @@ fn signature(parameters: &[FunctionParameter], return_type: Option<&StaticType>)
         .iter()
         .map(|p| match &p.lvalue.pattern {
             BindingPattern::Identifier { identifier, .. } => identifier.clone(),
-            _ => "_".to_string(),
+            BindingPattern::Sequence(_) => "_".to_string(),
         })
         .collect::<Vec<_>>()
         .join(", ");
