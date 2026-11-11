@@ -15,6 +15,8 @@ use std::rc::Rc;
 mod assignments;
 mod calls;
 mod declarations;
+
+use declarations::FunctionDeclaration;
 #[cfg(test)]
 mod tests;
 
@@ -251,8 +253,22 @@ impl Analyser {
                     }
                 }
                 if let Some(default) = default {
-                    let found =
-                        Self::default_value_type(self.analyse_with_expected(default, value));
+                    // A function default makes each missing value, so it's
+                    // expected to return one.
+                    let expected_default = if matches!(
+                        default.expression,
+                        Expression::FunctionDeclaration { name: None, .. }
+                    ) {
+                        StaticType::Function {
+                            parameters: Some(vec![]),
+                            return_type: value.clone(),
+                        }
+                    } else {
+                        value.as_ref().clone()
+                    };
+                    let found = Self::default_value_type(
+                        self.analyse_with_expected(default, &expected_default),
+                    );
                     Self::fold_lub(&mut value_type, found);
                 }
                 StaticType::Map {
@@ -267,6 +283,28 @@ impl Analyser {
                     })),
                 }
             }
+            // A lambda takes the types an expected function type gives it:
+            // in `let f: Fn(Int) -> Int = fn(x) => x + 1`, `x` is an `Int`.
+            (
+                Expression::FunctionDeclaration {
+                    name: None,
+                    parameters,
+                    body,
+                    return_annotation,
+                    ..
+                },
+                StaticType::Function { .. },
+            ) => self.analyse_function_declaration(
+                FunctionDeclaration {
+                    id: expr_loc.id,
+                    name: None,
+                    parameters,
+                    body,
+                    return_annotation: return_annotation.as_ref(),
+                    span: expr_loc.span,
+                },
+                Some(expected),
+            ),
             (Expression::Tuple { values }, StaticType::Tuple(elements))
                 if values.len() == elements.len() =>
             {
@@ -398,12 +436,15 @@ impl Analyser {
                 return_annotation,
                 ..
             } => self.analyse_function_declaration(
-                *id,
-                name.as_deref(),
-                parameters,
-                body,
-                return_annotation.as_ref(),
-                *span,
+                FunctionDeclaration {
+                    id: *id,
+                    name: name.as_deref(),
+                    parameters,
+                    body,
+                    return_annotation: return_annotation.as_ref(),
+                    span: *span,
+                },
+                None,
             ),
             Expression::Block { statements } => {
                 let mut last = None;

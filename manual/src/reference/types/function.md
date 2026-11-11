@@ -164,13 +164,23 @@ assert_eq(apply(twice, 4), 8);
 assert_eq(apply(make_adder(10), 1), 11);
 ```
 
-A function passed for a function parameter has to take what the parameter passes and return what it returns. Parts whose type isn't known, like the parameter of an unannotated lambda, are checked when the program runs:
+A function passed for a function parameter has to take what the parameter passes and return what it returns:
 
 ```ndc
 fn apply(f: Fn(Int) -> Int, x: Int) -> Int { f(x) }
-apply(fn(x) => x - 1, 1);         // fine: x isn't annotated
 apply(fn(s: String) => 1, 4);     // ERROR: the function takes a String, but apply passes an Int
 ```
+
+A lambda written where a function type is expected takes its parameter types from it, so it needs no annotations: as the value of an annotated variable, in an assignment, or as an argument to a function value. Its body is checked with those types:
+
+```ndc
+let shout: Fn(String) -> String = fn(s) => s ++ "!";   // s is a String
+assert_eq(shout("hi"), "hi!");
+
+let double: Fn(Int) -> Int = fn(x) => x ++ "!";        // ERROR: x is an Int, and there's no `++` for an Int and a String
+```
+
+A lambda passed to a named function, as in `xs.map(fn(x) => x + 1)`, doesn't get its parameter types this way yet. Its unannotated parameters are `Any`, and they are checked when the program runs.
 
 ## Function overloading
 

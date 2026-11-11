@@ -666,6 +666,49 @@ fn a_function_value_rejects_a_callback_taking_another_number_of_arguments() {
 }
 
 #[test]
+fn a_lambdas_type_picks_between_overloads_taking_functions() {
+    let choose = "fn choose(f: Fn() -> Int) { 1 } fn choose(f: Fn() -> String) { \"s\" } ";
+    assert_eq!(
+        analyse_last_type(&format!("{choose}choose(fn() => 1)")),
+        StaticType::Int
+    );
+    assert_eq!(
+        analyse_last_type(&format!("{choose}choose(fn() => \"a\")")),
+        StaticType::String
+    );
+}
+
+#[test]
+fn a_lambda_takes_the_function_type_expected_where_it_is_written() {
+    let int_to_int = StaticType::Function {
+        parameters: Some(vec![StaticType::Int]),
+        return_type: Box::new(StaticType::Int),
+    };
+    // An annotated variable.
+    assert_eq!(
+        analyse_last_type("let f: Fn(Int) -> Int = fn(x) => x; f"),
+        int_to_int
+    );
+    // A function value's parameter.
+    let globals = natives(&[("++", "(String, String) -> String")]);
+    assert_eq!(
+        errors(
+            "let apply = fn(g: Fn(Int) -> Int) { g(1) }; let fs = [apply]; fs[0](fn(x) => x ++ \"a\");",
+            [index_natives(), globals].concat()
+        ),
+        vec!["No function called '++' found that matches the arguments 'Int, String'"]
+    );
+    // A map's default function returns the map's values.
+    assert_eq!(
+        analyse_last_type("let m: Map<String, List<Int>> = %{:fn() => []}; m"),
+        StaticType::Map {
+            key: Box::new(StaticType::String),
+            value: Box::new(StaticType::List(Box::new(StaticType::Int))),
+        }
+    );
+}
+
+#[test]
 fn an_any_parameter_settles_what_its_argument_leaves_unknown_as_any() {
     // `keep` may store anything in the list, so it can't become a List<Int>.
     let globals = [natives(&[("keep", "(List<Any>)")]), index_natives()].concat();

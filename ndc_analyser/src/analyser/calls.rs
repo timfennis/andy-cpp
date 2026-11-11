@@ -150,9 +150,22 @@ impl Analyser {
         // get their slots first.
         let Expression::Identifier { name, .. } = &function.expression else {
             let callee_type = self.analyse_expr(function);
+            // The callee's type says what each argument is expected to be,
+            // which tells a lambda argument what its parameters are.
+            let expected = match &callee_type {
+                StaticType::Function {
+                    parameters: Some(parameters),
+                    ..
+                } if parameters.len() == arguments.len() => Some(parameters.clone()),
+                _ => None,
+            };
             let arguments = arguments
                 .iter()
-                .map(|arg| self.analyse_expr(arg))
+                .enumerate()
+                .map(|(position, arg)| match &expected {
+                    Some(expected) => self.analyse_with_expected(arg, &expected[position]),
+                    None => self.analyse_expr(arg),
+                })
                 .collect::<Vec<_>>();
             return match callee_type {
                 // The callee's type says what it takes, like a picked overload's.
