@@ -769,7 +769,7 @@ impl fmt::Display for Value {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::Int(n) => write!(f, "{n}"),
-            Self::Float(n) => write!(f, "{n}"),
+            Self::Float(n) => number::format_float(*n, f),
             Self::Number(n) => write!(f, "{n}"),
             Self::Bool(b) => write!(f, "{b}"),
             Self::None => write!(f, "None"),
@@ -782,7 +782,7 @@ impl fmt::Display for Value {
 impl fmt::Display for Object {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Some(v) => write!(f, "Some({v})"),
+            Self::Some(v) => write!(f, "Some({v:?})"),
             // Strings display without quotes at the top level.
             Self::String(s) => write!(f, "{}", s.borrow()),
             Self::List(vs) => {
@@ -797,7 +797,8 @@ impl fmt::Display for Object {
                 }
                 write!(f, "]")
             }
-            // Empty tuple is the unit value, which prints as nothing.
+            // Empty tuple is the unit value, which prints as nothing on its
+            // own; inside another value it shows as `()`.
             Self::Tuple(vs) if vs.is_empty() => Ok(()),
             Self::Tuple(vs) => {
                 write!(f, "(")?;
@@ -807,13 +808,23 @@ impl fmt::Display for Object {
                         write!(f, ",")?;
                     }
                 }
+                // `(1,)` is a tuple, `(1)` is just 1.
+                if vs.len() == 1 {
+                    write!(f, ",")?;
+                }
                 write!(f, ")")
             }
             Self::Map { entries, .. } => {
                 write!(f, "%{{")?;
                 let entries = entries.borrow();
+                // A set is a map whose values are all `()`: `%{1,2}`.
+                let is_set = entries.values().all(Value::is_unit);
                 for (i, (k, v)) in entries.iter().enumerate() {
-                    write!(f, "{k:?}: {v:?}")?;
+                    if is_set {
+                        write!(f, "{k:?}")?;
+                    } else {
+                        write!(f, "{k:?}: {v:?}")?;
+                    }
                     if i + 1 < entries.len() {
                         write!(f, ",")?;
                     }
@@ -860,6 +871,9 @@ impl fmt::Debug for Value {
             Self::Object(obj) if matches!(obj.as_ref(), Object::String(_)) => {
                 write!(f, "{obj:?}")
             }
+            // Unit displays as nothing on its own, but as an element it has
+            // to show: `[()]`, not `[]`.
+            _ if self.is_unit() => write!(f, "()"),
             // Everything else uses Display.
             _ => write!(f, "{self}"),
         }
