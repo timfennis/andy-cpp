@@ -1,0 +1,5 @@
+// An augmented assignment to an element of a tuple used to crash the compiler
+// with "encountered unresolved binding during compilation".
+// expect-error: No function called '[]=' found that matches the arguments 'Tuple<Int, Int, Int>, Int, Any'
+let t = (1, 2, 3);
+t[0] += 1;

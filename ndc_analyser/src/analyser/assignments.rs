@@ -135,11 +135,13 @@ impl Analyser {
                 // Indexing isn't operator-form for vec purposes: there's no
                 // natural broadcast story for `(list_a, list_b)[i]`. Only an
                 // augmented assignment reads the old value through `[]`.
+                let mut getter_missing = false;
                 if let Some(getters) = self.resolver.getter_candidates(lvalue.id) {
                     let getter = self
                         .overloads()
                         .resolve_call(getters, &get_args, CallKind::Regular)
                         .binding;
+                    getter_missing = matches!(getter, Binding::None);
                     self.picks.getters.insert(lvalue.id, getter);
                 }
                 let setter = self
@@ -150,7 +152,23 @@ impl Analyser {
                         CallKind::Regular,
                     )
                     .binding;
+                let setter_missing = matches!(setter, Binding::None);
                 self.picks.setters.insert(lvalue.id, setter);
+
+                // A tuple has `[]` but no `[]=`: it can't be changed in place.
+                if getter_missing {
+                    self.emit(AnalysisError::function_not_found(
+                        "[]",
+                        &get_args,
+                        lvalue.span,
+                    ));
+                } else if setter_missing {
+                    self.emit(AnalysisError::function_not_found(
+                        "[]=",
+                        &set_args,
+                        lvalue.span,
+                    ));
+                }
 
                 if Self::index_type_is_slice(&index_type)
                     && let StaticType::List(element) = &type_of_index_target
