@@ -37,18 +37,38 @@ let string = r###"raw string with r#"stop doing this"#"###;
 
 `strip_prefix(string, prefix)` and `strip_suffix(string, suffix)` remove one matching
 prefix or suffix. `strip_circumfix(string, prefix, suffix)` removes both only when
-both match without overlapping. Each function returns a new string on success or
-`()` on mismatch, leaving the original string unchanged. Matches are exact and
-case-sensitive; empty patterns match without removing any text.
+both match without overlapping. Each function returns a new string, leaving the
+original string unchanged, and it's an error when the pattern doesn't match. Matches
+are exact and case-sensitive; empty patterns match without removing any text.
 
 ```ndc
 assert_eq("foobar".strip_prefix("foo"), "bar");
 assert_eq("foobar".strip_suffix("bar"), "foo");
 assert_eq("[hello]".strip_circumfix("[", "]"), "hello");
 assert_eq("foofoo".strip_prefix("foo"), "foo");
-assert_eq("hello".strip_prefix("x"), ());
-assert_eq("aaa".strip_circumfix("aa", "aa"), ());
 assert_eq("[]".strip_circumfix("[", "]"), "");
+"hello".strip_prefix("x");   // ERROR: "hello" doesn't start with "x"
+```
+
+When a mismatch isn't an error, the `?` variants return an `Option` instead:
+
+```ndc
+assert_eq("foobar".strip_prefix?("foo"), Some("bar"));
+assert_eq("hello".strip_prefix?("x"), None);
+assert_eq("aaa".strip_circumfix?("aa", "aa"), None);
+```
+
+## Splitting once
+
+`split_once(string, pattern)` splits a string at the first occurrence of `pattern` into
+the parts before and after it. It's an error when `pattern` doesn't occur, and
+`split_once?` returns `None` instead:
+
+```ndc
+let (key, value) = "port=80".split_once("=");
+assert_eq(key, "port");
+assert_eq("a=b=c".split_once("="), ("a", "b=c"));
+assert_eq("abc".split_once?("="), None);
 ```
 
 ## Operators
