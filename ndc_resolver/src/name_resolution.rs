@@ -108,9 +108,21 @@ pub enum NameResolutionError {
     IllegalStructRedefinition { name: String, span: Span },
     #[error("Can't assign to the built-in function '{name}'")]
     AssignToBuiltin { name: String, span: Span },
+    #[error("No function named '{name}'")]
+    VariableIsNotAFunction { name: String, span: Span },
 }
 
 impl NameResolutionError {
+    /// Advice on how to fix the error, when there is any.
+    pub fn help_text(&self) -> Option<String> {
+        match self {
+            Self::VariableIsNotAFunction { name, .. } => Some(format!(
+                "'{name}' is a variable, and `x.{name}` only finds functions. Call it as `{name}(x)` instead"
+            )),
+            _ => None,
+        }
+    }
+
     pub fn span(&self) -> Span {
         match self {
             Self::UnknownName { span, .. }
@@ -122,7 +134,8 @@ impl NameResolutionError {
             | Self::StructRedefinition { span, .. }
             | Self::DuplicateField { span, .. }
             | Self::IllegalStructRedefinition { span, .. }
-            | Self::AssignToBuiltin { span, .. } => *span,
+            | Self::AssignToBuiltin { span, .. }
+            | Self::VariableIsNotAFunction { span, .. } => *span,
         }
     }
 }
@@ -664,6 +677,20 @@ impl NameResolver {
                     self.resolve(argument)?;
                 }
             }
+            Expression::MethodCall {
+                function,
+                arguments,
+            } => {
+                let Expression::Identifier { name, .. } = &function.expression else {
+                    unreachable!("the parser only builds method calls with a named callee");
+                };
+                let candidates = self.use_function_name(name, function.span)?;
+                self.references.insert(function.id, candidates);
+                self.record_use_site(function.id);
+                for argument in arguments {
+                    self.resolve(argument)?;
+                }
+            }
             Expression::MemberAccess {
                 receiver,
                 member,
@@ -671,7 +698,7 @@ impl NameResolver {
                 ..
             } => {
                 self.resolve(receiver)?;
-                let candidates = self.use_name(member, *member_span)?;
+                let candidates = self.use_function_name(member, *member_span)?;
                 self.getters.insert(loc.id, candidates);
                 self.record_use_site(loc.id);
             }
@@ -821,6 +848,40 @@ impl NameResolver {
             .for_each(|symbol| self.record_use(*symbol));
 
         Ok(candidates)
+    }
+
+    /// Resolves a use of `name` that only functions can answer: the callee of
+    /// `xs.f()` and the member in `x.f`. Variables are skipped, so
+    /// `let len = 5; xs.len()` reaches the function `len`, and a variable
+    /// that isn't a candidate isn't captured either.
+    fn use_function_name(
+        &mut self,
+        name: &str,
+        span: Span,
+    ) -> Result<Candidates, NameResolutionError> {
+        let candidates = self.scopes.candidates(name, &self.symbols);
+        let functions = candidates.functions(&self.symbols);
+
+        if functions.0.is_empty() {
+            return Err(if candidates.0.is_empty() {
+                NameResolutionError::UnknownName {
+                    name: name.to_string(),
+                    span,
+                }
+            } else {
+                NameResolutionError::VariableIsNotAFunction {
+                    name: name.to_string(),
+                    span,
+                }
+            });
+        }
+
+        functions
+            .iter()
+            .flatten()
+            .for_each(|symbol| self.record_use(*symbol));
+
+        Ok(functions)
     }
 
     /// Whether the current scope has a `let`, parameter or loop variable named
@@ -1000,9 +1061,9 @@ impl NameResolver {
                 ..
             } => {
                 self.resolve(receiver)?;
-                let setter = self.use_name(&format!("{member}="), *member_span)?;
+                let setter = self.use_function_name(&format!("{member}="), *member_span)?;
                 self.setters.insert(target.id, setter);
-                let getter = self.use_name(member, *member_span)?;
+                let getter = self.use_function_name(member, *member_span)?;
                 self.getters.insert(target.id, getter);
                 self.record_use_site(target.id);
             }
@@ -1064,6 +1125,24 @@ impl Candidates {
     /// Candidates made of these groups, nearest scope first.
     pub fn from_groups(groups: Vec<Vec<SymbolId>>) -> Self {
         Self(groups)
+    }
+
+    /// Only the functions among these candidates, keeping their order. Scopes
+    /// left without a function are dropped.
+    fn functions(&self, symbols: &SymbolTable) -> Self {
+        Self(
+            self.0
+                .iter()
+                .map(|group| {
+                    group
+                        .iter()
+                        .copied()
+                        .filter(|&symbol| symbols.kind(symbol) == BindingKind::Function)
+                        .collect::<Vec<_>>()
+                })
+                .filter(|group| !group.is_empty())
+                .collect(),
+        )
     }
 
     /// The newest symbol in the nearest scope. For `x` in

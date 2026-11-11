@@ -93,14 +93,12 @@ assert_eq(x(p), 1);
 assert_eq(p.x(), 1);
 ```
 
-Since `p.x` is a call of the function `x`, a value named `x` whose type isn't
-known, such as a parameter without a type annotation, makes it ambiguous. That's
-an error, as described in [How a call finds its function](function.md#how-a-call-finds-its-function).
-Annotating the value's type resolves it:
+Like a method call, `p.x` only looks among functions, so a variable named `x`
+doesn't get in its way, as described in
+[How a call finds its function](function.md#how-a-call-finds-its-function):
 
 ```ndc
-fn shift(p, x) { p.x + x }       // ERROR: Ambiguous call to 'x'
-fn shift(p, x: Int) { p.x + x }  // fine
+fn shift(p, x) { p.x + x }   // p.x is the field, x the parameter
 ```
 
 Because getters are ordinary function values you can pass them to higher-order

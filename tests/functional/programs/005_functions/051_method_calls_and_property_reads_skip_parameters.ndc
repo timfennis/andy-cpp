@@ -1,0 +1,12 @@
+// `xs.map(f)` and `s.len` only look among functions, so parameters named
+// `map` and `len` don't get in their way.
+fn render(map) {
+    [1, 2].map(fn(x) => x * 2)
+}
+fn label(len) {
+    "abc".len
+}
+print(render(5));
+print(label(5));
+// expect-output: [2,4]
+// expect-output: 3

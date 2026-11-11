@@ -20,23 +20,6 @@ impl Analyser {
         span: Span,
     ) -> StaticType {
         let left_type = self.analyse_assignment_target(l_value, span);
-        // `p.x += 1` reads `p.x`, the call `x(p)`, first.
-        if let AssignmentTarget::Member {
-            receiver,
-            member,
-            member_span,
-            ..
-        } = &l_value.target
-        {
-            let receiver_type = self
-                .result
-                .analysis
-                .expr_types
-                .get(&receiver.id)
-                .cloned()
-                .unwrap_or(StaticType::Any);
-            self.check_member_read(l_value.id, &receiver_type, member, *member_span);
-        }
         let right_type = self.analyse_expr(r_value);
         let arg_types = vec![left_type.clone(), right_type.clone()];
 

@@ -701,7 +701,7 @@ impl Parser {
                     };
 
                     let span = expr.span;
-                    let (function, arguments) = match expr.expression {
+                    let expression = match expr.expression {
                         Expression::MemberAccess {
                             receiver,
                             member,
@@ -709,8 +709,8 @@ impl Parser {
                             ..
                         } => {
                             arguments.insert(0, *receiver);
-                            (
-                                Box::new(
+                            Expression::MethodCall {
+                                function: Box::new(
                                     Expression::Identifier {
                                         name: member,
                                         identifier_span: member_span,
@@ -718,23 +718,20 @@ impl Parser {
                                     .to_location(member_span),
                                 ),
                                 arguments,
-                            )
+                            }
                         }
-                        expression => (
-                            Box::new(ExpressionLocation {
+                        expression => Expression::Call {
+                            function: Box::new(ExpressionLocation {
                                 expression,
                                 span: expr.span,
                                 id: expr.id,
                             }),
                             arguments,
-                        ),
+                        },
                     };
 
                     expr = ExpressionLocation {
-                        expression: Expression::Call {
-                            function,
-                            arguments,
-                        },
+                        expression,
                         span: span.merge(arguments_span),
                         id: NodeId::next(),
                     };

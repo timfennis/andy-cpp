@@ -118,7 +118,9 @@ impl AndycppHighlighter {
 /// Walk the parsed AST and collect the byte offsets of identifiers used as function names.
 fn collect_function_spans(expr: &ExpressionLocation, spans: &mut AHashSet<usize>) {
     match &expr.expression {
-        Expression::Call { function, .. } | Expression::OperatorCall { function, .. }
+        Expression::Call { function, .. }
+        | Expression::OperatorCall { function, .. }
+        | Expression::MethodCall { function, .. }
             if matches!(function.expression, Expression::Identifier { .. }) =>
         {
             spans.insert(function.span.offset());

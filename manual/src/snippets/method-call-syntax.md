@@ -13,7 +13,8 @@ print(add(3, 5));
 print(3.add(5));
 ```
 
-Both forms do the same thing.
+Both forms do the same thing, except that a method call only looks among functions: a variable named `add` is
+skipped.
 
 ### Implicit call
 
