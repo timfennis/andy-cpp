@@ -14,8 +14,7 @@ fn main() {
     let dirty = Command::new("git")
         .args(["diff", "--quiet", "HEAD"])
         .status()
-        .map(|s| !s.success())
-        .unwrap_or(false);
+        .is_ok_and(|s| !s.success());
 
     let suffix = if dirty { "-dirty" } else { "" };
 

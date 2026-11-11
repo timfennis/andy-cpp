@@ -8,6 +8,11 @@
 /// depend on any particular version of the VM.  The goal is to measure the
 /// overhead of the *write path* in isolation from interpreter execution.
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+// Dependencies of the other benchmark in this package.
+use ndc_interpreter as _;
+use ndc_stdlib as _;
+use rand as _;
+use rand_chacha as _;
 use std::cell::RefCell;
 use std::hint::black_box;
 use std::io::Write;
@@ -24,7 +29,7 @@ enum EnumSink {
 impl Write for EnumSink {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         match self {
-            EnumSink::Buffer(v) => v.write(buf),
+            Self::Buffer(v) => v.write(buf),
         }
     }
 
@@ -37,11 +42,7 @@ impl Write for EnumSink {
 // Implementation 2 – trait object
 // ---------------------------------------------------------------------------
 
-trait OutputTrait: Write {
-    fn captured(&self) -> Option<&[u8]> {
-        None
-    }
-}
+trait OutputTrait: Write {}
 
 struct DynBuffer(Vec<u8>);
 
@@ -55,11 +56,7 @@ impl Write for DynBuffer {
     }
 }
 
-impl OutputTrait for DynBuffer {
-    fn captured(&self) -> Option<&[u8]> {
-        Some(&self.0)
-    }
-}
+impl OutputTrait for DynBuffer {}
 
 // ---------------------------------------------------------------------------
 // Implementation 3 – Rc<RefCell<Vec<u8>>>

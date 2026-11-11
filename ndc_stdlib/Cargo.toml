@@ -11,12 +11,12 @@ ndc_core.workspace = true
 ndc_macros.workspace = true
 ndc_vm = { workspace = true }
 num.workspace = true
-once_cell.workspace = true
-tap.workspace = true
 
 # Optional
+once_cell = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
 regex = { workspace = true, optional = true }
+tap = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 
 # Crypto
@@ -26,6 +26,6 @@ sha1 = { version = "0.11.0", optional = true }
 [features]
 default = ["crypto", "rand", "regex", "serde"]
 crypto = ["dep:md5", "dep:sha1"]
-rand = ["dep:rand"]
-regex = ["dep:regex"]
+rand = ["dep:rand", "dep:tap"]
+regex = ["dep:regex", "dep:once_cell"]
 serde = ["dep:serde_json"]
