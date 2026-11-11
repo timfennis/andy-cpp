@@ -1,6 +1,10 @@
 // Andy C++ in the browser: highlighting, running programs in a worker, and a
 // code editor. Shared by the playground page and the manual's code blocks.
-import init, { highlight as highlightHtml } from "./pkg/ndc_wasm.js";
+import init, {
+  highlight as highlightHtml,
+  highlight_classes as highlightClasses,
+  highlight_spans as highlightSpans,
+} from "./pkg/ndc_wasm.js";
 
 let loading = null;
 let loaded = false;
@@ -25,6 +29,77 @@ export function highlight(code) {
     return highlightHtml(code);
   } catch {
     return escape(code);
+  }
+}
+
+/** What an editor needs from the language: highlighting on the main thread,
+ * and everything that needs a full analysis (diagnostics, completion, hover,
+ * definition) from a worker. Positions are LSP positions, a line and a UTF-16
+ * column, and answers are the language server protocol's types. Call after
+ * `load()` has resolved. */
+export function language() {
+  const service = new LanguageService();
+  return {
+    /** The classes `spans` numbers its pieces by, without the `tok-` prefix. */
+    classes: highlightClasses(),
+    /** `[start, end, kind]` per highlighted piece, in UTF-16 offsets. */
+    spans(code) {
+      try {
+        return highlightSpans(code);
+      } catch {
+        return new Uint32Array();
+      }
+    },
+    highlight,
+    /** Tells the worker about an edit, so it knows the last text that parsed. */
+    update: (source) => service.request("update", source),
+    diagnostics: (source) => service.request("diagnostics", source),
+    completion: (source, line, character) => service.request("completion", source, line, character),
+    hover: (source, line, character) => service.request("hover", source, line, character),
+    definition: (source, line, character) => service.request("definition", source, line, character),
+  };
+}
+
+/** Asks the language worker about a text. A request that crashes the worker,
+ * for example by overflowing its stack, answers `null` and the next request
+ * gets a fresh worker. */
+class LanguageService {
+  #worker = null;
+  #pending = new Map();
+  #next = 0;
+
+  request(op, source, line, character) {
+    return new Promise((resolve) => {
+      const id = this.#next++;
+      this.#pending.set(id, resolve);
+      this.#start().postMessage({ id, op, source, line, character });
+    });
+  }
+
+  #start() {
+    if (!this.#worker) {
+      this.#worker = new Worker(new URL("language-worker.js", import.meta.url), { type: "module" });
+      this.#worker.onmessage = ({ data }) => {
+        if (data.crashed) {
+          this.#restart();
+        }
+        this.#pending.get(data.id)?.(data.result ?? null);
+        this.#pending.delete(data.id);
+      };
+      this.#worker.onerror = (e) => {
+        e.preventDefault();
+        this.#restart();
+      };
+    }
+    return this.#worker;
+  }
+
+  /** Ends the worker; whatever it still had to answer gets `null`. */
+  #restart() {
+    this.#worker?.terminate();
+    this.#worker = null;
+    for (const resolve of this.#pending.values()) resolve(null);
+    this.#pending.clear();
   }
 }
 

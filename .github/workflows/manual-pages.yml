@@ -56,6 +56,11 @@ jobs:
       - name: Build the interpreter for the browser
         run: ./ndc_wasm/build.sh
 
+      # npm only runs inside the container build.sh pins, from the lockfile,
+      # with install scripts off; the runner itself never installs packages.
+      - name: Bundle the playground's editor
+        run: ./manual/editor/build.sh
+
       - name: Build manual
         run: mdbook build manual
 

@@ -38,6 +38,13 @@ cargo run --bin ndc -- disassemble script.ndc
 ./ndc_wasm/build.sh
 mdbook serve manual
 
+# Bundle the playground's code editor (CodeMirror) into manual/src/playground/editor.js.
+# Without it the playground falls back to a plain editor. npm never runs on the host:
+# the script runs it in a Docker image pinned by digest, from manual/editor's lockfile
+# (exact versions, install scripts off). Add or upgrade packages with
+# `./manual/editor/build.sh add <package>`, which only takes versions over 30 days old.
+./manual/editor/build.sh
+
 # Show documentation (optionally filtered by query)
 cargo run --bin ndc -- docs [query] [--no-color]
 
@@ -96,7 +103,7 @@ The AST is syntax only. The analyser runs name resolution (`ndc_resolver`) on ea
 | `ndc_diagnostics` | Renders `InterpreterError`s as codespan reports, for the CLI (coloured, `color` feature) and the browser (plain text) |
 | `ndc_highlight` | Classifies the pieces of a program (keyword, function, comment, …) for syntax highlighting, from the lexer and parser |
 | `ndc_bin` | CLI entry point, REPL, terminal colours for the highlighting |
-| `ndc_wasm` | The interpreter and highlighter for the browser via wasm-bindgen, used by the manual's playground |
+| `ndc_wasm` | The interpreter, highlighter and language features (`ndc_lsp` without its server) for the browser via wasm-bindgen, used by the manual's playground; its editor is bundled from `manual/editor/` |
 
 ### Key Concepts
 

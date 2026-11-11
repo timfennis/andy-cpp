@@ -13,8 +13,10 @@
 use ndc_interpreter::Interpreter;
 use wasm_bindgen::prelude::*;
 
+mod editor;
 mod highlight;
-pub use highlight::highlight;
+pub use editor::Editor;
+pub use highlight::{highlight, highlight_classes, highlight_spans};
 
 // Linked only for the `wasm_js` features turned on in Cargo.toml.
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
