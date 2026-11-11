@@ -1032,6 +1032,22 @@ fn a_cast_settles_what_isnt_known_about_its_value() {
 }
 
 #[test]
+fn a_waiting_call_does_not_commit_to_an_overload_taking_any_instead() {
+    // Only the catch-all `[]=` takes a list of unknown elements as an Int
+    // list's element, but once the elements are known the element-wise
+    // `[]=` is the one that fits, and it doesn't take a list.
+    let globals = [
+        natives(&[("[]=", "<T>(List<T>, Any, Any)")]),
+        index_natives(),
+    ]
+    .concat();
+    assert_eq!(
+        errors("let xs = [1]; xs[0] = [];", globals),
+        vec!["mismatched types: found List<Any> but expected Int"]
+    );
+}
+
+#[test]
 fn a_join_waits_until_both_branches_are_known() {
     // `x` isn't fixed as an `Int` by the branch next to it: the branches join
     // once the call says what `x` is.

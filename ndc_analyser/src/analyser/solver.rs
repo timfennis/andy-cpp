@@ -474,15 +474,7 @@ impl Analyser {
             .collect::<Vec<_>>();
         match viable[..] {
             [] => Some(self.resolve_call_now(call, &arguments)),
-            [only]
-                if matches!(
-                    self.vars.resolve(self.types.get_type(only)),
-                    StaticType::Function {
-                        parameters: Some(_),
-                        ..
-                    }
-                ) =>
-            {
+            [only] if self.fits_without_any(only, &arguments) => {
                 let binding = Binding::Resolved(Candidate::Scalar(only));
                 let typ = self.commit_call(&binding, &arguments, StaticType::Any);
                 self.record_pick(call.site, binding, &arguments);
@@ -687,7 +679,10 @@ impl Analyser {
         let [group] = &fitting[..] else {
             return false;
         };
-        let Some(narrowest) = self.most_specific(group) else {
+        let Some(narrowest) = self
+            .most_specific(group)
+            .filter(|&narrowest| self.fits_without_any(narrowest, &arguments))
+        else {
             return false;
         };
         let Some(Constraint::Call(call)) = self.waiting.remove(&serial) else {
@@ -727,6 +722,28 @@ impl Analyser {
                 .all(|(j, wider)| i == j || is_strictly_more_specific(narrower, wider))
         })?;
         Some(symbols[narrowest])
+    }
+
+    /// Whether `symbol` is a function whose parameters take these arguments
+    /// without an `Any` parameter standing in for an argument of another
+    /// type. One that does is a fallback that only wins over the overloads
+    /// taking exact types once the arguments are known, so a waiting call
+    /// doesn't commit to it: `xs[0] = []` on a `List<Int>` leaves only
+    /// `[]=(List<T>, Any, Any)` taking the empty list, but it's still an
+    /// error once the list's type is known.
+    fn fits_without_any(&self, symbol: SymbolId, arguments: &[StaticType]) -> bool {
+        match self.vars.resolve(self.types.get_type(symbol)) {
+            StaticType::Function {
+                parameters: Some(parameters),
+                ..
+            } => parameters
+                .iter()
+                .zip(arguments)
+                .all(|(parameter, argument)| {
+                    *parameter != StaticType::Any || *argument == StaticType::Any
+                }),
+            _ => false,
+        }
     }
 
     /// Whether `symbol` can accept arguments of these types, where each part
