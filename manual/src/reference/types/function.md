@@ -149,6 +149,29 @@ fn bad() -> Int { "hello" }   // ERROR: mismatched types
 
 A return-type annotation also helps the analyser understand recursive calls — without it, a recursive call resolves against an unknown return type and you can lose precision.
 
+### Function types
+
+The type of a function is written `Fn(A, B) -> C`: it takes an `A` and a `B` and returns a `C`. Without `-> …` the function returns `()`:
+
+```ndc
+let twice: Fn(Int) -> Int = fn(x: Int) => x * 2;
+let log: Fn(String) = fn(s: String) { print(s); };
+
+fn apply(f: Fn(Int) -> Int, x: Int) -> Int { f(x) }
+fn make_adder(n: Int) -> Fn(Int) -> Int { fn(x: Int) => x + n }
+
+assert_eq(apply(twice, 4), 8);
+assert_eq(apply(make_adder(10), 1), 11);
+```
+
+A function passed for a function parameter has to take what the parameter passes and return what it returns. Parts whose type isn't known, like the parameter of an unannotated lambda, are checked when the program runs:
+
+```ndc
+fn apply(f: Fn(Int) -> Int, x: Int) -> Int { f(x) }
+apply(fn(x) => x - 1, 1);         // fine: x isn't annotated
+apply(fn(s: String) => 1, 4);     // ERROR: the function takes a String, but apply passes an Int
+```
+
 ## Function overloading
 
 A name can refer to several functions, called overloads, as long as they differ in their number of parameters, their parameter types, or both:

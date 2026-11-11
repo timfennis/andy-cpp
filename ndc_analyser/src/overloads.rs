@@ -48,6 +48,40 @@ struct ScalarWalk {
     all_by_name: Vec<SymbolId>,
 }
 
+/// Whether a value of type `arg` might be accepted where `param` is expected
+/// when the program runs. For a function passed for a function parameter,
+/// only what both types know has to agree: `fn(x) => x * 2`, typed
+/// `Fn(Any) -> Any`, can be passed for an `Fn(Int) -> Int`, but
+/// `fn(x: String) => 1` can't, and neither can a function of two arguments.
+fn could_pass(param: &StaticType, arg: &StaticType) -> bool {
+    match (param, arg) {
+        (
+            StaticType::Function {
+                parameters: expected,
+                return_type: expected_return,
+            },
+            StaticType::Function {
+                parameters: takes,
+                return_type: returns,
+            },
+        ) => {
+            let parameters = match (expected, takes) {
+                // What the parameter passes has to fit what the function takes.
+                (Some(expected), Some(takes)) => {
+                    expected.len() == takes.len()
+                        && expected
+                            .iter()
+                            .zip(takes)
+                            .all(|(expected, takes)| could_pass(takes, expected))
+                }
+                _ => true,
+            };
+            parameters && could_pass(expected_return, returns)
+        }
+        _ => !param.is_incompatible_with(arg),
+    }
+}
+
 /// Returns `true` iff `more` is a strict subtype of `less` pointwise — i.e.
 /// every position satisfies `more[i] <: less[i]` and at least one position is
 /// not bidirectionally equivalent. Used by [`Overloads::most_specific_match`] to order
@@ -441,7 +475,7 @@ impl<'a> Overloads<'a> {
             && parameters
                 .iter()
                 .zip(sig)
-                .all(|(param, arg)| !param.is_incompatible_with(arg))
+                .all(|(param, arg)| could_pass(param, arg))
     }
 
     /// Try to resolve a vec candidate set for `sig`.
@@ -531,7 +565,7 @@ impl<'a> Overloads<'a> {
                     && parameters
                         .iter()
                         .zip(sig)
-                        .all(|(param, arg)| !param.is_incompatible_with(arg))
+                        .all(|(param, arg)| could_pass(param, arg))
             }
             StaticType::Function {
                 parameters: None, ..

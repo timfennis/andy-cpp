@@ -19,7 +19,7 @@ The type system is hierarchical with `Any` at the root:
     * [`Deque<T>`](./types/deque.md): a double-ended queue
     * [`MinHeap<T>` / `MaxHeap<T>`](./types/min-max-heap.md): min/max heap
     * `Iterator<T>`: produces values when consumed (currently only from range expressions like `5..100`)
-  * [`Function`](./types/function.md)
+  * [`Fn(A, B) -> C`](./types/function.md): a function taking an `A` and a `B` and returning a `C`
   * [Structs](./types/struct.md): user-defined record types, one per `struct` declaration
 
 These are also the names you write in annotations. Generic types take their parameters in angle brackets:

@@ -331,6 +331,20 @@ impl Value {
         match param {
             // A type parameter like `T` in `push<T>(List<T>, T)` takes any value.
             param if param.is_unknown() => true,
+            // What a function takes and returns can't be checked as the
+            // program runs, only how many arguments it takes.
+            StaticType::Function {
+                parameters: expected,
+                ..
+            } => match self.static_type() {
+                StaticType::Function {
+                    parameters: takes, ..
+                } => match (expected, takes) {
+                    (Some(expected), Some(takes)) => expected.len() == takes.len(),
+                    _ => true,
+                },
+                _ => false,
+            },
             StaticType::Int => {
                 matches!(self, Self::Int(_))
             }

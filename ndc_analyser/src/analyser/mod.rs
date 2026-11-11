@@ -134,6 +134,18 @@ impl Analyser {
             TypeExpr::Tuple { elements, .. } => {
                 StaticType::Tuple(elements.iter().map(|e| self.lower_type_expr(e)).collect())
             }
+            TypeExpr::Function {
+                parameters,
+                return_type,
+                ..
+            } => StaticType::Function {
+                parameters: Some(parameters.iter().map(|p| self.lower_type_expr(p)).collect()),
+                return_type: Box::new(
+                    return_type
+                        .as_ref()
+                        .map_or_else(StaticType::unit, |r| self.lower_type_expr(r)),
+                ),
+            },
             TypeExpr::Name {
                 name,
                 args,

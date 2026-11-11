@@ -170,13 +170,13 @@ mod inner {
     }
 
     /// Returns the element for which the key function returns the highest value.
-    #[function(signature = "<T, U>(Sequence<T>, Fn(*) -> U) -> T")]
+    #[function(signature = "<T, U>(Sequence<T>, Fn(T) -> U) -> T")]
     pub fn max_by_key(seq: SeqValue, func: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         by_key(seq, func, Ordering::Greater)
     }
 
     /// Returns the element for which the key function returns the lowest value.
-    #[function(signature = "<T, U>(Sequence<T>, Fn(*) -> U) -> T")]
+    #[function(signature = "<T, U>(Sequence<T>, Fn(T) -> U) -> T")]
     pub fn min_by_key(seq: SeqValue, func: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         by_key(seq, func, Ordering::Less)
     }
@@ -186,7 +186,7 @@ mod inner {
     /// The comparator function takes two elements and returns a number. A positive result means the
     /// first argument is greater than the second, a negative result means the first argument is
     /// less than the second, and zero means they are equal.
-    #[function(signature = "<T, U>(Sequence<T>, Fn(*) -> U) -> T")]
+    #[function(signature = "<T, U>(Sequence<T>, Fn(T, T) -> U) -> T")]
     pub fn max_by(seq: SeqValue, comp: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         by_comp(seq, comp, Ordering::Greater)
     }
@@ -196,7 +196,7 @@ mod inner {
     /// The comparator function takes two elements and returns a number. A positive result means the
     /// first argument is greater than the second, a negative result means the first argument is
     /// less than the second, and zero means they are equal.
-    #[function(signature = "<T, U>(Sequence<T>, Fn(*) -> U) -> T")]
+    #[function(signature = "<T, U>(Sequence<T>, Fn(T, T) -> U) -> T")]
     pub fn min_by(seq: SeqValue, comp: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         by_comp(seq, comp, Ordering::Less)
     }
@@ -265,7 +265,7 @@ mod inner {
     /// - for values equal to `0` the first argument is equal to the second argument
     ///
     /// This function only works for strings and lists and will throw errors otherwise.
-    #[function(signature = "<T, U>(List<T>, Fn(*) -> U)")]
+    #[function(signature = "<T, U>(List<T>, Fn(T, T) -> U)")]
     pub fn sort_by(list: &mut Vec<Value>, comp: &mut VmCallable<'_>) -> anyhow::Result<()> {
         let mut err: Option<String> = None;
         list.sort_by(|left, right| {
@@ -311,7 +311,7 @@ mod inner {
     /// - for values lower than `0` the first argument is smaller than the second argument
     /// - for values higher than `0` the first argument is greater than the second argument
     /// - for values equal to `0` the first argument is equal to the second argument
-    #[function(signature = "<T, U>(Sequence<T>, Fn(*) -> U) -> List<T>")]
+    #[function(signature = "<T, U>(Sequence<T>, Fn(T, T) -> U) -> List<T>")]
     pub fn sorted_by(seq: SeqValue, comp: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         let mut list: Vec<Value> = seq
             .try_into_iter()
@@ -378,7 +378,7 @@ mod inner {
     }
 
     /// Reduces/folds the given sequence using the given combining function and a custom initial value.
-    #[function(signature = "<T, A>(Sequence<T>, A, Fn(*) -> A) -> A")]
+    #[function(signature = "<T, A>(Sequence<T>, A, Fn(A, T) -> A) -> A")]
     pub fn fold(
         seq: SeqValue,
         initial: Value,
@@ -393,7 +393,7 @@ mod inner {
     }
 
     /// Reduces/folds the given sequence using the given combining function.
-    #[function(signature = "<T>(Sequence<T>, Fn(*) -> T) -> T")]
+    #[function(signature = "<T>(Sequence<T>, Fn(T, T) -> T) -> T")]
     pub fn reduce(seq: SeqValue, function: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         let mut iterator = seq
             .try_into_iter()
@@ -405,7 +405,7 @@ mod inner {
     }
 
     /// Filters the given sequence using the `predicate`.
-    #[function(signature = "<T, U>(Sequence<T>, Fn(*) -> U) -> List<T>")]
+    #[function(signature = "<T>(Sequence<T>, Fn(T) -> Bool) -> List<T>")]
     pub fn filter(seq: SeqValue, predicate: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         let mut out = Vec::new();
         for element in seq
@@ -425,7 +425,7 @@ mod inner {
     }
 
     /// Returns the number of elements in the input sequence for which the given `predicate` returns `true`.
-    #[function(signature = "<T, U>(Sequence<T>, Fn(*) -> U) -> Int")]
+    #[function(signature = "<T>(Sequence<T>, Fn(T) -> Bool) -> Int")]
     pub fn count(seq: SeqValue, predicate: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         let mut out = 0i64;
         for element in seq
@@ -442,7 +442,7 @@ mod inner {
     }
 
     /// Returns the value of the first element for which the `predicate` is true for the given input sequence.
-    #[function(signature = "<T, U>(Sequence<T>, Fn(*) -> U) -> T")]
+    #[function(signature = "<T>(Sequence<T>, Fn(T) -> Bool) -> T")]
     pub fn find(seq: SeqValue, predicate: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         for element in seq
             .try_into_iter()
@@ -461,7 +461,7 @@ mod inner {
     }
 
     /// Returns the first index of the element for which the `predicate` is true in the input sequence.
-    #[function(signature = "<T, U>(Sequence<T>, Fn(*) -> U) -> Int")]
+    #[function(signature = "<T>(Sequence<T>, Fn(T) -> Bool) -> Int")]
     pub fn locate(seq: SeqValue, predicate: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         for (idx, element) in seq
             .try_into_iter()
@@ -493,7 +493,7 @@ mod inner {
     }
 
     /// Returns `true` if the `predicate` is true for none of the elements in `seq`.
-    #[function(signature = "<T, U>(Sequence<T>, Fn(*) -> U) -> Bool")]
+    #[function(signature = "<T>(Sequence<T>, Fn(T) -> Bool) -> Bool")]
     pub fn none(seq: SeqValue, function: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         for item in seq
             .try_into_iter()
@@ -514,7 +514,7 @@ mod inner {
     }
 
     /// Returns `true` if the `predicate` is true for all the elements in `seq`.
-    #[function(signature = "<T, U>(Sequence<T>, Fn(*) -> U) -> Bool")]
+    #[function(signature = "<T>(Sequence<T>, Fn(T) -> Bool) -> Bool")]
     pub fn all(seq: SeqValue, function: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         for item in seq
             .try_into_iter()
@@ -535,7 +535,7 @@ mod inner {
     }
 
     /// Returns `true` if the `predicate` is true for any of the elements in `seq`.
-    #[function(signature = "<T, U>(Sequence<T>, Fn(*) -> U) -> Bool")]
+    #[function(signature = "<T>(Sequence<T>, Fn(T) -> Bool) -> Bool")]
     pub fn any(seq: SeqValue, predicate: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         for item in seq
             .try_into_iter()
@@ -556,7 +556,7 @@ mod inner {
     }
 
     /// Applies the function to each element in a sequence returning the result as a list.
-    #[function(signature = "<T, U>(Sequence<T>, Fn(*) -> U) -> List<U>")]
+    #[function(signature = "<T, U>(Sequence<T>, Fn(T) -> U) -> List<U>")]
     pub fn map(seq: SeqValue, function: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         let mut out = Vec::new();
         for item in seq
@@ -569,7 +569,7 @@ mod inner {
     }
 
     /// Applies a function to each item in a sequence, flattens the resulting sequences, and returns a single combined sequence.
-    #[function(signature = "<T, U>(Sequence<T>, Fn(*) -> U) -> List<Any>")]
+    #[function(signature = "<T, U>(Sequence<T>, Fn(T) -> Sequence<U>) -> List<U>")]
     pub fn flat_map(seq: SeqValue, function: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         let mut out = Vec::new();
         for item in seq
@@ -753,7 +753,7 @@ mod inner {
     /// Applies a function to each pair of consecutive elements in a sequence and returns the results as a list.
     #[function(
         name = "pairwise",
-        signature = "<T, U>(Sequence<T>, Fn(*) -> U) -> List<U>"
+        signature = "<T, U>(Sequence<T>, Fn(T, T) -> U) -> List<U>"
     )]
     pub fn pairwise_map(seq: SeqValue, function: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         let main: Vec<Value> = seq

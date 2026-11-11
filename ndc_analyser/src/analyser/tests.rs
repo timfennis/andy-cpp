@@ -564,7 +564,7 @@ fn calling_a_function_value_checks_its_arguments() {
             "let f = fn(x: Int) { x }; let g = [f]; g[0](\"a\");",
             index_natives()
         ),
-        vec!["A Function(Int) -> Int doesn't accept the arguments 'String'"]
+        vec!["A function of type Fn(Int) -> Int doesn't accept the arguments 'String'"]
     );
 }
 
@@ -585,6 +585,69 @@ fn an_index_write_checks_the_index_against_the_container() {
         ("let a = 5; a[0] = 1;", "Unable to index into Int"),
     ] {
         assert_eq!(errors(source, globals.clone()), vec![expected], "{source}");
+    }
+}
+
+#[test]
+fn a_function_annotation_types_a_variable() {
+    let int_to_int = StaticType::Function {
+        parameters: Some(vec![StaticType::Int]),
+        return_type: Box::new(StaticType::Int),
+    };
+    assert_eq!(
+        analyse_last_type("let f: Fn(Int) -> Int = fn(x: Int) => x; f"),
+        int_to_int
+    );
+    assert_eq!(
+        errors("let f: Fn(Int) -> Int = fn(x: String) => x;", vec![]),
+        vec!["mismatched types: found Fn(String) -> String but expected Fn(Int) -> Int"]
+    );
+}
+
+#[test]
+fn a_function_argument_gets_what_the_function_parameter_passes() {
+    let globals = natives(&[("map", "<T, U>(Sequence<T>, Fn(T) -> U) -> List<U>")]);
+    // A typed lambda fits a type parameter, and settles it.
+    assert_eq!(
+        analyse_last_type_with_globals(
+            "let xs = []; map(xs, fn(x: Int) => x); xs",
+            globals.clone()
+        ),
+        StaticType::List(Box::new(StaticType::Int))
+    );
+    assert_eq!(
+        analyse_last_type_with_globals("map([1], fn(x: Int) => \"a\")", globals.clone()),
+        StaticType::List(Box::new(StaticType::String))
+    );
+    // It has to take what the list holds.
+    assert_eq!(
+        errors("map([1], fn(x: String) => x);", globals),
+        vec![
+            "No function called 'map' found that matches the arguments 'List<Int>, Fn(String) -> String'"
+        ]
+    );
+}
+
+#[test]
+fn a_function_argument_fits_a_function_parameter_where_their_known_parts_agree() {
+    let apply = "fn apply(f: Fn(Int) -> Int) { f(1) } ";
+    // An untyped lambda is `Fn(Any) -> Any`, which is checked as the program runs.
+    assert_eq!(
+        errors(&format!("{apply}apply(fn(x) => x);"), vec![]),
+        Vec::<String>::new()
+    );
+    for (lambda, shown) in [
+        ("fn(x: String) => 1", "Fn(String) -> Int"),
+        ("fn(x) => \"a\"", "Fn(Any) -> String"),
+        ("fn(a, b) => 1", "Fn(Any, Any) -> Int"),
+    ] {
+        assert_eq!(
+            errors(&format!("{apply}apply({lambda});"), vec![]),
+            vec![format!(
+                "No function called 'apply' found that matches the arguments '{shown}'"
+            )],
+            "{lambda}"
+        );
     }
 }
 

@@ -202,7 +202,7 @@ impl AnalysisError {
     ) -> Self {
         Self {
             text: format!(
-                "A {callee} doesn't accept the arguments '{}'",
+                "A function of type {callee} doesn't accept the arguments '{}'",
                 types.iter().join(", ")
             ),
             span,

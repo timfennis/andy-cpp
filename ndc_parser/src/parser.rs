@@ -1415,6 +1415,11 @@ impl Parser {
         };
 
         match token {
+            Token::Identifier(name)
+                if name == "Fn" && self.peek_next_token() == Some(&Token::LeftParentheses) =>
+            {
+                self.function_type()
+            }
             Token::Identifier(_) => self.named_or_generic_type(),
             Token::LeftParentheses => self.tuple_type(),
             _ => Err(Error::with_help(
@@ -1602,6 +1607,29 @@ impl Parser {
         };
 
         Ok(greater_span)
+    }
+
+    /// Parses `Fn(A, B) -> C`, where `-> C` is optional.
+    fn function_type(&mut self) -> Result<TypeExpr, Error> {
+        let start = self.require_current_token()?.span;
+        let (parameters, parameters_span) = self.delimited_comma_separated(
+            &Token::LeftParentheses,
+            &Token::RightParentheses,
+            Self::type_annotation,
+            true,
+        )?;
+        let (return_type, span) = if self.consume_token_if(&[Token::RightArrow]).is_some() {
+            let return_type = self.type_annotation()?;
+            let span = start.merge(return_type.span());
+            (Some(Box::new(return_type)), span)
+        } else {
+            (None, start.merge(parameters_span))
+        };
+        Ok(TypeExpr::Function {
+            parameters,
+            return_type,
+            span,
+        })
     }
 
     pub fn tuple_type(&mut self) -> Result<TypeExpr, Error> {
