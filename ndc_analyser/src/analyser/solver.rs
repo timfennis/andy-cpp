@@ -284,10 +284,6 @@ impl Analyser {
     /// every early commit the tests make.
     pub(super) fn check_early_picks(&mut self) {
         let early_picks = std::mem::take(&mut self.early_picks);
-        // A program with errors may have committed to what was reported.
-        if !self.result.errors.is_empty() {
-            return;
-        }
         for pick in early_picks {
             match pick {
                 EarlyPick::Call {
@@ -686,12 +682,22 @@ impl Analyser {
         }
     }
 
+    /// Whether an operator might still apply to each element of a tuple: an
+    /// operand that isn't known yet, or is `Any`, can be one.
+    fn operand_could_be_a_tuple(kind: CallKind, arguments: &[StaticType]) -> bool {
+        kind == CallKind::Operator
+            && arguments
+                .iter()
+                .any(|argument| matches!(argument, StaticType::Var(_) | StaticType::Any))
+    }
+
     /// The overload a call of `candidates` with arguments of these types
     /// commits to while the arguments aren't fully known: the only one that
     /// can take them, once nothing learned later could make another one the
     /// pick. One that takes them only through an `Any` parameter would lose
     /// to an exact type once they're known, and an operator may also apply
-    /// to each element of a tuple: `fn(x) => x ++ "!"` can take `("a", "b")`.
+    /// to each element of a tuple, which an unknown or `Any` operand can be:
+    /// `fn(x) => x ++ "!"` can take `("a", "b")`.
     /// Function values are picked by the same rule, as calls with the
     /// expected parameter types.
     pub(super) fn early_overload(
@@ -706,13 +712,12 @@ impl Analyser {
             .into_iter()
             .filter(|&symbol| self.could_accept(symbol, arguments))
             .collect::<Vec<_>>();
-        let operand_could_be_a_tuple = kind == CallKind::Operator
-            && arguments
-                .iter()
-                .any(|argument| matches!(argument, StaticType::Var(_)));
         match viable[..] {
             [] => EarlyOverload::NoneFits,
-            [only] if self.fits_without_any(only, arguments) && !operand_could_be_a_tuple => {
+            [only]
+                if self.fits_without_any(only, arguments)
+                    && !Self::operand_could_be_a_tuple(kind, arguments) =>
+            {
                 EarlyOverload::Only(only)
             }
             _ => EarlyOverload::Undecided,
@@ -894,6 +899,7 @@ impl Analyser {
         if arguments
             .iter()
             .any(|argument| matches!(argument, StaticType::Var(_)))
+            || Self::operand_could_be_a_tuple(call.kind, &arguments)
         {
             return false;
         }

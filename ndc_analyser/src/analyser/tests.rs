@@ -1070,6 +1070,20 @@ fn an_operator_waits_while_an_operand_could_still_be_a_tuple() {
 }
 
 #[test]
+fn an_operator_doesnt_commit_early_while_an_operand_is_any() {
+    // `a` is `Any`, so it may be a tuple that `++` applies to element-wise:
+    // the call is picked when the program runs, among all the overloads
+    // that could do that, as it would be with the types as they end up.
+    let globals = natives(&[("++", "<T>(List<T>, List<T>) -> List<T>")]);
+    let (_, result) = analyse_with_globals("let g = fn(a: Any) => a ++ [];", globals);
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    assert!(matches!(
+        result.analysis.bindings.values().find(|binding| matches!(binding, Binding::Dynamic(_))),
+        Some(Binding::Dynamic(candidates)) if candidates.iter().any(|c| matches!(c, Candidate::Vec(_)))
+    ));
+}
+
+#[test]
 fn a_write_passes_its_value_like_an_argument() {
     // Any sequence goes where a `Sequence<Int>` is expected, and settles its
     // elements as Ints.

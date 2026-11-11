@@ -25,7 +25,7 @@ The workspace has three test crates, each living under `tests/`:
 |---|---|---|
 | `functional_tests` | `tests/functional/` | End-to-end `.ndc` programs and REPL integration tests. The crate's `build.rs` auto-generates one Rust `#[test]` per `.ndc` file under `tests/functional/programs/`. |
 | `compiler_tests`   | `tests/compiler/`   | Asserts exact bytecode `OpCode` sequences for given source. |
-| `proptest_tests`   | `tests/proptest/`   | Property-based fuzz harness that drives random token streams through the parser → analyser → compiler → VM and looks for panics. |
+| `proptest_tests`   | `tests/proptest/`   | Property-based fuzz harnesses: random token streams through the parser → analyser → compiler → VM, and generated programs that stress the analyser's overload choices. Both look for panics. |
 
 ### Run everything
 
@@ -78,6 +78,27 @@ When a fresh fuzz run finds a new panic, proptest shrinks it and appends
 the seed to `tests/proptest/tests/panic.regressions`. **Commit the
 updated `.regressions` file** — every subsequent `cargo test` will
 guard against that input.
+
+### Run the overload fuzz harness
+
+`tests/proptest/tests/overloads.rs` generates well-formed programs built
+from what makes the analyser commit to an overload before the types are
+fully known: overloaded functions, empty literals, lambdas, function
+values, `map`, `if`, writes and annotations. In debug builds the analyser
+checks that each such early commit is the overload the call or value gets
+once the types are known, so any disagreement panics. The minimal
+failing program is printed as source.
+
+```bash
+# Fuzz only (1024 cases by default)
+cargo test -p proptest_tests --test overloads -- --ignored
+
+# Long fuzz run
+PROPTEST_CASES=100000 cargo test -p proptest_tests --test overloads -- --ignored
+```
+
+Its seeds go to `tests/proptest/tests/overloads.regressions`, which
+`known_overload_regressions_do_not_panic` replays in every `cargo test`.
 
 ## Writing new tests
 
