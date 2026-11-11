@@ -1,7 +1,9 @@
+//! Interpreter errors as codespan reports: the source line, a caret under the
+//! offending span, and any help text as a note.
+
 use codespan_reporting::diagnostic::{Diagnostic, Label};
 use codespan_reporting::files;
 use codespan_reporting::term;
-use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
 use ndc_interpreter::InterpreterError;
 use ndc_lexer::{SourceDb, SourceId};
 use std::ops::Range;
@@ -123,7 +125,25 @@ fn into_diagnostics(err: InterpreterError) -> Vec<Diagnostic<SourceId>> {
     }
 }
 
+/// Renders the error without colours, as one string.
+#[must_use]
+pub fn render(source_db: &SourceDb, err: InterpreterError) -> String {
+    let files = DiagnosticFiles(source_db);
+    let config = term::Config::default();
+    into_diagnostics(err)
+        .iter()
+        .map(|diagnostic| {
+            term::emit_into_string(&config, &files, diagnostic)
+                .unwrap_or_else(|_| diagnostic.message.clone())
+        })
+        .collect()
+}
+
+/// Prints the error to stderr, in colour when stderr is a terminal.
+#[cfg(feature = "color")]
 pub fn emit_error(source_db: &SourceDb, err: InterpreterError) {
+    use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
+
     let diagnostics = into_diagnostics(err);
     let files = DiagnosticFiles(source_db);
     let writer = StandardStream::stderr(ColorChoice::Auto);

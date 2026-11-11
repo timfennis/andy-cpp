@@ -32,6 +32,10 @@ cargo run --bin ndc -- script.ndc
 # Disassemble bytecode
 cargo run --bin ndc -- disassemble script.ndc
 
+# Build the browser playground into ndc_wasm/web (needs the wasm32-unknown-unknown
+# target and wasm-bindgen-cli at the version in Cargo.lock), then serve that folder
+./ndc_wasm/build.sh
+
 # Show documentation (optionally filtered by query)
 cargo run --bin ndc -- docs [query] [--no-color]
 
@@ -85,7 +89,9 @@ The AST is syntax only. The analyser runs name resolution (`ndc_resolver`) on ea
 | `ndc_vm` | Bytecode `Compiler`, stack-based `Vm`, and the runtime `Value` (including `Number`) |
 | `ndc_stdlib` | Built-in functions registered via `FunctionRegistry` |
 | `ndc_lsp` | LSP backend (hover, inlay hints) |
+| `ndc_diagnostics` | Renders `InterpreterError`s as codespan reports, for the CLI (coloured, `color` feature) and the browser (plain text) |
 | `ndc_bin` | CLI entry point, REPL, syntax highlighting |
+| `ndc_wasm` | The interpreter for the browser via wasm-bindgen, and the playground page in `ndc_wasm/web/` |
 
 ### Key Concepts
 

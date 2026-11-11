@@ -10,7 +10,6 @@ use std::path::PathBuf;
 use std::process;
 use std::{fs, io::Write};
 
-mod diagnostic;
 mod phase_timing;
 mod repl;
 
@@ -197,12 +196,12 @@ fn main() -> anyhow::Result<()> {
                         write_phase_timings(&mut std::io::stderr(), &timings)?;
                     }
                     Err(err) => {
-                        diagnostic::emit_error(interpreter.source_db(), err);
+                        ndc_diagnostics::emit_error(interpreter.source_db(), err);
                         process::exit(1);
                     }
                 }
             } else if let Err(err) = interpreter.eval_named(name, &string) {
-                diagnostic::emit_error(interpreter.source_db(), err);
+                ndc_diagnostics::emit_error(interpreter.source_db(), err);
                 process::exit(1);
             }
         }
@@ -213,7 +212,7 @@ fn main() -> anyhow::Result<()> {
             match interpreter.disassemble_str(&string) {
                 Ok(output) => print!("{output}"),
                 Err(e) => {
-                    diagnostic::emit_error(interpreter.source_db(), e);
+                    ndc_diagnostics::emit_error(interpreter.source_db(), e);
                     process::exit(1);
                 }
             }
