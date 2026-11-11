@@ -157,7 +157,7 @@ impl Analyser {
             }
             return match callee_type {
                 StaticType::Function { return_type, .. } => *return_type,
-                StaticType::Any | StaticType::Var(_) => StaticType::Any,
+                unknown if unknown.is_unknown() => StaticType::Any,
                 other => {
                     self.emit(AnalysisError::not_callable(&other, span));
                     StaticType::Any

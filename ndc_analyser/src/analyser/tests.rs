@@ -522,6 +522,20 @@ fn each_call_instantiates_the_signature_afresh() {
 }
 
 #[test]
+fn a_call_picked_at_runtime_has_no_type_parameters_in_its_type() {
+    // `xs` could be anything, so `reversed` is picked when the program runs
+    // and its `T` is never known.
+    let globals = natives(&[("reversed", "<T>(List<T>) -> List<T>")]);
+    assert_eq!(
+        analyse_last_type_with_globals("fn f(xs) { reversed(xs) } f", globals),
+        StaticType::Function {
+            parameters: Some(vec![StaticType::Any]),
+            return_type: Box::new(StaticType::List(Box::new(StaticType::Any))),
+        }
+    );
+}
+
+#[test]
 fn an_any_parameter_settles_what_its_argument_leaves_unknown_as_any() {
     // `keep` may store anything in the list, so it can't become a List<Int>.
     let globals = [natives(&[("keep", "(List<Any>)")]), index_natives()].concat();

@@ -548,9 +548,16 @@ impl<'a> Overloads<'a> {
 
     /// Return type of a scalar candidate. Falls back to `Any` if the binding
     /// turned out not to carry a function type (e.g. `Any`-typed callee).
+    ///
+    /// A type parameter such as `T` in `first<T>(List<T>) -> T` is `Any`
+    /// here: only a call that commits to the overload knows what it stands
+    /// for, and one picked at runtime never does.
     fn scalar_return_type(self, symbol: SymbolId) -> StaticType {
         match self.types.get_type(symbol) {
-            StaticType::Function { return_type, .. } => self.vars.resolve(return_type),
+            StaticType::Function { return_type, .. } => self
+                .vars
+                .resolve(return_type)
+                .replace(&|part| matches!(part, StaticType::Generic(_)).then_some(StaticType::Any)),
             _ => StaticType::Any,
         }
     }
