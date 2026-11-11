@@ -1121,6 +1121,17 @@ fn an_overloaded_function_value_is_the_overload_its_use_expects() {
 }
 
 #[test]
+fn a_return_annotation_picks_the_overloaded_function_value_returned() {
+    assert_eq!(
+        errors(
+            "fn by_pattern() -> Fn(String, String) -> List<String> { split }",
+            split_natives()
+        ),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
 fn an_overloaded_function_value_nothing_picks_is_an_error() {
     assert_eq!(
         errors("let f = split;", split_natives()),
