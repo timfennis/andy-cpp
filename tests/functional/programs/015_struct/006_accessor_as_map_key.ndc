@@ -27,7 +27,8 @@ struct Other {
 let other_x = x;
 
 assert(point_x != other_x);
-let both = %{point_x: "Point", other_x: "Other"};
+// The two getters have different types, so the keys are typed `Any`.
+let both: Map<Any, String> = %{point_x: "Point", other_x: "Other"};
 assert_eq(both.len(), 2);
 assert_eq(both[point_x], "Point");
 assert_eq(both[other_x], "Other");

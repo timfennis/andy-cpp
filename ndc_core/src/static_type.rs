@@ -330,9 +330,14 @@ impl StaticType {
                     (Some(ps1), Some(ps2)) => {
                         ps1.len() == ps2.len() &&
                             // Note the reversal: p2 must be subtype of p1!
+                            // A type parameter of a signature, like `T` in
+                            // `Fn(T) -> U`, fits whatever the function takes:
+                            // the call works out what it stands for. An `Any`
+                            // doesn't, as a value of that type is only
+                            // checked when the program runs.
                             ps1.iter()
                                 .zip(ps2)
-                                .all(|(p1, p2)| p2.is_subtype(p1))
+                                .all(|(p1, p2)| matches!(p2, Self::Generic(_)) || p2.is_subtype(p1))
                     }
                 };
 
@@ -831,7 +836,7 @@ impl fmt::Display for StaticType {
                 return_type,
             } => write!(
                 f,
-                "Function({}) -> {return_type}",
+                "Fn({}) -> {return_type}",
                 parameters
                     .as_deref()
                     .map_or(String::from("*"), |p| p.iter().join(", "))

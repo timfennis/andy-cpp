@@ -1000,6 +1000,18 @@ impl NameResolver {
                     self.resolve_type(element)?;
                 }
             }
+            TypeExpr::Function {
+                parameters,
+                return_type,
+                ..
+            } => {
+                for parameter in parameters {
+                    self.resolve_type(parameter)?;
+                }
+                if let Some(return_type) = return_type {
+                    self.resolve_type(return_type)?;
+                }
+            }
         }
         Ok(())
     }

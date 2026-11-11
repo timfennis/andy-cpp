@@ -193,17 +193,35 @@ impl TypeVars {
             | (StaticType::MinHeap(p), StaticType::MinHeap(a))
             | (StaticType::MaxHeap(p), StaticType::MaxHeap(a))
             | (StaticType::Deque(p), StaticType::Deque(a))
-            | (StaticType::Sequence(p), StaticType::Sequence(a))
-            // A function passed as an argument returns what the parameter's
-            // function type returns: `map(xs, fn(x) => x + 1)` settles `U`.
-            | (
+            | (StaticType::Sequence(p), StaticType::Sequence(a)) => self.bind_argument(p, a),
+            // A function passed as an argument gets the parameter types the
+            // function type passes it, and returns what the function type
+            // returns: `map(xs, fn(x: Int) => x + 1)` passes `xs`'s elements
+            // to `x` and settles `U`. A function parameter whose type isn't
+            // known takes anything, so it settles nothing.
+            (
                 StaticType::Function {
-                    return_type: p, ..
+                    parameters: expected,
+                    return_type: p,
                 },
                 StaticType::Function {
-                    return_type: a, ..
+                    parameters: takes,
+                    return_type: a,
                 },
-            ) => self.bind_argument(p, a),
+            ) => {
+                let mut fits = true;
+                if let (Some(expected), Some(takes)) = (expected, takes) {
+                    // A function taking another number of arguments can't be
+                    // called the way the function type says.
+                    fits = expected.len() == takes.len();
+                    for (expected, takes) in expected.iter().zip(takes) {
+                        if !takes.is_unknown() {
+                            fits &= self.bind_argument(takes, expected);
+                        }
+                    }
+                }
+                fits && self.bind_argument(p, a)
+            }
             (StaticType::Tuple(ps), StaticType::Tuple(args)) if ps.len() == args.len() => {
                 ps.iter().zip(args).all(|(p, a)| self.bind_argument(p, a))
             }
