@@ -6,10 +6,11 @@
 use super::Analyser;
 use super::solver::Constraint;
 use crate::error::AnalysisError;
+use crate::overloads::CallKind;
 use ndc_analysis::{Binding, Candidate};
 use ndc_core::{NodeId, StaticType};
 use ndc_lexer::Span;
-use ndc_resolver::{BindingKind, SymbolId};
+use ndc_resolver::{BindingKind, Candidates, SymbolId};
 
 /// An overloaded function's name used as a value, waiting for the type
 /// expected of it to say which overload is meant.
@@ -17,7 +18,9 @@ use ndc_resolver::{BindingKind, SymbolId};
 pub(super) struct FunctionValue {
     id: NodeId,
     name: String,
-    /// The overloads the name can mean, grouped by scope, nearest first.
+    /// What the name can mean, as for a call of it.
+    candidates: Candidates,
+    /// The functions among them, grouped by scope, nearest first.
     groups: Vec<Vec<SymbolId>>,
     /// The type expected of the value, which its uses settle.
     expected: StaticType,
@@ -52,12 +55,13 @@ impl Analyser {
         span: Span,
     ) -> StaticType {
         let symbol = self.resolver.innermost_reference(id);
-        let groups = self.overloaded_function_groups(id);
+        let groups = self.overloaded_function_groups(id, symbol);
         if groups.iter().map(Vec::len).sum::<usize>() > 1 {
             let expected = self.vars.fresh(StaticType::Any);
             let value = FunctionValue {
                 id,
                 name: name.to_string(),
+                candidates: self.resolver.reference_candidates(id).clone(),
                 groups,
                 expected: expected.clone(),
                 span,
@@ -76,10 +80,10 @@ impl Analyser {
     }
 
     /// The functions the name at `id` can mean, grouped by scope, nearest
-    /// first, if the nearest thing it can mean is a function.
-    fn overloaded_function_groups(&self, id: NodeId) -> Vec<Vec<SymbolId>> {
+    /// first, if the nearest thing it can mean, `innermost`, is a function.
+    fn overloaded_function_groups(&self, id: NodeId, innermost: SymbolId) -> Vec<Vec<SymbolId>> {
         let symbols = self.resolver.symbols();
-        if symbols.kind(self.resolver.innermost_reference(id)) != BindingKind::Function {
+        if symbols.kind(innermost) != BindingKind::Function {
             return Vec::new();
         }
         self.overloads()
@@ -105,25 +109,40 @@ impl Analyser {
         }
     }
 
-    /// Which overload `value` means with the expected type as it's known
-    /// now: the one in the nearest scope that has any that fit, if it's the
-    /// only one there. While the expected type isn't fully known, only an
-    /// overload that's the only one fitting in any scope is chosen, as more
-    /// knowledge could still rule out a nearer one.
-    pub(super) fn choose_function_value(&mut self, value: &FunctionValue) -> Choice {
-        let expected = self.vars.resolve(&value.expected);
-        let fitting = value
-            .groups
-            .iter()
-            .map(|group| {
-                group
-                    .iter()
-                    .copied()
-                    .filter(|&symbol| self.fits_expected(symbol, &expected))
-                    .collect::<Vec<_>>()
-            })
-            .filter(|group| !group.is_empty())
-            .collect::<Vec<_>>();
+    /// Which overload `value` means where a value of type `expected` is
+    /// expected. Once the expected function's parameter types are known, it
+    /// means the overload a call with arguments of those types would pick,
+    /// so the nearest scope, the most specific overload and `Any` losing to
+    /// an exact type all work as for calls, and the overload must return
+    /// what's expected too. Before that, only an overload that's the only
+    /// one fitting in any scope is chosen, as more knowledge could still
+    /// rule out a nearer one.
+    pub(super) fn choose_function_value(
+        &mut self,
+        value: &FunctionValue,
+        expected: &StaticType,
+    ) -> Choice {
+        if let StaticType::Function {
+            parameters: Some(parameters),
+            ..
+        } = expected
+            && !parameters.iter().any(StaticType::has_vars)
+        {
+            let binding = self
+                .overloads()
+                .resolve_call(&value.candidates, parameters, CallKind::Regular)
+                .binding;
+            return match binding {
+                Binding::Resolved(Candidate::Scalar(symbol))
+                    if self.fits_expected(symbol, expected) =>
+                {
+                    Choice::One(symbol)
+                }
+                Binding::Dynamic(_) => Choice::Undecided,
+                _ => Choice::None,
+            };
+        }
+        let fitting = self.fitting_groups(value, expected);
         let nearest = if expected.has_vars() {
             match &fitting[..] {
                 [only] => only.clone(),
@@ -143,6 +162,27 @@ impl Analyser {
             [newest, ..] if self.all_take_the_same(&nearest) => Choice::One(newest),
             _ => Choice::Undecided,
         }
+    }
+
+    /// The overloads of `value` that a value of type `expected` can be,
+    /// grouped by scope, nearest first, leaving out scopes with none.
+    fn fitting_groups(
+        &mut self,
+        value: &FunctionValue,
+        expected: &StaticType,
+    ) -> Vec<Vec<SymbolId>> {
+        value
+            .groups
+            .iter()
+            .map(|group| {
+                group
+                    .iter()
+                    .copied()
+                    .filter(|&symbol| self.fits_expected(symbol, expected))
+                    .collect::<Vec<_>>()
+            })
+            .filter(|group| !group.is_empty())
+            .collect()
     }
 
     /// Whether the functions `symbols` all take the same parameter types.
@@ -169,14 +209,14 @@ impl Analyser {
     /// of it decides it, and returns whether it did.
     pub(super) fn try_function_value(&mut self, value: &FunctionValue) -> bool {
         let expected = self.vars.resolve(&value.expected);
-        match self.choose_function_value(value) {
+        match self.choose_function_value(value, &expected) {
             Choice::One(symbol) => {
                 self.commit_function_value(value, symbol, expected.has_vars());
                 true
             }
             Choice::Undecided if expected.has_vars() => false,
             Choice::Undecided => {
-                let example = self.overload_example(value);
+                let example = self.overload_example(value, &expected);
                 self.emit(AnalysisError::ambiguous_function_value(
                     &value.name,
                     &self.vars.shown(&expected),
@@ -198,11 +238,18 @@ impl Analyser {
         }
     }
 
-    /// The type of the overload the name means innermost, as an example of
-    /// a type that picks one.
-    fn overload_example(&self, value: &FunctionValue) -> StaticType {
-        let symbol = self.resolver.innermost_reference(value.id);
-        self.vars.shown(self.types.get_type(symbol))
+    /// The type of an overload that fits `expected`, nearest first, as an
+    /// example of an annotation that picks one. A type parameter can't be
+    /// written in an annotation, so it's shown as `Any`.
+    fn overload_example(&mut self, value: &FunctionValue, expected: &StaticType) -> StaticType {
+        let symbol = self
+            .fitting_groups(value, expected)
+            .first()
+            .and_then(|group| group.first().copied())
+            .unwrap_or_else(|| self.resolver.innermost_reference(value.id));
+        self.vars
+            .shown(self.types.get_type(symbol))
+            .replace(&|part| matches!(part, StaticType::Generic(_)).then_some(StaticType::Any))
     }
 
     fn commit_function_value(&mut self, value: &FunctionValue, symbol: SymbolId, early: bool) {

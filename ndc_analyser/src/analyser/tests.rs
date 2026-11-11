@@ -1132,6 +1132,49 @@ fn a_return_annotation_picks_the_overloaded_function_value_returned() {
 }
 
 #[test]
+fn a_return_annotation_settles_what_the_body_left_unknown() {
+    assert_eq!(
+        errors("fn f() -> Sequence<Int> { let xs = []; xs }", vec![]),
+        Vec::<String>::new()
+    );
+    // Returns that join at `Any` still don't fit an `Int`.
+    assert_eq!(
+        errors("fn f(x) -> Int { if x { return \"s\"; } 1 }", vec![]),
+        vec!["mismatched types: found Any but expected Int"]
+    );
+}
+
+#[test]
+fn the_help_for_an_ambiguous_function_value_names_an_overload_that_fits() {
+    let help = |source: &str, globals| {
+        let (_, result) = analyse_with_globals(source, globals);
+        result.errors[0].help_text().map(str::to_string)
+    };
+    // A type parameter can't be written in an annotation.
+    assert_eq!(
+        help(
+            "let f = push;",
+            natives(&[("push", "<T>(List<T>, T)"), ("push", "<T>(MinHeap<T>, T)")])
+        ),
+        Some(
+            "Say which one with a function type, as in `let f: Fn(MinHeap<Any>, Any) -> () = push`"
+                .to_string()
+        )
+    );
+    // The inner `pick` takes two arguments, so the example is an outer one.
+    assert_eq!(
+        help(
+            "fn pick(x: Int) => 1; fn pick(x: Float) => 1.0; { fn pick(a, b) => 0; let f: Fn(Any) -> Any = pick; }",
+            vec![]
+        ),
+        Some(
+            "Say which one with a function type, as in `let f: Fn(Float) -> Float = pick`"
+                .to_string()
+        )
+    );
+}
+
+#[test]
 fn an_overloaded_function_value_nothing_picks_is_an_error() {
     assert_eq!(
         errors("let f = split;", split_natives()),
@@ -1140,6 +1183,11 @@ fn an_overloaded_function_value_nothing_picks_is_an_error() {
     assert_eq!(
         errors("let f: Fn(Int) -> Int = split;", split_natives()),
         vec!["No overload of 'split' is a Fn(Int) -> Int"]
+    );
+    // `split(String)` takes the String, but doesn't return an Int.
+    assert_eq!(
+        errors("let f: Fn(String) -> Int = split;", split_natives()),
+        vec!["No overload of 'split' is a Fn(String) -> Int"]
     );
 }
 

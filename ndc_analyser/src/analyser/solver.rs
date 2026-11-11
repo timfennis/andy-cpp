@@ -54,12 +54,9 @@ pub(super) enum Constraint {
         value: StaticType,
         span: Span,
     },
-    /// The one type the two branches of an `if` have, once both are known.
-    Join {
-        sides: [StaticType; 2],
-        result: StaticType,
-        span: Span,
-    },
+    /// The one type the two branches of an `if` have, once both are known:
+    /// the branches' types and then the result's.
+    Join { types: [StaticType; 3], span: Span },
 }
 
 impl Constraint {
@@ -71,7 +68,7 @@ impl Constraint {
             Self::Iterate { sequence, .. } => std::slice::from_ref(sequence),
             Self::Unpack { value, .. } => std::slice::from_ref(value),
             Self::MapDefault { default, .. } => std::slice::from_ref(default),
-            Self::Join { sides, .. } => sides,
+            Self::Join { types, .. } => types,
         }
     }
 }
@@ -219,8 +216,7 @@ impl Analyser {
             _ => {
                 let result = self.vars.fresh(StaticType::Any);
                 self.wait(Constraint::Join {
-                    sides: [a, b],
-                    result: result.clone(),
+                    types: [a, b, result.clone()],
                     span,
                 });
                 result
@@ -311,7 +307,8 @@ impl Analyser {
                     );
                 }
                 EarlyPick::FunctionValue { value, picked } => {
-                    let choice = self.choose_function_value(&value);
+                    let expected = self.vars.resolve(value.expected());
+                    let choice = self.choose_function_value(&value, &expected);
                     assert!(
                         choice == Choice::One(picked),
                         "internal error: the function value {value:?} committed to {picked:?} \
@@ -583,15 +580,27 @@ impl Analyser {
                 true
             }
             Constraint::Join {
-                sides: [a, b],
-                result,
+                types: [a, b, result],
                 span,
             } => {
-                let (a, b) = (self.vars.resolve(a), self.vars.resolve(b));
+                let (a, b, result) = (a.clone(), b.clone(), result.clone());
+                // A result known from outside is what's expected of each
+                // branch: in `let f: Fn(Int) -> Int = if c { abs } else
+                // { floor }`, it says which `abs` and `floor` are meant.
+                if !matches!(self.vars.resolve(&result), StaticType::Var(_)) {
+                    for side in [&a, &b] {
+                        if self.vars.resolve(side).has_vars() {
+                            let snapshot = self.vars.snapshot();
+                            if !self.vars.bind_argument(&result, side) {
+                                self.vars.rollback(snapshot);
+                            }
+                        }
+                    }
+                }
+                let (a, b) = (self.vars.resolve(&a), self.vars.resolve(&b));
                 if a.has_vars() || b.has_vars() {
                     return false;
                 }
-                let result = result.clone();
                 self.settle_waited_for(&result, &a.lub(&b), *span);
                 true
             }
