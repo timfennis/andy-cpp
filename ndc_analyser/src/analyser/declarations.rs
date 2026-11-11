@@ -24,15 +24,13 @@ pub(super) struct FunctionDeclaration<'a> {
 }
 
 impl Analyser {
-    /// Analyses a function declaration and returns its type. A lambda passed
-    /// where a function type is expected, as in `xs.map(fn(x) => x + 1)`,
-    /// gets that type as `expected`: an unannotated parameter takes the
-    /// expected parameter's type, and the body is checked against the
-    /// expected return type.
+    /// Analyses a function declaration and returns its type. A named
+    /// function's unannotated parameters are `Any`. A lambda's are type
+    /// variables that its uses settle: in `xs.map(fn(x) => x + 1)`, `x` gets
+    /// the type of `xs`'s elements.
     pub(super) fn analyse_function_declaration(
         &mut self,
         function: FunctionDeclaration<'_>,
-        expected: Option<&StaticType>,
     ) -> StaticType {
         let FunctionDeclaration {
             id,
@@ -43,27 +41,15 @@ impl Analyser {
             span,
         } = function;
         let first_var = self.vars.count();
-        let (expected_parameters, expected_return) = match expected {
-            Some(StaticType::Function {
-                parameters: Some(expected),
-                return_type,
-            }) if expected.len() == parameters.len() => {
-                (Some(expected.as_slice()), Some(return_type.as_ref()))
-            }
-            _ => (None, None),
-        };
         let type_signature = TypeSignature::from_annotated_bindings(
             parameters
                 .iter()
-                .enumerate()
-                .map(|(index, param)| {
-                    let annotation =
-                        self.lower_annotation(param.annotation.as_ref())
-                            .or_else(|| {
-                                expected_parameters
-                                    .map(|expected| expected[index].clone())
-                                    .filter(|expected| *expected != StaticType::Any)
-                            });
+                .map(|param| {
+                    let annotation = match self.lower_annotation(param.annotation.as_ref()) {
+                        Some(annotation) => Some(annotation),
+                        None if name.is_none() => Some(self.vars.fresh(StaticType::Any)),
+                        None => None,
+                    };
                     (param.name().to_string(), annotation)
                 })
                 .collect(),
@@ -114,30 +100,30 @@ impl Analyser {
                 .insert(param.lvalue.id, typ.clone());
         }
 
-        let implicit_return = match expected_return {
-            Some(expected) if annotated_return.is_none() => {
-                self.analyse_with_expected(body, expected)
-            }
-            _ => self.analyse_expr(body),
-        };
+        let implicit_return = self.analyse_expr(body);
         let explicit_return = self.return_type_stack.pop().unwrap();
         self.loop_depth = outer_loop_depth;
-        // Nothing outside the body can settle the type variables made in it,
-        // so the function's type doesn't carry any.
-        self.vars.settle_from(first_var);
-        let implicit_return = self.vars.resolve(&implicit_return);
-        let explicit_return = explicit_return.map(|ret| self.vars.resolve(&ret));
 
         // Combine explicit `return` types with the block's implicit return type.
         let inferred_return = match explicit_return {
-            Some(ret) => ret.lub(&implicit_return),
+            Some(ret) => self.join(&ret, &implicit_return),
             None => implicit_return,
         };
+
+        // Nothing outside a named function's body can settle the type
+        // variables made in it, as its parameters have their types. A
+        // lambda's variables are settled by how the code around it uses it.
+        if declared.is_some() {
+            self.settle_waiting(first_var);
+        }
+        let inferred_return = self.vars.resolve(&inferred_return);
 
         // If there is an annotated return type, validate it;
         // otherwise record the inferred type in the analysis.
         if let Some(annotated) = &annotated_return {
-            if !inferred_return.is_subtype(annotated) {
+            let fits = self.vars.try_unify(annotated, &inferred_return)
+                || self.vars.resolve(&inferred_return).is_subtype(annotated);
+            if !fits {
                 self.emit(AnalysisError::mismatched_types(
                     &inferred_return,
                     annotated,
@@ -279,6 +265,16 @@ impl Analyser {
                 self.result.analysis.variable_types.insert(lvalue.id, typ);
             }
             BindingPattern::Sequence(seq) => {
+                // What a value whose type isn't known yet unpacks into is
+                // settled once its type is.
+                let found_type = self.vars.resolve(&found_type);
+                if expected_type.is_none() && matches!(found_type, StaticType::Var(_)) {
+                    let parts = self.constrain_unpacking(found_type, seq.len(), span);
+                    for (sub_lvalue, part) in seq.iter().zip(parts) {
+                        self.declare_binding_pattern(sub_lvalue, None, part, span);
+                    }
+                    return;
+                }
                 // If the type is a fixed-length Tuple whose arity doesn't match
                 // the number of bindings, fall back to Any for each element. This
                 // can happen when a variable is declared with one type (e.g. ())

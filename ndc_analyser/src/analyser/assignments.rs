@@ -1,4 +1,5 @@
 use super::Analyser;
+use super::solver::CallSite;
 use crate::error::AnalysisError;
 use crate::overloads::{CallKind, ResolvedCall};
 use itertools::izip;
@@ -145,76 +146,29 @@ impl Analyser {
                 // The container before the index, in source order like the resolver.
                 let container = self.analyse_expr(value);
                 let index_type = self.analyse_expr(index);
-                // `xs[i] = v` is the call `[]=(xs, i, v)`. The value isn't
-                // analysed yet, so what the container holds stands in for
-                // it, and a slice like `xs[0..2]` stores a list of that.
-                let element = container.index_element_type();
-                let stored = match &element {
-                    Some(element)
-                        if Self::index_type_is_slice(&index_type)
-                            && matches!(container, StaticType::List(_)) =>
-                    {
-                        StaticType::List(Box::new(element.clone()))
-                    }
-                    Some(element) => element.clone(),
-                    None => StaticType::Any,
+                // `xs[i] op= v` reads the old value with `[]`, so the value
+                // written has the type that reading gives. A plain write
+                // stores a value whose type the write settles.
+                let stored = match self.resolver.getter_candidates(lvalue.id) {
+                    Some(_) => self.constrain_call(
+                        CallSite::Getter(lvalue.id),
+                        vec![container.clone(), index_type.clone()],
+                        CallKind::Regular,
+                        "[]",
+                        span,
+                    ),
+                    None => self.vars.fresh(StaticType::Any),
                 };
-
-                // Indexing isn't operator-form for vec purposes: there's no
-                // natural broadcast story for `(list_a, list_b)[i]`. Only an
-                // augmented assignment reads the old value through `[]`.
-                let errors_before = self.result.errors.len();
-                if let Some(getters) = self.resolver.getter_candidates(lvalue.id) {
-                    let get_args = [container.clone(), index_type.clone()];
-                    let getter =
-                        self.overloads()
-                            .resolve_call(getters, &get_args, CallKind::Regular);
-                    if matches!(getter.binding, Binding::None) {
-                        self.emit(AnalysisError::function_not_found("[]", &get_args, span));
-                    } else {
-                        self.commit_call(
-                            &getter.binding,
-                            &get_args,
-                            getter.return_type,
-                            "[]",
-                            span,
-                        );
-                    }
-                    self.picks.getters.insert(lvalue.id, getter.binding);
-                }
-
-                // Committing the setter checks the index against the
-                // container, and settles what neither is known to hold yet,
-                // as the key type in `let m = %{}; m["a"] = 1`.
-                let set_args = [container.clone(), index_type, stored.clone()];
-                let setter = self.overloads().resolve_call(
-                    self.resolver.setter_candidates(lvalue.id),
-                    &set_args,
+                // `xs[i] = v` is the call `[]=(xs, i, v)`, which waits for
+                // the value's type when nothing else picks the overload.
+                self.constrain_call(
+                    CallSite::Setter(lvalue.id),
+                    vec![container, index_type, stored.clone()],
                     CallKind::Regular,
+                    "[]=",
+                    span,
                 );
-                // When reading the old value failed, storing the new one
-                // fails the same way, which is reported once.
-                let read_failed = self.result.errors.len() > errors_before;
-                match setter.binding {
-                    _ if read_failed => {}
-                    Binding::None if element.is_none() && !container.is_unknown() => {
-                        self.emit(AnalysisError::unable_to_index_into(&container, span));
-                    }
-                    Binding::None => {
-                        self.emit(AnalysisError::function_not_found("[]=", &set_args, span));
-                    }
-                    _ => {
-                        self.commit_call(
-                            &setter.binding,
-                            &set_args,
-                            setter.return_type,
-                            "[]=",
-                            span,
-                        );
-                    }
-                }
-                self.picks.setters.insert(lvalue.id, setter.binding);
-                self.vars.resolve(&stored)
+                stored
             }
             // What `(a, b) = …` can store is a tuple of what each target can.
             AssignmentTarget::Sequence(seq) => StaticType::Tuple(
@@ -270,7 +224,7 @@ impl Analyser {
 
     /// An index expression typed as an integer sequence (e.g. `0..2`) selects
     /// a slice of the container rather than a single element.
-    fn index_type_is_slice(index_type: &StaticType) -> bool {
+    pub(super) fn index_type_is_slice(index_type: &StaticType) -> bool {
         index_type.is_subtype(&StaticType::Iterator(Box::new(StaticType::Int)))
     }
 
@@ -364,7 +318,8 @@ impl Analyser {
                     .get(&index.id)
                     .is_some_and(Self::index_type_is_slice);
                 if is_slice
-                    && let Some(stored_element) = stored_type.index_element_type()
+                    && let Some(stored_element) =
+                        self.vars.resolve(stored_type).index_element_type()
                     && let Some(value_element) = value_type.sequence_element_type()
                     && self.accepts_write(&stored_element, &value_element)
                 {

@@ -171,16 +171,26 @@ fn apply(f: Fn(Int) -> Int, x: Int) -> Int { f(x) }
 apply(fn(s: String) => 1, 4);     // ERROR: the function takes a String, but apply passes an Int
 ```
 
-A lambda written where a function type is expected takes its parameter types from it, so it needs no annotations: as the value of an annotated variable, in an assignment, or as an argument to a function value. Its body is checked with those types:
+A lambda's unannotated parameters get their types from how the lambda is used: the function type it's stored as, what the function it's passed to gives it, and the calls in its body. Its body is checked with those types:
 
 ```ndc
 let shout: Fn(String) -> String = fn(s) => s ++ "!";   // s is a String
 assert_eq(shout("hi"), "hi!");
 
-let double: Fn(Int) -> Int = fn(x) => x ++ "!";        // ERROR: x is an Int, and there's no `++` for an Int and a String
+let tens = [3, 1, 2].map(fn(x) => x * 10);             // x is an Int, so tens is a List<Int>
+
+let double: Fn(Int) -> Int = fn(x) => x ++ "!";        // ERROR: `x ++ "!"` makes x a String, so the lambda is a Fn(String) -> String
 ```
 
-A lambda passed to a named function, as in `xs.map(fn(x) => x + 1)`, doesn't get its parameter types this way yet. Its unannotated parameters are `Any`, and they are checked when the program runs.
+A lambda stored in a variable has one type, like any variable, so it can't take an `Int` in one call and a `Float` in the next:
+
+```ndc
+let twice = fn(x) => x * 2;
+twice(3);
+twice(2.5);    // ERROR: twice takes an Int
+```
+
+A named function such as `fn twice(x) => x * 2` can be called with both. A lambda parameter that nothing gives a type is `Any`, and is checked when the program runs.
 
 ## Function overloading
 

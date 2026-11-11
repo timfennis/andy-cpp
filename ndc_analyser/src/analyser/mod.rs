@@ -1,10 +1,10 @@
 use crate::error::AnalysisError;
 use crate::overloads::CallKind;
 use crate::types::{TypeTable, TypeVars};
-use ahash::AHashMap;
+use ahash::{AHashMap, AHashSet};
 use ndc_analysis::{Analysis, Binding, Candidate};
-use ndc_core::StaticType;
 use ndc_core::r#struct::{StructInfo, StructRegistry};
+use ndc_core::{NodeId, StaticType};
 use ndc_layout::{Layout, Picks};
 use ndc_lexer::NumericLiteral;
 use ndc_parser::{Expression, ExpressionLocation, ForBody, ForIteration, TypeExpr};
@@ -15,8 +15,10 @@ use std::rc::Rc;
 mod assignments;
 mod calls;
 mod declarations;
+mod solver;
 
 use declarations::FunctionDeclaration;
+use solver::Constraint;
 #[cfg(test)]
 mod tests;
 
@@ -41,6 +43,14 @@ pub struct Analyser {
     types: TypeTable,
     /// What the type variables in those types stand for, once known.
     vars: TypeVars,
+    /// The calls and other uses that wait for types that aren't known yet.
+    waiting: Vec<Constraint>,
+    /// [`TypeVars::generation`] when the waiting constraints were last
+    /// tried, so they're tried again only after something was settled.
+    solved_generation: u64,
+    /// The nodes of `xs[i] op= v` whose read of `xs[i]` failed, so the
+    /// write, which fails the same way, isn't reported again.
+    failed_reads: AHashSet<NodeId>,
     /// What each struct's type symbol stands for, so `p: Point` lowers to
     /// `Point`'s struct type. Every other type name is built in.
     struct_types: AHashMap<SymbolId, Rc<StructInfo>>,
@@ -77,6 +87,9 @@ impl Analyser {
             resolver,
             types,
             vars: TypeVars::default(),
+            waiting: Vec::new(),
+            solved_generation: 0,
+            failed_reads: AHashSet::new(),
             struct_registry: StructRegistry::default(),
             struct_types: AHashMap::new(),
             return_type_stack: Vec::new(),
@@ -91,9 +104,11 @@ impl Analyser {
     /// resetting it for the next analysis.
     pub fn take_result(&mut self) -> AnalysisResult {
         // Nothing after this batch can settle its type variables any more,
-        // so the ones left unsettled get their fallbacks, and no variable
-        // leaves the analyser.
-        self.vars.settle_from(0);
+        // so the ones left unsettled get their fallbacks, what waited on them
+        // is solved, and no variable leaves the analyser.
+        self.settle_waiting(0);
+        debug_assert!(self.waiting.is_empty(), "unsolved: {:?}", self.waiting);
+        self.failed_reads.clear();
         self.types.resolve_all(&self.vars);
         let analysis = &mut self.result.analysis;
         for table in [
@@ -203,120 +218,7 @@ impl Analyser {
 
     fn analyse_expr(&mut self, expr_loc: &ExpressionLocation) -> StaticType {
         let typ = self.analyse_inner(expr_loc);
-        self.result
-            .analysis
-            .expr_types
-            .insert(expr_loc.id, typ.clone());
-        typ
-    }
-
-    /// Like [`Self::analyse_expr`], but with an expected type from an annotation
-    /// or an annotated target: `let x: List<Int> = []` types the literal as
-    /// `List<Int>` instead of `List<Any>`. A container literal with no
-    /// elements has nothing to infer from, so it adopts the expected element
-    /// types; non-empty literals recurse so nested empties (`[(1, [])]`)
-    /// adopt too. Everything else falls back to plain analysis, and the
-    /// caller still subtype-checks the result against the expectation.
-    ///
-    /// This is a temporary measure until the type system supports type
-    /// parameters and proper unification, at which point empty literals can
-    /// be typed with fresh type variables instead of adopting the annotation.
-    fn analyse_with_expected(
-        &mut self,
-        expr_loc: &ExpressionLocation,
-        expected: &StaticType,
-    ) -> StaticType {
-        let typ = match (&expr_loc.expression, expected) {
-            (
-                Expression::List { values },
-                StaticType::List(element) | StaticType::Sequence(element),
-            ) => {
-                let mut element_type: Option<StaticType> = None;
-                for value in values {
-                    let found = self.analyse_with_expected(value, element);
-                    Self::fold_lub(&mut element_type, found);
-                }
-                StaticType::List(Box::new(
-                    element_type.unwrap_or_else(|| element.as_ref().clone()),
-                ))
-            }
-            (Expression::Map { values, default }, StaticType::Map { key, value }) => {
-                let is_empty = values.is_empty();
-                let mut key_type: Option<StaticType> = None;
-                let mut value_type: Option<StaticType> = None;
-                for (entry_key, entry_value) in values {
-                    let found = self.analyse_with_expected(entry_key, key);
-                    Self::fold_lub(&mut key_type, found);
-                    if let Some(entry_value) = entry_value {
-                        let found = self.analyse_with_expected(entry_value, value);
-                        Self::fold_lub(&mut value_type, found);
-                    }
-                }
-                if let Some(default) = default {
-                    // A function default makes each missing value, so it's
-                    // expected to return one.
-                    let expected_default = if matches!(
-                        default.expression,
-                        Expression::FunctionDeclaration { name: None, .. }
-                    ) {
-                        StaticType::Function {
-                            parameters: Some(vec![]),
-                            return_type: value.clone(),
-                        }
-                    } else {
-                        value.as_ref().clone()
-                    };
-                    let found = Self::default_value_type(
-                        self.analyse_with_expected(default, &expected_default),
-                    );
-                    Self::fold_lub(&mut value_type, found);
-                }
-                StaticType::Map {
-                    key: Box::new(key_type.unwrap_or_else(|| key.as_ref().clone())),
-                    value: Box::new(value_type.unwrap_or_else(|| {
-                        if is_empty {
-                            value.as_ref().clone()
-                        } else {
-                            // A set literal like `%{1, 2}` has unit values.
-                            StaticType::unit()
-                        }
-                    })),
-                }
-            }
-            // A lambda takes the types an expected function type gives it:
-            // in `let f: Fn(Int) -> Int = fn(x) => x + 1`, `x` is an `Int`.
-            (
-                Expression::FunctionDeclaration {
-                    name: None,
-                    parameters,
-                    body,
-                    return_annotation,
-                    ..
-                },
-                StaticType::Function { .. },
-            ) => self.analyse_function_declaration(
-                FunctionDeclaration {
-                    id: expr_loc.id,
-                    name: None,
-                    parameters,
-                    body,
-                    return_annotation: return_annotation.as_ref(),
-                    span: expr_loc.span,
-                },
-                Some(expected),
-            ),
-            (Expression::Tuple { values }, StaticType::Tuple(elements))
-                if values.len() == elements.len() =>
-            {
-                let types = values
-                    .iter()
-                    .zip(elements)
-                    .map(|(value, element)| self.analyse_with_expected(value, element))
-                    .collect();
-                StaticType::Tuple(types)
-            }
-            _ => return self.analyse_expr(expr_loc),
-        };
+        self.solve_waiting();
         self.result
             .analysis
             .expr_types
@@ -389,7 +291,7 @@ impl Analyser {
             Expression::Grouping(expr) => self.analyse_expr(expr),
             Expression::Cast { value, annotation } => {
                 let target = self.lower_type_expr(annotation);
-                let found = self.analyse_with_expected(value, &target);
+                let found = self.analyse_expr(value);
                 if !found.overlaps(&target) {
                     self.emit(AnalysisError::impossible_cast(&found, &target, *span));
                 }
@@ -404,10 +306,7 @@ impl Analyser {
             } => {
                 let annotated_type = self.lower_annotation(annotated_type.as_ref());
                 let value_span = value.span;
-                let found_type = match &annotated_type {
-                    Some(expected) => self.analyse_with_expected(value, expected),
-                    None => self.analyse_expr(value),
-                };
+                let found_type = self.analyse_expr(value);
 
                 self.declare_binding_pattern(
                     l_value,
@@ -419,7 +318,7 @@ impl Analyser {
             }
             Expression::Assignment { l_value, r_value } => {
                 let old_type = self.analyse_assignment_target(l_value, *span);
-                let new_type = self.analyse_with_expected(r_value, &old_type);
+                let new_type = self.analyse_expr(r_value);
                 self.validate_assignment_write(l_value, &old_type, &new_type, *span);
 
                 StaticType::unit()
@@ -435,17 +334,14 @@ impl Analyser {
                 body,
                 return_annotation,
                 ..
-            } => self.analyse_function_declaration(
-                FunctionDeclaration {
-                    id: *id,
-                    name: name.as_deref(),
-                    parameters,
-                    body,
-                    return_annotation: return_annotation.as_ref(),
-                    span: *span,
-                },
-                None,
-            ),
+            } => self.analyse_function_declaration(FunctionDeclaration {
+                id: *id,
+                name: name.as_deref(),
+                parameters,
+                body,
+                return_annotation: return_annotation.as_ref(),
+                span: *span,
+            }),
             Expression::Block { statements } => {
                 let mut last = None;
                 for s in statements {
@@ -467,7 +363,7 @@ impl Analyser {
                     StaticType::unit()
                 };
 
-                true_type.lub(&false_type)
+                self.join(&true_type, &false_type)
             }
             Expression::While {
                 expression,
@@ -529,9 +425,11 @@ impl Analyser {
                 let mut key_type: Option<StaticType> = None;
                 let mut value_type: Option<StaticType> = None;
                 for (key, value) in values {
-                    Self::fold_lub(&mut key_type, self.analyse_expr(key));
+                    let found = self.analyse_expr(key);
+                    self.fold_join(&mut key_type, found);
                     if let Some(value) = value {
-                        Self::fold_lub(&mut value_type, self.analyse_expr(value));
+                        let found = self.analyse_expr(value);
+                        self.fold_join(&mut value_type, found);
                     }
                 }
 
@@ -539,7 +437,7 @@ impl Analyser {
                 // the map's value type.
                 if let Some(default) = default {
                     let default_type = Self::default_value_type(self.analyse_expr(default));
-                    Self::fold_lub(&mut value_type, default_type);
+                    self.fold_join(&mut value_type, default_type);
                 }
 
                 let key_type = match key_type {
@@ -559,8 +457,11 @@ impl Analyser {
             }
             Expression::Return { value } => {
                 let typ = self.analyse_expr(value);
-                match self.return_type_stack.last_mut() {
-                    Some(slot) => Self::fold_lub(slot, typ),
+                match self.return_type_stack.pop() {
+                    Some(mut returned) => {
+                        self.fold_join(&mut returned, typ);
+                        self.return_type_stack.push(returned);
+                    }
                     None => self.emit(AnalysisError::return_outside_function(*span)),
                 }
                 StaticType::Never
@@ -599,9 +500,7 @@ impl Analyser {
                 let sequence_span = sequence.span;
                 let sequence_type = self.analyse_expr(sequence);
 
-                let found_type = sequence_type
-                    .sequence_element_type()
-                    .unwrap_or(StaticType::Any);
+                let found_type = self.constrain_iteration(sequence_type, sequence_span);
 
                 self.loop_depth += 1;
                 // A `for` binder has no type annotation.
@@ -648,7 +547,8 @@ impl Analyser {
     ) -> Option<StaticType> {
         let mut element_type: Option<StaticType> = None;
         for expression in expressions {
-            Self::fold_lub(&mut element_type, self.analyse_expr(expression));
+            let found = self.analyse_expr(expression);
+            self.fold_join(&mut element_type, found);
         }
         element_type
     }
@@ -663,11 +563,29 @@ impl Analyser {
         }
     }
 
-    /// Fold a new type into an accumulator via least-upper-bound.
-    fn fold_lub(acc: &mut Option<StaticType>, new_type: StaticType) {
-        match acc {
-            Some(prev) => *prev = prev.lub(&new_type),
-            None => *acc = Some(new_type),
+    /// The one type that values of type `a` and `b` both have, as the two
+    /// branches of an `if`. Where either isn't fully known, they're made the
+    /// same type: `if c { [] } else { [1] }` is a `List<Int>`. Two known
+    /// types join at their least upper bound.
+    fn join(&mut self, a: &StaticType, b: &StaticType) -> StaticType {
+        let (a, b) = (self.vars.resolve(a), self.vars.resolve(b));
+        if a == StaticType::Never {
+            return b;
         }
+        if b == StaticType::Never {
+            return a;
+        }
+        if (a.has_vars() || b.has_vars()) && self.vars.try_unify(&a, &b) {
+            return self.vars.resolve(&a);
+        }
+        a.lub(&b)
+    }
+
+    /// Joins a new type into an accumulator, as with [`Self::join`].
+    fn fold_join(&mut self, acc: &mut Option<StaticType>, new_type: StaticType) {
+        *acc = Some(match acc.take() {
+            Some(prev) => self.join(&prev, &new_type),
+            None => new_type,
+        });
     }
 }

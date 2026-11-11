@@ -1,0 +1,5 @@
+// `x + 1` waits for `x`, and `r`'s annotation decides its type meanwhile.
+// Once the call picks `+(Float, Int)`, its Float result must fit that.
+// expect-error: mismatched types: found Float but expected String
+let g = fn(x) { let r: String = x + 1; r };
+g(2.5);

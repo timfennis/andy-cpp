@@ -170,6 +170,11 @@ impl<'a> Overloads<'a> {
         })
     }
 
+    /// Every candidate a call can reach, nearest scope first.
+    pub(crate) fn reachable_symbols(self, candidates: &Candidates) -> Vec<SymbolId> {
+        self.reachable(candidates).flatten().copied().collect()
+    }
+
     /// The variable that ends the search, if one does: in
     /// `fn foo(a) { … } let foo = fn(a, b) { … };`, a call of `foo` ends at the `let`.
     pub(crate) fn variable_ending_search(self, candidates: &Candidates) -> Option<SymbolId> {

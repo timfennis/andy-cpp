@@ -48,6 +48,7 @@ fn index_natives() -> Vec<(String, StaticType)> {
         ("[]=", "<T>(List<T>, Int, T)"),
         ("[]=", "<T>(List<T>, Iterator<Any>, Sequence<T>)"),
         ("[]=", "<K, V>(Map<K, V>, K, V)"),
+        ("[]=", "(String, Any, String)"),
     ]
     .into_iter()
     .map(|(name, signature)| {
@@ -689,14 +690,15 @@ fn a_lambda_takes_the_function_type_expected_where_it_is_written() {
         analyse_last_type("let f: Fn(Int) -> Int = fn(x) => x; f"),
         int_to_int
     );
-    // A function value's parameter.
-    let globals = natives(&[("++", "(String, String) -> String")]);
+    // A function value's parameter. Either `+` could take `x` until the
+    // call says it's a `String`.
+    let globals = natives(&[("+", "(Int, Int) -> Int"), ("+", "(Float, Int) -> Float")]);
     assert_eq!(
         errors(
-            "let apply = fn(g: Fn(Int) -> Int) { g(1) }; let fs = [apply]; fs[0](fn(x) => x ++ \"a\");",
+            "let apply = fn(g: Fn(String) -> Int) { g(\"a\") }; let fs = [apply]; fs[0](fn(x) => x + 1);",
             [index_natives(), globals].concat()
         ),
-        vec!["No function called '++' found that matches the arguments 'Int, String'"]
+        vec!["No function called '+' found that matches the arguments 'String, Int'"]
     );
     // A map's default function returns the map's values.
     assert_eq!(
@@ -760,6 +762,135 @@ fn a_function_settles_its_own_type_variables_when_its_body_ends() {
         ),
         StaticType::List(Box::new(StaticType::Any))
     );
+}
+
+/// `+` with two overloads that both take an `Int` on the right, so `x + 1`
+/// can't be picked until `x`'s type is known.
+fn ambiguous_plus() -> Vec<(String, StaticType)> {
+    natives(&[("+", "(Int, Int) -> Int"), ("+", "(Float, Int) -> Float")])
+}
+
+fn function(parameters: Vec<StaticType>, return_type: StaticType) -> StaticType {
+    StaticType::Function {
+        parameters: Some(parameters),
+        return_type: Box::new(return_type),
+    }
+}
+
+#[test]
+fn a_call_waits_until_its_arguments_pick_an_overload() {
+    // Either `+` could take `x` until `f` is called with a Float.
+    assert_eq!(
+        analyse_last_type_with_globals("let f = fn(x) => x + 1; f(2.5); f", ambiguous_plus()),
+        function(vec![StaticType::Float], StaticType::Float)
+    );
+}
+
+#[test]
+fn a_call_commits_to_the_only_overload_that_can_take_its_arguments() {
+    let globals = natives(&[
+        ("+", "(Int, Int) -> Int"),
+        ("+", "(String, String) -> String"),
+    ]);
+    assert_eq!(
+        analyse_last_type_with_globals("let f = fn(x) => x + 1; f", globals),
+        function(vec![StaticType::Int], StaticType::Int)
+    );
+}
+
+#[test]
+fn a_lambda_passed_to_a_function_takes_its_parameter_types_from_the_call() {
+    let globals = [
+        natives(&[("map", "<T, U>(List<T>, Fn(T) -> U) -> List<U>")]),
+        ambiguous_plus(),
+    ]
+    .concat();
+    assert_eq!(
+        analyse_last_type_with_globals("[2.5].map(fn(x) => x + 1)", globals),
+        StaticType::List(Box::new(StaticType::Float))
+    );
+}
+
+#[test]
+fn a_lambda_in_a_variable_has_one_type() {
+    assert_eq!(
+        errors("let f = fn(x) => x + 1; f(1); f(2.5);", ambiguous_plus()),
+        vec!["The variable 'f' holds a function that doesn't accept the arguments 'Float'"]
+    );
+}
+
+#[test]
+fn a_variable_holding_an_unknown_function_takes_what_it_is_called_with() {
+    assert_eq!(
+        analyse_last_type_with_globals(
+            "let apply = fn(g, v) => g(v); apply(fn(z) => z + 1, 2.5)",
+            ambiguous_plus()
+        ),
+        StaticType::Float
+    );
+}
+
+#[test]
+fn iterating_waits_until_the_kind_of_sequence_is_known() {
+    let globals = [natives(&[("push", "<T>(List<T>, T)")]), ambiguous_plus()].concat();
+    assert_eq!(
+        analyse_last_type_with_globals(
+            "let g = fn(rows) { let out = []; for r in rows { out.push(r + 1) }; out }; g([2.5])",
+            globals
+        ),
+        StaticType::List(Box::new(StaticType::Float))
+    );
+}
+
+#[test]
+fn unpacking_waits_until_the_kind_of_value_is_known() {
+    assert_eq!(
+        analyse_last_type("let swap = fn(p) { let (a, b) = p; (b, a) }; swap((1, \"s\"))"),
+        StaticType::Tuple(vec![StaticType::String, StaticType::Int])
+    );
+    assert_eq!(
+        errors("let f = fn(p) { let (a, b) = p; a }; f((1, 2, 3));", vec![]),
+        vec!["mismatched tuple arity: found a len=2 identifier and a len=3 annotation."]
+    );
+}
+
+#[test]
+fn what_iterating_or_unpacking_gives_must_fit_how_it_was_used_meanwhile() {
+    // `r + 1` and `a + 1` make `r` and `a` Ints before the call settles
+    // what they are.
+    let globals = natives(&[
+        ("+", "(Int, Int) -> Int"),
+        ("+", "(String, String) -> String"),
+    ]);
+    assert_eq!(
+        errors(
+            "let g = fn(rows) { for r in rows { r + 1; } }; g([\"s\"]);",
+            globals.clone()
+        ),
+        vec!["mismatched types: found String but expected Int"]
+    );
+    assert_eq!(
+        errors(
+            "let f = fn(p) { let (a, b) = p; a + 1 }; f((\"s\", 2));",
+            globals
+        ),
+        vec!["mismatched types: found String but expected Int"]
+    );
+}
+
+#[test]
+fn branches_that_arent_fully_known_join_as_one_type() {
+    assert_eq!(
+        analyse_last_type("let xs = if true { [] } else { [1] }; xs"),
+        StaticType::List(Box::new(StaticType::Int))
+    );
+}
+
+#[test]
+fn a_call_nothing_picks_falls_back_to_picking_at_runtime() {
+    let (last, result) = analyse_with_globals("let f = fn(x) => x + 1; f", ambiguous_plus());
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    assert_eq!(last, function(vec![StaticType::Any], StaticType::Any));
 }
 
 /// `len`, a native taking a `String`, for the test below.
