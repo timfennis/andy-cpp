@@ -63,6 +63,17 @@ impl Constraint {
     }
 }
 
+/// An overload a call committed to before its arguments were known, which
+/// [`Analyser::check_early_picks`] checks once they are.
+#[derive(Debug)]
+pub(super) struct EarlyPick {
+    candidates: Candidates,
+    arguments: Vec<StaticType>,
+    kind: CallKind,
+    name: String,
+    binding: Binding<SymbolId>,
+}
+
 #[derive(Debug)]
 pub(super) struct CallConstraint {
     site: CallSite,
@@ -195,6 +206,85 @@ impl Analyser {
                 });
                 result
             }
+        }
+    }
+
+    /// Commits `call` to `picked` while its arguments still have unknown
+    /// parts, which settles them from `picked`'s parameters, and returns the
+    /// call's type, or `None` when they don't fit after all. The program
+    /// calls `picked` directly only where it would once the arguments are
+    /// known: an `Any` argument, as `xs` in `fn big(xs) { xs.filter(…) }`, is
+    /// checked as the program runs.
+    fn commit_early(
+        &mut self,
+        call: &CallConstraint,
+        arguments: &[StaticType],
+        picked: SymbolId,
+    ) -> Option<StaticType> {
+        let typ = self.commit_call(
+            &Binding::Resolved(Candidate::Scalar(picked)),
+            arguments,
+            StaticType::Any,
+        )?;
+        let arguments = arguments
+            .iter()
+            .map(|argument| self.vars.resolve(argument))
+            .collect::<Vec<_>>();
+        let binding = if self
+            .vars
+            .resolve(self.types.get_type(picked))
+            .is_fn_and_matches(&arguments)
+        {
+            Binding::Resolved(Candidate::Scalar(picked))
+        } else {
+            Binding::Dynamic(vec![Candidate::Scalar(picked)])
+        };
+        if cfg!(debug_assertions) {
+            self.early_picks.push(EarlyPick {
+                candidates: call.candidates.clone(),
+                arguments: call.arguments.clone(),
+                kind: call.kind,
+                name: call.name.clone(),
+                binding: binding.clone(),
+            });
+        }
+        self.record_pick(call.site, binding, &arguments);
+        Some(typ)
+    }
+
+    /// Checks that each call that committed to an overload before its
+    /// arguments were known got the overload it would get now that they
+    /// are. Committing early is only right when nothing learned later could
+    /// change the pick, which is easy to get wrong, so debug builds check
+    /// every early commit the tests make.
+    pub(super) fn check_early_picks(&mut self) {
+        let early_picks = std::mem::take(&mut self.early_picks);
+        // A program with errors may have committed to what was reported.
+        if !self.result.errors.is_empty() {
+            return;
+        }
+        for pick in early_picks {
+            let arguments = pick
+                .arguments
+                .iter()
+                .map(|argument| self.vars.resolve(argument))
+                .collect::<Vec<_>>();
+            let binding = self
+                .overloads()
+                .resolve_call(&pick.candidates, &arguments, pick.kind)
+                .binding;
+            assert!(
+                binding == pick.binding,
+                "internal error: `{}` committed to {:?} before its arguments were known, \
+                 but with ({}) it means {binding:?}",
+                pick.name,
+                pick.binding,
+                arguments
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            );
         }
     }
 
@@ -475,13 +565,11 @@ impl Analyser {
         match viable[..] {
             [] => Some(self.resolve_call_now(call, &arguments)),
             [only] if self.fits_without_any(only, &arguments) => {
-                let binding = Binding::Resolved(Candidate::Scalar(only));
-                let typ = self.commit_call(&binding, &arguments, StaticType::Any);
-                self.record_pick(call.site, binding, &arguments);
-                Some(typ.unwrap_or_else(|| {
+                let Some(typ) = self.commit_early(call, &arguments, only) else {
                     self.report_failed_call(call, &arguments);
-                    StaticType::Any
-                }))
+                    return Some(StaticType::Any);
+                };
+                Some(typ)
             }
             _ => None,
         }
@@ -688,12 +776,10 @@ impl Analyser {
         let Some(Constraint::Call(call)) = self.waiting.remove(&serial) else {
             unreachable!("the call was waiting a moment ago");
         };
-        let binding = Binding::Resolved(Candidate::Scalar(narrowest));
-        let Some(typ) = self.commit_call(&binding, &arguments, StaticType::Any) else {
+        let Some(typ) = self.commit_early(&call, &arguments, narrowest) else {
             self.wait_again(serial, Constraint::Call(call));
             return false;
         };
-        self.record_pick(call.site, binding, &arguments);
         let result = call.result.clone();
         self.settle_waited_for(&result, &typ, call.span);
         true

@@ -19,7 +19,7 @@ mod declarations;
 mod solver;
 
 use declarations::FunctionDeclaration;
-use solver::Constraint;
+use solver::{Constraint, EarlyPick};
 #[cfg(test)]
 mod tests;
 
@@ -55,6 +55,9 @@ pub struct Analyser {
     /// [`TypeVars::settled_count`] when the waiting constraints were last
     /// woken, so the ones watching a variable settled since are woken next.
     watched_settlings: usize,
+    /// The calls that committed to an overload before their arguments were
+    /// known, which debug builds check at the end of the batch.
+    early_picks: Vec<EarlyPick>,
     /// The nodes of `xs[i] op= v` whose read of `xs[i]` failed, so the
     /// write, which fails the same way, isn't reported again.
     failed_reads: AHashSet<NodeId>,
@@ -99,6 +102,7 @@ impl Analyser {
             watchers: AHashMap::new(),
             watched_settlings: 0,
             failed_reads: AHashSet::new(),
+            early_picks: Vec::new(),
             struct_registry: StructRegistry::default(),
             struct_types: AHashMap::new(),
             return_type_stack: Vec::new(),
@@ -118,6 +122,9 @@ impl Analyser {
         self.settle_waiting(0);
         debug_assert!(self.waiting.is_empty(), "unsolved: {:?}", self.waiting);
         self.watchers.clear();
+        if cfg!(debug_assertions) {
+            self.check_early_picks();
+        }
         self.failed_reads.clear();
         self.types.resolve_all(&self.vars);
         let analysis = &mut self.result.analysis;
