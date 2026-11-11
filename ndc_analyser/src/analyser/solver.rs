@@ -6,7 +6,7 @@ use super::Analyser;
 use crate::error::AnalysisError;
 use crate::overloads::{CallKind, ResolvedCall, is_strictly_more_specific};
 use ndc_analysis::{Binding, Candidate};
-use ndc_core::{NodeId, StaticType};
+use ndc_core::{NodeId, StaticType, TypeVar};
 use ndc_lexer::Span;
 use ndc_resolver::{Candidates, SymbolId};
 use std::collections::BTreeSet;
@@ -220,6 +220,13 @@ impl Analyser {
     /// Tries again each waiting constraint that waits on a variable settled
     /// since this last ran, oldest first, until that settles nothing more.
     pub(super) fn solve_waiting(&mut self) {
+        self.solve_waiting_and_report();
+    }
+
+    /// [`Self::solve_waiting`], returning the constraints it tried that
+    /// still wait.
+    fn solve_waiting_and_report(&mut self) -> BTreeSet<u64> {
+        let mut still_waiting = BTreeSet::new();
         loop {
             let settled = self.vars.settled_since(self.watched_settlings);
             if settled.is_empty() {
@@ -236,52 +243,54 @@ impl Analyser {
                 let Some(mut constraint) = self.waiting.remove(&serial) else {
                     continue;
                 };
-                if !self.try_constraint(&mut constraint) {
+                if self.try_constraint(&mut constraint) {
+                    still_waiting.remove(&serial);
+                } else {
                     self.wait_again(serial, constraint);
+                    still_waiting.insert(serial);
                 }
             }
         }
         self.watched_settlings = self.vars.settled_count();
+        still_waiting
     }
 
     /// Solves what waits on the variables made since `first`, which nothing
-    /// outside the code they were made in can settle: each one still
-    /// unsettled gets its fallback, oldest constraint first, and the rest are
-    /// settled the same way. Constraints that wait only on older variables
-    /// keep waiting.
+    /// outside the code they were made in can settle. A call that a default
+    /// rule can decide is decided by it first: it commits to its narrowest
+    /// overload, or `a op= b` keeps the type of `b`. What's left gets its
+    /// fallbacks, oldest constraint first. Constraints that wait only on
+    /// older variables keep waiting.
     pub(super) fn settle_waiting(&mut self, first: usize) {
-        // Settling only ever makes more known, so a constraint found to wait
-        // on no variable made since `first` never needs looking at again.
-        let mut checked = 0;
+        // Each constraint is checked for a default rule once, and again only
+        // after something it waits on changed.
+        let mut unchecked = self.waiting.keys().copied().collect::<BTreeSet<_>>();
+        unchecked.extend(self.solve_waiting_and_report());
+        // Fallbacks only ever make more known, so a constraint found to wait
+        // on no variable made since `first` never needs them.
+        let mut fallen_back = 0;
         loop {
-            self.solve_waiting();
+            while let Some(serial) = unchecked.pop_first() {
+                if !self.waits_on_vars_since(serial, first).is_empty()
+                    && (self.default_to_narrowest(serial) || self.default_to_operand(serial))
+                {
+                    unchecked.extend(self.solve_waiting_and_report());
+                }
+            }
             let next = self
                 .waiting
-                .range(checked..)
-                .find_map(|(&serial, constraint)| {
-                    let vars = constraint
-                        .inputs()
-                        .iter()
-                        .flat_map(|input| self.vars.unsettled(input))
-                        .filter(|var| var.0 as usize >= first)
-                        .collect::<Vec<_>>();
+                .range(fallen_back..)
+                .map(|(&serial, _)| serial)
+                .find_map(|serial| {
+                    let vars = self.waits_on_vars_since(serial, first);
                     (!vars.is_empty()).then_some((serial, vars))
                 });
             let Some((serial, vars)) = next else {
                 break;
             };
-            checked = serial;
-            // What nothing else settled in `a op= b` keeps the type it
-            // already had, so it's taken from `b`: in `m["k"] += 3` on an
-            // empty map, the values are Ints.
-            if let Some(Constraint::Call(call)) = self.waiting.get(&serial)
-                && let CallSite::OpAssignment(_) = call.site
-                && let [target, operand] = &call.arguments[..]
-            {
-                let (target, operand) = (target.clone(), operand.clone());
-                self.vars.try_unify(&target, &operand);
-            }
+            fallen_back = serial;
             self.vars.settle_with_fallbacks(&vars);
+            unchecked.extend(self.solve_waiting_and_report());
         }
         self.vars.settle_from(first);
         self.solve_waiting();
@@ -297,6 +306,37 @@ impl Analyser {
             }
         }
         self.solve_waiting();
+    }
+
+    /// The unsettled variables made since `first` that the waiting
+    /// constraint `serial` waits on, if it's still waiting.
+    fn waits_on_vars_since(&self, serial: u64, first: usize) -> Vec<TypeVar> {
+        self.waiting
+            .get(&serial)
+            .map_or_else(Vec::new, |constraint| {
+                constraint
+                    .inputs()
+                    .iter()
+                    .flat_map(|input| self.vars.unsettled(input))
+                    .filter(|var| var.0 as usize >= first)
+                    .collect()
+            })
+    }
+
+    /// What nothing else settled in the waiting `a op= b` keeps the type it
+    /// already had, so it's taken from `b`: in `m["k"] += 3` on an empty
+    /// map, the values are Ints. Returns whether that settled anything.
+    fn default_to_operand(&mut self, serial: u64) -> bool {
+        let Some(Constraint::Call(call)) = self.waiting.get(&serial) else {
+            return false;
+        };
+        let (CallSite::OpAssignment(_), [target, operand]) = (call.site, &call.arguments[..])
+        else {
+            return false;
+        };
+        let (target, operand) = (target.clone(), operand.clone());
+        let before = self.vars.settled_count();
+        self.vars.try_unify(&target, &operand) && self.vars.settled_count() > before
     }
 
     /// Solves `constraint` if what it waits on is known, and returns whether
@@ -432,12 +472,6 @@ impl Analyser {
             .copied()
             .filter(|&symbol| self.could_accept(symbol, &arguments))
             .collect::<Vec<_>>();
-        // An overload taking `Any` where another takes something narrower
-        // loses to it, as it would once the arguments are known.
-        let viable = match self.most_specific(&viable) {
-            Some(symbol) => vec![symbol],
-            None => viable,
-        };
         match viable[..] {
             [] => Some(self.resolve_call_now(call, &arguments)),
             [only]
@@ -614,8 +648,65 @@ impl Analyser {
         fits
     }
 
+    /// Commits the waiting call `serial` to the narrowest overload that
+    /// fits it, once nothing else can settle its arguments, and returns
+    /// whether it did. That's the overload the call would pick if the
+    /// arguments' unknown parts were whatever that overload needs: in
+    /// `m["k"]` on an empty map, `[](Map<K, V>, K)` is narrower than
+    /// `[](Any, Any)`, so the map's keys are Strings. It only commits when
+    /// every overload that fits is in the same scope, as a nearer one would
+    /// otherwise win, and when each unknown is inside an argument whose kind
+    /// is known: an argument nothing at all is known about is `Any`, which
+    /// the overloads taking `Any` take.
+    fn default_to_narrowest(&mut self, serial: u64) -> bool {
+        let Some(Constraint::Call(call)) = self.waiting.get(&serial) else {
+            return false;
+        };
+        let arguments = call
+            .arguments
+            .iter()
+            .map(|argument| self.vars.resolve(argument))
+            .collect::<Vec<_>>();
+        if arguments
+            .iter()
+            .any(|argument| matches!(argument, StaticType::Var(_)))
+        {
+            return false;
+        }
+        let groups = self.overloads().reachable_groups(&call.candidates);
+        let mut fitting = Vec::new();
+        for group in groups {
+            let fits = group
+                .into_iter()
+                .filter(|&symbol| self.could_accept(symbol, &arguments))
+                .collect::<Vec<_>>();
+            if !fits.is_empty() {
+                fitting.push(fits);
+            }
+        }
+        let [group] = &fitting[..] else {
+            return false;
+        };
+        let Some(narrowest) = self.most_specific(group) else {
+            return false;
+        };
+        let Some(Constraint::Call(call)) = self.waiting.remove(&serial) else {
+            unreachable!("the call was waiting a moment ago");
+        };
+        let binding = Binding::Resolved(Candidate::Scalar(narrowest));
+        let Some(typ) = self.commit_call(&binding, &arguments, StaticType::Any) else {
+            self.wait_again(serial, Constraint::Call(call));
+            return false;
+        };
+        self.record_pick(call.site, binding, &arguments);
+        let result = call.result.clone();
+        self.settle_waited_for(&result, &typ, call.span);
+        true
+    }
+
     /// The one of `symbols` whose parameters are narrower than every other
     /// one's, as `[](Map<K, V>, K)` is than `[](Any, Any)`, if there is one.
+    /// A single function is the narrowest of one.
     fn most_specific(&self, symbols: &[SymbolId]) -> Option<SymbolId> {
         let parameters = symbols
             .iter()
@@ -635,7 +726,7 @@ impl Analyser {
                 .enumerate()
                 .all(|(j, wider)| i == j || is_strictly_more_specific(narrower, wider))
         })?;
-        (symbols.len() > 1).then(|| symbols[narrowest])
+        Some(symbols[narrowest])
     }
 
     /// Whether `symbol` can accept arguments of these types, where each part

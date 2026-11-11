@@ -933,7 +933,7 @@ fn an_op_assignment_waits_for_its_operands_like_any_call() {
 }
 
 #[test]
-fn a_call_commits_to_an_overload_narrower_than_every_other_that_fits() {
+fn a_call_nothing_else_settles_takes_its_narrowest_overload() {
     // `[](Any, Any)` would take the map too, but loses to the map's own `[]`,
     // which settles the key type.
     let globals = [natives(&[("[]", "(Any, Any) -> Any")]), index_natives()].concat();
@@ -943,6 +943,47 @@ fn a_call_commits_to_an_overload_narrower_than_every_other_that_fits() {
             key: Box::new(StaticType::String),
             value: Box::new(StaticType::unit()),
         }
+    );
+}
+
+#[test]
+fn a_call_nothing_else_settles_takes_no_narrowest_overload_when_unsure() {
+    let function = |parameter, returns| StaticType::Function {
+        parameters: Some(vec![parameter]),
+        return_type: Box::new(returns),
+    };
+    // Nothing is known about `x`, so it's `Any`, which `pick(Any)` takes.
+    assert_eq!(
+        analyse_last_type(
+            "fn pick(x: Int) => 1; fn pick(x: Any) => \"any\"; let f = fn(x) => pick(x); f"
+        ),
+        function(StaticType::Any, StaticType::String)
+    );
+    // Overloads in two scopes fit, so none settles `x`: it's `Any`, and the
+    // call resolves as it does for any `Any` argument.
+    assert_eq!(
+        analyse_last_type(
+            "fn pick(xs: List<String>) => \"outer\"; { fn pick(xs: List<Int>) => 1; let f = fn(x) => pick([x]); f }"
+        ),
+        function(StaticType::Any, StaticType::Int)
+    );
+}
+
+#[test]
+fn a_waiting_call_does_not_commit_to_a_narrower_overload_too_early() {
+    // `pick(x)` waits: `x` may still turn out to be what only `pick(Any)` takes.
+    assert_eq!(
+        analyse_last_type(
+            "fn pick(x: Int) => 1; fn pick(x: Any) => \"any\"; let f = fn(x) => pick(x); f(\"s\")"
+        ),
+        StaticType::String
+    );
+    // The nearest scope's `pick` takes the call, however narrow the outer one is.
+    assert_eq!(
+        analyse_last_type(
+            "fn pick(x: Int) => 1; { fn pick(x: Any) => \"inner\"; let f = fn(x) => pick(x); f(1) }"
+        ),
+        StaticType::String
     );
 }
 

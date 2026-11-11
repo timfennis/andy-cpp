@@ -182,6 +182,13 @@ impl<'a> Overloads<'a> {
         }
     }
 
+    /// The candidates a call can reach, grouped by scope, nearest first.
+    pub(crate) fn reachable_groups(self, candidates: &Candidates) -> Vec<Vec<SymbolId>> {
+        self.reachable(candidates)
+            .map(<[SymbolId]>::to_vec)
+            .collect()
+    }
+
     /// Every candidate a call can reach, nearest scope first.
     pub(crate) fn reachable_symbols(self, candidates: &Candidates) -> Vec<SymbolId> {
         self.reachable(candidates).flatten().copied().collect()
