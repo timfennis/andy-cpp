@@ -16,7 +16,13 @@ pub struct Parser {
 }
 
 impl Parser {
+    /// A parser over `tokens`, without their comments: a comment can stand
+    /// between any two tokens and never changes what the program means.
     pub fn from_tokens(tokens: Vec<TokenLocation>) -> Self {
+        let tokens = tokens
+            .into_iter()
+            .filter(|token| !matches!(token.token, Token::Comment(_)))
+            .collect();
         Self { tokens, current: 0 }
     }
 

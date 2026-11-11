@@ -38,6 +38,9 @@ pub enum Token {
 
     Identifier(String),
     OpAssign(Box<TokenLocation>),
+    /// `// text` or `#! text`, up to the end of the line. Holds the whole
+    /// comment, marker included: `// text` for `// text`. The parser skips it.
+    Comment(String),
 
     // Operator - Assignment
     // DeclareVar,
@@ -126,6 +129,7 @@ impl fmt::Display for Token {
                 return write!(f, "{n}");
             }
             Self::Identifier(ident) => ident,
+            Self::Comment(comment) => comment,
             // Self::DeclareVar => ":=",
             Self::EqualsSign => "=",
             Self::EqualsEquals => "==",

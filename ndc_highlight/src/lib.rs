@@ -68,29 +68,41 @@ pub fn highlight(source: &str) -> Vec<Highlight> {
     };
 
     let mut highlights = Vec::new();
-    let mut end_of_previous = 0;
+    // The token before the current one, comments left out
+    let mut previous = None;
     for (i, token) in tokens.iter().enumerate() {
-        let range = token.span.range();
-        skipped(source, end_of_previous..range.start, &mut highlights);
-        end_of_previous = range.end;
-
-        let next = tokens.get(i + 1).map(|t| &t.token);
-        let previous = i.checked_sub(1).map(|i| &tokens[i].token);
-        let kind = kind(token, previous, next, &function_spans);
-        highlights.push(Highlight { range, kind });
+        let kind = if matches!(token.token, Token::Comment(_)) {
+            Kind::Comment
+        } else {
+            // Only the token right before a run of comments looks past it,
+            // so this stays linear however many comments there are
+            let next = tokens[i + 1..]
+                .iter()
+                .map(|t| &t.token)
+                .find(|t| !matches!(t, Token::Comment(_)));
+            let kind = kind(token, previous, next, &function_spans);
+            previous = Some(&token.token);
+            kind
+        };
+        highlights.push(Highlight {
+            range: token.span.range(),
+            kind,
+        });
     }
 
     // After a lexer error, the code is invalid from the first thing after the
-    // last token that isn't whitespace or a comment: that's where the lexer
-    // gave up, even when its error points further in.
-    let rest = end_of_previous..source.len();
-    if let Some(start) = skipped(source, rest, &mut highlights)
-        && !lexed
-    {
-        highlights.push(Highlight {
-            range: start..source.len(),
-            kind: Kind::Invalid,
-        });
+    // last token that isn't whitespace: that's where the lexer gave up, even
+    // when its error points further in.
+    if !lexed {
+        let end_of_tokens = tokens.last().map_or(0, |t| t.span.end());
+        let rest = &source[end_of_tokens..];
+        let start = source.len() - rest.trim_start_matches([' ', '\t', '\r', '\n']).len();
+        if start < source.len() {
+            highlights.push(Highlight {
+                range: start..source.len(),
+                kind: Kind::Invalid,
+            });
+        }
     }
     highlights
 }
@@ -167,30 +179,6 @@ fn kind(
         | Token::Colon => Kind::Punctuation,
         _ => Kind::Operator,
     }
-}
-
-/// Records the comments in `gap`, a stretch of `source` the lexer skipped,
-/// and returns where something other than whitespace or a comment starts, if
-/// anything does. Between two tokens nothing does; after the last token, that
-/// is where a lexer error stopped it. A comment runs to the end of its line.
-fn skipped(source: &str, gap: Range<usize>, highlights: &mut Vec<Highlight>) -> Option<usize> {
-    let mut at = gap.start;
-    while at < gap.end {
-        let rest = &source[at..gap.end];
-        if rest.starts_with("//") || rest.starts_with("#!") {
-            let end = rest.find('\n').map_or(gap.end, |newline| at + newline);
-            highlights.push(Highlight {
-                range: at..end,
-                kind: Kind::Comment,
-            });
-            at = end;
-        } else if rest.starts_with([' ', '\t', '\r', '\n']) {
-            at += 1;
-        } else {
-            return Some(at);
-        }
-    }
-    None
 }
 
 /// The byte offsets of identifiers the parser sees used as functions.
@@ -271,6 +259,13 @@ mod tests {
                 ("// last", Kind::Comment),
             ]
         );
+    }
+
+    #[test]
+    fn a_comment_does_not_hide_a_function_name_from_its_neighbours() {
+        // Doesn't parse, so only the tokens around `foo` say it's a function
+        assert!(kinds("fn // name\nfoo(").contains(&("foo", Kind::Function)));
+        assert!(kinds("foo // call\n(").contains(&("foo", Kind::Function)));
     }
 
     #[test]
