@@ -10,6 +10,7 @@ values.insert(2);
 // keys returns List<Any>; the cast recovers the element type so the
 // result works with functions that expect a List<Int>.
 let keys = values.keys as List<Int>;
+print(keys.max());  // 2
 ```
 
 A cast checks the value without converting it. `5 as Float` is an error
@@ -67,7 +68,14 @@ needs:
 let line = "a b c";
 line = line.split(" ");    // line is now Sequence<String>, not List<String>
 line.remove(0);            // error: no `remove` matches Sequence<String>, Int
-assert_eq((line as List<String>).remove(0), "a");
+```
+
+A cast states that it is still a list:
+
+```ndc
+let line = "a b c";
+line = line.split(" ");
+print((line as List<String>).remove(0));  // a
 ```
 
 A specialized `op=` mutates its target in place and keeps its type, so it only
@@ -79,7 +87,7 @@ target unverified:
 fn opaque(x) => x;
 let values = [1];
 values ++= opaque([2, 3]) as List<Int>;
-assert_eq(values, [1, 2, 3]);
+print(values);  // [1,2,3]
 ```
 
 ## Limitations

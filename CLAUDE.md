@@ -55,7 +55,7 @@ User-facing language documentation lives in `manual/src/`. It is an mdBook proje
 
 When making changes that affect language behaviour or runtime semantics, update the relevant manual page.
 
-The published manual highlights ` ```ndc ` code blocks and gives them a Run button, running them on the interpreter compiled to WebAssembly (`manual/theme/ndc.js`). Mark a block that can't run on its own, such as a fragment that uses names from an earlier block, as ` ```ndc,norun `. The playground page and the code it shares with the manual live in `manual/src/playground/`.
+The published manual highlights ` ```ndc ` code blocks and gives them a Run button, running them on the interpreter compiled to WebAssembly (`manual/theme/ndc.js`). Mark a block that can't run on its own, such as a fragment that uses names from an earlier block, as ` ```ndc,norun `. Write examples so running them shows the result: `print(-7 / 2);  // -3` rather than `assert_eq(-7 / 2, -3);`, with the exact printed output in the comment. A block that demonstrates a runtime error ends with it, as nothing after the first error runs. The playground page and the code it shares with the manual live in `manual/src/playground/`.
 
 ## Architecture
 

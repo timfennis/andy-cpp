@@ -30,12 +30,15 @@ let table: Map<String, Int> = %{"a": 1, "b": 2};
 let maybe: Option<Any> = Some("hi");
 let pair: Tuple<Int, String> = (1, "hi");
 let pair2: (Int, String) = (1, "hi");  // tuple shorthand
+
+print(maybe, pair2);  // Some(hi) (1,"hi")
 ```
 
 Nested generics work too — the parser handles the `>>` ambiguity for you:
 
 ```ndc
 let grid: List<List<Int>> = [[1, 2], [3, 4]];
+print(grid);  // [[1,2],[3,4]]
 ```
 
 [Struct](./types/struct.md) names are type names like any other, including inside generics:
@@ -45,6 +48,7 @@ struct Point { x: Int, y: Int }
 
 fn manhattan(p: Point) => p.x + p.y
 let points: List<Point> = [Point(1, 2), Point(3, 4)];
+print(points.map(manhattan));  // [3,7]
 ```
 
 A struct name refers to the struct declared earlier in an enclosing scope; it cannot be

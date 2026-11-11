@@ -16,6 +16,7 @@ There are two common ways to create cycles:
     let n = %{};
     m["n"] = n;
     n["m"] = m;
+    print(m["n"]["m"] == m);  // true
 }
 // m and n are out of scope, but each map still holds
 // a reference to the other — neither can be freed.
@@ -25,10 +26,11 @@ There are two common ways to create cycles:
 
 A closure that captures a variable which holds a reference back to itself creates a cycle:
 
-```ndc,norun
+```ndc
 {
-    let f = ();
-    f = fn(x) { if x > 0 then f(x - 1) else 0 };
+    let f: Any = ();
+    f = fn(x) { if x > 0 { x + f(x - 1) } else { 0 } };
+    print(f(3));  // 6
 }
 // f now holds the closure, and the closure holds
 // f, because it captured f to call it.

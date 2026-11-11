@@ -8,6 +8,7 @@ Because `{` is already used to create a block expression, Andy C++ uses `%{` to 
 
 ```ndc
 let my_set = %{5, 3, 2, 1};
+print(3 in my_set);  // true
 ```
 
 ## Map
@@ -18,6 +19,7 @@ let my_map = %{
     "oranges": 22,
     "bananas": 0,
 };
+print(my_map["apples"]);  // 60
 ```
 
 ## Default values
@@ -26,10 +28,11 @@ let my_map = %{
 let defaultdict = %{:0};
 
 // Missing keys in defaultdict default to 0
-assert(defaultdict[10] == 0);
+print(defaultdict[10]);  // 0
 
 // You can also mutate a missing key this way
 defaultdict[33] += 7; // adds 7 to 0 and associates it to key 33
+print(defaultdict[33]);  // 7
 ```
 
 > **Note:** Lists are copied by reference. If you use `[]` as a dictionary default value, every missing key gets the same list instance. Use a default function instead.
@@ -44,8 +47,8 @@ let dd = %{:fn() => []};
 dd["foo"].push(3);
 dd["bar"].push(4);
 
-assert_eq(dd["foo"].len, 1);
-assert_eq(dd["bar"].len, 1);
+print(dd["foo"]);  // [3]
+print(dd["bar"]);  // [4]
 ```
 
 You can still use a function itself as the default value:

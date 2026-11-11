@@ -77,7 +77,7 @@ values.insert(1);
 values.insert(2);
 
 // keys is typed List<Any>; the cast recovers Int so sum can resolve.
-assert_eq((values.keys as List<Int>).sum(), 3);
+print((values.keys as List<Int>).sum());  // 3
 ```
 
 Otherwise, move the call to a location where Andy C++ can infer the argument types

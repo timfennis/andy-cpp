@@ -7,12 +7,15 @@ let my_list = [1,2,3];
 
 // Values inside a list can be changed
 my_list[2] = 4;
+print(my_list);           // [1,2,4]
 
 // You can add elements to the end of a list
 my_list.push(99);
+print(my_list);           // [1,2,4,99]
 
 // Remove and return the last element of the list
 let element = my_list.pop();
+print(element, my_list);  // 99 [1,2,4]
 ```
 
 ## Indexing
@@ -21,7 +24,7 @@ Lists, strings, and tuples also support negative indexes. Negative indexes count
 
 ```ndc
 let my_list = [1,2,3,4,5,6,7,8,9];
-assert_eq(9, my_list[-1]);
+print(my_list[-1]);  // 9
 ```
 
 ### Element accessors
@@ -40,11 +43,14 @@ the index is out of bounds.
 ```ndc
 let my_list = [10, 20, 30];
 
-assert_eq(my_list.get(0), 10);
-assert_eq(my_list.get?(9), None);   // in range for a usize, past the end
-assert_eq(my_list.index(-1), 30);   // wraps like `[]`
-assert_eq(my_list.index?(-9), None);
+print(my_list.get(0));      // 10
+print(my_list.get?(9));     // None
+print(my_list.index(-1));   // 30
+print(my_list.index?(-9));  // None
 ```
+
+`get?(9)` is `None` because 9 is a valid index type but past the end, and
+`index(-1)` wraps from the end like `[]`.
 
 `index` behaves like the `[]` operator (wrap + error on out of bounds);
 `index?` is its non-throwing counterpart.

@@ -29,20 +29,25 @@ fn foo() {
 }
 ```
 
-A function declared with `fn` can't be replaced. To have a variable that holds a function, declare it with `let`:
+A function declared with `fn` can't be replaced:
 
 ```ndc
 fn double(x) { x * 2 }
 double = fn(x) { x * 10 };     // ERROR: Can't assign to the function 'double'
+```
 
+To have a variable that holds a function, declare it with `let`:
+
+```ndc
 let scale = fn(x) { x * 2 };
 scale = fn(x) { x * 10 };      // fine
+print(scale(3));               // 30
 ```
 
 Functions close over their environment.
 
 ```ndc
-let x = [];
+let x: List<Int> = [];
 
 fn my_function(n) {
   // add argument n to x
@@ -52,9 +57,9 @@ fn my_function(n) {
   x.sum()
 }
 
-assert_eq(10, my_function(10));
-assert_eq(15, my_function(5));
-assert_eq([10, 5], x);
+print(my_function(10));  // 10
+print(my_function(5));   // 15
+print(x);                // [10,5]
 ```
 
 A function captures the variable itself, not a copy of its value. It sees later assignments, and its own assignments are seen outside:
@@ -64,7 +69,7 @@ let count = 0;
 let increment = fn() { count += 1; };
 increment();
 increment();
-assert_eq(count, 2);
+print(count);  // 2
 ```
 
 Each block and each loop iteration has its own variables, so a function keeps the one from the iteration that created it:
@@ -77,7 +82,7 @@ while i < 3 {
     getters.push(fn() { j });
     i += 1;
 }
-assert_eq([g() for g in getters], [0, 1, 2]);
+print([g() for g in getters]);  // [0,1,2]
 ```
 
 ## Anonymous functions
@@ -88,13 +93,14 @@ Anonymous functions let you write inline function values.
 // An anonymous function that adds its operands together
 let my_function = fn(a, b) { a + b };
 
-assert_eq(my_function(5, 3), 8);
+print(my_function(5, 3));  // 8
 
 fn foo() {
-    // whatever
+    "whatever"
 }
 
 let my_variable = foo; // Store the foo-function in a variable
+print(my_variable());      // whatever
 ```
 
 `map` applies an anonymous function to each element in the list:
@@ -102,6 +108,7 @@ let my_variable = foo; // Store the foo-function in a variable
 ```ndc
 let my_list = [x for x in 1..10];
 let out = my_list.map(fn(x) => x * 10);
+print(out);  // [10,20,30,40,50,60,70,80,90]
 ```
 
 ## Arrow syntax
@@ -111,15 +118,19 @@ Use the fat arrow `=>` for functions that return a single expression.
 ```ndc
 // Works for anonymous functions
 let my_function = fn(a, b) => a + b;
+print(my_function(1, 2));  // 3
 
 // Also works for named functions
 fn foo() => "whatever";
+print(foo());              // whatever
 
 // Note that commas have a very low precedence in this example x is a tuple (function, 3)
 let x = fn(y) => y, 3;
+print(x[1]);               // 3
 
 // If you want to return a tuple from a function written in this way you must use parentheses
 let x = fn(y) => (y, 3);
+print(x(1));               // (1,3)
 ```
 
 ## Type annotations
@@ -132,6 +143,9 @@ fn greet(name: String) -> String => "hello " <> name;
 fn add(x: Int, y: Int) -> Int {
     x + y
 }
+
+print(greet("world"));  // hello world
+print(add(1, 2));       // 3
 ```
 
 Annotations are optional — leave them off and the parameter is treated as `Any`. Mix and match as you like:
@@ -139,6 +153,9 @@ Annotations are optional — leave them off and the parameter is treated as `Any
 ```ndc
 fn first(xs: List<Int>) => xs[0];   // params annotated, return inferred
 fn count(xs) -> Int => len(xs);      // return annotated, params inferred
+
+print(first([7, 8]));      // 7
+print(count([1, 2, 3]));   // 3
 ```
 
 If the body produces a value that doesn't fit the declared return type, the analyser flags it:
@@ -157,8 +174,8 @@ A name can refer to several functions, called overloads, as long as they differ 
 fn add(n) { n + 1 }
 fn add(x, y) { x + y }
 
-assert_eq(10, add(9));
-assert_eq(12, add(8, 4));
+print(add(9));     // 10
+print(add(8, 4));  // 12
 ```
 
 A call uses the overload whose parameters accept its arguments. When several accept them, the most specific one wins:
@@ -168,9 +185,9 @@ fn describe(x: Int) { "int" }
 fn describe(x: String) { "string" }
 fn describe(x: Any) { "something else" }
 
-assert_eq("int", describe(1));
-assert_eq("string", describe("a"));
-assert_eq("something else", describe([1]));
+print(describe(1));    // int
+print(describe("a"));  // string
+print(describe([1]));  // something else
 ```
 
 Two overloads in the same scope can't have the same parameter types. Parameter names don't count, and a parameter without a type annotation has type `Any`:
@@ -192,8 +209,9 @@ fn foo(a, b) { "outer-two" }
 
 {
     fn foo(a) { "inner-one" }
-    foo("x");        // "inner-one"
-    foo("x", "y");   // "outer-two": the inner foo doesn't take two arguments
+    print(foo("x"));        // inner-one
+    // the inner foo doesn't take two arguments
+    print(foo("x", "y"));   // outer-two
 }
 ```
 
@@ -204,9 +222,17 @@ fn foo(a) { "one" }
 fn foo(a, b) { "two" }
 
 let foo = fn(a) => "let";
-foo("x");        // "let"
-foo("x", "y");   // ERROR: The variable 'foo' holds a function that doesn't accept the arguments 'String, String'
+print(foo("x"));  // let
+```
 
+```ndc
+fn foo(a, b) { "two" }
+
+let foo = fn(a) => "let";
+foo("x", "y");   // ERROR: The variable 'foo' holds a function that doesn't accept the arguments 'String, String'
+```
+
+```ndc
 let len = 300;
 len("test");     // ERROR: The variable 'len' is Int, which can't be called
 ```
@@ -215,12 +241,17 @@ len("test");     // ERROR: The variable 'len' is Int, which can't be called
 
 ```ndc
 let len = 300;
-len;               // 300
-"test".len();      // 4: the built-in len
-"test".len;        // 4
+print(len);              // 300
+// the built-in len
+print("test".len());     // 4
+print("test".len);       // 4
 
 let double = fn(x) => x * 2;
-double(5);         // 10
+print(double(5));        // 10
+```
+
+```ndc
+let double = fn(x) => x * 2;
 5.double();        // ERROR: No function named 'double'
 ```
 
@@ -229,11 +260,15 @@ double(5);         // 10
 ```ndc
 let foo = fn(a) => "let";
 fn foo(a, b) { "fn" }    // ERROR: Illegal redefinition of variable foo as a function in the same scope
+```
 
+```ndc
 let bar = 1;
 {
     fn bar(a) { a }      // fine: a different scope
+    print(bar(2));       // 2
 }
+print(bar);              // 1
 ```
 
 ## Method call syntax

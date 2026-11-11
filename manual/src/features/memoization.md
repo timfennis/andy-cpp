@@ -12,6 +12,9 @@ pure fn add(x, y) {
 }
 
 let multiply = pure fn (x, y) { x * y };
+
+print(add(2, 3));       // 5
+print(multiply(4, 5));  // 20
 ```
 
 > **Note:** The interpreter does not check whether a function is actually pure. You must avoid side effects yourself.
@@ -48,7 +51,5 @@ pure fn fib (n) {
   }
 }
 
-for x in 1..1000 {
-  print(x, fib(x));
-}
+print(fib(92));  // 7540113804746346429
 ```

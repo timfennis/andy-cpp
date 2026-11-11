@@ -3,13 +3,16 @@
 If-statements are very similar to how they are in Go and Rust. You don't need parentheses
 around the conditions but braces around the body are required.
 
-```ndc,norun
+```ndc
+let x = 3;
+let y = 4;
+
 if x == 3 {
-  // x is three
+  print("x is three");
 } else if y == 4 {
-  // y is four
+  print("y is four");
 } else {
-  // neither x is three or y is four
+  print("neither x is three or y is four");
 }
 ```
 
@@ -26,3 +29,6 @@ let x = if n > 0 {
 } else {
   -1
 };
+print(x);  // 1
+
+```
