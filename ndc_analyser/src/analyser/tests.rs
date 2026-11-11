@@ -12,11 +12,15 @@ fn analyse_with_globals(
         .expect("lex failed");
     let expressions = Parser::from_tokens(tokens).parse().expect("parse failed");
     let mut analyser = Analyser::new(globals);
-    let mut last_type = StaticType::unit();
     for expression in &expressions {
-        last_type = analyser.analyse(expression);
+        analyser.analyse(expression);
     }
-    (last_type, analyser.take_result())
+    let result = analyser.take_result();
+    // The last statement's type as the whole program settled it.
+    let last_type = expressions.last().map_or_else(StaticType::unit, |last| {
+        result.analysis.expr_types[&last.id].clone()
+    });
+    (last_type, result)
 }
 
 fn analyse_last_type_with_globals(source: &str, globals: Vec<(String, StaticType)>) -> StaticType {
@@ -123,12 +127,6 @@ fn break_and_continue_need_a_loop_in_their_own_function() {
 }
 
 #[test]
-fn destructuring_assignment_widens_each_target() {
-    let typ = analyse_last_type("let a = 1; let b = 2; (a, b) = (\"s\", 2); a");
-    assert_eq!(typ, StaticType::Int.lub(&StaticType::String));
-}
-
-#[test]
 fn break_and_continue_inside_a_loop_are_accepted() {
     for source in [
         "while true { break; }",
@@ -174,71 +172,6 @@ fn a_function_returns_the_join_of_its_body_and_every_return() {
             .exactly_one()
             .ok(),
         Some(&StaticType::Tuple(vec![StaticType::Any; 3])),
-    );
-}
-
-#[test]
-fn inferred_list_index_assignment_widens_element_type() {
-    assert_eq!(
-        analyse_last_type_with_globals(
-            "let values = [1]; values[0] = \"two\"; values",
-            index_natives()
-        ),
-        StaticType::List(Box::new(StaticType::Any)),
-    );
-}
-
-#[test]
-fn inferred_list_slice_assignment_widens_element_type() {
-    assert_eq!(
-        analyse_last_type_with_globals(
-            "let values = [1]; values[0..1] = [\"two\"]; values",
-            index_natives()
-        ),
-        StaticType::List(Box::new(StaticType::Any)),
-    );
-}
-
-#[test]
-fn inferred_map_index_assignment_widens_value_and_preserves_key_type() {
-    assert_eq!(
-        analyse_last_type_with_globals(
-            "let values = %{\"one\": 1}; values[\"two\"] = \"two\"; values",
-            index_natives()
-        ),
-        StaticType::Map {
-            key: Box::new(StaticType::String),
-            value: Box::new(StaticType::Any),
-        },
-    );
-}
-
-#[test]
-fn inferred_index_augmented_assignment_widens_element_type() {
-    let add = StaticType::Function {
-        parameters: Some(vec![StaticType::Int, StaticType::Float]),
-        return_type: Box::new(StaticType::Number),
-    };
-    assert_eq!(
-        analyse_last_type_with_globals(
-            "let values = [1]; values[0] += 0.5; values",
-            [index_natives(), vec![("+".to_string(), add)]].concat(),
-        ),
-        StaticType::List(Box::new(StaticType::Any)),
-    );
-}
-
-#[test]
-fn inferred_identifier_assignments_widen_subsequent_reads() {
-    assert_eq!(analyse_last_type("let x = 3; x = 0.5; x"), StaticType::Any,);
-
-    let add = StaticType::Function {
-        parameters: Some(vec![StaticType::Int, StaticType::Float]),
-        return_type: Box::new(StaticType::Float),
-    };
-    assert_eq!(
-        analyse_last_type_with_globals("let x = 3; x += 0.5; x", vec![("+".to_string(), add)],),
-        StaticType::Any,
     );
 }
 
@@ -472,6 +405,115 @@ fn same_arity_overloads_with_different_parameter_types_are_allowed() {
             "fn f(x: Int) { 1 } fn f(x: String) { \"one\" } fn f(x: List<Int>) { [1] } f(\"a\")"
         ),
         StaticType::String,
+    );
+}
+
+#[test]
+fn a_variable_keeps_its_inferred_type() {
+    let add = StaticType::Function {
+        parameters: Some(vec![StaticType::Int, StaticType::Float]),
+        return_type: Box::new(StaticType::Float),
+    };
+    let globals = [index_natives(), vec![("+".to_string(), add)]].concat();
+    let scalar = "mismatched types: found Float but expected Int";
+    let list = "mismatched types: found List<Float> but expected List<Int>";
+    for (source, expected) in [
+        ("let x = 3; x = 0.5;", scalar),
+        ("let x = 3; x += 0.5;", scalar),
+        ("let a = 1; let b = 2; (a, b) = (0.5, 2);", scalar),
+        ("for x in [1] { x = 0.5; }", scalar),
+        ("let values = [1]; values[0] = 0.5;", scalar),
+        ("let values = [1]; values[0..1] = [0.5];", list),
+        ("let values = [1]; values[0] += 0.5;", scalar),
+        ("let values = %{\"one\": 1}; values[\"two\"] = 0.5;", scalar),
+    ] {
+        assert_eq!(errors(source, globals.clone()), vec![expected], "{source}");
+    }
+}
+
+#[test]
+fn an_any_value_can_be_stored_anywhere() {
+    let any_value = vec![(
+        "anything".to_string(),
+        StaticType::Function {
+            parameters: Some(vec![]),
+            return_type: Box::new(StaticType::Any),
+        },
+    )];
+    assert_eq!(
+        analyse_last_type_with_globals("let x = 3; x = anything(); x", any_value),
+        StaticType::Int
+    );
+}
+
+#[test]
+fn the_first_write_settles_what_an_empty_literal_holds() {
+    let list_of = |element| StaticType::List(Box::new(element));
+    assert_eq!(
+        analyse_last_type_with_globals("let xs = []; xs[0] = 1; xs", index_natives()),
+        list_of(StaticType::Int)
+    );
+    assert_eq!(
+        analyse_last_type_with_globals("let xs = []; xs[0] = [1.5]; xs", index_natives()),
+        list_of(list_of(StaticType::Float))
+    );
+    assert_eq!(
+        analyse_last_type_with_globals("let m = %{}; m[\"a\"] = 1; m", index_natives()),
+        StaticType::Map {
+            key: Box::new(StaticType::String),
+            value: Box::new(StaticType::Int),
+        }
+    );
+    // Reads before the write see the settled type too, once the batch ends.
+    assert_eq!(
+        analyse_last_type_with_globals("let xs = []; let ys = xs; xs[0] = 1; ys", index_natives()),
+        list_of(StaticType::Int)
+    );
+}
+
+#[test]
+fn an_annotation_settles_what_its_value_holds() {
+    let option_of = |inner| StaticType::Option(Box::new(inner));
+    assert_eq!(
+        analyse_last_type("let o: Option<Int> = None; o"),
+        option_of(StaticType::Int)
+    );
+    assert_eq!(
+        analyse_last_type("let p: (Int, Option<Int>) = (1, None); p"),
+        StaticType::Tuple(vec![StaticType::Int, option_of(StaticType::Int)])
+    );
+}
+
+#[test]
+fn what_nothing_settles_falls_back_to_any() {
+    assert_eq!(
+        analyse_last_type("let xs = []; xs"),
+        StaticType::List(Box::new(StaticType::Any))
+    );
+    assert_eq!(
+        analyse_last_type("None"),
+        StaticType::Option(Box::new(StaticType::Any))
+    );
+    // An empty map with nothing written to it is an empty set.
+    assert_eq!(
+        analyse_last_type("%{}"),
+        StaticType::Map {
+            key: Box::new(StaticType::Any),
+            value: Box::new(StaticType::unit()),
+        }
+    );
+}
+
+#[test]
+fn a_function_settles_its_own_type_variables_when_its_body_ends() {
+    // `f` returns a list of unknown elements: they fall back to `Any` when
+    // `f` ends, so a caller's write can't settle them for every caller.
+    assert_eq!(
+        analyse_last_type_with_globals(
+            "fn f() { [] } let xs = f(); xs[0] = \"a\"; f()",
+            index_natives()
+        ),
+        StaticType::List(Box::new(StaticType::Any))
     );
 }
 

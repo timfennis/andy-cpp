@@ -42,30 +42,47 @@ print(x); // 3
 
 ## Reassignment
 
-The `=` operator can be used to reassign a value to an existing variable. When you reassign a variable to a value of a different type, the variable's type is widened to the least upper bound (LUB) of the old and new types.
+The `=` operator assigns a new value to an existing variable. A variable keeps the type its first value gave it, so a new value has to fit that type:
 
 ```ndc
-let x = 1;     // the initializer and declaration have type Int
-x = 2;         // subsequent reads still have type Int
-x = 3.14;      // subsequent reads have type Any (Int and Float are siblings)
-x;             // type is Any
+let x = 1;     // x is Int
+x = 2;         // fine
+x = 3.14;      // ERROR: mismatched types: found Float but expected Int
 ```
 
-Augmented assignment widens an inferred binding from the operation's result in the same way:
+Augmented assignment is checked the same way, against the result of the operation:
 
 ```ndc
 let total = 3;
-total += 0.5;  // Int + Float returns Float, so subsequent reads have type Any
-total;         // type is Any
+total += 0.5;  // ERROR: Int + Float is a Float, which doesn't fit in Int
+
+let sum = 3.0;
+sum += 0.5;    // fine
 ```
+
+What an empty list or map holds, or what `None` will hold, isn't known yet. The first assignment that stores something settles it, and later ones have to fit:
 
 ```ndc
-let pos = ();        // type is ()
-pos = (1, 2);        // type widens to Sequence<Any>
-pos = ("a", "b");    // type is still Sequence<Any>
+let counts = %{};       // key and value types not known yet
+counts["a"] = 1;        // counts is Map<String, Int> from here on
+counts["b"] = "two";    // ERROR: mismatched types: found String but expected Int
 ```
 
-> **Tip:** For the best type inference, initialize variables with a value that matches the intended type. For example, use `let pos = (0, 0);` instead of `let pos = ();` if you intend to store a 2-tuple of numbers.
+Only assignments settle these types. When nothing does, as in `let xs = []; xs.push(1)`, they stay `Any`.
+
+A variable that only gets its real value later holds an `Option`:
+
+```ndc
+let pos = None;
+pos = Some((1, 2));
+```
+
+To store values of different types in one variable, annotate it with `Any`:
+
+```ndc
+let x: Any = 1;
+x = "text";    // fine
+```
 
 ## Type annotations
 
@@ -99,15 +116,13 @@ let m: Map<Int, Int> = %{};    // m is Map<Int, Int>
 let nested: List<List<Int>> = [[]];
 ```
 
-Once a binding has an annotation, it stays locked to that type. Reassignment and augmented assignment can't widen it the way they widen an inferred binding:
+An annotated variable keeps its annotated type, just as an inferred one keeps the type of its first value:
 
 ```ndc
 let x: Int = 5;
 x = "test";   // ERROR: mismatched types
 x += 0.5;     // ERROR: the Float result doesn't fit in Int
 ```
-
-If you want a binding that widens freely, just leave the annotation off. Annotations are opt-in.
 
 The same syntax shows up on function parameters and return types — see the [Function](./types/function.md) page.
 

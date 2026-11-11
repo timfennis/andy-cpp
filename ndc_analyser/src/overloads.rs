@@ -1,4 +1,4 @@
-use crate::types::TypeTable;
+use crate::types::{TypeTable, TypeVars};
 use ndc_analysis::{Binding, Candidate};
 use ndc_core::StaticType;
 use ndc_resolver::{BindingKind, Candidates, SymbolId, SymbolTable};
@@ -97,13 +97,20 @@ fn push_unique<T: PartialEq>(out: &mut Vec<T>, item: T) {
 #[derive(Clone, Copy)]
 pub(crate) struct Overloads<'a> {
     types: &'a TypeTable,
+    /// What the type variables in those types stand for so far. A function
+    /// that returns a captured `let xs = []` returns what `xs` holds.
+    vars: &'a TypeVars,
     /// Tells a `fn` from a plain binding like a `let`, which doesn't join overloads.
     symbols: &'a SymbolTable,
 }
 
 impl<'a> Overloads<'a> {
-    pub(crate) fn new(types: &'a TypeTable, symbols: &'a SymbolTable) -> Self {
-        Self { types, symbols }
+    pub(crate) fn new(types: &'a TypeTable, vars: &'a TypeVars, symbols: &'a SymbolTable) -> Self {
+        Self {
+            types,
+            vars,
+            symbols,
+        }
     }
 
     /// The candidate groups a call can reach, nearest scope first. A plain
@@ -452,7 +459,10 @@ impl<'a> Overloads<'a> {
                 positions,
             });
         }
-        if !sig.iter().any(|t| matches!(t, StaticType::Any)) {
+        if !sig
+            .iter()
+            .any(|t| matches!(t, StaticType::Any | StaticType::Var(_)))
+        {
             return None;
         }
         let permissive: Vec<StaticType> = vec![StaticType::Any; sig.len()];
@@ -526,10 +536,12 @@ impl<'a> Overloads<'a> {
                         .zip(sig)
                         .all(|(param, arg)| !param.is_incompatible_with(arg))
             }
+            // A variable whose type isn't known yet may hold a function.
             StaticType::Function {
                 parameters: None, ..
             }
-            | StaticType::Any => true,
+            | StaticType::Any
+            | StaticType::Var(_) => true,
             _ => false,
         }
     }
@@ -538,7 +550,7 @@ impl<'a> Overloads<'a> {
     /// turned out not to carry a function type (e.g. `Any`-typed callee).
     fn scalar_return_type(self, symbol: SymbolId) -> StaticType {
         match self.types.get_type(symbol) {
-            StaticType::Function { return_type, .. } => return_type.as_ref().clone(),
+            StaticType::Function { return_type, .. } => self.vars.resolve(return_type),
             _ => StaticType::Any,
         }
     }
@@ -596,7 +608,6 @@ impl<'a> Overloads<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::TypeBinding;
     use ndc_resolver::{BindingKind, SymbolTable};
     use std::cell::RefCell;
 
@@ -631,7 +642,7 @@ mod tests {
             .into_iter()
             .map(|typ| {
                 let symbol = symbol(BindingKind::Function);
-                table.declare(symbol, TypeBinding::Inferred(typ));
+                table.declare(symbol, typ);
                 symbol
             })
             .collect();
@@ -655,8 +666,9 @@ mod tests {
         sig: &[StaticType],
         kind: CallKind,
     ) -> ResolvedCall {
-        SYMBOLS
-            .with_borrow(|table| Overloads::new(types, table).resolve_call(candidates, sig, kind))
+        SYMBOLS.with_borrow(|table| {
+            Overloads::new(types, &TypeVars::default(), table).resolve_call(candidates, sig, kind)
+        })
     }
 
     /// Asserts the call picks `expected` as its single overload.
@@ -824,14 +836,12 @@ mod tests {
     fn a_variable_holding_a_function_ends_the_search() {
         let (mut types, fns) = table(vec![fn_type(vec![StaticType::Int], StaticType::Int)]);
         let variable = symbol(BindingKind::Plain);
-        types.declare(
-            variable,
-            TypeBinding::Inferred(fn_type(vec![StaticType::String], StaticType::Int)),
-        );
+        types.declare(variable, fn_type(vec![StaticType::String], StaticType::Int));
         let candidates = candidates(&[&[fns[0], variable]]);
 
         SYMBOLS.with_borrow(|table| {
-            let overloads = Overloads::new(&types, table);
+            let vars = TypeVars::default();
+            let overloads = Overloads::new(&types, &vars, table);
             let resolved =
                 overloads.resolve_call(&candidates, &[StaticType::Int], CallKind::Regular);
             assert_eq!(resolved.binding, Binding::None);
@@ -846,13 +856,11 @@ mod tests {
     fn a_variable_ending_the_search_hides_only_the_functions_further_out() {
         let (mut types, fns) = table(vec![fn_type(vec![StaticType::Int], StaticType::Int)]);
         let variable = symbol(BindingKind::Plain);
-        types.declare(
-            variable,
-            TypeBinding::Inferred(fn_type(vec![StaticType::String], StaticType::Int)),
-        );
+        types.declare(variable, fn_type(vec![StaticType::String], StaticType::Int));
 
         SYMBOLS.with_borrow(|table| {
-            let overloads = Overloads::new(&types, table);
+            let vars = TypeVars::default();
+            let overloads = Overloads::new(&types, &vars, table);
             assert!(overloads.hides_functions(&candidates(&[&[variable], &[fns[0]]])));
             assert!(!overloads.hides_functions(&candidates(&[&[variable]])));
         });
@@ -865,13 +873,14 @@ mod tests {
     fn a_variable_ends_the_search_whatever_its_type() {
         let (mut types, fns) = table(vec![fn_type(vec![StaticType::Int], StaticType::Int)]);
         let variable = symbol(BindingKind::Plain);
-        types.declare(variable, TypeBinding::Inferred(StaticType::Int));
+        types.declare(variable, StaticType::Int);
         let candidates = candidates(&[&[variable], &[fns[0]]]);
 
         let resolved = resolve(&types, &candidates, &[StaticType::Int], CallKind::Regular);
         assert_eq!(resolved.binding, Binding::None);
         SYMBOLS.with_borrow(|table| {
-            let overloads = Overloads::new(&types, table);
+            let vars = TypeVars::default();
+            let overloads = Overloads::new(&types, &vars, table);
             assert_eq!(
                 overloads.variable_ending_search(&candidates),
                 Some(variable)

@@ -37,7 +37,7 @@ impl Analyser {
 
     /// Overload resolution over the types declared so far.
     pub(super) fn overloads(&self) -> Overloads<'_> {
-        Overloads::new(&self.types, self.resolver.symbols())
+        Overloads::new(&self.types, &self.vars, self.resolver.symbols())
     }
 
     /// Analyses `receiver.member`, the call `member(receiver)`.
@@ -93,7 +93,7 @@ impl Analyser {
             }
             return match callee_type {
                 StaticType::Function { return_type, .. } => *return_type,
-                StaticType::Any => StaticType::Any,
+                StaticType::Any | StaticType::Var(_) => StaticType::Any,
                 other => {
                     self.emit(AnalysisError::not_callable(&other, span));
                     StaticType::Any

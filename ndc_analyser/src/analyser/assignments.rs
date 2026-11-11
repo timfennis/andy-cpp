@@ -2,7 +2,7 @@ use super::Analyser;
 use crate::error::AnalysisError;
 use crate::overloads::{CallKind, ResolvedCall};
 use itertools::izip;
-use ndc_analysis::{Binding, Candidate};
+use ndc_analysis::Binding;
 use ndc_core::{NodeId, StaticType};
 use ndc_lexer::Span;
 use ndc_parser::{AssignmentTarget, AssignmentTargetLocation, ExpressionLocation};
@@ -21,6 +21,27 @@ impl Analyser {
     ) -> StaticType {
         let left_type = self.analyse_assignment_target(l_value, span);
         let right_type = self.analyse_expr(r_value);
+        // An in-place operation such as `++=` keeps its target's type, so
+        // what it stores has to fit that type. Where the target's type isn't
+        // fully known, the right operand settles it: in
+        // `let xs = []; xs ++= [1]`, the elements of `xs` are `Int`.
+        let left_type = if left_type.any_var(&|_| true) {
+            match &left_type {
+                // A tuple target with a scalar operand applies the operand to
+                // each element: `t ++= [1]` appends to every list in `t`.
+                StaticType::Tuple(targets) if !matches!(right_type, StaticType::Tuple(_)) => {
+                    for target in targets {
+                        self.vars.unify(target, &right_type);
+                    }
+                }
+                _ => {
+                    self.vars.unify(&left_type, &right_type);
+                }
+            }
+            self.vars.resolve(&left_type)
+        } else {
+            left_type
+        };
         let arg_types = vec![left_type.clone(), right_type.clone()];
 
         let ResolvedCall {
@@ -118,12 +139,19 @@ impl Analyser {
             AssignmentTarget::Identifier { .. } => {
                 let symbol = self.resolver.assigned_symbol(lvalue.id);
                 self.picks.variables.insert(lvalue.id, symbol);
-                self.types.get_type(symbol).clone()
+                self.vars.resolve(self.types.get_type(symbol))
             }
             AssignmentTarget::Index { index, value } => {
                 // The container before the index, in source order like the resolver.
                 let type_of_index_target = self.analyse_expr(value);
                 let index_type = self.analyse_expr(index);
+                // Writing `m[k]` settles the key type of a map whose keys
+                // aren't known yet, as in `let m = %{}; m["a"] = 1`.
+                if let StaticType::Map { key, .. } = &type_of_index_target
+                    && matches!(**key, StaticType::Var(_))
+                {
+                    self.vars.unify(key, &index_type);
+                }
 
                 let get_args = [type_of_index_target.clone(), index_type.clone()];
                 let set_args = [
@@ -248,8 +276,42 @@ impl Analyser {
         }
     }
 
-    /// Validate a value that will be stored through an lvalue, widening an
-    /// inferred binding when the location has a stable variable to update.
+    /// Whether a value of `value_type` can be stored where values of
+    /// `stored_type` are kept, settling type variables on the way: in
+    /// `let xs = []; xs[0] = 1`, the write settles the element type of `xs`
+    /// as `Int`. The stored type never widens to fit the value. An `Any`
+    /// value fits anywhere, as `Any` is the dynamic type.
+    pub(super) fn accepts_write(
+        &mut self,
+        stored_type: &StaticType,
+        value_type: &StaticType,
+    ) -> bool {
+        if self.vars.unify(stored_type, value_type) {
+            return true;
+        }
+        let stored_type = self.vars.resolve(stored_type);
+        let value_type = self.vars.resolve(value_type);
+        value_type == StaticType::Any || value_type.is_subtype(&stored_type)
+    }
+
+    /// Reports that a value of `value_type` can't be stored where values of
+    /// `stored_type` are kept.
+    pub(super) fn emit_rejected_write(
+        &mut self,
+        stored_type: &StaticType,
+        value_type: &StaticType,
+        span: Span,
+    ) {
+        let error = AnalysisError::mismatched_types(
+            &self.vars.resolve(value_type),
+            &self.vars.resolve(stored_type),
+            span,
+        );
+        self.emit(error);
+    }
+
+    /// Checks a value that will be stored through an lvalue against the type
+    /// stored there.
     pub(super) fn validate_assignment_write(
         &mut self,
         lvalue: &AssignmentTargetLocation,
@@ -261,95 +323,34 @@ impl Analyser {
             AssignmentTarget::Identifier { .. }
                 if self.picks.variables.contains_key(&lvalue.id) =>
             {
-                let target = self.resolver.assigned_symbol(lvalue.id);
-                let widened = stored_type.lub(value_type);
-                if widened != *stored_type
-                    && let Err(annotated_type) = self.types.update_binding_type(target, widened)
-                    && !value_type.is_subtype(&annotated_type)
-                {
-                    self.emit(AnalysisError::mismatched_types(
-                        value_type,
-                        &annotated_type,
-                        span,
-                    ));
+                if !self.accepts_write(stored_type, value_type) {
+                    self.emit_rejected_write(stored_type, value_type, span);
                 }
             }
             AssignmentTarget::Member { .. } => {
-                if !value_type.is_subtype(stored_type) {
-                    self.emit(AnalysisError::mismatched_types(
-                        value_type,
-                        stored_type,
-                        span,
-                    ));
+                if !self.accepts_write(stored_type, value_type) {
+                    self.emit_rejected_write(stored_type, value_type, span);
                 }
             }
-            AssignmentTarget::Index { value, index, .. } => {
-                if value_type.is_subtype(stored_type) {
+            AssignmentTarget::Index { index, .. } => {
+                if self.accepts_write(stored_type, value_type) {
                     return;
                 }
-
+                // `xs[0..2] = (1, 2)` stores the tuple's elements.
                 let is_slice = self
                     .result
                     .analysis
                     .expr_types
                     .get(&index.id)
                     .is_some_and(Self::index_type_is_slice);
-                let (stored_element_type, value_element_type) = if is_slice {
-                    let Some(stored_element_type) = stored_type.index_element_type() else {
-                        self.emit(AnalysisError::mismatched_types(
-                            value_type,
-                            stored_type,
-                            span,
-                        ));
-                        return;
-                    };
-                    let Some(value_element_type) = value_type.sequence_element_type() else {
-                        self.emit(AnalysisError::mismatched_types(
-                            value_type,
-                            stored_type,
-                            span,
-                        ));
-                        return;
-                    };
-                    (stored_element_type, value_element_type)
-                } else {
-                    (stored_type.clone(), value_type.clone())
-                };
-
-                if matches!(
-                    self.picks.bindings.get(&value.id),
-                    Some(Binding::Resolved(Candidate::Scalar(_)))
-                ) {
-                    let target = self.resolver.innermost_reference(value.id);
-                    let container_type = self.types.get_type(target).clone();
-                    // An earlier target of the same destructuring may already
-                    // have widened the container, as in `l[0], l[1] = …`, so
-                    // check against its current type rather than `stored_type`.
-                    if container_type
-                        .index_element_type()
-                        .is_some_and(|element| value_element_type.is_subtype(&element))
-                    {
-                        return;
-                    }
-                    let widened_container = container_type.lub(
-                        &container_type
-                            .with_element_type(stored_element_type.lub(&value_element_type)),
-                    );
-                    if widened_container != container_type
-                        && self
-                            .types
-                            .update_binding_type(target, widened_container)
-                            .is_ok()
-                    {
-                        return;
-                    }
+                if is_slice
+                    && let Some(stored_element) = stored_type.index_element_type()
+                    && let Some(value_element) = value_type.sequence_element_type()
+                    && self.accepts_write(&stored_element, &value_element)
+                {
+                    return;
                 }
-
-                self.emit(AnalysisError::mismatched_types(
-                    value_type,
-                    stored_type,
-                    span,
-                ));
+                self.emit_rejected_write(stored_type, value_type, span);
             }
             // Each target gets the element unpacked for it, as in a `let`.
             AssignmentTarget::Sequence(targets) => {

@@ -1,6 +1,6 @@
 use crate::error::AnalysisError;
 use crate::overloads::CallKind;
-use crate::types::{TypeBinding, TypeTable};
+use crate::types::{TypeTable, TypeVars};
 use ahash::AHashMap;
 use ndc_analysis::{Analysis, Binding, Candidate};
 use ndc_core::StaticType;
@@ -37,6 +37,8 @@ pub struct Analyser {
     struct_registry: StructRegistry,
     /// The type of every value declared so far.
     types: TypeTable,
+    /// What the type variables in those types stand for, once known.
+    vars: TypeVars,
     /// What each struct's type symbol stands for, so `p: Point` lowers to
     /// `Point`'s struct type. Every other type name is built in.
     struct_types: AHashMap<SymbolId, Rc<StructInfo>>,
@@ -67,11 +69,12 @@ impl Analyser {
         );
         let mut types = TypeTable::default();
         for ((_, typ), symbol) in natives.into_iter().zip(resolver.native_symbols()) {
-            types.declare(symbol, TypeBinding::Inferred(typ));
+            types.declare(symbol, typ);
         }
         Self {
             resolver,
             types,
+            vars: TypeVars::default(),
             struct_registry: StructRegistry::default(),
             struct_types: AHashMap::new(),
             return_type_stack: Vec::new(),
@@ -85,6 +88,24 @@ impl Analyser {
     /// Take the accumulated analysis result (including any errors),
     /// resetting it for the next analysis.
     pub fn take_result(&mut self) -> AnalysisResult {
+        // Nothing after this batch can settle its type variables any more,
+        // so the ones left unsettled get their fallbacks, and no variable
+        // leaves the analyser.
+        self.vars.settle_from(0);
+        self.types.resolve_all(&self.vars);
+        let analysis = &mut self.result.analysis;
+        for table in [
+            &mut analysis.expr_types,
+            &mut analysis.variable_types,
+            &mut analysis.inferred_return_types,
+            &mut analysis.function_types,
+        ] {
+            for typ in table.values_mut() {
+                *typ = self.vars.resolve(typ);
+                debug_assert!(!typ.any_var(&|_| true), "unsettled type variable in {typ}");
+            }
+        }
+
         let mut result = std::mem::take(&mut self.result);
         Layout::new(&self.resolver).lay_out(
             std::mem::take(&mut self.picks),
@@ -159,8 +180,7 @@ impl Analyser {
                 .extend(name_errors.into_iter().map(AnalysisError::from));
             let declared = self.resolver.current_bindings()[bound_before..].to_vec();
             for symbol in declared {
-                self.types
-                    .declare(symbol, TypeBinding::Inferred(StaticType::Any));
+                self.types.declare(symbol, StaticType::Any);
             }
             return StaticType::Any;
         }
@@ -263,7 +283,10 @@ impl Analyser {
     ) -> StaticType {
         match expression {
             Expression::BoolLiteral(_) => StaticType::Bool,
-            Expression::NoneLiteral => StaticType::Option(Box::new(StaticType::Any)),
+            // What `None`, `[]` and `%{}` hold is only known from later uses.
+            Expression::NoneLiteral => {
+                StaticType::Option(Box::new(self.vars.fresh(StaticType::Any)))
+            }
             Expression::StringLiteral(_) => StaticType::String,
             Expression::NumericLiteral(NumericLiteral::Int64(_)) => StaticType::Int,
             Expression::NumericLiteral(NumericLiteral::Float64(_)) => StaticType::Float,
@@ -288,7 +311,7 @@ impl Analyser {
                 let symbol = self.resolver.innermost_reference(*id);
                 let binding = Binding::Resolved(Candidate::Scalar(symbol));
                 self.picks.bindings.insert(*id, binding);
-                self.types.get_type(symbol).clone()
+                self.vars.resolve(self.types.get_type(symbol))
             }
             Expression::Statement(inner) => {
                 let typ = self.analyse_expr(inner);
@@ -435,9 +458,11 @@ impl Analyser {
                 StaticType::Tuple(types)
             }
             Expression::List { values } => {
-                let element_type = self.analyse_multiple_expression_with_same_type(values);
-
-                StaticType::List(Box::new(element_type.unwrap_or(StaticType::Any)))
+                let element_type = match self.analyse_multiple_expression_with_same_type(values) {
+                    Some(element_type) => element_type,
+                    None => self.vars.fresh(StaticType::Any),
+                };
+                StaticType::List(Box::new(element_type))
             }
             Expression::Map { values, default } => {
                 let mut key_type: Option<StaticType> = None;
@@ -456,9 +481,19 @@ impl Analyser {
                     Self::fold_lub(&mut value_type, default_type);
                 }
 
+                let key_type = match key_type {
+                    Some(key_type) => key_type,
+                    None => self.vars.fresh(StaticType::Any),
+                };
+                // A literal with keys but no values, like `%{1, 2}`, is a set.
+                let value_type = match value_type {
+                    Some(value_type) => value_type,
+                    None if values.is_empty() => self.vars.fresh(StaticType::unit()),
+                    None => StaticType::unit(),
+                };
                 StaticType::Map {
-                    key: Box::new(key_type.unwrap_or(StaticType::Any)),
-                    value: Box::new(value_type.unwrap_or_else(StaticType::unit)),
+                    key: Box::new(key_type),
+                    value: Box::new(value_type),
                 }
             }
             Expression::Return { value } => {
