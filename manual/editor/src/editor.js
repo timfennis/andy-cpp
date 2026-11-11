@@ -144,19 +144,27 @@ async function diagnostics(view, language) {
 // LSP completion item kinds to the names CodeMirror styles them by.
 const KINDS = { 2: "method", 3: "function", 5: "property", 6: "variable", 7: "class", 14: "keyword", 21: "constant", 22: "class" };
 
+// The characters of a name, as the lexer reads them: Unicode letters and
+// digits, `_`, and `?` (`get?`). Completion replaces the whole name, so
+// `écl` becomes `éclair`, not `ééclair`.
+const NAME = /[\p{Alphabetic}\p{N}_?]+/u;
+const PARTIAL_NAME = /^[\p{Alphabetic}\p{N}_?]*$/u;
+
 async function complete(context, language) {
-  const word = context.matchBefore(/[\w?]+/);
+  const word = context.matchBefore(NAME);
   const start = word ? word.from : context.pos;
   const afterDot = context.state.sliceDoc(start - 1, start) === ".";
   if (!word && !afterDot && !context.explicit) return null;
 
+  // After `xs.lo`, ask about the position right after the dot: that's where
+  // the language features look for the receiver whose type filters the list.
   const doc = context.state.doc;
-  const { line, character } = position(doc, context.pos);
+  const { line, character } = position(doc, afterDot ? start : context.pos);
   const response = await language.completion(doc.toString(), line, character);
   const items = Array.isArray(response) ? response : (response?.items ?? []);
   return {
     from: start,
-    validFor: /^[\w?]*$/,
+    validFor: PARTIAL_NAME,
     options: items.map((item) => ({
       label: item.label,
       type: KINDS[item.kind] ?? "text",
