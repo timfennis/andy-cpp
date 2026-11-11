@@ -1021,6 +1021,17 @@ fn an_error_shows_what_isnt_known_yet_as_any() {
 }
 
 #[test]
+fn a_cast_settles_what_isnt_known_about_its_value() {
+    let (_, result) = analyse_with_globals("(fn(x) => x) as Fn(Int) -> Int", vec![]);
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    // `x` is an Int, so the cast holds without a check when the program runs.
+    assert_eq!(
+        result.analysis.cast_checks.values().collect::<Vec<_>>(),
+        vec![&None]
+    );
+}
+
+#[test]
 fn a_join_waits_until_both_branches_are_known() {
     // `x` isn't fixed as an `Int` by the branch next to it: the branches join
     // once the call says what `x` is.

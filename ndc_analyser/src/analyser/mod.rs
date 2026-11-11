@@ -302,6 +302,13 @@ impl Analyser {
             Expression::Cast { value, annotation } => {
                 let target = self.lower_type_expr(annotation);
                 let found = self.analyse_expr(value);
+                // What isn't known about the value yet is what the cast says
+                // it is: `(fn(x) => x) as Fn(Int) -> Int` takes an Int, and
+                // needs no check as the program runs. Known parts are checked.
+                if self.vars.resolve(&found).has_vars() {
+                    self.vars.try_unify(&found, &target);
+                }
+                let found = self.vars.resolve(&found);
                 if !found.overlaps(&target) {
                     self.emit(AnalysisError::impossible_cast(&found, &target, *span));
                 }
