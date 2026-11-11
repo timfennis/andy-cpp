@@ -46,6 +46,16 @@ pub(crate) struct TypeVars {
     /// unsettle the ones settled after it, and the solver can tell which
     /// ones were settled since it last looked.
     trail: Vec<TypeVar>,
+    /// How deep in generic functions each variable belongs: 0 for the
+    /// program's top level, 1 for the body of a top-level `fn`. A variable
+    /// that a function's body made but that something outside it now refers
+    /// to, like `n` in `let xs = []; fn f(n) { xs.push(n) }`, belongs outside.
+    levels: Vec<u32>,
+    /// The level new variables get.
+    level: u32,
+    /// The levels lowered so far, with what each was before, so a
+    /// [`Snapshot`] can raise them again.
+    lowered: Vec<(TypeVar, u32)>,
 }
 
 /// The state of the variables at one point, which [`TypeVars::rollback`]
@@ -54,6 +64,7 @@ pub(crate) struct TypeVars {
 pub(crate) struct Snapshot {
     vars: usize,
     trail: usize,
+    lowered: usize,
 }
 
 impl TypeVars {
@@ -63,13 +74,33 @@ impl TypeVars {
             TypeVar(u32::try_from(self.solutions.len()).expect("fewer than 2^32 type variables"));
         self.solutions.push(None);
         self.fallbacks.push(fallback);
+        self.levels.push(self.level);
         StaticType::Var(var)
     }
 
-    /// How many variables there are, so [`Self::settle_from`] can settle
-    /// the ones made after this point.
-    pub(crate) fn count(&self) -> usize {
-        self.solutions.len()
+    /// Starts the body of a generic function: the variables made until
+    /// [`Self::leave_level`] belong to it.
+    pub(crate) fn enter_level(&mut self) {
+        self.level += 1;
+    }
+
+    /// Ends the body [`Self::enter_level`] started. The variables it made
+    /// that nothing outside refers to can then be generalized.
+    pub(crate) fn leave_level(&mut self) {
+        self.level -= 1;
+    }
+
+    /// Whether `var` is unsettled and belongs to a generic function's body
+    /// that has ended, so it can become one of the function's type
+    /// parameters.
+    pub(crate) fn is_generalizable(&self, var: TypeVar) -> bool {
+        self.solution(var).is_none() && self.levels[var.0 as usize] > self.level
+    }
+
+    /// Settles `var` as the type parameter `name` of the generic function
+    /// whose body made it.
+    pub(crate) fn generalize(&mut self, var: TypeVar, name: &str) {
+        self.settle(var, StaticType::Generic(name.into()));
     }
 
     fn solution(&self, var: TypeVar) -> Option<&StaticType> {
@@ -79,6 +110,17 @@ impl TypeVars {
     /// Settles `var` as `typ`.
     fn settle(&mut self, var: TypeVar, typ: StaticType) {
         debug_assert!(self.solution(var).is_none(), "{var:?} is settled twice");
+        // What `var` stands for now belongs where `var` does.
+        let level = self.levels[var.0 as usize];
+        if level < self.level {
+            for inner in self.unsettled(&typ) {
+                let inner_level = self.levels[inner.0 as usize];
+                if inner_level > level {
+                    self.lowered.push((inner, inner_level));
+                    self.levels[inner.0 as usize] = level;
+                }
+            }
+        }
         self.solutions[var.0 as usize] = Some(typ);
         self.trail.push(var);
     }
@@ -101,6 +143,7 @@ impl TypeVars {
         Snapshot {
             vars: self.solutions.len(),
             trail: self.trail.len(),
+            lowered: self.lowered.len(),
         }
     }
 
@@ -110,8 +153,12 @@ impl TypeVars {
         for var in self.trail.drain(snapshot.trail..) {
             self.solutions[var.0 as usize] = None;
         }
+        for (var, level) in self.lowered.drain(snapshot.lowered..).rev() {
+            self.levels[var.0 as usize] = level;
+        }
         self.solutions.truncate(snapshot.vars);
         self.fallbacks.truncate(snapshot.vars);
+        self.levels.truncate(snapshot.vars);
     }
 
     /// Unifies `a` and `b` if they can be made the same type, and otherwise
@@ -241,6 +288,17 @@ impl TypeVars {
     /// signature of the overload it picked, so its arguments settle what `T`
     /// stands for at that call.
     pub(crate) fn instantiate(&mut self, typ: &StaticType) -> StaticType {
+        self.instantiate_with(typ, &mut Vec::new())
+    }
+
+    /// [`Self::instantiate`], with the variables already made for some type
+    /// parameters in `made`, which gets the ones made for the others. A
+    /// generic function's constraints are instantiated with its signature.
+    pub(crate) fn instantiate_with(
+        &mut self,
+        typ: &StaticType,
+        made: &mut Vec<(Box<str>, StaticType)>,
+    ) -> StaticType {
         let names = std::cell::RefCell::new(Vec::<Box<str>>::new());
         typ.contains(&|part| {
             if let StaticType::Generic(name) = part
@@ -250,13 +308,14 @@ impl TypeVars {
             }
             false
         });
-        let vars = names
-            .into_inner()
-            .into_iter()
-            .map(|name| (name, self.fresh(StaticType::Any)))
-            .collect::<Vec<_>>();
+        for name in names.into_inner() {
+            if !made.iter().any(|(generic, _)| *generic == name) {
+                let var = self.fresh(StaticType::Any);
+                made.push((name, var));
+            }
+        }
         typ.replace(&|part| match part {
-            StaticType::Generic(name) => vars
+            StaticType::Generic(name) => made
                 .iter()
                 .find(|(generic, _)| generic == name)
                 .map(|(_, var)| var.clone()),

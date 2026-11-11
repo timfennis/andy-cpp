@@ -1,0 +1,9 @@
+// `xs ++= ys` in a generic function appends to the caller's list, as it
+// does where the list's type is known.
+// expect-output: [1,2,3]
+fn append(xs, ys) {
+    xs ++= ys;
+}
+let list = [1];
+append(list, [2, 3]);
+print(list);

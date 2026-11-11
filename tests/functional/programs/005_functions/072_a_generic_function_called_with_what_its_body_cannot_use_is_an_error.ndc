@@ -1,0 +1,7 @@
+// A call of a generic function is checked against what its body does with
+// the arguments. The error is reported at the call, with a note on the line
+// in the body that can't take them.
+// expect-error: No function called '+' found that matches the arguments 'String, Int'
+fn inc(x) => x + 1;
+fn shout(s) => inc(s) ++ "!";
+shout("a");

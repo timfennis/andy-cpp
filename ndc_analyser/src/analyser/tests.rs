@@ -271,7 +271,7 @@ fn annotated_declaration_rejects_a_mismatched_container_literal() {
 // `f` might hold any function, so which one runs is only known at runtime.
 #[test]
 fn a_call_of_a_value_of_unknown_type_dispatches_at_runtime() {
-    let (_, result) = analyse_with_globals("fn call(f) { f(\"x\") }", vec![]);
+    let (_, result) = analyse_with_globals("fn call(f: Any) { f(\"x\") }", vec![]);
     assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
     let callee = result
         .analysis
@@ -536,7 +536,7 @@ fn a_call_picked_at_runtime_has_no_type_parameters_in_its_type() {
     // and its `T` is never known.
     let globals = natives(&[("reversed", "<T>(List<T>) -> List<T>")]);
     assert_eq!(
-        analyse_last_type_with_globals("fn f(xs) { reversed(xs) } f", globals),
+        analyse_last_type_with_globals("fn f(xs: Any) { reversed(xs) } f", globals),
         StaticType::Function {
             parameters: Some(vec![StaticType::Any]),
             return_type: Box::new(StaticType::List(Box::new(StaticType::Any))),
@@ -953,12 +953,13 @@ fn a_call_nothing_else_settles_takes_no_narrowest_overload_when_unsure() {
         parameters: Some(vec![parameter]),
         return_type: Box::new(returns),
     };
-    // Nothing is known about `x`, so it's `Any`, which `pick(Any)` takes.
+    // Nothing is known about `x`, so it's `Any`, and the program picks
+    // `pick(Int)` or `pick(Any)` as it runs.
     assert_eq!(
         analyse_last_type(
             "fn pick(x: Int) => 1; fn pick(x: Any) => \"any\"; let f = fn(x) => pick(x); f"
         ),
-        function(StaticType::Any, StaticType::String)
+        function(StaticType::Any, StaticType::Any)
     );
     // Overloads in two scopes fit, so none settles `x`: it's `Any`, and the
     // call resolves as it does for any `Any` argument.
@@ -1336,5 +1337,231 @@ fn plain_assignment_to_a_field_is_not_ambiguous_with_a_value_named_like_the_fiel
     assert_eq!(
         errors("struct P { x: Int } fn f(p, x) { p.x = 1 }", vec![]),
         Vec::<String>::new()
+    );
+}
+
+#[test]
+fn a_generic_function_has_the_type_its_body_makes_of_each_call() {
+    for (call, typ) in [("inc(1)", StaticType::Int), ("inc(2.5)", StaticType::Float)] {
+        assert_eq!(
+            analyse_last_type_with_globals(
+                &format!("fn inc(x) => x + 1; inc(1); inc(2.5); {call}"),
+                ambiguous_plus()
+            ),
+            typ,
+            "{call}"
+        );
+    }
+}
+
+#[test]
+fn a_generic_function_calls_what_its_body_calls_as_the_program_runs() {
+    // `inc`'s body is compiled once, for Ints and Floats alike.
+    let (_, result) = analyse_with_globals("fn inc(x) => x + 1; inc(1);", ambiguous_plus());
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    assert!(
+        result
+            .analysis
+            .bindings
+            .values()
+            .any(|binding| matches!(binding, Binding::Dynamic(_))),
+        "{:?}",
+        result.analysis.bindings
+    );
+}
+
+#[test]
+fn a_generic_function_calling_one_has_its_constraints_too() {
+    assert_eq!(
+        analyse_last_type_with_globals(
+            "fn inc(x) => x + 1; fn twice(x) => inc(inc(x)); twice(2.5)",
+            ambiguous_plus()
+        ),
+        StaticType::Float
+    );
+}
+
+#[test]
+fn an_error_in_a_generic_body_is_the_outermost_calls() {
+    let source = "fn inc(x) => x + 1; fn twice(x) => inc(inc(x)); twice(\"a\");";
+    let (_, result) = analyse_with_globals(source, ambiguous_plus());
+    let [error] = &result.errors[..] else {
+        panic!("one error expected: {:?}", result.errors);
+    };
+    let text = |span: Span| &source[span.range()];
+    assert_eq!(text(error.span()), "twice(\"a\")");
+    assert_eq!(
+        error
+            .notes()
+            .iter()
+            .map(|(span, note)| (text(*span), note.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            ("inc(x)", "`twice` calls `inc` here"),
+            ("x + 1", "`inc` needs this"),
+        ]
+    );
+}
+
+#[test]
+fn a_generic_function_keeps_one_copy_of_each_call_it_copies() {
+    // Each function calls the one before twice. With a copy of each call's
+    // constraints, the last would have 2^40.
+    let mut source = "fn f0(x) => x + 1;".to_string();
+    for i in 1..40 {
+        source.push_str(&format!("fn f{i}(x) => f{}(x) + f{}(x);", i - 1, i - 1));
+    }
+    source.push_str("f39(2.5)");
+    assert_eq!(
+        analyse_last_type_with_globals(
+            &source,
+            natives(&[
+                ("+", "(Int, Int) -> Int"),
+                ("+", "(Float, Int) -> Float"),
+                ("+", "(Float, Float) -> Float"),
+            ])
+        ),
+        StaticType::Float
+    );
+}
+
+#[test]
+fn a_variable_from_outside_has_one_type_in_a_generic_function() {
+    // `n` is stored in `xs`, which the first call settles.
+    let globals = natives(&[("push", "<T>(List<T>, T)")]);
+    assert_eq!(
+        analyse_last_type_with_globals(
+            "let xs = []; fn f(n) { xs.push(n) } f(1); xs",
+            globals.clone()
+        ),
+        StaticType::List(Box::new(StaticType::Int))
+    );
+    assert_eq!(
+        errors(
+            "let xs = []; fn f(n) { xs.push(n) } f(1); f(\"a\");",
+            globals
+        ),
+        vec!["No function called 'f' found that matches the arguments 'String'"]
+    );
+}
+
+#[test]
+fn what_no_call_can_decide_is_decided_in_the_body() {
+    // The map's types can't depend on how `count` is called, so they're
+    // settled where it's declared, as at the end of the program.
+    let mut globals = index_natives();
+    globals.extend(natives(&[("+", "(Int, Int) -> Int")]));
+    assert_eq!(
+        analyse_last_type_with_globals(
+            "fn count() { let m = %{}; m[\"k\"] = 1; m } count()",
+            globals
+        ),
+        StaticType::Map {
+            key: Box::new(StaticType::String),
+            value: Box::new(StaticType::Int),
+        }
+    );
+}
+
+#[test]
+fn a_recursive_generic_function_returns_what_its_branches_join_to() {
+    let globals = natives(&[
+        ("<", "(Int, Int) -> Bool"),
+        ("<", "(Float, Int) -> Bool"),
+        ("-", "(Int, Int) -> Int"),
+        ("-", "(Float, Int) -> Float"),
+        ("+", "(Int, Int) -> Int"),
+        ("+", "(Float, Float) -> Float"),
+    ]);
+    for (argument, typ) in [("10", StaticType::Int), ("10.0", StaticType::Float)] {
+        assert_eq!(
+            analyse_last_type_with_globals(
+                &format!(
+                    "fn fib(n) => if n < 2 {{ n }} else {{ fib(n - 1) + fib(n - 2) }}; fib({argument})"
+                ),
+                globals.clone()
+            ),
+            typ,
+        );
+    }
+}
+
+#[test]
+fn overloads_tie_when_a_call_could_fit_both_and_neither_is_more_specific() {
+    for (source, ties) in [
+        ("fn f(x: Int, y) {} fn f(x, y: Int) {}", true),
+        ("fn f(x: Int, y: Any) {} fn f(x: Any, y: Int) {}", false),
+        ("fn f(x: Int) {} fn f(x) {}", false),
+        ("fn f(x: List<Int>) {} fn f(x) {}", false),
+        ("fn f(x: Int) {} fn f(x: Any) {}", false),
+        ("fn f(x: List<Int>) {} fn f(x: List<String>) {}", false),
+        ("fn f(x) {} fn f(x, y) {}", false),
+    ] {
+        let errors = errors(source, vec![]);
+        assert_eq!(
+            errors
+                .iter()
+                .any(|error| error.contains("neither is more specific")),
+            ties,
+            "{source}: {errors:?}"
+        );
+    }
+    // Two unannotated parameters are a redefinition, as two `Any`s are.
+    assert_eq!(
+        errors("fn f(x) {} fn f(y) {}", vec![]),
+        vec!["Illegal redefinition of function 'f' with parameters (Any) in the same scope"]
+    );
+}
+
+#[test]
+fn a_lambda_a_generic_function_passes_on_takes_what_each_call_gives_it() {
+    // `map` waits for what `xs` is, so its lambda's types are only known
+    // once `incs` is called.
+    let mut globals = natives(&[
+        ("map", "<T, U>(List<T>, Fn(T) -> U) -> List<U>"),
+        ("map", "<T, U>(Deque<T>, Fn(T) -> U) -> List<U>"),
+    ]);
+    globals.extend(ambiguous_plus());
+    assert_eq!(
+        analyse_last_type_with_globals(
+            "fn incs(xs) => xs.map(fn(x) => x + 1); incs([1]); incs([2.5])",
+            globals
+        ),
+        StaticType::List(Box::new(StaticType::Float))
+    );
+}
+
+#[test]
+fn an_overloaded_function_value_in_a_generic_function_is_decided_by_its_body() {
+    // The body is compiled once, so `g` has to be one `abs`, whatever `f`
+    // is called with.
+    let globals = natives(&[("abs", "(Int) -> Int"), ("abs", "(Float) -> Float")]);
+    assert_eq!(
+        errors("fn f(x) { let g = abs; g(x) } f(1);", globals.clone()),
+        vec![
+            "'abs' has several overloads that are a Fn(Any) -> Any, and nothing here says which one is meant"
+        ]
+    );
+    assert_eq!(
+        errors(
+            "fn f(x) { let g: Fn(Int) -> Int = abs; g(x) } f(1);",
+            globals
+        ),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn a_generic_function_stored_in_a_variable_keeps_its_constraints() {
+    assert_eq!(
+        analyse_last_type_with_globals("fn inc(x) => x + 1; let h = inc; h(2.5)", ambiguous_plus()),
+        StaticType::Float
+    );
+    assert_eq!(
+        errors(
+            "fn inc(x) => x + 1; let h = inc; h(\"a\");",
+            ambiguous_plus()
+        ),
+        vec!["No function called '+' found that matches the arguments 'String, Int'"]
     );
 }

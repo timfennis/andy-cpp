@@ -134,7 +134,7 @@ fn add(x: Int, y: Int) -> Int {
 }
 ```
 
-Annotations are optional. A named function's parameter without one is treated as `Any`; a lambda's gets its type from how the lambda is used (see below). Mix and match as you like:
+Annotations are optional. A parameter without one gets its type from how the function is used: each call of a function declared in the program gives it the types of that call's arguments (see [Generic functions](#generic-functions)), and a lambda gets the types of how it's used (see below). Mix and match as you like:
 
 ```ndc
 fn first(xs: List<Int>) => xs[0];   // params annotated, return inferred
@@ -147,7 +147,7 @@ If the body produces a value that doesn't fit the declared return type, the anal
 fn bad() -> Int { "hello" }   // ERROR: mismatched types
 ```
 
-A return-type annotation also helps the analyser understand recursive calls — without it, a recursive call resolves against an unknown return type and you can lose precision.
+A recursive call returns what the function returns, so `fib` below returns an `Int` when it's called with one, without an annotation.
 
 ### Function types
 
@@ -190,7 +190,57 @@ twice(3);
 twice(2.5);    // ERROR: twice takes an Int
 ```
 
-A named function such as `fn twice(x) => x * 2` can be called with both. A lambda parameter that nothing gives a type is `Any`, and is checked when the program runs.
+A function declared with `fn` in the program, such as `fn twice(x) => x * 2`, can be called with both (see [Generic functions](#generic-functions)). A lambda parameter that nothing gives a type is `Any`, and is checked when the program runs.
+
+## Generic functions
+
+A function declared with `fn` in the program takes any argument its body can work with. Each call gets the types its body makes of that call's arguments:
+
+```ndc
+fn inc(x) => x + 1;
+
+let a: Int = inc(1);       // + on an Int and an Int is an Int
+let b: Float = inc(2.5);   // + on a Float and an Int is a Float
+
+fn apply(f, x) => f(x);
+assert_eq(apply(abs, -1), 1);
+assert_eq(apply(fn(s) => s ++ "!", "hi"), "hi!");
+
+fn fib(n) => if n < 2 { n } else { fib(n - 1) + fib(n - 2) };
+let i: Int = fib(10);
+```
+
+A call with an argument the body can't use is an error at the call, with a note on the line in the body that can't take it:
+
+```ndc
+fn inc(x) => x + 1;
+fn shout(s) => inc(s) ++ "!";
+shout("a");    // ERROR: No function called '+' found that matches the arguments 'String, Int'
+               //   `shout` calls `inc` here, and `inc` needs `x + 1`
+```
+
+What the body can do with a parameter can make its type known right away: `xs.push(1)` only works on a list of Ints, so `fn f(xs) { xs.push(1) }` takes a `List<Int>`.
+
+Only a function declared in the program itself is generic. One declared in another function or in a block has one type, like a lambda in a variable, and its first call decides it:
+
+```ndc
+fn outer() {
+    fn same(v) => v;
+    same(1);
+    same("a");    // ERROR: same takes an Int
+}
+```
+
+A variable declared outside a function has one type too, even when the function is generic, so the first call decides what it holds:
+
+```ndc
+let seen = [];
+fn remember(n) { seen.push(n); n }
+remember(1);
+remember("a");    // ERROR: seen holds Ints, so remember takes an Int
+```
+
+To take any value whatever its type, annotate the parameter with `Any`: the body then works with it as the program runs.
 
 ## Function overloading
 
@@ -216,11 +266,28 @@ assert_eq("string", describe("a"));
 assert_eq("something else", describe([1]));
 ```
 
-Two overloads in the same scope can't have the same parameter types. Parameter names don't count, and a parameter without a type annotation has type `Any`:
+Two overloads in the same scope can't have the same parameter types. Parameter names don't count:
 
 ```ndc
 fn foo(a) { a + 1 }
 fn foo(b) { b + 2 }   // ERROR: Illegal redefinition of function 'foo' with parameters (Any)
+```
+
+A parameter without a type annotation takes any argument the body can work with, so an overload with one is a fallback, like one taking `Any`, but with a typed body. A call uses the most specific overload that fits it:
+
+```ndc
+fn show(x: Int) { "int" }
+fn show(x) { "other" }
+
+assert_eq(show(1), "int");
+assert_eq(show("a"), "other");
+```
+
+Two overloads in one scope can't both fit a call with neither more specific than the other, as nothing would say which one the call means:
+
+```ndc
+fn f(x: Int, y) { "first" }
+fn f(x, y: Int) { "second" }   // ERROR: A call could fit both f(_, Int) and f(Int, _), declared earlier in the same scope, and neither is more specific
 ```
 
 ## An overloaded function as a value

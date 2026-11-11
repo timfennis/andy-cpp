@@ -17,10 +17,12 @@ mod assignments;
 mod calls;
 mod declarations;
 mod function_values;
+pub(crate) mod generics;
 mod solver;
 
 use declarations::FunctionDeclaration;
-use solver::{Constraint, EarlyPick};
+pub use generics::tied_natives;
+use solver::{Constraint, EarlyPick, Origin, Waiting};
 #[cfg(test)]
 mod tests;
 
@@ -47,7 +49,17 @@ pub struct Analyser {
     vars: TypeVars,
     /// The calls and other uses that wait for types that aren't known yet,
     /// by the order they started waiting in.
-    waiting: BTreeMap<u64, Constraint>,
+    waiting: BTreeMap<u64, Waiting>,
+    /// The constraints of each generic function declared in the program,
+    /// such as `+(A, Int) -> B` for `fn inc(x) => x + 1`, which a call of it
+    /// copies with the types it's called with.
+    schemes: AHashMap<SymbolId, Rc<[Waiting]>>,
+    /// The constraints a call just copied from a generic function, with the
+    /// function's name, until the call is known to commit to it.
+    pending_copies: Vec<(String, Constraint, Option<Origin>)>,
+    /// The calls the constraint being solved was copied through, when it's
+    /// a copy of a generic function's constraint.
+    copied_through: Option<Origin>,
     /// The number the next waiting constraint gets.
     next_serial: u64,
     /// The waiting constraints that each unsettled variable would let make
@@ -99,6 +111,9 @@ impl Analyser {
             types,
             vars: TypeVars::default(),
             waiting: BTreeMap::new(),
+            schemes: AHashMap::new(),
+            pending_copies: Vec::new(),
+            copied_through: None,
             next_serial: 0,
             watchers: AHashMap::new(),
             watched_settlings: 0,
@@ -152,8 +167,18 @@ impl Analyser {
     }
 
     /// Records an analysis error. The analyser continues with a fallback type
-    /// (usually `Any`) so that subsequent code is still checked.
+    /// (usually `Any`) so that subsequent code is still checked. An error in
+    /// a copy of a generic function's constraint is the call's: it's
+    /// reported there, with notes pointing into the function.
     fn emit(&mut self, err: AnalysisError) {
+        let err = match &self.copied_through {
+            Some(frames) => err.through_calls(
+                frames
+                    .iter()
+                    .map(|frame| (frame.function.as_str(), frame.call)),
+            ),
+            None => err,
+        };
         self.result.errors.push(err);
     }
 

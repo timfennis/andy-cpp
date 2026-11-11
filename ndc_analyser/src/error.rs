@@ -10,6 +10,8 @@ pub struct AnalysisError {
     text: String,
     span: Span,
     help_text: Option<String>,
+    /// Other places that explain the error, each with what it says there.
+    notes: Vec<(Span, String)>,
 }
 
 impl From<NameResolutionError> for AnalysisError {
@@ -18,6 +20,7 @@ impl From<NameResolutionError> for AnalysisError {
             text: error.to_string(),
             span: error.span(),
             help_text: error.help_text(),
+            notes: Vec::new(),
         }
     }
 }
@@ -33,11 +36,47 @@ impl AnalysisError {
         self.help_text.as_deref()
     }
 
+    /// Other places that explain the error, each with what it says there.
+    pub fn notes(&self) -> &[(Span, String)] {
+        &self.notes
+    }
+
+    /// This error, found in a generic function's body while checking a call
+    /// of it, as the call's error. `calls` are the calls it came through,
+    /// outermost first, each with the function it calls: in
+    /// `fn yy(l) => l.len(); yy(5)`, the call `yy(5)` gets the error that
+    /// there's no `len(Int)`, with a note at `l.len()`.
+    pub(crate) fn through_calls<'a>(
+        mut self,
+        calls: impl IntoIterator<Item = (&'a str, Span)>,
+    ) -> Self {
+        let calls = calls.into_iter().collect::<Vec<_>>();
+        let Some(&(_, outermost)) = calls.first() else {
+            return self;
+        };
+        let mut notes = calls
+            .windows(2)
+            .map(|pair| {
+                let [(caller, _), (callee, call)] = pair else {
+                    unreachable!("windows of two");
+                };
+                (*call, format!("`{caller}` calls `{callee}` here"))
+            })
+            .collect::<Vec<_>>();
+        let (innermost, _) = calls[calls.len() - 1];
+        notes.push((self.span, format!("`{innermost}` needs this")));
+        notes.append(&mut self.notes);
+        self.notes = notes;
+        self.span = outermost;
+        self
+    }
+
     pub(crate) fn invalid_type_annotation(err: &StaticTypeConstructionError, span: Span) -> Self {
         Self {
             text: err.to_string(),
             span,
             help_text: Some(err.help_text().to_string()),
+            notes: Vec::new(),
         }
     }
 
@@ -46,6 +85,7 @@ impl AnalysisError {
             text: format!("type `{name}` does not take generic arguments"),
             span,
             help_text: None,
+            notes: Vec::new(),
         }
     }
 
@@ -60,6 +100,7 @@ impl AnalysisError {
             ),
             span,
             help_text: None,
+            notes: Vec::new(),
         }
     }
 
@@ -68,6 +109,7 @@ impl AnalysisError {
             text: format!("mismatched types: found {found} but expected {expected}"),
             span,
             help_text: None,
+            notes: Vec::new(),
         }
     }
 
@@ -76,6 +118,7 @@ impl AnalysisError {
             text: format!("invalid cast: {found} can never be {target}"),
             span,
             help_text: None,
+            notes: Vec::new(),
         }
     }
 
@@ -96,6 +139,27 @@ impl AnalysisError {
             help_text: Some(
                 "Overloads in one scope need different parameter types, so annotate a parameter's type to tell them apart".to_string(),
             ),
+            notes: Vec::new(),
+        }
+    }
+
+    pub(crate) fn tied_overloads(
+        name: &str,
+        parameters: &[String],
+        earlier: &[String],
+        span: Span,
+    ) -> Self {
+        Self {
+            text: format!(
+                "A call could fit both {name}({}) and {name}({}), declared earlier in the same scope, and neither is more specific",
+                parameters.join(", "),
+                earlier.join(", "),
+            ),
+            span,
+            help_text: Some(
+                "A parameter without a type annotation (`_` here) takes any argument the body can work with. Annotate the parameters so that one overload is more specific, or so that they take different arguments".to_string(),
+            ),
+            notes: Vec::new(),
         }
     }
 
@@ -104,6 +168,7 @@ impl AnalysisError {
             text: format!("Unable to index into {typ}"),
             span,
             help_text: None,
+            notes: Vec::new(),
         }
     }
     pub(crate) fn unable_to_unpack_type(typ: &StaticType, span: Span) -> Self {
@@ -111,6 +176,7 @@ impl AnalysisError {
             text: format!("Invalid unpacking of {typ}"),
             span,
             help_text: None,
+            notes: Vec::new(),
         }
     }
 
@@ -138,6 +204,7 @@ impl AnalysisError {
                     "A variable hides the functions named '{name}' further out: it doesn't join their overloads"
                 )
             }),
+            notes: Vec::new(),
         }
     }
 
@@ -149,6 +216,7 @@ impl AnalysisError {
             ),
             span,
             help_text: None,
+            notes: Vec::new(),
         }
     }
 
@@ -192,6 +260,7 @@ impl AnalysisError {
             help_text: Some(format!(
                 "Say which one with a function type, as in `let f: {example} = {name}`"
             )),
+            notes: Vec::new(),
         }
     }
 
@@ -200,6 +269,7 @@ impl AnalysisError {
             text: format!("No overload of '{name}' is a {expected}"),
             span,
             help_text: None,
+            notes: Vec::new(),
         }
     }
 
@@ -208,6 +278,7 @@ impl AnalysisError {
             text: "unexpected break statement outside of loop".to_string(),
             span,
             help_text: None,
+            notes: Vec::new(),
         }
     }
 
@@ -216,6 +287,7 @@ impl AnalysisError {
             text: "unexpected continue statement outside of loop".to_string(),
             span,
             help_text: None,
+            notes: Vec::new(),
         }
     }
 
@@ -224,6 +296,7 @@ impl AnalysisError {
             text: "unexpected return statement outside of function body".to_string(),
             span,
             help_text: None,
+            notes: Vec::new(),
         }
     }
 
@@ -239,6 +312,7 @@ impl AnalysisError {
             ),
             span,
             help_text: None,
+            notes: Vec::new(),
         }
     }
 
@@ -247,6 +321,7 @@ impl AnalysisError {
             text: format!("Unable to invoke {typ} as a function."),
             span,
             help_text: None,
+            notes: Vec::new(),
         }
     }
 }

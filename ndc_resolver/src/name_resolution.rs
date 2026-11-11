@@ -151,7 +151,7 @@ impl NameResolutionError {
 /// within a scope. For `x` in `let x = 1; { let x = 2; x }`: `[[x2], [x1]]`.
 /// Identifiers always have at least one candidate, augmented operators may
 /// not.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Candidates(Vec<Vec<SymbolId>>);
 
 /// The two operations an augmented assignment can use. For `xs ++= ys`:

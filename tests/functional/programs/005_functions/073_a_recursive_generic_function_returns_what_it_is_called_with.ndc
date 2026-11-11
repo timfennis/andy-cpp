@@ -1,0 +1,7 @@
+// A recursive call has the types of the call it's in, so `fib` returns an
+// Int for an Int and a Float for a Float, as the annotations check.
+// expect-output: 55 55
+fn fib(n) => if n < 2 { n } else { fib(n - 1) + fib(n - 2) };
+let i: Int = fib(10);
+let f: Float = fib(10.0);
+print(i, f);
