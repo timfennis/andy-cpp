@@ -85,8 +85,8 @@ print(sqrt(-1n));  // 0+1i
 `Int` division and remainder by zero report an error. `Float` returns IEEE infinity or NaN. `Number` also falls back to a wrapped Float result when an exact zero divisor has no rational representation:
 
 ```ndc
-print(1n / 0n);  // inf
-print(1n \ 0n);  // inf
+print(1n / 0n);  // Inf
+print(1n \ 0n);  // Inf
 
 let nan = 0n / 0n;
 print(nan);         // NaN

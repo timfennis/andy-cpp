@@ -14,7 +14,7 @@ for item in my_tuple {
 }
 ```
 
-```ndc,norun
+```ndc
 let my_tuple = (1,2,3);
 
 // Tuples are immutable, so assignment fails

@@ -76,7 +76,7 @@ print("[]".strip_circumfix("[", "]") == "");     // true
 
 ```ndc
 print("foo" <> 3);        // foo3
-let c = 10 <> 5.0;        // 105.0
+print(10 <> 5.0);         // 105.0
 print("oo" in "foobar");  // true
 ```
 

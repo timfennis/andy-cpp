@@ -31,7 +31,7 @@ let maybe: Option<Any> = Some("hi");
 let pair: Tuple<Int, String> = (1, "hi");
 let pair2: (Int, String) = (1, "hi");  // tuple shorthand
 
-print(maybe, pair2);  // Some(hi) (1,"hi")
+print(maybe, pair2);  // Some("hi") (1,"hi")
 ```
 
 Nested generics work too — the parser handles the `>>` ambiguity for you:
