@@ -1,0 +1,14 @@
+[package]
+name = "ndc_layout"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+ndc_core.workspace = true
+ndc_analysis.workspace = true
+ndc_resolver.workspace = true
+ahash.workspace = true
+
+[dev-dependencies]
+ndc_parser.workspace = true
+ndc_lexer.workspace = true

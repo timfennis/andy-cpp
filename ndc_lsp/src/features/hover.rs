@@ -1,6 +1,7 @@
-use ndc_core::StaticType;
+use ndc_analysis::{Analysis, Binding, ResolvedVar};
+use ndc_core::{NodeId, StaticType};
 use ndc_lexer::Span;
-use ndc_parser::{Binding, Expression, ResolvedVar};
+use ndc_parser::Expression;
 use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position};
 
 use crate::features::completion::FunctionInfo;
@@ -29,27 +30,40 @@ pub fn hover(
 
     let node = node_at_offset(&state.ast, offset)?;
     let markdown = match &node.expression {
-        Expression::Identifier { name, resolved, .. } if resolves_to_global(resolved) => {
-            function_hover(name, functions).or_else(|| type_hover(state, node.id))
-        }
+        Expression::Identifier { .. } => native_hover(state.analysis.binding(node.id), functions)
+            .or_else(|| type_hover(state, node.id)),
         _ => type_hover(state, node.id),
     }?;
 
     Some(markup(state, node.span, markdown))
 }
 
-/// Did the analyser resolve this identifier to a global (a native function)?
-/// Locals and parameters that shadow a built-in resolve to `Local`/`Upvalue`.
-fn resolves_to_global(binding: &Binding) -> bool {
-    let is_global = |v: ResolvedVar| matches!(v, ResolvedVar::Global { .. });
-    match binding {
-        Binding::Resolved(candidate) => is_global(candidate.var()),
-        // Dynamic dispatch is a global native only if every candidate is global.
-        Binding::Dynamic(candidates) => {
-            !candidates.is_empty() && candidates.iter().all(|c| is_global(c.var()))
-        }
-        Binding::None => false,
-    }
+/// Markdown for an identifier the analyser resolved to built-in functions: the
+/// signature and documentation of the overload it picked, or of each one it
+/// leaves to runtime dispatch. `None` unless every candidate is a built-in, so a
+/// local that shadows one (e.g. `let len = 1; len`) shows the local's type.
+fn native_hover(binding: &Binding, functions: &[FunctionInfo]) -> Option<String> {
+    let candidates = match binding {
+        Binding::Resolved(candidate) => std::slice::from_ref(candidate),
+        Binding::Dynamic(candidates) => candidates.as_slice(),
+        Binding::None => return None,
+    };
+    // A built-in's global slot is its position in the registry, which is the
+    // order of `functions`.
+    let mut slots = candidates
+        .iter()
+        .map(|candidate| match candidate.var() {
+            ResolvedVar::Global { slot } => Some(slot),
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>()?;
+    // A broadcast candidate names the same overload as the scalar one.
+    slots.dedup();
+    let overloads = slots
+        .into_iter()
+        .map(|slot| functions.get(slot).map(function_markdown))
+        .collect::<Option<Vec<_>>>()?;
+    (!overloads.is_empty()).then(|| overloads.join("\n\n---\n\n"))
 }
 
 fn markup(state: &DocumentState, span: Span, value: String) -> Hover {
@@ -66,6 +80,7 @@ fn markup(state: &DocumentState, span: Span, value: String) -> Hover {
 /// span and inferred type.
 fn declaration_at(state: &DocumentState, offset: usize) -> Option<(Span, StaticType)> {
     let mut finder = DeclFinder {
+        analysis: &state.analysis,
         offset,
         found: None,
     };
@@ -73,32 +88,31 @@ fn declaration_at(state: &DocumentState, offset: usize) -> Option<(Span, StaticT
     finder.found
 }
 
-struct DeclFinder {
+struct DeclFinder<'a> {
+    analysis: &'a Analysis,
     offset: usize,
     found: Option<(Span, StaticType)>,
 }
 
-impl AstVisitor for DeclFinder {
+impl AstVisitor for DeclFinder<'_> {
     fn on_declaration(
         &mut self,
         _identifier: &str,
-        inferred_type: Option<&StaticType>,
+        node: NodeId,
         _has_annotation: bool,
         span: Span,
     ) {
         if self.offset >= span.offset()
             && self.offset < span.end()
-            && let Some(typ) = inferred_type
+            && let Some(typ) = self.analysis.variable_types.get(&node)
         {
             self.found = Some((span, typ.clone()));
         }
     }
 }
 
-/// Markdown for an identifier that names a built-in function: a fenced
-/// signature followed by its documentation.
-fn function_hover(name: &str, functions: &[FunctionInfo]) -> Option<String> {
-    let fun = functions.iter().find(|f| f.name == name)?;
+/// A built-in function's fenced signature followed by its documentation.
+fn function_markdown(fun: &FunctionInfo) -> String {
     let mut out = format!(
         "```ndc\n{}\n```",
         format_signature(&fun.name, &fun.static_type)
@@ -107,11 +121,11 @@ fn function_hover(name: &str, functions: &[FunctionInfo]) -> Option<String> {
         out.push_str("\n\n");
         out.push_str(doc);
     }
-    Some(out)
+    out
 }
 
 /// Markdown showing the inferred type of an expression.
-fn type_hover(state: &DocumentState, id: ndc_parser::NodeId) -> Option<String> {
+fn type_hover(state: &DocumentState, id: NodeId) -> Option<String> {
     let typ = state.analysis.expr_types.get(&id)?;
     Some(format!("```ndc\n{typ}\n```"))
 }
@@ -152,8 +166,15 @@ mod tests {
         (state, functions)
     }
 
+    fn markdown(hover: Hover) -> String {
+        let HoverContents::Markup(content) = hover.contents else {
+            panic!("expected markup");
+        };
+        content.value
+    }
+
     #[test]
-    fn hover_on_variable_shows_type() {
+    fn hovering_a_declared_name_shows_its_type() {
         let (state, functions) = analyse("let count = 41 + 1;");
         // Cursor on `count` (character 4..9 on line 0).
         let hover = hover(&state, Position::new(0, 6), &functions).expect("hover present");
@@ -168,25 +189,54 @@ mod tests {
     }
 
     #[test]
-    fn hover_on_builtin_function_shows_signature_and_docs() {
-        let (state, functions) = analyse("let n = abs(-3);");
+    fn hover_on_a_builtin_shows_the_overload_the_call_picks_and_its_docs() {
         // `abs` starts at byte 8 in "let n = abs(-3);".
+        let (state, functions) = analyse("let n = abs(-3);");
         let hover = hover(&state, Position::new(0, 9), &functions).expect("hover present");
         let HoverContents::Markup(content) = hover.contents else {
             panic!("expected markup");
         };
         assert!(
-            content.value.contains("abs("),
-            "expected a signature for abs, got: {}",
+            content.value.contains("abs(Int) -> Int"),
+            "expected the Int overload, got: {}",
+            content.value
+        );
+        assert!(
+            !content.value.contains("abs(Float)"),
+            "expected only the picked overload, got: {}",
+            content.value
+        );
+        assert!(
+            content
+                .value
+                .contains("Returns the absolute value of a number."),
+            "expected the documentation of abs, got: {}",
             content.value
         );
     }
 
     #[test]
-    fn hover_outside_any_node_is_none() {
-        let (state, functions) = analyse("let n = 1;");
-        // Way past the end of the document.
-        assert!(hover(&state, Position::new(5, 0), &functions).is_none());
+    fn hover_on_a_dynamically_dispatched_builtin_lists_every_candidate() {
+        // `x` is untyped, so which `abs` the call reaches is decided at runtime.
+        let src = "fn f(x) { abs(x) }";
+        let (state, functions) = analyse(src);
+        let pos = state
+            .line_index
+            .position(&state.source, src.find("abs").unwrap());
+        let value = markdown(hover(&state, pos, &functions).expect("hover present"));
+        for signature in ["abs(Int) -> Int", "abs(Float) -> Float"] {
+            assert!(
+                value.contains(signature),
+                "expected {signature} among the candidates, got: {value}"
+            );
+        }
+    }
+
+    #[test]
+    fn hover_between_expressions_is_none() {
+        let (state, functions) = analyse("let n = 1;\n\nlet m = 2;");
+        // The blank line between the two declarations.
+        assert!(hover(&state, Position::new(1, 0), &functions).is_none());
     }
 
     #[test]

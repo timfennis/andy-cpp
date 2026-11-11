@@ -111,17 +111,6 @@ mod tests {
     }
 
     #[test]
-    fn position_to_offset_roundtrip() {
-        let text = "let x = 5\nx.";
-        let index = LineIndex::new(text);
-        for offset in 0..=text.len() {
-            let pos = index.position(text, offset);
-            let back = index.offset(text, pos);
-            assert_eq!(back, Some(offset), "roundtrip failed for offset {offset}");
-        }
-    }
-
-    #[test]
     fn position_to_offset_past_end_of_line() {
         let text = "ab\ncd";
         let index = LineIndex::new(text);
@@ -160,8 +149,8 @@ mod tests {
     }
 
     #[test]
-    fn position_to_offset_roundtrip_with_astral() {
-        // Round-trip every char-boundary offset through UTF-16 columns.
+    fn every_char_boundary_round_trips_through_a_position() {
+        // Covers ASCII, a newline and a character outside the BMP.
         let text = "x = 😀\ny";
         let index = LineIndex::new(text);
         for (offset, _) in text.char_indices().chain([(text.len(), ' ')]) {

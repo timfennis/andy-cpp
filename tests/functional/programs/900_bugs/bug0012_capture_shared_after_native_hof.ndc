@@ -1,0 +1,18 @@
+// Two closures and the frame that declares `x` share one variable, also after
+// one of the closures has been passed to a native higher-order function.
+// Passing `inc` to `map` used to give it its own copy of `x`, so `get` and
+// the frame saw different values.
+//
+// expect-output: 3
+// expect-output: 3
+fn make_counter() {
+    let x = 0;
+    let inc = fn(v) { x = x + 1 };
+    let get = fn() { x };
+
+    [1, 2, 3].map(inc);
+
+    print(get())
+    print(x)
+}
+make_counter()

@@ -1,0 +1,8 @@
+// A `let` in a function body may shadow a parameter of the same name, and its
+// initializer reads the parameter.
+fn foo(bar) {
+  let bar = bar + 1;
+  bar
+}
+
+assert_eq(foo(5), 6);

@@ -1,3 +1,4 @@
+use ndc_analysis::Analysis;
 use ndc_core::StaticType;
 use ndc_lexer::Span;
 use ndc_parser::{
@@ -7,45 +8,50 @@ use tower_lsp::lsp_types::{DocumentSymbol, SymbolKind};
 
 use crate::util::LineIndex;
 
-/// Build the document outline (functions and variable declarations) from the
-/// analysed AST. Declarations nested inside a function body become children of
-/// that function's symbol.
+/// Build the document outline (functions, structs and variable declarations)
+/// from the analysed AST, wherever they are declared. Declarations inside a
+/// named function's body become children of that function's symbol.
 pub fn document_symbols(
     ast: &[ExpressionLocation],
+    analysis: &Analysis,
     text: &str,
     line_index: &LineIndex,
 ) -> Vec<DocumentSymbol> {
     let mut symbols = Vec::new();
     for expr in ast {
-        collect_symbol(expr, text, line_index, &mut symbols);
+        collect_symbol(expr, analysis, text, line_index, &mut symbols);
     }
     symbols
 }
 
 fn collect_symbol(
     expr: &ExpressionLocation,
+    analysis: &Analysis,
     text: &str,
     line_index: &LineIndex,
     out: &mut Vec<DocumentSymbol>,
 ) {
     match &expr.expression {
-        Expression::Statement(inner)
-        | Expression::Grouping(inner)
-        | Expression::Cast { value: inner, .. } => {
-            collect_symbol(inner, text, line_index, out);
-        }
         Expression::FunctionDeclaration {
             name: Some(name),
             parameters,
-            resolved_return_type,
+            return_annotation,
             body,
             ..
         } => {
             let mut children = Vec::new();
-            collect_children(body, text, line_index, &mut children);
+            collect_symbol(body, analysis, text, line_index, &mut children);
+            // Only an annotated return type is shown; the declared function
+            // type holds it as the analyser lowered it.
+            let return_type = match analysis.function_types.get(&expr.id) {
+                Some(StaticType::Function { return_type, .. }) if return_annotation.is_some() => {
+                    Some(return_type.as_ref())
+                }
+                _ => None,
+            };
             out.push(make_symbol(
                 name.clone(),
-                Some(signature(parameters, resolved_return_type.as_ref())),
+                Some(signature(parameters, return_type)),
                 SymbolKind::FUNCTION,
                 expr.span,
                 expr.span,
@@ -54,10 +60,11 @@ fn collect_symbol(
                 children,
             ));
         }
+        // A function without a name has no symbol to list what it declares under.
+        Expression::FunctionDeclaration { name: None, .. } => {}
         Expression::VariableDeclaration { l_value, value, .. } => {
-            push_pattern_symbols(l_value, expr.span, text, line_index, out);
-            // A lambda bound to a variable should still appear in the outline.
-            collect_symbol(value, text, line_index, out);
+            push_pattern_symbols(l_value, expr.span, analysis, text, line_index, out);
+            collect_symbol(value, analysis, text, line_index, out);
         }
         Expression::StructDeclaration { name, fields, .. } => {
             let children = fields
@@ -86,49 +93,30 @@ fn collect_symbol(
                 children,
             ));
         }
-        _ => {}
-    }
-}
-
-/// Walk a function body collecting nested function/variable declarations.
-fn collect_children(
-    body: &ExpressionLocation,
-    text: &str,
-    line_index: &LineIndex,
-    out: &mut Vec<DocumentSymbol>,
-) {
-    match &body.expression {
-        Expression::Block { statements } => {
-            for s in statements {
-                collect_symbol(s, text, line_index, out);
+        _ => {
+            for child in expr.children() {
+                collect_symbol(child, analysis, text, line_index, out);
             }
         }
-        Expression::Statement(inner)
-        | Expression::Grouping(inner)
-        | Expression::Cast { value: inner, .. } => {
-            collect_children(inner, text, line_index, out);
-        }
-        _ => collect_symbol(body, text, line_index, out),
     }
 }
 
 fn push_pattern_symbols(
     pattern: &BindingPatternLocation,
     decl_span: Span,
+    analysis: &Analysis,
     text: &str,
     line_index: &LineIndex,
     out: &mut Vec<DocumentSymbol>,
 ) {
     match &pattern.pattern {
-        BindingPattern::Identifier {
-            identifier,
-            span,
-            inferred_type,
-            ..
-        } => {
+        BindingPattern::Identifier { identifier, span } => {
             out.push(make_symbol(
                 identifier.clone(),
-                inferred_type.as_ref().map(ToString::to_string),
+                analysis
+                    .variable_types
+                    .get(&pattern.id)
+                    .map(ToString::to_string),
                 SymbolKind::VARIABLE,
                 decl_span,
                 *span,
@@ -139,7 +127,7 @@ fn push_pattern_symbols(
         }
         BindingPattern::Sequence(patterns) => {
             for pattern in patterns {
-                push_pattern_symbols(pattern, decl_span, text, line_index, out);
+                push_pattern_symbols(pattern, decl_span, analysis, text, line_index, out);
             }
         }
     }
@@ -200,7 +188,12 @@ mod tests {
         interpreter.configure(ndc_stdlib::register);
         let (ast, analysis) = interpreter.analyse_str(source).expect("analysis succeeds");
         let state = DocumentState::from_analysis(source.to_string(), ast, analysis);
-        document_symbols(&state.ast, &state.source, &state.line_index)
+        document_symbols(
+            &state.ast,
+            &state.analysis,
+            &state.source,
+            &state.line_index,
+        )
     }
 
     #[test]
@@ -219,14 +212,13 @@ mod tests {
     }
 
     #[test]
-    fn function_signature_in_detail() {
+    fn a_function_symbol_shows_its_parameters_and_annotated_return_type() {
         let syms = symbols("fn add(a, b) -> Int { a + b }");
         let func = syms
             .iter()
             .find(|s| s.name == "add")
             .expect("add symbol present");
-        let detail = func.detail.as_deref().unwrap_or_default();
-        assert!(detail.contains("a, b"), "got detail: {detail}");
+        assert_eq!(func.detail.as_deref(), Some("(a, b) -> Int"));
     }
 
     #[test]
@@ -248,12 +240,24 @@ mod tests {
     }
 
     #[test]
-    fn cast_does_not_hide_a_declaration() {
-        let syms = symbols("(fn identity(value) => value) as Any");
-        assert!(
-            syms.iter()
-                .any(|s| s.name == "identity" && s.kind == SymbolKind::FUNCTION),
-            "expected function `identity` in {syms:?}"
-        );
+    fn declarations_nested_in_any_expression_are_listed() {
+        let syms = symbols(concat!(
+            "if true { fn helper() { 1 } }\n",
+            "for x in [1] { let doubled = x * 2; }\n",
+            "(fn identity(value) => value) as Any",
+        ));
+        let names = syms.iter().map(|s| s.name.as_str()).collect::<Vec<_>>();
+        assert_eq!(names, ["helper", "doubled", "identity"]);
+    }
+
+    #[test]
+    fn declarations_nested_in_a_function_body_are_its_children() {
+        let syms = symbols("fn outer() { while true { fn inner() { 1 }; break; } }");
+        let [outer] = syms.as_slice() else {
+            panic!("expected only `outer` at the top level, got {syms:?}");
+        };
+        let children = outer.children.as_deref().unwrap_or_default();
+        let names = children.iter().map(|s| s.name.as_str()).collect::<Vec<_>>();
+        assert_eq!(names, ["inner"]);
     }
 }

@@ -3,7 +3,7 @@ use ndc_vm::value::{Object, SeqValue, Value};
 
 #[export_module]
 mod inner {
-    use ndc_core::hash_map::HashMap;
+    use ndc_vm::hash_map::HashMap;
     use std::rc::Rc;
 
     /// Counts the occurrences of each item in a sequence and returns a map with the frequencies.

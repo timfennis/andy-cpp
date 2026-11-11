@@ -4,9 +4,8 @@ mod parser;
 mod type_expr;
 
 pub use expression::{
-    AssignmentTarget, AssignmentTargetLocation, AugmentedAssignmentPlan, Binding, BindingPattern,
-    BindingPatternLocation, Candidate, CaptureSource, Expression, ExpressionLocation, ForBody,
-    ForIteration, FunctionParameter, NodeId, ResolvedVar,
+    AssignmentTarget, AssignmentTargetLocation, BindingPattern, BindingPatternLocation, Expression,
+    ExpressionLocation, ForBody, ForIteration, FunctionParameter, StructField,
 };
 pub use operator::{BinaryOperator, LogicalOperator, UnaryOperator};
 pub use parser::Error;

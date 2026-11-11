@@ -7,10 +7,9 @@
 //!
 //! Resolution is done structurally (not via the analyser's resolved slots)
 //! because local slot numbers are stack-relative — they reset to 0 per function,
-//! so they are not unique across the document and can't key a global map. The
-//! follow-up that exposes the analyser's resolution will replace go-to-definition
-//! here; completion's visibility enumeration is a pure structural query that
-//! stays.
+//! so they are not unique across the document and can't key a global map.
+//! Issue #254 tracks moving go-to-definition onto the resolver's symbols;
+//! completion's visibility enumeration is a pure structural query that stays.
 
 use ndc_lexer::{SourceId, Span};
 use ndc_parser::{
@@ -28,11 +27,10 @@ pub struct Decl {
     /// bindings this is the END of the initializer (RHS / sequence), so the
     /// binding is not visible inside its own initializer — matching the analyser,
     /// which resolves the initializer before creating the binding (`let x = x`
-    /// must resolve the RHS to an outer `x`). Ignored for hoisted functions.
+    /// must resolve the RHS to an outer `x`). Functions and structs are
+    /// visible from the start of their declaration, so a function can call
+    /// itself; like the language, nothing is hoisted.
     pub visible_from: usize,
-    /// Functions are hoisted: visible throughout their scope regardless of
-    /// whether the use textually precedes the declaration.
-    pub is_function: bool,
 }
 
 /// The outermost (document) scope. Its end is one past the source length so a
@@ -51,10 +49,10 @@ pub fn collect_declarations(ast: &[ExpressionLocation], file_scope: Span) -> Vec
     out
 }
 
-/// Is `decl` visible at `offset`? It must be in an enclosing scope, and — unless
-/// it is a hoisted function — the use must come at or after `visible_from`.
+/// Is `decl` visible at `offset`? It must be in an enclosing scope, and the use
+/// must come at or after `visible_from`.
 pub fn is_visible(decl: &Decl, offset: usize) -> bool {
-    contains(decl.scope_span, offset) && (decl.is_function || decl.visible_from <= offset)
+    contains(decl.scope_span, offset) && decl.visible_from <= offset
 }
 
 pub fn contains(span: Span, offset: usize) -> bool {
@@ -65,6 +63,9 @@ pub fn scope_len(span: Span) -> usize {
     span.end().saturating_sub(span.offset())
 }
 
+/// Records the declarations in `expr`, which sits in `scope`. Only the nodes
+/// that declare names or open a scope need matching here; every other node's
+/// children are in the same scope as the node.
 fn collect(expr: &ExpressionLocation, scope: Span, out: &mut Vec<Decl>) {
     match &expr.expression {
         Expression::VariableDeclaration { l_value, value, .. } => {
@@ -87,7 +88,6 @@ fn collect(expr: &ExpressionLocation, scope: Span, out: &mut Vec<Decl>) {
                     name_span: expr.span,
                     scope_span: scope,
                     visible_from: expr.span.offset(),
-                    is_function: true,
                 });
             }
             // Parameters and body locals are scoped to the body; parameters are
@@ -102,27 +102,6 @@ fn collect(expr: &ExpressionLocation, scope: Span, out: &mut Vec<Decl>) {
             for s in statements {
                 collect(s, expr.span, out);
             }
-        }
-        Expression::Statement(inner)
-        | Expression::Grouping(inner)
-        | Expression::Cast { value: inner, .. } => collect(inner, scope, out),
-        Expression::If {
-            condition,
-            on_true,
-            on_false,
-        } => {
-            collect(condition, scope, out);
-            collect(on_true, scope, out);
-            if let Some(f) = on_false {
-                collect(f, scope, out);
-            }
-        }
-        Expression::While {
-            expression,
-            loop_body,
-        } => {
-            collect(expression, scope, out);
-            collect(loop_body, scope, out);
         }
         Expression::For { iterations, body } => {
             // For-loop bindings are visible across the loop expression, but only
@@ -156,72 +135,22 @@ fn collect(expr: &ExpressionLocation, scope: Span, out: &mut Vec<Decl>) {
                 }
             }
         }
-        Expression::Return { value } => collect(value, scope, out),
-        Expression::Logical { left, right, .. } => {
-            collect(left, scope, out);
-            collect(right, scope, out);
-        }
-        Expression::Assignment { r_value, .. } | Expression::OpAssignment { r_value, .. } => {
-            collect(r_value, scope, out);
-        }
-        Expression::Call {
-            function,
-            arguments,
-        }
-        | Expression::OperatorCall {
-            function,
-            arguments,
-        } => {
-            collect(function, scope, out);
-            for arg in arguments {
-                collect(arg, scope, out);
-            }
-        }
-        Expression::MemberAccess { receiver, .. } => collect(receiver, scope, out),
-        Expression::Tuple { values } | Expression::List { values } => {
-            for v in values {
-                collect(v, scope, out);
-            }
-        }
-        Expression::Map { values, default } => {
-            for (key, value) in values {
-                collect(key, scope, out);
-                if let Some(v) = value {
-                    collect(v, scope, out);
-                }
-            }
-            if let Some(d) = default {
-                collect(d, scope, out);
-            }
-        }
-        Expression::RangeInclusive { start, end } | Expression::RangeExclusive { start, end } => {
-            if let Some(s) = start {
-                collect(s, scope, out);
-            }
-            if let Some(e) = end {
-                collect(e, scope, out);
-            }
-        }
-        Expression::Identifier { .. }
-        | Expression::BoolLiteral(_)
-        | Expression::NoneLiteral
-        | Expression::StringLiteral(_)
-        | Expression::NumericLiteral(_)
-        | Expression::Break
-        | Expression::Continue => {}
         Expression::StructDeclaration { name, .. } => {
             // The declaration binds the constructor, visible from the
             // declaration onward (structs are not hoisted, matching the
-            // analyser). Fields are names + type annotations, not expressions,
-            // so there is nothing to descend into. No dedicated name span
-            // exists yet (the parser keeps only the whole-declaration span).
+            // analyser). No dedicated name span exists yet (the parser keeps
+            // only the whole-declaration span).
             out.push(Decl {
                 name: name.clone(),
                 name_span: expr.span,
                 scope_span: scope,
                 visible_from: expr.span.offset(),
-                is_function: false,
             });
+        }
+        _ => {
+            for child in expr.children() {
+                collect(child, scope, out);
+            }
         }
     }
 }
@@ -240,7 +169,6 @@ fn push_pattern(
             name_span: *span,
             scope_span: scope,
             visible_from,
-            is_function: false,
         }),
         BindingPattern::Sequence(patterns) => {
             for pattern in patterns {

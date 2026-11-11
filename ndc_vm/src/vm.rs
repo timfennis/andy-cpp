@@ -1,18 +1,17 @@
 use crate::chunk::OpCode;
 use crate::error::VmError;
+use crate::hash_map::{DefaultHasher, HashMap};
 use crate::iterator::{
     HeapIter, MapIter, RangeInclusiveIter, RangeIter, SeqIter, StringIter, UnboundedRangeIter,
     VmIterator,
 };
-use crate::value::{CompiledFunction, Function, NativeFunc};
-use crate::{ClosureFunction, Object, UpvalueCell, Value};
-use ndc_core::hash_map::{DefaultHasher, HashMap};
+use crate::value::{CompiledFunction, Function, NativeFunc, NativeFunction};
+use crate::{ClosureFunction, Object, Value};
+use ndc_analysis::{CaptureSource, ResolvedVar};
 use ndc_lexer::Span;
-use ndc_parser::{CaptureSource, ResolvedVar};
 use std::cell::RefCell;
 use std::hash::{Hash, Hasher};
 use std::io::Write;
-use std::ops::Deref;
 use std::rc::Rc;
 
 /// Output destination for the VM's I/O built-ins (`print`, `dbg`, etc.).
@@ -41,12 +40,6 @@ pub struct Vm {
     stack: Vec<Value>,
     globals: Vec<Value>,
     frames: Vec<CallFrame>,
-    /// All currently-open upvalue cells, keyed by absolute stack slot.
-    /// When a frame exits, cells pointing into that frame's stack region are
-    /// "closed" — the live value is copied out of the stack into the cell so
-    /// the closure can still read/write it after the frame is gone.
-    /// Two closures capturing the same local share one cell via this list.
-    open_upvalues: Vec<Rc<RefCell<UpvalueCell>>>,
     /// Output sink for `print`, `dbg`, and similar I/O built-ins.
     output: OutputSink,
     #[cfg(feature = "trace")]
@@ -83,9 +76,27 @@ pub struct CallFrame {
     memo: Option<MemoCache>,
 }
 
+/// The VM's globals for `natives`: native `i` is global slot `i`. The analyser
+/// numbers natives the same way, given them in the same order.
+pub fn native_globals<'a>(natives: impl IntoIterator<Item = &'a Rc<NativeFunction>>) -> Vec<Value> {
+    natives
+        .into_iter()
+        .map(|native| {
+            Value::Object(Rc::new(Object::Function(Function::Native(Rc::clone(
+                native,
+            )))))
+        })
+        .collect()
+}
+
 impl Vm {
-    pub fn new(function: CompiledFunction, globals: Vec<Value>) -> Self {
+    pub fn new(function: CompiledFunction, mut globals: Vec<Value>) -> Self {
         let num_locals = function.num_locals;
+        // Every global the program declares has a slot, holding unit until its
+        // declaration runs, like a local.
+        if globals.len() < function.num_globals {
+            globals.resize(function.num_globals, Value::unit());
+        }
         let mut vm = Self {
             stack: Vec::with_capacity(256),
             globals,
@@ -98,7 +109,6 @@ impl Vm {
                 frame_pointer: 0,
                 memo: None,
             }],
-            open_upvalues: Vec::new(),
             output: OutputSink::Stdout,
             #[cfg(feature = "trace")]
             source: None,
@@ -192,9 +202,6 @@ impl Vm {
                     if let Some((cache, key)) = &frame.memo {
                         cache.borrow_mut().insert(*key, ret.clone());
                     }
-                    if !self.open_upvalues.is_empty() {
-                        self.close_upvalues(frame_pointer);
-                    }
                     if frame_pointer == 0 {
                         return Err(VmError::new("Return at top level", span));
                     }
@@ -223,9 +230,39 @@ impl Vm {
                     let slot = *slot;
                     self.stack.push(self.stack[frame.slot(slot)].clone());
                 }
+                OpCode::GetCell(slot) => {
+                    let value = &self.stack[frame.slot(*slot)];
+                    let value = match value.as_cell() {
+                        Some(cell) => cell.borrow().clone(),
+                        None => value.clone(),
+                    };
+                    self.stack.push(value);
+                }
+                OpCode::SetCell(slot) => {
+                    let index = frame.slot(*slot);
+                    let value = self.stack.pop().expect("stack underflow");
+                    match self.stack[index].as_cell() {
+                        Some(cell) => *cell.borrow_mut() = value,
+                        None => self.stack[index] = value,
+                    }
+                }
+                OpCode::NewCell(slot) => {
+                    let index = frame.slot(*slot);
+                    let cell = Value::Cell(Rc::new(RefCell::new(Value::unit())));
+                    if index < self.stack.len() {
+                        self.stack[index] = cell;
+                    } else {
+                        self.stack.push(cell);
+                    }
+                }
                 OpCode::GetGlobal(slot) => {
                     let slot = *slot;
                     self.stack.push(self.globals[slot].clone());
+                }
+                OpCode::SetGlobal(slot) => {
+                    let slot = *slot;
+                    let value = self.stack.pop().expect("stack underflow");
+                    self.globals[slot] = value;
                 }
                 OpCode::SetLocal(slot) => {
                     let slot = *slot;
@@ -385,20 +422,12 @@ impl Vm {
                         .push(Value::Object(Rc::new(Object::map(map, default))));
                 }
                 OpCode::GetUpvalue(slot) => {
-                    let slot = *slot;
-                    match frame.closure.upvalues[slot].borrow().deref() {
-                        UpvalueCell::Open(slot) => self.stack.push(self.stack[*slot].clone()),
-                        UpvalueCell::Closed(value) => self.stack.push(value.clone()),
-                    }
+                    let value = frame.closure.upvalues[*slot].borrow().clone();
+                    self.stack.push(value);
                 }
                 OpCode::SetUpvalue(slot) => {
-                    let slot = *slot;
                     let value = self.stack.pop().expect("stack underflow");
-                    let mut cell = frame.closure.upvalues[slot].borrow_mut();
-                    match &mut *cell {
-                        UpvalueCell::Open(stack_slot) => self.stack[*stack_slot] = value,
-                        UpvalueCell::Closed(stored) => *stored = value,
-                    }
+                    *frame.closure.upvalues[*slot].borrow_mut() = value;
                 }
                 OpCode::GetIterator => {
                     let val = self.stack.pop().expect("stack underflow");
@@ -518,7 +547,7 @@ impl Vm {
                 } => {
                     // Clone the Rc<[CaptureSource]> (just a refcount bump) and copy the index
                     // so that `op`'s borrow of `self.frames` ends before we re-borrow the frame
-                    // and before `capture_upvalue` needs `&mut self`.
+                    // and before `capture_local` needs `&mut self`.
                     let idx = *idx;
                     let values = Rc::clone(values);
                     let (compiled, frame_pointer) = {
@@ -533,14 +562,12 @@ impl Vm {
                         };
                         (Rc::clone(compiled), frame.frame_pointer)
                     };
-                    // Resolve captures lazily: only clone the specific parent upvalue
-                    // Rcs that this closure references, and capture locals on demand.
+                    // Share the cells of captured locals, moving a local into a new
+                    // cell on its first capture, and the parent's own upvalues.
                     let upvalues = values
                         .iter()
                         .map(|c| match c {
-                            CaptureSource::Local(slot) => {
-                                self.capture_upvalue(frame_pointer + slot)
-                            }
+                            CaptureSource::Local(slot) => self.capture_local(frame_pointer + slot),
                             CaptureSource::Upvalue(slot) => {
                                 let frame = self.frames.last().expect("no frame");
                                 Rc::clone(&frame.closure.upvalues[*slot])
@@ -557,11 +584,6 @@ impl Vm {
                 OpCode::Unpack(size) => {
                     let size = *size;
                     self.exec_unpack(size, span)?;
-                }
-                OpCode::CloseUpvalue(slot) => {
-                    let slot = *slot;
-                    let frame_pointer = self.frames.last().expect("no frame").frame_pointer;
-                    self.close_upvalues(frame_pointer + slot);
                 }
                 // Wraps the function on top of the stack in a fresh memoization
                 // cache.  Emitted by the compiler for every `pure fn` declaration.
@@ -594,36 +616,17 @@ impl Vm {
         result
     }
 
-    /// Returns a shared upvalue cell for the given absolute stack slot, creating
-    /// one if it doesn't exist yet. Two closures capturing the same local get the
-    /// same `Rc` so mutations from either side are immediately visible to both.
-    fn capture_upvalue(&mut self, stack_slot: usize) -> Rc<RefCell<UpvalueCell>> {
-        if let Some(cell) = self
-            .open_upvalues
-            .iter()
-            .find(|c| matches!(*c.borrow(), UpvalueCell::Open(s) if s == stack_slot))
-        {
+    /// The cell a closure shares with the local at `stack_slot`. On the
+    /// first capture the local's value moves into a new cell, which takes its
+    /// place in the slot, so the frame and every closure see one variable.
+    fn capture_local(&mut self, stack_slot: usize) -> Rc<RefCell<Value>> {
+        if let Some(cell) = self.stack[stack_slot].as_cell() {
             return Rc::clone(cell);
         }
-        let cell = Rc::new(RefCell::new(UpvalueCell::Open(stack_slot)));
-        self.open_upvalues.push(Rc::clone(&cell));
+        let value = std::mem::replace(&mut self.stack[stack_slot], Value::None);
+        let cell = Rc::new(RefCell::new(value));
+        self.stack[stack_slot] = Value::Cell(Rc::clone(&cell));
         cell
-    }
-
-    /// Closes every open upvalue whose stack slot falls within the region
-    /// starting at `frame_pointer`. Called just before a frame's stack window
-    /// is reclaimed so that closures retaining those cells keep live copies.
-    fn close_upvalues(&mut self, frame_pointer: usize) {
-        self.open_upvalues.retain_mut(|cell| {
-            let mut borrow = cell.borrow_mut();
-            if let UpvalueCell::Open(slot) = *borrow
-                && slot >= frame_pointer
-            {
-                *borrow = UpvalueCell::Closed(self.stack[slot].clone());
-                return false;
-            }
-            true
-        });
     }
 
     fn dispatch_call(&mut self, func: Function, args: usize) -> Result<Dispatch, VmError> {
@@ -712,29 +715,6 @@ impl Vm {
         Ok(Dispatch::FramePushed)
     }
 
-    /// Call a VM function with the given arguments, using a fresh VM instance.
-    /// Used by the interpreter bridge (`vm_to_interp_callable`) to re-enter the
-    /// VM from the tree-walk interpreter side. The hot path for VM-native HOFs
-    /// uses `call_callback` instead, which runs inline on the parent VM.
-    pub fn call_function(
-        func: Function,
-        args: &[Value],
-        globals: Vec<Value>,
-    ) -> Result<Value, VmError> {
-        let mut vm = Self {
-            stack: Vec::new(),
-            globals,
-            frames: Vec::new(),
-            open_upvalues: Vec::new(),
-            output: OutputSink::Stdout,
-            #[cfg(feature = "trace")]
-            source: None,
-            #[cfg(feature = "trace")]
-            tracer: None,
-        };
-        vm.call_callback(func, args)
-    }
-
     /// Call a function inline on this VM, without spawning a child VM.
     /// Used by `VmCallable::call` so stdlib HOFs run their predicates/mappers
     /// directly on the parent stack — zero allocation per callback invocation.
@@ -756,11 +736,6 @@ impl Vm {
         }
     }
 
-    /// Expose the globals slice for use by the interpreter bridge.
-    pub fn globals(&self) -> &[Value] {
-        &self.globals
-    }
-
     /// Returns the expression result left on top of the stack after `run()`.
     /// If the last top-level expression was a statement (semicolon-terminated)
     /// its value was already popped, so the stack is exactly `num_locals` deep
@@ -773,38 +748,9 @@ impl Vm {
         }
     }
 
-    /// Resume execution with a new (extended) compiled function, starting at
-    /// `resume_ip` — the instruction index where the previous `Halt` was.
-    /// Used by the REPL to keep a single VM alive across lines.
-    ///
-    /// The stack is trimmed to `prev_num_locals` (discarding any leftover
-    /// expression result from the previous run) and then extended with
-    /// `Value::unit()` for any new local slots the new function introduces.
-    /// Upvalues for preserved locals remain open; any pointing above
-    /// `prev_num_locals` are closed before the truncation.
-    pub fn resume_from_halt(
-        &mut self,
-        function: CompiledFunction,
-        globals: Vec<Value>,
-        resume_ip: usize,
-        prev_num_locals: usize,
-    ) {
-        let new_num_locals = function.num_locals;
-        self.globals = globals;
-        self.close_upvalues(prev_num_locals);
-        self.stack.truncate(prev_num_locals);
-        for _ in prev_num_locals..new_num_locals {
-            self.stack.push(Value::unit());
-        }
-        self.frames = vec![CallFrame {
-            closure: ClosureFunction {
-                prototype: Rc::new(function),
-                upvalues: Vec::new(),
-            },
-            ip: resume_ip,
-            frame_pointer: 0,
-            memo: None,
-        }];
+    /// The globals as the program left them, for the next REPL line.
+    pub fn into_globals(self) -> Vec<Value> {
+        self.globals
     }
 
     /// Resolves the callee on the stack to a scalar `Function`. Direct
@@ -1177,12 +1123,16 @@ impl Vm {
         match var {
             ResolvedVar::Global { slot } => self.globals[*slot].clone(),
             ResolvedVar::Local { slot } => self.stack[frame_pointer + slot].clone(),
+            ResolvedVar::Cell { slot } => {
+                let value = &self.stack[frame_pointer + slot];
+                match value.as_cell() {
+                    Some(cell) => cell.borrow().clone(),
+                    None => value.clone(),
+                }
+            }
             ResolvedVar::Upvalue { slot } => {
                 let frame = self.frames.last().expect("no frame");
-                match &*frame.closure.upvalues[*slot].borrow() {
-                    UpvalueCell::Open(stack_slot) => self.stack[*stack_slot].clone(),
-                    UpvalueCell::Closed(value) => value.clone(),
-                }
+                frame.closure.upvalues[*slot].borrow().clone()
             }
         }
     }

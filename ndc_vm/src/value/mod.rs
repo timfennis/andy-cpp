@@ -8,12 +8,12 @@ pub use number::{AdvancedNumber, BinaryOperatorError, ExactFraction, NumberToFlo
 pub use numeric::{NumericMode, NumericRef};
 pub use string::VmString;
 
+use ndc_analysis::ResolvedVar;
+
+use crate::hash_map::{DefaultHasher, HashMap};
 use crate::iterator::SharedIterator;
 use ndc_core::StaticType;
-use ndc_core::compare::FallibleOrd;
-use ndc_core::hash_map::{DefaultHasher, HashMap};
 use ndc_core::r#struct::StructInfo;
-use ndc_parser::ResolvedVar;
 use std::cell::RefCell;
 use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;
@@ -61,6 +61,10 @@ pub enum Value {
     Bool(bool),
     None,
     Object(Rc<Object>),
+    /// A captured local, shared by the frame that declares it and the
+    /// closures that capture it. It lives in a stack slot or a closure's
+    /// upvalues and is never a value a program can see.
+    Cell(Rc<RefCell<Self>>),
 }
 
 #[derive(Clone)]
@@ -94,8 +98,18 @@ pub enum Object {
     MaxHeap(RefCell<BinaryHeap<OrdValue>>),
 }
 
+impl Value {
+    /// The cell this value is, if a captured local's slot holds one.
+    pub(crate) fn as_cell(&self) -> Option<&Rc<RefCell<Self>>> {
+        match self {
+            Self::Cell(cell) => Some(cell),
+            _ => None,
+        }
+    }
+}
+
 /// Newtype wrapper around `Value` that imposes a total order so values can be
-/// stored in a `BinaryHeap`.  The ordering mirrors the interpreter's `HeapValue`.
+/// stored in a `BinaryHeap`.
 #[derive(Clone)]
 pub struct OrdValue(pub Value);
 
@@ -293,6 +307,7 @@ impl Value {
             Self::Bool(_) => StaticType::Bool,
             Self::None => StaticType::Option(Box::new(StaticType::Any)),
             Self::Object(obj) => obj.static_type_with_budget(depth, budget),
+            Self::Cell(cell) => cell.borrow().static_type_with_budget(depth, budget),
         }
     }
 
@@ -573,7 +588,7 @@ impl Value {
             Self::Int(value) => Some(NumericRef::Int(*value)),
             Self::Float(value) => Some(NumericRef::Float(*value)),
             Self::Number(value) => Some(NumericRef::Number(value.as_ref())),
-            Self::Bool(_) | Self::None | Self::Object(_) => None,
+            Self::Bool(_) | Self::None | Self::Object(_) | Self::Cell(_) => None,
         }
     }
 
@@ -759,6 +774,7 @@ impl fmt::Display for Value {
             Self::Bool(b) => write!(f, "{b}"),
             Self::None => write!(f, "None"),
             Self::Object(obj) => write!(f, "{obj}"),
+            Self::Cell(cell) => write!(f, "{}", cell.borrow()),
         }
     }
 }
@@ -781,7 +797,7 @@ impl fmt::Display for Object {
                 }
                 write!(f, "]")
             }
-            // Empty tuple is the unit value — prints as nothing, matching the interpreter.
+            // Empty tuple is the unit value, which prints as nothing.
             Self::Tuple(vs) if vs.is_empty() => Ok(()),
             Self::Tuple(vs) => {
                 write!(f, "(")?;
@@ -916,10 +932,9 @@ impl PartialOrd for Object {
     }
 }
 
-impl FallibleOrd for Value {
-    type Error = String;
-
-    fn try_cmp(&self, other: &Self) -> Result<Ordering, String> {
+impl Value {
+    /// Like `partial_cmp`, but says why two values can't be compared.
+    pub fn try_cmp(&self, other: &Self) -> Result<Ordering, String> {
         self.partial_cmp(other).ok_or_else(|| {
             format!(
                 "{} cannot be compared to {}",
@@ -928,9 +943,7 @@ impl FallibleOrd for Value {
             )
         })
     }
-}
 
-impl Value {
     /// Compare a comparator return value to zero, returning the ordering.
     /// Comparators return a number: negative means less, zero means equal, positive means greater.
     pub fn cmp_to_zero(&self) -> Result<Ordering, String> {
@@ -992,6 +1005,7 @@ impl Hash for Value {
                 state.write_u8(6);
                 o.hash(state);
             }
+            Self::Cell(_) => unreachable!("internal error: a cell is never hashed"),
             Self::Int(_) | Self::Float(_) | Self::Number(_) => unreachable!("handled above"),
         }
     }
@@ -1086,7 +1100,6 @@ impl Hash for Object {
             Self::Map { entries, .. } => {
                 state.write_u8(8);
                 // Order-independent hash: XOR-fold of pair hashes
-                // (same approach as the non-VM interpreter)
                 // NOTE: the default value is not part of the identity of the map
                 let mut acc = 0u64;
                 let mut cube_acc = 0u64;
@@ -1168,7 +1181,7 @@ mod tests {
     }
 
     #[test]
-    fn numeric_ref_owns_checked_numeric_conversions() {
+    fn numeric_ref_reports_its_mode_and_converts_checked() {
         let integer = Value::Int(42);
         let float = Value::Float(42.75);
         let rational = Value::number(AdvancedNumber::rational(num::BigRational::new(
@@ -1188,7 +1201,7 @@ mod tests {
     }
 
     #[test]
-    fn equal_numeric_modes_keep_equal_hashes() {
+    fn equal_numbers_hash_alike_in_every_representation() {
         let values = [
             Value::Int(1),
             Value::Float(1.0),
@@ -1251,7 +1264,7 @@ mod tests {
     }
 
     #[test]
-    fn same_representation_numbers_compare_without_changing_semantics() {
+    fn numbers_of_one_representation_compare_by_value() {
         assert!(Value::int(-1) < Value::int(1));
         assert_eq!(Value::float(-0.0), Value::float(0.0));
         assert_eq!(Value::float(f64::NAN), Value::float(f64::NAN));
@@ -1263,7 +1276,7 @@ mod tests {
     }
 
     #[test]
-    fn cross_representation_numbers_keep_exact_comparison_semantics() {
+    fn int_float_comparison_is_exact() {
         let integers = [
             i64::MIN,
             i64::MIN + 1,

@@ -1,0 +1,6 @@
+// Unannotated parameters are `Any`, so two functions with the same name and
+// parameter count but no annotations have the same parameter types: defining
+// both in one scope is a redefinition.
+// expect-error: Illegal redefinition of function 'foo' with parameters (Any) in the same scope
+fn foo(a) { a + 1 }
+fn foo(a) { a + 2 }

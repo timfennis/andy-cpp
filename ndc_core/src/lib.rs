@@ -1,9 +1,8 @@
-pub mod compare;
-pub mod duration;
-pub mod hash_map;
+mod node_id;
 pub mod static_type;
 pub mod r#struct;
 
+pub use node_id::NodeId;
 pub use static_type::{Parameter, StaticType, TypeSignature};
 use std::slice::Iter;
 
@@ -24,9 +23,5 @@ impl<T> FunctionRegistry<T> {
 
     pub fn iter(&'_ self) -> Iter<'_, T> {
         self.functions.iter()
-    }
-
-    pub fn take(&mut self) -> Vec<T> {
-        std::mem::take(&mut self.functions)
     }
 }

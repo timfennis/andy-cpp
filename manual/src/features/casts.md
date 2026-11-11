@@ -41,7 +41,7 @@ The analyser rejects casts between types that cannot share a value:
 
 ```ndc
 "foo" as Int
-// error[resolver]: invalid cast: String can never be Int
+// error[analysis]: invalid cast: String can never be Int
 ```
 
 ## Precedence

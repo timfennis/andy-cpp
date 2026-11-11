@@ -1,0 +1,4 @@
+// A top-level declaration that never runs still declares its name, which
+// holds unit.
+false and (fn f() { 1 });
+assert_eq(f, ());

@@ -1,7 +1,9 @@
 pub mod chunk;
 pub mod compiler;
 pub mod disassemble;
+pub mod duration;
 pub mod error;
+pub mod hash_map;
 pub mod iterator;
 #[cfg(feature = "trace")]
 #[allow(clippy::print_stderr)]
@@ -26,12 +28,12 @@ mod test {
     use std::rc::Rc;
 
     #[test]
-    fn test_that_value_size_does_not_change() {
+    fn a_value_is_16_bytes() {
         assert_eq!(size_of::<Value>(), 16)
     }
 
     #[test]
-    fn test_that_opcode_size_does_not_change() {
+    fn an_opcode_is_32_bytes() {
         // NOTE: this is allowed to change, but we'd like to know about it.
         assert_eq!(size_of::<crate::chunk::OpCode>(), 32)
     }
@@ -39,7 +41,7 @@ mod test {
     /// A struct's constructor, getter, and setter must each display
     /// distinctly, so `ndc disassemble` output tells them apart.
     #[test]
-    fn test_struct_function_display_is_unambiguous() {
+    fn struct_accessors_display_distinctly() {
         use crate::value::Function;
         use ndc_core::r#struct::StructRegistry;
 
@@ -57,7 +59,7 @@ mod test {
     }
 
     #[test]
-    fn diagnostic_type_has_total_work_budget_for_cycles() {
+    fn a_cyclic_values_diagnostic_type_falls_back_to_any() {
         let list = Rc::new(Object::List(RefCell::new(Vec::new())));
         let value = Value::Object(Rc::clone(&list));
         let Object::List(elements) = list.as_ref() else {

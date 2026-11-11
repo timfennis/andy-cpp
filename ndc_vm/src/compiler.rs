@@ -1,18 +1,16 @@
 use crate::chunk::{JumpTarget, LabelId, OpCode, OptimizerIr};
 use crate::value::{CompiledFunction, Function};
 use crate::{Object, Value};
-use ndc_core::r#struct::StructRegistry;
-use ndc_core::{StaticType, TypeSignature};
+use ndc_analysis::{Analysis, Binding, Candidate, ResolvedVar};
+use ndc_core::NodeId;
+use ndc_core::StaticType;
 use ndc_lexer::{NumericLiteral, Span};
 use ndc_parser::{
-    AssignmentTarget, AugmentedAssignmentPlan, Binding, BindingPattern, BindingPatternLocation,
-    Candidate, CaptureSource, Expression, ExpressionLocation, ForBody, ForIteration,
-    FunctionParameter, LogicalOperator, ResolvedVar,
+    AssignmentTarget, AssignmentTargetLocation, BindingPattern, BindingPatternLocation, Expression,
+    ExpressionLocation, ForBody, ForIteration, LogicalOperator,
 };
-use std::cell::RefCell;
 use std::rc::Rc;
 
-#[derive(Clone)]
 pub struct Compiler {
     ir: OptimizerIr,
     source_locals: usize,
@@ -21,11 +19,12 @@ pub struct Compiler {
     loop_stack: Vec<LoopContext>,
     allow_return: bool,
     optimize: bool,
-    struct_registry: Rc<RefCell<StructRegistry>>,
+    /// What the analyser worked out about the batch being compiled.
+    analysis: Rc<Analysis>,
 }
 
 impl Compiler {
-    pub fn new(struct_registry: Rc<RefCell<StructRegistry>>) -> Self {
+    fn new() -> Self {
         Self {
             ir: Default::default(),
             source_locals: 0,
@@ -34,11 +33,11 @@ impl Compiler {
             loop_stack: vec![],
             allow_return: false,
             optimize: true,
-            struct_registry,
+            analysis: Rc::default(),
         }
     }
 
-    pub fn new_without_optimization(struct_registry: Rc<RefCell<StructRegistry>>) -> Self {
+    fn new_without_optimization() -> Self {
         Self {
             ir: Default::default(),
             source_locals: 0,
@@ -47,16 +46,19 @@ impl Compiler {
             loop_stack: vec![],
             allow_return: false,
             optimize: false,
-            struct_registry,
+            analysis: Rc::default(),
         }
     }
+    /// Compiles a program, or one REPL line, into a function the VM runs at
+    /// the top level. Its locals are only what the code's blocks declare; its
+    /// top-level declarations are globals.
     pub fn compile(
         expressions: impl Iterator<Item = ExpressionLocation>,
-        struct_registry: Rc<RefCell<StructRegistry>>,
+        analysis: Analysis,
     ) -> Result<CompiledFunction, CompileError> {
-        let mut compiler = Self::new(struct_registry);
-        compiler.compile_batch(expressions)?;
-        Ok(compiler.finish()?.0)
+        let mut compiler = Self::new();
+        compiler.compile_batch(expressions, analysis)?;
+        Ok(compiler.finish())
     }
 
     /// Compile expressions without running the peephole optimizer. Useful
@@ -64,50 +66,22 @@ impl Compiler {
     /// debugging tools (e.g. a future `--no-optimize` disassembler flag).
     pub fn compile_unoptimized(
         expressions: impl Iterator<Item = ExpressionLocation>,
-        struct_registry: Rc<RefCell<StructRegistry>>,
+        analysis: Analysis,
     ) -> Result<CompiledFunction, CompileError> {
-        let mut compiler = Self::new_without_optimization(struct_registry);
-        compiler.compile_batch(expressions)?;
-        Ok(compiler.finish()?.0)
+        let mut compiler = Self::new_without_optimization();
+        compiler.compile_batch(expressions, analysis)?;
+        Ok(compiler.finish())
     }
 
-    /// Compile expressions and return both the finished function and a
-    /// checkpoint that can be passed to `resume` to append more code later.
-    /// The checkpoint is the compiler state *before* the `Halt` instruction,
-    /// so `resume` can extend the bytecode without re-running old instructions.
-    ///
-    /// Optimization is disabled on this path: the REPL's resume-from-
-    /// halt machinery relies on `halt_ip` matching the position of `Halt` in
-    /// the emitted chunk, and shifting instructions invalidates that.
-    pub fn compile_resumable(
-        expressions: impl Iterator<Item = ExpressionLocation>,
-        struct_registry: Rc<RefCell<StructRegistry>>,
-    ) -> Result<(CompiledFunction, Self), CompileError> {
-        let mut compiler = Self::new_without_optimization(struct_registry);
-        compiler.compile_batch(expressions)?;
-        compiler.finish()
-    }
-
-    /// Resume from a checkpoint produced by `compile_resumable` or a previous
-    /// `resume` call.  Compiles `new_expressions` starting where the checkpoint
-    /// left off, returning the extended function and a new checkpoint.
-    ///
-    /// The returned `CompiledFunction` contains all instructions (old + new),
-    /// so the VM can be pointed at `checkpoint.halt_ip()` to execute only the
-    /// new part while the stack already holds the old locals.
-    pub fn resume(
-        self,
-        new_expressions: impl Iterator<Item = ExpressionLocation>,
-    ) -> Result<(CompiledFunction, Self), CompileError> {
-        let mut compiler = self; // checkpoint has no trailing Halt
-        compiler.compile_batch(new_expressions)?;
-        compiler.finish()
-    }
-
+    /// Compiles one batch of top-level expressions, `analysis` being what the
+    /// analyser worked out about them.
     fn compile_batch(
         &mut self,
         expressions: impl Iterator<Item = ExpressionLocation>,
+        analysis: Analysis,
     ) -> Result<(), CompileError> {
+        self.source_locals = analysis.top_level_frame_size;
+        self.analysis = Rc::new(analysis);
         for expression in expressions {
             self.compile_expr(expression)?;
         }
@@ -154,22 +128,13 @@ impl Compiler {
         }
     }
 
-    /// The instruction index where the trailing `Halt` was written.
-    /// When resuming, this is the `ip` to start from in the new function.
-    pub fn halt_ip(&self) -> usize {
-        self.ir.len()
-    }
-
-    /// Number of top-level local slots used so far.
-    pub fn num_locals(&self) -> usize {
+    /// Number of local slots: the code's own variables, then the temporaries.
+    fn num_locals(&self) -> usize {
         self.source_locals + self.temp_count
     }
 
-    /// Internal: clone a checkpoint (pre-Halt), write Halt, return both.
-    fn finish(mut self) -> Result<(CompiledFunction, Self), CompileError> {
-        // Keep resumable IR symbolic so later batches can grow the source-local
-        // range and lay out every compiler temporary against the new boundary.
-        let checkpoint = self.clone();
+    /// Ends the top-level function with `Halt`.
+    fn finish(mut self) -> CompiledFunction {
         self.layout_temporaries();
         self.ir.write(OpCode::Halt, Span::synthetic());
         if self.optimize {
@@ -177,7 +142,7 @@ impl Compiler {
         }
 
         let num_locals = self.num_locals();
-        let function = CompiledFunction {
+        CompiledFunction {
             name: None,
             static_type: StaticType::Function {
                 parameters: Some(vec![]),
@@ -185,8 +150,8 @@ impl Compiler {
             },
             body: self.ir.into_chunk(),
             num_locals,
-        };
-        Ok((function, checkpoint))
+            num_globals: self.analysis.global_count,
+        }
     }
 
     /// Compile one expression. Leaves exactly one result value on the stack,
@@ -198,7 +163,9 @@ impl Compiler {
         expression_location: ExpressionLocation,
     ) -> Result<(), CompileError> {
         let ExpressionLocation {
-            expression, span, ..
+            id,
+            expression,
+            span,
         } = expression_location;
         let entry_depth = self.ir.stack_depth();
         // A `;`-statement pops its own value and is the one expression that
@@ -232,19 +199,19 @@ impl Compiler {
                 let idx = self.ir.add_constant(value);
                 self.ir.write(OpCode::Constant(idx), span);
             }
-            Expression::Identifier { resolved, .. } => self.compile_binding(resolved, span)?,
-            Expression::Cast {
-                value,
-                resolved_type,
-                requires_check,
-                ..
-            } => {
+            Expression::Identifier { .. } => {
+                let analysis = Rc::clone(&self.analysis);
+                self.compile_binding(analysis.binding(id), span)?;
+            }
+            Expression::Cast { value, .. } => {
                 self.compile_expr(*value)?;
-                if requires_check {
-                    let Some(target) = resolved_type else {
-                        return Err(CompileError::unresolved_cast(span));
-                    };
-                    self.ir.write(OpCode::CheckType(Rc::new(target)), span);
+                match self.analysis.cast_checks.get(&id) {
+                    None => return Err(CompileError::unresolved_cast(span)),
+                    Some(None) => {}
+                    Some(Some(target)) => {
+                        let target = Rc::new(target.clone());
+                        self.ir.write(OpCode::CheckType(target), span);
+                    }
                 }
             }
             Expression::Statement(stm) => {
@@ -289,57 +256,49 @@ impl Compiler {
                 AssignmentTarget::Index {
                     value: container,
                     index,
-                    resolved_set,
-                    ..
                 } => {
-                    let set_fn = resolved_set.expect("[]= must be resolved");
-                    self.compile_binding(set_fn, span)?;
+                    let analysis = Rc::clone(&self.analysis);
+                    self.compile_binding(analysis.setter(l_value.id), span)?;
                     self.compile_expr(*container)?;
                     self.compile_expr(*index)?;
                     self.compile_expr(*value)?;
                     self.ir.write(OpCode::Call(3), span);
                 }
-                l_value @ AssignmentTarget::Identifier { .. } => {
+                AssignmentTarget::Identifier { span: lv_span, .. } => {
                     self.compile_expr(*value)?;
-                    self.compile_assignment_target(l_value, span)?;
+                    self.emit_set_var(self.assigned_variable(l_value.id), lv_span);
                     self.emit_unit();
                 }
                 AssignmentTarget::Sequence(seq) => {
                     self.compile_expr(*value)?;
                     self.ir.write(OpCode::Unpack(seq.len()), span);
                     for l_value in seq {
-                        self.compile_assignment_target(l_value.target, span)?;
+                        self.compile_assignment_target(l_value, span)?;
                     }
                     self.emit_unit();
                 }
                 AssignmentTarget::Member {
                     receiver,
                     member_span,
-                    resolved_setter,
                     ..
                 } => {
-                    let setter = resolved_setter.expect("member setter must be resolved");
-                    self.compile_binding(setter, member_span)?;
+                    let analysis = Rc::clone(&self.analysis);
+                    self.compile_binding(analysis.setter(l_value.id), member_span)?;
                     self.compile_expr(*receiver)?;
                     self.compile_expr(*value)?;
                     self.ir.write(OpCode::Call(2), member_span);
                 }
             },
             Expression::OpAssignment {
-                l_value,
-                r_value,
-                plan,
-                ..
+                l_value, r_value, ..
             } => {
-                let target = PreparedAssignmentTarget::prepare(self, l_value.target, span)?;
-                let binding = match plan {
-                    AugmentedAssignmentPlan::Resolved(binding) => binding,
-                    AugmentedAssignmentPlan::Unresolved => {
-                        return Err(CompileError::unresolved_binding(span));
-                    }
+                let target = PreparedAssignmentTarget::prepare(self, l_value)?;
+                let analysis = Rc::clone(&self.analysis);
+                let Some(binding) = analysis.augmented_assignments.get(&id) else {
+                    return Err(CompileError::unresolved_binding(span));
                 };
 
-                let opcode = Self::call_opcode_for(&binding, 2);
+                let opcode = Self::call_opcode_for(binding, 2);
                 self.compile_binding(binding, span)?;
                 target.emit_read(self)?;
                 self.compile_expr(*r_value)?;
@@ -349,37 +308,16 @@ impl Compiler {
                 self.emit_unit();
             }
             Expression::FunctionDeclaration {
-                name,
-                resolved_name,
-                body,
-                parameters,
-                resolved_return_type,
-                captures,
-                pure,
-                ..
+                name, body, pure, ..
             } => {
-                let type_signature = FunctionParameter::from_params(&parameters);
-                self.compile_function_decl(
-                    name,
-                    resolved_name,
-                    *body,
-                    &type_signature,
-                    resolved_return_type,
-                    captures,
-                    pure,
-                    span,
-                )?;
+                self.compile_function_decl(id, name, *body, pure, span)?;
             }
-            Expression::StructDeclaration {
-                fields,
-                resolved,
-                resolved_name,
-                ..
-            } => {
-                let info = Rc::clone(
-                    &self.struct_registry.borrow()
-                        [resolved.expect("must be resolved by the analyser")],
-                );
+            Expression::StructDeclaration { .. } => {
+                let analysis = Rc::clone(&self.analysis);
+                let declared = analysis.declared_struct(id);
+                // The constructor and accessors share this one `Rc`: struct
+                // values and accessor checks compare their info by identity.
+                let info = Rc::new(declared.info.clone());
 
                 let idx = self
                     .ir
@@ -389,15 +327,13 @@ impl Compiler {
 
                 self.ir.write(OpCode::Constant(idx), span);
 
-                match resolved_name {
-                    Some(var @ ResolvedVar::Local { .. }) => {
-                        self.emit_set_var(var, span);
-                    }
-                    Some(_) => unreachable!("declarations always bind locally"),
-                    None => unreachable!("resolved_name should have been resolved"),
-                };
+                let constructor = self
+                    .analysis
+                    .variable(id)
+                    .expect("internal error: a struct declaration declares its constructor");
+                self.emit_declare(constructor, span);
 
-                for (field_offset, field) in fields.iter().enumerate() {
+                for (field_offset, field) in declared.fields.iter().enumerate() {
                     // GET
                     let get_idx = self
                         .ir
@@ -406,13 +342,7 @@ impl Compiler {
                             field_offset,
                         )));
                     self.ir.write(OpCode::Constant(get_idx), span);
-                    match field.resolved_getter {
-                        Some(var @ ResolvedVar::Local { .. }) => {
-                            self.emit_set_var(var, span);
-                        }
-                        Some(_) => unreachable!("declarations always bind locally"),
-                        None => unreachable!("resolved_name should have been resolved"),
-                    }
+                    self.emit_declare(field.getter, span);
 
                     // SET
                     let set_idx = self
@@ -422,13 +352,7 @@ impl Compiler {
                             field_offset,
                         )));
                     self.ir.write(OpCode::Constant(set_idx), span);
-                    match field.resolved_setter {
-                        Some(var @ ResolvedVar::Local { .. }) => {
-                            self.emit_set_var(var, span);
-                        }
-                        Some(_) => unreachable!("declarations always bind locally"),
-                        None => unreachable!("resolved_name should have been resolved"),
-                    }
+                    self.emit_declare(field.setter, span);
                 }
                 self.emit_unit();
             }
@@ -464,8 +388,8 @@ impl Compiler {
             } => {
                 let function_span = function.span;
                 let opcode = match &function.expression {
-                    Expression::Identifier { resolved, .. } => {
-                        Self::call_opcode_for(resolved, arguments.len())
+                    Expression::Identifier { .. } => {
+                        Self::call_opcode_for(self.analysis.binding(function.id), arguments.len())
                     }
                     _ => OpCode::Call(arguments.len()),
                 };
@@ -480,10 +404,13 @@ impl Compiler {
             Expression::MemberAccess {
                 receiver,
                 member_span,
-                resolved_getter,
                 ..
             } => {
-                self.compile_binding(resolved_getter, member_span)?;
+                let analysis = Rc::clone(&self.analysis);
+                let getter = analysis
+                    .getter(id)
+                    .expect("internal error: every member access is analysed before it's compiled");
+                self.compile_binding(getter, member_span)?;
                 self.compile_expr(*receiver)?;
                 self.ir.write(OpCode::Call(1), member_span);
             }
@@ -518,16 +445,17 @@ impl Compiler {
                 self.ir.write(OpCode::MakeMap { pairs, has_default }, span);
             }
             Expression::Return { value } => {
-                if !self.allow_return {
-                    return Err(CompileError::return_outside_function(span));
-                }
+                assert!(
+                    self.allow_return,
+                    "internal error: the analyser rejects a return outside of a function"
+                );
                 self.compile_expr(*value)?;
                 self.ir.write(OpCode::Return, span);
             }
             Expression::Break => {
                 let context = self
                     .current_loop_context()
-                    .ok_or(CompileError::unexpected_break(span))?;
+                    .expect("internal error: the analyser rejects a break outside of a loop");
                 self.emit_operand_cleanup(context.stack_depth, span);
                 let idx = self.ir.write(OpCode::Jump(JumpTarget::PLACEHOLDER), span); // will be backpatched
 
@@ -539,7 +467,7 @@ impl Compiler {
             Expression::Continue => {
                 let context = self
                     .current_loop_context()
-                    .ok_or(CompileError::unexpected_continue(span))?;
+                    .expect("internal error: the analyser rejects a continue outside of a loop");
                 let start = context.start;
                 self.emit_operand_cleanup(context.stack_depth, span);
                 self.write_jump_back(start, span);
@@ -569,23 +497,14 @@ impl Compiler {
 
     fn compile_assignment_target(
         &mut self,
-        l_value: AssignmentTarget,
+        l_value: AssignmentTargetLocation,
         span: Span,
     ) -> Result<(), CompileError> {
-        match l_value {
-            AssignmentTarget::Identifier {
-                resolved,
-                span: lv_span,
-                ..
-            } => {
-                self.emit_set_var(resolved.expect("identifiers must be resolved"), lv_span);
+        match l_value.target {
+            AssignmentTarget::Identifier { span: lv_span, .. } => {
+                self.emit_set_var(self.assigned_variable(l_value.id), lv_span);
             }
-            AssignmentTarget::Index {
-                value,
-                index,
-                resolved_set,
-                ..
-            } => {
+            AssignmentTarget::Index { value, index } => {
                 // Value to store is on top of stack. We need to:
                 // 1. Save it to a temp slot
                 // 2. Compile container and index
@@ -596,7 +515,8 @@ impl Compiler {
                 let tmp_value = self.allocate_temp();
                 self.write_temp(tmp_value, span, OpCode::SetLocal);
 
-                self.compile_binding(resolved_set.expect("[]= must be resolved"), span)?;
+                let analysis = Rc::clone(&self.analysis);
+                self.compile_binding(analysis.setter(l_value.id), span)?;
                 self.compile_expr(*value)?;
                 self.compile_expr(*index)?;
                 self.write_temp(tmp_value, span, OpCode::GetLocal);
@@ -606,7 +526,7 @@ impl Compiler {
             AssignmentTarget::Sequence(seq) => {
                 self.ir.write(OpCode::Unpack(seq.len()), span);
                 for lv in seq {
-                    self.compile_assignment_target(lv.target, span)?;
+                    self.compile_assignment_target(lv, span)?;
                 }
             }
             AssignmentTarget::Member { .. } => unreachable!(
@@ -623,13 +543,11 @@ impl Compiler {
         span: Span,
     ) -> Result<(), CompileError> {
         match pattern.pattern {
-            BindingPattern::Identifier { resolved, .. } => {
-                let slot = match resolved.expect("binding pattern must be resolved") {
-                    ResolvedVar::Local { slot } => slot,
-                    _ => unreachable!("binding pattern must be a local"),
-                };
-                self.ir.write(OpCode::SetLocal(slot), span);
-                self.source_locals = self.source_locals.max(slot + 1);
+            BindingPattern::Identifier { .. } => {
+                let variable = self.analysis.variable(pattern.id).expect(
+                    "internal error: every binding pattern is analysed before it's compiled",
+                );
+                self.emit_declare(variable, span);
             }
             BindingPattern::Sequence(seq) => {
                 self.ir.write(OpCode::Unpack(seq.len()), span);
@@ -641,6 +559,21 @@ impl Compiler {
         Ok(())
     }
 
+    /// The variable the identifier assignment target at `target` writes to.
+    fn assigned_variable(&self, target: NodeId) -> ResolvedVar {
+        self.analysis
+            .variable(target)
+            .expect("internal error: every assignment target is analysed before it's compiled")
+    }
+
+    /// The function an augmented assignment reads the target at `target` with.
+    fn target_getter(&self, target: NodeId) -> Binding {
+        self.analysis
+            .getter(target)
+            .expect("internal error: an augmented assignment's target has a getter")
+            .clone()
+    }
+
     /// Emit code that puts the resolved callee on top of the stack.
     ///
     /// * `Resolved(Scalar(var))` and `Resolved(Vec(scalar))` both emit a
@@ -648,7 +581,7 @@ impl Compiler {
     ///   which one the analyser chose (see [`Self::call_opcode_for`]).
     /// * `Dynamic(candidates)` pushes the candidate list as an `OverloadSet`
     ///   constant; the VM dispatcher narrows at runtime.
-    fn compile_binding(&mut self, resolved: Binding, span: Span) -> Result<(), CompileError> {
+    fn compile_binding(&mut self, resolved: &Binding, span: Span) -> Result<(), CompileError> {
         match resolved {
             Binding::None => return Err(CompileError::unresolved_binding(span)),
             Binding::Resolved(candidate) => self.emit_get_var(candidate.var(), span),
@@ -658,9 +591,9 @@ impl Compiler {
                 // scalar-only call site cost identical to master.
                 let (scalars, vec_candidates) =
                     candidates
-                        .into_iter()
+                        .iter()
                         .fold((Vec::new(), Vec::new()), |mut acc, c| {
-                            match c {
+                            match *c {
                                 Candidate::Scalar(v) => acc.0.push(v),
                                 Candidate::Vec(v) => acc.1.push(v),
                             }
@@ -693,6 +626,7 @@ impl Compiler {
     fn emit_get_var(&mut self, var: ResolvedVar, span: Span) {
         match var {
             ResolvedVar::Local { slot } => self.ir.write(OpCode::GetLocal(slot), span),
+            ResolvedVar::Cell { slot } => self.ir.write(OpCode::GetCell(slot), span),
             ResolvedVar::Upvalue { slot } => self.ir.write(OpCode::GetUpvalue(slot), span),
             ResolvedVar::Global { slot } => self.ir.write(OpCode::GetGlobal(slot), span),
         };
@@ -702,12 +636,39 @@ impl Compiler {
         match var {
             ResolvedVar::Local { slot } => {
                 self.ir.write(OpCode::SetLocal(slot), span);
-                self.source_locals = self.source_locals.max(slot + 1);
+            }
+            ResolvedVar::Cell { slot } => {
+                self.ir.write(OpCode::SetCell(slot), span);
             }
             ResolvedVar::Upvalue { slot } => {
                 self.ir.write(OpCode::SetUpvalue(slot), span);
             }
-            ResolvedVar::Global { .. } => unreachable!("globals are native, never assigned"),
+            ResolvedVar::Global { slot } => {
+                self.ir.write(OpCode::SetGlobal(slot), span);
+            }
+        }
+    }
+
+    /// Stores the value on top of the stack in a variable being declared. The
+    /// declaration replaces whatever the slot held, so a captured local declared
+    /// again, as in each loop iteration, gets a new variable instead of writing
+    /// through the cell an earlier closure kept.
+    fn emit_declare(&mut self, var: ResolvedVar, span: Span) {
+        match var {
+            ResolvedVar::Local { slot } | ResolvedVar::Cell { slot } => {
+                debug_assert!(
+                    slot < self.source_locals,
+                    "internal error: slot {slot} is outside the frame of {} variables",
+                    self.source_locals
+                );
+                self.ir.write(OpCode::SetLocal(slot), span);
+            }
+            ResolvedVar::Global { slot } => {
+                self.ir.write(OpCode::SetGlobal(slot), span);
+            }
+            ResolvedVar::Upvalue { .. } => {
+                unreachable!("the analyser never assigns a declaration to an upvalue")
+            }
         }
     }
 
@@ -811,41 +772,25 @@ impl Compiler {
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn compile_function_decl(
         &mut self,
+        id: NodeId,
         name: Option<String>,
-        resolved_name: Option<ResolvedVar>,
         body: ExpressionLocation,
-        type_signature: &TypeSignature,
-        return_type: Option<StaticType>,
-        captures: Vec<CaptureSource>,
         pure: bool,
         span: Span,
     ) -> Result<(), CompileError> {
-        let num_params = match &type_signature {
-            TypeSignature::Exact(params) => params.len(),
-            TypeSignature::Variadic => 0,
-        };
-        let return_type = return_type.unwrap_or_default();
-        let static_type = StaticType::Function {
-            parameters: match &type_signature {
-                TypeSignature::Variadic => None,
-                TypeSignature::Exact(types) => {
-                    Some(types.iter().map(|x| x.type_name.clone()).collect())
-                }
-            },
-            return_type: Box::new(return_type.clone()),
-        };
+        let name_variable = self.analysis.variable(id);
+        let static_type = self.analysis.function_type(id).clone();
         let mut fn_compiler = Self {
             ir: Default::default(),
-            source_locals: num_params,
+            source_locals: self.analysis.frame_size(id),
             temp_count: 0,
             temp_uses: Vec::new(),
             loop_stack: vec![],
             allow_return: true,
             optimize: self.optimize,
-            struct_registry: Rc::clone(&self.struct_registry),
+            analysis: Rc::clone(&self.analysis),
         };
         fn_compiler.compile_expr(body)?;
         fn_compiler.ir.write(OpCode::Return, Span::synthetic());
@@ -861,16 +806,25 @@ impl Compiler {
             static_type,
             body: fn_compiler.ir.into_chunk(),
             num_locals,
+            num_globals: 0,
         };
         let idx = self
             .ir
             .add_constant(Value::function(Function::Compiled(Rc::new(compiled))));
 
+        // A captured function may capture itself, before its value exists, so
+        // its cell must be in place before the closure is made.
+        if let Some(ResolvedVar::Cell { slot }) = name_variable {
+            self.ir.write(OpCode::NewCell(slot), span);
+        }
+
+        let captures = self.analysis.captures(id);
         if !captures.is_empty() {
+            let values = captures.into();
             self.ir.write(
                 OpCode::Closure {
                     constant_idx: idx,
-                    values: captures.into(),
+                    values,
                 },
                 span,
             );
@@ -885,14 +839,17 @@ impl Compiler {
             self.ir.write(OpCode::Memoize, span);
         }
 
-        match resolved_name {
-            Some(ResolvedVar::Local { slot }) => {
-                self.ir.write(OpCode::SetLocal(slot), span);
-                self.source_locals = self.source_locals.max(slot + 1);
+        match name_variable {
+            Some(var @ (ResolvedVar::Local { .. } | ResolvedVar::Global { .. })) => {
+                self.emit_declare(var, span);
                 self.emit_unit();
             }
-            Some(ResolvedVar::Upvalue { .. } | ResolvedVar::Global { .. }) => {
-                unreachable!("the analyser never assigns a declaration to a non-local binding")
+            Some(ResolvedVar::Cell { slot }) => {
+                self.ir.write(OpCode::SetCell(slot), span);
+                self.emit_unit();
+            }
+            Some(ResolvedVar::Upvalue { .. }) => {
+                unreachable!("the analyser never assigns a declaration to an upvalue")
             }
             None => {}
         }
@@ -989,12 +946,6 @@ impl Compiler {
                 self.compile_binding_pattern(l_value.clone(), span)?;
 
                 self.compile_for_iterations(rest, span, compile_leaf)?;
-
-                // Close upvalues for the loop variable so each iteration's closures
-                // get their own frozen copy rather than sharing a mutable slot.
-                if let Some(slot) = min_binding_slot(l_value) {
-                    self.ir.write(OpCode::CloseUpvalue(slot), span);
-                }
 
                 self.write_jump_back(loop_start, span);
 
@@ -1100,20 +1051,14 @@ enum PreparedAssignmentTarget {
 impl PreparedAssignmentTarget {
     fn prepare(
         compiler: &mut Compiler,
-        l_value: AssignmentTarget,
-        span: Span,
+        l_value: AssignmentTargetLocation,
     ) -> Result<Self, CompileError> {
-        match l_value {
-            AssignmentTarget::Identifier { resolved, span, .. } => Ok(Self::Variable {
-                variable: resolved.expect("lvalue must be resolved"),
+        match l_value.target {
+            AssignmentTarget::Identifier { span, .. } => Ok(Self::Variable {
+                variable: compiler.assigned_variable(l_value.id),
                 span,
             }),
-            AssignmentTarget::Index {
-                value,
-                index,
-                resolved_get,
-                resolved_set,
-            } => {
+            AssignmentTarget::Index { value, index } => {
                 let container_span = value.span;
                 let index_span = index.span;
                 let cached_container = compiler.allocate_temp();
@@ -1129,15 +1074,13 @@ impl PreparedAssignmentTarget {
                     cached_index,
                     container_span,
                     index_span,
-                    getter: resolved_get.expect("[] must be resolved"),
-                    setter: resolved_set.expect("[]= must be resolved"),
+                    getter: compiler.target_getter(l_value.id),
+                    setter: compiler.analysis.setter(l_value.id).clone(),
                 })
             }
             AssignmentTarget::Member {
                 receiver,
                 member_span,
-                resolved_getter,
-                resolved_setter,
                 ..
             } => {
                 let receiver_span = receiver.span;
@@ -1150,13 +1093,13 @@ impl PreparedAssignmentTarget {
                     cached_receiver,
                     receiver_span,
                     member_span,
-                    getter: resolved_getter.expect("member getter must be resolved"),
-                    setter: resolved_setter.expect("member setter must be resolved"),
+                    getter: compiler.target_getter(l_value.id),
+                    setter: compiler.analysis.setter(l_value.id).clone(),
                 })
             }
-            AssignmentTarget::Sequence(_) => {
-                Err(CompileError::lvalue_required_to_be_single_identifier(span))
-            }
+            AssignmentTarget::Sequence(_) => unreachable!(
+                "internal error: name resolution rejects a sequence as an augmented assignment target"
+            ),
         }
     }
 
@@ -1171,7 +1114,7 @@ impl PreparedAssignmentTarget {
                 getter,
                 ..
             } => {
-                compiler.compile_binding(getter.clone(), *index_span)?;
+                compiler.compile_binding(getter, *index_span)?;
                 compiler.write_temp(*cached_container, *container_span, OpCode::GetLocal);
                 compiler.write_temp(*cached_index, *index_span, OpCode::GetLocal);
                 compiler
@@ -1185,7 +1128,7 @@ impl PreparedAssignmentTarget {
                 getter,
                 ..
             } => {
-                compiler.compile_binding(getter.clone(), *member_span)?;
+                compiler.compile_binding(getter, *member_span)?;
                 compiler.write_temp(*cached_receiver, *receiver_span, OpCode::GetLocal);
                 compiler.ir.write(OpCode::Call(1), *member_span);
             }
@@ -1208,7 +1151,7 @@ impl PreparedAssignmentTarget {
                 let target_span = container_span.merge(*index_span);
 
                 compiler.write_temp(cached_value, target_span, OpCode::SetLocal);
-                compiler.compile_binding(setter.clone(), target_span)?;
+                compiler.compile_binding(setter, target_span)?;
                 compiler.write_temp(*cached_container, *container_span, OpCode::GetLocal);
                 compiler.write_temp(*cached_index, *index_span, OpCode::GetLocal);
                 compiler.write_temp(cached_value, target_span, OpCode::GetLocal);
@@ -1225,7 +1168,7 @@ impl PreparedAssignmentTarget {
                 let cached_value = compiler.allocate_temp();
 
                 compiler.write_temp(cached_value, *member_span, OpCode::SetLocal);
-                compiler.compile_binding(setter.clone(), *member_span)?;
+                compiler.compile_binding(setter, *member_span)?;
                 compiler.write_temp(*cached_receiver, *receiver_span, OpCode::GetLocal);
                 compiler.write_temp(cached_value, *member_span, OpCode::GetLocal);
                 compiler.ir.write(OpCode::Call(2), *member_span);
@@ -1233,19 +1176,6 @@ impl PreparedAssignmentTarget {
             }
         }
         Ok(())
-    }
-}
-
-/// Returns the minimum local slot referenced by a binding pattern, used to determine
-/// which upvalues to close at the end of a loop iteration.
-fn min_binding_slot(pattern: &BindingPatternLocation) -> Option<usize> {
-    match &pattern.pattern {
-        BindingPattern::Identifier {
-            resolved: Some(ResolvedVar::Local { slot }),
-            ..
-        } => Some(*slot),
-        BindingPattern::Sequence(seq) => seq.iter().filter_map(min_binding_slot).min(),
-        _ => None,
     }
 }
 
@@ -1269,33 +1199,6 @@ impl CompileError {
             text:
                 "encountered unresolved cast during compilation, this is probably an internal error"
                     .to_string(),
-            span,
-        }
-    }
-
-    fn unexpected_break(span: Span) -> Self {
-        Self {
-            text: "unexpected break statement outside of loop".to_string(),
-            span,
-        }
-    }
-    fn unexpected_continue(span: Span) -> Self {
-        Self {
-            text: "unexpected continue statement outside of loop".to_string(),
-            span,
-        }
-    }
-
-    fn return_outside_function(span: Span) -> Self {
-        Self {
-            text: "unexpected return statement outside of function body".to_string(),
-            span,
-        }
-    }
-
-    fn lvalue_required_to_be_single_identifier(span: Span) -> Self {
-        Self {
-            text: "This lvalue is required to be a single identifier".to_string(),
             span,
         }
     }

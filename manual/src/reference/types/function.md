@@ -47,6 +47,29 @@ assert_eq(15, my_function(5));
 assert_eq([10, 5], x);
 ```
 
+A function captures the variable itself, not a copy of its value. It sees later assignments, and its own assignments are seen outside:
+
+```ndc
+let count = 0;
+let increment = fn() { count += 1; };
+increment();
+increment();
+assert_eq(count, 2);
+```
+
+Each block and each loop iteration has its own variables, so a function keeps the one from the iteration that created it:
+
+```ndc
+let getters = [];
+let i = 0;
+while i < 3 {
+    let j = i;
+    getters.push(fn() { j });
+    i += 1;
+}
+assert_eq([g() for g in getters], [0, 1, 2]);
+```
+
 ## Anonymous functions
 
 Anonymous functions let you write inline function values.
@@ -118,28 +141,40 @@ A return-type annotation also helps the analyser understand recursive calls — 
 
 ## Function overloading
 
-You can overload functions by declaring multiple `fn` definitions with the same name and different parameter counts.
+A name can refer to several functions, called overloads, as long as they differ in their number of parameters, their parameter types, or both:
 
 ```ndc
-fn add(n) { n + 1 };
-fn add(x, y) { x + y };
+fn add(n) { n + 1 }
+fn add(x, y) { x + y }
 
 assert_eq(10, add(9));
 assert_eq(12, add(8, 4));
 ```
 
-Declaring two `fn` definitions with the same name and the same number of parameters in the same scope is an error:
+A call uses the overload whose parameters accept its arguments. When several accept them, the most specific one wins:
+
+```ndc
+fn describe(x: Int) { "int" }
+fn describe(x: String) { "string" }
+fn describe(x: Any) { "something else" }
+
+assert_eq("int", describe(1));
+assert_eq("string", describe("a"));
+assert_eq("something else", describe([1]));
+```
+
+Two overloads in the same scope can't have the same parameter types. Parameter names don't count, and a parameter without a type annotation has type `Any`:
 
 ```ndc
 fn foo(a) { a + 1 }
-fn foo(a) { a + 2 } // ERROR: redefinition of 'foo' with 1 parameter
+fn foo(b) { b + 2 }   // ERROR: Illegal redefinition of function 'foo' with parameters (Any)
 ```
 
-> **Note:** The engine can also dispatch by argument type, and the standard library uses that to register specialised overloads (for example, an `Int`-only fast path for `+`). User code can't declare two overloads with the same name and arity yet, even when the parameter types differ — the resolver only distinguishes overloads by parameter count.
+## How a call finds its function
 
-## Function shadowing
+A call such as `foo(x)` looks for `foo` in the scope it's written in first, then in each enclosing scope in turn, and finally among the built-in functions. A method call `x.foo()` and a property read `x.foo` are both the call `foo(x)`, and are looked up the same way.
 
-A `fn` declaration in a nested scope shadows only the overload with the same parameter count from outer scopes. Other overloads remain available:
+**Functions in a nested scope** take over only the calls they accept. Other calls still reach the overloads further out:
 
 ```ndc
 fn foo(a) { "outer-one" }
@@ -147,30 +182,56 @@ fn foo(a, b) { "outer-two" }
 
 {
     fn foo(a) { "inner-one" }
-    foo("x");        // "inner-one": inner 1-arg shadows outer 1-arg
-    foo("x", "y");   // "outer-two": outer 2-arg still reachable
+    foo("x");        // "inner-one"
+    foo("x", "y");   // "outer-two": the inner foo doesn't take two arguments
 }
-
-foo("x");  // "outer-one": shadow is gone after the block
 ```
 
-A `let` binding with a function value replaces all previous bindings with the same name. It does not participate in function overloading:
+**A `let` holding a function** shadows the functions with that name. It doesn't join their overloads, so a call it doesn't accept is an error, even when one of the functions would accept it:
 
 ```ndc
 fn foo(a) { "one" }
 fn foo(a, b) { "two" }
 
 let foo = fn(a) => "let";
-foo("x");      // "let": both fn overloads are shadowed
+foo("x");        // "let"
+foo("x", "y");   // ERROR: The variable 'foo' holds a function that doesn't accept the arguments 'String, String'
 ```
 
-A non-function `let` binding shadows the name for value access, but function calls still resolve to the underlying function:
+**A `let` holding a value that can't be called** is skipped, so the call reaches the function:
 
 ```ndc
 let len = 300;
-len;           // 300: the value
-len("test");   // 4: calls the stdlib function, skipping the non-function binding
-"test".len;    // 4: method call also resolves to the function
+len;           // 300
+len("test");   // 4: the built-in len
+```
+
+**A value whose type isn't known**, such as a parameter without a type annotation, might hold a function. If a function further out also accepts the call, the call is ambiguous, which is an error. Rename the value if it holds a function, or annotate its type if it doesn't. If no function accepts the call, the value is called.
+
+```ndc
+fn label(len) {
+    len("abc")          // ERROR: Ambiguous call to 'len'
+}
+
+fn measure(len) {
+    "abc".len()         // ERROR: the same call, written as a method call
+}
+
+fn padded(len: Int) {
+    len("abc") + len    // fine: an Int can't be called, so this calls the built-in len
+}
+```
+
+**Within one scope**, a name belongs either to `let` bindings or to functions, not both. A `fn` after a `let` with the same name in the same scope is an error, while in a nested scope it's fine. The same applies to a struct's constructor:
+
+```ndc
+let foo = fn(a) => "let";
+fn foo(a, b) { "fn" }    // ERROR: Illegal redefinition of variable foo as a function in the same scope
+
+let bar = 1;
+{
+    fn bar(a) { a }      // fine: a different scope
+}
 ```
 
 ## Method call syntax

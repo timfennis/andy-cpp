@@ -1,0 +1,16 @@
+// A captured variable is shared by the frame that declares it and every
+// closure that captures it: a write on either side is seen by the other,
+// before and after the closure is made.
+fn shared_counter() {
+    let count = 0;
+    count = 1;
+    let inc = fn() { count += 1; };
+    inc();
+    inc();
+    let after_calls = count;
+    count = 10;
+    inc();
+    (after_calls, count)
+}
+print(shared_counter());
+// expect-output: (3,11)

@@ -1,0 +1,11 @@
+// Declarations inside a callee expression and inside its arguments are
+// separate variables, and so are those inside an index assignment's
+// container and its index.
+let r = { fn twice(h) { h() * 2 } twice }((fn three() { 3 }, three)[1]);
+print(r);
+// expect-output: 6
+
+let ys = [[0], [0]];
+{ fn get() { ys } get() }[(fn one() { 1 }, one)[1]()] = [7];
+print(ys);
+// expect-output: [[0],[7]]

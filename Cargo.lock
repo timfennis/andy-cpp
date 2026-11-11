@@ -324,6 +324,7 @@ checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
 name = "compiler_tests"
 version = "0.3.0"
 dependencies = [
+ "ndc_analysis",
  "ndc_core",
  "ndc_interpreter",
  "ndc_lexer",
@@ -1143,11 +1144,23 @@ dependencies = [
 name = "ndc_analyser"
 version = "0.3.0"
 dependencies = [
+ "ahash",
  "itertools 0.15.0",
+ "ndc_analysis",
  "ndc_core",
+ "ndc_layout",
  "ndc_lexer",
  "ndc_parser",
+ "ndc_resolver",
  "thiserror",
+]
+
+[[package]]
+name = "ndc_analysis"
+version = "0.3.0"
+dependencies = [
+ "ahash",
+ "ndc_core",
 ]
 
 [[package]]
@@ -1159,6 +1172,7 @@ dependencies = [
  "clap",
  "codespan-reporting",
  "itertools 0.15.0",
+ "libc",
  "ndc_core",
  "ndc_interpreter",
  "ndc_lexer",
@@ -1176,7 +1190,6 @@ dependencies = [
 name = "ndc_core"
 version = "0.3.0"
 dependencies = [
- "ahash",
  "itertools 0.15.0",
 ]
 
@@ -1185,11 +1198,24 @@ name = "ndc_interpreter"
 version = "0.3.0"
 dependencies = [
  "ndc_analyser",
+ "ndc_analysis",
  "ndc_core",
  "ndc_lexer",
  "ndc_parser",
  "ndc_vm",
  "thiserror",
+]
+
+[[package]]
+name = "ndc_layout"
+version = "0.3.0"
+dependencies = [
+ "ahash",
+ "ndc_analysis",
+ "ndc_core",
+ "ndc_lexer",
+ "ndc_parser",
+ "ndc_resolver",
 ]
 
 [[package]]
@@ -1206,7 +1232,7 @@ name = "ndc_lsp"
 version = "0.3.0"
 dependencies = [
  "ahash",
- "ndc_analyser",
+ "ndc_analysis",
  "ndc_core",
  "ndc_interpreter",
  "ndc_lexer",
@@ -1236,6 +1262,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ndc_resolver"
+version = "0.3.0"
+dependencies = [
+ "ahash",
+ "itertools 0.15.0",
+ "ndc_core",
+ "ndc_lexer",
+ "ndc_parser",
+ "thiserror",
+]
+
+[[package]]
 name = "ndc_stdlib"
 version = "0.3.0"
 dependencies = [
@@ -1261,6 +1299,7 @@ version = "0.3.0"
 dependencies = [
  "ahash",
  "char_index",
+ "ndc_analysis",
  "ndc_core",
  "ndc_lexer",
  "ndc_parser",

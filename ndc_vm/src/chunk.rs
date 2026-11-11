@@ -1,9 +1,9 @@
 use crate::Value;
+use crate::hash_map::HashMap;
 use ahash::AHashSet;
+use ndc_analysis::CaptureSource;
 use ndc_core::StaticType;
-use ndc_core::hash_map::HashMap;
 use ndc_lexer::Span;
-use ndc_parser::CaptureSource;
 use std::rc::Rc;
 
 /// A jump destination: either a resolved displacement — "relative offset, in
@@ -17,19 +17,6 @@ pub enum JumpTarget {
 
 impl JumpTarget {
     pub const PLACEHOLDER: Self = Self::Label(LabelId(usize::MAX));
-
-    #[inline]
-    pub fn new(offset: isize) -> Self {
-        Self::Offset(offset)
-    }
-
-    #[inline]
-    pub fn raw(self) -> isize {
-        match self {
-            Self::Offset(i) => i,
-            Self::Label(_) => panic!("cannot get raw offset of unresolved label"),
-        }
-    }
 
     /// Advance `ip` by this offset using wrapping signed arithmetic.
     #[inline]
@@ -62,9 +49,11 @@ impl std::fmt::Debug for JumpTarget {
 /// | `Constant`    | `[… → … value]`                        | +1                                         |
 /// | `Pop`         | `[… value → …]`                        | −1                                         |
 /// | `GetLocal`    | `[… → … value]`                        | +1 (copies from slot)                      |
+/// | `GetCell`     | `[… → … value]`                        | +1 (reads through the slot's cell)         |
 /// | `GetUpvalue`  | `[… → … value]`                        | +1 (reads upvalue cell)                    |
 /// | `GetGlobal`   | `[… → … value]`                        | +1 (copies from globals)                   |
 /// | `SetLocal`    | `[… value → …]`                        | −1 (pops, writes to slot)                  |
+/// | `SetCell`     | `[… value → …]`                        | −1 (pops, writes through the slot's cell)  |
 /// | `SetUpvalue`  | `[… value → …]`                        | −1 (pops, writes to upvalue cell)          |
 /// | `Call`        | `[… callee a1…an → … result]`          | −n (pops callee + args, pushes result)     |
 /// | `CallVec`     | `[… callee a1…an → … tuple]`           | −n (pops callee + args, pushes result)     |
@@ -83,7 +72,7 @@ impl std::fmt::Debug for JumpTarget {
 /// | `ListPush`    | `[… value → …]`                        | −1 (pops value, mutates list in slot)      |
 /// | `MapInsert`   | `[… key value → …]`                    | −2 (pops both, mutates map in slot)        |
 /// | `Unpack`      | `[… compound → … v1…vn]`               | +(n−1) (pops 1, pushes n)                  |
-/// | `CloseUpvalue`| `[…]`                                   | 0 (closes upvalue cells, no stack change)  |
+/// | `NewCell`     | `[…]`                                   | 0 (puts a fresh cell in a slot)            |
 /// | `Memoize`     | `[… fn → … memoized_fn]`               | 0 (pops and pushes)                        |
 // NOTE: OpCode cannot be Copy because the Closure variant holds Rc<[CaptureSource]>.
 // The dispatch loop accesses opcodes by reference to avoid cloning the 32-byte enum on
@@ -110,14 +99,22 @@ pub enum OpCode {
     Constant(usize),
     /// Copies local slot onto stack. `[… → … value]`
     GetLocal(usize),
+    /// Reads a captured local onto the stack: through the cell in its slot,
+    /// or the slot's own value before the first capture. `[… → … value]`
+    GetCell(usize),
     /// Reads upvalue cell onto stack. `[… → … value]`
     GetUpvalue(usize),
     /// Pops top and writes to local slot. `[… value → …]`
     SetLocal(usize),
+    /// Pops top and writes to a captured local: through the cell in its slot,
+    /// or to the slot itself before the first capture. `[… value → …]`
+    SetCell(usize),
     /// Pops top and writes to upvalue cell. `[… value → …]`
     SetUpvalue(usize),
     /// Copies global slot onto stack. `[… → … value]`
     GetGlobal(usize),
+    /// Pops top and writes to global slot. `[… value → …]`
+    SetGlobal(usize),
     /// Pops `n` values, pushes a list. `[… v1…vn → … list]`
     MakeList(usize),
     /// Pops `n` values, pushes a tuple. `[… v1…vn → … tuple]`
@@ -145,8 +142,9 @@ pub enum OpCode {
     Halt,
     /// Returns from function call. Pops return value, truncates frame, pushes return value.
     Return,
-    /// Closes open upvalues at or above `frame_pointer + slot`. No stack change.
-    CloseUpvalue(usize),
+    /// Puts a fresh cell holding unit in a local slot, so a closure created
+    /// before the local's value exists can capture it. No stack change.
+    NewCell(usize),
     /// Pops function, pushes memoized wrapper. `[… fn → … memoized_fn]`
     Memoize,
     /// Peeks top; errors if the value does not conform to the type. `[… value → … value]`
@@ -154,6 +152,42 @@ pub enum OpCode {
 }
 
 impl OpCode {
+    /// The variant's name, e.g. `"GetLocal"` for `GetLocal(0)`.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Call(_) => "Call",
+            Self::CallVec(_) => "CallVec",
+            Self::Pop => "Pop",
+            Self::Jump(_) => "Jump",
+            Self::JumpIfTrue(_) => "JumpIfTrue",
+            Self::JumpIfFalse(_) => "JumpIfFalse",
+            Self::Constant(_) => "Constant",
+            Self::GetLocal(_) => "GetLocal",
+            Self::GetCell(_) => "GetCell",
+            Self::GetUpvalue(_) => "GetUpvalue",
+            Self::SetLocal(_) => "SetLocal",
+            Self::SetCell(_) => "SetCell",
+            Self::SetUpvalue(_) => "SetUpvalue",
+            Self::GetGlobal(_) => "GetGlobal",
+            Self::SetGlobal(_) => "SetGlobal",
+            Self::MakeList(_) => "MakeList",
+            Self::MakeTuple(_) => "MakeTuple",
+            Self::MakeMap { .. } => "MakeMap",
+            Self::Closure { .. } => "Closure",
+            Self::GetIterator => "GetIterator",
+            Self::IterNext(_) => "IterNext",
+            Self::ListPush(_) => "ListPush",
+            Self::MapInsert(_) => "MapInsert",
+            Self::MakeRange { .. } => "MakeRange",
+            Self::Unpack(_) => "Unpack",
+            Self::Halt => "Halt",
+            Self::Return => "Return",
+            Self::NewCell(_) => "NewCell",
+            Self::Memoize => "Memoize",
+            Self::CheckType(_) => "CheckType",
+        }
+    }
+
     /// The net stack effect of executing this instruction on its fall-through
     /// path, matching the `[… → …]` comments on the enum variants. The
     /// compiler simulates the stack depth from these deltas so that `break`
@@ -171,8 +205,12 @@ impl OpCode {
             // The conditional jumps peek at the condition without popping it;
             // the branch they land in pops it instead.
             Self::Jump(_) | Self::JumpIfTrue(_) | Self::JumpIfFalse(_) => 0,
-            Self::Constant(_) | Self::GetLocal(_) | Self::GetUpvalue(_) | Self::GetGlobal(_) => 1,
-            Self::SetLocal(_) | Self::SetUpvalue(_) => -1,
+            Self::Constant(_)
+            | Self::GetLocal(_)
+            | Self::GetCell(_)
+            | Self::GetUpvalue(_)
+            | Self::GetGlobal(_) => 1,
+            Self::SetLocal(_) | Self::SetCell(_) | Self::SetUpvalue(_) | Self::SetGlobal(_) => -1,
             // Pops `n` elements, pushes the collection: -n+1.
             Self::MakeList(n) | Self::MakeTuple(n) => 1 - *n as isize,
             // Pops a key and a value per pair plus the optional default,
@@ -199,7 +237,7 @@ impl OpCode {
             // Pops the return value; the frame teardown that discards the
             // rest of the frame happens in the VM, outside this accounting.
             Self::Return => -1,
-            Self::CloseUpvalue(_) => 0,
+            Self::NewCell(_) => 0,
             Self::Memoize => 0,
             // Peeks the value without popping it.
             Self::CheckType(_) => 0,
@@ -220,6 +258,10 @@ impl std::fmt::Debug for OpCode {
             Self::GetLocal(n) => write!(f, "GetLocal({n})"),
             Self::SetLocal(n) => write!(f, "SetLocal({n})"),
             Self::GetGlobal(n) => write!(f, "GetGlobal({n})"),
+            Self::SetGlobal(n) => write!(f, "SetGlobal({n})"),
+            Self::GetCell(n) => write!(f, "GetCell({n})"),
+            Self::SetCell(n) => write!(f, "SetCell({n})"),
+            Self::NewCell(n) => write!(f, "NewCell({n})"),
             Self::GetUpvalue(n) => write!(f, "GetUpvalue({n})"),
             Self::SetUpvalue(n) => write!(f, "SetUpvalue({n})"),
             Self::MakeList(n) => write!(f, "MakeList({n})"),
@@ -250,7 +292,6 @@ impl std::fmt::Debug for OpCode {
             Self::Halt => write!(f, "Halt"),
             Self::Return => write!(f, "Return"),
             Self::Unpack(n) => write!(f, "Unpack({n})"),
-            Self::CloseUpvalue(n) => write!(f, "CloseUpvalue({n})"),
             Self::Memoize => write!(f, "Memoize"),
             Self::CheckType(typ) => write!(f, "CheckType({typ})"),
         }
@@ -340,7 +381,10 @@ impl OptimizerIr {
                 let elide = i + 1 < self.code.len()
                     && matches!(
                         self.code[i].1,
-                        OpCode::Constant(_) | OpCode::GetGlobal(_) | OpCode::GetLocal(_)
+                        OpCode::Constant(_)
+                            | OpCode::GetGlobal(_)
+                            | OpCode::GetLocal(_)
+                            | OpCode::GetCell(_)
                     )
                     && matches!(self.code[i + 1].1, OpCode::Pop)
                     && !targets.contains(&self.code[i].0)
@@ -437,12 +481,6 @@ pub struct Chunk {
 impl Chunk {
     pub fn len(&self) -> usize {
         self.code.len()
-    }
-
-    pub fn write(&mut self, op: OpCode, span: Span) -> usize {
-        self.code.push(op);
-        self.spans.push(span);
-        self.code.len() - 1
     }
 
     pub fn is_empty(&self) -> bool {

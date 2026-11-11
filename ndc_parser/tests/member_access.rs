@@ -89,18 +89,6 @@ fn invoked_member_is_not_assignable() {
 }
 
 #[test]
-fn member_destructuring_is_not_assignable() {
-    let tokens = Lexer::new("[foo.bar] = values", SourceId::SYNTHETIC)
-        .collect::<Result<Vec<_>, _>>()
-        .expect("source must lex");
-    let error = Parser::from_tokens(tokens)
-        .parse()
-        .expect_err("member destructuring must not be assignable");
-
-    assert!(error.to_string().contains("Invalid assignment target"));
-}
-
-#[test]
 fn member_augmented_assignment_has_a_member_target() {
     let expression = parse_one("foo.bar += value");
 

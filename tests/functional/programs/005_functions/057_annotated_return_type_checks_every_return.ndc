@@ -1,0 +1,7 @@
+// An annotated return type must accept every value the function can return:
+// an early `return` is checked too, not only the body's last value.
+fn f(x) -> Int {
+    if x { return "early"; }
+    1
+}
+// expect-error: mismatched types

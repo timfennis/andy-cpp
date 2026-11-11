@@ -1,0 +1,12 @@
+// A map comprehension's default is evaluated once, before the loop starts, so
+// a name in it means what it means outside the comprehension, even when a loop
+// variable has the same name.
+let x = 100;
+let m = %{:x, k: k for x in [1, 2], k in [x]};
+assert_eq(m[99], 100);
+
+fn f() {
+    let x = 7;
+    %{:x, x: 1 for x in [1]}
+}
+assert_eq(f()[5], 7);

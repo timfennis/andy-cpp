@@ -1,8 +1,8 @@
 use super::{Object, Value};
 use crate::chunk::{Chunk, OpCode};
 use crate::error::VmError;
+use crate::hash_map::HashMap;
 use ndc_core::StaticType;
-use ndc_core::hash_map::HashMap;
 use ndc_core::r#struct::StructInfo;
 use std::cell::RefCell;
 use std::fmt;
@@ -48,17 +48,18 @@ pub struct CompiledFunction {
     pub(crate) static_type: StaticType,
     pub(crate) body: Chunk,
     pub(crate) num_locals: usize,
+    /// For a program run at the top level, how many global slots it needs, so
+    /// a declaration that never runs still has its slot; 0 for any other
+    /// function.
+    pub(crate) num_globals: usize,
 }
 
 #[derive(Clone)]
 pub struct ClosureFunction {
     pub(crate) prototype: Rc<CompiledFunction>,
-    pub(crate) upvalues: Vec<Rc<RefCell<UpvalueCell>>>,
-}
-
-pub enum UpvalueCell {
-    Open(usize),
-    Closed(Value),
+    /// The cells of the variables the closure captured, each shared with the
+    /// frame that declared it, see [`Value::Cell`].
+    pub(crate) upvalues: Vec<Rc<RefCell<Value>>>,
 }
 
 impl CompiledFunction {
@@ -212,33 +213,8 @@ impl Function {
         }
     }
 
-    /// Returns true if this function accepts arguments of the given types,
-    /// without allocating any intermediate `StaticType` values.
-    pub fn matches_arg_types(&self, arg_types: &[StaticType]) -> bool {
-        let st = match self {
-            Self::Native(f) => &f.static_type,
-            Self::Compiled(f) => &f.static_type,
-            Self::Closure(c) => &c.prototype.static_type,
-            Self::Memoized { function, .. } => return function.matches_arg_types(arg_types),
-        };
-        let StaticType::Function { parameters, .. } = st else {
-            return false;
-        };
-        match parameters {
-            None => true, // variadic: always matches
-            Some(params) => {
-                params.len() == arg_types.len()
-                    && params
-                        .iter()
-                        .zip(arg_types.iter())
-                        .all(|(param, actual)| actual.is_subtype(param))
-            }
-        }
-    }
-
-    /// Like [`matches_arg_types`] but takes runtime [`Value`]s directly,
-    /// avoiding any `StaticType` allocation for parameters typed `Any`
-    /// (the common case for stdlib functions).
+    /// Returns true if this function accepts the given arguments, without
+    /// allocating a `StaticType` for each of them.
     pub fn matches_value_args(&self, args: &[Value]) -> bool {
         let st = match self {
             Self::Native(f) => &f.static_type,

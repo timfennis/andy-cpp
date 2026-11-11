@@ -1,14 +1,13 @@
+use ndc_core::NodeId;
 use std::fmt::Write;
 
 use crate::expression::{
-    AssignmentTarget, AssignmentTargetLocation, AugmentedAssignmentPlan, Binding, BindingPattern,
-    BindingPatternLocation, ExpressionLocation, ForBody, ForIteration, FunctionParameter, NodeId,
-    NonBindingTarget,
+    AssignmentTarget, AssignmentTargetLocation, BindingPattern, BindingPatternLocation,
+    ExpressionLocation, ForBody, ForIteration, FunctionParameter, NonBindingTarget,
 };
 use crate::expression::{Expression, StructField};
 use crate::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
 use crate::type_expr::TypeExpr;
-use ndc_core::{Parameter, StaticType, TypeSignature};
 use ndc_lexer::{NumericLiteral, Span, Token, TokenLocation};
 
 pub struct Parser {
@@ -210,7 +209,6 @@ impl Parser {
                 function: Box::new(
                     Expression::Identifier {
                         name: operator_token_loc.token.to_string(),
-                        resolved: Binding::None,
                         identifier_span: operator_token_loc.span,
                     }
                     .to_location(operator_token_loc.span),
@@ -224,7 +222,6 @@ impl Parser {
                     function: Box::new(
                         Expression::Identifier {
                             name: not_token.token.to_string(),
-                            resolved: Binding::None,
                             identifier_span: not_token.span,
                         }
                         .to_location(not_token.span),
@@ -257,7 +254,6 @@ impl Parser {
                 function: Box::new(
                     Expression::Identifier {
                         name: operator.to_string(),
-                        resolved: Binding::None,
                         identifier_span: operator_span,
                     }
                     .to_location(operator_span),
@@ -398,7 +394,6 @@ impl Parser {
                         .expect("guaranteed to produce an assignment target"),
                     r_value: Box::new(expression),
                     operation: operation_identifier,
-                    plan: AugmentedAssignmentPlan::Unresolved,
                 };
 
                 Ok(op_assign.to_location(start.merge(end)))
@@ -525,7 +520,6 @@ impl Parser {
                 function: Box::new(
                     Expression::Identifier {
                         name: operator_token_loc.token.to_string(),
-                        resolved: Binding::None,
                         identifier_span: operator_span,
                     }
                     .to_location(operator_span),
@@ -652,8 +646,6 @@ impl Parser {
             expression = Expression::Cast {
                 value: Box::new(expression),
                 annotation,
-                resolved_type: None,
-                requires_check: true,
             }
             .to_location(span);
         }
@@ -673,7 +665,6 @@ impl Parser {
                 function: Box::new(
                     Expression::Identifier {
                         name: operator_token_loc.token.to_string(),
-                        resolved: Binding::None,
                         identifier_span: token_span,
                     }
                     .to_location(token_span),
@@ -722,7 +713,6 @@ impl Parser {
                                 Box::new(
                                     Expression::Identifier {
                                         name: member,
-                                        resolved: Binding::None,
                                         identifier_span: member_span,
                                     }
                                     .to_location(member_span),
@@ -763,7 +753,6 @@ impl Parser {
                         receiver: Box::new(expr),
                         member: identifier,
                         member_span: identifier_span,
-                        resolved_getter: Binding::None,
                     }
                     .to_location(span);
                 }
@@ -821,7 +810,6 @@ impl Parser {
                             function: Box::new(
                                 Expression::Identifier {
                                     name: "[]".to_string(),
-                                    resolved: Binding::None,
                                     identifier_span: bracket_span,
                                 }
                                 .to_location(bracket_span),
@@ -996,12 +984,12 @@ impl Parser {
     #[allow(clippy::too_many_lines)] // WERE BUILDING A PROGRAMMING LANGUAGE CLIPPY WHAT DO YOU WANT?
     fn primary(&mut self) -> Result<ExpressionLocation, Error> {
         // matches if expression like `if a < b { } else { }`
-        if self.consume_token_if(&[Token::If]).is_some() {
-            return self.if_expression();
+        if let Some(if_token) = self.consume_token_if(&[Token::If]) {
+            return self.if_expression(if_token.span);
         }
         // matches while loops like `while foo < bar { }`
-        else if self.consume_token_if(&[Token::While]).is_some() {
-            return self.while_expression();
+        else if let Some(while_token) = self.consume_token_if(&[Token::While]) {
+            return self.while_expression(while_token.span);
         }
         // matches for loops like `for x in xs { }`
         else if self.match_token(&[Token::For]).is_some() {
@@ -1080,7 +1068,6 @@ impl Parser {
             Token::String(value) => Expression::StringLiteral(value),
             Token::Identifier(identifier) => Expression::Identifier {
                 name: identifier,
-                resolved: Binding::None,
                 identifier_span: token_location.span,
             },
             _ => {
@@ -1108,13 +1095,15 @@ impl Parser {
     ///
     /// }
     /// ```
-    fn if_expression(&mut self) -> Result<ExpressionLocation, Error> {
+    /// Parses an `if` after its keyword, whose span is `if_span`. The expression
+    /// spans from the keyword to the end of its last branch.
+    fn if_expression(&mut self, if_span: Span) -> Result<ExpressionLocation, Error> {
         let expression = self.expression()?;
         let on_true = self.block()?;
 
         let on_false = if self.consume_token_if(&[Token::Else]).is_some() {
-            if self.consume_token_if(&[Token::If]).is_some() {
-                let expression = self.if_expression()?;
+            if let Some(if_token) = self.consume_token_if(&[Token::If]) {
+                let expression = self.if_expression(if_token.span)?;
                 Some(Box::new(expression))
             } else {
                 Some(Box::new(self.block()?))
@@ -1123,7 +1112,8 @@ impl Parser {
             None
         };
 
-        let span = expression.span;
+        let last_branch = on_false.as_deref().unwrap_or(&on_true);
+        let span = if_span.merge(last_branch.span);
         Ok(Expression::If {
             condition: Box::new(expression),
             on_true: Box::new(on_true),
@@ -1132,11 +1122,13 @@ impl Parser {
         .to_location(span))
     }
 
-    fn while_expression(&mut self) -> Result<ExpressionLocation, Error> {
+    /// Parses a `while` after its keyword, whose span is `while_span`. The
+    /// expression spans from the keyword to the end of its body.
+    fn while_expression(&mut self, while_span: Span) -> Result<ExpressionLocation, Error> {
         let expression = self.expression()?;
         let loop_body = self.block()?;
 
-        let span = expression.span;
+        let span = while_span.merge(loop_body.span);
         Ok(Expression::While {
             expression: Box::new(expression),
             loop_body: Box::new(loop_body),
@@ -1292,9 +1284,6 @@ impl Parser {
                 parameters_span,
                 body: Box::new(body),
                 return_annotation,
-                resolved_return_type: None,
-                resolved_name: None,
-                captures: vec![],
                 pure: is_pure,
             },
             span,
@@ -1318,8 +1307,6 @@ impl Parser {
             expression: Expression::StructDeclaration {
                 name: identifier.to_identifier(),
                 fields,
-                resolved_name: None,
-                resolved: None,
             },
             span: struct_start.merge(field_span),
         })
@@ -1663,8 +1650,6 @@ impl Parser {
         Ok(StructField {
             identifier,
             annotation,
-            resolved_getter: None,
-            resolved_setter: None,
             span: identifier_span.merge(self.tokens[self.current - 1].span),
         })
     }
@@ -1704,7 +1689,6 @@ impl Parser {
         Ok(FunctionParameter {
             lvalue,
             annotation,
-            resolved_type: None,
             span,
         })
     }
@@ -1824,31 +1808,4 @@ fn tokens_to_string(tokens: &[Token]) -> String {
         }
     }
     buf
-}
-
-impl TryFrom<ExpressionLocation> for TypeSignature {
-    type Error = ();
-
-    fn try_from(
-        ExpressionLocation { expression, .. }: ExpressionLocation,
-    ) -> Result<Self, Self::Error> {
-        let Expression::Tuple { values } = expression else {
-            return Err(());
-        };
-
-        values
-            .into_iter()
-            .map(|expression_location| {
-                let ExpressionLocation { expression, .. } = expression_location;
-
-                match expression {
-                    Expression::Identifier { name, .. } => {
-                        Ok(Parameter::new(name, StaticType::Any))
-                    }
-                    _ => Err(()),
-                }
-            })
-            .collect::<Result<Vec<_>, ()>>()
-            .map(TypeSignature::Exact)
-    }
 }

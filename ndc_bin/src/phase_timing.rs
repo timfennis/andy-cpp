@@ -1,5 +1,5 @@
-use ndc_core::duration::format_duration;
 use ndc_interpreter::ExecutionTimings;
+use ndc_interpreter::format_duration;
 use std::io::{self, Write};
 
 pub fn write_phase_timings<W: Write>(writer: &mut W, timings: &ExecutionTimings) -> io::Result<()> {

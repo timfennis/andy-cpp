@@ -1,85 +1,8 @@
 use crate::operator::LogicalOperator;
 use crate::parser::Error as ParseError;
 use crate::type_expr::TypeExpr;
-use ndc_core::r#struct::StructId;
-use ndc_core::{StaticType, TypeSignature};
+use ndc_core::NodeId;
 use ndc_lexer::{NumericLiteral, Span};
-use std::sync::atomic::{AtomicU32, Ordering};
-
-/// Unique identity for an AST node. Used as a key in side tables (e.g. the
-/// analyser's expression type map) so that tooling data doesn't bloat the AST.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct NodeId(pub u32);
-
-static NEXT_NODE_ID: AtomicU32 = AtomicU32::new(0);
-
-impl NodeId {
-    pub fn next() -> Self {
-        Self(NEXT_NODE_ID.fetch_add(1, Ordering::Relaxed))
-    }
-}
-
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub enum Binding {
-    None,
-    Resolved(Candidate),
-    Dynamic(Vec<Candidate>), // figure it out at runtime
-}
-
-/// The operation selected by the analyser for an augmented assignment.
-///
-/// Every selected operation returns the updated left value internally. The
-/// compiler writes that value back through the assignment target, while the
-/// augmented-assignment expression itself evaluates to unit.
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub enum AugmentedAssignmentPlan {
-    Unresolved,
-    Resolved(Binding),
-}
-
-#[derive(Debug, Eq, PartialEq, Clone, Copy)]
-pub enum ResolvedVar {
-    Local { slot: usize },
-    Upvalue { slot: usize },
-    Global { slot: usize },
-}
-
-impl ResolvedVar {
-    pub fn slot(self) -> usize {
-        match self {
-            Self::Local { slot } | Self::Upvalue { slot, .. } | Self::Global { slot } => slot,
-        }
-    }
-}
-
-/// A function overload candidate the analyser picked. The two variants encode
-/// what kind of call this candidate is — a direct scalar call, or an element-wise
-/// tuple broadcast over the scalar overload that `var()` returns.
-#[derive(Debug, Eq, PartialEq, Clone, Copy)]
-pub enum Candidate {
-    Scalar(ResolvedVar),
-    /// Element-wise tuple broadcast. The inner `ResolvedVar` points to the
-    /// scalar overload that fires for each element pair.
-    Vec(ResolvedVar),
-}
-
-impl Candidate {
-    pub fn var(self) -> ResolvedVar {
-        match self {
-            Self::Scalar(v) | Self::Vec(v) => v,
-        }
-    }
-
-    pub fn is_vec(self) -> bool {
-        matches!(self, Self::Vec(_))
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CaptureSource {
-    Local(usize),
-    Upvalue(usize),
-}
 
 #[derive(Eq, PartialEq, Clone, Debug)]
 pub struct ExpressionLocation {
@@ -98,7 +21,6 @@ pub enum Expression {
     NumericLiteral(NumericLiteral),
     Identifier {
         name: String,
-        resolved: Binding,
         /// The identifier token's range. When parsing `(foo)`, the parser reuses
         /// the identifier expression and widens `ExpressionLocation.span` to
         /// include the parentheses. This field still covers only `foo`, so a
@@ -116,9 +38,6 @@ pub enum Expression {
     Cast {
         value: Box<ExpressionLocation>,
         annotation: TypeExpr,
-        resolved_type: Option<StaticType>,
-        /// Cleared by the analyser when the value's static type proves the cast.
-        requires_check: bool,
     },
     VariableDeclaration {
         l_value: BindingPatternLocation,
@@ -133,24 +52,18 @@ pub enum Expression {
         l_value: AssignmentTargetLocation,
         r_value: Box<ExpressionLocation>,
         operation: String,
-        plan: AugmentedAssignmentPlan,
     },
     FunctionDeclaration {
         name: Option<String>,
-        resolved_name: Option<ResolvedVar>,
         parameters: Vec<FunctionParameter>,
         parameters_span: Span,
         body: Box<ExpressionLocation>,
         return_annotation: Option<TypeExpr>,
-        resolved_return_type: Option<StaticType>,
-        captures: Vec<CaptureSource>,
         pure: bool,
     },
     StructDeclaration {
         name: String,
         fields: Vec<StructField>,
-        resolved: Option<StructId>,
-        resolved_name: Option<ResolvedVar>,
     },
     Block {
         statements: Vec<ExpressionLocation>,
@@ -181,7 +94,6 @@ pub enum Expression {
         receiver: Box<ExpressionLocation>,
         member: String,
         member_span: Span,
-        resolved_getter: Binding,
     },
     Tuple {
         values: Vec<ExpressionLocation>,
@@ -234,8 +146,6 @@ pub enum ForBody {
 pub struct StructField {
     pub identifier: String,
     pub annotation: TypeExpr,
-    pub resolved_getter: Option<ResolvedVar>,
-    pub resolved_setter: Option<ResolvedVar>,
     pub span: Span,
 }
 
@@ -243,26 +153,17 @@ pub struct StructField {
 pub struct FunctionParameter {
     pub lvalue: BindingPatternLocation,
     pub annotation: Option<TypeExpr>,
-    pub resolved_type: Option<StaticType>,
     pub span: Span,
 }
 
 impl FunctionParameter {
-    pub fn from_params(params: &[Self]) -> TypeSignature {
-        TypeSignature::from_annotated_bindings(
-            params
-                .iter()
-                .map(|p| {
-                    let BindingPattern::Identifier { identifier, .. } = &p.lvalue.pattern else {
-                        unreachable!(
-                            "parameter list may only contain identifiers {:?} found.",
-                            p.lvalue
-                        );
-                    };
-                    (identifier.clone(), p.resolved_type.clone())
-                })
-                .collect(),
-        )
+    pub fn name(&self) -> &str {
+        match &self.lvalue.pattern {
+            BindingPattern::Identifier { identifier, .. } => identifier,
+            BindingPattern::Sequence(_) => {
+                unreachable!("a function parameter can never be a sequence")
+            }
+        }
     }
 }
 
@@ -271,16 +172,12 @@ pub enum AssignmentTarget {
     // Example: `foo = ...`
     Identifier {
         identifier: String,
-        resolved: Option<ResolvedVar>,
         span: Span,
-        inferred_type: Option<StaticType>,
     },
     // Example: `foo()[1] = ...`
     Index {
         value: Box<ExpressionLocation>,
         index: Box<ExpressionLocation>,
-        resolved_set: Option<Binding>,
-        resolved_get: Option<Binding>,
     },
     // Example: `a, b = ...`
     Sequence(Vec<AssignmentTargetLocation>),
@@ -289,8 +186,6 @@ pub enum AssignmentTarget {
         receiver: Box<ExpressionLocation>,
         member: String,
         member_span: Span,
-        resolved_getter: Option<Binding>,
-        resolved_setter: Option<Binding>,
     },
 }
 
@@ -325,13 +220,6 @@ impl ExpressionLocation {
         }
     }
 
-    pub fn as_identifier(&self) -> &str {
-        match &self.expression {
-            Expression::Identifier { name, .. } => name,
-            _ => panic!("the parser should have guaranteed us the right type of expression"),
-        }
-    }
-
     pub fn to_identifier(self) -> String {
         match self.expression {
             Expression::Identifier { name, .. } => name,
@@ -339,13 +227,123 @@ impl ExpressionLocation {
         }
     }
 
-    pub fn as_parameters(&self) -> Vec<&str> {
-        match &self.expression {
-            Expression::Tuple {
-                values: tuple_values,
-            } => tuple_values.iter().map(|it| it.as_identifier()).collect(),
-            _ => panic!("the parser should have guaranteed us the right type of expression"),
+    /// The expressions directly inside this one, in source order. In
+    /// `xs[i] = f(x)` they are `xs`, `i` and `f(x)`: the expressions inside an
+    /// assignment target count too. Binding patterns, struct fields and type
+    /// annotations hold no expressions.
+    pub fn children(&self) -> Vec<&Self> {
+        fn target_children<'a>(
+            target: &'a AssignmentTargetLocation,
+            out: &mut Vec<&'a ExpressionLocation>,
+        ) {
+            match &target.target {
+                AssignmentTarget::Identifier { .. } => {}
+                AssignmentTarget::Index { value, index } => {
+                    out.push(value);
+                    out.push(index);
+                }
+                AssignmentTarget::Sequence(targets) => {
+                    for target in targets {
+                        target_children(target, out);
+                    }
+                }
+                AssignmentTarget::Member { receiver, .. } => out.push(receiver),
+            }
         }
+
+        let mut out = Vec::new();
+        match &self.expression {
+            Expression::Identifier { .. }
+            | Expression::BoolLiteral(_)
+            | Expression::NoneLiteral
+            | Expression::StringLiteral(_)
+            | Expression::NumericLiteral(_)
+            | Expression::Break
+            | Expression::Continue
+            | Expression::StructDeclaration { .. } => {}
+            Expression::Statement(inner)
+            | Expression::Grouping(inner)
+            | Expression::Cast { value: inner, .. }
+            | Expression::Return { value: inner }
+            | Expression::VariableDeclaration { value: inner, .. }
+            | Expression::FunctionDeclaration { body: inner, .. }
+            | Expression::MemberAccess {
+                receiver: inner, ..
+            } => out.push(inner.as_ref()),
+            Expression::Logical { left, right, .. } => {
+                out.push(left);
+                out.push(right);
+            }
+            Expression::Assignment { l_value, r_value }
+            | Expression::OpAssignment {
+                l_value, r_value, ..
+            } => {
+                target_children(l_value, &mut out);
+                out.push(r_value);
+            }
+            Expression::Block { statements } => out.extend(statements),
+            Expression::If {
+                condition,
+                on_true,
+                on_false,
+            } => {
+                out.push(condition);
+                out.push(on_true);
+                out.extend(on_false.as_deref());
+            }
+            Expression::While {
+                expression,
+                loop_body,
+            } => {
+                out.push(expression);
+                out.push(loop_body);
+            }
+            Expression::For { iterations, body } => {
+                for iteration in iterations {
+                    match iteration {
+                        ForIteration::Iteration { sequence, .. } => out.push(sequence),
+                        ForIteration::Guard(guard) => out.push(guard),
+                    }
+                }
+                match body.as_ref() {
+                    ForBody::Block(expr) | ForBody::List { expr } => out.push(expr),
+                    ForBody::Map {
+                        key,
+                        value,
+                        default,
+                    } => {
+                        out.push(key);
+                        out.extend(value);
+                        out.extend(default.as_deref());
+                    }
+                }
+            }
+            Expression::Call {
+                function,
+                arguments,
+            }
+            | Expression::OperatorCall {
+                function,
+                arguments,
+            } => {
+                out.push(function);
+                out.extend(arguments);
+            }
+            Expression::Tuple { values } | Expression::List { values } => out.extend(values),
+            Expression::Map { values, default } => {
+                for (key, value) in values {
+                    out.push(key);
+                    out.extend(value);
+                }
+                out.extend(default.as_deref());
+            }
+            Expression::RangeInclusive { start, end }
+            | Expression::RangeExclusive { start, end } => {
+                out.extend(start.as_deref());
+                out.extend(end.as_deref());
+            }
+        }
+        out
     }
 
     /// If this `ExpressionLocation` is a tuple expression with length one, it returns the
@@ -409,10 +407,8 @@ pub struct BindingPatternLocation {
 pub enum BindingPattern {
     Identifier {
         identifier: String,
-        resolved: Option<ResolvedVar>,
         /// The identifier token, which may be narrower than the pattern's span.
         span: Span,
-        inferred_type: Option<StaticType>,
     },
     Sequence(Vec<BindingPatternLocation>),
 }
@@ -430,17 +426,9 @@ impl TryFrom<AssignmentTargetLocation> for BindingPatternLocation {
 
     fn try_from(value: AssignmentTargetLocation) -> Result<Self, Self::Error> {
         let pattern = match value.target {
-            AssignmentTarget::Identifier {
-                identifier,
-                resolved,
-                span,
-                inferred_type,
-            } => BindingPattern::Identifier {
-                identifier,
-                resolved,
-                span,
-                inferred_type,
-            },
+            AssignmentTarget::Identifier { identifier, span } => {
+                BindingPattern::Identifier { identifier, span }
+            }
             AssignmentTarget::Sequence(items) => BindingPattern::Sequence(
                 items
                     .into_iter()
@@ -473,9 +461,7 @@ impl TryFrom<ExpressionLocation> for AssignmentTargetLocation {
                 ..
             } => AssignmentTarget::Identifier {
                 identifier: name,
-                resolved: None,
                 span: identifier_span,
-                inferred_type: None,
             },
             Expression::Call {
                 function,
@@ -486,8 +472,6 @@ impl TryFrom<ExpressionLocation> for AssignmentTargetLocation {
                 AssignmentTarget::Index {
                     value: Box::new(container),
                     index: Box::new(index),
-                    resolved_set: None,
-                    resolved_get: None,
                 }
             }
             Expression::MemberAccess {
@@ -499,8 +483,6 @@ impl TryFrom<ExpressionLocation> for AssignmentTargetLocation {
                 receiver,
                 member,
                 member_span,
-                resolved_getter: None,
-                resolved_setter: None,
             },
             Expression::List { values } | Expression::Tuple { values } => {
                 AssignmentTarget::Sequence(

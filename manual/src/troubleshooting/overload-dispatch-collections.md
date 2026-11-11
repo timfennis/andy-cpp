@@ -56,7 +56,7 @@ it and scan, the call is rejected at compile time:
 ```ndc
 let values: List<Any> = [1, 2, 3];
 values.sum()
-// error[resolver]: No function called 'sum' found that matches the arguments 'List<Any>'
+// error[analysis]: No function called 'sum' found that matches the arguments 'List<Any>'
 // = An overload would accept a narrower argument type. Cast to say what the value holds,
 //   as in `value as List<Int>`.
 ```

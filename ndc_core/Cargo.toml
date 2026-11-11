@@ -4,5 +4,4 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
-ahash.workspace = true
 itertools.workspace = true

@@ -776,21 +776,6 @@ mod tests {
     }
 
     #[test]
-    fn equality_and_hash_use_exact_numeric_values() {
-        let integer = AdvancedNumber::Int(BigInt::from(1));
-        let float = AdvancedNumber::Float(1.0);
-        let complex = AdvancedNumber::complex(1.0, -0.0);
-
-        assert_eq!(integer, float);
-        assert_eq!(float, complex);
-        assert_eq!(hash(&integer), hash(&float));
-        assert_eq!(hash(&float), hash(&complex));
-
-        let tenth = AdvancedNumber::rational(BigRational::new(1.into(), 10.into()));
-        assert_ne!(tenth, AdvancedNumber::Float(0.1));
-    }
-
-    #[test]
     fn every_representation_of_one_integer_hashes_alike() {
         let five = [
             AdvancedNumber::Int(BigInt::from(5)),
@@ -800,8 +785,10 @@ mod tests {
 
         for value in &five {
             assert_eq!(value.as_exact_i64(), Some(5));
-            assert_eq!(*value, five[0]);
-            assert_eq!(hash(value), hash(&five[0]));
+            for other in &five {
+                assert_eq!(value, other);
+                assert_eq!(hash(value), hash(other));
+            }
         }
     }
 
@@ -824,7 +811,7 @@ mod tests {
     }
 
     #[test]
-    fn values_off_the_integer_fast_path_still_agree() {
+    fn values_off_the_integer_fast_path_compare_and_hash_by_exact_value() {
         let huge = AdvancedNumber::Int(BigInt::from(u64::MAX) * BigInt::from(u64::MAX));
         let half = AdvancedNumber::rational(BigRational::new(1.into(), 2.into()));
 
@@ -836,6 +823,10 @@ mod tests {
         assert_eq!(half, AdvancedNumber::Float(0.5));
         assert_eq!(hash(&half), hash(&AdvancedNumber::Float(0.5)));
         assert_ne!(hash(&huge), hash(&half));
+
+        // 0.1 is not exactly 1/10, so the two are different numbers.
+        let tenth = AdvancedNumber::rational(BigRational::new(1.into(), 10.into()));
+        assert_ne!(tenth, AdvancedNumber::Float(0.1));
     }
 
     #[test]

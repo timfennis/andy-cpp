@@ -1,7 +1,6 @@
 #![allow(clippy::ptr_arg)]
 
 use anyhow::anyhow;
-use ndc_core::compare::FallibleOrd;
 use ndc_macros::export_module;
 use ndc_vm::VmCallable;
 use ndc_vm::value::{Object, SeqValue, Value};
@@ -56,7 +55,6 @@ fn vm_try_min(mut iter: impl Iterator<Item = Value>) -> anyhow::Result<Value> {
 mod inner {
     use super::{try_sort_by, vm_try_max, vm_try_min};
     use itertools::Itertools;
-    use ndc_core::compare::FallibleOrd;
     use ndc_vm::VmCallable;
     use std::cmp::Ordering;
     use std::rc::Rc;
