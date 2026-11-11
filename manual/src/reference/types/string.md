@@ -80,6 +80,6 @@ print(10 <> 5.0);         // 105.0
 print("oo" in "foobar");  // true
 ```
 
-```ndc
+```ndc,fails
 let a = "foo" ++ 3; // Error: cannot concatenate string and int
 ```

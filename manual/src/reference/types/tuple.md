@@ -14,7 +14,7 @@ for item in my_tuple {
 }
 ```
 
-```ndc
+```ndc,fails
 let my_tuple = (1,2,3);
 
 // Tuples are immutable, so assignment fails
@@ -32,7 +32,7 @@ print((1,).len());  // 1
 Tuples use copy-on-write. If an operation looks like it modifies a tuple, such as appending elements, Andy C++ keeps the original tuple and creates a new one for the updated value.
 
 
-```ndc
+```ndc,fails
 let a = (1,2,3);
 let b = a;
 b ++= (4,5);
@@ -67,10 +67,10 @@ tuple to `f` and does not call `f` once per element.
 Mixed-element tuples or length mismatches error at compile time rather than
 silently producing wrong results:
 
-```ndc
+```ndc,fails
 (1, 2, 3) + (4, 5)  // ERROR: no overload accepts those argument types
 ```
 
-```ndc
+```ndc,fails
 (1, "a") + (2, "b")  // ERROR: no `+(String, String)` overload
 ```

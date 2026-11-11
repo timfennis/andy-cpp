@@ -53,7 +53,7 @@ fn sum(Sequence<Number>) -> Number
 A value the analyser only knows as `List<Any>` matches none of them. Rather than dispatch on
 it and scan, the call is rejected at compile time:
 
-```ndc
+```ndc,fails
 let values: List<Any> = [1, 2, 3];
 values.sum()
 // error[analysis]: No function called 'sum' found that matches the arguments 'List<Any>'

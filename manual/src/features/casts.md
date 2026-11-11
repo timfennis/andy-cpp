@@ -23,7 +23,7 @@ When the compiler can already prove the cast from the value's static type,
 the cast is free: no runtime check is emitted. Otherwise the value is
 checked at runtime, and a failed check raises an error at the cast site:
 
-```ndc
+```ndc,fails
 let value: Any = ["a"];
 value as List<Int>
 // error[vm]: cannot cast List<String> to List<Int>
@@ -40,7 +40,7 @@ type is `Any`.
 
 The analyser rejects casts between types that cannot share a value:
 
-```ndc
+```ndc,fails
 "foo" as Int
 // error[analysis]: invalid cast: String can never be Int
 ```
@@ -64,7 +64,7 @@ value's type and checks it at the cast site.
 Reassigning a variable widens its type, which can lose the detail a function
 needs:
 
-```ndc
+```ndc,fails
 let line = "a b c";
 line = line.split(" ");    // line is now Sequence<String>, not List<String>
 line.remove(0);            // error: no `remove` matches Sequence<String>, Int

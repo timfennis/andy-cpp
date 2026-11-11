@@ -21,7 +21,7 @@ fn my_function(input) {
 
 Function declarations are not hoisted. Define a function before you call it.
 
-```ndc
+```ndc,fails
 foo(); // ERROR: no function called foo exists
 
 fn foo() {
@@ -31,7 +31,7 @@ fn foo() {
 
 A function declared with `fn` can't be replaced:
 
-```ndc
+```ndc,fails
 fn double(x) { x * 2 }
 double = fn(x) { x * 10 };     // ERROR: Can't assign to the function 'double'
 ```
@@ -160,7 +160,7 @@ print(count([1, 2, 3]));   // 3
 
 If the body produces a value that doesn't fit the declared return type, the analyser flags it:
 
-```ndc
+```ndc,fails
 fn bad() -> Int { "hello" }   // ERROR: mismatched types
 ```
 
@@ -192,7 +192,7 @@ print(describe([1]));  // something else
 
 Two overloads in the same scope can't have the same parameter types. Parameter names don't count, and a parameter without a type annotation has type `Any`:
 
-```ndc
+```ndc,fails
 fn foo(a) { a + 1 }
 fn foo(b) { b + 2 }   // ERROR: Illegal redefinition of function 'foo' with parameters (Any)
 ```
@@ -225,14 +225,14 @@ let foo = fn(a) => "let";
 print(foo("x"));  // let
 ```
 
-```ndc
+```ndc,fails
 fn foo(a, b) { "two" }
 
 let foo = fn(a) => "let";
 foo("x", "y");   // ERROR: The variable 'foo' holds a function that doesn't accept the arguments 'String, String'
 ```
 
-```ndc
+```ndc,fails
 let len = 300;
 len("test");     // ERROR: The variable 'len' is Int, which can't be called
 ```
@@ -250,14 +250,14 @@ let double = fn(x) => x * 2;
 print(double(5));        // 10
 ```
 
-```ndc
+```ndc,fails
 let double = fn(x) => x * 2;
 5.double();        // ERROR: No function named 'double'
 ```
 
 **Within one scope**, a name belongs either to `let` bindings or to functions, not both. A `fn` after a `let` with the same name in the same scope is an error, while in a nested scope it's fine. The same applies to a struct's constructor:
 
-```ndc
+```ndc,fails
 let foo = fn(a) => "let";
 fn foo(a, b) { "fn" }    // ERROR: Illegal redefinition of variable foo as a function in the same scope
 ```

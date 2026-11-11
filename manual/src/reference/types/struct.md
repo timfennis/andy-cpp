@@ -43,7 +43,7 @@ the same name in the same scope is an error, but the name can be reused in
 scopes that never coexist, and a declaration in an inner scope shadows a
 same-named struct from an outer scope.
 
-```ndc
+```ndc,fails
 struct Point { x: Int }
 struct Point { y: Int } // ERROR: Illegal redefinition of struct 'Point'
 ```
@@ -54,7 +54,7 @@ outside.
 
 A struct cannot take the name of a built-in type:
 
-```ndc
+```ndc,fails
 struct Int { x: Float } // ERROR: Struct 'Int' is not allowed to shadow the built-in type 'Int'
 ```
 
@@ -76,12 +76,12 @@ print(p);  // Point {x: 1, y: 2}
 Constructor calls are checked before the program runs: passing the wrong number of
 arguments or incompatible types is a compile-time error.
 
-```ndc
+```ndc,fails
 struct Point { x: Int, y: Int }
 Point(1);      // ERROR: no 'Point' matches the arguments 'Int'
 ```
 
-```ndc
+```ndc,fails
 struct Point { x: Int, y: Int }
 Point("x", 2); // ERROR: no 'Point' matches the arguments 'String, Int'
 ```
@@ -150,7 +150,7 @@ let cb = Callback(fn (a) => a * 2);
 print((cb.f)(21));  // 42
 ```
 
-```ndc
+```ndc,fails
 struct Callback { f: Any }
 let cb = Callback(fn (a) => a * 2);
 
@@ -161,7 +161,7 @@ cb.f(21);    // ERROR: this is method-call syntax for `f(cb, 21)`
 
 `p.x = value` writes to a field. The value must fit the field's declared type:
 
-```ndc
+```ndc,fails
 struct Point { x: Int }
 let p = Point(1);
 
@@ -182,7 +182,7 @@ print(c.hits);  // 5
 A field is a typed location, so an augmented assignment whose result would not
 fit the field type is rejected:
 
-```ndc
+```ndc,fails
 struct Counter { hits: Int }
 let c = Counter(1);
 
@@ -248,7 +248,7 @@ print(visited[Point(0, 0)]);  // true
 object decodes back to a map, not a struct. Use `json_encode_lossy` to encode an
 instance as a JSON object with the field names as keys.
 
-```ndc
+```ndc,fails
 struct Point { x: Int, y: Int }
 
 print(json_encode_lossy(Point(1, 2)));  // {"x":1,"y":2}

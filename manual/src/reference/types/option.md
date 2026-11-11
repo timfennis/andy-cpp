@@ -17,7 +17,7 @@ if value.is_none() {
 
 Some functions have variations with a `?` appended to their name that return options instead of throwing errors:
 
-```ndc
+```ndc,fails
 let my_list = [1,2,3];
 print(my_list.first?);    // Some(1)
 
@@ -45,17 +45,17 @@ print(my_list.index?(5));   // None
 
 Each of these is an error:
 
-```ndc
+```ndc,fails
 let my_list = [10, 20, 30];
 my_list.get(5);    // ERROR: index 5 is out of bounds
 ```
 
-```ndc
+```ndc,fails
 let my_list = [10, 20, 30];
 my_list.get?(-1);  // ERROR: arg 1: expected a non-negative integer, but the value was negative
 ```
 
-```ndc
+```ndc,fails
 let my_list = [10, 20, 30];
 my_list.index(5);  // ERROR: index out of bounds
 ```
