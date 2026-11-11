@@ -329,7 +329,8 @@ impl Value {
     /// `self.static_type().is_subtype(param)`.
     pub fn matches_param(&self, param: &StaticType) -> bool {
         match param {
-            StaticType::Any => true,
+            // A type parameter like `T` in `push<T>(List<T>, T)` takes any value.
+            param if param.is_unknown() => true,
             StaticType::Int => {
                 matches!(self, Self::Int(_))
             }
@@ -339,21 +340,16 @@ impl Value {
             StaticType::String => {
                 matches!(self, Self::Object(o) if matches!(o.as_ref(), Object::String(_)))
             }
-            StaticType::List(t) if matches!(t.as_ref(), StaticType::Any) => {
+            StaticType::List(t) if t.is_unknown() => {
                 matches!(self, Self::Object(o) if matches!(o.as_ref(), Object::List(_)))
             }
-            StaticType::Deque(t) if matches!(t.as_ref(), StaticType::Any) => {
+            StaticType::Deque(t) if t.is_unknown() => {
                 matches!(self, Self::Object(o) if matches!(o.as_ref(), Object::Deque(_)))
             }
-            StaticType::Map { key, value }
-                if matches!(
-                    (key.as_ref(), value.as_ref()),
-                    (StaticType::Any, StaticType::Any)
-                ) =>
-            {
+            StaticType::Map { key, value } if key.is_unknown() && value.is_unknown() => {
                 matches!(self, Self::Object(o) if matches!(o.as_ref(), Object::Map { .. }))
             }
-            StaticType::Sequence(t) if matches!(t.as_ref(), StaticType::Any) => {
+            StaticType::Sequence(t) if t.is_unknown() => {
                 matches!(self, Self::Object(o) if matches!(
                     o.as_ref(),
                     Object::List(_)
@@ -404,7 +400,7 @@ impl Value {
         // Static types are finite trees, so this pair cannot be re-entered
         // before its result is stored.
         let result = match target {
-            StaticType::Any => true,
+            target if target.is_unknown() => true,
             StaticType::Option(inner) => match self {
                 Self::None => true,
                 Self::Object(object) => match object.as_ref() {

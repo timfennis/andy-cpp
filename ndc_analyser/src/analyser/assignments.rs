@@ -25,7 +25,7 @@ impl Analyser {
         // what it stores has to fit that type. Where the target's type isn't
         // fully known, the right operand settles it: in
         // `let xs = []; xs ++= [1]`, the elements of `xs` are `Int`.
-        let left_type = if left_type.any_var(&|_| true) {
+        let left_type = if left_type.has_vars() {
             match &left_type {
                 // A tuple target with a scalar operand applies the operand to
                 // each element: `t ++= [1]` appends to every list in `t`.
@@ -143,58 +143,78 @@ impl Analyser {
             }
             AssignmentTarget::Index { index, value } => {
                 // The container before the index, in source order like the resolver.
-                let type_of_index_target = self.analyse_expr(value);
+                let container = self.analyse_expr(value);
                 let index_type = self.analyse_expr(index);
-                // Writing `m[k]` settles the key type of a map whose keys
-                // aren't known yet, as in `let m = %{}; m["a"] = 1`.
-                if let StaticType::Map { key, .. } = &type_of_index_target
-                    && matches!(**key, StaticType::Var(_))
-                {
-                    self.vars.unify(key, &index_type);
-                }
-
-                let get_args = [type_of_index_target.clone(), index_type.clone()];
-                let set_args = [
-                    type_of_index_target.clone(),
-                    index_type.clone(),
-                    StaticType::Any,
-                ];
+                // `xs[i] = v` is the call `[]=(xs, i, v)`. The value isn't
+                // analysed yet, so what the container holds stands in for
+                // it, and a slice like `xs[0..2]` stores a list of that.
+                let element = container.index_element_type();
+                let stored = match &element {
+                    Some(element)
+                        if Self::index_type_is_slice(&index_type)
+                            && matches!(container, StaticType::List(_)) =>
+                    {
+                        StaticType::List(Box::new(element.clone()))
+                    }
+                    Some(element) => element.clone(),
+                    None => StaticType::Any,
+                };
 
                 // Indexing isn't operator-form for vec purposes: there's no
                 // natural broadcast story for `(list_a, list_b)[i]`. Only an
                 // augmented assignment reads the old value through `[]`.
+                let errors_before = self.result.errors.len();
                 if let Some(getters) = self.resolver.getter_candidates(lvalue.id) {
-                    let getter = self
-                        .overloads()
-                        .resolve_call(getters, &get_args, CallKind::Regular)
-                        .binding;
-                    self.picks.getters.insert(lvalue.id, getter);
-                }
-                let setter = self
-                    .overloads()
-                    .resolve_call(
-                        self.resolver.setter_candidates(lvalue.id),
-                        &set_args,
-                        CallKind::Regular,
-                    )
-                    .binding;
-                self.picks.setters.insert(lvalue.id, setter);
-
-                if Self::index_type_is_slice(&index_type)
-                    && let StaticType::List(element) = &type_of_index_target
-                {
-                    return StaticType::List(element.clone());
+                    let get_args = [container.clone(), index_type.clone()];
+                    let getter =
+                        self.overloads()
+                            .resolve_call(getters, &get_args, CallKind::Regular);
+                    if matches!(getter.binding, Binding::None) {
+                        self.emit(AnalysisError::function_not_found("[]", &get_args, span));
+                    } else {
+                        self.commit_call(
+                            &getter.binding,
+                            &get_args,
+                            getter.return_type,
+                            "[]",
+                            span,
+                        );
+                    }
+                    self.picks.getters.insert(lvalue.id, getter.binding);
                 }
 
-                if let Some(t) = type_of_index_target.index_element_type() {
-                    t
-                } else {
-                    self.emit(AnalysisError::unable_to_index_into(
-                        &type_of_index_target,
-                        span,
-                    ));
-                    StaticType::Any
+                // Committing the setter checks the index against the
+                // container, and settles what neither is known to hold yet,
+                // as the key type in `let m = %{}; m["a"] = 1`.
+                let set_args = [container.clone(), index_type, stored.clone()];
+                let setter = self.overloads().resolve_call(
+                    self.resolver.setter_candidates(lvalue.id),
+                    &set_args,
+                    CallKind::Regular,
+                );
+                // When reading the old value failed, storing the new one
+                // fails the same way, which is reported once.
+                let read_failed = self.result.errors.len() > errors_before;
+                match setter.binding {
+                    _ if read_failed => {}
+                    Binding::None if element.is_none() && !container.is_unknown() => {
+                        self.emit(AnalysisError::unable_to_index_into(&container, span));
+                    }
+                    Binding::None => {
+                        self.emit(AnalysisError::function_not_found("[]=", &set_args, span));
+                    }
+                    _ => {
+                        self.commit_call(
+                            &setter.binding,
+                            &set_args,
+                            setter.return_type,
+                            "[]=",
+                            span,
+                        );
+                    }
                 }
+                self.picks.setters.insert(lvalue.id, setter.binding);
+                self.vars.resolve(&stored)
             }
             // What `(a, b) = …` can store is a tuple of what each target can.
             AssignmentTarget::Sequence(seq) => StaticType::Tuple(

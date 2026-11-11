@@ -62,6 +62,11 @@ pub enum StaticType {
     /// these, and it replaces every one before handing its results on. Until
     /// then, every method here treats one as `Any`.
     Var(TypeVar),
+    /// A type parameter of a generic built-in's signature, such as `T` in
+    /// `push<T>(List<T>, T)`. Each call stands for its own type in place of
+    /// it, which the analyser works out from the arguments. Every method
+    /// here treats one as `Any`.
+    Generic(Box<str>),
     /// Bottom type for diverging expressions (`return`, `break`, `continue`).
     /// `Never` is a subtype of every type: `lub(T, Never) = T`.
     Never,
@@ -243,12 +248,12 @@ impl StaticType {
         }
 
         // Any is the universal supertype
-        if matches!(other, Self::Any | Self::Var(_)) {
+        if other.is_unknown() {
             return true;
         }
 
         // Only Any satisfies the above; all other types fail here
-        if matches!(self, Self::Any | Self::Var(_)) {
+        if self.is_unknown() {
             return false;
         }
 
@@ -358,7 +363,7 @@ impl StaticType {
         }
 
         // Any is the top type
-        if matches!(self, Self::Any | Self::Var(_)) || matches!(other, Self::Any | Self::Var(_)) {
+        if self.is_unknown() || other.is_unknown() {
             return Self::Any;
         }
 
@@ -447,7 +452,7 @@ impl StaticType {
     fn glb(&self, other: &Self) -> Self {
         // Any is the top type: glb(Any, T) = T
         match (self, other) {
-            (Self::Any | Self::Var(_), t) | (t, Self::Any | Self::Var(_)) => t.clone(),
+            (unknown, t) | (t, unknown) if unknown.is_unknown() => t.clone(),
             _ if self == other => self.clone(),
             _ if self.is_subtype(other) => self.clone(),
             _ if other.is_subtype(self) => other.clone(),
@@ -525,26 +530,34 @@ impl StaticType {
                 key.as_ref().clone(),
                 value.as_ref().clone(),
             ])),
-            Self::Any | Self::Var(_) => Some(Self::Any),
+            unknown if unknown.is_unknown() => Some(Self::Any),
             _ => None,
         }
     }
 
-    /// This type with each type variable that `replace` gives a type for
-    /// replaced by that type: `List<?0>` becomes `List<Int>` when `replace`
-    /// maps `?0` to `Int`. The other variables stay as they are.
+    /// Whether this type stands for every type: `Any`, a type variable or
+    /// a type parameter, which are all `Any` to the methods here.
+    pub fn is_unknown(&self) -> bool {
+        matches!(self, Self::Any | Self::Var(_) | Self::Generic(_))
+    }
+
+    /// This type with each part that `replace` gives a type for replaced by
+    /// that type, looking at the outer parts first: `List<?0>` becomes
+    /// `List<Int>` when `replace` maps `?0` to `Int`.
     #[must_use]
-    pub fn replace_vars(&self, replace: &impl Fn(TypeVar) -> Option<Self>) -> Self {
-        let map = |typ: &Self| Box::new(typ.replace_vars(replace));
+    pub fn replace(&self, replace: &impl Fn(&Self) -> Option<Self>) -> Self {
+        if let Some(replaced) = replace(self) {
+            return replaced;
+        }
+        let map = |typ: &Self| Box::new(typ.replace(replace));
         match self {
-            Self::Var(var) => replace(*var).unwrap_or_else(|| self.clone()),
             Self::Function {
                 parameters,
                 return_type,
             } => Self::Function {
                 parameters: parameters
                     .as_ref()
-                    .map(|parameters| parameters.iter().map(|p| p.replace_vars(replace)).collect()),
+                    .map(|parameters| parameters.iter().map(|p| p.replace(replace)).collect()),
                 return_type: map(return_type),
             },
             Self::Option(t) => Self::Option(map(t)),
@@ -555,13 +568,15 @@ impl StaticType {
             Self::MaxHeap(t) => Self::MaxHeap(map(t)),
             Self::Deque(t) => Self::Deque(map(t)),
             Self::Tuple(elements) => {
-                Self::Tuple(elements.iter().map(|e| e.replace_vars(replace)).collect())
+                Self::Tuple(elements.iter().map(|e| e.replace(replace)).collect())
             }
             Self::Map { key, value } => Self::Map {
                 key: map(key),
                 value: map(value),
             },
             Self::Any
+            | Self::Var(_)
+            | Self::Generic(_)
             | Self::Never
             | Self::Bool
             | Self::Struct { .. }
@@ -572,20 +587,21 @@ impl StaticType {
         }
     }
 
-    /// Whether some type variable in this type satisfies `test`:
-    /// `any_var(&|_| true)` asks whether the type has any variables left.
-    pub fn any_var(&self, test: &impl Fn(TypeVar) -> bool) -> bool {
+    /// Whether this type or any of its parts satisfies `test`.
+    pub fn contains(&self, test: &impl Fn(&Self) -> bool) -> bool {
+        if test(self) {
+            return true;
+        }
         match self {
-            Self::Var(var) => test(*var),
             Self::Function {
                 parameters,
                 return_type,
             } => {
-                return_type.any_var(test)
+                return_type.contains(test)
                     || parameters
                         .iter()
                         .flatten()
-                        .any(|parameter| parameter.any_var(test))
+                        .any(|parameter| parameter.contains(test))
             }
             Self::Option(t)
             | Self::Sequence(t)
@@ -593,10 +609,12 @@ impl StaticType {
             | Self::Iterator(t)
             | Self::MinHeap(t)
             | Self::MaxHeap(t)
-            | Self::Deque(t) => t.any_var(test),
-            Self::Tuple(elements) => elements.iter().any(|e| e.any_var(test)),
-            Self::Map { key, value } => key.any_var(test) || value.any_var(test),
+            | Self::Deque(t) => t.contains(test),
+            Self::Tuple(elements) => elements.iter().any(|e| e.contains(test)),
+            Self::Map { key, value } => key.contains(test) || value.contains(test),
             Self::Any
+            | Self::Var(_)
+            | Self::Generic(_)
             | Self::Never
             | Self::Bool
             | Self::Struct { .. }
@@ -605,6 +623,11 @@ impl StaticType {
             | Self::Int
             | Self::String => false,
         }
+    }
+
+    /// Whether any type variable is left in this type.
+    pub fn has_vars(&self) -> bool {
+        self.contains(&|t| matches!(t, Self::Var(_)))
     }
 
     #[must_use]
@@ -748,7 +771,7 @@ impl StaticType {
     /// This is true for `Function` types and for `Any` (which might be a
     /// function at runtime). Concrete non-function types return `false`.
     pub fn could_be_callable(&self) -> bool {
-        matches!(self, Self::Function { .. } | Self::Any | Self::Var(_))
+        matches!(self, Self::Function { .. }) || self.is_unknown()
     }
 
     pub fn is_fn_and_matches(&self, types: &[Self]) -> bool {
@@ -771,7 +794,10 @@ impl StaticType {
     pub fn unpack(&self) -> Option<Box<dyn Iterator<Item = &Self> + '_>> {
         match self {
             // Any just unpacks to an infinite list of Any
-            Self::Any | Self::Var(_) => Some(Box::new(std::iter::repeat(&Self::Any))),
+            // The same types as `is_unknown`, spelled out for this exhaustive match.
+            Self::Any | Self::Var(_) | Self::Generic(_) => {
+                Some(Box::new(std::iter::repeat(&Self::Any)))
+            }
             Self::List(elem)
             | Self::Sequence(elem)
             | Self::Iterator(elem)
@@ -810,7 +836,7 @@ impl fmt::Display for StaticType {
                     .as_deref()
                     .map_or(String::from("*"), |p| p.iter().join(", "))
             ),
-            Self::Struct { name, .. } => write!(f, "{name}"),
+            Self::Generic(name) | Self::Struct { name, .. } => write!(f, "{name}"),
             Self::Option(elem) => write!(f, "Option<{elem}>"),
             Self::Number => write!(f, "Number"),
             Self::Float => write!(f, "Float"),

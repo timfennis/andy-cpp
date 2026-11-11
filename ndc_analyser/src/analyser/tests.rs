@@ -40,14 +40,21 @@ fn analyse_last_type(source: &str) -> StaticType {
 /// `[]` and `[]=`, which index reads and writes go through. Name resolution
 /// rejects index access without them, as it would any other unknown function.
 fn index_natives() -> Vec<(String, StaticType)> {
-    let any_function = StaticType::Function {
-        parameters: None,
-        return_type: Box::new(StaticType::Any),
-    };
-    vec![
-        ("[]".to_string(), any_function.clone()),
-        ("[]=".to_string(), any_function),
+    // The stdlib's list and map overloads.
+    [
+        ("[]", "<T>(List<T>, Int) -> T"),
+        ("[]", "<T>(List<T>, Iterator<Any>) -> List<T>"),
+        ("[]", "<K, V>(Map<K, V>, K) -> V"),
+        ("[]=", "<T>(List<T>, Int, T)"),
+        ("[]=", "<T>(List<T>, Iterator<Any>, Sequence<T>)"),
+        ("[]=", "<K, V>(Map<K, V>, K, V)"),
     ]
+    .into_iter()
+    .map(|(name, signature)| {
+        let typ = StaticType::signature(signature).expect("valid signature");
+        (name.to_string(), typ)
+    })
+    .collect()
 }
 
 /// Every error analysing `source` reports, in order.
@@ -481,6 +488,124 @@ fn an_annotation_settles_what_its_value_holds() {
     assert_eq!(
         analyse_last_type("let p: (Int, Option<Int>) = (1, None); p"),
         StaticType::Tuple(vec![StaticType::Int, option_of(StaticType::Int)])
+    );
+}
+
+/// Natives with these signatures, as a stdlib would declare them.
+fn natives(signatures: &[(&str, &str)]) -> Vec<(String, StaticType)> {
+    signatures
+        .iter()
+        .map(|(name, signature)| {
+            let typ = StaticType::signature(signature).expect("valid signature");
+            ((*name).to_string(), typ)
+        })
+        .collect()
+}
+
+#[test]
+fn a_call_settles_its_arguments_through_the_picked_signature() {
+    let globals = natives(&[("push", "<T>(List<T>, T)")]);
+    assert_eq!(
+        analyse_last_type_with_globals("let xs = []; push(xs, 1); xs", globals.clone()),
+        StaticType::List(Box::new(StaticType::Int))
+    );
+    assert_eq!(
+        errors("let xs = [1]; push(xs, \"a\");", globals),
+        vec!["No function called 'push' found that matches the arguments 'List<Int>, String'"]
+    );
+}
+
+#[test]
+fn each_call_instantiates_the_signature_afresh() {
+    let globals = natives(&[("first", "<T>(List<T>) -> T")]);
+    assert_eq!(
+        analyse_last_type_with_globals("first([1.5])", globals.clone()),
+        StaticType::Float
+    );
+    assert_eq!(
+        analyse_last_type_with_globals("first([1]); first([\"a\"])", globals),
+        StaticType::String
+    );
+}
+
+#[test]
+fn a_call_picked_at_runtime_has_no_type_parameters_in_its_type() {
+    // `xs` could be anything, so `reversed` is picked when the program runs
+    // and its `T` is never known.
+    let globals = natives(&[("reversed", "<T>(List<T>) -> List<T>")]);
+    assert_eq!(
+        analyse_last_type_with_globals("fn f(xs) { reversed(xs) } f", globals),
+        StaticType::Function {
+            parameters: Some(vec![StaticType::Any]),
+            return_type: Box::new(StaticType::List(Box::new(StaticType::Any))),
+        }
+    );
+}
+
+#[test]
+fn a_generic_built_in_used_as_a_value_has_one_type() {
+    let globals = natives(&[("push", "<T>(List<T>, T)")]);
+    assert_eq!(
+        analyse_last_type_with_globals("let p = push; let xs = [1]; p(xs, 2); p", globals),
+        StaticType::Function {
+            parameters: Some(vec![
+                StaticType::List(Box::new(StaticType::Int)),
+                StaticType::Int
+            ]),
+            return_type: Box::new(StaticType::unit()),
+        }
+    );
+}
+
+#[test]
+fn calling_a_function_value_checks_its_arguments() {
+    assert_eq!(
+        errors(
+            "let f = fn(x: Int) { x }; let g = [f]; g[0](\"a\");",
+            index_natives()
+        ),
+        vec!["A Function(Int) -> Int doesn't accept the arguments 'String'"]
+    );
+}
+
+#[test]
+fn an_index_write_checks_the_index_against_the_container() {
+    let plus = natives(&[("+", "(Int, Int) -> Int")]);
+    let globals = [index_natives(), plus].concat();
+    for (source, expected) in [
+        (
+            "let m = %{1: 2}; m[\"a\"] = 3;",
+            "No function called '[]=' found that matches the arguments 'Map<Int, Int>, String, Int'",
+        ),
+        // Reading the old value fails first, and is the one error reported.
+        (
+            "let m = %{\"a\": 1}; m[0] += 3;",
+            "No function called '[]' found that matches the arguments 'Map<String, Int>, Int'",
+        ),
+        ("let a = 5; a[0] = 1;", "Unable to index into Int"),
+    ] {
+        assert_eq!(errors(source, globals.clone()), vec![expected], "{source}");
+    }
+}
+
+#[test]
+fn an_any_parameter_settles_what_its_argument_leaves_unknown_as_any() {
+    // `keep` may store anything in the list, so it can't become a List<Int>.
+    let globals = [natives(&[("keep", "(List<Any>)")]), index_natives()].concat();
+    assert_eq!(
+        analyse_last_type_with_globals("let xs = []; keep(xs); xs[0] = 1; xs", globals),
+        StaticType::List(Box::new(StaticType::Any))
+    );
+}
+
+#[test]
+fn a_default_function_gives_a_map_the_values_it_returns() {
+    assert_eq!(
+        analyse_last_type("%{:fn() => 1}"),
+        StaticType::Map {
+            key: Box::new(StaticType::Any),
+            value: Box::new(StaticType::Int),
+        }
     );
 }
 

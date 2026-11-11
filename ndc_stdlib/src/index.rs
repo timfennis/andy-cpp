@@ -55,19 +55,21 @@ fn register_get(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     let doc =
         "Retrieves an element by index. Supports negative indices and range slicing.".to_string();
 
-    // []<List, Any> -> Any
-    env.declare_global_fn(Rc::new(NativeFunction {
-        name: "[]".to_string(),
-        documentation: Some(doc.clone()),
-        static_type: StaticType::Function {
-            parameters: Some(vec![
-                StaticType::List(Box::new(StaticType::Any)),
-                StaticType::Any,
-            ]),
-            return_type: Box::new(StaticType::Any),
-        },
-        func: make_get_func_simple(),
-    }));
+    // An element by its index, or a slice by a range of indices.
+    for signature in [
+        "<T>(List<T>, Int) -> T",
+        "<T>(List<T>, Iterator<Any>) -> List<T>",
+        // An index whose type isn't known could be either, and keeps the
+        // allocation-free path rather than falling back to `[](Any, Any)`.
+        "<T>(List<T>, Any) -> Any",
+    ] {
+        env.declare_global_fn(Rc::new(NativeFunction {
+            name: "[]".to_string(),
+            documentation: Some(doc.clone()),
+            static_type: StaticType::signature(signature).expect("valid signature"),
+            func: make_get_func_simple(),
+        }));
+    }
 
     // []<String, Any> -> String
     env.declare_global_fn(Rc::new(NativeFunction {
@@ -107,20 +109,10 @@ fn register_get(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
         func: make_get_func_simple(),
     }));
 
-    // []<Map, Any> -> Any
     env.declare_global_fn(Rc::new(NativeFunction {
         name: "[]".to_string(),
         documentation: Some(doc),
-        static_type: StaticType::Function {
-            parameters: Some(vec![
-                StaticType::Map {
-                    key: Box::new(StaticType::Any),
-                    value: Box::new(StaticType::Any),
-                },
-                StaticType::Any,
-            ]),
-            return_type: Box::new(StaticType::Any),
-        },
+        static_type: StaticType::signature("<K, V>(Map<K, V>, K) -> V").expect("valid signature"),
         func: make_get_func(),
     }));
 }
@@ -128,20 +120,20 @@ fn register_get(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
 fn register_set(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     let doc = "Sets an element by index. Supports negative indices and range slicing for lists and strings.".to_string();
 
-    // []=<List, Any, Any> -> ()
-    env.declare_global_fn(Rc::new(NativeFunction {
-        name: "[]=".to_string(),
-        documentation: Some(doc.clone()),
-        static_type: StaticType::Function {
-            parameters: Some(vec![
-                StaticType::List(Box::new(StaticType::Any)),
-                StaticType::Any,
-                StaticType::Any,
-            ]),
-            return_type: Box::new(StaticType::unit()),
-        },
-        func: make_set_func(),
-    }));
+    // An element by its index, or a slice by a range of indices.
+    for signature in [
+        "<T>(List<T>, Int, T)",
+        "<T>(List<T>, Iterator<Any>, Sequence<T>)",
+        // An index whose type isn't known could be either.
+        "<T>(List<T>, Any, Any)",
+    ] {
+        env.declare_global_fn(Rc::new(NativeFunction {
+            name: "[]=".to_string(),
+            documentation: Some(doc.clone()),
+            static_type: StaticType::signature(signature).expect("valid signature"),
+            func: make_set_func(),
+        }));
+    }
 
     // []=<String, Any, String> -> ()
     env.declare_global_fn(Rc::new(NativeFunction {
@@ -158,21 +150,10 @@ fn register_set(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
         func: make_set_func(),
     }));
 
-    // []=<Map, Any, Any> -> ()
     env.declare_global_fn(Rc::new(NativeFunction {
         name: "[]=".to_string(),
         documentation: Some(doc),
-        static_type: StaticType::Function {
-            parameters: Some(vec![
-                StaticType::Map {
-                    key: Box::new(StaticType::Any),
-                    value: Box::new(StaticType::Any),
-                },
-                StaticType::Any,
-                StaticType::Any,
-            ]),
-            return_type: Box::new(StaticType::unit()),
-        },
+        static_type: StaticType::signature("<K, V>(Map<K, V>, K, V)").expect("valid signature"),
         func: make_set_func(),
     }));
 }

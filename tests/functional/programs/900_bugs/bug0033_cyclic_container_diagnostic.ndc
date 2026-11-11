@@ -2,6 +2,6 @@
 // forever and aborted the process with a stack overflow. The bounded
 // description stops at a fixed depth instead.
 // expect-error: cannot compare
-let a = [];
+let a: List<Any> = [];
 a.push(a);
 print(a < 1);

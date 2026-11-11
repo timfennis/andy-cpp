@@ -195,6 +195,21 @@ impl AnalysisError {
         }
     }
 
+    pub(crate) fn callee_rejects_arguments(
+        callee: &StaticType,
+        types: &[StaticType],
+        span: Span,
+    ) -> Self {
+        Self {
+            text: format!(
+                "A {callee} doesn't accept the arguments '{}'",
+                types.iter().join(", ")
+            ),
+            span,
+            help_text: None,
+        }
+    }
+
     pub(crate) fn not_callable(typ: &StaticType, span: Span) -> Self {
         Self {
             text: format!("Unable to invoke {typ} as a function."),

@@ -68,7 +68,15 @@ counts["a"] = 1;        // counts is Map<String, Int> from here on
 counts["b"] = "two";    // ERROR: mismatched types: found String but expected Int
 ```
 
-Only assignments settle these types. When nothing does, as in `let xs = []; xs.push(1)`, they stay `Any`.
+Calls settle them too, through the types the called function takes. `push` takes a `List<T>` and a `T`, so pushing an `Int` makes the list a `List<Int>`, and later pushes have to fit:
+
+```ndc
+let xs = [];
+xs.push(1);       // xs is List<Int> from here on
+xs.push("two");   // ERROR: No function called 'push' found that matches the arguments 'List<Int>, String'
+```
+
+When nothing settles them, they stay `Any`.
 
 A variable that only gets its real value later holds an `Option`:
 

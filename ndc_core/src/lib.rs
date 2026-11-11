@@ -1,4 +1,5 @@
 mod node_id;
+mod signature;
 pub mod static_type;
 pub mod r#struct;
 

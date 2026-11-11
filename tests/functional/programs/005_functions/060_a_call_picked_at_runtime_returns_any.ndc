@@ -1,0 +1,5 @@
+// `xs` could be anything, so `first` is picked when the program runs and
+// its `T` isn't known: the call is `Any`, and calling its result is fine.
+fn invoke(xs) { xs.first()() }
+print(invoke([fn() => 5]));
+// expect-output: 5

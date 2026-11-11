@@ -27,7 +27,7 @@ impl TypeTable {
     pub(crate) fn resolve_all(&mut self, vars: &TypeVars) {
         for typ in self.types.values_mut() {
             *typ = vars.resolve(typ);
-            debug_assert!(!typ.any_var(&|_| true), "unsettled type variable in {typ}");
+            debug_assert!(!typ.has_vars(), "unsettled type variable in {typ}");
         }
     }
 }
@@ -66,7 +66,10 @@ impl TypeVars {
 
     /// `typ` with every settled variable replaced by what it stands for.
     pub(crate) fn resolve(&self, typ: &StaticType) -> StaticType {
-        typ.replace_vars(&|var| self.solution(var).map(|solution| self.resolve(solution)))
+        typ.replace(&|part| match part {
+            StaticType::Var(var) => self.solution(*var).map(|solution| self.resolve(solution)),
+            _ => None,
+        })
     }
 
     /// `typ`, or what it stands for if it's a settled variable.
@@ -93,7 +96,10 @@ impl TypeVars {
             }
             (StaticType::Var(var), other) | (other, StaticType::Var(var)) => {
                 // A variable can't stand for a type that contains it.
-                if self.resolve(other).any_var(&|other| other == *var) {
+                if self
+                    .resolve(other)
+                    .contains(&|part| *part == StaticType::Var(*var))
+                {
                     return false;
                 }
                 self.solutions[var.0 as usize] = Some(other.clone());
@@ -135,6 +141,102 @@ impl TypeVars {
                 parameters && returns
             }
             _ => a == b,
+        }
+    }
+
+    /// `typ` with each type parameter, such as `T` in `<T>(List<T>, T)`,
+    /// replaced by a new variable of its own. A call does this to the
+    /// signature of the overload it picked, so its arguments settle what `T`
+    /// stands for at that call.
+    pub(crate) fn instantiate(&mut self, typ: &StaticType) -> StaticType {
+        let names = std::cell::RefCell::new(Vec::<Box<str>>::new());
+        typ.contains(&|part| {
+            if let StaticType::Generic(name) = part
+                && !names.borrow().contains(name)
+            {
+                names.borrow_mut().push(name.clone());
+            }
+            false
+        });
+        let vars = names
+            .into_inner()
+            .into_iter()
+            .map(|name| (name, self.fresh(StaticType::Any)))
+            .collect::<Vec<_>>();
+        typ.replace(&|part| match part {
+            StaticType::Generic(name) => vars
+                .iter()
+                .find(|(generic, _)| generic == name)
+                .map(|(_, var)| var.clone()),
+            _ => None,
+        })
+    }
+
+    /// Settles the parts of `argument` that aren't known yet by passing it
+    /// where a `parameter` is expected, and returns whether it fits there. In
+    /// `push(xs, 1)` with `push(List<?0>, ?0)` and `xs: List<?1>`, both
+    /// variables become `Int`. A parameter of type `Any` settles what's
+    /// unknown in the argument as `Any`, because the function may store
+    /// anything in it.
+    pub(crate) fn bind_argument(&mut self, parameter: &StaticType, argument: &StaticType) -> bool {
+        let (parameter, argument) = (self.shallow(parameter), self.shallow(argument));
+        match (&parameter, &argument) {
+            (_, StaticType::Never) => true,
+            (StaticType::Any, _) => {
+                self.settle_unknowns(&argument, &StaticType::Any);
+                true
+            }
+            (StaticType::Var(_), _) | (_, StaticType::Var(_)) => self.unify(&parameter, &argument),
+            (StaticType::Option(p), StaticType::Option(a))
+            | (StaticType::List(p), StaticType::List(a))
+            | (StaticType::Iterator(p), StaticType::Iterator(a))
+            | (StaticType::MinHeap(p), StaticType::MinHeap(a))
+            | (StaticType::MaxHeap(p), StaticType::MaxHeap(a))
+            | (StaticType::Deque(p), StaticType::Deque(a))
+            | (StaticType::Sequence(p), StaticType::Sequence(a))
+            // A function passed as an argument returns what the parameter's
+            // function type returns: `map(xs, fn(x) => x + 1)` settles `U`.
+            | (
+                StaticType::Function {
+                    return_type: p, ..
+                },
+                StaticType::Function {
+                    return_type: a, ..
+                },
+            ) => self.bind_argument(p, a),
+            (StaticType::Tuple(ps), StaticType::Tuple(args)) if ps.len() == args.len() => {
+                ps.iter().zip(args).all(|(p, a)| self.bind_argument(p, a))
+            }
+            (StaticType::Map { key: pk, value: pv }, StaticType::Map { key: ak, value: av }) => {
+                let keys = self.bind_argument(pk, ak);
+                let values = self.bind_argument(pv, av);
+                keys && values
+            }
+            // Any sequence passes as a `Sequence<T>` of its elements.
+            (StaticType::Sequence(p), _) if argument.sequence_element_type().is_some() => {
+                let element = argument
+                    .sequence_element_type()
+                    .expect("checked by the guard");
+                self.bind_argument(p, &element)
+            }
+            _ => {
+                let argument = self.resolve(&argument);
+                argument.is_unknown() || argument.is_subtype(&self.resolve(&parameter))
+            }
+        }
+    }
+
+    /// Settles every unsettled variable in `typ` as `to`.
+    pub(crate) fn settle_unknowns(&mut self, typ: &StaticType, to: &StaticType) {
+        let unsettled = std::cell::RefCell::new(Vec::new());
+        self.resolve(typ).contains(&|part| {
+            if let StaticType::Var(var) = part {
+                unsettled.borrow_mut().push(*var);
+            }
+            false
+        });
+        for var in unsettled.into_inner() {
+            self.solutions[var.0 as usize].get_or_insert_with(|| to.clone());
         }
     }
 
