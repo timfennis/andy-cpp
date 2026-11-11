@@ -89,7 +89,7 @@ print(n, x);              // 3 anything
 
 A mismatch is rejected with a `mismatched types` error:
 
-```ndc
+```ndc,fails
 let x: Int = "hello";   // ERROR: mismatched types: found String but expected Int
 ```
 
@@ -105,12 +105,12 @@ print(xs, m, nested);          // [] %{} [[]]
 
 Once a binding has an annotation, it stays locked to that type. Reassignment and augmented assignment can't widen it the way they widen an inferred binding:
 
-```ndc
+```ndc,fails
 let x: Int = 5;
 x = "test";   // ERROR: mismatched types
 ```
 
-```ndc
+```ndc,fails
 let x: Int = 5;
 x += 0.5;     // ERROR: the Float result doesn't fit in Int
 ```

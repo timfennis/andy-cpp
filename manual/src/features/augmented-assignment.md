@@ -43,7 +43,7 @@ An augmented assignment with an in-place operator such as `++=` never changes
 the type of its target. If the right-hand side would force a type change the
 program is rejected:
 
-```ndc
+```ndc,fails
 let values = [1];
 values ++= ["two"]; // error: mismatched types: found List<String> but expected List<Int>
 ```
@@ -51,7 +51,7 @@ values ++= ["two"]; // error: mismatched types: found List<String> but expected 
 The right-hand side has to *provably* fit. A wider element type is not enough,
 because the operator copies the values across without checking them:
 
-```ndc
+```ndc,fails
 let values: List<Int> = [1];
 let rhs: List<Number> = [0.5n];
 values ++= rhs; // error: mismatched types: found List<Number> but expected List<Int>
@@ -60,7 +60,7 @@ values ++= rhs; // error: mismatched types: found List<Number> but expected List
 The same goes for an operand whose type is unknown. `Any` says nothing about
 what the value holds, and no later step re-checks it, so it is rejected too:
 
-```ndc
+```ndc,fails
 fn opaque(x) => x;
 let values = [1];
 values ++= opaque([2, 3]); // error: mismatched types: found Any but expected List<Int>
@@ -78,7 +78,7 @@ print(values);  // [1,2,3]
 
 A cast that does not hold fails there rather than corrupting the target:
 
-```ndc
+```ndc,fails
 fn opaque(x) => x;
 let values = [1];
 values ++= opaque([0.5]) as List<Int>; // error: cannot cast List<Float> to List<Int>

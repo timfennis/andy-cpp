@@ -55,7 +55,7 @@ User-facing language documentation lives in `manual/src/`. It is an mdBook proje
 
 When making changes that affect language behaviour or runtime semantics, update the relevant manual page.
 
-The published manual highlights ` ```ndc ` code blocks and gives them a Run button, running them on the interpreter compiled to WebAssembly (`manual/theme/ndc.js`). Mark a block that can't run on its own, such as a fragment that uses names from an earlier block, as ` ```ndc,norun `. Write examples so running them shows the result: `print(-7 / 2);  // -3` rather than `assert_eq(-7 / 2, -3);`, with the exact printed output in the comment. A block that demonstrates a runtime error ends with it, as nothing after the first error runs. The playground page and the code it shares with the manual live in `manual/src/playground/`.
+The published manual highlights ` ```ndc ` code blocks and gives them a Run button, running them on the interpreter compiled to WebAssembly (`manual/theme/ndc.js`). Mark a block that can't run on its own, such as a fragment that uses names from an earlier block, as ` ```ndc,norun `. Write examples so running them shows the result: `print(-7 / 2);  // -3` rather than `assert_eq(-7 / 2, -3);`, with the exact printed output in the comment. A block that demonstrates a runtime error ends with it, as nothing after the first error runs, and is marked ` ```ndc,fails `. `tests/functional/tests/manual.rs` runs every block that isn't `norun` and checks all of this: blocks fail exactly when marked `fails`, the others show something, and print comments match the output (`cargo test -p functional_tests --test manual`). The playground page and the code it shares with the manual live in `manual/src/playground/`.
 
 ## Architecture
 
@@ -123,6 +123,7 @@ Test crates live under `tests/`:
   // expect-output: 42      ← assert stdout equals this
   // expect-error: divide   ← assert error message contains this substring
   ```
+  It also generates one test per ` ```ndc ` block in the manual (`manual_<page>_<line>`), run by `tests/manual.rs`; see [Manual](#manual).
 - `tests/compiler/` (`compiler_tests`) — validates the bytecode compiler by asserting exact `OpCode` sequences. Use when adding new VM instructions.
 - `ndc_bin/tests/repl.rs` — feeds lines to the built `ndc` binary's REPL (Unix only) and checks what it prints, e.g. that a failed line leaves no trace.
 - `tests/proptest/` (`proptest_tests`) — property-based panic fuzzer over random token streams. The fresh-fuzz test is `#[ignore]`d; regression replay (from `panic.regressions`) runs by default. See [CONTRIBUTING.md](CONTRIBUTING.md) for run commands.
