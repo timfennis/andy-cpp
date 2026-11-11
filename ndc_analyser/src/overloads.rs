@@ -459,10 +459,7 @@ impl<'a> Overloads<'a> {
                 positions,
             });
         }
-        if !sig
-            .iter()
-            .any(|t| matches!(t, StaticType::Any | StaticType::Var(_)))
-        {
+        if !sig.iter().any(StaticType::is_unknown) {
             return None;
         }
         let permissive: Vec<StaticType> = vec![StaticType::Any; sig.len()];
@@ -536,13 +533,11 @@ impl<'a> Overloads<'a> {
                         .zip(sig)
                         .all(|(param, arg)| !param.is_incompatible_with(arg))
             }
-            // A variable whose type isn't known yet may hold a function.
             StaticType::Function {
                 parameters: None, ..
-            }
-            | StaticType::Any
-            | StaticType::Var(_) => true,
-            _ => false,
+            } => true,
+            // A value whose type isn't known may hold a function.
+            unknown => unknown.is_unknown(),
         }
     }
 

@@ -63,7 +63,7 @@ pub fn wrap_function(function: &syn::ItemFn) -> syn::Result<Vec<WrappedFunction>
                 "a signature already has a return type: drop `return_type`",
             ));
         }
-        check_signature_arity(signature, function.sig.inputs.len())?;
+        check_signature(signature, function.sig.inputs.len())?;
     }
 
     let return_type = match return_type {
@@ -294,46 +294,29 @@ fn map_type_path(p: &syn::TypePath) -> syn::Result<TokenStream> {
     }
 }
 
-/// Checks that a signature such as `<T>(List<T>, T)` declares as many
-/// parameters as the Rust function takes. `(*)` takes any number.
-fn check_signature_arity(signature: &syn::LitStr, expected: usize) -> syn::Result<()> {
-    let text = signature.value();
-    // The parameter list is the first parenthesised group after any `<…>`.
-    let Some(start) = text.find('(') else {
+/// Checks that a signature such as `<T>(List<T>, T)` parses, and that it
+/// declares as many parameters as the Rust function takes.
+fn check_signature(signature: &syn::LitStr, expected: usize) -> syn::Result<()> {
+    let parsed = ndc_core::StaticType::signature(&signature.value())
+        .map_err(|error| syn::Error::new_spanned(signature, error))?;
+    let ndc_core::StaticType::Function {
+        parameters: Some(parameters),
+        ..
+    } = parsed
+    else {
         return Err(syn::Error::new_spanned(
             signature,
-            "a signature needs a parameter list",
+            "a native function takes a fixed number of arguments, so `(*)` doesn't fit",
         ));
     };
-    let mut depth = 0usize;
-    let mut commas = 0;
-    let mut empty = true;
-    let mut variadic = false;
-    let mut previous = ' ';
-    for c in text[start..].chars() {
-        match c {
-            '(' | '<' => depth += 1,
-            ')' if depth == 1 => break,
-            // The `>` of a nested `Fn(T) -> U` closes nothing.
-            '>' if previous == '-' => {}
-            ')' | '>' => depth = depth.saturating_sub(1),
-            ',' if depth == 1 => commas += 1,
-            '*' if depth == 1 => variadic = true,
-            _ => {}
-        }
-        if depth >= 1 && !c.is_whitespace() && !matches!(c, '(' | '*') || depth > 1 {
-            empty = false;
-        }
-        previous = c;
-    }
-    let declared = if empty { 0 } else { commas + 1 };
-    if variadic || declared == expected {
+    if parameters.len() == expected {
         Ok(())
     } else {
         Err(syn::Error::new_spanned(
             signature,
             format!(
-                "the signature declares {declared} parameters but the function takes {expected}"
+                "the signature declares {} parameters but the function takes {expected}",
+                parameters.len()
             ),
         ))
     }

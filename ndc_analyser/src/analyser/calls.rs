@@ -42,7 +42,7 @@ impl Analyser {
     /// settles `xs` as a `List<Int>`, and `push(xs, "a")` then doesn't fit.
     /// When the pick is left to the program as it runs, any function may get
     /// the arguments, so what's unknown in them becomes `Any`.
-    fn commit_call(
+    pub(super) fn commit_call(
         &mut self,
         binding: &Binding<SymbolId>,
         arguments: &[StaticType],
@@ -150,14 +150,47 @@ impl Analyser {
         // get their slots first.
         let Expression::Identifier { name, .. } = &function.expression else {
             let callee_type = self.analyse_expr(function);
-            for arg in arguments {
-                // Nothing tells what the callee does with its arguments.
-                let argument = self.analyse_expr(arg);
-                self.vars.settle_unknowns(&argument, &StaticType::Any);
-            }
+            let arguments = arguments
+                .iter()
+                .map(|arg| self.analyse_expr(arg))
+                .collect::<Vec<_>>();
             return match callee_type {
-                StaticType::Function { return_type, .. } => *return_type,
-                unknown if unknown.is_unknown() => StaticType::Any,
+                // The callee's type says what it takes, like a picked overload's.
+                StaticType::Function {
+                    parameters: Some(parameters),
+                    return_type,
+                } if parameters.len() == arguments.len() => {
+                    let mut fits = true;
+                    for (parameter, argument) in parameters.iter().zip(&arguments) {
+                        fits &= self.vars.bind_argument(parameter, argument);
+                    }
+                    if !fits {
+                        let arguments = arguments
+                            .iter()
+                            .map(|argument| self.vars.resolve(argument))
+                            .collect::<Vec<_>>();
+                        let callee_type = StaticType::Function {
+                            parameters: Some(parameters),
+                            return_type: return_type.clone(),
+                        };
+                        self.emit(AnalysisError::callee_rejects_arguments(
+                            &self.vars.resolve(&callee_type),
+                            &arguments,
+                            span,
+                        ));
+                    }
+                    self.vars.resolve(&return_type)
+                }
+                // Nothing tells what the callee does with its arguments.
+                callee if callee.could_be_callable() => {
+                    for argument in &arguments {
+                        self.vars.settle_unknowns(argument, &StaticType::Any);
+                    }
+                    match callee {
+                        StaticType::Function { return_type, .. } => *return_type,
+                        _ => StaticType::Any,
+                    }
+                }
                 other => {
                     self.emit(AnalysisError::not_callable(&other, span));
                     StaticType::Any

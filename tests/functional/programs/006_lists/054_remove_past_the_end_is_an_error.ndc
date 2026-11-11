@@ -1,0 +1,4 @@
+// Removing at the list's length is out of bounds: an error, not a crash.
+// expect-error: index 2 is out of bounds
+let xs = [1, 2];
+xs.remove(2);

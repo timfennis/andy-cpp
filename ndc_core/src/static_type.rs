@@ -248,12 +248,12 @@ impl StaticType {
         }
 
         // Any is the universal supertype
-        if matches!(other, Self::Any | Self::Var(_) | Self::Generic(_)) {
+        if other.is_unknown() {
             return true;
         }
 
         // Only Any satisfies the above; all other types fail here
-        if matches!(self, Self::Any | Self::Var(_) | Self::Generic(_)) {
+        if self.is_unknown() {
             return false;
         }
 
@@ -363,9 +363,7 @@ impl StaticType {
         }
 
         // Any is the top type
-        if matches!(self, Self::Any | Self::Var(_) | Self::Generic(_))
-            || matches!(other, Self::Any | Self::Var(_) | Self::Generic(_))
-        {
+        if self.is_unknown() || other.is_unknown() {
             return Self::Any;
         }
 
@@ -454,8 +452,7 @@ impl StaticType {
     fn glb(&self, other: &Self) -> Self {
         // Any is the top type: glb(Any, T) = T
         match (self, other) {
-            (Self::Any | Self::Var(_) | Self::Generic(_), t)
-            | (t, Self::Any | Self::Var(_) | Self::Generic(_)) => t.clone(),
+            (unknown, t) | (t, unknown) if unknown.is_unknown() => t.clone(),
             _ if self == other => self.clone(),
             _ if self.is_subtype(other) => self.clone(),
             _ if other.is_subtype(self) => other.clone(),
@@ -533,7 +530,7 @@ impl StaticType {
                 key.as_ref().clone(),
                 value.as_ref().clone(),
             ])),
-            Self::Any | Self::Var(_) | Self::Generic(_) => Some(Self::Any),
+            unknown if unknown.is_unknown() => Some(Self::Any),
             _ => None,
         }
     }
@@ -774,10 +771,7 @@ impl StaticType {
     /// This is true for `Function` types and for `Any` (which might be a
     /// function at runtime). Concrete non-function types return `false`.
     pub fn could_be_callable(&self) -> bool {
-        matches!(
-            self,
-            Self::Function { .. } | Self::Any | Self::Var(_) | Self::Generic(_)
-        )
+        matches!(self, Self::Function { .. }) || self.is_unknown()
     }
 
     pub fn is_fn_and_matches(&self, types: &[Self]) -> bool {
@@ -800,7 +794,10 @@ impl StaticType {
     pub fn unpack(&self) -> Option<Box<dyn Iterator<Item = &Self> + '_>> {
         match self {
             // Any just unpacks to an infinite list of Any
-            Self::Any | Self::Var(_) | Self::Generic(_) => Some(Box::new(std::iter::repeat(&Self::Any))),
+            // The same types as `is_unknown`, spelled out for this exhaustive match.
+            Self::Any | Self::Var(_) | Self::Generic(_) => {
+                Some(Box::new(std::iter::repeat(&Self::Any)))
+            }
             Self::List(elem)
             | Self::Sequence(elem)
             | Self::Iterator(elem)

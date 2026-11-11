@@ -1245,6 +1245,7 @@ dependencies = [
 name = "ndc_macros"
 version = "0.1.0"
 dependencies = [
+ "ndc_core",
  "proc-macro2",
  "quote",
  "syn",

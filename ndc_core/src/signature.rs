@@ -142,10 +142,13 @@ impl SignatureParser {
     fn typ(&mut self) -> Result<StaticType, String> {
         let token = self.next()?;
         match token.as_str() {
-            // `()` is unit, `(A, B)` a tuple and `(A)` just `A`.
+            // `()` is unit, `(A, B)` and `(A,)` are tuples, and `(A)` is just `A`.
             "(" => {
+                let start = self.position;
                 let mut elements = self.list(")")?;
-                if elements.len() == 1 {
+                let trailing_comma = self.tokens[start..self.position]
+                    .ends_with(&[",".to_string(), ")".to_string()]);
+                if elements.len() == 1 && !trailing_comma {
                     Ok(elements.remove(0))
                 } else {
                     Ok(StaticType::Tuple(elements))
@@ -236,6 +239,16 @@ mod tests {
         assert_eq!(
             StaticType::signature("(*) -> Any"),
             Ok(function(None, StaticType::Any))
+        );
+        assert_eq!(
+            StaticType::signature("((Int,), (Int))"),
+            Ok(function(
+                Some(vec![
+                    StaticType::Tuple(vec![StaticType::Int]),
+                    StaticType::Int
+                ]),
+                StaticType::unit()
+            ))
         );
     }
 

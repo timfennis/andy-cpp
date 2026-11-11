@@ -312,7 +312,14 @@ impl Analyser {
                 let symbol = self.resolver.innermost_reference(*id);
                 let binding = Binding::Resolved(Candidate::Scalar(symbol));
                 self.picks.bindings.insert(*id, binding);
-                self.vars.resolve(self.types.get_type(symbol))
+                // A generic built-in used as a value, as in `let p = push`,
+                // has one type there, which its uses settle.
+                let typ = self.vars.resolve(self.types.get_type(symbol));
+                if typ.contains(&|part| matches!(part, StaticType::Generic(_))) {
+                    self.vars.instantiate(&typ)
+                } else {
+                    typ
+                }
             }
             Expression::Statement(inner) => {
                 let typ = self.analyse_expr(inner);

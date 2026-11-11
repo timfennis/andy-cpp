@@ -58,7 +58,7 @@ mod inner {
     /// Removes and returns the element at position `index` within the list, shifting all elements after it to the left.
     #[function(signature = "<T>(List<T>, Int) -> T")]
     pub fn remove(list: &mut Vec<Value>, index: usize) -> anyhow::Result<Value> {
-        if index > list.len() {
+        if index >= list.len() {
             return Err(anyhow!("index {index} is out of bounds"));
         }
 

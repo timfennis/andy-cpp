@@ -40,14 +40,21 @@ fn analyse_last_type(source: &str) -> StaticType {
 /// `[]` and `[]=`, which index reads and writes go through. Name resolution
 /// rejects index access without them, as it would any other unknown function.
 fn index_natives() -> Vec<(String, StaticType)> {
-    let any_function = StaticType::Function {
-        parameters: None,
-        return_type: Box::new(StaticType::Any),
-    };
-    vec![
-        ("[]".to_string(), any_function.clone()),
-        ("[]=".to_string(), any_function),
+    // The stdlib's list and map overloads.
+    [
+        ("[]", "<T>(List<T>, Int) -> T"),
+        ("[]", "<T>(List<T>, Iterator<Any>) -> List<T>"),
+        ("[]", "<K, V>(Map<K, V>, K) -> V"),
+        ("[]=", "<T>(List<T>, Int, T)"),
+        ("[]=", "<T>(List<T>, Iterator<Any>, Sequence<T>)"),
+        ("[]=", "<K, V>(Map<K, V>, K, V)"),
     ]
+    .into_iter()
+    .map(|(name, signature)| {
+        let typ = StaticType::signature(signature).expect("valid signature");
+        (name.to_string(), typ)
+    })
+    .collect()
 }
 
 /// Every error analysing `source` reports, in order.
@@ -533,6 +540,52 @@ fn a_call_picked_at_runtime_has_no_type_parameters_in_its_type() {
             return_type: Box::new(StaticType::List(Box::new(StaticType::Any))),
         }
     );
+}
+
+#[test]
+fn a_generic_built_in_used_as_a_value_has_one_type() {
+    let globals = natives(&[("push", "<T>(List<T>, T)")]);
+    assert_eq!(
+        analyse_last_type_with_globals("let p = push; let xs = [1]; p(xs, 2); p", globals),
+        StaticType::Function {
+            parameters: Some(vec![
+                StaticType::List(Box::new(StaticType::Int)),
+                StaticType::Int
+            ]),
+            return_type: Box::new(StaticType::unit()),
+        }
+    );
+}
+
+#[test]
+fn calling_a_function_value_checks_its_arguments() {
+    assert_eq!(
+        errors(
+            "let f = fn(x: Int) { x }; let g = [f]; g[0](\"a\");",
+            index_natives()
+        ),
+        vec!["A Function(Int) -> Int doesn't accept the arguments 'String'"]
+    );
+}
+
+#[test]
+fn an_index_write_checks_the_index_against_the_container() {
+    let plus = natives(&[("+", "(Int, Int) -> Int")]);
+    let globals = [index_natives(), plus].concat();
+    for (source, expected) in [
+        (
+            "let m = %{1: 2}; m[\"a\"] = 3;",
+            "No function called '[]=' found that matches the arguments 'Map<Int, Int>, String, Int'",
+        ),
+        // Reading the old value fails first, and is the one error reported.
+        (
+            "let m = %{\"a\": 1}; m[0] += 3;",
+            "No function called '[]' found that matches the arguments 'Map<String, Int>, Int'",
+        ),
+        ("let a = 5; a[0] = 1;", "Unable to index into Int"),
+    ] {
+        assert_eq!(errors(source, globals.clone()), vec![expected], "{source}");
+    }
 }
 
 #[test]
