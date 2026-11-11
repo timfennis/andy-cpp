@@ -43,11 +43,9 @@ pub(crate) struct TypeVars {
     /// elements of `[]`, which is what `[]` was typed as before.
     fallbacks: Vec<StaticType>,
     /// The variables in the order they were settled, so a [`Snapshot`] can
-    /// unsettle the ones settled after it.
+    /// unsettle the ones settled after it, and the solver can tell which
+    /// ones were settled since it last looked.
     trail: Vec<TypeVar>,
-    /// How many times a variable was settled, so a caller can tell whether
-    /// anything changed since it last looked.
-    generation: u64,
 }
 
 /// The state of the variables at one point, which [`TypeVars::rollback`]
@@ -83,12 +81,19 @@ impl TypeVars {
         debug_assert!(self.solution(var).is_none(), "{var:?} is settled twice");
         self.solutions[var.0 as usize] = Some(typ);
         self.trail.push(var);
-        self.generation += 1;
     }
 
-    /// Changes every time a variable is settled.
-    pub(crate) fn generation(&self) -> u64 {
-        self.generation
+    /// How many settlings there have been, to pass to
+    /// [`Self::settled_since`] later.
+    pub(crate) fn settled_count(&self) -> usize {
+        self.trail.len()
+    }
+
+    /// The variables settled since there were `count` settlings. A rollback
+    /// only undoes settlings made after the snapshot it returns to, so
+    /// `count` from before a snapshot stays valid.
+    pub(crate) fn settled_since(&self, count: usize) -> &[TypeVar] {
+        &self.trail[count.min(self.trail.len())..]
     }
 
     /// The current state, to [`Self::rollback`] to later.
@@ -107,7 +112,6 @@ impl TypeVars {
         }
         self.solutions.truncate(snapshot.vars);
         self.fallbacks.truncate(snapshot.vars);
-        self.generation += 1;
     }
 
     /// Unifies `a` and `b` if they can be made the same type, and otherwise

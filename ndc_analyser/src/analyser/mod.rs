@@ -4,11 +4,12 @@ use crate::types::{TypeTable, TypeVars};
 use ahash::{AHashMap, AHashSet};
 use ndc_analysis::{Analysis, Binding, Candidate};
 use ndc_core::r#struct::{StructInfo, StructRegistry};
-use ndc_core::{NodeId, StaticType};
+use ndc_core::{NodeId, StaticType, TypeVar};
 use ndc_layout::{Layout, Picks};
-use ndc_lexer::NumericLiteral;
+use ndc_lexer::{NumericLiteral, Span};
 use ndc_parser::{Expression, ExpressionLocation, ForBody, ForIteration, TypeExpr};
 use ndc_resolver::{NameResolver, SymbolId};
+use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::rc::Rc;
 
@@ -43,11 +44,17 @@ pub struct Analyser {
     types: TypeTable,
     /// What the type variables in those types stand for, once known.
     vars: TypeVars,
-    /// The calls and other uses that wait for types that aren't known yet.
-    waiting: Vec<Constraint>,
-    /// [`TypeVars::generation`] when the waiting constraints were last
-    /// tried, so they're tried again only after something was settled.
-    solved_generation: u64,
+    /// The calls and other uses that wait for types that aren't known yet,
+    /// by the order they started waiting in.
+    waiting: BTreeMap<u64, Constraint>,
+    /// The number the next waiting constraint gets.
+    next_serial: u64,
+    /// The waiting constraints that each unsettled variable would let make
+    /// progress once settled.
+    watchers: AHashMap<TypeVar, Vec<u64>>,
+    /// [`TypeVars::settled_count`] when the waiting constraints were last
+    /// woken, so the ones watching a variable settled since are woken next.
+    watched_settlings: usize,
     /// The nodes of `xs[i] op= v` whose read of `xs[i]` failed, so the
     /// write, which fails the same way, isn't reported again.
     failed_reads: AHashSet<NodeId>,
@@ -87,8 +94,10 @@ impl Analyser {
             resolver,
             types,
             vars: TypeVars::default(),
-            waiting: Vec::new(),
-            solved_generation: 0,
+            waiting: BTreeMap::new(),
+            next_serial: 0,
+            watchers: AHashMap::new(),
+            watched_settlings: 0,
             failed_reads: AHashSet::new(),
             struct_registry: StructRegistry::default(),
             struct_types: AHashMap::new(),
@@ -108,6 +117,7 @@ impl Analyser {
         // is solved, and no variable leaves the analyser.
         self.settle_waiting(0);
         debug_assert!(self.waiting.is_empty(), "unsolved: {:?}", self.waiting);
+        self.watchers.clear();
         self.failed_reads.clear();
         self.types.resolve_all(&self.vars);
         let analysis = &mut self.result.analysis;
@@ -363,7 +373,7 @@ impl Analyser {
                     StaticType::unit()
                 };
 
-                self.join(&true_type, &false_type)
+                self.join(&true_type, &false_type, *span)
             }
             Expression::While {
                 expression,
@@ -426,10 +436,10 @@ impl Analyser {
                 let mut value_type: Option<StaticType> = None;
                 for (key, value) in values {
                     let found = self.analyse_expr(key);
-                    self.fold_join(&mut key_type, found);
+                    self.fold_join(&mut key_type, found, key.span);
                     if let Some(value) = value {
                         let found = self.analyse_expr(value);
-                        self.fold_join(&mut value_type, found);
+                        self.fold_join(&mut value_type, found, value.span);
                     }
                 }
 
@@ -437,7 +447,7 @@ impl Analyser {
                 // the map's value type.
                 if let Some(default) = default {
                     let default_type = Self::default_value_type(self.analyse_expr(default));
-                    self.fold_join(&mut value_type, default_type);
+                    self.fold_join(&mut value_type, default_type, default.span);
                 }
 
                 let key_type = match key_type {
@@ -459,7 +469,7 @@ impl Analyser {
                 let typ = self.analyse_expr(value);
                 match self.return_type_stack.pop() {
                     Some(mut returned) => {
-                        self.fold_join(&mut returned, typ);
+                        self.fold_join(&mut returned, typ, *span);
                         self.return_type_stack.push(returned);
                     }
                     None => self.emit(AnalysisError::return_outside_function(*span)),
@@ -548,7 +558,7 @@ impl Analyser {
         let mut element_type: Option<StaticType> = None;
         for expression in expressions {
             let found = self.analyse_expr(expression);
-            self.fold_join(&mut element_type, found);
+            self.fold_join(&mut element_type, found, expression.span);
         }
         element_type
     }
@@ -563,28 +573,10 @@ impl Analyser {
         }
     }
 
-    /// The one type that values of type `a` and `b` both have, as the two
-    /// branches of an `if`. Where either isn't fully known, they're made the
-    /// same type: `if c { [] } else { [1] }` is a `List<Int>`. Two known
-    /// types join at their least upper bound.
-    fn join(&mut self, a: &StaticType, b: &StaticType) -> StaticType {
-        let (a, b) = (self.vars.resolve(a), self.vars.resolve(b));
-        if a == StaticType::Never {
-            return b;
-        }
-        if b == StaticType::Never {
-            return a;
-        }
-        if (a.has_vars() || b.has_vars()) && self.vars.try_unify(&a, &b) {
-            return self.vars.resolve(&a);
-        }
-        a.lub(&b)
-    }
-
     /// Joins a new type into an accumulator, as with [`Self::join`].
-    fn fold_join(&mut self, acc: &mut Option<StaticType>, new_type: StaticType) {
+    fn fold_join(&mut self, acc: &mut Option<StaticType>, new_type: StaticType, span: Span) {
         *acc = Some(match acc.take() {
-            Some(prev) => self.join(&prev, &new_type),
+            Some(prev) => self.join(&prev, &new_type, span),
             None => new_type,
         });
     }

@@ -80,46 +80,22 @@ impl Analyser {
                 .collect::<Vec<_>>();
             return match self.vars.resolve(&callee_type) {
                 // The callee's type says what it takes, like a picked overload's.
-                StaticType::Function {
-                    parameters: Some(parameters),
-                    return_type,
-                } if parameters.len() == arguments.len() => {
-                    let snapshot = self.vars.snapshot();
-                    let mut fits = true;
-                    for (parameter, argument) in parameters.iter().zip(&arguments) {
-                        fits &= self.vars.bind_argument(parameter, argument);
-                    }
-                    if !fits {
-                        self.vars.rollback(snapshot);
-                        let arguments = arguments
-                            .iter()
-                            .map(|argument| self.vars.shown(argument))
-                            .collect::<Vec<_>>();
-                        let callee_type = StaticType::Function {
-                            parameters: Some(parameters),
-                            return_type: return_type.clone(),
-                        };
-                        self.emit(AnalysisError::callee_rejects_arguments(
-                            &self.vars.resolve(&callee_type),
-                            &arguments,
-                            span,
-                        ));
-                    }
-                    self.vars.resolve(&return_type)
-                }
-                // A callee whose type isn't known yet is a function that
-                // takes these arguments.
-                callee @ StaticType::Var(_) => {
-                    let returns = self.vars.fresh(StaticType::Any);
-                    self.vars.unify(
-                        &callee,
-                        &StaticType::Function {
-                            parameters: Some(arguments),
-                            return_type: Box::new(returns.clone()),
-                        },
-                    );
-                    self.vars.resolve(&returns)
-                }
+                callee @ StaticType::Function {
+                    parameters: Some(_),
+                    ..
+                } => self.bind_signature(&callee, &arguments).unwrap_or_else(|| {
+                    let arguments = arguments
+                        .iter()
+                        .map(|argument| self.vars.shown(argument))
+                        .collect::<Vec<_>>();
+                    self.emit(AnalysisError::callee_rejects_arguments(
+                        &self.vars.shown(&callee),
+                        &arguments,
+                        span,
+                    ));
+                    StaticType::Any
+                }),
+                callee @ StaticType::Var(_) => self.call_unknown_function(&callee, arguments),
                 // Nothing tells what the callee does with its arguments.
                 callee if callee.could_be_callable() => {
                     for argument in &arguments {

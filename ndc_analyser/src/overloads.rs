@@ -88,7 +88,7 @@ fn could_pass(param: &StaticType, arg: &StaticType) -> bool {
 /// not bidirectionally equivalent. Used by [`Overloads::most_specific_match`] to order
 /// matching overloads by specificity: an overload with `more` parameters
 /// accepts strictly fewer call signatures than one with `less` parameters.
-fn is_strictly_more_specific(more: &[StaticType], less: &[StaticType]) -> bool {
+pub(crate) fn is_strictly_more_specific(more: &[StaticType], less: &[StaticType]) -> bool {
     if more.len() != less.len() {
         return false;
     }

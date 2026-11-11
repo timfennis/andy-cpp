@@ -4,11 +4,12 @@
 
 use super::Analyser;
 use crate::error::AnalysisError;
-use crate::overloads::{CallKind, ResolvedCall};
+use crate::overloads::{CallKind, ResolvedCall, is_strictly_more_specific};
 use ndc_analysis::{Binding, Candidate};
 use ndc_core::{NodeId, StaticType};
 use ndc_lexer::Span;
 use ndc_resolver::{Candidates, SymbolId};
+use std::collections::BTreeSet;
 
 /// Where a call's candidates come from and where its pick goes.
 #[derive(Debug, Clone, Copy)]
@@ -19,6 +20,10 @@ pub(super) enum CallSite {
     Getter(NodeId),
     /// The write in `xs[i] = v`.
     Setter(NodeId),
+    /// The write in `p.x = v`.
+    FieldSetter(NodeId),
+    /// The operator in `a op= b`, which is `a = op(a, b)`.
+    OpAssignment(NodeId),
 }
 
 /// Something that waits until the types it depends on are known.
@@ -38,6 +43,24 @@ pub(super) enum Constraint {
         parts: Vec<StaticType>,
         span: Span,
     },
+    /// The one type the two branches of an `if` have, once both are known.
+    Join {
+        sides: [StaticType; 2],
+        result: StaticType,
+        span: Span,
+    },
+}
+
+impl Constraint {
+    /// The types whose variables the constraint waits on.
+    fn inputs(&self) -> &[StaticType] {
+        match self {
+            Self::Call(call) => &call.arguments,
+            Self::Iterate { sequence, .. } => std::slice::from_ref(sequence),
+            Self::Unpack { value, .. } => std::slice::from_ref(value),
+            Self::Join { sides, .. } => sides,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -50,9 +73,6 @@ pub(super) struct CallConstraint {
     kind: CallKind,
     name: String,
     span: Span,
-    /// The arguments when the call last couldn't be picked, so it's tried
-    /// again only once they've changed.
-    tried: Option<Vec<StaticType>>,
 }
 
 impl Analyser {
@@ -75,14 +95,13 @@ impl Analyser {
             kind,
             name: name.to_string(),
             span,
-            tried: None,
         };
-        if let Some(typ) = self.try_call(&mut call) {
+        if let Some(typ) = self.try_call(&call) {
             return typ;
         }
         call.result = self.vars.fresh(StaticType::Any);
         let result = call.result.clone();
-        self.waiting.push(Constraint::Call(call));
+        self.wait(Constraint::Call(call));
         result
     }
 
@@ -92,7 +111,7 @@ impl Analyser {
         match self.vars.resolve(&sequence) {
             StaticType::Var(_) => {
                 let element = self.vars.fresh(StaticType::Any);
-                self.waiting.push(Constraint::Iterate {
+                self.wait(Constraint::Iterate {
                     sequence,
                     element: element.clone(),
                     span,
@@ -114,7 +133,7 @@ impl Analyser {
         let parts = (0..count)
             .map(|_| self.vars.fresh(StaticType::Any))
             .collect::<Vec<_>>();
-        self.waiting.push(Constraint::Unpack {
+        self.wait(Constraint::Unpack {
             value,
             parts: parts.clone(),
             span,
@@ -122,29 +141,107 @@ impl Analyser {
         parts
     }
 
-    /// Solves every waiting constraint that can be solved now, until solving
-    /// one doesn't make another solvable.
-    pub(super) fn solve_waiting(&mut self) {
-        if self.vars.generation() == self.solved_generation {
-            return;
-        }
-        loop {
-            let mut progress = false;
-            let mut index = 0;
-            while index < self.waiting.len() {
-                let mut constraint = self.waiting.remove(index);
-                if self.try_constraint(&mut constraint) {
-                    progress = true;
-                } else {
-                    self.waiting.insert(index, constraint);
-                    index += 1;
+    /// The one type that values of type `a` and `b` both have, as the two
+    /// branches of an `if`: their least upper bound. Where a part of either
+    /// isn't known yet, that part waits until it is, so a lambda's parameter
+    /// isn't fixed by the branch next to it: in `fn(x) => if c { x } else
+    /// { 0 }`, `x` can still be a `Float`. Parts both sides share are joined
+    /// part by part, so `if c { [] } else { [1] }` is a list either way.
+    pub(super) fn join(&mut self, a: &StaticType, b: &StaticType, span: Span) -> StaticType {
+        let (a, b) = (self.vars.resolve(a), self.vars.resolve(b));
+        match (&a, &b) {
+            (StaticType::Never, _) => b,
+            (_, StaticType::Never) => a,
+            _ if a == b => a,
+            _ if !a.has_vars() && !b.has_vars() => a.lub(&b),
+            (StaticType::Option(x), StaticType::Option(y)) => {
+                StaticType::Option(Box::new(self.join(x, y, span)))
+            }
+            (StaticType::List(x), StaticType::List(y)) => {
+                StaticType::List(Box::new(self.join(x, y, span)))
+            }
+            (StaticType::Iterator(x), StaticType::Iterator(y)) => {
+                StaticType::Iterator(Box::new(self.join(x, y, span)))
+            }
+            (StaticType::Deque(x), StaticType::Deque(y)) => {
+                StaticType::Deque(Box::new(self.join(x, y, span)))
+            }
+            (StaticType::MinHeap(x), StaticType::MinHeap(y)) => {
+                StaticType::MinHeap(Box::new(self.join(x, y, span)))
+            }
+            (StaticType::MaxHeap(x), StaticType::MaxHeap(y)) => {
+                StaticType::MaxHeap(Box::new(self.join(x, y, span)))
+            }
+            (StaticType::Map { key: k1, value: v1 }, StaticType::Map { key: k2, value: v2 }) => {
+                StaticType::Map {
+                    key: Box::new(self.join(k1, k2, span)),
+                    value: Box::new(self.join(v1, v2, span)),
                 }
             }
-            if !progress {
-                break;
+            (StaticType::Tuple(xs), StaticType::Tuple(ys)) if xs.len() == ys.len() => {
+                StaticType::Tuple(
+                    xs.iter()
+                        .zip(ys)
+                        .map(|(x, y)| self.join(x, y, span))
+                        .collect(),
+                )
+            }
+            _ => {
+                let result = self.vars.fresh(StaticType::Any);
+                self.wait(Constraint::Join {
+                    sides: [a, b],
+                    result: result.clone(),
+                    span,
+                });
+                result
             }
         }
-        self.solved_generation = self.vars.generation();
+    }
+
+    /// Makes `constraint` wait, in the order it started waiting, until one
+    /// of the variables it waits on is settled.
+    fn wait(&mut self, constraint: Constraint) {
+        let serial = self.next_serial;
+        self.next_serial += 1;
+        self.wait_again(serial, constraint);
+    }
+
+    fn wait_again(&mut self, serial: u64, constraint: Constraint) {
+        for var in constraint
+            .inputs()
+            .iter()
+            .flat_map(|input| self.vars.unsettled(input))
+        {
+            self.watchers.entry(var).or_default().push(serial);
+        }
+        self.waiting.insert(serial, constraint);
+    }
+
+    /// Tries again each waiting constraint that waits on a variable settled
+    /// since this last ran, oldest first, until that settles nothing more.
+    pub(super) fn solve_waiting(&mut self) {
+        loop {
+            let settled = self.vars.settled_since(self.watched_settlings);
+            if settled.is_empty() {
+                break;
+            }
+            let woken = settled
+                .iter()
+                .filter_map(|var| self.watchers.remove(var))
+                .flatten()
+                .collect::<BTreeSet<_>>();
+            self.watched_settlings = self.vars.settled_count();
+            for serial in woken {
+                // A constraint woken by an earlier variable may be solved already.
+                let Some(mut constraint) = self.waiting.remove(&serial) else {
+                    continue;
+                };
+                if !self.try_constraint(&mut constraint) {
+                    self.wait_again(serial, constraint);
+                }
+            }
+        }
+        self.watched_settlings = self.vars.settled_count();
     }
 
     /// Solves what waits on the variables made since `first`, which nothing
@@ -153,27 +250,52 @@ impl Analyser {
     /// settled the same way. Constraints that wait only on older variables
     /// keep waiting.
     pub(super) fn settle_waiting(&mut self, first: usize) {
+        // Settling only ever makes more known, so a constraint found to wait
+        // on no variable made since `first` never needs looking at again.
+        let mut checked = 0;
         loop {
             self.solve_waiting();
-            let next = self.waiting.iter().find_map(|constraint| {
-                let inputs: &[StaticType] = match constraint {
-                    Constraint::Call(call) => &call.arguments,
-                    Constraint::Iterate { sequence, .. } => std::slice::from_ref(sequence),
-                    Constraint::Unpack { value, .. } => std::slice::from_ref(value),
-                };
-                let vars = inputs
-                    .iter()
-                    .flat_map(|input| self.vars.unsettled(input))
-                    .filter(|var| var.0 as usize >= first)
-                    .collect::<Vec<_>>();
-                (!vars.is_empty()).then_some(vars)
-            });
-            let Some(vars) = next else {
+            let next = self
+                .waiting
+                .range(checked..)
+                .find_map(|(&serial, constraint)| {
+                    let vars = constraint
+                        .inputs()
+                        .iter()
+                        .flat_map(|input| self.vars.unsettled(input))
+                        .filter(|var| var.0 as usize >= first)
+                        .collect::<Vec<_>>();
+                    (!vars.is_empty()).then_some((serial, vars))
+                });
+            let Some((serial, vars)) = next else {
                 break;
             };
+            checked = serial;
+            // What nothing else settled in `a op= b` keeps the type it
+            // already had, so it's taken from `b`: in `m["k"] += 3` on an
+            // empty map, the values are Ints.
+            if let Some(Constraint::Call(call)) = self.waiting.get(&serial)
+                && let CallSite::OpAssignment(_) = call.site
+                && let [target, operand] = &call.arguments[..]
+            {
+                let (target, operand) = (target.clone(), operand.clone());
+                self.vars.try_unify(&target, &operand);
+            }
             self.vars.settle_with_fallbacks(&vars);
         }
         self.vars.settle_from(first);
+        self.solve_waiting();
+        // A call can still wait when its arguments are known: a variable's
+        // type might have settled since, which nothing watches.
+        let serials = self.waiting.keys().copied().collect::<Vec<_>>();
+        for serial in serials {
+            let Some(mut constraint) = self.waiting.remove(&serial) else {
+                continue;
+            };
+            if !self.try_constraint(&mut constraint) {
+                self.wait_again(serial, constraint);
+            }
+        }
         self.solve_waiting();
     }
 
@@ -186,7 +308,11 @@ impl Analyser {
                     return false;
                 };
                 let result = call.result.clone();
-                self.settle_waited_for(&result, &typ, call.span);
+                if !self.settle_waited_for(&result, &typ, call.span)
+                    && let CallSite::Getter(id) = call.site
+                {
+                    self.failed_reads.insert(id);
+                }
                 true
             }
             Constraint::Iterate {
@@ -233,16 +359,32 @@ impl Analyser {
                 }
                 true
             }
+            Constraint::Join {
+                sides: [a, b],
+                result,
+                span,
+            } => {
+                let (a, b) = (self.vars.resolve(a), self.vars.resolve(b));
+                if a.has_vars() || b.has_vars() {
+                    return false;
+                }
+                let result = result.clone();
+                self.settle_waited_for(&result, &a.lub(&b), *span);
+                true
+            }
         }
     }
 
     /// Settles `waited`, the type a constraint gave out while it waited, as
     /// `found`, the type it turned out to be. Code analysed meanwhile may
     /// have settled `waited` already, and then `found` has to fit it.
-    fn settle_waited_for(&mut self, waited: &StaticType, found: &StaticType, span: Span) {
-        if !self.accepts_write(waited, found) {
+    /// Returns whether it does.
+    fn settle_waited_for(&mut self, waited: &StaticType, found: &StaticType, span: Span) -> bool {
+        let fits = self.accepts_write(waited, found);
+        if !fits {
             self.emit_rejected_write(waited, found, span);
         }
+        fits
     }
 
     /// Picks the overload `call` means, records it, and returns the call's
@@ -251,15 +393,12 @@ impl Analyser {
     /// the candidates that can't accept what's known are crossed off, and
     /// when one is left, the call commits to it, which settles the arguments
     /// from its parameters.
-    fn try_call(&mut self, call: &mut CallConstraint) -> Option<StaticType> {
+    fn try_call(&mut self, call: &CallConstraint) -> Option<StaticType> {
         let arguments = call
             .arguments
             .iter()
             .map(|argument| self.vars.resolve(argument))
             .collect::<Vec<_>>();
-        if call.tried.as_ref() == Some(&arguments) {
-            return None;
-        }
         let reachable = self.overloads().reachable_symbols(&call.candidates);
 
         // A variable whose type isn't known yet, like the parameter `f` in
@@ -267,22 +406,20 @@ impl Analyser {
         if let [only] = reachable[..]
             && let callee @ StaticType::Var(_) = self.vars.resolve(self.types.get_type(only))
         {
-            let returns = self.vars.fresh(StaticType::Any);
-            self.vars.unify(
-                &callee,
-                &StaticType::Function {
-                    parameters: Some(arguments),
-                    return_type: Box::new(returns.clone()),
-                },
+            let typ = self.call_unknown_function(&callee, arguments);
+            self.record_pick(
+                call.site,
+                Binding::Resolved(Candidate::Scalar(only)),
+                &call.arguments,
             );
-            self.record_pick(call.site, Binding::Resolved(Candidate::Scalar(only)));
-            return Some(self.vars.resolve(&returns));
+            return Some(typ);
         }
 
         // A write waits for the value it stores, which is analysed after the
         // target: only then can it tell whether the value is what's wrong.
-        if let (CallSite::Setter(_), Some(StaticType::Var(_))) = (call.site, arguments.last()) {
-            call.tried = Some(arguments);
+        if let (CallSite::Setter(_) | CallSite::FieldSetter(_), Some(StaticType::Var(_))) =
+            (call.site, arguments.last())
+        {
             return None;
         }
 
@@ -295,6 +432,12 @@ impl Analyser {
             .copied()
             .filter(|&symbol| self.could_accept(symbol, &arguments))
             .collect::<Vec<_>>();
+        // An overload taking `Any` where another takes something narrower
+        // loses to it, as it would once the arguments are known.
+        let viable = match self.most_specific(&viable) {
+            Some(symbol) => vec![symbol],
+            None => viable,
+        };
         match viable[..] {
             [] => Some(self.resolve_call_now(call, &arguments)),
             [only]
@@ -308,16 +451,13 @@ impl Analyser {
             {
                 let binding = Binding::Resolved(Candidate::Scalar(only));
                 let typ = self.commit_call(&binding, &arguments, StaticType::Any);
-                self.record_pick(call.site, binding);
+                self.record_pick(call.site, binding, &arguments);
                 Some(typ.unwrap_or_else(|| {
                     self.report_failed_call(call, &arguments);
                     StaticType::Any
                 }))
             }
-            _ => {
-                call.tried = Some(arguments);
-                None
-            }
+            _ => None,
         }
     }
 
@@ -332,11 +472,11 @@ impl Analyser {
             .resolve_call(&call.candidates, arguments, call.kind);
         if matches!(binding, Binding::None) {
             self.report_failed_call(call, arguments);
-            self.record_pick(call.site, binding);
+            self.record_pick(call.site, binding, arguments);
             return StaticType::Any;
         }
         let typ = self.commit_call(&binding, arguments, return_type);
-        self.record_pick(call.site, binding);
+        self.record_pick(call.site, binding, arguments);
         typ.unwrap_or_else(|| {
             self.report_failed_call(call, arguments);
             StaticType::Any
@@ -360,8 +500,29 @@ impl Analyser {
     ) -> Option<StaticType> {
         let picked = match binding {
             Binding::Resolved(Candidate::Scalar(symbol)) => Some(*symbol),
-            // Element-wise operators on tuples leave the types they have.
-            Binding::Resolved(Candidate::Vec(_)) => return Some(return_type),
+            // An operator on tuples applies one overload to each position,
+            // with a scalar operand used at every position.
+            Binding::Resolved(Candidate::Vec(symbol)) => {
+                let Some(length) = arguments.iter().find_map(|argument| match argument {
+                    StaticType::Tuple(elements) => Some(elements.len()),
+                    _ => None,
+                }) else {
+                    return Some(return_type);
+                };
+                let scalar = Binding::Resolved(Candidate::Scalar(*symbol));
+                let mut returns = Vec::with_capacity(length);
+                for position in 0..length {
+                    let arguments = arguments
+                        .iter()
+                        .map(|argument| match argument {
+                            StaticType::Tuple(elements) => elements[position].clone(),
+                            scalar => scalar.clone(),
+                        })
+                        .collect::<Vec<_>>();
+                    returns.push(self.commit_call(&scalar, &arguments, StaticType::Any)?);
+                }
+                return Some(StaticType::Tuple(returns));
+            }
             Binding::Dynamic(_) | Binding::None => None,
         };
         let signature = picked.map(|symbol| {
@@ -379,16 +540,63 @@ impl Analyser {
             return Some(return_type);
         };
 
+        self.bind_signature(
+            &StaticType::Function {
+                parameters: Some(parameters),
+                return_type: declared_return,
+            },
+            arguments,
+        )
+    }
+
+    /// Passes each argument where `signature` expects its parameter, which
+    /// settles what's unknown in either, and returns what the signature
+    /// returns. Returns `None` and settles nothing when an argument doesn't
+    /// fit, or the number of arguments is wrong.
+    pub(super) fn bind_signature(
+        &mut self,
+        signature: &StaticType,
+        arguments: &[StaticType],
+    ) -> Option<StaticType> {
+        let StaticType::Function {
+            parameters: Some(parameters),
+            return_type,
+        } = signature
+        else {
+            unreachable!("only a function with known parameters has a signature to bind");
+        };
         let snapshot = self.vars.snapshot();
-        let fits = parameters
-            .iter()
-            .zip(arguments)
-            .all(|(parameter, argument)| self.vars.bind_argument(parameter, argument));
+        let fits = parameters.len() == arguments.len()
+            && parameters
+                .iter()
+                .zip(arguments)
+                .all(|(parameter, argument)| self.vars.bind_argument(parameter, argument));
         if !fits {
             self.vars.rollback(snapshot);
             return None;
         }
-        Some(self.vars.resolve(&declared_return))
+        Some(self.vars.resolve(return_type))
+    }
+
+    /// The type of calling a value whose type isn't known yet, like `g` in
+    /// `fn(g) => g(1)`: the value is a function taking these arguments. A
+    /// value that can't be one, like `g` in `g(g)`, which would have to take
+    /// itself, stays unknown, and the call is left to the program as it runs.
+    pub(super) fn call_unknown_function(
+        &mut self,
+        callee: &StaticType,
+        arguments: Vec<StaticType>,
+    ) -> StaticType {
+        let returns = self.vars.fresh(StaticType::Any);
+        let function = StaticType::Function {
+            parameters: Some(arguments),
+            return_type: Box::new(returns.clone()),
+        };
+        if self.vars.try_unify(callee, &function) {
+            self.vars.resolve(&returns)
+        } else {
+            StaticType::Any
+        }
     }
 
     /// Whether some overload of `call` accepts arguments of these types.
@@ -404,6 +612,30 @@ impl Analyser {
             && self.commit_call(&binding, arguments, return_type).is_some();
         self.vars.rollback(snapshot);
         fits
+    }
+
+    /// The one of `symbols` whose parameters are narrower than every other
+    /// one's, as `[](Map<K, V>, K)` is than `[](Any, Any)`, if there is one.
+    fn most_specific(&self, symbols: &[SymbolId]) -> Option<SymbolId> {
+        let parameters = symbols
+            .iter()
+            .map(
+                |&symbol| match self.vars.resolve(self.types.get_type(symbol)) {
+                    StaticType::Function {
+                        parameters: Some(parameters),
+                        ..
+                    } => Some(parameters),
+                    _ => None,
+                },
+            )
+            .collect::<Option<Vec<_>>>()?;
+        let (narrowest, _) = parameters.iter().enumerate().find(|&(i, narrower)| {
+            parameters
+                .iter()
+                .enumerate()
+                .all(|(j, wider)| i == j || is_strictly_more_specific(narrower, wider))
+        })?;
+        (symbols.len() > 1).then(|| symbols[narrowest])
     }
 
     /// Whether `symbol` can accept arguments of these types, where each part
@@ -444,15 +676,45 @@ impl Analyser {
                 .resolver
                 .getter_candidates(id)
                 .expect("internal error: a getter call without getter candidates"),
-            CallSite::Setter(id) => self.resolver.setter_candidates(id),
+            CallSite::Setter(id) | CallSite::FieldSetter(id) => self.resolver.setter_candidates(id),
+            CallSite::OpAssignment(id) => &self.resolver.augmented_candidates(id).operator,
         }
     }
 
-    fn record_pick(&mut self, site: CallSite, binding: Binding<SymbolId>) {
+    fn record_pick(
+        &mut self,
+        site: CallSite,
+        binding: Binding<SymbolId>,
+        arguments: &[StaticType],
+    ) {
         match site {
             CallSite::Call(id) => self.picks.bindings.insert(id, binding),
             CallSite::Getter(id) => self.picks.getters.insert(id, binding),
-            CallSite::Setter(id) => self.picks.setters.insert(id, binding),
+            CallSite::Setter(id) | CallSite::FieldSetter(id) => {
+                self.picks.setters.insert(id, binding)
+            }
+            // An in-place overload such as `++=` does the same thing faster,
+            // so it's used where one takes the operands as they are.
+            CallSite::OpAssignment(id) => {
+                let arguments = arguments
+                    .iter()
+                    .map(|argument| self.vars.resolve(argument))
+                    .collect::<Vec<_>>();
+                let in_place = self.overloads().resolve_call(
+                    &self.resolver.augmented_candidates(id).in_place,
+                    &arguments,
+                    CallKind::Operator,
+                );
+                let binding = match in_place.binding {
+                    Binding::Resolved(candidate)
+                        if Self::augmented_rhs_is_compatible(&arguments[0], &arguments[1]) =>
+                    {
+                        Binding::Resolved(candidate)
+                    }
+                    _ => binding,
+                };
+                self.picks.augmented_assignments.insert(id, binding)
+            }
         };
     }
 
@@ -465,13 +727,18 @@ impl Analyser {
             .map(|argument| self.vars.shown(argument))
             .collect::<Vec<_>>();
         let error = match call.site {
-            CallSite::Call(_) | CallSite::Getter(_) => {
+            CallSite::Call(_) | CallSite::Getter(_) | CallSite::OpAssignment(_) => {
                 if let CallSite::Getter(id) = call.site {
                     self.failed_reads.insert(id);
                 }
                 self.no_match(&call.candidates, &call.name, arguments, call.span)
             }
-            CallSite::Setter(id) if self.failed_reads.contains(&id) => return,
+            CallSite::Setter(id) | CallSite::FieldSetter(id) if self.failed_reads.contains(&id) => {
+                return;
+            }
+            CallSite::FieldSetter(_) => {
+                AnalysisError::function_not_found(&call.name, arguments, call.span)
+            }
             CallSite::Setter(_) => match arguments.as_slice() {
                 [container, ..]
                     if container.index_element_type().is_none() && !container.is_unknown() =>

@@ -22,27 +22,29 @@ impl Analyser {
     ) -> StaticType {
         let left_type = self.analyse_assignment_target(l_value, span);
         let right_type = self.analyse_expr(r_value);
-        // An in-place operation such as `++=` keeps its target's type, so
-        // what it stores has to fit that type. Where the target's type isn't
-        // fully known, the right operand settles it: in
-        // `let xs = []; xs ++= [1]`, the elements of `xs` are `Int`.
-        let left_type = if left_type.has_vars() {
-            match &left_type {
-                // A tuple target with a scalar operand applies the operand to
-                // each element: `t ++= [1]` appends to every list in `t`.
-                StaticType::Tuple(targets) if !matches!(right_type, StaticType::Tuple(_)) => {
-                    for target in targets {
-                        self.vars.unify(target, &right_type);
-                    }
-                }
-                _ => {
-                    self.vars.unify(&left_type, &right_type);
-                }
-            }
-            self.vars.resolve(&left_type)
-        } else {
-            left_type
-        };
+        // `a op= b` is `a = op(a, b)`. Where the operands aren't fully known
+        // yet, the operator waits for them like any call, and the in-place
+        // overload is picked along with it.
+        let (left_type, right_type) = (
+            self.vars.resolve(&left_type),
+            self.vars.resolve(&right_type),
+        );
+        if (left_type.has_vars() || right_type.has_vars())
+            && !self
+                .overloads()
+                .reachable_symbols(&self.resolver.augmented_candidates(id).operator)
+                .is_empty()
+        {
+            let result = self.constrain_call(
+                CallSite::OpAssignment(id),
+                vec![left_type.clone(), right_type],
+                CallKind::Operator,
+                operation,
+                span,
+            );
+            self.validate_assignment_write(l_value, &left_type, &result, span);
+            return StaticType::unit();
+        }
         let arg_types = vec![left_type.clone(), right_type.clone()];
 
         let ResolvedCall {
@@ -181,43 +183,24 @@ impl Analyser {
                 member,
                 member_span,
             } => {
+                // `p.x = v` stores through `x=(p, v)`, and what it stores
+                // has the type `x(p)` reads.
                 let receiver_type = self.analyse_expr(receiver);
-                let getter_args = [receiver_type.clone()];
-                let setter_args = [receiver_type, StaticType::Any];
-                let getters = self
-                    .resolver
-                    .getter_candidates(lvalue.id)
-                    .expect("internal error: member target without getter candidates");
-                let getter =
-                    self.overloads()
-                        .resolve_call(getters, &getter_args, CallKind::Regular);
-                let setter_name = format!("{member}=");
-                let setter = self.overloads().resolve_call(
-                    self.resolver.setter_candidates(lvalue.id),
-                    &setter_args,
+                let stored = self.constrain_call(
+                    CallSite::Getter(lvalue.id),
+                    vec![receiver_type.clone()],
                     CallKind::Regular,
+                    member,
+                    *member_span,
                 );
-                let getter_missing = matches!(getter.binding, Binding::None);
-                let setter_missing = matches!(setter.binding, Binding::None);
-
-                self.picks.getters.insert(lvalue.id, getter.binding);
-                self.picks.setters.insert(lvalue.id, setter.binding);
-
-                if getter_missing {
-                    self.emit(AnalysisError::function_not_found(
-                        member,
-                        &getter_args,
-                        *member_span,
-                    ));
-                } else if setter_missing {
-                    self.emit(AnalysisError::function_not_found(
-                        &setter_name,
-                        &setter_args,
-                        *member_span,
-                    ));
-                }
-
-                getter.return_type
+                self.constrain_call(
+                    CallSite::FieldSetter(lvalue.id),
+                    vec![receiver_type, stored.clone()],
+                    CallKind::Regular,
+                    &format!("{member}="),
+                    *member_span,
+                );
+                stored
             }
         }
     }
@@ -236,7 +219,10 @@ impl Analyser {
     ///
     /// A tuple left-hand side represents vector dispatch, so a scalar right
     /// operand must be compatible with every concrete tuple element.
-    fn augmented_rhs_is_compatible(left_type: &StaticType, right_type: &StaticType) -> bool {
+    pub(super) fn augmented_rhs_is_compatible(
+        left_type: &StaticType,
+        right_type: &StaticType,
+    ) -> bool {
         match (left_type, right_type) {
             (StaticType::Tuple(left), StaticType::Tuple(right)) => {
                 left.len() == right.len()
@@ -277,8 +263,8 @@ impl Analyser {
         span: Span,
     ) {
         let error = AnalysisError::mismatched_types(
-            &self.vars.resolve(value_type),
-            &self.vars.resolve(stored_type),
+            &self.vars.shown(value_type),
+            &self.vars.shown(stored_type),
             span,
         );
         self.emit(error);

@@ -134,7 +134,7 @@ fn add(x: Int, y: Int) -> Int {
 }
 ```
 
-Annotations are optional — leave them off and the parameter is treated as `Any`. Mix and match as you like:
+Annotations are optional. A named function's parameter without one is treated as `Any`; a lambda's gets its type from how the lambda is used (see below). Mix and match as you like:
 
 ```ndc
 fn first(xs: List<Int>) => xs[0];   // params annotated, return inferred

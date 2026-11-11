@@ -106,7 +106,7 @@ impl Analyser {
 
         // Combine explicit `return` types with the block's implicit return type.
         let inferred_return = match explicit_return {
-            Some(ret) => self.join(&ret, &implicit_return),
+            Some(ret) => self.join(&ret, &implicit_return, span),
             None => implicit_return,
         };
 
@@ -125,7 +125,7 @@ impl Analyser {
                 || self.vars.resolve(&inferred_return).is_subtype(annotated);
             if !fits {
                 self.emit(AnalysisError::mismatched_types(
-                    &inferred_return,
+                    &self.vars.shown(&inferred_return),
                     annotated,
                     span,
                 ));

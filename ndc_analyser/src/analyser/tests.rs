@@ -840,6 +840,12 @@ fn a_variable_holding_an_unknown_function_takes_what_it_is_called_with() {
         errors("let apply = fn(g) { g(1); g(\"s\") };", ambiguous_plus()),
         vec!["The variable 'g' holds a function that doesn't accept the arguments 'String'"]
     );
+    // A function that would have to take itself stays unknown, and the
+    // call is checked as the program runs.
+    assert_eq!(
+        errors("let f = fn(g) => g(g);", vec![]),
+        Vec::<String>::new()
+    );
 }
 
 #[test]
@@ -891,9 +897,107 @@ fn what_iterating_or_unpacking_gives_must_fit_how_it_was_used_meanwhile() {
 }
 
 #[test]
-fn branches_that_arent_fully_known_join_as_one_type() {
+fn an_op_assignment_waits_for_its_operands_like_any_call() {
+    // `t += 1` doesn't fix `t` as an `Int` before the call says what `x` is.
     assert_eq!(
-        analyse_last_type("let xs = if true { [] } else { [1] }; xs"),
+        analyse_last_type_with_globals(
+            "let f = fn(x) { let t = x; t += 1; t }; f(2.5)",
+            ambiguous_plus()
+        ),
+        StaticType::Float
+    );
+    // The in-place overload is picked along with the operator once they're
+    // known, as `++=` is here: the natives' global slots are in this order.
+    let globals = natives(&[
+        ("++", "<T>(List<T>, List<T>) -> List<T>"),
+        ("++", "(String, String) -> String"),
+        ("++=", "<T>(List<T>, List<T>) -> List<T>"),
+    ]);
+    let (_, result) = analyse_with_globals("let f = fn(xs) { xs ++= [1]; }; f([2]);", globals);
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    assert_eq!(
+        result
+            .analysis
+            .augmented_assignments
+            .values()
+            .collect::<Vec<_>>(),
+        vec![&Binding::Resolved(Candidate::Scalar(
+            ndc_analysis::ResolvedVar::Global { slot: 2 }
+        ))]
+    );
+    // A target nothing else settles keeps the type of what's added to it.
+    assert_eq!(
+        analyse_last_type_with_globals("let f = fn(x) { x += 1; x }; f", ambiguous_plus()),
+        function(vec![StaticType::Int], StaticType::Int)
+    );
+}
+
+#[test]
+fn a_call_commits_to_an_overload_narrower_than_every_other_that_fits() {
+    // `[](Any, Any)` would take the map too, but loses to the map's own `[]`,
+    // which settles the key type.
+    let globals = [natives(&[("[]", "(Any, Any) -> Any")]), index_natives()].concat();
+    assert_eq!(
+        analyse_last_type_with_globals("let m = %{}; m[\"k\"]; m", globals),
+        StaticType::Map {
+            key: Box::new(StaticType::String),
+            value: Box::new(StaticType::unit()),
+        }
+    );
+}
+
+#[test]
+fn a_failed_read_in_an_op_assignment_is_reported_once() {
+    let globals = [
+        natives(&[("++", "(String, String) -> String")]),
+        index_natives(),
+    ]
+    .concat();
+    assert_eq!(
+        errors("let g = fn(xs) { xs[0] ++= \"a\"; }; g([1]);", globals),
+        vec!["mismatched types: found Int but expected String"]
+    );
+}
+
+#[test]
+fn a_field_write_settles_the_receiver_like_a_field_read() {
+    let structs = "struct P { score: Int } struct Q { score: String } ";
+    assert_eq!(
+        errors(
+            &format!("{structs}let f = fn(p) {{ p.score = 3; p }}; f(Q(\"a\"));"),
+            vec![]
+        ),
+        vec!["The variable 'f' holds a function that doesn't accept the arguments 'Q'"]
+    );
+}
+
+#[test]
+fn an_error_shows_what_isnt_known_yet_as_any() {
+    assert_eq!(
+        errors("let f = fn(x) -> Int { [x] };", vec![]),
+        vec!["mismatched types: found List<Any> but expected Int"]
+    );
+}
+
+#[test]
+fn a_join_waits_until_both_branches_are_known() {
+    // `x` isn't fixed as an `Int` by the branch next to it: the branches join
+    // once the call says what `x` is.
+    assert_eq!(
+        analyse_last_type("let f = fn(x) => if true { x } else { 1 }; f(2)"),
+        StaticType::Int
+    );
+    assert_eq!(
+        analyse_last_type("let f = fn(x) => if true { x } else { 1 }; f(2.5)"),
+        StaticType::Any
+    );
+    // What both branches share is known meanwhile: two lists join as a list
+    // that `push` can take.
+    assert_eq!(
+        analyse_last_type_with_globals(
+            "let xs = if true { [] } else { [] }; xs.push(1); xs",
+            natives(&[("push", "<T>(List<T>, T)"), ("push", "<T>(MinHeap<T>, T)")])
+        ),
         StaticType::List(Box::new(StaticType::Int))
     );
 }
