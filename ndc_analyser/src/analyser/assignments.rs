@@ -174,7 +174,8 @@ impl Analyser {
                     } else {
                         self.commit_call(
                             &getter.binding,
-                            &get_args,
+                            &mut get_args.clone(),
+                            &[],
                             getter.return_type,
                             "[]",
                             span,
@@ -206,7 +207,8 @@ impl Analyser {
                     _ => {
                         self.commit_call(
                             &setter.binding,
-                            &set_args,
+                            &mut set_args.clone(),
+                            &[],
                             setter.return_type,
                             "[]=",
                             span,

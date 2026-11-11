@@ -638,7 +638,7 @@ fn a_function_argument_fits_a_function_parameter_where_their_known_parts_agree()
     );
     for (lambda, shown) in [
         ("fn(x: String) => 1", "Fn(String) -> Int"),
-        ("fn(x) => \"a\"", "Fn(Any) -> String"),
+        ("fn(x) => \"a\"", "Fn(Int) -> String"),
         ("fn(a, b) => 1", "Fn(Any, Any) -> Int"),
     ] {
         assert_eq!(
@@ -662,6 +662,53 @@ fn a_function_value_rejects_a_callback_taking_another_number_of_arguments() {
         vec![
             "A function of type Fn(Fn(Int) -> Int) -> Int doesn't accept the arguments 'Fn(Any, Any) -> Int'"
         ]
+    );
+}
+
+#[test]
+fn a_lambda_argument_takes_what_its_function_parameter_passes() {
+    let globals = natives(&[
+        ("map", "<T, U>(Sequence<T>, Fn(T) -> U) -> List<U>"),
+        ("++", "(String, String) -> String"),
+    ]);
+    assert_eq!(
+        analyse_last_type_with_globals("map([1], fn(x) => x)", globals.clone()),
+        StaticType::List(Box::new(StaticType::Int))
+    );
+    // So its body is checked with `x` an Int.
+    assert_eq!(
+        errors("map([1], fn(x) => x ++ \"a\");", globals),
+        vec!["No function called '++' found that matches the arguments 'Int, String'"]
+    );
+}
+
+#[test]
+fn a_lambda_takes_the_function_type_expected_where_it_is_written() {
+    let int_to_int = StaticType::Function {
+        parameters: Some(vec![StaticType::Int]),
+        return_type: Box::new(StaticType::Int),
+    };
+    // An annotated variable.
+    assert_eq!(
+        analyse_last_type("let f: Fn(Int) -> Int = fn(x) => x; f"),
+        int_to_int
+    );
+    // A function value's parameter.
+    let globals = natives(&[("++", "(String, String) -> String")]);
+    assert_eq!(
+        errors(
+            "let apply = fn(g: Fn(Int) -> Int) { g(1) }; let fs = [apply]; fs[0](fn(x) => x ++ \"a\");",
+            [index_natives(), globals].concat()
+        ),
+        vec!["No function called '++' found that matches the arguments 'Int, String'"]
+    );
+    // A map's default function returns the map's values.
+    assert_eq!(
+        analyse_last_type("let m: Map<String, List<Int>> = %{:fn() => []}; m"),
+        StaticType::Map {
+            key: Box::new(StaticType::String),
+            value: Box::new(StaticType::List(Box::new(StaticType::Int))),
+        }
     );
 }
 

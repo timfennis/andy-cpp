@@ -11,23 +11,59 @@ use ndc_parser::{
 use ndc_resolver::SymbolId;
 use std::rc::Rc;
 
+/// What a function declaration consists of, named like `fn f(x) { … }` or
+/// anonymous like `fn(x) => …`.
+#[derive(Clone, Copy)]
+pub(super) struct FunctionDeclaration<'a> {
+    pub id: NodeId,
+    pub name: Option<&'a str>,
+    pub parameters: &'a [FunctionParameter],
+    pub body: &'a ExpressionLocation,
+    pub return_annotation: Option<&'a TypeExpr>,
+    pub span: Span,
+}
+
 impl Analyser {
-    /// Analyses a function declaration and returns its type.
+    /// Analyses a function declaration and returns its type. A lambda passed
+    /// where a function type is expected, as in `xs.map(fn(x) => x + 1)`,
+    /// gets that type as `expected`: an unannotated parameter takes the
+    /// expected parameter's type, and the body is checked against the
+    /// expected return type.
     pub(super) fn analyse_function_declaration(
         &mut self,
-        id: NodeId,
-        name: Option<&str>,
-        parameters: &[FunctionParameter],
-        body: &ExpressionLocation,
-        return_annotation: Option<&TypeExpr>,
-        span: Span,
+        function: FunctionDeclaration<'_>,
+        expected: Option<&StaticType>,
     ) -> StaticType {
+        let FunctionDeclaration {
+            id,
+            name,
+            parameters,
+            body,
+            return_annotation,
+            span,
+        } = function;
         let first_var = self.vars.count();
+        let (expected_parameters, expected_return) = match expected {
+            Some(StaticType::Function {
+                parameters: Some(expected),
+                return_type,
+            }) if expected.len() == parameters.len() => {
+                (Some(expected.as_slice()), Some(return_type.as_ref()))
+            }
+            _ => (None, None),
+        };
         let type_signature = TypeSignature::from_annotated_bindings(
             parameters
                 .iter()
-                .map(|param| {
-                    let annotation = self.lower_annotation(param.annotation.as_ref());
+                .enumerate()
+                .map(|(index, param)| {
+                    let annotation =
+                        self.lower_annotation(param.annotation.as_ref())
+                            .or_else(|| {
+                                expected_parameters
+                                    .map(|expected| expected[index].clone())
+                                    .filter(|expected| *expected != StaticType::Any)
+                            });
                     (param.name().to_string(), annotation)
                 })
                 .collect(),
@@ -78,7 +114,12 @@ impl Analyser {
                 .insert(param.lvalue.id, typ.clone());
         }
 
-        let implicit_return = self.analyse_expr(body);
+        let implicit_return = match expected_return {
+            Some(expected) if annotated_return.is_none() => {
+                self.analyse_with_expected(body, expected)
+            }
+            _ => self.analyse_expr(body),
+        };
         let explicit_return = self.return_type_stack.pop().unwrap();
         self.loop_depth = outer_loop_depth;
         // Nothing outside the body can settle the type variables made in it,
