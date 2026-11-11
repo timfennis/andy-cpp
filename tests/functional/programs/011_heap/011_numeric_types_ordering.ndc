@@ -1,8 +1,8 @@
 // Tests heap ordering with BigInt, Rational, and Complex values, exercising
 // the VM's cross-type OrdValue comparator path.
 
-// MinHeap with BigInts (values outside i64 range)
-let h = MinHeap();
+// MinHeap with BigInts (values outside i64 range) and an Int
+let h: MinHeap<Any> = MinHeap();
 h.push(9223372036854775808n);   // i64::MAX + 1
 h.push(9223372036854775809n);
 h.push(9223372036854775807);   // i64::MAX (fits in i64)
@@ -20,7 +20,7 @@ assert_eq(h.pop, 5n / 3n);
 assert_eq(h.pop, 1n / 2n);
 
 // MinHeap: mixed int and Rational
-let h = MinHeap();
+let h: MinHeap<Any> = MinHeap();
 h.push(2);
 h.push(3n / 2n);   // 1.5
 h.push(5n / 2n);   // 2.5

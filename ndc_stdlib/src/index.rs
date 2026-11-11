@@ -95,19 +95,19 @@ fn register_get(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
         func: make_get_func(),
     }));
 
-    // []<Deque, Any> -> Any
-    env.declare_global_fn(Rc::new(NativeFunction {
-        name: "[]".to_string(),
-        documentation: Some(doc.clone()),
-        static_type: StaticType::Function {
-            parameters: Some(vec![
-                StaticType::Deque(Box::new(StaticType::Any)),
-                StaticType::Any,
-            ]),
-            return_type: Box::new(StaticType::Any),
-        },
-        func: make_get_func_simple(),
-    }));
+    // A deque is indexed like a list, and a range of it is a list too.
+    for signature in [
+        "<T>(Deque<T>, Int) -> T",
+        "<T>(Deque<T>, Iterator<Any>) -> List<T>",
+        "<T>(Deque<T>, Any) -> Any",
+    ] {
+        env.declare_global_fn(Rc::new(NativeFunction {
+            name: "[]".to_string(),
+            documentation: Some(doc.clone()),
+            static_type: StaticType::signature(signature).expect("valid signature"),
+            func: make_get_func_simple(),
+        }));
+    }
 
     env.declare_global_fn(Rc::new(NativeFunction {
         name: "[]".to_string(),

@@ -61,7 +61,7 @@ values.sum()
 //   as in `value as List<Int>`.
 ```
 
-Overloads that differ only by container *kind* (e.g. `pop(List<Any>)` vs `pop(MinHeap<Any>)`)
+Overloads that differ only by container *kind* (e.g. `pop(List<T>)` vs `pop(MinHeap<T>)`)
 are still distinguished by the kind check alone. User-defined functions cannot yet declare
 typed container parameters (the syntax is not implemented), so user overloads always use
 `Any`.
@@ -72,12 +72,10 @@ State the element type with a [cast](../features/casts.md). A cast scans the val
 cost lands at a site you wrote rather than inside every dispatch:
 
 ```ndc
-let values = %{};
-values.insert(1);
-values.insert(2);
+let values: List<Any> = [1, 2, 3];
 
-// keys is typed List<Any>; the cast recovers Int so sum can resolve.
-assert_eq((values.keys as List<Int>).sum(), 3);
+// values is typed List<Any>; the cast recovers Int so sum can resolve.
+assert_eq((values as List<Int>).sum(), 6);
 ```
 
 Otherwise, move the call to a location where Andy C++ can infer the argument types

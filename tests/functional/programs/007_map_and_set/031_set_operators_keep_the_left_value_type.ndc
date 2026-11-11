@@ -1,0 +1,7 @@
+// `&` keeps the left map's values whatever the right one holds, while `|`
+// mixes the values of both maps, so they must be of one type.
+// expect-error: No function called '|' found that matches the arguments 'Map<String, Int>, Map<String, ()>'
+let ages = %{"ann": 31, "bob": 42};
+let kept: Map<String, Int> = ages & set(["ann"]);
+assert_eq(kept.values.sum, 31);
+ages | set(["cid"]);

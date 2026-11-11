@@ -2,7 +2,7 @@
 // separate Int, Float, and Number overloads, and a value the analyser only
 // knows as List<Any> matches none of them, so each cast below picks a
 // different overload at compile time.
-let values = %{};
+let values: Map<Any, ()> = %{};
 values.insert(1);
 values.insert(2);
 assert_eq((values.keys as List<Int>).sum(), 3);

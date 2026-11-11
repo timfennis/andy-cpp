@@ -8,7 +8,7 @@ mod inner {
     /// Creates a new `Deque` type.
     ///
     /// The `Deque` type allows the user to quickly append and remove elements from both the start and the end of the list.
-    #[function(name = "Deque", return_type = VecDeque)]
+    #[function(name = "Deque", signature = "<T>() -> Deque<T>")]
     pub fn create_deque() -> Value {
         Value::Object(std::rc::Rc::new(Object::Deque(std::cell::RefCell::new(
             VecDeque::new(),
@@ -16,16 +16,19 @@ mod inner {
     }
 
     /// Pushes the `value` to the front of the `deque`.
+    #[function(signature = "<T>(Deque<T>, T)")]
     pub fn push_front(deque: &mut VecDeque<Value>, value: Value) {
         deque.push_front(value);
     }
 
     /// Appends the `value` to the end of the `deque`.
+    #[function(signature = "<T>(Deque<T>, T)")]
     pub fn push_back(deque: &mut VecDeque<Value>, value: Value) {
         deque.push_back(value);
     }
 
     /// Removes and returns the first element of the `deque`.
+    #[function(signature = "<T>(Deque<T>) -> T")]
     pub fn pop_front(deque: &mut VecDeque<Value>) -> anyhow::Result<Value> {
         deque
             .pop_front()
@@ -33,7 +36,7 @@ mod inner {
     }
 
     /// Removes and returns the first element of the `deque` as an `Option` returning `None` if the queue is empty.
-    #[function(name = "pop_front?", return_type = Option<Value>)]
+    #[function(name = "pop_front?", signature = "<T>(Deque<T>) -> Option<T>")]
     pub fn maybe_pop_front(deque: &mut VecDeque<Value>) -> Value {
         match deque.pop_front() {
             None => Value::None,
@@ -42,6 +45,7 @@ mod inner {
     }
 
     /// Removes and returns the last element of the `deque`.
+    #[function(signature = "<T>(Deque<T>) -> T")]
     pub fn pop_back(deque: &mut VecDeque<Value>) -> anyhow::Result<Value> {
         deque
             .pop_back()
@@ -49,7 +53,7 @@ mod inner {
     }
 
     /// Removes and returns the last element of the `deque` as an `Option` returning `None` if the queue is empty.
-    #[function(name = "pop_back?", return_type = Option<Value>)]
+    #[function(name = "pop_back?", signature = "<T>(Deque<T>) -> Option<T>")]
     pub fn maybe_pop_back(deque: &mut VecDeque<Value>) -> Value {
         match deque.pop_back() {
             None => Value::None,
@@ -58,6 +62,7 @@ mod inner {
     }
 
     /// Returns (but does not remove) the first element of the `deque`.
+    #[function(signature = "<T>(Deque<T>) -> T")]
     pub fn front(deque: &VecDeque<Value>) -> anyhow::Result<Value> {
         deque
             .front()
@@ -66,7 +71,7 @@ mod inner {
     }
 
     /// Returns (but does not remove) the first element of the `deque` as an `Option` returning `None` if the queue is empty.
-    #[function(name = "front?", return_type = Option<Value>)]
+    #[function(name = "front?", signature = "<T>(Deque<T>) -> Option<T>")]
     pub fn maybe_front(deque: &VecDeque<Value>) -> Value {
         match deque.front().cloned() {
             None => Value::None,
@@ -75,6 +80,7 @@ mod inner {
     }
 
     /// Returns (but does not remove) the last element of the `deque`.
+    #[function(signature = "<T>(Deque<T>) -> T")]
     pub fn back(deque: &VecDeque<Value>) -> anyhow::Result<Value> {
         deque
             .back()
@@ -83,7 +89,7 @@ mod inner {
     }
 
     /// Returns (but does not remove) the last element of the `deque` as an `Option` returning `None` if the queue is empty.
-    #[function(name = "back?", return_type = Option<Value>)]
+    #[function(name = "back?", signature = "<T>(Deque<T>) -> Option<T>")]
     pub fn maybe_back(deque: &VecDeque<Value>) -> Value {
         match deque.back().cloned() {
             None => Value::None,
@@ -92,16 +98,19 @@ mod inner {
     }
 
     /// Returns `true` if the `deque` contains the `value` or `false` otherwise.
+    #[function(signature = "<T>(Deque<T>, T) -> Bool")]
     pub fn contains(deque: &VecDeque<Value>, value: Value) -> bool {
         deque.contains(&value)
     }
 
     /// Returns `true` if the `deque` is empty and `false` otherwise.
+    #[function(signature = "<T>(Deque<T>) -> Bool")]
     pub fn is_empty(deque: &VecDeque<Value>) -> bool {
         deque.is_empty()
     }
 
     /// Removes all elements from the `deque`
+    #[function(signature = "<T>(Deque<T>)")]
     pub fn clear(deque: &mut VecDeque<Value>) {
         deque.clear();
     }
