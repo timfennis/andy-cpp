@@ -21,6 +21,16 @@ impl Analyser {
     ) -> StaticType {
         let left_type = self.analyse_assignment_target(l_value, span);
         let right_type = self.analyse_expr(r_value);
+        // An in-place operation such as `++=` keeps its target's type, so
+        // what it stores has to fit that type. Where the target's type isn't
+        // fully known, the right operand settles it: in
+        // `let xs = []; xs ++= [1]`, the elements of `xs` are `Int`.
+        let left_type = if left_type.any_var(&|_| true) {
+            self.vars.unify(&left_type, &right_type);
+            self.vars.resolve(&left_type)
+        } else {
+            left_type
+        };
         let arg_types = vec![left_type.clone(), right_type.clone()];
 
         let ResolvedCall {
