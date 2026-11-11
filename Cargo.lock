@@ -1180,17 +1180,15 @@ dependencies = [
 name = "ndc_bin"
 version = "0.3.0"
 dependencies = [
- "ahash",
  "anyhow",
  "clap",
  "itertools 0.15.0",
  "libc",
  "ndc_core",
  "ndc_diagnostics",
+ "ndc_highlight",
  "ndc_interpreter",
- "ndc_lexer",
  "ndc_lsp",
- "ndc_parser",
  "ndc_stdlib",
  "rustyline",
  "strsim",
@@ -1213,6 +1211,15 @@ dependencies = [
  "codespan-reporting",
  "ndc_interpreter",
  "ndc_lexer",
+]
+
+[[package]]
+name = "ndc_highlight"
+version = "0.3.0"
+dependencies = [
+ "ahash",
+ "ndc_lexer",
+ "ndc_parser",
 ]
 
 [[package]]
@@ -1339,6 +1346,7 @@ dependencies = [
  "getrandom 0.3.4",
  "getrandom 0.4.2",
  "ndc_diagnostics",
+ "ndc_highlight",
  "ndc_interpreter",
  "ndc_stdlib",
  "wasm-bindgen",

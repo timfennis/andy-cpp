@@ -13,6 +13,9 @@
 use ndc_interpreter::Interpreter;
 use wasm_bindgen::prelude::*;
 
+mod highlight;
+pub use highlight::highlight;
+
 // Linked only for the `wasm_js` features turned on in Cargo.toml.
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 use {getrandom_03 as _, getrandom_04 as _};

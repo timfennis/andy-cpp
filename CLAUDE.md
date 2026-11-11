@@ -90,7 +90,8 @@ The AST is syntax only. The analyser runs name resolution (`ndc_resolver`) on ea
 | `ndc_stdlib` | Built-in functions registered via `FunctionRegistry` |
 | `ndc_lsp` | LSP backend (hover, inlay hints) |
 | `ndc_diagnostics` | Renders `InterpreterError`s as codespan reports, for the CLI (coloured, `color` feature) and the browser (plain text) |
-| `ndc_bin` | CLI entry point, REPL, syntax highlighting |
+| `ndc_highlight` | Classifies the pieces of a program (keyword, function, comment, …) for syntax highlighting, from the lexer and parser |
+| `ndc_bin` | CLI entry point, REPL, terminal colours for the highlighting |
 | `ndc_wasm` | The interpreter for the browser via wasm-bindgen, and the playground page in `ndc_wasm/web/` |
 
 ### Key Concepts
