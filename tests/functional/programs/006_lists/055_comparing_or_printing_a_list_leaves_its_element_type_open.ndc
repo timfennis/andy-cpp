@@ -1,0 +1,7 @@
+// `==` and `string` only read their arguments, so they don't settle the
+// element type of an empty list: the first `push` does.
+// expect-error: No function called 'push' found that matches the arguments 'List<Int>, String'
+let xs = [];
+print(xs == [], xs.string);
+xs.push(1);
+xs.push("a");

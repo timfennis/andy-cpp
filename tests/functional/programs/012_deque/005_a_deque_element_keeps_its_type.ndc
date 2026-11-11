@@ -1,0 +1,10 @@
+// Reading from a Deque<Int>, by index, slice or pop, gives Ints and Lists of Ints.
+// expect-output: 3
+let queue = Deque();
+queue.push_back(1);
+queue.push_back(2);
+queue.push_back(3);
+let first: Int = queue[0];
+let rest: List<Int> = queue[1..];
+let last: Int = queue.pop_back();
+print(first + rest.sum - last);

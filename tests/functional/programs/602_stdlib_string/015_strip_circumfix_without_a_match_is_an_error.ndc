@@ -1,0 +1,4 @@
+// The prefix and suffix may not overlap, so this doesn't match.
+// `strip_circumfix?` would return `None`; `strip_circumfix` reports it.
+// expect-error: and end with
+"aaa".strip_circumfix("aa", "aa");

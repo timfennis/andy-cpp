@@ -1,5 +1,5 @@
 use ndc_macros::export_module;
-use ndc_vm::value::{SeqValue, Value, VmString};
+use ndc_vm::value::{Object, SeqValue, Value, VmString};
 
 use std::rc::Rc;
 
@@ -25,11 +25,24 @@ pub fn join_to_string(list: SeqValue, sep: &str) -> anyhow::Result<String> {
     }
 }
 
+/// `Some(value)`, or `None` when there's no value.
+fn option(value: Option<Value>) -> Value {
+    value.map_or(Value::None, |value| {
+        Value::Object(Rc::new(Object::Some(value)))
+    })
+}
+
+/// `string` without `prefix` and `suffix`, when it starts and ends with them
+/// without the two overlapping.
+fn circumfix<'a>(string: &'a str, prefix: &str, suffix: &str) -> Option<&'a str> {
+    string.strip_prefix(prefix)?.strip_suffix(suffix)
+}
+
 #[export_module]
 mod inner {
 
     /// Concatenates two values into a string.
-    #[function(name = "<>")]
+    #[function(name = "<>", signature = "<A, B>(A, B) -> String")]
     pub fn op_string_concat(left: Value, right: Value) -> String {
         format!("{left}{right}")
     }
@@ -47,6 +60,7 @@ mod inner {
     }
 
     /// Returns the provided value as a string
+    #[function(signature = "<A>(A) -> String")]
     pub fn string(value: Value) -> String {
         format!("{value}")
     }
@@ -111,6 +125,7 @@ mod inner {
     }
 
     /// Joins elements of the sequence into a single string using `sep` as the separator.
+    #[function(signature = "<T>(Sequence<T>, String) -> String")]
     pub fn join(list: SeqValue, sep: &str) -> anyhow::Result<String> {
         join_to_string(list, sep)
     }
@@ -122,6 +137,7 @@ mod inner {
     }
 
     /// Joins paragraphs into a single string, inserting blank lines between them.
+    #[function(signature = "<T>(Sequence<T>) -> String")]
     pub fn unparagraphs(list: SeqValue) -> anyhow::Result<String> {
         join_to_string(list, "\n\n")
     }
@@ -133,6 +149,7 @@ mod inner {
     }
 
     /// Joins lines into a single string, inserting newline characters between them.
+    #[function(signature = "<T>(Sequence<T>) -> String")]
     pub fn unlines(list: SeqValue) -> anyhow::Result<String> {
         join_to_string(list, "\n")
     }
@@ -144,6 +161,7 @@ mod inner {
     }
 
     /// Joins words into a single string, separating them with spaces.
+    #[function(signature = "<T>(Sequence<T>) -> String")]
     pub fn unwords(list: SeqValue) -> anyhow::Result<String> {
         join_to_string(list, " ")
     }
@@ -170,39 +188,91 @@ mod inner {
         Value::list(string.split(pattern).map(Value::string).collect())
     }
 
-    /// Splits the string at the first occurrence of `pattern`, returning a tuple-like value.
-    #[function(return_type = (String, String))]
-    pub fn split_once(string: &str, pattern: &str) -> Value {
-        match string.split_once(pattern) {
-            Some((fst, snd)) => Value::tuple(vec![Value::string(fst), Value::string(snd)]),
-            None => Value::unit(),
-        }
+    /// Splits the string at the first occurrence of `pattern` into the parts
+    /// before and after it. It's an error if `pattern` doesn't occur; use
+    /// `split_once?` to get `None` instead.
+    #[function(signature = "(String, String) -> (String, String)")]
+    pub fn split_once(string: &str, pattern: &str) -> anyhow::Result<Value> {
+        let (before, after) = string
+            .split_once(pattern)
+            .ok_or_else(|| anyhow!("{string:?} doesn't contain {pattern:?}"))?;
+        Ok(Value::tuple(vec![
+            Value::string(before),
+            Value::string(after),
+        ]))
     }
 
-    /// Removes one matching prefix, returning `()` if it does not match.
-    #[function(return_type = String)]
-    pub fn strip_prefix(string: &str, prefix: &str) -> Value {
+    /// Splits the string at the first occurrence of `pattern` into the parts
+    /// before and after it, or returns `None` if `pattern` doesn't occur.
+    #[function(
+        name = "split_once?",
+        signature = "(String, String) -> Option<(String, String)>"
+    )]
+    pub fn maybe_split_once(string: &str, pattern: &str) -> Value {
+        option(
+            string.split_once(pattern).map(|(before, after)| {
+                Value::tuple(vec![Value::string(before), Value::string(after)])
+            }),
+        )
+    }
+
+    /// Removes one matching prefix. It's an error if the string doesn't start
+    /// with `prefix`; use `strip_prefix?` to get `None` instead.
+    pub fn strip_prefix(string: &str, prefix: &str) -> anyhow::Result<String> {
         string
             .strip_prefix(prefix)
-            .map_or_else(Value::unit, Value::string)
+            .map(str::to_string)
+            .ok_or_else(|| anyhow!("{string:?} doesn't start with {prefix:?}"))
     }
 
-    /// Removes one matching suffix, returning `()` if it does not match.
-    #[function(return_type = String)]
-    pub fn strip_suffix(string: &str, suffix: &str) -> Value {
+    /// Removes one matching prefix, or returns `None` if the string doesn't
+    /// start with `prefix`.
+    #[function(
+        name = "strip_prefix?",
+        signature = "(String, String) -> Option<String>"
+    )]
+    pub fn maybe_strip_prefix(string: &str, prefix: &str) -> Value {
+        option(string.strip_prefix(prefix).map(Value::string))
+    }
+
+    /// Removes one matching suffix. It's an error if the string doesn't end
+    /// with `suffix`; use `strip_suffix?` to get `None` instead.
+    pub fn strip_suffix(string: &str, suffix: &str) -> anyhow::Result<String> {
         string
             .strip_suffix(suffix)
-            .map_or_else(Value::unit, Value::string)
+            .map(str::to_string)
+            .ok_or_else(|| anyhow!("{string:?} doesn't end with {suffix:?}"))
     }
 
-    /// Removes one matching prefix and suffix, returning `()` if either fails to match.
-    /// The prefix and suffix must not overlap. Empty patterns match without removing text.
-    #[function(return_type = String)]
-    pub fn strip_circumfix(string: &str, prefix: &str, suffix: &str) -> Value {
-        string
-            .strip_prefix(prefix)
-            .and_then(|rest| rest.strip_suffix(suffix))
-            .map_or_else(Value::unit, Value::string)
+    /// Removes one matching suffix, or returns `None` if the string doesn't
+    /// end with `suffix`.
+    #[function(
+        name = "strip_suffix?",
+        signature = "(String, String) -> Option<String>"
+    )]
+    pub fn maybe_strip_suffix(string: &str, suffix: &str) -> Value {
+        option(string.strip_suffix(suffix).map(Value::string))
+    }
+
+    /// Removes one matching prefix and suffix, which must not overlap. Empty
+    /// patterns match without removing text. It's an error if they don't both
+    /// match; use `strip_circumfix?` to get `None` instead.
+    pub fn strip_circumfix(string: &str, prefix: &str, suffix: &str) -> anyhow::Result<String> {
+        circumfix(string, prefix, suffix)
+            .map(str::to_string)
+            .ok_or_else(|| {
+                anyhow!("{string:?} doesn't start with {prefix:?} and end with {suffix:?} without overlap")
+            })
+    }
+
+    /// Removes one matching prefix and suffix, which must not overlap, or
+    /// returns `None` if they don't both match.
+    #[function(
+        name = "strip_circumfix?",
+        signature = "(String, String, String) -> Option<String>"
+    )]
+    pub fn maybe_strip_circumfix(string: &str, prefix: &str, suffix: &str) -> Value {
+        option(circumfix(string, prefix, suffix).map(Value::string))
     }
 
     /// Removes leading and trailing whitespace from the string.

@@ -3,13 +3,11 @@
 The `as` operator asserts that a value has the given type:
 
 ```ndc
-let values = %{};
-values.insert(1);
-values.insert(2);
+let values: List<Any> = [1, 2];
 
-// keys returns List<Any>; the cast recovers the element type so the
+// values is a List<Any>; the cast recovers the element type so the
 // result works with functions that expect a List<Int>.
-let keys = values.keys as List<Int>;
+let ints = values as List<Int>;
 ```
 
 A cast checks the value without converting it. `5 as Float` is an error

@@ -1,0 +1,5 @@
+// `map` returns a list of what its function returns, so mapping numbers to
+// strings gives a List<String>, which only takes strings.
+// expect-error: No function called 'push' found that matches the arguments 'List<String>, Int'
+let labels = [1, 2, 3].map(fn(n) => "label");
+labels.push(4);

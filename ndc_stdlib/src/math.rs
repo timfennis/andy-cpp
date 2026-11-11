@@ -83,6 +83,23 @@ fn declare(
     }));
 }
 
+/// Declares a native whose type is a generic signature such as
+/// `<A, B>(A, B) -> Bool`, see [`StaticType::signature`].
+fn declare_signature(
+    env: &mut FunctionRegistry<Rc<NativeFunction>>,
+    name: &str,
+    signature: &str,
+    documentation: impl Into<String>,
+    func: impl Fn(&[Value]) -> Result<Value, VmError> + 'static,
+) {
+    env.declare_global_fn(Rc::new(NativeFunction {
+        name: name.to_string(),
+        documentation: Some(documentation.into()),
+        static_type: StaticType::signature(signature).expect("valid signature"),
+        func: NativeFunc::Simple(Box::new(func)),
+    }));
+}
+
 /// Declares a native whose operands and result have fixed types.
 ///
 /// A type name is written once and used twice: as the operand's declared
@@ -527,32 +544,25 @@ fn register_comparisons(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
             "Returns whether the left value is less than or equal to the right.",
         ),
     ] {
-        declare(
-            env,
-            name,
-            vec![StaticType::Any, StaticType::Any],
-            StaticType::Bool,
-            docs,
-            move |args| Ok(Value::Bool(predicate(compare_operands(args)?))),
-        );
+        declare_signature(env, name, "<A, B>(A, B) -> Bool", docs, move |args| {
+            Ok(Value::Bool(predicate(compare_operands(args)?)))
+        });
     }
 
-    declare(
+    declare_signature(
         env,
         "==",
-        vec![StaticType::Any, StaticType::Any],
-        StaticType::Bool,
+        "<A, B>(A, B) -> Bool",
         "Returns whether two values are equal.",
         |args| {
             arity(args, 2)?;
             Ok(Value::Bool(args[0] == args[1]))
         },
     );
-    declare(
+    declare_signature(
         env,
         "!=",
-        vec![StaticType::Any, StaticType::Any],
-        StaticType::Bool,
+        "<A, B>(A, B) -> Bool",
         "Returns whether two values are not equal.",
         |args| {
             arity(args, 2)?;
@@ -564,21 +574,14 @@ fn register_comparisons(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
         ("<=>", false, "Performs a three-way comparison."),
         (">=<", true, "Performs a reverse three-way comparison."),
     ] {
-        declare(
-            env,
-            name,
-            vec![StaticType::Any, StaticType::Any],
-            StaticType::Int,
-            docs,
-            move |args| {
-                let result = match compare_operands(args)? {
-                    Ordering::Less => -1,
-                    Ordering::Equal => 0,
-                    Ordering::Greater => 1,
-                };
-                Ok(Value::Int(if reverse { -result } else { result }))
-            },
-        );
+        declare_signature(env, name, "<A, B>(A, B) -> Int", docs, move |args| {
+            let result = match compare_operands(args)? {
+                Ordering::Less => -1,
+                Ordering::Equal => 0,
+                Ordering::Greater => 1,
+            };
+            Ok(Value::Int(if reverse { -result } else { result }))
+        });
     }
 }
 
@@ -1078,22 +1081,20 @@ fn bigint_number(value: BigInt) -> Value {
 }
 
 fn register_conversions(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
-    declare(
+    declare_signature(
         env,
         "int",
-        vec![StaticType::Any],
-        StaticType::Int,
+        "<A>(A) -> Int",
         "Converts a value to a checked i64 Int.",
         |args| {
             arity(args, 1)?;
             convert_to_int(&args[0]).map(Value::Int)
         },
     );
-    declare(
+    declare_signature(
         env,
         "float",
-        vec![StaticType::Any],
-        StaticType::Float,
+        "<A>(A) -> Float",
         "Converts a value to a Float.",
         |args| {
             arity(args, 1)?;

@@ -5,7 +5,8 @@ let map = %{
   3: "quux",
 };
 
-let set = %{};
+// The set holds both the Int keys and the String values.
+let set: Map<Any, ()> = %{};
 for key, value in map {
     set.insert(key);
     set.insert(value);
