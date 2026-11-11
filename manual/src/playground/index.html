@@ -47,7 +47,35 @@
       main { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
       kbd { display: none; }
     }
-    .ndc-editor { background: var(--panel); border-right: 1px solid var(--line); }
+    .vim { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 4px; cursor: pointer; }
+    .vim[hidden] { display: none; }
+    #editor { min-width: 0; min-height: 0; background: var(--panel); border-right: 1px solid var(--line); }
+
+    /* CodeMirror, in the page's colours. */
+    #editor .cm-editor { height: 100%; background: var(--panel); color: var(--ink); }
+    #editor .cm-editor.cm-focused { outline: none; }
+    #editor .cm-scroller { font: 14px/1.55 ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace; }
+    #editor .cm-gutters { background: var(--panel); color: var(--muted); border-right: 1px solid var(--line); }
+    #editor .cm-activeLine, #editor .cm-activeLineGutter { background: color-mix(in srgb, var(--ink) 5%, transparent); }
+    #editor .cm-content { caret-color: var(--ndc-caret); }
+    #editor .cm-cursor { border-left-color: var(--ndc-caret); }
+    #editor .cm-selectionBackground, #editor .cm-focused .cm-selectionBackground,
+    #editor .cm-content ::selection { background: var(--ndc-selection) !important; }
+    #editor .cm-matchingBracket { background: color-mix(in srgb, var(--accent) 25%, transparent); color: inherit; }
+    #editor .cm-selectionMatch { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+    #editor .cm-fat-cursor { background: color-mix(in srgb, var(--ndc-caret) 70%, transparent) !important; }
+    #editor .cm-panels { background: var(--panel); color: var(--muted); border-top: 1px solid var(--line); }
+    #editor .cm-panels input { background: var(--bg); color: var(--ink); border: 1px solid var(--line); }
+    .cm-tooltip { background: var(--panel) !important; color: var(--ink); border: 1px solid var(--line) !important; border-radius: 6px; }
+    .cm-tooltip-autocomplete > ul { font: 13px/1.5 ui-monospace, monospace !important; }
+    .cm-tooltip-autocomplete > ul > li[aria-selected] { background: var(--accent) !important; color: #fff !important; }
+    .cm-completionDetail { color: inherit; opacity: .7; font-style: normal !important; margin-left: 1em; }
+    .cm-tooltip.cm-completionInfo { padding: 0; max-width: 480px; }
+    .cm-tooltip-lint { padding: 4px 8px; font: 13px/1.45 ui-monospace, monospace; white-space: pre-wrap; }
+    .ndc-docs { padding: 6px 10px; max-width: 520px; font: 13px/1.45 system-ui, sans-serif; }
+    .ndc-docs p { margin: 4px 0; }
+    .ndc-docs pre, .ndc-docs code { font: 13px/1.45 ui-monospace, monospace; }
+    .ndc-docs pre { margin: 4px 0; white-space: pre-wrap; }
     #out {
       margin: 0; padding: 16px; overflow: auto; min-width: 0;
       font: 14px/1.55 ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
@@ -59,6 +87,7 @@
   <header>
     <h1>Andy <span>C++</span></h1>
     <span class="status" id="status">Loading interpreter…</span>
+    <label class="vim" hidden><input type="checkbox" id="vim"> Vim</label>
     <kbd>Ctrl+Enter</kbd>
     <button id="stop" disabled>Stop</button>
     <button id="run" class="primary" disabled>Run</button>
@@ -68,7 +97,7 @@
     <pre id="out"></pre>
   </main>
   <script type="module">
-    import { load, escape, Runner, createEditor, resultHtml, codeFromHash } from "./andy.js";
+    import { load, escape, language, Runner, createEditor, resultHtml, codeFromHash } from "./andy.js";
 
     const welcome = `// Andy C++, compiled to WebAssembly and running in your browser.
 fn fib(n: Int) -> Int {
@@ -84,7 +113,9 @@ shuffled([1, 2, 3, 4, 5])
     const $ = (id) => document.getElementById(id);
     const out = $("out"), runButton = $("run"), stopButton = $("stop"), status = $("status");
     const runner = new Runner();
-    const editor = createEditor($("editor"), { code: codeFromHash() ?? welcome, onRun: run });
+    // A plain editor until the interpreter loads; then CodeMirror, if
+    // manual/editor/build.sh has bundled it.
+    let editor = createEditor($("editor"), { code: codeFromHash() ?? welcome, onRun: run });
     addEventListener("hashchange", () => {
       const code = codeFromHash();
       if (code !== null) editor.value = code;
@@ -112,6 +143,7 @@ shuffled([1, 2, 3, 4, 5])
       () => {
         status.textContent = "Ready";
         runButton.disabled = false;
+        return useCodeEditor();
       },
       (err) => {
         status.textContent = "The interpreter couldn't be loaded";
@@ -119,7 +151,36 @@ shuffled([1, 2, 3, 4, 5])
       },
     );
     // Embedded in the manual, the page around it keeps the keyboard.
-    if (window.self === window.top) editor.focus();
+    const embedded = window.self !== window.top;
+    if (!embedded) editor.focus();
+
+    // Whether the reader wants vim's keys, remembered in this browser.
+    const vimSetting = {
+      get: () => { try { return localStorage.getItem("ndc-playground-vim") === "on"; } catch { return false; } },
+      set: (on) => { try { localStorage.setItem("ndc-playground-vim", on ? "on" : "off"); } catch {} },
+    };
+
+    async function useCodeEditor() {
+      let createCodeEditor;
+      try {
+        ({ createCodeEditor } = await import("./editor.js"));
+      } catch {
+        return; // Not built: keep the plain editor.
+      }
+      const vimToggle = $("vim");
+      vimToggle.checked = vimSetting.get();
+      const code = editor.value;
+      $("editor").replaceChildren();
+      $("editor").classList.remove("ndc-editor");
+      editor = createCodeEditor($("editor"), { code, onRun: run, language: language(), vimMode: vimToggle.checked });
+      vimToggle.parentElement.hidden = false;
+      vimToggle.onchange = () => {
+        vimSetting.set(vimToggle.checked);
+        editor.setVimMode(vimToggle.checked);
+        editor.focus();
+      };
+      if (!embedded) editor.focus();
+    }
   </script>
 </body>
 </html>

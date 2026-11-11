@@ -152,6 +152,7 @@ mod tests {
         assert!(!document.set_text("let words = [\"a\"];\nwords.").is_empty());
         let labels = labels(document.completion(Position::new(1, 6)));
         assert!(labels.iter().any(|l| l == "len"), "{labels:?}");
+        assert!(!labels.iter().any(|l| l == "abs"), "{labels:?}");
     }
 
     #[test]

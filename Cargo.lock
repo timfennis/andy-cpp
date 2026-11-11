@@ -1348,7 +1348,10 @@ dependencies = [
  "ndc_diagnostics",
  "ndc_highlight",
  "ndc_interpreter",
+ "ndc_lsp",
  "ndc_stdlib",
+ "serde",
+ "serde_json",
  "wasm-bindgen",
 ]
 
