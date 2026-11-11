@@ -1,0 +1,7 @@
+// expect-output: 4 true
+let squares = %{x: x * x for x in 1..=3, if x > 1,};
+let set = %{
+    x
+    for x in 1..=3,
+};
+print(squares[2], 3 in set);

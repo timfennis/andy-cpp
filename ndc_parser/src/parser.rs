@@ -410,9 +410,12 @@ impl Parser {
         let mut expressions = vec![next(self)?];
         let mut must_be_tuple = must_be_tuple;
         while self.consume_token_if(&[Token::Comma]).is_some() {
-            // Peek at right paren, if that matches we break
-            // this helps us support expressions like `(1,)` and `(1,2,)`
-            if self.match_token(&[Token::RightParentheses]).is_some() {
+            // A comma right before a closing bracket is a trailing comma, as in
+            // `(1,)`, `(1, 2,)` and `[1, 2,]`, and makes the sequence a tuple
+            if self
+                .match_token(&[Token::RightParentheses, Token::RightSquareBracket])
+                .is_some()
+            {
                 must_be_tuple = true;
                 break;
             }
@@ -916,7 +919,7 @@ impl Parser {
                         "The for comprehension contains two consecutive commas".to_string(),
                     ));
                 }
-                Some(Token::RightSquareBracket) => break,
+                Some(token) if token == end_token => break,
                 Some(Token::If) => iterations.push(self.if_guard()?),
                 Some(_) => iterations.push(self.for_iteration()?),
                 _ => {}
