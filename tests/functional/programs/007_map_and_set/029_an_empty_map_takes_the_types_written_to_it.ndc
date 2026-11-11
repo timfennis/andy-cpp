@@ -1,0 +1,6 @@
+// The first write to an empty map settles its key and value types, and later
+// writes must fit them.
+// expect-error: mismatched types: found String but expected Int
+let counts = %{};
+counts["a"] = 1;
+counts["b"] = "two";

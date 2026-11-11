@@ -1,6 +1,5 @@
 use super::Analyser;
 use crate::error::AnalysisError;
-use crate::types::TypeBinding;
 use itertools::{Itertools, izip};
 use ndc_core::r#struct::StructInfo;
 use ndc_core::{NodeId, StaticType, TypeSignature};
@@ -23,6 +22,7 @@ impl Analyser {
         return_annotation: Option<&TypeExpr>,
         span: Span,
     ) -> StaticType {
+        let first_var = self.vars.count();
         let type_signature = TypeSignature::from_annotated_bindings(
             parameters
                 .iter()
@@ -58,8 +58,7 @@ impl Analyser {
                 parameters: type_signature.types(),
                 return_type: Box::new(annotated_return.clone().unwrap_or_default()),
             };
-            self.types
-                .declare(symbol, TypeBinding::Inferred(placeholder));
+            self.types.declare(symbol, placeholder);
             Some(symbol)
         } else {
             None
@@ -82,6 +81,11 @@ impl Analyser {
         let implicit_return = self.analyse_expr(body);
         let explicit_return = self.return_type_stack.pop().unwrap();
         self.loop_depth = outer_loop_depth;
+        // Nothing outside the body can settle the type variables made in it,
+        // so the function's type doesn't carry any.
+        self.vars.settle_from(first_var);
+        let implicit_return = self.vars.resolve(&implicit_return);
+        let explicit_return = explicit_return.map(|ret| self.vars.resolve(&ret));
 
         // Combine explicit `return` types with the block's implicit return type.
         let inferred_return = match explicit_return {
@@ -117,7 +121,7 @@ impl Analyser {
         // `let`, evaluates to unit. An anonymous one evaluates to the function.
         match declared {
             Some(symbol) => {
-                let _ = self.types.update_binding_type(symbol, function_type);
+                self.types.declare(symbol, function_type);
                 self.picks.variables.insert(id, symbol);
                 StaticType::unit()
             }
@@ -154,16 +158,12 @@ impl Analyser {
         let symbols = self.resolver.struct_symbols(id).clone();
         self.struct_types
             .insert(symbols.type_symbol, Rc::clone(&info));
-        self.types.declare(
-            symbols.constructor,
-            TypeBinding::Annotated(info.constructor_type()),
-        );
+        self.types
+            .declare(symbols.constructor, info.constructor_type());
         self.picks.variables.insert(id, symbols.constructor);
         for (index, &(getter, setter)) in symbols.accessors.iter().enumerate() {
-            self.types
-                .declare(getter, TypeBinding::Annotated(info.getter_type(index)));
-            self.types
-                .declare(setter, TypeBinding::Annotated(info.setter_type(index)));
+            self.types.declare(getter, info.getter_type(index));
+            self.types.declare(setter, info.setter_type(index));
         }
         self.picks.structs.insert(id, StructInfo::clone(&info));
 
@@ -200,15 +200,8 @@ impl Analyser {
         };
 
         for (param, &node) in parameters.iter().zip(parameter_nodes) {
-            let has_annotation = param.type_name != StaticType::Any;
-            let binding = if has_annotation {
-                TypeBinding::Annotated(param.type_name.clone())
-            } else {
-                TypeBinding::Inferred(StaticType::Any)
-            };
-
             let symbol = self.resolver.declared_symbol(node);
-            self.types.declare(symbol, binding);
+            self.types.declare(symbol, param.type_name.clone());
         }
 
         parameters
@@ -229,28 +222,20 @@ impl Analyser {
         match &lvalue.pattern {
             BindingPattern::Identifier { span, .. } => {
                 // If there is a type annotation and the given type is not a subtype of the annotated type we emit an error
+                // The value is checked like an assignment to the annotated
+                // variable, so `let o: Option<Int> = None` settles `None`.
                 if let Some(expected_type) = &expected_type
-                    && !found_type.is_subtype(expected_type)
+                    && !self.accepts_write(expected_type, &found_type)
                 {
-                    self.emit(AnalysisError::mismatched_types(
-                        &found_type,
-                        expected_type,
-                        *span,
-                    ));
+                    self.emit_rejected_write(expected_type, &found_type, *span);
                 }
 
-                let type_binding = match expected_type {
-                    Some(annotated) => TypeBinding::Annotated(annotated),
-                    None => TypeBinding::Inferred(found_type),
-                };
-
+                // An annotation decides the type, or else the value does.
+                let typ = expected_type.unwrap_or(found_type);
                 let symbol = self.resolver.declared_symbol(lvalue.id);
-                self.types.declare(symbol, type_binding.clone());
+                self.types.declare(symbol, typ.clone());
                 self.picks.variables.insert(lvalue.id, symbol);
-                self.result
-                    .analysis
-                    .variable_types
-                    .insert(lvalue.id, type_binding.typ().clone());
+                self.result.analysis.variable_types.insert(lvalue.id, typ);
             }
             BindingPattern::Sequence(seq) => {
                 // If the type is a fixed-length Tuple whose arity doesn't match

@@ -91,13 +91,16 @@ mixed ++= ["two"];
 assert_eq(mixed, [1, "two"]);
 ```
 
-Operators without an in-place implementation behave like `target = target op value`
-and may widen the inferred type of the target, just like a regular assignment:
+Operators without an in-place implementation behave like `target = target op value`,
+so the result has to fit the target's type, just like in a regular assignment:
 
 ```ndc
 let numbers = [1];
-numbers[0] += 0.5; // fine: the element type widens from Int to Any
-assert_eq(numbers, [1.5]);
+numbers[0] += 0.5;  // ERROR: Int + Float is a Float, which doesn't fit in List<Int>
+
+let floats = [1.0];
+floats[0] += 0.5;   // fine
+assert_eq(floats, [1.5]);
 ```
 
 ## Optimization

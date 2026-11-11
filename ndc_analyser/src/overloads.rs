@@ -452,7 +452,10 @@ impl<'a> Overloads<'a> {
                 positions,
             });
         }
-        if !sig.iter().any(|t| matches!(t, StaticType::Any)) {
+        if !sig
+            .iter()
+            .any(|t| matches!(t, StaticType::Any | StaticType::Var(_)))
+        {
             return None;
         }
         let permissive: Vec<StaticType> = vec![StaticType::Any; sig.len()];
@@ -526,10 +529,12 @@ impl<'a> Overloads<'a> {
                         .zip(sig)
                         .all(|(param, arg)| !param.is_incompatible_with(arg))
             }
+            // A variable whose type isn't known yet may hold a function.
             StaticType::Function {
                 parameters: None, ..
             }
-            | StaticType::Any => true,
+            | StaticType::Any
+            | StaticType::Var(_) => true,
             _ => false,
         }
     }
@@ -596,7 +601,6 @@ impl<'a> Overloads<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::TypeBinding;
     use ndc_resolver::{BindingKind, SymbolTable};
     use std::cell::RefCell;
 
@@ -631,7 +635,7 @@ mod tests {
             .into_iter()
             .map(|typ| {
                 let symbol = symbol(BindingKind::Function);
-                table.declare(symbol, TypeBinding::Inferred(typ));
+                table.declare(symbol, typ);
                 symbol
             })
             .collect();
@@ -824,10 +828,7 @@ mod tests {
     fn a_variable_holding_a_function_ends_the_search() {
         let (mut types, fns) = table(vec![fn_type(vec![StaticType::Int], StaticType::Int)]);
         let variable = symbol(BindingKind::Plain);
-        types.declare(
-            variable,
-            TypeBinding::Inferred(fn_type(vec![StaticType::String], StaticType::Int)),
-        );
+        types.declare(variable, fn_type(vec![StaticType::String], StaticType::Int));
         let candidates = candidates(&[&[fns[0], variable]]);
 
         SYMBOLS.with_borrow(|table| {
@@ -846,10 +847,7 @@ mod tests {
     fn a_variable_ending_the_search_hides_only_the_functions_further_out() {
         let (mut types, fns) = table(vec![fn_type(vec![StaticType::Int], StaticType::Int)]);
         let variable = symbol(BindingKind::Plain);
-        types.declare(
-            variable,
-            TypeBinding::Inferred(fn_type(vec![StaticType::String], StaticType::Int)),
-        );
+        types.declare(variable, fn_type(vec![StaticType::String], StaticType::Int));
 
         SYMBOLS.with_borrow(|table| {
             let overloads = Overloads::new(&types, table);
@@ -865,7 +863,7 @@ mod tests {
     fn a_variable_ends_the_search_whatever_its_type() {
         let (mut types, fns) = table(vec![fn_type(vec![StaticType::Int], StaticType::Int)]);
         let variable = symbol(BindingKind::Plain);
-        types.declare(variable, TypeBinding::Inferred(StaticType::Int));
+        types.declare(variable, StaticType::Int);
         let candidates = candidates(&[&[variable], &[fns[0]]]);
 
         let resolved = resolve(&types, &candidates, &[StaticType::Int], CallKind::Regular);

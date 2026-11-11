@@ -1,5 +1,5 @@
-// An empty map without a default has value type `()`, so no `+` overload can
-// ever apply and the analyser rejects the call.
-// expect-error: No function called '+' found that matches the arguments '(), Int'
+// `%{}` doesn't say what its values are, so `+=` on one of them is checked
+// when the program runs, and fails there because the key is missing.
+// expect-error: Key not found in map
 let map = %{};
 map["invalid key"] += 3;

@@ -60,14 +60,12 @@ that follow form one, and as a less-than comparison otherwise, so
 The analyser only accepts what it can prove. Where it cannot, a cast states the
 value's type and checks it at the cast site.
 
-Reassigning a variable widens its type, which can lose the detail a function
-needs:
+A wider annotation than the value needs can lose the detail a function needs:
 
 ```ndc
-let line = "a b c";
-line = line.split(" ");    // line is now Sequence<String>, not List<String>
-line.remove(0);            // error: no `remove` matches Sequence<String>, Int
-assert_eq((line as List<String>).remove(0), "a");
+let words: Sequence<String> = "a b c".split(" ");
+words.remove(0);           // error: no `remove` matches Sequence<String>, Int
+assert_eq((words as List<String>).remove(0), "a");
 ```
 
 A specialized `op=` mutates its target in place and keeps its type, so it only
