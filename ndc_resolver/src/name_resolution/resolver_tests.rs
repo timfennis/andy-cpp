@@ -376,6 +376,31 @@ fn natives_cannot_be_assigned_but_a_let_shadowing_one_can() {
 }
 
 #[test]
+fn functions_cannot_be_assigned_but_a_let_shadowing_one_can() {
+    for source in [
+        "fn f() { 1; } f = 2;",
+        "fn f() { 1; } f += 2;",
+        "struct Point { x: Int } Point = 2;",
+    ] {
+        let mut resolver = new_resolver(["+"]);
+        let error = resolve_source(&mut resolver, source).unwrap_err();
+        let NameResolutionError::AssignToFunction { name, span } = &error else {
+            panic!("expected an assignment to a function in {source}, got {error:?}");
+        };
+        assert_eq!(&source[span.range()], name, "{source}");
+        assert!(error.help_text().is_some(), "{source}");
+    }
+
+    let mut resolver = new_resolver([]);
+    resolve_source(&mut resolver, "fn f() { 1; } { let f = 1; f = 2; }").unwrap();
+    let [_, local] = declared(&resolver);
+    assert_eq!(
+        resolver.assignments.values().copied().collect_vec(),
+        vec![local]
+    );
+}
+
+#[test]
 fn candidates_include_functions_and_plain_bindings() {
     let mut resolver = new_resolver(["len"]);
     let native = builtin(&resolver, "len");
