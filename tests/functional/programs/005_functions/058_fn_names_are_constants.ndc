@@ -1,0 +1,4 @@
+// A function declared with `fn` can't be replaced.
+// expect-error: Can't assign to the function 'double'
+fn double(x) { x * 2 }
+double = fn(x) { x * 10 };

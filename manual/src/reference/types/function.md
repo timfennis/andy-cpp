@@ -29,6 +29,16 @@ fn foo() {
 }
 ```
 
+A function declared with `fn` can't be replaced. To have a variable that holds a function, declare it with `let`:
+
+```ndc
+fn double(x) { x * 2 }
+double = fn(x) { x * 10 };     // ERROR: Can't assign to the function 'double'
+
+let scale = fn(x) { x * 2 };
+scale = fn(x) { x * 10 };      // fine
+```
+
 Functions close over their environment.
 
 ```ndc

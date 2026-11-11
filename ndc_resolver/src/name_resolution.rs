@@ -110,12 +110,18 @@ pub enum NameResolutionError {
     AssignToBuiltin { name: String, span: Span },
     #[error("No function named '{name}'")]
     VariableIsNotAFunction { name: String, span: Span },
+    #[error("Can't assign to the function '{name}'")]
+    AssignToFunction { name: String, span: Span },
 }
 
 impl NameResolutionError {
     /// Advice on how to fix the error, when there is any.
     pub fn help_text(&self) -> Option<String> {
         match self {
+            Self::AssignToFunction { name, .. } => Some(format!(
+                "A function declared with `fn` can't be replaced. \
+                 To have a variable that holds a function, declare it with `let {name} = fn(...) {{ ... }}`"
+            )),
             Self::VariableIsNotAFunction { name, .. } => Some(format!(
                 "'{name}' is a variable, and `x.{name}` only finds functions. Call it as `{name}(x)` instead"
             )),
@@ -135,7 +141,8 @@ impl NameResolutionError {
             | Self::DuplicateField { span, .. }
             | Self::IllegalStructRedefinition { span, .. }
             | Self::AssignToBuiltin { span, .. }
-            | Self::VariableIsNotAFunction { span, .. } => *span,
+            | Self::VariableIsNotAFunction { span, .. }
+            | Self::AssignToFunction { span, .. } => *span,
         }
     }
 }
@@ -1034,6 +1041,12 @@ impl NameResolver {
                 let symbol = self.lookup(identifier, *span)?;
                 if self.native_slots.contains_key(&symbol) {
                     return Err(NameResolutionError::AssignToBuiltin {
+                        name: identifier.clone(),
+                        span: *span,
+                    });
+                }
+                if self.symbols.kind(symbol) == BindingKind::Function {
+                    return Err(NameResolutionError::AssignToFunction {
                         name: identifier.clone(),
                         span: *span,
                     });
