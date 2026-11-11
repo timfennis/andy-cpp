@@ -14,4 +14,6 @@ let x = reduce(map(sorted(l), fn(x) => x + 5), fn(a, b) => a * b);
 let y = l.sorted
          .map(fn(x) => x + 5)
          .reduce(fn(a, b) => a * b);
+
+print(x, y);  // 41765625 41765625
 ```

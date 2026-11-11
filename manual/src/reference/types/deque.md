@@ -11,7 +11,8 @@ queue.push_back((0, 0));
 
 while not queue.is_empty() {
     let cur = queue.pop_front();
-    
+    print(cur);  // (0,0)
+
     // etc.
 }
 ```

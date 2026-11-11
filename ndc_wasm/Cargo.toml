@@ -1,0 +1,21 @@
+[package]
+name = "ndc_wasm"
+edition.workspace = true
+version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+ndc_diagnostics.workspace = true
+ndc_highlight.workspace = true
+ndc_interpreter.workspace = true
+ndc_stdlib.workspace = true
+wasm-bindgen = "0.2.102"
+
+# Both getrandom versions in the tree (0.3 via ahash, 0.4 via rand) need to be
+# told to take their entropy from the browser's `crypto.getRandomValues`.
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+console_error_panic_hook = "0.1.7"
+getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
+getrandom_04 = { package = "getrandom", version = "0.4", features = ["wasm_js"] }

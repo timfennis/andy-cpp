@@ -6,21 +6,25 @@ Tuples are similar to [lists](../list.md), but you cannot change their elements 
 let my_tuple = (1,2,3);
 
 // You can access elements using indexing
-assert_eq(my_tuple[0], 1);
-
-// Tuples are immutable, so assignment fails
-my_tuple[0] = 99; // ERROR
+print(my_tuple[0]);  // 1
 
 // You may also iterate over tuples
 for item in my_tuple {
-  // ..
+  print(item);
 }
+```
+
+```ndc
+let my_tuple = (1,2,3);
+
+// Tuples are immutable, so assignment fails
+my_tuple[0] = 99; // ERROR
 ```
 
 Create a 1-element tuple by adding a trailing comma:
 
 ```ndc
-assert_eq((1,).len(), 1);
+print((1,).len());  // 1
 ```
 
 ## Copy-on-write
@@ -50,10 +54,10 @@ Operators broadcast element-wise over tuples. Both arguments must be tuples
 of the same length, or one side may be a scalar that broadcasts:
 
 ```ndc
-assert_eq((1, 2) + (3, 4), (4, 6));
-assert_eq(-(1, 2, 3), (-1, -2, -3));
-assert_eq((1, 2) + 5, (6, 7));
-assert_eq(("a", "b") ++ ("c", "d"), ("ac", "bd"));
+print((1, 2) + (3, 4));           // (4,6)
+print(-(1, 2, 3));                // (-1,-2,-3)
+print((1, 2) + 5);                // (6,7)
+print(("a", "b") ++ ("c", "d"));  // ("ac","bd")
 ```
 
 Vectorization only kicks in for operator syntax (`a + b`, `-x`, `a ++ b`).
@@ -64,6 +68,9 @@ Mixed-element tuples or length mismatches error at compile time rather than
 silently producing wrong results:
 
 ```ndc
-(1, 2, 3) + (4, 5)   // ERROR: no overload accepts those argument types
+(1, 2, 3) + (4, 5)  // ERROR: no overload accepts those argument types
+```
+
+```ndc
 (1, "a") + (2, "b")  // ERROR: no `+(String, String)` overload
 ```

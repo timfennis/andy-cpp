@@ -12,6 +12,9 @@ pure fn add(x, y) {
 }
 
 let multiply = pure fn (x, y) { x * y };
+
+print(add(2, 3));       // 5
+print(multiply(4, 5));  // 20
 ```
 
 > **Note:** The interpreter does not check whether a function is actually pure. You must avoid side effects yourself.
@@ -24,7 +27,7 @@ to a `pure fn` therefore adds hashing overhead on every call, even on cache hits
 
 If a container is large and does not change between recursive calls, such as a lookup table or graph, let the function use it from outside instead of passing it as an argument. A value the function uses from outside is not part of the cache key, so memoization cost depends only on the arguments that change.
 
-```ndc
+```ndc,norun
 // Slow: `graph` is hashed on every call
 pure fn count(graph, node, visited) { ... }
 
@@ -48,7 +51,5 @@ pure fn fib (n) {
   }
 }
 
-for x in 1..1000 {
-  print(x, fib(x));
-}
+print(fib(92));  // 7540113804746346429
 ```

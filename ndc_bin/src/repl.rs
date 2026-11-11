@@ -55,7 +55,7 @@ fn eval_and_print(interpreter: &mut Interpreter, name: String, line: &str) -> Ou
                 }
                 _ => Outcome::Failed,
             };
-            crate::diagnostic::emit_error(interpreter.source_db(), err);
+            ndc_diagnostics::emit_error(interpreter.source_db(), err);
             outcome
         }
     }

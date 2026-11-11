@@ -34,3 +34,8 @@ jobs:
         run: cargo build -p ndc_stdlib --no-default-features
       - name: Build with tracing
         run: cargo build --features trace
+      # The manual runs its examples on this build, deployed only from master.
+      - name: Build for the browser
+        run: |
+          rustup target add wasm32-unknown-unknown
+          cargo build -p ndc_wasm --target wasm32-unknown-unknown

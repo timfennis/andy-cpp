@@ -11,8 +11,8 @@ Mutating the string discards the cache, so the next indexed read rebuilds it.
 
 ```ndc
 let string = "I ❤ Andy C++";
-assert_eq(string[2], "❤");
-assert_eq(string[4], "A");
+print(string[2]);  // ❤
+print(string[4]);  // A
 ```
 
 The advantage is that it's a bit easier to guess that `A` is the 4th character in the example above. The downside is that
@@ -25,12 +25,14 @@ You may also define raw strings using this syntax borrowed from rust.
 
 ```ndc
 let string = r#"raw string with "" lots of "" quotes"#;
+print(string);  // raw string with "" lots of "" quotes
 ```
 
 and even
 
 ```ndc
 let string = r###"raw string with r#"stop doing this"#"###;
+print(string);  // raw string with r#"stop doing this"#
 ```
 
 ## Removing prefixes and suffixes
@@ -42,13 +44,13 @@ both match without overlapping. Each function returns a new string on success or
 case-sensitive; empty patterns match without removing any text.
 
 ```ndc
-assert_eq("foobar".strip_prefix("foo"), "bar");
-assert_eq("foobar".strip_suffix("bar"), "foo");
-assert_eq("[hello]".strip_circumfix("[", "]"), "hello");
-assert_eq("foofoo".strip_prefix("foo"), "foo");
-assert_eq("hello".strip_prefix("x"), ());
-assert_eq("aaa".strip_circumfix("aa", "aa"), ());
-assert_eq("[]".strip_circumfix("[", "]"), "");
+print("foobar".strip_prefix("foo"));             // bar
+print("foobar".strip_suffix("bar"));             // foo
+print("[hello]".strip_circumfix("[", "]"));      // hello
+print("foofoo".strip_prefix("foo"));             // foo
+print("hello".strip_prefix("x") == ());          // true
+print("aaa".strip_circumfix("aa", "aa") == ());  // true
+print("[]".strip_circumfix("[", "]") == "");     // true
 ```
 
 ## Operators
@@ -73,8 +75,11 @@ assert_eq("[]".strip_circumfix("[", "]"), "");
 ### Examples
 
 ```ndc
+print("foo" <> 3);        // foo3
+print(10 <> 5.0);         // 105.0
+print("oo" in "foobar");  // true
+```
+
+```ndc
 let a = "foo" ++ 3; // Error: cannot concatenate string and int
-let b = "foo" <> 3; // foo3
-let c = 10 <> 5.0; // 105.0
-let d = "oo" in "foobar"; // true
 ```

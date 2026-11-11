@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["ndc_macros", "ndc_bin", "ndc_core", "ndc_analyser", "ndc_resolver", "ndc_layout", "ndc_analysis", "ndc_interpreter", "ndc_vm", "ndc_lsp", "ndc_lexer", "ndc_parser", "ndc_stdlib", "benches", "tests/functional", "tests/compiler", "tests/proptest"]
+members = ["ndc_macros", "ndc_bin", "ndc_diagnostics", "ndc_highlight", "ndc_wasm", "ndc_core", "ndc_analyser", "ndc_resolver", "ndc_layout", "ndc_analysis", "ndc_interpreter", "ndc_vm", "ndc_lsp", "ndc_lexer", "ndc_parser", "ndc_stdlib", "benches", "tests/functional", "tests/compiler", "tests/proptest"]
 
 [profile.release-with-debug]
 inherits = "release"
@@ -24,6 +24,8 @@ factorial = "0.4.0"
 itertools = "0.15.0"
 libc = "0.2.186"
 ndc_core = { path = "ndc_core", version = "0.3.0" }
+ndc_diagnostics = { path = "ndc_diagnostics", version = "0.3.0" }
+ndc_highlight = { path = "ndc_highlight", version = "0.3.0" }
 ndc_lexer = { path = "ndc_lexer", version = "0.3.0" }
 ndc_analyser = { path = "ndc_analyser", version = "0.3.0" }
 ndc_resolver = { path = "ndc_resolver", version = "0.3.0" }
@@ -51,3 +53,11 @@ tap = "1.0.1"
 thiserror = "2.0.18"
 tokio = { version = "1.52.3", features = ["full"] }
 tower-lsp = "0.20.0"
+
+# For the browser build: LTO makes the module about 10% smaller and a bit
+# faster. opt-level "s" or "z" would save another 12-21% of the gzipped size,
+# but programs would run a quarter to a third slower.
+[profile.wasm-release]
+inherits = "release"
+lto = true
+codegen-units = 1

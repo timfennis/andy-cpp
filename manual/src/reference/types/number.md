@@ -15,8 +15,8 @@ let count: Int = 42;
 let measurement: Float = 42.0;
 let exact: Number = 42n;
 
-assert_eq(Number(42), 42n);
-assert_eq(Number(42.0), 42.0n);
+print(Number(42) == 42n);      // true
+print(Number(42.0) == 42.0n);  // true
 ```
 
 ## Literals
@@ -29,6 +29,10 @@ let decimal = 1.25n;
 let binary = 0b101010n;
 let octal = 0o52n;
 let hexadecimal = 0x2an;
+
+print(large);                       // 123456789123456789123456789
+print(decimal);                     // 1.25
+print(binary, octal, hexadecimal);  // 42 42 42
 ```
 
 An integer literal without `n` must fit in `i64`. The lexer reports an error and suggests the suffixed form when it does not fit.
@@ -37,7 +41,8 @@ Arbitrary-radix literals such as `16r2a` remain `Int` literals and do not accept
 
 ```ndc
 let z: Number = 2 + 3i;
-assert_eq(z, 2 + 3j);
+print(z);            // 2+3i
+print(z == 2 + 3j);  // true
 ```
 
 ## Arithmetic modes
@@ -54,25 +59,25 @@ The arithmetic operators `+`, `-`, `*`, `/`, `\`, `%`, `%%`, and `^` define all 
 `Int` uses checked `i64` arithmetic. `/` truncates toward zero, while `\` rounds toward negative infinity. `%` pairs with truncating division and `%%` returns a Euclidean remainder:
 
 ```ndc
-assert_eq(-7 / 2, -3);
-assert_eq(-7 \ 2, -4);
-assert_eq(-7 % 2, -1);
-assert_eq(-7 %% 2, 1);
+print(-7 / 2);   // -3
+print(-7 \ 2);   // -4
+print(-7 % 2);   // -1
+print(-7 %% 2);  // 1
 ```
 
 `Float` follows IEEE 754 behavior. `Number` keeps integer and rational operations exact when it can:
 
 ```ndc
-assert_eq(7 / 2, 3);
-assert_eq(7n / 2n, 7n / 2n);
-assert_eq(2n ^ 100n, 1267650600228229401496703205376n);
+print(7 / 2);      // 3
+print(7n / 2n);    // 7/2
+print(2n ^ 100n);  // 1267650600228229401496703205376
 ```
 
 Integer powers and shifts must fit their checked `Int` result. Use `Number` for negative exponents, arbitrary-size powers, and complex continuation. Roots, logarithms, inverse trigonometric functions, and fractional powers return a complex `Number` when the real result does not exist:
 
 ```ndc
-assert_eq(5n ^ -1n, 1n / 5n);
-assert_eq(sqrt(-1n), 1i);
+print(5n ^ -1n);   // 1/5
+print(sqrt(-1n));  // 0+1i
 ```
 
 ## Division by zero
@@ -80,11 +85,12 @@ assert_eq(sqrt(-1n), 1i);
 `Int` division and remainder by zero report an error. `Float` returns IEEE infinity or NaN. `Number` also falls back to a wrapped Float result when an exact zero divisor has no rational representation:
 
 ```ndc
-assert_eq(1n / 0n, Inf);
-assert_eq(1n \ 0n, Inf);
+print(1n / 0n);  // Inf
+print(1n \ 0n);  // Inf
 
 let nan = 0n / 0n;
-assert(nan == nan);
+print(nan);         // NaN
+print(nan == nan);  // true
 ```
 
 Both remainder operators follow the same rule, so `5n % 0n` and `5n %% 0n` are
@@ -97,11 +103,11 @@ propagates.
 Numeric equality compares exact values across all three modes. Equal values produce the same map or set hash. Andy C++ converts each finite Float to its exact binary rational value for this comparison, so decimal approximation does not make values equal:
 
 ```ndc
-assert(1 == 1.0);
-assert(1.0 == 1n);
-assert(1n == 1 + 0i);
-assert(0.1 != 1n / 10n);
-assert_eq(%{1, 1.0, 1n, 1 + 0i}.len(), 1);
+print(1 == 1.0);                     // true
+print(1.0 == 1n);                    // true
+print(1n == 1 + 0i);                 // true
+print(0.1 == 1n / 10n);              // false
+print(%{1, 1.0, 1n, 1 + 0i}.len());  // 1
 ```
 
 Positive and negative zero compare equal. All NaN values compare equal and hash alike. Real scalars sort in this order:
@@ -113,8 +119,8 @@ Positive and negative zero compare equal. All NaN values compare equal and hash 
 Complex values keep lexicographic ordering. The comparison checks the real part, then the imaginary part:
 
 ```ndc
-assert((2 + 0i) > (1 + 100i));
-assert((1 + 2i) < (1 + 3i));
+print((2 + 0i) > (1 + 100i));  // true
+print((1 + 2i) < (1 + 3i));    // true
 ```
 
 ## Integer-only operators

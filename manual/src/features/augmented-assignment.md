@@ -4,11 +4,10 @@ Andy C++ supports augmented assignment for operations on existing variables.
 
 This example increments a number with augmented assignment.
 
-```
+```ndc
 let my_number = 3;
 my_number += 5;
-
-assert_eq(my_number, 8);
+print(my_number);  // 8
 ```
 
 ## Indexed targets
@@ -18,7 +17,7 @@ The target of an augmented assignment can also be an indexed location:
 ```ndc
 let values = [1, 2, 3];
 values[0] += 10;
-assert_eq(values, [11, 2, 3]);
+print(values);  // [11,2,3]
 ```
 
 This works even when reading the location produces a new value rather than a
@@ -28,11 +27,11 @@ value is always stored back into the container:
 ```ndc
 let text = "ab";
 text[0] ++= "x";
-assert_eq(text, "axb");
+print(text);   // axb
 
 let items = [1, 2];
 items[0..1] ++= [3];
-assert_eq(items, [1, 3, 2]);
+print(items);  // [1,3,2]
 ```
 
 The target, index, and right-hand side are each evaluated exactly once, in
@@ -54,7 +53,7 @@ because the operator copies the values across without checking them:
 
 ```ndc
 let values: List<Int> = [1];
-let rhs: List<Number> = [0.5];
+let rhs: List<Number> = [0.5n];
 values ++= rhs; // error: mismatched types: found List<Number> but expected List<Int>
 ```
 
@@ -74,12 +73,14 @@ the assignment gets its guarantee from the cast site:
 fn opaque(x) => x;
 let values = [1];
 values ++= opaque([2, 3]) as List<Int>;
-assert_eq(values, [1, 2, 3]);
+print(values);  // [1,2,3]
 ```
 
 A cast that does not hold fails there rather than corrupting the target:
 
 ```ndc
+fn opaque(x) => x;
+let values = [1];
 values ++= opaque([0.5]) as List<Int>; // error: cannot cast List<Float> to List<Int>
 ```
 
@@ -88,7 +89,7 @@ Annotate the target with `Any` to opt into heterogeneous contents:
 ```ndc
 let mixed: List<Any> = [1];
 mixed ++= ["two"];
-assert_eq(mixed, [1, "two"]);
+print(mixed);  // [1,"two"]
 ```
 
 Operators without an in-place implementation behave like `target = target op value`
@@ -97,7 +98,7 @@ and may widen the inferred type of the target, just like a regular assignment:
 ```ndc
 let numbers = [1];
 numbers[0] += 0.5; // fine: the element type widens from Int to Any
-assert_eq(numbers, [1.5]);
+print(numbers);     // [1.5]
 ```
 
 ## Optimization
@@ -113,17 +114,20 @@ Augmented assignment also works with built-in functions and user-defined functio
 ```ndc
 let x = 3;
 let f = fn (a, b) { a + b }; // simple addition
-x f= 5; // similar to: x = f(x, 5);
-assert_eq(x, 8);
+x f= 5;   // similar to: x = f(x, 5);
+print(x); // 8
 ```
 
 One common use case is tracking the highest or lowest value in a loop:
 
 ```ndc
+fn g(x) => (x - 40) ^ 2;
 let lowest, highest = Inf, -Inf;
 
 for x in 1..100 {
   lowest min= g(x);
   highest max= g(x);
 }
+
+print(lowest, highest);  // 0 3481
 ```

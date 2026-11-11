@@ -48,7 +48,7 @@ The `=` operator can be used to reassign a value to an existing variable. When y
 let x = 1;     // the initializer and declaration have type Int
 x = 2;         // subsequent reads still have type Int
 x = 3.14;      // subsequent reads have type Any (Int and Float are siblings)
-x;             // type is Any
+print(x);      // 3.14
 ```
 
 Augmented assignment widens an inferred binding from the operation's result in the same way:
@@ -56,13 +56,14 @@ Augmented assignment widens an inferred binding from the operation's result in t
 ```ndc
 let total = 3;
 total += 0.5;  // Int + Float returns Float, so subsequent reads have type Any
-total;         // type is Any
+print(total);  // 3.5
 ```
 
 ```ndc
 let pos = ();        // type is ()
 pos = (1, 2);        // type widens to Sequence<Any>
 pos = ("a", "b");    // type is still Sequence<Any>
+print(pos);          // ("a","b")
 ```
 
 > **Tip:** For the best type inference, initialize variables with a value that matches the intended type. For example, use `let pos = (0, 0);` instead of `let pos = ();` if you intend to store a 2-tuple of numbers.
@@ -75,6 +76,7 @@ You can pin a variable's type by adding `: Type` after the name. The initialiser
 let count: Int = 0;
 let name: String = "world";
 let xs: List<Int> = [1, 2, 3];
+print(count, name, xs);  // 0 world [1,2,3]
 ```
 
 A subtype is fine. All concrete types fit where `Any` is requested:
@@ -82,6 +84,7 @@ A subtype is fine. All concrete types fit where `Any` is requested:
 ```ndc
 let n: Number = 3n;
 let x: Any = "anything";  // every value fits Any
+print(n, x);              // 3 anything
 ```
 
 A mismatch is rejected with a `mismatched types` error:
@@ -97,6 +100,7 @@ from, so the annotation decides:
 let xs: List<Int> = [];        // xs is List<Int>, not List<Any>
 let m: Map<Int, Int> = %{};    // m is Map<Int, Int>
 let nested: List<List<Int>> = [[]];
+print(xs, m, nested);          // [] %{} [[]]
 ```
 
 Once a binding has an annotation, it stays locked to that type. Reassignment and augmented assignment can't widen it the way they widen an inferred binding:
@@ -104,6 +108,10 @@ Once a binding has an annotation, it stays locked to that type. Reassignment and
 ```ndc
 let x: Int = 5;
 x = "test";   // ERROR: mismatched types
+```
+
+```ndc
+let x: Int = 5;
 x += 0.5;     // ERROR: the Float result doesn't fit in Int
 ```
 
@@ -124,10 +132,12 @@ let a, b = 3, 4;
 let [a, b] = 3, 4;
 let (a, b) = [3, 4];
 let [a, b] = (3, 4);
+print(a, b);  // 3 4
 ```
 
 You can also destructure nested patterns:
 
-```
+```ndc
 let [a, (b, c)] = (1, [2, 3]);
+print(a, b, c);  // 1 2 3
 ```
