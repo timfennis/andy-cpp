@@ -5,10 +5,11 @@ use crate::iterator::{
     HeapIter, MapIter, RangeInclusiveIter, RangeIter, SeqIter, StringIter, UnboundedRangeIter,
     VmIterator,
 };
-use crate::value::{CompiledFunction, Function, NativeFunc, NativeFunction};
+use crate::value::{CompiledFunction, Function, NativeFunc, NativeFunction, OverloadRanking};
 use crate::{ClosureFunction, Object, Value};
 use ndc_analysis::{CaptureSource, ResolvedVar};
 use ndc_lexer::Span;
+use std::cell::OnceCell;
 use std::cell::RefCell;
 use std::hash::{Hash, Hasher};
 use std::io::Write;
@@ -755,8 +756,8 @@ impl Vm {
 
     /// Resolves the callee on the stack to a scalar `Function`. Direct
     /// `Object::Function` and `OverloadSet` scalars both go through this
-    /// path — for an `OverloadSet`, the scalar list is walked first-match-
-    /// wins (no vec dispatch yet). `Ok(None)` means no scalar matched; the
+    /// path — for an `OverloadSet`, the most specific scalar that accepts
+    /// the arguments wins (no vec dispatch yet). `Ok(None)` means no scalar matched; the
     /// caller falls through to vec dispatch.
     ///
     /// Returns `Option<Function>` (not the wider `Callable` enum) so the
@@ -767,9 +768,11 @@ impl Vm {
         match &self.stack[self.stack.len() - args - 1] {
             Value::Object(obj) => match obj.as_ref() {
                 Object::Function(f) => Ok(Some(f.clone())),
-                Object::OverloadSet { scalars, .. } => {
+                Object::OverloadSet {
+                    scalars, ranking, ..
+                } => {
                     let start = self.stack.len() - args;
-                    Ok(self.find_scalar_overload(scalars, &self.stack[start..]))
+                    Ok(self.find_scalar_overload(scalars, ranking, &self.stack[start..]))
                 }
                 other => Err(format!(
                     "Unable to invoke {} as a function.",
@@ -812,6 +815,7 @@ impl Vm {
                 Object::OverloadSet {
                     scalars,
                     vec_candidates,
+                    ..
                 } => {
                     let first = scalars.first().or_else(|| vec_candidates.first())?;
                     let value = self.resolve_var(first, frame_pointer);
@@ -829,21 +833,45 @@ impl Vm {
         }
     }
 
-    /// Walks the `OverloadSet`'s scalar candidates in priority order,
-    /// returning the first whose parameter types accept `args`. Mirrors
-    /// master's `find_overload` body so the hot path on numerics-heavy
-    /// code stays at the same shape and footprint.
-    fn find_scalar_overload(&self, scalars: &[ResolvedVar], args: &[Value]) -> Option<Function> {
+    /// The `OverloadSet`'s scalar candidate that accepts `args` and that no
+    /// other one accepting them is more specific than. The candidates come
+    /// nearest scope first, newest first within a scope, so a tie goes to the
+    /// newest, as when the analyser picks the overload. Walking them from
+    /// most to least specific, the first that accepts the arguments is the
+    /// one, unless a newer one could tie with it, which is rare.
+    fn find_scalar_overload(
+        &self,
+        scalars: &[ResolvedVar],
+        ranking: &OnceCell<OverloadRanking>,
+        args: &[Value],
+    ) -> Option<Function> {
         let frame_pointer = self.frames.last().expect("no frame").frame_pointer;
-        scalars.iter().find_map(|var| {
-            let value = self.resolve_var(var, frame_pointer);
-            let Value::Object(obj) = value else {
-                return None;
-            };
-            let Object::Function(f) = obj.as_ref() else {
-                return None;
-            };
-            f.matches_value_args(args).then(|| f.clone())
+        let function = |var: &ResolvedVar| match self.resolve_var(var, frame_pointer) {
+            Value::Object(obj) => match obj.as_ref() {
+                Object::Function(f) => Some(f.clone()),
+                _ => None,
+            },
+            _ => None,
+        };
+        let accepts = |index: usize| {
+            function(&scalars[index]).filter(|function| function.matches_value_args(args))
+        };
+        let ranking = ranking.get_or_init(|| {
+            OverloadRanking::new(&scalars.iter().map(function).collect::<Vec<_>>())
+        });
+        let first = ranking
+            .order
+            .iter()
+            .find_map(|&index| accepts(index).map(|function| (index, function)))?;
+        if !ranking.has_newer_rival[first.0] {
+            return Some(first.1);
+        }
+        (0..scalars.len()).find_map(|index| {
+            let candidate = accepts(index)?;
+            let dominated = ranking.more_specific[index]
+                .iter()
+                .any(|&more| accepts(more).is_some());
+            (!dominated).then_some(candidate)
         })
     }
 

@@ -5,7 +5,7 @@
 use super::Analyser;
 use super::function_values::{Choice, FunctionValue};
 use crate::error::AnalysisError;
-use crate::overloads::{CallKind, ResolvedCall, is_strictly_more_specific};
+use crate::overloads::{CallKind, ResolvedCall};
 use crate::types::TypeVars;
 use ndc_analysis::{Binding, Candidate};
 use ndc_core::{NodeId, StaticType, TypeVar};
@@ -1174,7 +1174,7 @@ impl Analyser {
             parameters
                 .iter()
                 .enumerate()
-                .all(|(j, wider)| i == j || is_strictly_more_specific(narrower, wider))
+                .all(|(j, wider)| i == j || StaticType::is_strictly_more_specific(narrower, wider))
         })?;
         Some(symbols[narrowest])
     }
