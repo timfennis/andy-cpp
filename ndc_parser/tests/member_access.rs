@@ -36,7 +36,7 @@ fn bare_dot_is_member_access() {
 fn invoked_dot_is_call_with_receiver_as_first_argument() {
     let expression = parse_one("foo.bar()");
 
-    let Expression::Call {
+    let Expression::MethodCall {
         function,
         arguments,
     } = expression.expression

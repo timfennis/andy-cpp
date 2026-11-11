@@ -823,14 +823,49 @@ fn user_functions_resolve_as_properties() {
 }
 
 #[test]
-fn getters_keep_same_named_variables_as_candidates() {
-    // The type pass skips the variable because it can't be called.
+fn getters_look_only_among_functions() {
     let mut resolver = new_resolver(["x"]);
     let native = builtin(&resolver, "x");
     resolve_source(&mut resolver, "let p = 1; let x = 99; p.x;").unwrap();
 
-    let [_, local] = declared(&resolver);
-    assert_eq!(only_getter(&resolver).0, vec![vec![local], vec![native]]);
+    assert_eq!(only_getter(&resolver).0, vec![vec![native]]);
+}
+
+#[test]
+fn method_calls_look_only_among_functions() {
+    let mut resolver = new_resolver(["len"]);
+    let native = builtin(&resolver, "len");
+    resolve_source(&mut resolver, "let len = 99; \"abc\".len();").unwrap();
+
+    assert_eq!(only_reference(&resolver).0, vec![vec![native]]);
+}
+
+#[test]
+fn a_method_call_never_captures_a_variable() {
+    let mut resolver = new_resolver(["len"]);
+    resolve_source(
+        &mut resolver,
+        "fn outer() { let len = 99; fn inner(s) { s.len(); } }",
+    )
+    .unwrap();
+
+    let [_, inner] = functions(&resolver)[..] else {
+        panic!("expected two functions");
+    };
+    assert!(captures_of(&resolver, inner).is_empty());
+}
+
+#[test]
+fn a_method_call_of_a_variable_is_an_error() {
+    let source = "let double = fn(x) { x; }; 5.double();";
+    let mut resolver = new_resolver([]);
+    let error = resolve_source(&mut resolver, source).unwrap_err();
+    let NameResolutionError::VariableIsNotAFunction { name, span } = &error else {
+        panic!("expected a variable that isn't a function, got {error:?}");
+    };
+    assert_eq!(name, "double");
+    assert_eq!(&source[span.range()], "double");
+    assert!(error.help_text().is_some());
 }
 
 #[test]
@@ -1132,10 +1167,9 @@ fn field_accessors_may_share_names_with_variables() {
     )
     .unwrap();
 
-    // The getter is a candidate beside the variable; the type pass skips the variable.
-    let [local] = declared(&resolver);
+    // A field read only looks among functions, so the variable isn't a candidate.
     let (getter, _) = only_struct(&resolver).accessors[0];
-    assert_eq!(only_getter(&resolver).0, vec![vec![getter, local]]);
+    assert_eq!(only_getter(&resolver).0, vec![vec![getter]]);
 }
 
 #[test]

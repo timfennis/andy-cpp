@@ -9,8 +9,8 @@ use ndc_resolver::Candidates;
 
 impl Analyser {
     /// Why no candidate accepts a call of `name` with arguments of these types:
-    /// a variable holding a function ended the search, a cast would make an
-    /// overload fit, or nothing fits.
+    /// a variable ended the search, a cast would make an overload fit, or
+    /// nothing fits.
     fn no_match(
         &self,
         candidates: &Candidates,
@@ -19,9 +19,15 @@ impl Analyser {
         span: Span,
     ) -> AnalysisError {
         let overloads = self.overloads();
-        if overloads.variable_ending_search(candidates).is_some() {
+        if let Some(variable) = overloads.variable_ending_search(candidates) {
             let hides_functions = overloads.hides_functions(candidates);
-            AnalysisError::variable_rejects_arguments(name, types, hides_functions, span)
+            AnalysisError::variable_rejects_arguments(
+                name,
+                self.types.get_type(variable),
+                types,
+                hides_functions,
+                span,
+            )
         } else if overloads.a_cast_could_resolve(candidates, types) {
             AnalysisError::function_not_found_suggest_cast(name, types, span)
         } else {
@@ -34,29 +40,6 @@ impl Analyser {
         Overloads::new(&self.types, self.resolver.symbols())
     }
 
-    /// Reports a read `x.name`, the call `name(x)`, that a value of unknown
-    /// type named `name` makes ambiguous, as [`Overloads::any_value_hiding_function`]
-    /// describes. `node` is the read's, which holds its getter candidates.
-    pub(super) fn check_member_read(
-        &mut self,
-        node: NodeId,
-        receiver: &StaticType,
-        member: &str,
-        span: Span,
-    ) {
-        let ambiguous = self
-            .resolver
-            .getter_candidates(node)
-            .is_some_and(|getters| {
-                self.overloads()
-                    .any_value_hiding_function(getters, std::slice::from_ref(receiver))
-                    .is_some()
-            });
-        if ambiguous {
-            self.emit(AnalysisError::ambiguous_call(member, span));
-        }
-    }
-
     /// Analyses `receiver.member`, the call `member(receiver)`.
     pub(super) fn analyse_member_access(
         &mut self,
@@ -65,9 +48,8 @@ impl Analyser {
         member: &str,
         member_span: Span,
     ) -> StaticType {
+        // `xs.len` is the call `len(xs)`, among functions only.
         let receiver_type = self.analyse_expr(receiver);
-        // `xs.len` is the call `len(xs)`, checked like any other call.
-        self.check_member_read(id, &receiver_type, member, member_span);
         let getters = self
             .resolver
             .getter_candidates(id)
@@ -124,17 +106,6 @@ impl Analyser {
         let mut type_sig = Vec::with_capacity(arguments.len());
         for arg in arguments.iter() {
             type_sig.push(self.analyse_expr(arg));
-        }
-
-        // A value whose type isn't known may hold a function itself, so one
-        // standing nearer than a function that accepts the call makes it
-        // ambiguous. `xs.len()` is the call `len(xs)`, so it's checked too.
-        if self
-            .overloads()
-            .any_value_hiding_function(self.resolver.reference_candidates(function.id), &type_sig)
-            .is_some()
-        {
-            self.emit(AnalysisError::ambiguous_call(name, function.span));
         }
 
         let ResolvedCall {

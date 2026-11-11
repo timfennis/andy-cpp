@@ -385,6 +385,10 @@ impl Compiler {
             | Expression::OperatorCall {
                 function,
                 arguments,
+            }
+            | Expression::MethodCall {
+                function,
+                arguments,
             } => {
                 let function_span = function.span;
                 let opcode = match &function.expression {

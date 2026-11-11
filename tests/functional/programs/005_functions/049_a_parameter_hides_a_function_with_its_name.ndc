@@ -1,0 +1,8 @@
+// A parameter hides a function with its name, whatever its type: the call
+// uses the parameter.
+fn greet(name) { "Hello " ++ name }
+fn welcome(greet) {
+    greet("Ada")
+}
+print(welcome(fn(name) { "Hi " ++ name }));
+// expect-output: Hi Ada

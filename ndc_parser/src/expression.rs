@@ -89,6 +89,12 @@ pub enum Expression {
         function: Box<ExpressionLocation>,
         arguments: Vec<ExpressionLocation>,
     },
+    /// `xs.f(y)`: the call `f(xs, y)`, whose callee is only looked up
+    /// among functions. The receiver is the first argument.
+    MethodCall {
+        function: Box<ExpressionLocation>,
+        arguments: Vec<ExpressionLocation>,
+    },
     // Example: reading from `foo.bar`
     MemberAccess {
         receiver: Box<ExpressionLocation>,
@@ -323,6 +329,10 @@ impl ExpressionLocation {
                 arguments,
             }
             | Expression::OperatorCall {
+                function,
+                arguments,
+            }
+            | Expression::MethodCall {
                 function,
                 arguments,
             } => {

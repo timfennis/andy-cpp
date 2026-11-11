@@ -1,6 +1,0 @@
-// `"abc".len` is the call `len("abc")`, so an unannotated parameter named
-// `len` makes it ambiguous, as it would the call written out.
-// expect-error: Ambiguous call to 'len'
-fn label(len) {
-    "abc".len
-}

@@ -17,7 +17,7 @@ impl From<NameResolutionError> for AnalysisError {
         Self {
             text: error.to_string(),
             span: error.span(),
-            help_text: None,
+            help_text: error.help_text(),
         }
     }
 }
@@ -99,19 +99,6 @@ impl AnalysisError {
         }
     }
 
-    pub(crate) fn ambiguous_call(name: &str, span: Span) -> Self {
-        Self {
-            text: format!(
-                "Ambiguous call to '{name}': it could mean the function '{name}' or a value named '{name}' whose type isn't known"
-            ),
-            span,
-            help_text: Some(
-                "Rename the value if it holds a function, or annotate its type if it doesn't"
-                    .to_string(),
-            ),
-        }
-    }
-
     pub(crate) fn unable_to_index_into(typ: &StaticType, span: Span) -> Self {
         Self {
             text: format!("Unable to index into {typ}"),
@@ -131,15 +118,20 @@ impl AnalysisError {
     /// name further out, which the help then explains.
     pub(crate) fn variable_rejects_arguments(
         name: &str,
+        variable_type: &StaticType,
         types: &[StaticType],
         hides_functions: bool,
         span: Span,
     ) -> Self {
-        Self {
-            text: format!(
+        let text = match variable_type {
+            StaticType::Function { .. } => format!(
                 "The variable '{name}' holds a function that doesn't accept the arguments '{}'",
                 types.iter().join(", ")
             ),
+            other => format!("The variable '{name}' is {other}, which can't be called"),
+        };
+        Self {
+            text,
             span,
             help_text: hides_functions.then(|| {
                 format!(

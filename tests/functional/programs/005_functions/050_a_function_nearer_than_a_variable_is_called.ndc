@@ -1,0 +1,8 @@
+// The nearest binding wins in both directions: a function declared nearer
+// than a variable with its name is the one called.
+fn inner(f) {
+    fn f(x) { "inner function" }
+    f(1)
+}
+print(inner(5));
+// expect-output: inner function

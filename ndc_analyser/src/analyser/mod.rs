@@ -412,6 +412,10 @@ impl Analyser {
             Expression::Call {
                 function,
                 arguments,
+            }
+            | Expression::MethodCall {
+                function,
+                arguments,
             } => self.analyse_call(function, arguments, CallKind::Regular, *span),
             Expression::OperatorCall {
                 function,

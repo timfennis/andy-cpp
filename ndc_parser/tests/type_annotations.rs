@@ -71,8 +71,9 @@ fn a_cast_target_before_a_comparison_gets_its_own_id() {
     };
 
     let ids = values.iter().map(|value| {
-        let (Expression::Call { arguments, .. } | Expression::OperatorCall { arguments, .. }) =
-            &value.expression
+        let (Expression::Call { arguments, .. }
+        | Expression::OperatorCall { arguments, .. }
+        | Expression::MethodCall { arguments, .. }) = &value.expression
         else {
             panic!("expected a comparison, got {value:?}");
         };

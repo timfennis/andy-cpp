@@ -172,7 +172,7 @@ fn foo(b) { b + 2 }   // ERROR: Illegal redefinition of function 'foo' with para
 
 ## How a call finds its function
 
-A call such as `foo(x)` looks for `foo` in the scope it's written in first, then in each enclosing scope in turn, and finally among the built-in functions. A method call `x.foo()` and a property read `x.foo` are both the call `foo(x)`, and are looked up the same way.
+A call such as `foo(x)` looks for `foo` in the scope it's written in first, then in each enclosing scope in turn, and finally among the built-in functions.
 
 **Functions in a nested scope** take over only the calls they accept. Other calls still reach the overloads further out:
 
@@ -187,7 +187,7 @@ fn foo(a, b) { "outer-two" }
 }
 ```
 
-**A `let` holding a function** shadows the functions with that name. It doesn't join their overloads, so a call it doesn't accept is an error, even when one of the functions would accept it:
+**A variable**, such as a `let`, a parameter or a loop variable, shadows the functions with its name, whatever it holds. It doesn't join their overloads, so the call uses the variable, and it's an error when the variable can't take the call, even when a function further out would:
 
 ```ndc
 fn foo(a) { "one" }
@@ -196,30 +196,22 @@ fn foo(a, b) { "two" }
 let foo = fn(a) => "let";
 foo("x");        // "let"
 foo("x", "y");   // ERROR: The variable 'foo' holds a function that doesn't accept the arguments 'String, String'
+
+let len = 300;
+len("test");     // ERROR: The variable 'len' is Int, which can't be called
 ```
 
-**A `let` holding a value that can't be called** is skipped, so the call reaches the function:
+**A method call `x.foo()` and a property read `x.foo`** are the call `foo(x)`, but they only look among functions: variables named `foo` are skipped. A variable never gets in the way of a method call, and a function stored in a variable is called the plain way:
 
 ```ndc
 let len = 300;
-len;           // 300
-len("test");   // 4: the built-in len
-```
+len;               // 300
+"test".len();      // 4: the built-in len
+"test".len;        // 4
 
-**A value whose type isn't known**, such as a parameter without a type annotation, might hold a function. If a function further out also accepts the call, the call is ambiguous, which is an error. Rename the value if it holds a function, or annotate its type if it doesn't. If no function accepts the call, the value is called.
-
-```ndc
-fn label(len) {
-    len("abc")          // ERROR: Ambiguous call to 'len'
-}
-
-fn measure(len) {
-    "abc".len()         // ERROR: the same call, written as a method call
-}
-
-fn padded(len: Int) {
-    len("abc") + len    // fine: an Int can't be called, so this calls the built-in len
-}
+let double = fn(x) => x * 2;
+double(5);         // 10
+5.double();        // ERROR: No function named 'double'
 ```
 
 **Within one scope**, a name belongs either to `let` bindings or to functions, not both. A `fn` after a `let` with the same name in the same scope is an error, while in a nested scope it's fine. The same applies to a struct's constructor:

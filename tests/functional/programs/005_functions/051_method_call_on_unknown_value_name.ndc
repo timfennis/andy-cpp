@@ -1,6 +1,0 @@
-// `xs.map(f)` is the call `map(xs, f)`, so an unannotated parameter named
-// `map` makes it ambiguous, as it would the plain call.
-// expect-error: Ambiguous call to 'map'
-fn render(map) {
-    [1, 2].map(fn(x) => x * 2)
-}

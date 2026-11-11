@@ -1,0 +1,7 @@
+// A method call or a property read only looks among functions, so a
+// variable named `len` doesn't get in its way. Reading the name gives the
+// variable.
+let len = 300;
+assert_eq(4, "test".len);
+assert_eq(4, "test".len());
+assert_eq(300, len);

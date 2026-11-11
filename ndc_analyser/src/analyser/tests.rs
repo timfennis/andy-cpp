@@ -487,22 +487,22 @@ fn len_native() -> Vec<(String, StaticType)> {
 }
 
 #[test]
-fn unknown_value_nearer_than_an_accepting_function_is_ambiguous() {
+fn a_call_uses_a_variable_standing_nearer_than_a_function() {
     assert_eq!(
         errors("fn foo(x) { 1 } fn test(foo) { foo(2) }", vec![]),
-        vec![
-            "Ambiguous call to 'foo': it could mean the function 'foo' or a value named 'foo' whose type isn't known"
-        ],
+        Vec::<String>::new(),
+    );
+    assert_eq!(
+        errors("fn test(len) { len(\"abc\") }", len_native()),
+        Vec::<String>::new(),
     );
 }
 
 #[test]
-fn an_unknown_value_makes_a_call_of_a_native_ambiguous() {
+fn a_call_of_a_variable_that_cant_be_called_does_not_reach_the_function() {
     assert_eq!(
-        errors("fn test(len) { len(\"abc\") }", len_native()),
-        vec![
-            "Ambiguous call to 'len': it could mean the function 'len' or a value named 'len' whose type isn't known"
-        ],
+        errors("fn test(len: Int) { len(\"abc\") }", len_native()),
+        vec!["The variable 'len' is Int, which can't be called"],
     );
 }
 
@@ -518,23 +518,17 @@ fn plus_native() -> Vec<(String, StaticType)> {
 }
 
 #[test]
-fn a_field_read_is_ambiguous_with_an_unknown_value_named_like_the_field() {
-    assert_eq!(
-        errors("struct P { x: Int } fn f(p, x) { p.x }", vec![]),
-        vec![
-            "Ambiguous call to 'x': it could mean the function 'x' or a value named 'x' whose type isn't known"
-        ],
-    );
-}
-
-#[test]
-fn augmented_assignment_to_a_field_is_ambiguous_with_a_value_named_like_the_field() {
-    assert_eq!(
-        errors("struct P { x: Int } fn f(p, x) { p.x += 1 }", plus_native()),
-        vec![
-            "Ambiguous call to 'x': it could mean the function 'x' or a value named 'x' whose type isn't known"
-        ],
-    );
+fn field_reads_and_writes_skip_a_value_named_like_the_field() {
+    for source in [
+        "struct P { x: Int } fn f(p, x) { p.x }",
+        "struct P { x: Int } fn f(p, x) { p.x += 1 }",
+    ] {
+        assert_eq!(
+            errors(source, plus_native()),
+            Vec::<String>::new(),
+            "{source}"
+        );
+    }
 }
 
 #[test]

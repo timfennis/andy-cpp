@@ -1,0 +1,5 @@
+// A plain call uses the nearest binding with its name. Here that's a
+// variable, so the function `len` further out isn't reached.
+// expect-error: The variable 'len' is Int, which can't be called
+let len = 300;
+len("test");

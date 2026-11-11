@@ -107,9 +107,10 @@ impl<'a> Overloads<'a> {
     }
 
     /// The candidate groups a call can reach, nearest scope first. A plain
-    /// binding holding a function, like `let foo = fn(a, b) { … }`, is the last
-    /// candidate: the search stops there instead of reaching the functions
-    /// further out, since a `let` doesn't join their overloads.
+    /// binding, like a `let` or a parameter, is the last candidate: the search
+    /// stops there instead of reaching the functions further out, since a
+    /// variable doesn't join their overloads. Its type doesn't matter, so
+    /// `let len = 5; len(xs)` calls the variable and fails.
     fn reachable(self, candidates: &Candidates) -> impl Iterator<Item = &[SymbolId]> {
         let mut stopped = false;
         candidates.iter().map_while(move |group| {
@@ -128,7 +129,7 @@ impl<'a> Overloads<'a> {
         })
     }
 
-    /// The variable holding a function that ends the search, if one does: in
+    /// The variable that ends the search, if one does: in
     /// `fn foo(a) { … } let foo = fn(a, b) { … };`, a call of `foo` ends at the `let`.
     pub(crate) fn variable_ending_search(self, candidates: &Candidates) -> Option<SymbolId> {
         self.reachable(candidates)
@@ -149,32 +150,9 @@ impl<'a> Overloads<'a> {
             .any(|&symbol| self.symbols.kind(symbol) == BindingKind::Function)
     }
 
-    /// Whether `symbol` is a plain binding known to hold a function.
+    /// Whether `symbol` is a plain binding, which no search goes past.
     fn ends_search(self, symbol: SymbolId) -> bool {
         self.symbols.kind(symbol) == BindingKind::Plain
-            && matches!(self.types.get_type(symbol), StaticType::Function { .. })
-    }
-
-    /// A value whose type isn't known that stands nearer than a function
-    /// accepting this call, so the call could mean either: in
-    /// `fn foo(x) { 1 } fn test(foo) { foo(2) }`, the parameter `foo`. A
-    /// function nearer than every such value shadows them, and where no
-    /// function accepts the call, the value is what gets called.
-    pub(crate) fn any_value_hiding_function(
-        self,
-        candidates: &Candidates,
-        sig: &[StaticType],
-    ) -> Option<SymbolId> {
-        let mut any_value = None;
-        for &symbol in self.reachable(candidates).flatten() {
-            let typ = self.types.get_type(symbol);
-            if *typ == StaticType::Any {
-                any_value.get_or_insert(symbol);
-            } else if typ.is_fn_and_matches(sig) || self.is_compatible(symbol, sig) {
-                return any_value;
-            }
-        }
-        None
     }
 
     /// Whether some overload among `candidates` would accept these arguments
@@ -880,18 +858,24 @@ mod tests {
         });
     }
 
-    // A plain binding that can't be called doesn't end the search.
+    // Any plain binding ends the search, whatever its type: one that can't
+    // be called leaves the call without a match instead of reaching the
+    // function further out.
     #[test]
-    fn a_variable_holding_a_value_does_not_end_the_search() {
+    fn a_variable_ends_the_search_whatever_its_type() {
         let (mut types, fns) = table(vec![fn_type(vec![StaticType::Int], StaticType::Int)]);
         let variable = symbol(BindingKind::Plain);
         types.declare(variable, TypeBinding::Inferred(StaticType::Int));
+        let candidates = candidates(&[&[variable], &[fns[0]]]);
 
-        assert_resolves_to(
-            &types,
-            &candidates(&[&[variable], &[fns[0]]]),
-            &[StaticType::Int],
-            fns[0],
-        );
+        let resolved = resolve(&types, &candidates, &[StaticType::Int], CallKind::Regular);
+        assert_eq!(resolved.binding, Binding::None);
+        SYMBOLS.with_borrow(|table| {
+            let overloads = Overloads::new(&types, table);
+            assert_eq!(
+                overloads.variable_ending_search(&candidates),
+                Some(variable)
+            );
+        });
     }
 }

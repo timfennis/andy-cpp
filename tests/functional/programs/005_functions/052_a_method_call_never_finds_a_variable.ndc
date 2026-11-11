@@ -1,0 +1,5 @@
+// Method calls only find functions, so a function stored in a variable has
+// to be called the plain way: `double(5)`.
+// expect-error: No function named 'double'
+let double = fn(x) => x * 2;
+5.double();
