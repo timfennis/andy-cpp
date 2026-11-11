@@ -92,7 +92,7 @@ The AST is syntax only. The analyser runs name resolution (`ndc_resolver`) on ea
 | `ndc_interpreter` | `Interpreter` facade (analyse + compile + run via VM) |
 | `ndc_vm` | Bytecode `Compiler`, stack-based `Vm`, and the runtime `Value` (including `Number`) |
 | `ndc_stdlib` | Built-in functions registered via `FunctionRegistry` |
-| `ndc_lsp` | LSP backend (hover, inlay hints) |
+| `ndc_lsp` | Language features (completion, hover, diagnostics, inlay hints, symbols, go-to-definition) over a `Document`; with the default `server` feature, the LSP server that serves them over stdio |
 | `ndc_diagnostics` | Renders `InterpreterError`s as codespan reports, for the CLI (coloured, `color` feature) and the browser (plain text) |
 | `ndc_highlight` | Classifies the pieces of a program (keyword, function, comment, …) for syntax highlighting, from the lexer and parser |
 | `ndc_bin` | CLI entry point, REPL, terminal colours for the highlighting |

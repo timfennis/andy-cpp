@@ -53,6 +53,8 @@ tap = "1.0.1"
 thiserror = "2.0.18"
 tokio = { version = "1.52.3", features = ["full"] }
 tower-lsp = "0.20.0"
+# The version tower-lsp re-exports, so the server and the features share types.
+lsp-types = "0.94.1"
 
 # For the browser build: LTO makes the module about 10% smaller and a bit
 # faster. opt-level "s" or "z" would save another 12-21% of the gzipped size,

@@ -18,10 +18,6 @@ use crate::visitor::{AstVisitor, walk_ast};
 pub struct DocumentState {
     pub source: String,
     pub line_index: LineIndex,
-    /// Monotonic document version from the client (LSP `didChange`). Used to
-    /// discard the result of a `validate` that an overlapping later edit has
-    /// already superseded, so a slow analysis can't roll the buffer back.
-    pub version: i32,
     /// Whether `ast`/`analysis` were produced from the current `source`. False
     /// while the buffer is mid-edit and the last parse failed: the AST and its
     /// spans are then stale relative to `source`, so AST-backed features (hover,
@@ -51,13 +47,20 @@ impl DocumentState {
         Self {
             source,
             line_index,
-            version: 0,
             analysis_matches_source: false,
             ast: Vec::new(),
             analysis: Analysis::default(),
             variable_types: AHashMap::new(),
             expression_types: AHashMap::new(),
         }
+    }
+
+    /// Replace the source text. The analysis now predates it, so AST-backed
+    /// features stay off until [`set_analysis`] commits one for this text.
+    pub fn set_source(&mut self, source: &str) {
+        self.source = source.to_string();
+        self.line_index = LineIndex::new(source);
+        self.analysis_matches_source = false;
     }
 
     /// Build a state from a successful analysis. Test-only convenience; the
@@ -74,7 +77,7 @@ impl DocumentState {
     }
 
     /// Replace the analysis (AST + side tables + derived completion caches) in
-    /// place, leaving `source`/`line_index`/`version` untouched, and mark the
+    /// place, leaving `source` and `line_index` untouched, and mark the
     /// analysis as matching the current source. Callers must ensure `ast` was
     /// produced from the current `source`.
     pub fn set_analysis(&mut self, ast: Vec<ExpressionLocation>, analysis: Analysis) {

@@ -1,29 +1,36 @@
 use ahash::AHashMap;
 
-use ndc_core::FunctionRegistry;
-use ndc_interpreter::{Interpreter, NativeFunction};
-use std::rc::Rc;
-use tokio::sync::RwLock;
-use tower_lsp::jsonrpc::Result as JsonRPCResult;
-use tower_lsp::lsp_types::{
+use lsp_types::{
     CompletionItem, CompletionOptions, CompletionParams, CompletionResponse,
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
     DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse,
     Hover, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult,
-    InitializedParams, InlayHint, InlayHintParams, MessageType, OneOf, ServerCapabilities,
-    TextDocumentSyncCapability, TextDocumentSyncKind, Url, WorkDoneProgressOptions,
+    InitializedParams, InlayHint, InlayHintParams, Location, MessageType, OneOf,
+    ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
+    WorkDoneProgressOptions,
 };
+use tokio::sync::RwLock;
+use tower_lsp::jsonrpc::Result as JsonRPCResult;
 use tower_lsp::{Client, LanguageServer};
 
-use crate::diagnostics;
+use crate::document::{self, Configure};
 use crate::features::completion::FunctionInfo;
 use crate::features::{completion, definition, hover, inlay_hints, symbols};
 use crate::state::DocumentState;
 
+/// An open document: its state, and the client's version of the text in it.
+struct OpenDocument {
+    /// Monotonic document version from the client (LSP `didChange`). Used to
+    /// discard the result of a `validate` that an overlapping later edit has
+    /// already superseded, so a slow analysis can't roll the buffer back.
+    version: i32,
+    state: DocumentState,
+}
+
 pub struct Backend {
     pub client: Client,
-    documents: RwLock<AHashMap<Url, DocumentState>>,
-    configure: fn(&mut FunctionRegistry<Rc<NativeFunction>>),
+    documents: RwLock<AHashMap<Url, OpenDocument>>,
+    configure: Configure,
     /// Native-function metadata, snapshotted once at startup. The set of native
     /// functions never changes, so completion and hover read this instead of
     /// rebuilding an interpreter per request.
@@ -31,24 +38,13 @@ pub struct Backend {
 }
 
 impl Backend {
-    pub fn new(client: Client, configure: fn(&mut FunctionRegistry<Rc<NativeFunction>>)) -> Self {
-        let functions = {
-            let mut interpreter = Interpreter::capturing();
-            interpreter.configure(configure);
-            FunctionInfo::collect(&interpreter)
-        };
+    pub fn new(client: Client, configure: Configure) -> Self {
         Self {
             client,
             documents: RwLock::new(AHashMap::new()),
             configure,
-            functions,
+            functions: FunctionInfo::collect(&document::interpreter(configure)),
         }
-    }
-
-    fn make_interpreter(&self) -> Interpreter {
-        let mut interpreter = Interpreter::capturing();
-        interpreter.configure(self.configure);
-        interpreter
     }
 
     // Staleness & concurrency model
@@ -71,17 +67,14 @@ impl Backend {
     /// Update the cached source text immediately and bump the document version.
     async fn update_source(&self, uri: &Url, text: &str, version: i32) {
         let mut docs = self.documents.write().await;
-        if let Some(state) = docs.get_mut(uri) {
-            state.source = text.to_string();
-            state.line_index = crate::util::LineIndex::new(text);
-            state.version = version;
-            // The AST now predates this edit; `validate` re-sets this to true
-            // if the new source parses.
-            state.analysis_matches_source = false;
+        if let Some(open) = docs.get_mut(uri) {
+            // The AST now predates this edit; `validate` commits a new one if
+            // the new source parses.
+            open.state.set_source(text);
+            open.version = version;
         } else {
-            let mut state = DocumentState::from_source(text.to_string());
-            state.version = version;
-            docs.insert(uri.clone(), state);
+            let state = DocumentState::from_source(text.to_string());
+            docs.insert(uri.clone(), OpenDocument { version, state });
         }
     }
 
@@ -89,16 +82,9 @@ impl Backend {
     /// commit the analysis and publish diagnostics only if no later edit has
     /// superseded it. `update_source` must have run for this `version` first.
     async fn validate(&self, uri: &Url, text: &str, version: i32) {
-        // The interpreter uses Rc internally (non-Send), so it must be fully
-        // dropped before the next await point.
-        let (diagnostics, analysed) = {
-            let mut interpreter = self.make_interpreter();
-            let analysed = interpreter.analyse_str(text);
-            (
-                diagnostics::analysis_diagnostics(text, &analysed),
-                analysed.ok(),
-            )
-        };
+        // The interpreter uses Rc internally (non-Send); `analyse` drops it
+        // before returning, so nothing non-Send lives across the next await.
+        let (diagnostics, analysed) = document::analyse(self.configure, text);
 
         // Hold the write lock across the commit AND the publish. `did_close`
         // also takes this lock to remove state + clear diagnostics, so holding
@@ -109,19 +95,19 @@ impl Backend {
         // file. The publish is a fire-and-forget notification, so the lock is
         // held only briefly.
         let mut docs = self.documents.write().await;
-        let Some(state) = docs.get_mut(uri) else {
+        let Some(open) = docs.get_mut(uri) else {
             return;
         };
         // A later edit already moved the buffer on — drop this stale run
         // rather than committing old AST or publishing old diagnostics.
-        if state.version != version {
+        if open.version != version {
             return;
         }
         // On success, commit in place (keeps the current source/line_index).
         // On parse failure, keep the last good AST; `analysis_matches_source`
         // is already false, so AST-backed features stay disabled.
-        if let Some((ast, result)) = analysed {
-            state.set_analysis(ast, result.analysis);
+        if let Some((ast, analysis)) = analysed {
+            open.state.set_analysis(ast, analysis);
         }
 
         self.client
@@ -198,17 +184,20 @@ impl LanguageServer for Backend {
 
     async fn inlay_hint(&self, params: InlayHintParams) -> JsonRPCResult<Option<Vec<InlayHint>>> {
         let docs = self.documents.read().await;
-        Ok(docs.get(&params.text_document.uri).map(|state| {
-            if !state.analysis_matches_source {
-                return Vec::new();
-            }
-            inlay_hints::collect(
-                &state.ast,
-                &state.analysis,
-                &state.source,
-                &state.line_index,
-            )
-        }))
+        Ok(docs
+            .get(&params.text_document.uri)
+            .map(|open| &open.state)
+            .map(|state| {
+                if !state.analysis_matches_source {
+                    return Vec::new();
+                }
+                inlay_hints::collect(
+                    &state.ast,
+                    &state.analysis,
+                    &state.source,
+                    &state.line_index,
+                )
+            }))
     }
 
     async fn hover(&self, params: HoverParams) -> JsonRPCResult<Option<Hover>> {
@@ -217,6 +206,7 @@ impl LanguageServer for Backend {
         let position = params.text_document_position_params.position;
         Ok(docs
             .get(uri)
+            .map(|open| &open.state)
             .filter(|state| state.analysis_matches_source)
             .and_then(|state| hover::hover(state, position, &self.functions)))
     }
@@ -230,10 +220,15 @@ impl LanguageServer for Backend {
         let position = params.text_document_position_params.position;
         Ok(docs
             .get(uri)
+            .map(|open| &open.state)
             .filter(|state| state.analysis_matches_source)
             .and_then(|state| {
-                definition::goto_definition(state, position, uri.clone())
-                    .map(GotoDefinitionResponse::Scalar)
+                definition::goto_definition(state, position).map(|range| {
+                    GotoDefinitionResponse::Scalar(Location {
+                        uri: uri.clone(),
+                        range,
+                    })
+                })
             }))
     }
 
@@ -244,6 +239,7 @@ impl LanguageServer for Backend {
         let docs = self.documents.read().await;
         Ok(docs
             .get(&params.text_document.uri)
+            .map(|open| &open.state)
             .filter(|state| state.analysis_matches_source)
             .map(|state| {
                 DocumentSymbolResponse::Nested(symbols::document_symbols(
@@ -264,7 +260,11 @@ impl LanguageServer for Backend {
         let position = params.text_document_position.position;
         // Completion is synchronous and never awaits, so we can hold the read
         // lock and borrow the state directly (no cloning).
-        let response = completion::complete(docs.get(uri), position, &self.functions);
+        let response = completion::complete(
+            docs.get(uri).map(|open| &open.state),
+            position,
+            &self.functions,
+        );
         Ok(Some(response))
     }
 

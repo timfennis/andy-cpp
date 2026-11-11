@@ -1,8 +1,8 @@
+use lsp_types::{InlayHint, InlayHintKind, InlayHintLabel};
 use ndc_analysis::Analysis;
 use ndc_core::NodeId;
 use ndc_lexer::Span;
 use ndc_parser::ExpressionLocation;
-use tower_lsp::lsp_types::{InlayHint, InlayHintKind, InlayHintLabel};
 
 use crate::util::LineIndex;
 use crate::visitor::{AstVisitor, walk_ast};
