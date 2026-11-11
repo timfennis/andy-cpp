@@ -210,9 +210,10 @@ impl TypeVars {
                 },
             ) => {
                 let mut fits = true;
-                if let (Some(expected), Some(takes)) = (expected, takes)
-                    && expected.len() == takes.len()
-                {
+                if let (Some(expected), Some(takes)) = (expected, takes) {
+                    // A function taking another number of arguments can't be
+                    // called the way the function type says.
+                    fits = expected.len() == takes.len();
                     for (expected, takes) in expected.iter().zip(takes) {
                         if !takes.is_unknown() {
                             fits &= self.bind_argument(takes, expected);

@@ -652,6 +652,20 @@ fn a_function_argument_fits_a_function_parameter_where_their_known_parts_agree()
 }
 
 #[test]
+fn a_function_value_rejects_a_callback_taking_another_number_of_arguments() {
+    // Called through an expression, so no overload is matched first.
+    assert_eq!(
+        errors(
+            "fn apply(f: Fn(Int) -> Int) { f(1) } let fs = [apply]; fs[0](fn(a, b) => 1);",
+            index_natives()
+        ),
+        vec![
+            "A function of type Fn(Fn(Int) -> Int) -> Int doesn't accept the arguments 'Fn(Any, Any) -> Int'"
+        ]
+    );
+}
+
+#[test]
 fn an_any_parameter_settles_what_its_argument_leaves_unknown_as_any() {
     // `keep` may store anything in the list, so it can't become a List<Int>.
     let globals = [natives(&[("keep", "(List<Any>)")]), index_natives()].concat();
