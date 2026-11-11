@@ -276,6 +276,24 @@ impl Analyser {
             }
         }
 
+        // When the stand-ins can't tell the overloads apart, the lambdas'
+        // own types have to, so they're analysed first.
+        let positions = lambdas
+            .iter()
+            .map(|&(position, _)| position)
+            .collect::<Vec<_>>();
+        if !lambdas.is_empty()
+            && self.overloads().lambda_decides_between(
+                self.resolver.reference_candidates(function.id),
+                &type_sig,
+                &positions,
+            )
+        {
+            for (position, lambda) in std::mem::take(&mut lambdas) {
+                type_sig[position] = self.analyse_expr(lambda);
+            }
+        }
+
         let ResolvedCall {
             binding,
             return_type,

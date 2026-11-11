@@ -360,6 +360,45 @@ impl<'a> Overloads<'a> {
         }
     }
 
+    /// Whether which overload a call picks depends on what its lambda
+    /// arguments, at the positions in `lambdas`, return or take, which their
+    /// stand-ins in `sig` don't say. That's so when, in the scope the call
+    /// picks from, more than one overload that fits takes a function where a
+    /// lambda is passed. With `choose(f: Fn() -> Int)` and
+    /// `choose(f: Fn() -> String)`, `choose(fn() => 1)` has to look at the
+    /// lambda first.
+    pub(crate) fn lambda_decides_between(
+        self,
+        candidates: &Candidates,
+        sig: &[StaticType],
+        lambdas: &[usize],
+    ) -> bool {
+        for group in self.reachable(candidates) {
+            let fitting = group
+                .iter()
+                .map(|&symbol| self.types.get_type(symbol))
+                .filter(|typ| typ.is_fn_and_matches(sig))
+                .collect::<Vec<_>>();
+            if fitting.is_empty() {
+                continue;
+            }
+            let taking_functions = fitting
+                .iter()
+                .filter(|typ| match typ {
+                    StaticType::Function {
+                        parameters: Some(parameters),
+                        ..
+                    } => lambdas.iter().any(|&position| {
+                        matches!(parameters.get(position), Some(StaticType::Function { .. }))
+                    }),
+                    _ => false,
+                })
+                .count();
+            return taking_functions > 1;
+        }
+        false
+    }
+
     /// Per-scope walk for scalar matches against `sig`. Exact matches
     /// short-circuit; `loose` holds the first scope's compatibility candidates;
     /// `all_by_name` accumulates every callable candidate across the chain for

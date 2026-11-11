@@ -683,6 +683,33 @@ fn a_lambda_argument_takes_what_its_function_parameter_passes() {
 }
 
 #[test]
+fn a_lambda_that_decides_between_overloads_is_analysed_before_the_pick() {
+    let choose = "fn choose(f: Fn() -> Int) { 1 } fn choose(f: Fn() -> String) { \"s\" } ";
+    assert_eq!(
+        analyse_last_type(&format!("{choose}choose(fn() => 1)")),
+        StaticType::Int
+    );
+    assert_eq!(
+        analyse_last_type(&format!("{choose}choose(fn() => \"a\")")),
+        StaticType::String
+    );
+}
+
+#[test]
+fn one_overload_taking_a_function_still_gives_the_lambda_its_types() {
+    // `locate` also takes an element, but only one overload takes a function.
+    let globals = natives(&[
+        ("locate", "<T>(Sequence<T>, Fn(T) -> Bool) -> Int"),
+        ("locate", "<T>(Sequence<T>, T) -> Int"),
+        ("++", "(String, String) -> String"),
+    ]);
+    assert_eq!(
+        errors("locate([1], fn(x) => x ++ \"a\");", globals),
+        vec!["No function called '++' found that matches the arguments 'Int, String'"]
+    );
+}
+
+#[test]
 fn a_lambda_takes_the_function_type_expected_where_it_is_written() {
     let int_to_int = StaticType::Function {
         parameters: Some(vec![StaticType::Int]),
