@@ -4,7 +4,7 @@
 //! `split(String, String)`.
 
 use super::Analyser;
-use super::solver::Constraint;
+use super::solver::{Constraint, EarlyOverload};
 use crate::error::AnalysisError;
 use crate::overloads::CallKind;
 use ndc_analysis::{Binding, Candidate};
@@ -110,13 +110,16 @@ impl Analyser {
     }
 
     /// Which overload `value` means where a value of type `expected` is
-    /// expected. Once the expected function's parameter types are known, it
-    /// means the overload a call with arguments of those types would pick,
-    /// so the nearest scope, the most specific overload and `Any` losing to
-    /// an exact type all work as for calls, and the overload must return
-    /// what's expected too. Before that, only an overload that's the only
-    /// one fitting in any scope is chosen, as more knowledge could still
-    /// rule out a nearer one.
+    /// expected. Once that's a function type, the value is called with
+    /// arguments of its parameter types, so it means the overload a call
+    /// with those arguments means, decided by the same rules: while they
+    /// aren't fully known, only an overload that's the only one able to take
+    /// them, and not through an `Any` parameter, can be committed to; once
+    /// they are, the nearest scope, the most specific overload and `Any`
+    /// losing to an exact type pick it. The return type doesn't pick, as it
+    /// doesn't for a call: the overload must return what's expected, or none
+    /// fits. Before the expected type is a function type, an overload is
+    /// only chosen when it's the only one there is to choose.
     pub(super) fn choose_function_value(
         &mut self,
         value: &FunctionValue,
@@ -126,19 +129,26 @@ impl Analyser {
             parameters: Some(parameters),
             ..
         } = expected
-            && !parameters.iter().any(StaticType::has_vars)
         {
-            let binding = self
-                .overloads()
-                .resolve_call(&value.candidates, parameters, CallKind::Regular)
-                .binding;
-            return match binding {
-                Binding::Resolved(Candidate::Scalar(symbol))
-                    if self.fits_expected(symbol, expected) =>
-                {
-                    Choice::One(symbol)
+            let picked = if parameters.iter().any(StaticType::has_vars) {
+                match self.early_overload(&value.candidates, parameters, CallKind::Regular) {
+                    EarlyOverload::Only(only) => Some(only),
+                    EarlyOverload::NoneFits => return Choice::None,
+                    EarlyOverload::Undecided => return Choice::Undecided,
                 }
-                Binding::Dynamic(_) => Choice::Undecided,
+            } else {
+                match self
+                    .overloads()
+                    .resolve_call(&value.candidates, parameters, CallKind::Regular)
+                    .binding
+                {
+                    Binding::Resolved(Candidate::Scalar(symbol)) => Some(symbol),
+                    Binding::Dynamic(_) => return Choice::Undecided,
+                    _ => None,
+                }
+            };
+            return match picked {
+                Some(symbol) if self.fits_expected(symbol, expected) => Choice::One(symbol),
                 _ => Choice::None,
             };
         }

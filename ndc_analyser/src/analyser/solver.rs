@@ -12,6 +12,16 @@ use ndc_lexer::Span;
 use ndc_resolver::{Candidates, SymbolId};
 use std::collections::BTreeSet;
 
+/// What a call can commit to before its arguments are fully known.
+pub(super) enum EarlyOverload {
+    /// This overload, whatever the arguments turn out to be.
+    Only(SymbolId),
+    /// More than one could still be picked.
+    Undecided,
+    /// None can take the arguments.
+    NoneFits,
+}
+
 /// Where a call's candidates come from and where its pick goes.
 #[derive(Debug, Clone, Copy)]
 pub(super) enum CallSite {
@@ -656,33 +666,56 @@ impl Analyser {
             return Some(self.resolve_call_now(call, &arguments));
         }
 
-        let viable = reachable
-            .iter()
-            .copied()
-            .filter(|&symbol| self.could_accept(symbol, &arguments))
-            .collect::<Vec<_>>();
-        match viable[..] {
+        match self.early_overload(&call.candidates, &arguments, call.kind) {
             // A write that nothing takes may still fit once its target's
             // type is known, which also says better what's wrong.
-            [] if matches!(call.site, CallSite::Setter(_) | CallSite::FieldSetter(_)) => None,
-            [] => Some(self.resolve_call_now(call, &arguments)),
-            // An operator may also apply to each element of a tuple, so one
-            // overload left doesn't decide it while an operand could still
-            // be a tuple: `fn(x) => x ++ "!"` can take `("a", "b")`.
-            [only]
-                if self.fits_without_any(only, &arguments)
-                    && !(call.kind == CallKind::Operator
-                        && arguments
-                            .iter()
-                            .any(|argument| matches!(argument, StaticType::Var(_)))) =>
+            EarlyOverload::NoneFits
+                if matches!(call.site, CallSite::Setter(_) | CallSite::FieldSetter(_)) =>
             {
+                None
+            }
+            EarlyOverload::NoneFits => Some(self.resolve_call_now(call, &arguments)),
+            EarlyOverload::Only(only) => {
                 let Some(typ) = self.commit_early(call, &arguments, only) else {
                     self.report_failed_call(call, &arguments);
                     return Some(StaticType::Any);
                 };
                 Some(typ)
             }
-            _ => None,
+            EarlyOverload::Undecided => None,
+        }
+    }
+
+    /// The overload a call of `candidates` with arguments of these types
+    /// commits to while the arguments aren't fully known: the only one that
+    /// can take them, once nothing learned later could make another one the
+    /// pick. One that takes them only through an `Any` parameter would lose
+    /// to an exact type once they're known, and an operator may also apply
+    /// to each element of a tuple: `fn(x) => x ++ "!"` can take `("a", "b")`.
+    /// Function values are picked by the same rule, as calls with the
+    /// expected parameter types.
+    pub(super) fn early_overload(
+        &mut self,
+        candidates: &Candidates,
+        arguments: &[StaticType],
+        kind: CallKind,
+    ) -> EarlyOverload {
+        let viable = self
+            .overloads()
+            .reachable_symbols(candidates)
+            .into_iter()
+            .filter(|&symbol| self.could_accept(symbol, arguments))
+            .collect::<Vec<_>>();
+        let operand_could_be_a_tuple = kind == CallKind::Operator
+            && arguments
+                .iter()
+                .any(|argument| matches!(argument, StaticType::Var(_)));
+        match viable[..] {
+            [] => EarlyOverload::NoneFits,
+            [only] if self.fits_without_any(only, arguments) && !operand_could_be_a_tuple => {
+                EarlyOverload::Only(only)
+            }
+            _ => EarlyOverload::Undecided,
         }
     }
 

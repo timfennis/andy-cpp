@@ -1175,6 +1175,33 @@ fn the_help_for_an_ambiguous_function_value_names_an_overload_that_fits() {
 }
 
 #[test]
+fn a_function_value_is_not_picked_by_its_return_type_before_its_parameters_are_known() {
+    // Only `pick(Any)` returns an Int, but once `xs` holds Ints a call with
+    // an Int means `pick(Int)`, so that's the one meant, and it doesn't fit.
+    let globals = natives(&[
+        ("map", "<T, U>(List<T>, Fn(T) -> U) -> List<U>"),
+        ("push", "<T>(List<T>, T)"),
+    ]);
+    assert_eq!(
+        errors(
+            "fn pick(x) => 0; fn pick(x: Int) => \"s\"; let xs = []; let ys: List<Int> = xs.map(pick); xs.push(1);",
+            globals
+        ),
+        vec!["No overload of 'pick' is a Fn(Int) -> Int"]
+    );
+}
+
+#[test]
+fn a_function_value_commits_when_only_one_overload_can_take_the_arguments() {
+    // `map` calls `split` with one argument, which only `split(String)`
+    // takes, so it's meant even though nothing says what `xs` holds.
+    assert_eq!(
+        errors("let xs = []; xs.map(split);", split_natives()),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
 fn an_overloaded_function_value_nothing_picks_is_an_error() {
     assert_eq!(
         errors("let f = split;", split_natives()),
