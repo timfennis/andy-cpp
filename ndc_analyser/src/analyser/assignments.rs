@@ -155,19 +155,32 @@ impl Analyser {
                 let setter_missing = matches!(setter, Binding::None);
                 self.picks.setters.insert(lvalue.id, setter);
 
-                // A tuple has `[]` but no `[]=`: it can't be changed in place.
+                let Some(element_type) = type_of_index_target.index_element_type() else {
+                    self.emit(AnalysisError::unable_to_index_into(
+                        &type_of_index_target,
+                        span,
+                    ));
+                    return StaticType::Any;
+                };
+
+                // A tuple has `[]` but no `[]=`: it can be indexed but not
+                // changed in place. One error says so; the value isn't also
+                // checked against a slot that can't be written.
                 if getter_missing {
                     self.emit(AnalysisError::function_not_found(
                         "[]",
                         &get_args,
                         lvalue.span,
                     ));
-                } else if setter_missing {
+                    return StaticType::Any;
+                }
+                if setter_missing {
                     self.emit(AnalysisError::function_not_found(
                         "[]=",
                         &set_args,
                         lvalue.span,
                     ));
+                    return StaticType::Any;
                 }
 
                 if Self::index_type_is_slice(&index_type)
@@ -175,16 +188,7 @@ impl Analyser {
                 {
                     return StaticType::List(element.clone());
                 }
-
-                if let Some(t) = type_of_index_target.index_element_type() {
-                    t
-                } else {
-                    self.emit(AnalysisError::unable_to_index_into(
-                        &type_of_index_target,
-                        span,
-                    ));
-                    StaticType::Any
-                }
+                element_type
             }
             // What `(a, b) = …` can store is a tuple of what each target can.
             AssignmentTarget::Sequence(seq) => StaticType::Tuple(
