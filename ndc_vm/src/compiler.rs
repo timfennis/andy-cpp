@@ -608,6 +608,7 @@ impl Compiler {
                     .add_constant(Value::Object(Rc::new(Object::OverloadSet {
                         scalars,
                         vec_candidates,
+                        ranking: std::cell::OnceCell::new(),
                     })));
                 self.ir.write(OpCode::Constant(idx), span);
             }

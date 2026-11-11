@@ -1,11 +1,18 @@
 // A call with an argument whose type isn't known until the program runs
-// calls the most specific overload that takes it: `show(Int)` for an Int,
-// though `show(Any)` takes it too, and whichever was declared first.
-// expect-output: int other int other
+// calls the most specific overload that takes it, as a call with known
+// types does: `show(Int)` for an Int, though `show(Any)` takes it too,
+// whichever was declared first. Of two that are neither more specific than
+// the other, the newest wins, and an overload that doesn't take the
+// arguments changes nothing.
+// expect-output: int other int other any-int
 fn show(x: Int) { "int" }
 fn show(x: Any) { "other" }
 fn tell(x: Any) { "other" }
 fn tell(x: Int) { "int" }
+fn pair(x: String, y: Int) { "string-int" }
+fn pair(x: Int, y: Any) { "int-any" }
+fn pair(x: Any, y: Int) { "any-int" }
 fn via_show(v: Any) => show(v);
 fn via_tell(v: Any) => tell(v);
-print(via_show(1), via_show("a"), via_tell(1), via_tell("a"));
+fn via_pair(a: Any, b: Any) => pair(a, b);
+print(via_show(1), via_show("a"), via_tell(1), via_tell("a"), via_pair(1, 1));

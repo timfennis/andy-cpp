@@ -213,6 +213,34 @@ impl Function {
         }
     }
 
+    /// The types of the parameters this function declares, or `None` if
+    /// it's variadic.
+    pub fn parameter_types(&self) -> Option<&[StaticType]> {
+        let st = match self {
+            Self::Native(f) => &f.static_type,
+            Self::Compiled(f) => &f.static_type,
+            Self::Closure(c) => &c.prototype.static_type,
+            Self::Memoized { function, .. } => return function.parameter_types(),
+        };
+        match st {
+            StaticType::Function {
+                parameters: Some(parameters),
+                ..
+            } => Some(parameters),
+            _ => None,
+        }
+    }
+
+    /// Whether this function takes fewer arguments than `other`, so a call
+    /// both accept picks this one. A variadic function takes the most.
+    pub fn is_more_specific_than(&self, other: &Self) -> bool {
+        match (self.parameter_types(), other.parameter_types()) {
+            (Some(more), Some(less)) => StaticType::is_strictly_more_specific(more, less),
+            (Some(_), None) => true,
+            (None, _) => false,
+        }
+    }
+
     /// Returns true if this function accepts the given arguments, without
     /// allocating a `StaticType` for each of them.
     pub fn matches_value_args(&self, args: &[Value]) -> bool {

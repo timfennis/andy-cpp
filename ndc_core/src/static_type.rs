@@ -214,6 +214,28 @@ impl StaticType {
         }
     }
 
+    /// Whether a function taking `more` takes fewer arguments than one
+    /// taking `less`: each of `more` is a subtype of the one in `less`, and
+    /// at least one isn't the same. `(Int, Any)` is more specific than
+    /// `(Any, Any)`; `(Int, Any)` and `(Any, Int)` are neither. A call that
+    /// several overloads take picks the most specific one.
+    #[must_use]
+    pub fn is_strictly_more_specific(more: &[Self], less: &[Self]) -> bool {
+        if more.len() != less.len() {
+            return false;
+        }
+        let mut any_strict = false;
+        for (m, l) in more.iter().zip(less) {
+            if !m.is_subtype(l) {
+                return false;
+            }
+            if !l.is_subtype(m) {
+                any_strict = true;
+            }
+        }
+        any_strict
+    }
+
     /// Checks if `self` is a subtype of `other`.
     ///
     /// A type S is a subtype of T (S <: T) if a value of type S can be safely
