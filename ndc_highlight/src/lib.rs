@@ -68,17 +68,22 @@ pub fn highlight(source: &str) -> Vec<Highlight> {
     };
 
     let mut highlights = Vec::new();
-    // The tokens before and after one, comments left out
+    // The token before the current one, comments left out
     let mut previous = None;
     for (i, token) in tokens.iter().enumerate() {
-        let next = tokens[i + 1..]
-            .iter()
-            .map(|t| &t.token)
-            .find(|t| !matches!(t, Token::Comment(_)));
-        let kind = kind(token, previous, next, &function_spans);
-        if !matches!(token.token, Token::Comment(_)) {
+        let kind = if matches!(token.token, Token::Comment(_)) {
+            Kind::Comment
+        } else {
+            // Only the token right before a run of comments looks past it,
+            // so this stays linear however many comments there are
+            let next = tokens[i + 1..]
+                .iter()
+                .map(|t| &t.token)
+                .find(|t| !matches!(t, Token::Comment(_)));
+            let kind = kind(token, previous, next, &function_spans);
             previous = Some(&token.token);
-        }
+            kind
+        };
         highlights.push(Highlight {
             range: token.span.range(),
             kind,
@@ -132,7 +137,6 @@ fn kind(
 ) -> Kind {
     match &token.token {
         Token::String(_) => Kind::String,
-        Token::Comment(_) => Kind::Comment,
         Token::NumericLiteral(_) | Token::True | Token::False | Token::None => Kind::Literal,
         Token::Let
         | Token::Fn
