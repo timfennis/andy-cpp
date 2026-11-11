@@ -1,4 +1,5 @@
 use super::Analyser;
+use super::solver::CallSite;
 use crate::error::AnalysisError;
 use crate::overloads::{CallKind, ResolvedCall};
 use itertools::izip;
@@ -21,27 +22,29 @@ impl Analyser {
     ) -> StaticType {
         let left_type = self.analyse_assignment_target(l_value, span);
         let right_type = self.analyse_expr(r_value);
-        // An in-place operation such as `++=` keeps its target's type, so
-        // what it stores has to fit that type. Where the target's type isn't
-        // fully known, the right operand settles it: in
-        // `let xs = []; xs ++= [1]`, the elements of `xs` are `Int`.
-        let left_type = if left_type.has_vars() {
-            match &left_type {
-                // A tuple target with a scalar operand applies the operand to
-                // each element: `t ++= [1]` appends to every list in `t`.
-                StaticType::Tuple(targets) if !matches!(right_type, StaticType::Tuple(_)) => {
-                    for target in targets {
-                        self.vars.unify(target, &right_type);
-                    }
-                }
-                _ => {
-                    self.vars.unify(&left_type, &right_type);
-                }
-            }
-            self.vars.resolve(&left_type)
-        } else {
-            left_type
-        };
+        // `a op= b` is `a = op(a, b)`. Where the operands aren't fully known
+        // yet, the operator waits for them like any call, and the in-place
+        // overload is picked along with it.
+        let (left_type, right_type) = (
+            self.vars.resolve(&left_type),
+            self.vars.resolve(&right_type),
+        );
+        if (left_type.has_vars() || right_type.has_vars())
+            && !self
+                .overloads()
+                .reachable_symbols(&self.resolver.augmented_candidates(id).operator)
+                .is_empty()
+        {
+            let result = self.constrain_call(
+                CallSite::OpAssignment(id),
+                vec![left_type.clone(), right_type],
+                CallKind::Operator,
+                operation,
+                span,
+            );
+            self.validate_assignment_write(l_value, &left_type, &result, span);
+            return StaticType::unit();
+        }
         let arg_types = vec![left_type.clone(), right_type.clone()];
 
         let ResolvedCall {
@@ -145,76 +148,29 @@ impl Analyser {
                 // The container before the index, in source order like the resolver.
                 let container = self.analyse_expr(value);
                 let index_type = self.analyse_expr(index);
-                // `xs[i] = v` is the call `[]=(xs, i, v)`. The value isn't
-                // analysed yet, so what the container holds stands in for
-                // it, and a slice like `xs[0..2]` stores a list of that.
-                let element = container.index_element_type();
-                let stored = match &element {
-                    Some(element)
-                        if Self::index_type_is_slice(&index_type)
-                            && matches!(container, StaticType::List(_)) =>
-                    {
-                        StaticType::List(Box::new(element.clone()))
-                    }
-                    Some(element) => element.clone(),
-                    None => StaticType::Any,
+                // `xs[i] op= v` reads the old value with `[]`, so the value
+                // written has the type that reading gives. A plain write
+                // stores a value whose type the write settles.
+                let stored = match self.resolver.getter_candidates(lvalue.id) {
+                    Some(_) => self.constrain_call(
+                        CallSite::Getter(lvalue.id),
+                        vec![container.clone(), index_type.clone()],
+                        CallKind::Regular,
+                        "[]",
+                        span,
+                    ),
+                    None => self.vars.fresh(StaticType::Any),
                 };
-
-                // Indexing isn't operator-form for vec purposes: there's no
-                // natural broadcast story for `(list_a, list_b)[i]`. Only an
-                // augmented assignment reads the old value through `[]`.
-                let errors_before = self.result.errors.len();
-                if let Some(getters) = self.resolver.getter_candidates(lvalue.id) {
-                    let get_args = [container.clone(), index_type.clone()];
-                    let getter =
-                        self.overloads()
-                            .resolve_call(getters, &get_args, CallKind::Regular);
-                    if matches!(getter.binding, Binding::None) {
-                        self.emit(AnalysisError::function_not_found("[]", &get_args, span));
-                    } else {
-                        self.commit_call(
-                            &getter.binding,
-                            &get_args,
-                            getter.return_type,
-                            "[]",
-                            span,
-                        );
-                    }
-                    self.picks.getters.insert(lvalue.id, getter.binding);
-                }
-
-                // Committing the setter checks the index against the
-                // container, and settles what neither is known to hold yet,
-                // as the key type in `let m = %{}; m["a"] = 1`.
-                let set_args = [container.clone(), index_type, stored.clone()];
-                let setter = self.overloads().resolve_call(
-                    self.resolver.setter_candidates(lvalue.id),
-                    &set_args,
+                // `xs[i] = v` is the call `[]=(xs, i, v)`, which waits for
+                // the value's type when nothing else picks the overload.
+                self.constrain_call(
+                    CallSite::Setter(lvalue.id),
+                    vec![container, index_type, stored.clone()],
                     CallKind::Regular,
+                    "[]=",
+                    span,
                 );
-                // When reading the old value failed, storing the new one
-                // fails the same way, which is reported once.
-                let read_failed = self.result.errors.len() > errors_before;
-                match setter.binding {
-                    _ if read_failed => {}
-                    Binding::None if element.is_none() && !container.is_unknown() => {
-                        self.emit(AnalysisError::unable_to_index_into(&container, span));
-                    }
-                    Binding::None => {
-                        self.emit(AnalysisError::function_not_found("[]=", &set_args, span));
-                    }
-                    _ => {
-                        self.commit_call(
-                            &setter.binding,
-                            &set_args,
-                            setter.return_type,
-                            "[]=",
-                            span,
-                        );
-                    }
-                }
-                self.picks.setters.insert(lvalue.id, setter.binding);
-                self.vars.resolve(&stored)
+                stored
             }
             // What `(a, b) = …` can store is a tuple of what each target can.
             AssignmentTarget::Sequence(seq) => StaticType::Tuple(
@@ -227,50 +183,31 @@ impl Analyser {
                 member,
                 member_span,
             } => {
+                // `p.x = v` stores through `x=(p, v)`, and what it stores
+                // has the type `x(p)` reads.
                 let receiver_type = self.analyse_expr(receiver);
-                let getter_args = [receiver_type.clone()];
-                let setter_args = [receiver_type, StaticType::Any];
-                let getters = self
-                    .resolver
-                    .getter_candidates(lvalue.id)
-                    .expect("internal error: member target without getter candidates");
-                let getter =
-                    self.overloads()
-                        .resolve_call(getters, &getter_args, CallKind::Regular);
-                let setter_name = format!("{member}=");
-                let setter = self.overloads().resolve_call(
-                    self.resolver.setter_candidates(lvalue.id),
-                    &setter_args,
+                let stored = self.constrain_call(
+                    CallSite::Getter(lvalue.id),
+                    vec![receiver_type.clone()],
                     CallKind::Regular,
+                    member,
+                    *member_span,
                 );
-                let getter_missing = matches!(getter.binding, Binding::None);
-                let setter_missing = matches!(setter.binding, Binding::None);
-
-                self.picks.getters.insert(lvalue.id, getter.binding);
-                self.picks.setters.insert(lvalue.id, setter.binding);
-
-                if getter_missing {
-                    self.emit(AnalysisError::function_not_found(
-                        member,
-                        &getter_args,
-                        *member_span,
-                    ));
-                } else if setter_missing {
-                    self.emit(AnalysisError::function_not_found(
-                        &setter_name,
-                        &setter_args,
-                        *member_span,
-                    ));
-                }
-
-                getter.return_type
+                self.constrain_call(
+                    CallSite::FieldSetter(lvalue.id),
+                    vec![receiver_type, stored.clone()],
+                    CallKind::Regular,
+                    &format!("{member}="),
+                    *member_span,
+                );
+                stored
             }
         }
     }
 
     /// An index expression typed as an integer sequence (e.g. `0..2`) selects
     /// a slice of the container rather than a single element.
-    fn index_type_is_slice(index_type: &StaticType) -> bool {
+    pub(super) fn index_type_is_slice(index_type: &StaticType) -> bool {
         index_type.is_subtype(&StaticType::Iterator(Box::new(StaticType::Int)))
     }
 
@@ -282,7 +219,10 @@ impl Analyser {
     ///
     /// A tuple left-hand side represents vector dispatch, so a scalar right
     /// operand must be compatible with every concrete tuple element.
-    fn augmented_rhs_is_compatible(left_type: &StaticType, right_type: &StaticType) -> bool {
+    pub(super) fn augmented_rhs_is_compatible(
+        left_type: &StaticType,
+        right_type: &StaticType,
+    ) -> bool {
         match (left_type, right_type) {
             (StaticType::Tuple(left), StaticType::Tuple(right)) => {
                 left.len() == right.len()
@@ -306,9 +246,14 @@ impl Analyser {
         stored_type: &StaticType,
         value_type: &StaticType,
     ) -> bool {
-        if self.vars.unify(stored_type, value_type) {
+        // A write passes the value where a value of the stored type is
+        // expected, as a call passes an argument: `let xs: Sequence<Int> =
+        // []` settles the list's elements as Ints.
+        let snapshot = self.vars.snapshot();
+        if self.vars.bind_argument(stored_type, value_type) {
             return true;
         }
+        self.vars.rollback(snapshot);
         let stored_type = self.vars.resolve(stored_type);
         let value_type = self.vars.resolve(value_type);
         value_type == StaticType::Any || value_type.is_subtype(&stored_type)
@@ -323,8 +268,8 @@ impl Analyser {
         span: Span,
     ) {
         let error = AnalysisError::mismatched_types(
-            &self.vars.resolve(value_type),
-            &self.vars.resolve(stored_type),
+            &self.vars.shown(value_type),
+            &self.vars.shown(stored_type),
             span,
         );
         self.emit(error);
@@ -364,7 +309,8 @@ impl Analyser {
                     .get(&index.id)
                     .is_some_and(Self::index_type_is_slice);
                 if is_slice
-                    && let Some(stored_element) = stored_type.index_element_type()
+                    && let Some(stored_element) =
+                        self.vars.resolve(stored_type).index_element_type()
                     && let Some(value_element) = value_type.sequence_element_type()
                     && self.accepts_write(&stored_element, &value_element)
                 {

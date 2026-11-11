@@ -42,6 +42,18 @@ pub(crate) struct TypeVars {
     /// What each variable becomes if nothing settles it: `Any` for the
     /// elements of `[]`, which is what `[]` was typed as before.
     fallbacks: Vec<StaticType>,
+    /// The variables in the order they were settled, so a [`Snapshot`] can
+    /// unsettle the ones settled after it, and the solver can tell which
+    /// ones were settled since it last looked.
+    trail: Vec<TypeVar>,
+}
+
+/// The state of the variables at one point, which [`TypeVars::rollback`]
+/// returns to: overload resolution tries each candidate this way.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Snapshot {
+    vars: usize,
+    trail: usize,
 }
 
 impl TypeVars {
@@ -62,6 +74,86 @@ impl TypeVars {
 
     fn solution(&self, var: TypeVar) -> Option<&StaticType> {
         self.solutions[var.0 as usize].as_ref()
+    }
+
+    /// Settles `var` as `typ`.
+    fn settle(&mut self, var: TypeVar, typ: StaticType) {
+        debug_assert!(self.solution(var).is_none(), "{var:?} is settled twice");
+        self.solutions[var.0 as usize] = Some(typ);
+        self.trail.push(var);
+    }
+
+    /// How many settlings there have been, to pass to
+    /// [`Self::settled_since`] later.
+    pub(crate) fn settled_count(&self) -> usize {
+        self.trail.len()
+    }
+
+    /// The variables settled since there were `count` settlings. A rollback
+    /// only undoes settlings made after the snapshot it returns to, so
+    /// `count` from before a snapshot stays valid.
+    pub(crate) fn settled_since(&self, count: usize) -> &[TypeVar] {
+        &self.trail[count.min(self.trail.len())..]
+    }
+
+    /// The current state, to [`Self::rollback`] to later.
+    pub(crate) fn snapshot(&self) -> Snapshot {
+        Snapshot {
+            vars: self.solutions.len(),
+            trail: self.trail.len(),
+        }
+    }
+
+    /// Unsettles what was settled since `snapshot`, and forgets the variables
+    /// made since.
+    pub(crate) fn rollback(&mut self, snapshot: Snapshot) {
+        for var in self.trail.drain(snapshot.trail..) {
+            self.solutions[var.0 as usize] = None;
+        }
+        self.solutions.truncate(snapshot.vars);
+        self.fallbacks.truncate(snapshot.vars);
+    }
+
+    /// Unifies `a` and `b` if they can be made the same type, and otherwise
+    /// leaves every variable as it was.
+    pub(crate) fn try_unify(&mut self, a: &StaticType, b: &StaticType) -> bool {
+        let snapshot = self.snapshot();
+        let unified = self.unify(a, b);
+        if !unified {
+            self.rollback(snapshot);
+        }
+        unified
+    }
+
+    /// The unsettled variables in `typ`, each once, outermost first.
+    pub(crate) fn unsettled(&self, typ: &StaticType) -> Vec<TypeVar> {
+        let unsettled = std::cell::RefCell::new(Vec::new());
+        self.resolve(typ).contains(&|part| {
+            if let StaticType::Var(var) = part
+                && !unsettled.borrow().contains(var)
+            {
+                unsettled.borrow_mut().push(*var);
+            }
+            false
+        });
+        unsettled.into_inner()
+    }
+
+    /// `typ` as an error shows it: the parts not known yet could still be
+    /// anything, so they're shown as `Any`.
+    pub(crate) fn shown(&self, typ: &StaticType) -> StaticType {
+        self.resolve(typ)
+            .replace(&|part| matches!(part, StaticType::Var(_)).then_some(StaticType::Any))
+    }
+
+    /// Settles each of `vars` that is still unsettled with its fallback.
+    pub(crate) fn settle_with_fallbacks(&mut self, vars: &[TypeVar]) {
+        for &var in vars {
+            if self.solution(var).is_none() {
+                let fallback = self.fallbacks[var.0 as usize].clone();
+                self.settle(var, fallback);
+            }
+        }
     }
 
     /// `typ` with every settled variable replaced by what it stands for.
@@ -102,7 +194,7 @@ impl TypeVars {
                 {
                     return false;
                 }
-                self.solutions[var.0 as usize] = Some(other.clone());
+                self.settle(*var, other.clone());
                 true
             }
             (StaticType::Option(x), StaticType::Option(y))
@@ -196,9 +288,9 @@ impl TypeVars {
             | (StaticType::Sequence(p), StaticType::Sequence(a)) => self.bind_argument(p, a),
             // A function passed as an argument gets the parameter types the
             // function type passes it, and returns what the function type
-            // returns: `map(xs, fn(x: Int) => x + 1)` passes `xs`'s elements
-            // to `x` and settles `U`. A function parameter whose type isn't
-            // known takes anything, so it settles nothing.
+            // returns: `map(xs, fn(x) => x + 1)` passes `xs`'s elements to
+            // `x` and settles `U`. A parameter of type `Any` takes anything,
+            // so it settles nothing.
             (
                 StaticType::Function {
                     parameters: expected,
@@ -215,7 +307,7 @@ impl TypeVars {
                     // called the way the function type says.
                     fits = expected.len() == takes.len();
                     for (expected, takes) in expected.iter().zip(takes) {
-                        if !takes.is_unknown() {
+                        if self.shallow(takes) != StaticType::Any {
                             fits &= self.bind_argument(takes, expected);
                         }
                     }
@@ -246,26 +338,17 @@ impl TypeVars {
 
     /// Settles every unsettled variable in `typ` as `to`.
     pub(crate) fn settle_unknowns(&mut self, typ: &StaticType, to: &StaticType) {
-        let unsettled = std::cell::RefCell::new(Vec::new());
-        self.resolve(typ).contains(&|part| {
-            if let StaticType::Var(var) = part {
-                unsettled.borrow_mut().push(*var);
-            }
-            false
-        });
-        for var in unsettled.into_inner() {
-            self.solutions[var.0 as usize].get_or_insert_with(|| to.clone());
+        for var in self.unsettled(typ) {
+            self.settle(var, to.clone());
         }
     }
 
     /// Settles every variable made since `first` that nothing settled with
     /// its fallback.
     pub(crate) fn settle_from(&mut self, first: usize) {
-        for (solution, fallback) in self.solutions[first..]
-            .iter_mut()
-            .zip(&self.fallbacks[first..])
-        {
-            solution.get_or_insert_with(|| fallback.clone());
+        for index in first..self.solutions.len() {
+            let var = TypeVar(u32::try_from(index).expect("fewer than 2^32 type variables"));
+            self.settle_with_fallbacks(&[var]);
         }
     }
 }

@@ -1,0 +1,9 @@
+// `xs[0] + 1` waits until the push settles what `xs` holds, and is picked
+// then, so `y` is a Float before `y += 1` is checked.
+// expect-output: 4.5
+let xs = [];
+let g = fn() => xs[0] + 1;
+xs.push(2.5);
+let y = g();
+y += 1;
+print(y);
