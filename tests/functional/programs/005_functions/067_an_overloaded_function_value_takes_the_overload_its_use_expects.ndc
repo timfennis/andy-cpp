@@ -1,0 +1,22 @@
+// An overloaded function's name used as a value is the overload the type
+// expected there picks: `map` passes each element.
+// expect-output: [1.5,2.5]
+// expect-output: [1,2]
+// expect-output: [["a","b"]]
+// expect-output: ["string"] ["int"]
+// expect-output: ["a","b"]
+// expect-output: inner
+fn f(x: Int) { "int" }
+fn f(x: String) { "string" }
+print([-1.5, 2.5].map(abs));
+print([-1, 2].map(abs));
+print(["a b"].map(split));
+print(["a"].map(f), [1].map(f));
+let g = split;
+print(g("a b"));
+fn pick(x: Int) { 1 }
+{
+    fn pick(x: Any) { "inner" }
+    let h: Fn(Int) -> Any = pick;
+    print(h(1));
+}

@@ -2,7 +2,7 @@ use crate::error::AnalysisError;
 use crate::overloads::CallKind;
 use crate::types::{TypeTable, TypeVars};
 use ahash::{AHashMap, AHashSet};
-use ndc_analysis::{Analysis, Binding, Candidate};
+use ndc_analysis::Analysis;
 use ndc_core::r#struct::{StructInfo, StructRegistry};
 use ndc_core::{NodeId, StaticType, TypeVar};
 use ndc_layout::{Layout, Picks};
@@ -16,6 +16,7 @@ use std::rc::Rc;
 mod assignments;
 mod calls;
 mod declarations;
+mod function_values;
 mod solver;
 
 use declarations::FunctionDeclaration;
@@ -277,19 +278,7 @@ impl Analyser {
                 }
                 StaticType::Never
             }
-            Expression::Identifier { .. } => {
-                let symbol = self.resolver.innermost_reference(*id);
-                let binding = Binding::Resolved(Candidate::Scalar(symbol));
-                self.picks.bindings.insert(*id, binding);
-                // A generic built-in used as a value, as in `let p = push`,
-                // has one type there, which its uses settle.
-                let typ = self.vars.resolve(self.types.get_type(symbol));
-                if typ.contains(&|part| matches!(part, StaticType::Generic(_))) {
-                    self.vars.instantiate(&typ)
-                } else {
-                    typ
-                }
-            }
+            Expression::Identifier { name, .. } => self.analyse_value_reference(*id, name, *span),
             Expression::Statement(inner) => {
                 let typ = self.analyse_expr(inner);
                 // Diverging statements (return/break/continue) propagate Never

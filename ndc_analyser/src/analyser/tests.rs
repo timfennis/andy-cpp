@@ -1,5 +1,6 @@
 use super::*;
 use itertools::Itertools;
+use ndc_analysis::{Binding, Candidate};
 use ndc_lexer::{Lexer, SourceId};
 use ndc_parser::Parser;
 
@@ -1090,6 +1091,58 @@ fn a_map_default_waits_until_it_is_known_whether_it_makes_the_values() {
         ),
         StaticType::Int
     );
+}
+
+/// `split` as the stdlib has it: one overload splits on whitespace, the
+/// other on a pattern.
+fn split_natives() -> Vec<(String, StaticType)> {
+    natives(&[
+        ("split", "(String) -> List<String>"),
+        ("split", "(String, String) -> List<String>"),
+        ("map", "<T, U>(List<T>, Fn(T) -> U) -> List<U>"),
+    ])
+}
+
+#[test]
+fn an_overloaded_function_value_is_the_overload_its_use_expects() {
+    let list_of_lists = StaticType::List(Box::new(StaticType::List(Box::new(StaticType::String))));
+    assert_eq!(
+        analyse_last_type_with_globals("[\"a b\"].map(split)", split_natives()),
+        list_of_lists
+    );
+    // A variable's uses say what it is.
+    assert_eq!(
+        analyse_last_type_with_globals("let f = split; f(\"a b\"); f", split_natives()),
+        StaticType::Function {
+            parameters: Some(vec![StaticType::String]),
+            return_type: Box::new(StaticType::List(Box::new(StaticType::String))),
+        }
+    );
+}
+
+#[test]
+fn an_overloaded_function_value_nothing_picks_is_an_error() {
+    assert_eq!(
+        errors("let f = split;", split_natives()),
+        vec!["'split' has several overloads, and nothing here says which one is meant"]
+    );
+    assert_eq!(
+        errors("let f: Fn(Int) -> Int = split;", split_natives()),
+        vec!["No overload of 'split' is a Fn(Int) -> Int"]
+    );
+}
+
+#[test]
+fn an_overloaded_function_value_uses_the_nearest_scope_with_an_overload_that_fits() {
+    // The inner `pick` doesn't take an Int, so the outer one is meant.
+    assert_eq!(
+        analyse_last_type(
+            "fn pick(x: Int) => 1; { fn pick(x: String) => \"s\"; let f: Fn(Int) -> Int = pick; f(1) }"
+        ),
+        StaticType::Int
+    );
+    // When both fit, the nearer one is meant, which
+    // 005_functions/067 shows by what the program prints.
 }
 
 #[test]

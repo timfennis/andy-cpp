@@ -3,6 +3,7 @@
 //! picking `map` settles from the type of `xs`.
 
 use super::Analyser;
+use super::function_values::{Choice, FunctionValue};
 use crate::error::AnalysisError;
 use crate::overloads::{CallKind, ResolvedCall, is_strictly_more_specific};
 use ndc_analysis::{Binding, Candidate};
@@ -31,6 +32,9 @@ pub(super) enum CallSite {
 pub(super) enum Constraint {
     /// A call whose overload can't be picked yet.
     Call(CallConstraint),
+    /// An overloaded function's name used as a value, waiting for the type
+    /// expected of it to pick an overload.
+    FunctionValue(FunctionValue),
     /// `for x in s`: what iterating over `sequence` gives.
     Iterate {
         sequence: StaticType,
@@ -63,6 +67,7 @@ impl Constraint {
     fn inputs(&self) -> &[StaticType] {
         match self {
             Self::Call(call) => &call.arguments,
+            Self::FunctionValue(value) => std::slice::from_ref(value.expected()),
             Self::Iterate { sequence, .. } => std::slice::from_ref(sequence),
             Self::Unpack { value, .. } => std::slice::from_ref(value),
             Self::MapDefault { default, .. } => std::slice::from_ref(default),
@@ -74,12 +79,18 @@ impl Constraint {
 /// An overload a call committed to before its arguments were known, which
 /// [`Analyser::check_early_picks`] checks once they are.
 #[derive(Debug)]
-pub(super) struct EarlyPick {
-    candidates: Candidates,
-    arguments: Vec<StaticType>,
-    kind: CallKind,
-    name: String,
-    binding: Binding<SymbolId>,
+pub(super) enum EarlyPick {
+    Call {
+        candidates: Candidates,
+        arguments: Vec<StaticType>,
+        kind: CallKind,
+        name: String,
+        binding: Binding<SymbolId>,
+    },
+    FunctionValue {
+        value: FunctionValue,
+        picked: SymbolId,
+    },
 }
 
 #[derive(Debug)]
@@ -248,7 +259,7 @@ impl Analyser {
             Binding::Dynamic(vec![Candidate::Scalar(picked)])
         };
         if cfg!(debug_assertions) {
-            self.early_picks.push(EarlyPick {
+            self.early_picks.push(EarlyPick::Call {
                 candidates: call.candidates.clone(),
                 arguments: call.arguments.clone(),
                 kind: call.kind,
@@ -272,29 +283,59 @@ impl Analyser {
             return;
         }
         for pick in early_picks {
-            let arguments = pick
-                .arguments
-                .iter()
-                .map(|argument| self.vars.resolve(argument))
-                .collect::<Vec<_>>();
-            let binding = self
-                .overloads()
-                .resolve_call(&pick.candidates, &arguments, pick.kind)
-                .binding;
-            assert!(
-                binding == pick.binding,
-                "internal error: `{}` committed to {:?} before its arguments were known, \
-                 but with ({}) it means {binding:?}",
-                pick.name,
-                pick.binding,
-                arguments
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            );
+            match pick {
+                EarlyPick::Call {
+                    candidates,
+                    arguments,
+                    kind,
+                    name,
+                    binding: picked,
+                } => {
+                    let arguments = arguments
+                        .iter()
+                        .map(|argument| self.vars.resolve(argument))
+                        .collect::<Vec<_>>();
+                    let binding = self
+                        .overloads()
+                        .resolve_call(&candidates, &arguments, kind)
+                        .binding;
+                    assert!(
+                        binding == picked,
+                        "internal error: `{name}` committed to {picked:?} before its arguments \
+                         were known, but with ({}) it means {binding:?}",
+                        arguments
+                            .iter()
+                            .map(ToString::to_string)
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                    );
+                }
+                EarlyPick::FunctionValue { value, picked } => {
+                    let choice = self.choose_function_value(&value);
+                    assert!(
+                        choice == Choice::One(picked),
+                        "internal error: the function value {value:?} committed to {picked:?} \
+                         before its type was known, but with {} it means {choice:?}",
+                        self.vars.resolve(value.expected()),
+                    );
+                }
+            }
         }
     }
+
+    /// Remembers that `value` committed to `picked` before the type expected
+    /// of it was known, for [`Self::check_early_picks`].
+    pub(super) fn remember_early_function_value(
+        &mut self,
+        value: &FunctionValue,
+        picked: SymbolId,
+    ) {
+        self.early_picks.push(EarlyPick::FunctionValue {
+            value: value.clone(),
+            picked,
+        });
+    }
+
     /// The values a map default of type `default` makes, which waits until
     /// it's known whether the default is a function: in `fn(f) => %{:f}`, it
     /// depends on what's passed for `f`.
@@ -319,7 +360,7 @@ impl Analyser {
 
     /// Makes `constraint` wait, in the order it started waiting, until one
     /// of the variables it waits on is settled.
-    fn wait(&mut self, constraint: Constraint) {
+    pub(super) fn wait(&mut self, constraint: Constraint) {
         let serial = self.next_serial;
         self.next_serial += 1;
         self.wait_again(serial, constraint);
@@ -483,6 +524,7 @@ impl Analyser {
                 }
                 true
             }
+            Constraint::FunctionValue(value) => self.try_function_value(value),
             Constraint::Iterate {
                 sequence,
                 element,
