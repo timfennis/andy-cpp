@@ -26,7 +26,18 @@ impl Analyser {
         // fully known, the right operand settles it: in
         // `let xs = []; xs ++= [1]`, the elements of `xs` are `Int`.
         let left_type = if left_type.any_var(&|_| true) {
-            self.vars.unify(&left_type, &right_type);
+            match &left_type {
+                // A tuple target with a scalar operand applies the operand to
+                // each element: `t ++= [1]` appends to every list in `t`.
+                StaticType::Tuple(targets) if !matches!(right_type, StaticType::Tuple(_)) => {
+                    for target in targets {
+                        self.vars.unify(target, &right_type);
+                    }
+                }
+                _ => {
+                    self.vars.unify(&left_type, &right_type);
+                }
+            }
             self.vars.resolve(&left_type)
         } else {
             left_type

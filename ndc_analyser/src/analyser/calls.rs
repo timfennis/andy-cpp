@@ -37,7 +37,7 @@ impl Analyser {
 
     /// Overload resolution over the types declared so far.
     pub(super) fn overloads(&self) -> Overloads<'_> {
-        Overloads::new(&self.types, self.resolver.symbols())
+        Overloads::new(&self.types, &self.vars, self.resolver.symbols())
     }
 
     /// Analyses `receiver.member`, the call `member(receiver)`.
