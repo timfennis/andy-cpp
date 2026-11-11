@@ -1,5 +1,0 @@
-// `map` passes its function the list's elements, so `x` is an Int, and the
-// mapped list is a List<Int>.
-// expect-error: No function called 'push' found that matches the arguments 'List<Int>, String'
-let ys = [1, 2].map(fn(x) => x + 1);
-ys.push("a");

@@ -171,18 +171,16 @@ fn apply(f: Fn(Int) -> Int, x: Int) -> Int { f(x) }
 apply(fn(s: String) => 1, 4);     // ERROR: the function takes a String, but apply passes an Int
 ```
 
-A lambda written where a function type is expected takes its parameter types from it, so it needs no annotations. Its body is checked with those types:
+A lambda written where a function type is expected takes its parameter types from it, so it needs no annotations: as the value of an annotated variable, in an assignment, or as an argument to a function value. Its body is checked with those types:
 
 ```ndc
-fn apply(f: Fn(Int) -> Int, x: Int) -> Int { f(x) }
-assert_eq(apply(fn(x) => x - 1, 1), 0);    // x is an Int
+let shout: Fn(String) -> String = fn(s) => s ++ "!";   // s is a String
+assert_eq(shout("hi"), "hi!");
 
-let lengths = ["a", "bc"].map(fn(s) => s.len());   // s is a String, lengths a List<Int>
-assert_eq(lengths, [1, 2]);
-
-let shout: Fn(String) -> String = fn(s) => s ++ "!";
-["a"].map(fn(x) => x + 1);        // ERROR: x is a String, and there's no `+` for a String and an Int
+let double: Fn(Int) -> Int = fn(x) => x ++ "!";        // ERROR: x is an Int, and there's no `++` for an Int and a String
 ```
+
+A lambda passed to a named function, as in `xs.map(fn(x) => x + 1)`, doesn't get its parameter types this way yet. Its unannotated parameters are `Any`, and they are checked when the program runs.
 
 ## Function overloading
 

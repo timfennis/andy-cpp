@@ -42,24 +42,19 @@ impl Analyser {
     /// settles `xs` as a `List<Int>`, and `push(xs, "a")` then doesn't fit.
     /// When the pick is left to the program as it runs, any function may get
     /// the arguments, so what's unknown in them becomes `Any`.
-    ///
-    /// `lambdas` are the arguments analysed only now, by their position,
-    /// with [`Self::lambda_stand_in`] in `arguments` so far. Each is analysed
-    /// after the other arguments are bound, with the function type its
-    /// parameter expects: in `xs.map(fn(x) => x + 1)`, `x` gets the
-    /// elements' type. Their types replace the stand-ins in `arguments`.
     pub(super) fn commit_call(
         &mut self,
         binding: &Binding<SymbolId>,
-        arguments: &mut [StaticType],
-        lambdas: &[(usize, &ExpressionLocation)],
+        arguments: &[StaticType],
         return_type: StaticType,
         name: &str,
         span: Span,
     ) -> StaticType {
         let picked = match binding {
             Binding::Resolved(Candidate::Scalar(symbol)) => Some(*symbol),
-            Binding::Resolved(Candidate::Vec(_)) | Binding::Dynamic(_) | Binding::None => None,
+            // Element-wise operators on tuples leave the types they have.
+            Binding::Resolved(Candidate::Vec(_)) => return return_type,
+            Binding::Dynamic(_) | Binding::None => None,
         };
         let signature = picked.map(|symbol| {
             let declared = self.types.get_type(symbol).clone();
@@ -70,30 +65,15 @@ impl Analyser {
             return_type: declared_return,
         }) = signature
         else {
-            for &(position, lambda) in lambdas {
-                arguments[position] = self.analyse_expr(lambda);
-            }
-            // Element-wise operators on tuples leave the types they have.
-            if !matches!(binding, Binding::Resolved(Candidate::Vec(_))) {
-                for argument in arguments.iter() {
-                    self.vars.settle_unknowns(argument, &StaticType::Any);
-                }
+            for argument in arguments {
+                self.vars.settle_unknowns(argument, &StaticType::Any);
             }
             return return_type;
         };
 
         let mut fits = true;
-        for (position, (parameter, argument)) in parameters.iter().zip(arguments.iter()).enumerate()
-        {
-            if !lambdas.iter().any(|&(lambda, _)| lambda == position) {
-                fits &= self.vars.bind_argument(parameter, argument);
-            }
-        }
-        for &(position, lambda) in lambdas {
-            let expected = self.vars.resolve(&parameters[position]);
-            let lambda_type = self.analyse_with_expected(lambda, &expected);
-            fits &= self.vars.bind_argument(&parameters[position], &lambda_type);
-            arguments[position] = lambda_type;
+        for (parameter, argument) in parameters.iter().zip(arguments) {
+            fits &= self.vars.bind_argument(parameter, argument);
         }
         if !fits {
             let arguments = arguments
@@ -103,35 +83,6 @@ impl Analyser {
             self.emit(AnalysisError::function_not_found(name, &arguments, span));
         }
         self.vars.resolve(&declared_return)
-    }
-
-    /// What a lambda argument stands in as while its call picks an overload,
-    /// before the lambda itself is analysed: a function of its arity that fits
-    /// any function type, as it takes what its annotations say or anything,
-    /// and returns `Never`. `None` for any other argument.
-    fn lambda_stand_in(&mut self, argument: &ExpressionLocation) -> Option<StaticType> {
-        let Expression::FunctionDeclaration {
-            name: None,
-            parameters,
-            ..
-        } = &argument.expression
-        else {
-            return None;
-        };
-        // The lambda's analysis reports a bad annotation, so this doesn't.
-        let errors = self.result.errors.len();
-        let parameters = parameters
-            .iter()
-            .map(|parameter| {
-                self.lower_annotation(parameter.annotation.as_ref())
-                    .unwrap_or(StaticType::Any)
-            })
-            .collect();
-        self.result.errors.truncate(errors);
-        Some(StaticType::Function {
-            parameters: Some(parameters),
-            return_type: Box::new(StaticType::Never),
-        })
     }
 
     /// Overload resolution over the types declared so far.
@@ -174,8 +125,7 @@ impl Analyser {
 
         let return_type = self.commit_call(
             &binding,
-            &mut [receiver_type],
-            &[],
+            std::slice::from_ref(&receiver_type),
             return_type,
             member,
             member_span,
@@ -263,35 +213,9 @@ impl Analyser {
 
         // A named callee declares nothing, so its overload can be picked after
         // the arguments' types are known.
-        // Lambdas wait until the overload is picked, which tells them what
-        // their parameters are.
         let mut type_sig = Vec::with_capacity(arguments.len());
-        let mut lambdas = Vec::new();
-        for (position, arg) in arguments.iter().enumerate() {
-            if let Some(stand_in) = self.lambda_stand_in(arg) {
-                lambdas.push((position, arg));
-                type_sig.push(stand_in);
-            } else {
-                type_sig.push(self.analyse_expr(arg));
-            }
-        }
-
-        // When the stand-ins can't tell the overloads apart, the lambdas'
-        // own types have to, so they're analysed first.
-        let positions = lambdas
-            .iter()
-            .map(|&(position, _)| position)
-            .collect::<Vec<_>>();
-        if !lambdas.is_empty()
-            && self.overloads().lambda_decides_between(
-                self.resolver.reference_candidates(function.id),
-                &type_sig,
-                &positions,
-            )
-        {
-            for (position, lambda) in std::mem::take(&mut lambdas) {
-                type_sig[position] = self.analyse_expr(lambda);
-            }
+        for arg in arguments.iter() {
+            type_sig.push(self.analyse_expr(arg));
         }
 
         let ResolvedCall {
@@ -304,9 +228,6 @@ impl Analyser {
         );
 
         if matches!(binding, Binding::None) {
-            for &(position, lambda) in &lambdas {
-                type_sig[position] = self.analyse_expr(lambda);
-            }
             let candidates = self.resolver.reference_candidates(function.id);
             let error = self.no_match(candidates, name, &type_sig, span);
             self.emit(error);
@@ -314,8 +235,7 @@ impl Analyser {
             return StaticType::Any;
         }
 
-        let return_type =
-            self.commit_call(&binding, &mut type_sig, &lambdas, return_type, name, span);
+        let return_type = self.commit_call(&binding, &type_sig, return_type, name, span);
         self.picks.bindings.insert(function.id, binding);
         return_type
     }

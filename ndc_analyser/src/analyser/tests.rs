@@ -638,7 +638,7 @@ fn a_function_argument_fits_a_function_parameter_where_their_known_parts_agree()
     );
     for (lambda, shown) in [
         ("fn(x: String) => 1", "Fn(String) -> Int"),
-        ("fn(x) => \"a\"", "Fn(Int) -> String"),
+        ("fn(x) => \"a\"", "Fn(Any) -> String"),
         ("fn(a, b) => 1", "Fn(Any, Any) -> Int"),
     ] {
         assert_eq!(
@@ -666,24 +666,7 @@ fn a_function_value_rejects_a_callback_taking_another_number_of_arguments() {
 }
 
 #[test]
-fn a_lambda_argument_takes_what_its_function_parameter_passes() {
-    let globals = natives(&[
-        ("map", "<T, U>(Sequence<T>, Fn(T) -> U) -> List<U>"),
-        ("++", "(String, String) -> String"),
-    ]);
-    assert_eq!(
-        analyse_last_type_with_globals("map([1], fn(x) => x)", globals.clone()),
-        StaticType::List(Box::new(StaticType::Int))
-    );
-    // So its body is checked with `x` an Int.
-    assert_eq!(
-        errors("map([1], fn(x) => x ++ \"a\");", globals),
-        vec!["No function called '++' found that matches the arguments 'Int, String'"]
-    );
-}
-
-#[test]
-fn a_lambda_that_decides_between_overloads_is_analysed_before_the_pick() {
+fn a_lambdas_type_picks_between_overloads_taking_functions() {
     let choose = "fn choose(f: Fn() -> Int) { 1 } fn choose(f: Fn() -> String) { \"s\" } ";
     assert_eq!(
         analyse_last_type(&format!("{choose}choose(fn() => 1)")),
@@ -692,20 +675,6 @@ fn a_lambda_that_decides_between_overloads_is_analysed_before_the_pick() {
     assert_eq!(
         analyse_last_type(&format!("{choose}choose(fn() => \"a\")")),
         StaticType::String
-    );
-}
-
-#[test]
-fn one_overload_taking_a_function_still_gives_the_lambda_its_types() {
-    // `locate` also takes an element, but only one overload takes a function.
-    let globals = natives(&[
-        ("locate", "<T>(Sequence<T>, Fn(T) -> Bool) -> Int"),
-        ("locate", "<T>(Sequence<T>, T) -> Int"),
-        ("++", "(String, String) -> String"),
-    ]);
-    assert_eq!(
-        errors("locate([1], fn(x) => x ++ \"a\");", globals),
-        vec!["No function called '++' found that matches the arguments 'Int, String'"]
     );
 }
 
