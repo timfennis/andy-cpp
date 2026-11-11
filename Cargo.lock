@@ -1334,7 +1334,6 @@ dependencies = [
  "ndc_lexer",
  "ndc_parser",
  "num",
- "ryu",
  "thiserror",
 ]
 
