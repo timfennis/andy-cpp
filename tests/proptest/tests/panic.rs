@@ -163,6 +163,7 @@ fn arb_token() -> impl Strategy<Value = Token> {
     for s in ["", "x", "ab"] {
         atoms.push(Token::String(s.to_string()));
     }
+    atoms.push(Token::Comment("// c".to_string()));
     for i in [-2_i64, -1, 0, 1, 2, 42, i64::MAX] {
         atoms.push(Token::NumericLiteral(NumericLiteral::Int64(i)));
     }

@@ -60,27 +60,25 @@ impl Iterator for Lexer<'_> {
 
     #[allow(clippy::too_many_lines)]
     fn next(&mut self) -> Option<Self::Item> {
-        'iterator: while let Some(first) = self.source.peek() {
+        while let Some(first) = self.source.peek() {
             let start_offset = self.source.current_offset();
             let second = self.source.peek_n(1);
             let third = self.source.peek_n(2);
 
-            // Exclude // docs
+            // A comment runs up to, not including, the end of its line
             if matches!((first, second), ('/', Some('/')) | ('#', Some('!'))) {
-                self.source.consume(2);
-                // We ran into a doc comment, and we just keep consuming characters as long as we
-                // don't encounter a linebreak
-                while let Some(ch) = self.source.peek() {
-                    if ch == '\n' {
-                        // NOTE: can we consume this '\n' now that we don't count line breaks anymore
-                        continue 'iterator;
-                    }
-
-                    // Just consume the tokens
+                let mut comment = String::new();
+                while let Some(ch) = self.source.peek()
+                    && ch != '\n'
+                {
+                    comment.push(ch);
                     self.source.next();
                 }
 
-                continue 'iterator;
+                return Some(Ok(TokenLocation {
+                    token: Token::Comment(comment),
+                    span: self.source.create_span(start_offset),
+                }));
             }
 
             if let Ok(token) = Token::try_from((first, second, third)) {
@@ -287,5 +285,37 @@ impl Error {
 
     pub fn help_text(&self) -> Option<&str> {
         self.help_text.as_deref()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn lex(source: &str) -> Vec<(Token, std::ops::Range<usize>)> {
+        Lexer::new(source, SourceId::SYNTHETIC)
+            .map(|token| token.expect("source lexes"))
+            .map(|token| (token.token, token.span.range()))
+            .collect()
+    }
+
+    #[test]
+    fn a_comment_is_a_token_up_to_the_end_of_its_line() {
+        assert_eq!(
+            lex("1 // one\n#! two"),
+            [
+                (Token::NumericLiteral(NumericLiteral::Int64(1)), 0..1),
+                (Token::Comment("// one".to_string()), 2..8),
+                (Token::Comment("#! two".to_string()), 9..15),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_comment_marker_inside_a_string_is_not_a_comment() {
+        assert_eq!(
+            lex(r#""// no""#),
+            [(Token::String("// no".to_string()), 0..7)]
+        );
     }
 }
