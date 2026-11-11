@@ -411,7 +411,8 @@ impl Parser {
         let mut must_be_tuple = must_be_tuple;
         while self.consume_token_if(&[Token::Comma]).is_some() {
             // A comma right before a closing bracket is a trailing comma, as in
-            // `(1,)`, `(1, 2,)` and `[1, 2,]`, and makes the sequence a tuple
+            // `(1, 2,)` and `[1, 2,]`. After a single value in parentheses it
+            // makes a 1-tuple: `(1,)`
             if self
                 .match_token(&[Token::RightParentheses, Token::RightSquareBracket])
                 .is_some()

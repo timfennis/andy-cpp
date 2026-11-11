@@ -18,16 +18,6 @@ let element = my_list.pop();
 print(element, my_list);  // 99 [1,2,4]
 ```
 
-A trailing comma after the last element is allowed:
-
-```ndc
-let days = [
-    "Monday",
-    "Tuesday",
-];
-print(days.len());  // 2
-```
-
 ## Indexing
 
 Lists, strings, and tuples also support negative indexes. Negative indexes count from the end.
