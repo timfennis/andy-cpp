@@ -907,10 +907,12 @@ impl Parser {
     ) -> Result<ExpressionLocation, Error> {
         self.require_current_token_matches(&Token::For)
             .expect("guaranteed to match");
-        let mut iterations = Vec::new();
+        let mut iterations = vec![self.comprehension_clause()?];
 
-        loop {
+        while self.consume_token_if(&[Token::Comma]).is_some() {
             match self.peek_current_token() {
+                // A trailing comma, as in `[x for x in xs,]`
+                Some(token) if token == end_token => break,
                 Some(Token::Comma) => {
                     let current_token = self.require_current_token().expect("must have a token");
                     return Err(Error::with_help(
@@ -919,16 +921,8 @@ impl Parser {
                         "The for comprehension contains two consecutive commas".to_string(),
                     ));
                 }
-                Some(token) if token == end_token => break,
-                Some(Token::If) => iterations.push(self.if_guard()?),
-                Some(_) => iterations.push(self.for_iteration()?),
-                _ => {}
+                _ => iterations.push(self.comprehension_clause()?),
             }
-
-            // If next is not a comma we break
-            if self.consume_token_if(&[Token::Comma]).is_none() {
-                break;
-            };
         }
 
         let end = self.require_current_token_matches(end_token)?;
@@ -938,6 +932,15 @@ impl Parser {
             iterations,
         }
         .to_location(span.merge(end.span)))
+    }
+
+    /// Parses one clause of a comprehension: an iteration `x in xs` or a guard `if x > 1`
+    fn comprehension_clause(&mut self) -> Result<ForIteration, Error> {
+        if self.peek_current_token() == Some(&Token::If) {
+            self.if_guard()
+        } else {
+            self.for_iteration()
+        }
     }
 
     fn if_guard(&mut self) -> Result<ForIteration, Error> {

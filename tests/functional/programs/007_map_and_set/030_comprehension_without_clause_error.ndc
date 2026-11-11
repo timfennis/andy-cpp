@@ -1,0 +1,2 @@
+// expect-error: Expected an expression but got '}'
+let s = %{1 for };
