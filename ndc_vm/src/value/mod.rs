@@ -83,7 +83,7 @@ pub enum Object {
         fields: RefCell<Vec<Value>>,
     },
     /// A set of overload candidates the runtime narrows per call. Scalars are
-    /// walked first (the most specific that accepts the arguments wins);
+    /// walked first (first-match-wins, same shape as the master baseline);
     /// `vec_candidates` is only consulted as a fallback for operator-form
     /// calls when no scalar accepts the args. `vec_candidates` is empty for
     /// non-operator call sites, so the hot path stays a single `Vec<ResolvedVar>`
@@ -91,10 +91,6 @@ pub enum Object {
     OverloadSet {
         scalars: Vec<ResolvedVar>,
         vec_candidates: Vec<ResolvedVar>,
-        /// How the scalars rank, worked out on the first call: which ones
-        /// are more specific never changes, only which ones accept a call's
-        /// arguments.
-        ranking: std::cell::OnceCell<OverloadRanking>,
     },
     Iterator(SharedIterator),
     Deque(RefCell<VecDeque<Value>>),
@@ -838,7 +834,6 @@ impl fmt::Display for Object {
             Self::OverloadSet {
                 scalars,
                 vec_candidates,
-                ..
             } => write!(
                 f,
                 "<overload set ({} candidates)>",
@@ -898,7 +893,6 @@ impl fmt::Debug for Object {
             Self::OverloadSet {
                 scalars,
                 vec_candidates,
-                ..
             } => f
                 .debug_struct("OverloadSet")
                 .field("scalars", scalars)
@@ -1335,74 +1329,6 @@ mod tests {
                     "equality differs for {integer} and {float}"
                 );
             }
-        }
-    }
-}
-
-/// How the scalar candidates of an `OverloadSet` rank, by their index.
-#[derive(Debug, Clone)]
-pub struct OverloadRanking {
-    /// For each candidate, the candidates more specific than it.
-    pub more_specific: Box<[Box<[usize]>]>,
-    /// The candidates with each after every one more specific than it, so
-    /// the first that accepts a call's arguments has nothing more specific
-    /// that accepts them.
-    pub order: Box<[usize]>,
-    /// For each candidate, whether a newer one that's neither more nor less
-    /// specific could accept some of the same arguments. A call both accept
-    /// goes to the newer one, which `order` can't say.
-    pub has_newer_rival: Box<[bool]>,
-}
-
-impl OverloadRanking {
-    /// The ranking of `functions`, nearest scope first and newest first
-    /// within a scope. `None` is a candidate that isn't a function.
-    pub fn new(functions: &[Option<Function>]) -> Self {
-        let more_specific_than =
-            |more: usize, less: usize| match (&functions[more], &functions[less]) {
-                (Some(more), Some(less)) => more.is_more_specific_than(less),
-                _ => false,
-            };
-        let count = functions.len();
-        let more_specific = (0..count)
-            .map(|less| {
-                (0..count)
-                    .filter(|&more| more_specific_than(more, less))
-                    .collect()
-            })
-            .collect::<Box<[Box<[usize]>]>>();
-        let mut remaining = (0..count).collect::<Vec<_>>();
-        let mut order = Vec::with_capacity(count);
-        while !remaining.is_empty() {
-            let next = remaining
-                .iter()
-                .position(|&index| {
-                    !more_specific[index]
-                        .iter()
-                        .any(|more| remaining.contains(more))
-                })
-                .unwrap_or(0);
-            order.push(remaining.remove(next));
-        }
-        let could_tie = |a: usize, b: usize| {
-            let (Some(a), Some(b)) = (&functions[a], &functions[b]) else {
-                return false;
-            };
-            let (Some(a), Some(b)) = (a.parameter_types(), b.parameter_types()) else {
-                return false;
-            };
-            a.len() == b.len()
-                && a.iter().zip(b).all(|(a, b)| a.overlaps(b))
-                && !StaticType::is_strictly_more_specific(a, b)
-                && !StaticType::is_strictly_more_specific(b, a)
-        };
-        let has_newer_rival = (0..count)
-            .map(|index| (0..index).any(|newer| could_tie(newer, index)))
-            .collect();
-        Self {
-            more_specific,
-            order: order.into(),
-            has_newer_rival,
         }
     }
 }

@@ -8,6 +8,7 @@
 use super::Analyser;
 use super::solver::{CallConstraint, Constraint, Waiting};
 use crate::error::AnalysisError;
+use crate::overloads::is_strictly_more_specific;
 use ahash::AHashSet;
 use ndc_core::{StaticType, TypeVar};
 use ndc_lexer::Span;
@@ -407,8 +408,8 @@ fn shown_with_blanks(parameters: &[StaticType]) -> Vec<String> {
 fn is_a_tie(a: &[StaticType], b: &[StaticType]) -> bool {
     a.len() == b.len()
         && a.iter().zip(b).all(|(a, b)| may_take_the_same(a, b))
-        && !StaticType::is_strictly_more_specific(a, b)
-        && !StaticType::is_strictly_more_specific(b, a)
+        && !is_strictly_more_specific(a, b)
+        && !is_strictly_more_specific(b, a)
 }
 
 /// Whether some argument could be passed both where `a` and where `b` is
