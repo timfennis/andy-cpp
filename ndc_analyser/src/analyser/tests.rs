@@ -484,6 +484,64 @@ fn an_annotation_settles_what_its_value_holds() {
     );
 }
 
+/// Natives with these signatures, as a stdlib would declare them.
+fn natives(signatures: &[(&str, &str)]) -> Vec<(String, StaticType)> {
+    signatures
+        .iter()
+        .map(|(name, signature)| {
+            let typ = StaticType::signature(signature).expect("valid signature");
+            ((*name).to_string(), typ)
+        })
+        .collect()
+}
+
+#[test]
+fn a_call_settles_its_arguments_through_the_picked_signature() {
+    let globals = natives(&[("push", "<T>(List<T>, T)")]);
+    assert_eq!(
+        analyse_last_type_with_globals("let xs = []; push(xs, 1); xs", globals.clone()),
+        StaticType::List(Box::new(StaticType::Int))
+    );
+    assert_eq!(
+        errors("let xs = [1]; push(xs, \"a\");", globals),
+        vec!["No function called 'push' found that matches the arguments 'List<Int>, String'"]
+    );
+}
+
+#[test]
+fn each_call_instantiates_the_signature_afresh() {
+    let globals = natives(&[("first", "<T>(List<T>) -> T")]);
+    assert_eq!(
+        analyse_last_type_with_globals("first([1.5])", globals.clone()),
+        StaticType::Float
+    );
+    assert_eq!(
+        analyse_last_type_with_globals("first([1]); first([\"a\"])", globals),
+        StaticType::String
+    );
+}
+
+#[test]
+fn an_any_parameter_settles_what_its_argument_leaves_unknown_as_any() {
+    // `keep` may store anything in the list, so it can't become a List<Int>.
+    let globals = [natives(&[("keep", "(List<Any>)")]), index_natives()].concat();
+    assert_eq!(
+        analyse_last_type_with_globals("let xs = []; keep(xs); xs[0] = 1; xs", globals),
+        StaticType::List(Box::new(StaticType::Any))
+    );
+}
+
+#[test]
+fn a_default_function_gives_a_map_the_values_it_returns() {
+    assert_eq!(
+        analyse_last_type("%{:fn() => 1}"),
+        StaticType::Map {
+            key: Box::new(StaticType::Any),
+            value: Box::new(StaticType::Int),
+        }
+    );
+}
+
 #[test]
 fn what_nothing_settles_falls_back_to_any() {
     assert_eq!(

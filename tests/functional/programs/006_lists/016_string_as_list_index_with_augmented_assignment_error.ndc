@@ -1,3 +1,5 @@
-// expect-error: Invalid list index
+// A list is indexed by an Int or a range, so a String index has no `[]=`
+// to store the new value with.
+// expect-error: No function called '[]=' found
 let x = [1,2,3];
 x["foo"] += 69; // ERROR

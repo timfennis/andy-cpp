@@ -1,11 +1,11 @@
 use super::Analyser;
 use crate::error::AnalysisError;
 use crate::overloads::{CallKind, Overloads, ResolvedCall};
-use ndc_analysis::Binding;
+use ndc_analysis::{Binding, Candidate};
 use ndc_core::{NodeId, StaticType};
 use ndc_lexer::Span;
 use ndc_parser::{Expression, ExpressionLocation};
-use ndc_resolver::Candidates;
+use ndc_resolver::{Candidates, SymbolId};
 
 impl Analyser {
     /// Why no candidate accepts a call of `name` with arguments of these types:
@@ -33,6 +33,56 @@ impl Analyser {
         } else {
             AnalysisError::function_not_found(name, types, span)
         }
+    }
+
+    /// Settles the types a call's arguments leave unknown from the overload
+    /// it picked, and returns the call's type. The picked signature gets new
+    /// variables for its type parameters, and each argument is passed where
+    /// its parameter is expected: `push(xs, 1)` with `push<T>(List<T>, T)`
+    /// settles `xs` as a `List<Int>`, and `push(xs, "a")` then doesn't fit.
+    /// When the pick is left to the program as it runs, any function may get
+    /// the arguments, so what's unknown in them becomes `Any`.
+    fn commit_call(
+        &mut self,
+        binding: &Binding<SymbolId>,
+        arguments: &[StaticType],
+        return_type: StaticType,
+        name: &str,
+        span: Span,
+    ) -> StaticType {
+        let picked = match binding {
+            Binding::Resolved(Candidate::Scalar(symbol)) => Some(*symbol),
+            // Element-wise operators on tuples leave the types they have.
+            Binding::Resolved(Candidate::Vec(_)) => return return_type,
+            Binding::Dynamic(_) | Binding::None => None,
+        };
+        let signature = picked.map(|symbol| {
+            let declared = self.types.get_type(symbol).clone();
+            self.vars.instantiate(&declared)
+        });
+        let Some(StaticType::Function {
+            parameters: Some(parameters),
+            return_type: declared_return,
+        }) = signature
+        else {
+            for argument in arguments {
+                self.vars.settle_unknowns(argument, &StaticType::Any);
+            }
+            return return_type;
+        };
+
+        let mut fits = true;
+        for (parameter, argument) in parameters.iter().zip(arguments) {
+            fits &= self.vars.bind_argument(parameter, argument);
+        }
+        if !fits {
+            let arguments = arguments
+                .iter()
+                .map(|argument| self.vars.resolve(argument))
+                .collect::<Vec<_>>();
+            self.emit(AnalysisError::function_not_found(name, &arguments, span));
+        }
+        self.vars.resolve(&declared_return)
     }
 
     /// Overload resolution over the types declared so far.
@@ -64,10 +114,22 @@ impl Analyser {
         );
 
         if matches!(binding, Binding::None) {
-            let error = self.no_match(getters, member, &[receiver_type], member_span);
+            let error = self.no_match(
+                getters,
+                member,
+                std::slice::from_ref(&receiver_type),
+                member_span,
+            );
             self.emit(error);
         }
 
+        let return_type = self.commit_call(
+            &binding,
+            std::slice::from_ref(&receiver_type),
+            return_type,
+            member,
+            member_span,
+        );
         self.picks.getters.insert(id, binding);
         return_type
     }
@@ -89,7 +151,9 @@ impl Analyser {
         let Expression::Identifier { name, .. } = &function.expression else {
             let callee_type = self.analyse_expr(function);
             for arg in arguments {
-                self.analyse_expr(arg);
+                // Nothing tells what the callee does with its arguments.
+                let argument = self.analyse_expr(arg);
+                self.vars.settle_unknowns(&argument, &StaticType::Any);
             }
             return match callee_type {
                 StaticType::Function { return_type, .. } => *return_type,
@@ -125,6 +189,7 @@ impl Analyser {
             return StaticType::Any;
         }
 
+        let return_type = self.commit_call(&binding, &type_sig, return_type, name, span);
         self.picks.bindings.insert(function.id, binding);
         return_type
     }

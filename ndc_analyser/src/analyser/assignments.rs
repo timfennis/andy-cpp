@@ -25,7 +25,7 @@ impl Analyser {
         // what it stores has to fit that type. Where the target's type isn't
         // fully known, the right operand settles it: in
         // `let xs = []; xs ++= [1]`, the elements of `xs` are `Int`.
-        let left_type = if left_type.any_var(&|_| true) {
+        let left_type = if left_type.has_vars() {
             match &left_type {
                 // A tuple target with a scalar operand applies the operand to
                 // each element: `t ++= [1]` appends to every list in `t`.
@@ -168,6 +168,9 @@ impl Analyser {
                         .overloads()
                         .resolve_call(getters, &get_args, CallKind::Regular)
                         .binding;
+                    if matches!(getter, Binding::None) {
+                        self.emit(AnalysisError::function_not_found("[]", &get_args, span));
+                    }
                     self.picks.getters.insert(lvalue.id, getter);
                 }
                 let setter = self
@@ -178,6 +181,9 @@ impl Analyser {
                         CallKind::Regular,
                     )
                     .binding;
+                if matches!(setter, Binding::None) {
+                    self.emit(AnalysisError::function_not_found("[]=", &set_args, span));
+                }
                 self.picks.setters.insert(lvalue.id, setter);
 
                 if Self::index_type_is_slice(&index_type)

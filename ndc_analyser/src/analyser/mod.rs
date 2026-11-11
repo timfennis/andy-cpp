@@ -102,7 +102,7 @@ impl Analyser {
         ] {
             for typ in table.values_mut() {
                 *typ = self.vars.resolve(typ);
-                debug_assert!(!typ.any_var(&|_| true), "unsettled type variable in {typ}");
+                debug_assert!(!typ.has_vars(), "unsettled type variable in {typ}");
             }
         }
 
@@ -239,7 +239,8 @@ impl Analyser {
                     }
                 }
                 if let Some(default) = default {
-                    let found = self.analyse_with_expected(default, value);
+                    let found =
+                        Self::default_value_type(self.analyse_with_expected(default, value));
                     Self::fold_lub(&mut value_type, found);
                 }
                 StaticType::Map {
@@ -477,7 +478,7 @@ impl Analyser {
                 // Reads can produce the default value, so its type is part of
                 // the map's value type.
                 if let Some(default) = default {
-                    let default_type = self.analyse_expr(default);
+                    let default_type = Self::default_value_type(self.analyse_expr(default));
                     Self::fold_lub(&mut value_type, default_type);
                 }
 
@@ -590,6 +591,16 @@ impl Analyser {
             Self::fold_lub(&mut element_type, self.analyse_expr(expression));
         }
         element_type
+    }
+
+    /// The type of the values a map default of type `default` produces. A
+    /// function default, as in `%{:fn() => []}`, is called for each missing
+    /// key, so the values are what it returns.
+    fn default_value_type(default: StaticType) -> StaticType {
+        match default {
+            StaticType::Function { return_type, .. } => *return_type,
+            other => other,
+        }
     }
 
     /// Fold a new type into an accumulator via least-upper-bound.
