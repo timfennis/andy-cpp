@@ -1,0 +1,11 @@
+// A call with an argument whose type isn't known until the program runs
+// calls the most specific overload that takes it: `show(Int)` for an Int,
+// though `show(Any)` takes it too, and whichever was declared first.
+// expect-output: int other int other
+fn show(x: Int) { "int" }
+fn show(x: Any) { "other" }
+fn tell(x: Any) { "other" }
+fn tell(x: Int) { "int" }
+fn via_show(v: Any) => show(v);
+fn via_tell(v: Any) => tell(v);
+print(via_show(1), via_show("a"), via_tell(1), via_tell("a"));
