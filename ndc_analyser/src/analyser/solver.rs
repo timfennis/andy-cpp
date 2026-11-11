@@ -3,6 +3,7 @@
 //! picking `map` settles from the type of `xs`.
 
 use super::Analyser;
+use super::function_values::{Choice, FunctionValue};
 use crate::error::AnalysisError;
 use crate::overloads::{CallKind, ResolvedCall, is_strictly_more_specific};
 use ndc_analysis::{Binding, Candidate};
@@ -10,6 +11,16 @@ use ndc_core::{NodeId, StaticType, TypeVar};
 use ndc_lexer::Span;
 use ndc_resolver::{Candidates, SymbolId};
 use std::collections::BTreeSet;
+
+/// What a call can commit to before its arguments are fully known.
+pub(super) enum EarlyOverload {
+    /// This overload, whatever the arguments turn out to be.
+    Only(SymbolId),
+    /// More than one could still be picked.
+    Undecided,
+    /// None can take the arguments.
+    NoneFits,
+}
 
 /// Where a call's candidates come from and where its pick goes.
 #[derive(Debug, Clone, Copy)]
@@ -31,6 +42,9 @@ pub(super) enum CallSite {
 pub(super) enum Constraint {
     /// A call whose overload can't be picked yet.
     Call(CallConstraint),
+    /// An overloaded function's name used as a value, waiting for the type
+    /// expected of it to pick an overload.
+    FunctionValue(FunctionValue),
     /// `for x in s`: what iterating over `sequence` gives.
     Iterate {
         sequence: StaticType,
@@ -50,12 +64,9 @@ pub(super) enum Constraint {
         value: StaticType,
         span: Span,
     },
-    /// The one type the two branches of an `if` have, once both are known.
-    Join {
-        sides: [StaticType; 2],
-        result: StaticType,
-        span: Span,
-    },
+    /// The one type the two branches of an `if` have, once both are known:
+    /// the branches' types and then the result's.
+    Join { types: [StaticType; 3], span: Span },
 }
 
 impl Constraint {
@@ -63,10 +74,11 @@ impl Constraint {
     fn inputs(&self) -> &[StaticType] {
         match self {
             Self::Call(call) => &call.arguments,
+            Self::FunctionValue(value) => std::slice::from_ref(value.expected()),
             Self::Iterate { sequence, .. } => std::slice::from_ref(sequence),
             Self::Unpack { value, .. } => std::slice::from_ref(value),
             Self::MapDefault { default, .. } => std::slice::from_ref(default),
-            Self::Join { sides, .. } => sides,
+            Self::Join { types, .. } => types,
         }
     }
 }
@@ -74,12 +86,18 @@ impl Constraint {
 /// An overload a call committed to before its arguments were known, which
 /// [`Analyser::check_early_picks`] checks once they are.
 #[derive(Debug)]
-pub(super) struct EarlyPick {
-    candidates: Candidates,
-    arguments: Vec<StaticType>,
-    kind: CallKind,
-    name: String,
-    binding: Binding<SymbolId>,
+pub(super) enum EarlyPick {
+    Call {
+        candidates: Candidates,
+        arguments: Vec<StaticType>,
+        kind: CallKind,
+        name: String,
+        binding: Binding<SymbolId>,
+    },
+    FunctionValue {
+        value: FunctionValue,
+        picked: SymbolId,
+    },
 }
 
 #[derive(Debug)]
@@ -208,8 +226,7 @@ impl Analyser {
             _ => {
                 let result = self.vars.fresh(StaticType::Any);
                 self.wait(Constraint::Join {
-                    sides: [a, b],
-                    result: result.clone(),
+                    types: [a, b, result.clone()],
                     span,
                 });
                 result
@@ -248,7 +265,7 @@ impl Analyser {
             Binding::Dynamic(vec![Candidate::Scalar(picked)])
         };
         if cfg!(debug_assertions) {
-            self.early_picks.push(EarlyPick {
+            self.early_picks.push(EarlyPick::Call {
                 candidates: call.candidates.clone(),
                 arguments: call.arguments.clone(),
                 kind: call.kind,
@@ -272,29 +289,60 @@ impl Analyser {
             return;
         }
         for pick in early_picks {
-            let arguments = pick
-                .arguments
-                .iter()
-                .map(|argument| self.vars.resolve(argument))
-                .collect::<Vec<_>>();
-            let binding = self
-                .overloads()
-                .resolve_call(&pick.candidates, &arguments, pick.kind)
-                .binding;
-            assert!(
-                binding == pick.binding,
-                "internal error: `{}` committed to {:?} before its arguments were known, \
-                 but with ({}) it means {binding:?}",
-                pick.name,
-                pick.binding,
-                arguments
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            );
+            match pick {
+                EarlyPick::Call {
+                    candidates,
+                    arguments,
+                    kind,
+                    name,
+                    binding: picked,
+                } => {
+                    let arguments = arguments
+                        .iter()
+                        .map(|argument| self.vars.resolve(argument))
+                        .collect::<Vec<_>>();
+                    let binding = self
+                        .overloads()
+                        .resolve_call(&candidates, &arguments, kind)
+                        .binding;
+                    assert!(
+                        binding == picked,
+                        "internal error: `{name}` committed to {picked:?} before its arguments \
+                         were known, but with ({}) it means {binding:?}",
+                        arguments
+                            .iter()
+                            .map(ToString::to_string)
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                    );
+                }
+                EarlyPick::FunctionValue { value, picked } => {
+                    let expected = self.vars.resolve(value.expected());
+                    let choice = self.choose_function_value(&value, &expected);
+                    assert!(
+                        choice == Choice::One(picked),
+                        "internal error: the function value {value:?} committed to {picked:?} \
+                         before its type was known, but with {} it means {choice:?}",
+                        self.vars.resolve(value.expected()),
+                    );
+                }
+            }
         }
     }
+
+    /// Remembers that `value` committed to `picked` before the type expected
+    /// of it was known, for [`Self::check_early_picks`].
+    pub(super) fn remember_early_function_value(
+        &mut self,
+        value: &FunctionValue,
+        picked: SymbolId,
+    ) {
+        self.early_picks.push(EarlyPick::FunctionValue {
+            value: value.clone(),
+            picked,
+        });
+    }
+
     /// The values a map default of type `default` makes, which waits until
     /// it's known whether the default is a function: in `fn(f) => %{:f}`, it
     /// depends on what's passed for `f`.
@@ -319,7 +367,7 @@ impl Analyser {
 
     /// Makes `constraint` wait, in the order it started waiting, until one
     /// of the variables it waits on is settled.
-    fn wait(&mut self, constraint: Constraint) {
+    pub(super) fn wait(&mut self, constraint: Constraint) {
         let serial = self.next_serial;
         self.next_serial += 1;
         self.wait_again(serial, constraint);
@@ -483,6 +531,7 @@ impl Analyser {
                 }
                 true
             }
+            Constraint::FunctionValue(value) => self.try_function_value(value),
             Constraint::Iterate {
                 sequence,
                 element,
@@ -541,15 +590,27 @@ impl Analyser {
                 true
             }
             Constraint::Join {
-                sides: [a, b],
-                result,
+                types: [a, b, result],
                 span,
             } => {
-                let (a, b) = (self.vars.resolve(a), self.vars.resolve(b));
+                let (a, b, result) = (a.clone(), b.clone(), result.clone());
+                // A result known from outside is what's expected of each
+                // branch: in `let f: Fn(Int) -> Int = if c { abs } else
+                // { floor }`, it says which `abs` and `floor` are meant.
+                if !matches!(self.vars.resolve(&result), StaticType::Var(_)) {
+                    for side in [&a, &b] {
+                        if self.vars.resolve(side).has_vars() {
+                            let snapshot = self.vars.snapshot();
+                            if !self.vars.bind_argument(&result, side) {
+                                self.vars.rollback(snapshot);
+                            }
+                        }
+                    }
+                }
+                let (a, b) = (self.vars.resolve(&a), self.vars.resolve(&b));
                 if a.has_vars() || b.has_vars() {
                     return false;
                 }
-                let result = result.clone();
                 self.settle_waited_for(&result, &a.lub(&b), *span);
                 true
             }
@@ -605,33 +666,56 @@ impl Analyser {
             return Some(self.resolve_call_now(call, &arguments));
         }
 
-        let viable = reachable
-            .iter()
-            .copied()
-            .filter(|&symbol| self.could_accept(symbol, &arguments))
-            .collect::<Vec<_>>();
-        match viable[..] {
+        match self.early_overload(&call.candidates, &arguments, call.kind) {
             // A write that nothing takes may still fit once its target's
             // type is known, which also says better what's wrong.
-            [] if matches!(call.site, CallSite::Setter(_) | CallSite::FieldSetter(_)) => None,
-            [] => Some(self.resolve_call_now(call, &arguments)),
-            // An operator may also apply to each element of a tuple, so one
-            // overload left doesn't decide it while an operand could still
-            // be a tuple: `fn(x) => x ++ "!"` can take `("a", "b")`.
-            [only]
-                if self.fits_without_any(only, &arguments)
-                    && !(call.kind == CallKind::Operator
-                        && arguments
-                            .iter()
-                            .any(|argument| matches!(argument, StaticType::Var(_)))) =>
+            EarlyOverload::NoneFits
+                if matches!(call.site, CallSite::Setter(_) | CallSite::FieldSetter(_)) =>
             {
+                None
+            }
+            EarlyOverload::NoneFits => Some(self.resolve_call_now(call, &arguments)),
+            EarlyOverload::Only(only) => {
                 let Some(typ) = self.commit_early(call, &arguments, only) else {
                     self.report_failed_call(call, &arguments);
                     return Some(StaticType::Any);
                 };
                 Some(typ)
             }
-            _ => None,
+            EarlyOverload::Undecided => None,
+        }
+    }
+
+    /// The overload a call of `candidates` with arguments of these types
+    /// commits to while the arguments aren't fully known: the only one that
+    /// can take them, once nothing learned later could make another one the
+    /// pick. One that takes them only through an `Any` parameter would lose
+    /// to an exact type once they're known, and an operator may also apply
+    /// to each element of a tuple: `fn(x) => x ++ "!"` can take `("a", "b")`.
+    /// Function values are picked by the same rule, as calls with the
+    /// expected parameter types.
+    pub(super) fn early_overload(
+        &mut self,
+        candidates: &Candidates,
+        arguments: &[StaticType],
+        kind: CallKind,
+    ) -> EarlyOverload {
+        let viable = self
+            .overloads()
+            .reachable_symbols(candidates)
+            .into_iter()
+            .filter(|&symbol| self.could_accept(symbol, arguments))
+            .collect::<Vec<_>>();
+        let operand_could_be_a_tuple = kind == CallKind::Operator
+            && arguments
+                .iter()
+                .any(|argument| matches!(argument, StaticType::Var(_)));
+        match viable[..] {
+            [] => EarlyOverload::NoneFits,
+            [only] if self.fits_without_any(only, arguments) && !operand_could_be_a_tuple => {
+                EarlyOverload::Only(only)
+            }
+            _ => EarlyOverload::Undecided,
         }
     }
 

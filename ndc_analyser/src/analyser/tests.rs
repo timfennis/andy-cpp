@@ -1,5 +1,6 @@
 use super::*;
 use itertools::Itertools;
+use ndc_analysis::{Binding, Candidate};
 use ndc_lexer::{Lexer, SourceId};
 use ndc_parser::Parser;
 
@@ -1090,6 +1091,144 @@ fn a_map_default_waits_until_it_is_known_whether_it_makes_the_values() {
         ),
         StaticType::Int
     );
+}
+
+/// `split` as the stdlib has it: one overload splits on whitespace, the
+/// other on a pattern.
+fn split_natives() -> Vec<(String, StaticType)> {
+    natives(&[
+        ("split", "(String) -> List<String>"),
+        ("split", "(String, String) -> List<String>"),
+        ("map", "<T, U>(List<T>, Fn(T) -> U) -> List<U>"),
+    ])
+}
+
+#[test]
+fn an_overloaded_function_value_is_the_overload_its_use_expects() {
+    let list_of_lists = StaticType::List(Box::new(StaticType::List(Box::new(StaticType::String))));
+    assert_eq!(
+        analyse_last_type_with_globals("[\"a b\"].map(split)", split_natives()),
+        list_of_lists
+    );
+    // A variable's uses say what it is.
+    assert_eq!(
+        analyse_last_type_with_globals("let f = split; f(\"a b\"); f", split_natives()),
+        StaticType::Function {
+            parameters: Some(vec![StaticType::String]),
+            return_type: Box::new(StaticType::List(Box::new(StaticType::String))),
+        }
+    );
+}
+
+#[test]
+fn a_return_annotation_picks_the_overloaded_function_value_returned() {
+    assert_eq!(
+        errors(
+            "fn by_pattern() -> Fn(String, String) -> List<String> { split }",
+            split_natives()
+        ),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn a_return_annotation_settles_what_the_body_left_unknown() {
+    assert_eq!(
+        errors("fn f() -> Sequence<Int> { let xs = []; xs }", vec![]),
+        Vec::<String>::new()
+    );
+    // Returns that join at `Any` still don't fit an `Int`.
+    assert_eq!(
+        errors("fn f(x) -> Int { if x { return \"s\"; } 1 }", vec![]),
+        vec!["mismatched types: found Any but expected Int"]
+    );
+}
+
+#[test]
+fn the_help_for_an_ambiguous_function_value_names_an_overload_that_fits() {
+    let help = |source: &str, globals| {
+        let (_, result) = analyse_with_globals(source, globals);
+        result.errors[0].help_text().map(str::to_string)
+    };
+    // A type parameter can't be written in an annotation.
+    assert_eq!(
+        help(
+            "let f = push;",
+            natives(&[("push", "<T>(List<T>, T)"), ("push", "<T>(MinHeap<T>, T)")])
+        ),
+        Some(
+            "Say which one with a function type, as in `let f: Fn(MinHeap<Any>, Any) -> () = push`"
+                .to_string()
+        )
+    );
+    // The inner `pick` takes two arguments, so the example is an outer one.
+    assert_eq!(
+        help(
+            "fn pick(x: Int) => 1; fn pick(x: Float) => 1.0; { fn pick(a, b) => 0; let f: Fn(Any) -> Any = pick; }",
+            vec![]
+        ),
+        Some(
+            "Say which one with a function type, as in `let f: Fn(Float) -> Float = pick`"
+                .to_string()
+        )
+    );
+}
+
+#[test]
+fn a_function_value_is_not_picked_by_its_return_type_before_its_parameters_are_known() {
+    // Only `pick(Any)` returns an Int, but once `xs` holds Ints a call with
+    // an Int means `pick(Int)`, so that's the one meant, and it doesn't fit.
+    let globals = natives(&[
+        ("map", "<T, U>(List<T>, Fn(T) -> U) -> List<U>"),
+        ("push", "<T>(List<T>, T)"),
+    ]);
+    assert_eq!(
+        errors(
+            "fn pick(x) => 0; fn pick(x: Int) => \"s\"; let xs = []; let ys: List<Int> = xs.map(pick); xs.push(1);",
+            globals
+        ),
+        vec!["No overload of 'pick' is a Fn(Int) -> Int"]
+    );
+}
+
+#[test]
+fn a_function_value_commits_when_only_one_overload_can_take_the_arguments() {
+    // `map` calls `split` with one argument, which only `split(String)`
+    // takes, so it's meant even though nothing says what `xs` holds.
+    assert_eq!(
+        errors("let xs = []; xs.map(split);", split_natives()),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn an_overloaded_function_value_nothing_picks_is_an_error() {
+    assert_eq!(
+        errors("let f = split;", split_natives()),
+        vec!["'split' has several overloads, and nothing here says which one is meant"]
+    );
+    assert_eq!(
+        errors("let f: Fn(Int) -> Int = split;", split_natives()),
+        vec!["No overload of 'split' is a Fn(Int) -> Int"]
+    );
+    // `split(String)` takes the String, but doesn't return an Int.
+    assert_eq!(
+        errors("let f: Fn(String) -> Int = split;", split_natives()),
+        vec!["No overload of 'split' is a Fn(String) -> Int"]
+    );
+}
+
+#[test]
+fn an_overloaded_function_value_uses_the_nearest_scope_with_an_overload_that_fits() {
+    // The inner `pick` doesn't take an Int, so the outer one is meant.
+    assert_eq!(
+        analyse_last_type(
+            "fn pick(x: Int) => 1; { fn pick(x: String) => \"s\"; let f: Fn(Int) -> Int = pick; f(1) }"
+        ),
+        StaticType::Int
+    );
+    // When both fit, the nearer one is meant, which
+    // 005_functions/067 shows by what the program prints.
 }
 
 #[test]

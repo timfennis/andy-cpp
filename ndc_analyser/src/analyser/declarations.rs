@@ -110,6 +110,18 @@ impl Analyser {
             None => implicit_return,
         };
 
+        // An annotated return type is what the body returns, which can settle
+        // what the body left waiting: in `fn f() -> Fn(String) -> List<String>
+        // { split }`, it picks `split(String)`.
+        // What isn't known about the body's value yet is settled from the
+        // annotation, like a write: `-> Sequence<Int>` takes a `List<?T>` and
+        // settles `?T`.
+        if let Some(annotated) = &annotated_return
+            && self.vars.resolve(&inferred_return).has_vars()
+        {
+            self.accepts_write(annotated, &inferred_return);
+        }
+
         // Nothing outside a named function's body can settle the type
         // variables made in it, as its parameters have their types. A
         // lambda's variables are settled by how the code around it uses it.
@@ -118,23 +130,26 @@ impl Analyser {
         }
         let inferred_return = self.vars.resolve(&inferred_return);
 
-        // If there is an annotated return type, validate it;
-        // otherwise record the inferred type in the analysis.
-        if let Some(annotated) = &annotated_return {
-            let fits = self.vars.try_unify(annotated, &inferred_return)
-                || self.vars.resolve(&inferred_return).is_subtype(annotated);
-            if !fits {
+        // If there is an annotated return type, report a body that doesn't
+        // return it; otherwise record the inferred type in the analysis.
+        match &annotated_return {
+            Some(annotated)
+                if !self.vars.try_unify(annotated, &inferred_return)
+                    && !inferred_return.is_subtype(annotated) =>
+            {
                 self.emit(AnalysisError::mismatched_types(
                     &self.vars.shown(&inferred_return),
                     annotated,
                     span,
                 ));
             }
-        } else {
-            self.result
-                .analysis
-                .inferred_return_types
-                .insert(id, inferred_return.clone());
+            Some(_) => {}
+            None => {
+                self.result
+                    .analysis
+                    .inferred_return_types
+                    .insert(id, inferred_return.clone());
+            }
         }
 
         let effective_return = annotated_return.unwrap_or(inferred_return);

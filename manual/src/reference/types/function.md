@@ -223,6 +223,30 @@ fn foo(a) { a + 1 }
 fn foo(b) { b + 2 }   // ERROR: Illegal redefinition of function 'foo' with parameters (Any)
 ```
 
+## An overloaded function as a value
+
+A function's name can be used as a value, as in `xs.map(abs)`. When the name has several overloads, the type expected where it's used picks one. `map` passes each element, so over a list of Floats `abs` is `abs(Float)`, and over strings `split` is `split(String)` rather than `split(String, String)`. A function type annotation picks one too, and so do a variable's uses:
+
+```ndc
+assert_eq([-1.5, 2.5].map(abs), [1.5, 2.5]);
+assert_eq(["a b"].map(split), [["a", "b"]]);
+
+let by_pattern: Fn(String, String) -> List<String> = split;
+assert_eq(by_pattern("a:b", ":"), ["a", "b"]);
+
+let f = split;
+assert_eq(f("a b"), ["a", "b"]);   // f is split(String), as it's called with one String
+```
+
+When nothing says which overload is meant, it's an error that asks for a function type:
+
+```ndc
+let g = split;      // ERROR: 'split' has several overloads, and nothing here says which one is meant
+print(abs);         // ERROR: the same: print takes any value
+```
+
+Like a call, a value uses the nearest scope with an overload that fits.
+
 ## How a call finds its function
 
 A call such as `foo(x)` looks for `foo` in the scope it's written in first, then in each enclosing scope in turn, and finally among the built-in functions.

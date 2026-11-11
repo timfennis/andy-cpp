@@ -171,6 +171,38 @@ impl AnalysisError {
         }
     }
 
+    /// `example` is one of the overloads' types, to show how to say which
+    /// one is meant.
+    pub(crate) fn ambiguous_function_value(
+        name: &str,
+        expected: &StaticType,
+        example: &StaticType,
+        span: Span,
+    ) -> Self {
+        let text = if *expected == StaticType::Any {
+            format!("'{name}' has several overloads, and nothing here says which one is meant")
+        } else {
+            format!(
+                "'{name}' has several overloads that are a {expected}, and nothing here says which one is meant"
+            )
+        };
+        Self {
+            text,
+            span,
+            help_text: Some(format!(
+                "Say which one with a function type, as in `let f: {example} = {name}`"
+            )),
+        }
+    }
+
+    pub(crate) fn no_overload_fits(name: &str, expected: &StaticType, span: Span) -> Self {
+        Self {
+            text: format!("No overload of '{name}' is a {expected}"),
+            span,
+            help_text: None,
+        }
+    }
+
     pub(crate) fn break_outside_loop(span: Span) -> Self {
         Self {
             text: "unexpected break statement outside of loop".to_string(),
