@@ -25,6 +25,7 @@ mod inner {
     use ndc_vm::value::AdvancedNumber;
 
     /// Randomly shuffles the elements of the list in place.
+    #[function(signature = "<T>(List<T>)")]
     pub fn shuffle(list: &mut [Value]) {
         list.shuffle(&mut rand::rng());
     }
@@ -32,7 +33,7 @@ mod inner {
     /// Returns a copy of the input sequence converted to a list with the elements shuffled in random order.
     ///
     /// Note: this currently does consume iterators
-    #[function(return_type = Vec<_>)]
+    #[function(signature = "<T>(Sequence<T>) -> List<T>")]
     pub fn shuffled(list: SeqValue) -> anyhow::Result<Value> {
         Ok(Value::list(
             list.try_into_iter()

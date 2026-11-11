@@ -17,6 +17,7 @@ mod inner {
     }
 
     /// Produces an error if the arguments aren't equal to each other.
+    #[function(signature = "<A, B>(A, B)")]
     pub fn assert_eq(left: Value, right: Value) -> anyhow::Result<()> {
         if left == right {
             Ok(())
@@ -28,6 +29,7 @@ mod inner {
     }
 
     /// Produces an error if the arguments are equal to each other.
+    #[function(signature = "<A, B>(A, B)")]
     pub fn assert_ne(left: Value, right: Value) -> anyhow::Result<()> {
         if left == right {
             Err(anyhow!(format!(
@@ -49,6 +51,7 @@ mod inner {
     }
 
     /// Returns the larger of `left` and `right`, preferring `left` if they are equal.
+    #[function(signature = "<A, B>(A, B) -> Any")]
     pub fn max(left: Value, right: Value) -> anyhow::Result<Value> {
         match left.partial_cmp(&right) {
             Some(Ordering::Equal | Ordering::Greater) => Ok(left),
@@ -62,6 +65,7 @@ mod inner {
     }
 
     /// Returns the smaller of `left` and `right`, preferring `left` if they are equal.
+    #[function(signature = "<A, B>(A, B) -> Any")]
     pub fn min(left: Value, right: Value) -> anyhow::Result<Value> {
         match left.partial_cmp(&right) {
             Some(Ordering::Equal | Ordering::Less) => Ok(left),
