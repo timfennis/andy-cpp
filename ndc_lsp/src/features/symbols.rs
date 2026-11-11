@@ -1,10 +1,10 @@
+use lsp_types::{DocumentSymbol, SymbolKind};
 use ndc_analysis::Analysis;
 use ndc_core::StaticType;
 use ndc_lexer::Span;
 use ndc_parser::{
     BindingPattern, BindingPatternLocation, Expression, ExpressionLocation, FunctionParameter,
 };
-use tower_lsp::lsp_types::{DocumentSymbol, SymbolKind};
 
 use crate::util::LineIndex;
 

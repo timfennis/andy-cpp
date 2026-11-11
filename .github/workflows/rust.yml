@@ -32,6 +32,9 @@ jobs:
       # building it on its own checks that it compiles without them.
       - name: Build stdlib without default features
         run: cargo build -p ndc_stdlib --no-default-features
+      # The language features without the server, as the browser uses them.
+      - name: Build the language features without the server
+        run: cargo clippy -p ndc_lsp --no-default-features --all-targets
       - name: Build with tracing
         run: cargo build --features trace
       # The manual runs its examples on this build, deployed only from master.

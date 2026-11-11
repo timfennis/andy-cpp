@@ -1262,6 +1262,7 @@ name = "ndc_lsp"
 version = "0.3.0"
 dependencies = [
  "ahash",
+ "lsp-types",
  "ndc_analysis",
  "ndc_core",
  "ndc_interpreter",
