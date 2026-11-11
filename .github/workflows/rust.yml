@@ -5,8 +5,18 @@ on:
     branches: [ "master" ]
   pull_request:
 
+# A new push to a pull request cancels its run that is still going.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   CARGO_TERM_COLOR: always
+  # Incremental builds only help when the same tree is rebuilt locally.
+  CARGO_INCREMENTAL: 0
+  # Keep line numbers for backtraces, but skip the rest of the debug info.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  CARGO_PROFILE_TEST_DEBUG: line-tables-only
 
 jobs:
   build:
@@ -14,12 +24,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
-      - name: Build
-        run: cargo build --verbose
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
       - name: Run tests
-        run: cargo test --verbose
-      - name: Build no default
-        run: cargo build --verbose --no-default-features
+        run: cargo test
+      # Other workspace crates enable the stdlib's default features, so only
+      # building it on its own checks that it compiles without them.
+      - name: Build stdlib without default features
+        run: cargo build -p ndc_stdlib --no-default-features
       - name: Build with tracing
-        run: cargo build --verbose --features trace
+        run: cargo build --features trace
