@@ -93,3 +93,9 @@ rustflags = [
     "-Aclippy::semicolon_if_nothing_returned",
     "-Aclippy::unimplemented",
 ]
+
+# The parser, analyser and compiler recurse, and wasm's default stack of 1 MB
+# overflows on code nested ~90 levels deep (natively the stack is 8 MB). An
+# overflow in wasm also corrupts the instance, so give it the native size.
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "link-arg=-zstack-size=8388608"]

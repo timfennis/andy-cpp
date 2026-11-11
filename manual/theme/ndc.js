@@ -12,12 +12,16 @@
   const darkThemes = ["coal", "navy", "ayu"];
   const theme = () =>
     darkThemes.some((t) => document.documentElement.classList.contains(t)) ? "dark" : "light";
+  const sendTheme = (frame) => frame.contentWindow?.postMessage({ theme: theme() }, location.origin);
   for (const frame of frames) {
+    // Also on load, in case the theme changed while the playground loaded.
+    frame.addEventListener("load", () => sendTheme(frame));
     frame.src = new URL(`index.html?theme=${theme()}`, playground).href;
   }
-  new MutationObserver(() => {
-    for (const frame of frames) frame.contentWindow?.postMessage({ theme: theme() }, location.origin);
-  }).observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+  new MutationObserver(() => frames.forEach(sendTheme)).observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ["class"],
+  });
 
   if (blocks.length === 0) return;
 
@@ -29,16 +33,16 @@
     "M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z",
   );
 
-  function button(title, html) {
-    const b = document.createElement("button");
-    b.title = title;
-    b.setAttribute("aria-label", title);
-    b.innerHTML = html;
-    return b;
+  function label(button, title, html) {
+    button.title = title;
+    button.setAttribute("aria-label", title);
+    button.innerHTML = html;
+    return button;
   }
 
   import(new URL("andy.js", playground).href).then(async (andy) => {
     await andy.load();
+    // One worker for the page's examples; they queue behind each other.
     let runner = null;
 
     for (const code of blocks) {
@@ -53,35 +57,34 @@
         buttons.className = "buttons";
         pre.prepend(buttons);
       }
-      const run = button("Run this code", PLAY);
-      const open = button("Open in the playground", OPEN);
+      const run = label(document.createElement("button"), "Run this code", PLAY);
+      const open = label(document.createElement("button"), "Open in the playground", OPEN);
       buttons.prepend(run, open);
 
       open.addEventListener("click", () => window.open(andy.playgroundUrl(source), "_blank", "noopener"));
 
-      let running = false;
+      // While this example runs or waits its turn, its button stops it.
+      let running = null;
       run.addEventListener("click", async () => {
-        runner ??= new andy.Runner();
         if (running) {
-          runner.stop();
+          running.abort();
           return;
         }
+        runner ??= new andy.Runner();
         let result = pre.querySelector(".result");
         if (!result) {
           result = document.createElement("code");
           result.className = "result ndc hljs";
           pre.append(result);
         }
-        running = true;
-        run.innerHTML = STOP;
-        run.title = "Stop";
+        running = new AbortController();
+        label(run, "Stop", STOP);
         result.innerHTML = `<span class="ndc-muted">Running…</span>`;
 
-        const html = andy.resultHtml(await runner.run(source));
+        const html = andy.resultHtml(await runner.run(source, running.signal));
         result.innerHTML = html || `<span class="ndc-muted">No output</span>`;
-        running = false;
-        run.innerHTML = PLAY;
-        run.title = "Run this code";
+        running = null;
+        label(run, "Run this code", PLAY);
       });
     }
   }).catch((err) => {

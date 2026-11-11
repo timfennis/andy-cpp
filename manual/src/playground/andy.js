@@ -29,50 +29,59 @@ export function highlight(code) {
 }
 
 /** Runs programs one after another in a worker, off the main thread, so a
- * program that never ends can be stopped without freezing the page. */
+ * program that never ends can be stopped without freezing the page. The
+ * worker gets one program at a time: stopping a program, or a crash, ends
+ * that program only, and the ones queued behind it run on a fresh worker. */
 export class Runner {
   #worker = null;
-  #waiting = [];
+  /** `{ code, resolve }` per program; the first is the one running. */
+  #queue = [];
 
-  /** Resolves to `{ output, value, error, millis }`, or `{ stopped: true }`. */
-  run(code) {
+  /** Resolves to `{ output, value, error, millis, crashed }`, or to
+   * `{ stopped: true }` when `signal` aborts first. */
+  run(code, signal) {
     return new Promise((resolve) => {
-      this.#start();
-      this.#waiting.push(resolve);
-      this.#worker.postMessage(code);
+      const job = { code, resolve };
+      if (signal?.aborted) return resolve({ stopped: true });
+      signal?.addEventListener("abort", () => this.#cancel(job), { once: true });
+      this.#queue.push(job);
+      if (this.#queue.length === 1) this.#next();
     });
   }
 
-  get running() {
-    return this.#waiting.length > 0;
+  #next() {
+    const job = this.#queue[0];
+    if (!job) return;
+    if (!this.#worker) {
+      this.#worker = new Worker(new URL("worker.js", import.meta.url), { type: "module" });
+      this.#worker.onmessage = ({ data }) => this.#done(data);
+      this.#worker.onerror = (e) => {
+        e.preventDefault();
+        this.#done({ error: `The interpreter failed to start: ${e.message}`, crashed: true });
+      };
+    }
+    this.#worker.postMessage(job.code);
   }
 
-  /** Ends the program that is running and drops the ones waiting. */
-  stop() {
-    this.#finish({ stopped: true });
+  /** The running program finished, crashed or was stopped. */
+  #done(result) {
+    if (result.crashed || result.stopped) {
+      // The worker is busy or broken: start a fresh one for what's next.
+      this.#worker?.terminate();
+      this.#worker = null;
+    }
+    this.#queue.shift()?.resolve(result);
+    this.#next();
   }
 
-  #start() {
-    if (this.#worker) return;
-    this.#worker = new Worker(new URL("worker.js", import.meta.url), { type: "module" });
-    this.#worker.onmessage = ({ data }) => {
-      if (data.crashed) {
-        // The crash broke the worker's interpreter; start a fresh one next time.
-        this.#finish(data);
-      } else {
-        this.#waiting.shift()?.(data);
-      }
-    };
-    this.#worker.onerror = (e) => {
-      e.preventDefault();
-      this.#finish({ error: `The interpreter failed to start: ${e.message}` });
-    };
-  }
-
-  #finish(result) {
-    this.#worker?.terminate();
-    this.#worker = null;
-    for (const resolve of this.#waiting.splice(0)) resolve(result);
+  #cancel(job) {
+    const at = this.#queue.indexOf(job);
+    if (at === 0) {
+      this.#done({ stopped: true });
+    } else if (at > 0) {
+      this.#queue.splice(at, 1);
+      job.resolve({ stopped: true });
+    }
   }
 }
 
@@ -87,8 +96,9 @@ export function resultHtml({ output = "", value = "", error = null, stopped = fa
 
 /** A link to the playground page that opens with `code` in the editor. */
 export function playgroundUrl(code) {
-  const bytes = new TextEncoder().encode(code);
-  const base64 = btoa(String.fromCharCode(...bytes))
+  let binary = "";
+  for (const byte of new TextEncoder().encode(code)) binary += String.fromCharCode(byte);
+  const base64 = btoa(binary)
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
     .replace(/=+$/, "");
@@ -109,7 +119,7 @@ export function codeFromHash(hash = location.hash) {
 
 /** Turns `container` into a code editor: a transparent textarea over the
  * highlighted code, so the browser's own editing, selection and undo apply.
- * Ctrl/Cmd+Enter calls `onRun`. */
+ * Ctrl/Cmd+Enter calls `onRun`. Tab indents; Esc then Tab moves focus on. */
 export function createEditor(container, { code = "", onRun = () => {} } = {}) {
   const shown = document.createElement("pre");
   shown.setAttribute("aria-hidden", "true");
@@ -142,7 +152,16 @@ export function createEditor(container, { code = "", onRun = () => {} } = {}) {
 
   // execCommand("insertText") keeps the browser's undo history intact.
   const insert = (text) => document.execCommand("insertText", false, text);
+  // After Esc, Tab leaves the editor instead of indenting, so keyboard users
+  // aren't trapped in it.
+  let tabMovesFocus = false;
   input.addEventListener("keydown", (e) => {
+    // Enter and Tab while an input method composes text belong to it.
+    if (e.isComposing || e.keyCode === 229) return;
+    const escaped = tabMovesFocus;
+    tabMovesFocus = e.key === "Escape";
+    if (e.key === "Tab" && escaped) return;
+
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       onRun();
@@ -157,7 +176,8 @@ export function createEditor(container, { code = "", onRun = () => {} } = {}) {
   });
 
   render();
-  load().then(render);
+  // Without the interpreter the code stays plain; whoever called load() says why.
+  load().then(render, () => {});
   return {
     get value() {
       return input.value;

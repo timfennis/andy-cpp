@@ -8,6 +8,7 @@
   --ndc-variable: #4078f2; --ndc-assignment: #0184bc; --ndc-punctuation: #696c77;
   --ndc-operator: #a626a4; --ndc-comment: #a0a1a7; --ndc-invalid: #e45649;
   --ndc-error: #b42318; --ndc-muted: #6b6860; --ndc-selection: rgba(64, 120, 242, .22);
+  --ndc-caret: #383a42;
 }
 
 :root.coal, :root.navy, :root.ayu {
@@ -16,6 +17,7 @@
   --ndc-variable: #61afef; --ndc-assignment: #56b6c2; --ndc-punctuation: #abb2bf;
   --ndc-operator: #c678dd; --ndc-comment: #7f848e; --ndc-invalid: #e06c75;
   --ndc-error: #f97066; --ndc-muted: #7f848e; --ndc-selection: rgba(97, 175, 239, .25);
+  --ndc-caret: #abb2bf;
 }
 
 .tok-string { color: var(--ndc-string); }
@@ -45,6 +47,7 @@
    room at the end lets the <pre> always follow. */
 .ndc-editor > pre { overflow: hidden; pointer-events: none; padding-bottom: 64px; padding-right: 64px; }
 .ndc-editor > textarea {
-  overflow: auto; resize: none; outline: none; color: transparent; caret-color: currentColor;
+  /* The text itself shows through from the <pre>; only the caret is drawn here. */
+  overflow: auto; resize: none; outline: none; color: transparent; caret-color: var(--ndc-caret);
 }
 .ndc-editor > textarea::selection { background: var(--ndc-selection); }

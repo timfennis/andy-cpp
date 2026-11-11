@@ -42,23 +42,26 @@ pub struct Highlight {
     pub kind: Kind,
 }
 
+/// How deeply brackets may nest before the parser is skipped. The parser
+/// recurses, and the highlighter runs on every keystroke, so pathological
+/// nesting must not overflow its stack; real code nests far less.
+const MAX_PARSED_NESTING: usize = 64;
+
 /// The pieces of `source` in order. Code that fails to lex is highlighted up
 /// to the error; code that fails to parse still gets highlighted by token.
 #[must_use]
 pub fn highlight(source: &str) -> Vec<Highlight> {
     let mut tokens = Vec::new();
-    let mut invalid_from = None;
+    let mut lexed = true;
     for token in Lexer::new(source, SourceId::SYNTHETIC) {
-        match token {
-            Ok(token) => tokens.push(token),
-            Err(err) => {
-                invalid_from = Some(err.span().offset());
-                break;
-            }
-        }
+        let Ok(token) = token else {
+            lexed = false;
+            break;
+        };
+        tokens.push(token);
     }
 
-    let function_spans = if invalid_from.is_none() {
+    let function_spans = if lexed && nesting(&tokens) <= MAX_PARSED_NESTING {
         function_spans(tokens.clone())
     } else {
         AHashSet::new()
@@ -68,7 +71,7 @@ pub fn highlight(source: &str) -> Vec<Highlight> {
     let mut end_of_previous = 0;
     for (i, token) in tokens.iter().enumerate() {
         let range = token.span.range();
-        comments(source, end_of_previous..range.start, &mut highlights);
+        skipped(source, end_of_previous..range.start, &mut highlights);
         end_of_previous = range.end;
 
         let next = tokens.get(i + 1).map(|t| &t.token);
@@ -77,17 +80,41 @@ pub fn highlight(source: &str) -> Vec<Highlight> {
         highlights.push(Highlight { range, kind });
     }
 
-    match invalid_from {
-        Some(start) => {
-            comments(source, end_of_previous..start, &mut highlights);
-            highlights.push(Highlight {
-                range: start..source.len(),
-                kind: Kind::Invalid,
-            });
-        }
-        None => comments(source, end_of_previous..source.len(), &mut highlights),
+    // After a lexer error, the code is invalid from the first thing after the
+    // last token that isn't whitespace or a comment: that's where the lexer
+    // gave up, even when its error points further in.
+    let rest = end_of_previous..source.len();
+    if let Some(start) = skipped(source, rest, &mut highlights)
+        && !lexed
+    {
+        highlights.push(Highlight {
+            range: start..source.len(),
+            kind: Kind::Invalid,
+        });
     }
     highlights
+}
+
+/// How deeply the brackets in `tokens` nest: 2 for `f([1])`.
+fn nesting(tokens: &[TokenLocation]) -> usize {
+    let mut depth = 0usize;
+    let mut deepest = 0;
+    for token in tokens {
+        match token.token {
+            Token::LeftParentheses
+            | Token::LeftSquareBracket
+            | Token::LeftCurlyBracket
+            | Token::MapOpen => {
+                depth += 1;
+                deepest = deepest.max(depth);
+            }
+            Token::RightParentheses | Token::RightSquareBracket | Token::RightCurlyBracket => {
+                depth = depth.saturating_sub(1);
+            }
+            _ => {}
+        }
+    }
+    deepest
 }
 
 fn kind(
@@ -142,25 +169,28 @@ fn kind(
     }
 }
 
-/// The comments in `gap`, a stretch between tokens that holds only
-/// whitespace and comments. Each runs to the end of its line.
-fn comments(source: &str, gap: Range<usize>, highlights: &mut Vec<Highlight>) {
-    let mut rest = gap.start;
-    while let Some(found) = ["//", "#!"]
-        .iter()
-        .filter_map(|marker| source[rest..gap.end].find(marker))
-        .min()
-    {
-        let start = rest + found;
-        let end = source[start..gap.end]
-            .find('\n')
-            .map_or(gap.end, |newline| start + newline);
-        highlights.push(Highlight {
-            range: start..end,
-            kind: Kind::Comment,
-        });
-        rest = end;
+/// Records the comments in `gap`, a stretch of `source` the lexer skipped,
+/// and returns where something other than whitespace or a comment starts, if
+/// anything does. Between two tokens nothing does; after the last token, that
+/// is where a lexer error stopped it. A comment runs to the end of its line.
+fn skipped(source: &str, gap: Range<usize>, highlights: &mut Vec<Highlight>) -> Option<usize> {
+    let mut at = gap.start;
+    while at < gap.end {
+        let rest = &source[at..gap.end];
+        if rest.starts_with("//") || rest.starts_with("#!") {
+            let end = rest.find('\n').map_or(gap.end, |newline| at + newline);
+            highlights.push(Highlight {
+                range: at..end,
+                kind: Kind::Comment,
+            });
+            at = end;
+        } else if rest.starts_with([' ', '\t', '\r', '\n']) {
+            at += 1;
+        } else {
+            return Some(at);
+        }
     }
+    None
 }
 
 /// The byte offsets of identifiers the parser sees used as functions.
@@ -259,6 +289,41 @@ mod tests {
                 ("\"open", Kind::Invalid),
             ]
         );
+    }
+
+    #[test]
+    fn code_is_invalid_from_where_the_lexer_gave_up() {
+        // The lexer's errors point at or past the offending text; the
+        // highlight starts at the first thing after the last good token.
+        assert_eq!(
+            kinds("x = 1 @ 2"),
+            [
+                ("x", Kind::Variable),
+                ("=", Kind::Assignment),
+                ("1", Kind::Literal),
+                ("@ 2", Kind::Invalid),
+            ]
+        );
+        assert_eq!(
+            kinds(
+                r#"x // note
+"http://x\q""#
+            ),
+            [
+                ("x", Kind::Variable),
+                ("// note", Kind::Comment),
+                (r#""http://x\q""#, Kind::Invalid),
+            ]
+        );
+    }
+
+    #[test]
+    fn deeply_nested_code_is_highlighted_without_parsing() {
+        // Parsing this would overflow the stack of a test thread.
+        let source = "(".repeat(100_000);
+        let highlights = highlight(&source);
+        assert_eq!(highlights.len(), 100_000);
+        assert!(highlights.iter().all(|h| h.kind == Kind::Punctuation));
     }
 
     #[test]

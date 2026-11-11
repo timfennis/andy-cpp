@@ -5,7 +5,12 @@ import init, { run } from "./pkg/ndc_wasm.js";
 const ready = init();
 
 self.onmessage = async ({ data: code }) => {
-  await ready;
+  try {
+    await ready;
+  } catch (err) {
+    self.postMessage({ error: `The interpreter failed to load: ${err}`, crashed: true });
+    return;
+  }
   const started = performance.now();
   let reply;
   try {

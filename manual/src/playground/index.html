@@ -68,7 +68,7 @@
     <pre id="out"></pre>
   </main>
   <script type="module">
-    import { load, Runner, createEditor, resultHtml, codeFromHash } from "./andy.js";
+    import { load, escape, Runner, createEditor, resultHtml, codeFromHash } from "./andy.js";
 
     const welcome = `// Andy C++, compiled to WebAssembly and running in your browser.
 fn fib(n: Int) -> Int {
@@ -90,27 +90,36 @@ shuffled([1, 2, 3, 4, 5])
       if (code !== null) editor.value = code;
     });
 
+    let running = null;
     async function run() {
       if (runButton.disabled) return;
       runButton.disabled = true;
       stopButton.disabled = false;
       status.textContent = "Running…";
-      const result = await runner.run(editor.value);
+      running = new AbortController();
+      const result = await runner.run(editor.value, running.signal);
       out.innerHTML = resultHtml(result);
       status.textContent = result.stopped ? "Stopped"
-        : result.millis === undefined ? "Failed"
+        : result.crashed || result.millis === undefined ? "Crashed"
         : `Finished in ${result.millis.toFixed(1)} ms`;
       runButton.disabled = false;
       stopButton.disabled = true;
     }
 
     runButton.onclick = run;
-    stopButton.onclick = () => runner.stop();
-    load().then(() => {
-      status.textContent = "Ready";
-      runButton.disabled = false;
-    });
-    editor.focus();
+    stopButton.onclick = () => running?.abort();
+    load().then(
+      () => {
+        status.textContent = "Ready";
+        runButton.disabled = false;
+      },
+      (err) => {
+        status.textContent = "The interpreter couldn't be loaded";
+        out.innerHTML = `<span class="ndc-error">${escape(String(err))}</span>`;
+      },
+    );
+    // Embedded in the manual, the page around it keeps the keyboard.
+    if (window.self === window.top) editor.focus();
   </script>
 </body>
 </html>
