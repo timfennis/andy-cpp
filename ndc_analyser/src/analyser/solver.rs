@@ -299,7 +299,7 @@ impl Analyser {
             [] => Some(self.resolve_call_now(call, &arguments)),
             [only]
                 if matches!(
-                    self.types.get_type(only),
+                    self.vars.resolve(self.types.get_type(only)),
                     StaticType::Function {
                         parameters: Some(_),
                         ..
@@ -365,7 +365,7 @@ impl Analyser {
             Binding::Dynamic(_) | Binding::None => None,
         };
         let signature = picked.map(|symbol| {
-            let declared = self.types.get_type(symbol).clone();
+            let declared = self.vars.resolve(self.types.get_type(symbol));
             self.vars.instantiate(&declared)
         });
         let Some(StaticType::Function {

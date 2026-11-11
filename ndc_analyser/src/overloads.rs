@@ -2,6 +2,7 @@ use crate::types::{TypeTable, TypeVars};
 use ndc_analysis::{Binding, Candidate};
 use ndc_core::StaticType;
 use ndc_resolver::{BindingKind, Candidates, SymbolId, SymbolTable};
+use std::borrow::Cow;
 
 /// Whether a call site can fall back to element-wise tuple broadcast when no
 /// scalar overload matches the argument types directly. Set by the parser:
@@ -170,6 +171,17 @@ impl<'a> Overloads<'a> {
         })
     }
 
+    /// The type of `symbol` as far as it's known: a parameter `g` whose type
+    /// a call such as `g(1)` settled is a function from then on.
+    fn type_of(self, symbol: SymbolId) -> Cow<'a, StaticType> {
+        let typ = self.types.get_type(symbol);
+        if typ.has_vars() {
+            Cow::Owned(self.vars.resolve(typ))
+        } else {
+            Cow::Borrowed(typ)
+        }
+    }
+
     /// Every candidate a call can reach, nearest scope first.
     pub(crate) fn reachable_symbols(self, candidates: &Candidates) -> Vec<SymbolId> {
         self.reachable(candidates).flatten().copied().collect()
@@ -209,10 +221,11 @@ impl<'a> Overloads<'a> {
     /// misleading advice.
     pub(crate) fn a_cast_could_resolve(self, candidates: &Candidates, sig: &[StaticType]) -> bool {
         self.reachable(candidates).flatten().any(|&symbol| {
+            let typ = self.type_of(symbol);
             let StaticType::Function {
                 parameters: Some(parameters),
                 ..
-            } = self.types.get_type(symbol)
+            } = typ.as_ref()
             else {
                 return false;
             };
@@ -399,7 +412,7 @@ impl<'a> Overloads<'a> {
                     .iter()
                     .rev()
                     .copied()
-                    .filter(|&symbol| self.types.get_type(symbol).could_be_callable()),
+                    .filter(|&symbol| self.type_of(symbol).could_be_callable()),
             );
         }
 
@@ -432,15 +445,15 @@ impl<'a> Overloads<'a> {
         let matches = group
             .iter()
             .copied()
-            .filter(|&symbol| self.types.get_type(symbol).is_fn_and_matches(sig))
+            .filter(|&symbol| self.type_of(symbol).is_fn_and_matches(sig))
             .collect::<Vec<_>>();
 
-        let params_of = |symbol: SymbolId| -> Option<&[StaticType]> {
-            match self.types.get_type(symbol) {
+        let params_of = |symbol: SymbolId| -> Option<Vec<StaticType>> {
+            match self.type_of(symbol).into_owned() {
                 StaticType::Function {
                     parameters: Some(p),
                     ..
-                } => Some(p.as_slice()),
+                } => Some(p),
                 // Variadic / non-function bindings have no concrete shape.
                 _ => None,
             }
@@ -460,7 +473,7 @@ impl<'a> Overloads<'a> {
                     // Variadic never dominates a concrete overload.
                     return true;
                 };
-                !is_strictly_more_specific(pj, pi)
+                !is_strictly_more_specific(&pj, &pi)
             })
         })
     }
@@ -468,7 +481,8 @@ impl<'a> Overloads<'a> {
     /// Whether `symbol` is a function whose parameters don't provably conflict
     /// with `sig`, so it might accept the call at runtime.
     fn is_compatible(self, symbol: SymbolId, sig: &[StaticType]) -> bool {
-        let StaticType::Function { parameters, .. } = self.types.get_type(symbol) else {
+        let typ = self.type_of(symbol);
+        let StaticType::Function { parameters, .. } = typ.as_ref() else {
             return false;
         };
         let Some(parameters) = parameters else {
@@ -561,7 +575,7 @@ impl<'a> Overloads<'a> {
     /// runtime: its type is `Any`, a variadic function, or a function whose
     /// parameters don't provably conflict with `sig`.
     fn could_accept_call(self, symbol: SymbolId, sig: &[StaticType]) -> bool {
-        match self.types.get_type(symbol) {
+        match self.type_of(symbol).as_ref() {
             StaticType::Function {
                 parameters: Some(parameters),
                 ..
@@ -587,7 +601,7 @@ impl<'a> Overloads<'a> {
     /// here: only a call that commits to the overload knows what it stands
     /// for, and one picked at runtime never does.
     fn scalar_return_type(self, symbol: SymbolId) -> StaticType {
-        match self.types.get_type(symbol) {
+        match self.type_of(symbol).as_ref() {
             StaticType::Function { return_type, .. } => self
                 .vars
                 .resolve(return_type)

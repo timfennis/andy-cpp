@@ -828,6 +828,18 @@ fn a_variable_holding_an_unknown_function_takes_what_it_is_called_with() {
         ),
         StaticType::Float
     );
+    // Each later call goes through the type the first one settled.
+    assert_eq!(
+        analyse_last_type_with_globals(
+            "let apply = fn(g, v) { g(v); g(v) }; apply(fn(z) => z + 1, 2.5)",
+            ambiguous_plus()
+        ),
+        StaticType::Float
+    );
+    assert_eq!(
+        errors("let apply = fn(g) { g(1); g(\"s\") };", ambiguous_plus()),
+        vec!["The variable 'g' holds a function that doesn't accept the arguments 'String'"]
+    );
 }
 
 #[test]

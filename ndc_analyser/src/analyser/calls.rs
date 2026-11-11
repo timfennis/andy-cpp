@@ -23,7 +23,7 @@ impl Analyser {
             let hides_functions = overloads.hides_functions(candidates);
             AnalysisError::variable_rejects_arguments(
                 name,
-                self.types.get_type(variable),
+                &self.vars.shown(self.types.get_type(variable)),
                 types,
                 hides_functions,
                 span,
