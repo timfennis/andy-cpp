@@ -24,7 +24,7 @@ to a `pure fn` therefore adds hashing overhead on every call, even on cache hits
 
 If a container is large and does not change between recursive calls, such as a lookup table or graph, let the function use it from outside instead of passing it as an argument. A value the function uses from outside is not part of the cache key, so memoization cost depends only on the arguments that change.
 
-```ndc
+```ndc,norun
 // Slow: `graph` is hashed on every call
 pure fn count(graph, node, visited) { ... }
 

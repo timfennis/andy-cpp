@@ -128,6 +128,6 @@ let [a, b] = (3, 4);
 
 You can also destructure nested patterns:
 
-```
+```ndc
 let [a, (b, c)] = (1, [2, 3]);
 ```

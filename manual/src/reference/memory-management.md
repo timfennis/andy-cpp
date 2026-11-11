@@ -10,7 +10,7 @@ There are two common ways to create cycles:
 
 ### Mutable containers that reference each other
 
-```
+```ndc
 {
     let m = %{};
     let n = %{};
@@ -25,7 +25,7 @@ There are two common ways to create cycles:
 
 A closure that captures a variable which holds a reference back to itself creates a cycle:
 
-```
+```ndc,norun
 {
     let f = ();
     f = fn(x) { if x > 0 then f(x - 1) else 0 };
@@ -38,6 +38,6 @@ A closure that captures a variable which holds a reference back to itself create
 
 For short-lived scripts this is a non-issue — all memory is reclaimed when the process exits. Cycles only become a problem in long-running programs that repeatedly create and discard cyclic structures. If you find yourself in that situation, break the cycle manually by assigning `()` to one side before the values go out of scope:
 
-```
+```ndc,norun
 m["n"] = ();  // break the cycle
 ```

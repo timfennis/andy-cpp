@@ -12,10 +12,8 @@ self.onmessage = async ({ data: code }) => {
     const result = run(code);
     reply = { output: result.output, value: result.value, error: result.error ?? null };
   } catch (panic) {
-    // A Rust panic traps the wasm instance; the page starts a new worker.
+    // A Rust panic traps the wasm instance, so this worker is done for.
     reply = { output: "", value: "", error: `The interpreter crashed: ${panic}`, crashed: true };
   }
   self.postMessage({ ...reply, millis: performance.now() - started });
 };
-
-ready.then(() => self.postMessage({ ready: true }));

@@ -32,9 +32,11 @@ cargo run --bin ndc -- script.ndc
 # Disassemble bytecode
 cargo run --bin ndc -- disassemble script.ndc
 
-# Build the browser playground into ndc_wasm/web (needs the wasm32-unknown-unknown
-# target and wasm-bindgen-cli at the version in Cargo.lock), then serve that folder
+# Build the interpreter for the browser into manual/src/playground/pkg (needs the
+# wasm32-unknown-unknown target and wasm-bindgen-cli at the version in Cargo.lock),
+# then serve the manual with its playground and runnable examples
 ./ndc_wasm/build.sh
+mdbook serve manual
 
 # Show documentation (optionally filtered by query)
 cargo run --bin ndc -- docs [query] [--no-color]
@@ -52,6 +54,8 @@ perf report -i /tmp/out.perf --stdio --no-children --percent-limit=1
 User-facing language documentation lives in `manual/src/`. It is an mdBook project. The entry point is `manual/src/SUMMARY.md`.
 
 When making changes that affect language behaviour or runtime semantics, update the relevant manual page.
+
+The published manual highlights ` ```ndc ` code blocks and gives them a Run button, running them on the interpreter compiled to WebAssembly (`manual/theme/ndc.js`). Mark a block that can't run on its own, such as a fragment that uses names from an earlier block, as ` ```ndc,norun `. The playground page and the code it shares with the manual live in `manual/src/playground/`.
 
 ## Architecture
 
@@ -92,7 +96,7 @@ The AST is syntax only. The analyser runs name resolution (`ndc_resolver`) on ea
 | `ndc_diagnostics` | Renders `InterpreterError`s as codespan reports, for the CLI (coloured, `color` feature) and the browser (plain text) |
 | `ndc_highlight` | Classifies the pieces of a program (keyword, function, comment, …) for syntax highlighting, from the lexer and parser |
 | `ndc_bin` | CLI entry point, REPL, terminal colours for the highlighting |
-| `ndc_wasm` | The interpreter for the browser via wasm-bindgen, and the playground page in `ndc_wasm/web/` |
+| `ndc_wasm` | The interpreter and highlighter for the browser via wasm-bindgen, used by the manual's playground |
 
 ### Key Concepts
 

@@ -2,7 +2,7 @@
 
 Andy C++ uses the keywords `and`, `or`, and `not` for logical operators. If you are coming from Rust, write `and` and `or` instead of `&&` and `||`.
 
-```ndc
+```ndc,norun
 let ready = has_input and not failed;
 let retry = timed_out or disconnected;
 ```

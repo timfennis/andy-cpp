@@ -3,7 +3,7 @@
 If-statements are very similar to how they are in Go and Rust. You don't need parentheses
 around the conditions but braces around the body are required.
 
-```ndc
+```ndc,norun
 if x == 3 {
   // x is three
 } else if y == 4 {

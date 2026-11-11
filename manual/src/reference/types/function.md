@@ -6,7 +6,7 @@ Functions are first-class values in Andy C++. You can store them in variables, p
 
 Declare named functions with `fn`.
 
-```ndc
+```ndc,norun
 fn my_function(input) {
   if input == something {
     return foo;

@@ -4,8 +4,13 @@ on:
   push:
     branches:
       - master
+    # The manual runs its examples on the interpreter compiled to
+    # WebAssembly, so a change to the interpreter redeploys it too.
     paths:
       - "manual/**"
+      - "ndc_*/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
       - ".github/workflows/manual-pages.yml"
   workflow_dispatch:
 
@@ -30,6 +35,26 @@ jobs:
         uses: taiki-e/install-action@v2
         with:
           tool: mdbook
+
+      - name: Add the WebAssembly target
+        run: rustup target add wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      # The CLI must be the exact version of the wasm-bindgen crate in Cargo.lock.
+      - name: Find the wasm-bindgen version
+        id: wasm-bindgen
+        run: |
+          id=$(cargo pkgid wasm-bindgen)
+          echo "version=${id##*@}" >> "$GITHUB_OUTPUT"
+
+      - name: Install wasm-bindgen
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@${{ steps.wasm-bindgen.outputs.version }}
+
+      - name: Build the interpreter for the browser
+        run: ./ndc_wasm/build.sh
 
       - name: Build manual
         run: mdbook build manual

@@ -3,3 +3,9 @@ title = "Andy C++ Manual"
 authors = ["Tim Fennis"]
 language = "en"
 src = "src"
+
+[output.html]
+# Highlights and runs ```ndc code blocks with the interpreter compiled to
+# WebAssembly; ndc_wasm/build.sh puts it in src/playground/pkg.
+additional-css = ["theme/ndc.css"]
+additional-js = ["theme/ndc.js"]

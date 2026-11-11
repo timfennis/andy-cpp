@@ -1,2 +1,4 @@
 /target
 /*.ndc
+# Built by ndc_wasm/build.sh
+/manual/src/playground/pkg/

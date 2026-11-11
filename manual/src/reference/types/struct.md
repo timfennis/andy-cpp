@@ -72,7 +72,7 @@ let p = Point(1, 2);
 Constructor calls are checked before the program runs: passing the wrong number of
 arguments or incompatible types is a compile-time error.
 
-```ndc
+```ndc,norun
 Point(1);      // ERROR: no 'Point' matches the arguments 'Int'
 Point("x", 2); // ERROR: no 'Point' matches the arguments 'String, Int'
 ```
@@ -97,14 +97,14 @@ Like a method call, `p.x` only looks among functions, so a variable named `x`
 doesn't get in its way, as described in
 [How a call finds its function](function.md#how-a-call-finds-its-function):
 
-```ndc
+```ndc,norun
 fn shift(p, x) { p.x + x }   // p.x is the field, x the parameter
 ```
 
 Because getters are ordinary function values you can pass them to higher-order
 functions:
 
-```ndc
+```ndc,norun
 let points = [Point(1, 10), Point(2, 20)];
 
 assert_eq(points.map(x), [1, 2]);
@@ -164,7 +164,7 @@ assert_eq(c.hits, 5);
 A field is a typed location, so an augmented assignment whose result would not
 fit the field type is rejected:
 
-```ndc
+```ndc,norun
 c.hits += 0.5; // ERROR: mismatched types: found Float but expected Int
 ```
 
@@ -188,7 +188,7 @@ Use `clone` for an independent instance (nested containers are still shared,
 like cloning a list of lists) or `deepcopy` to duplicate nested mutable state
 as well:
 
-```ndc
+```ndc,norun
 let c = clone(a);
 c.x = 1;
 assert_eq(a.x, 99);

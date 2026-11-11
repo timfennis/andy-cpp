@@ -1,6 +1,7 @@
 # Summary
 
 [Welcome](./welcome.md)
+[Playground](./playground.md)
 
 # Getting Started
 - [Installation](./getting-started/installation.md)

@@ -4,7 +4,7 @@ Andy C++ supports augmented assignment for operations on existing variables.
 
 This example increments a number with augmented assignment.
 
-```
+```ndc
 let my_number = 3;
 my_number += 5;
 
@@ -79,7 +79,7 @@ assert_eq(values, [1, 2, 3]);
 
 A cast that does not hold fails there rather than corrupting the target:
 
-```ndc
+```ndc,norun
 values ++= opaque([0.5]) as List<Int>; // error: cannot cast List<Float> to List<Int>
 ```
 
@@ -119,7 +119,7 @@ assert_eq(x, 8);
 
 One common use case is tracking the highest or lowest value in a loop:
 
-```ndc
+```ndc,norun
 let lowest, highest = Inf, -Inf;
 
 for x in 1..100 {

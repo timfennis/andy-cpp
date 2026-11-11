@@ -19,7 +19,7 @@ let element = my_list.pop();
 
 Lists, strings, and tuples also support negative indexes. Negative indexes count from the end.
 
-```
+```ndc
 let my_list = [1,2,3,4,5,6,7,8,9];
 assert_eq(9, my_list[-1]);
 ```

@@ -84,7 +84,7 @@ Otherwise, move the call to a location where Andy C++ can infer the argument typ
 statically — for example, directly at the call site rather than through an intermediate
 untyped function parameter:
 
-```ndc
+```ndc,norun
 // The type of `data` is Any here — dynamic dispatch used
 fn handle(data) {
     process(data)
