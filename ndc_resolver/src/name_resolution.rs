@@ -263,9 +263,24 @@ impl ScopeTree {
     }
 
     pub(crate) fn bind(&mut self, symbol_id: SymbolId) {
-        let position = self.scopes[self.current.0].bindings.len();
-        self.scopes[self.current.0].bind(symbol_id);
-        self.bound_in.insert(symbol_id, (self.current, position));
+        self.bind_in(self.current, symbol_id);
+    }
+
+    /// Binds a value in `scope`, which may not be the current one.
+    fn bind_in(&mut self, scope: ScopeId, symbol_id: SymbolId) {
+        let position = self.scopes[scope.0].bindings.len();
+        self.scopes[scope.0].bind(symbol_id);
+        self.bound_in.insert(symbol_id, (scope, position));
+    }
+
+    /// The program's top-level scope.
+    fn program(&self) -> ScopeId {
+        let position = self
+            .scopes
+            .iter()
+            .position(|scope| scope.kind == ScopeKind::Program)
+            .expect("internal error: the resolver starts in the program scope");
+        ScopeId(position)
     }
 
     /// Binds a type name in the current scope. Types aren't runtime values, so
@@ -462,6 +477,17 @@ impl NameResolver {
 
     /// The symbol a resolved declaration introduced: a binding pattern identifier's
     /// or a named function's, keyed by its node.
+    /// Declares a top-level value named `name` that no code refers to by
+    /// name, as no identifier can be spelled like it: an instance of a generic
+    /// function, which the analyser picks for the calls that use it. Being
+    /// top-level, it's a global.
+    pub fn declare_instance(&mut self, name: String) -> SymbolId {
+        let symbol = self.symbols.declare(name, BindingKind::Function);
+        let program = self.scopes.program();
+        self.scopes.bind_in(program, symbol);
+        symbol
+    }
+
     pub fn declared_symbol(&self, node: NodeId) -> SymbolId {
         self.declarations[&node]
     }

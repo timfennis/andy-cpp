@@ -45,7 +45,9 @@ impl Analyser {
         let generic = declared.is_some_and(|(_, symbol)| self.is_generic_function(symbol));
         if generic {
             self.vars.enter_level();
+            self.declaring = declared.map(|(_, symbol)| symbol);
         }
+        let first_use = self.uses.len();
         let annotations = parameters
             .iter()
             .map(|param| self.lower_annotation(param.annotation.as_ref()))
@@ -168,7 +170,9 @@ impl Analyser {
         let function_type = match declared {
             Some((_, symbol)) if generic => {
                 self.vars.leave_level();
-                self.generalize(symbol, &signature)
+                self.declaring = None;
+                self.declared_in_batch.insert(symbol);
+                self.generalize(symbol, &signature, id, first_use)
             }
             _ => signature,
         };

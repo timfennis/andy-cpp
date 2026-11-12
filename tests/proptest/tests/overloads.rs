@@ -11,8 +11,9 @@
 //! generates well-formed programs instead, from the pieces that make the
 //! analyser commit early: overloaded functions taking `Int`, `Float`,
 //! `String`, lists and anything, empty literals settled by later uses,
-//! lambdas, function values, `map`, `if`, index writes, `op=` and
-//! annotations. Analysing each one must not panic. Type errors are
+//! lambdas, function values, `map`, `if`, index writes, `op=`,
+//! annotations, and generic functions calling each other, whose instances
+//! the analyser works out after the program. Analysing each one must not panic. Type errors are
 //! expected and ignored.
 //!
 //! * `known_overload_regressions_do_not_panic` replays the seeds saved in
@@ -82,9 +83,9 @@ fn arb_overloads(name: &'static str) -> impl Strategy<Value = String> {
 
 /// The names a value can be: variables, overloaded functions declared by
 /// the program, and overloaded or generic built-ins.
-const VALUES: [&str; 15] = [
+const VALUES: [&str; 17] = [
     "v0", "v1", "v2", "v3", "p", "q", "abs", "split", "push", "len", "max", "first", "sum", "n",
-    "S",
+    "S", "g", "h",
 ];
 
 const LITERALS: [&str; 13] = [
@@ -103,26 +104,46 @@ const LITERALS: [&str; 13] = [
     "[S(1)]",
 ];
 
+/// What a function taking `a` can do with it, in ways that need its type.
+const BODIES_USING_A: [&str; 15] = [
+    "a",
+    "p(a)",
+    "q(a)",
+    "a + 1",
+    "a ++ \"!\"",
+    "[a]",
+    "a.len()",
+    "if true { a } else { 1 }",
+    "if true { a } else { [] }",
+    "p(a, 1)",
+    "a[0]",
+    "a.n",
+    "a.n + 1",
+    "a as Int",
+    "a.first()",
+];
+
 /// A lambda taking `a`, whose body uses `a` in ways that need its type.
 fn arb_lambda() -> impl Strategy<Value = String> {
-    prop::sample::select(vec![
-        "a",
-        "p(a)",
-        "q(a)",
-        "a + 1",
-        "a ++ \"!\"",
-        "[a]",
-        "a.len()",
-        "if true { a } else { 1 }",
-        "if true { a } else { [] }",
-        "p(a, 1)",
-        "a[0]",
-        "a.n",
-        "a.n + 1",
-        "a as Int",
-        "a.first()",
-    ])
-    .prop_map(|body| format!("fn(a) => {body}"))
+    prop::sample::select(BODIES_USING_A.to_vec()).prop_map(|body| format!("fn(a) => {body}"))
+}
+
+/// Two generic functions, `g` and `h`, where `h` calls `g`, so that each
+/// call needs instances of both.
+fn arb_generic_functions() -> impl Strategy<Value = String> {
+    (
+        prop::sample::select(BODIES_USING_A.to_vec()),
+        prop::sample::select(vec![
+            "g(a)",
+            "g(a) + 1",
+            "[g(a)]",
+            "g([a])",
+            "p(g(a))",
+            "if true { g(a) } else { a }",
+            "g(a).len()",
+        ]),
+    )
+        .prop_map(|(g, h)| format!("fn g(a) => {g};\nfn h(a) => {h};\n"))
 }
 
 /// An expression, nesting a few levels deep.
@@ -135,7 +156,7 @@ fn arb_expression() -> impl Strategy<Value = String> {
     leaf.prop_recursive(3, 16, 2, |inner| {
         prop_oneof![
             (
-                prop::sample::select(vec!["p", "q", "abs", "len"]),
+                prop::sample::select(vec!["p", "q", "abs", "len", "g", "h"]),
                 inner.clone()
             )
                 .prop_map(|(f, e)| format!("{f}({e})")),
@@ -200,13 +221,15 @@ fn arb_program() -> impl Strategy<Value = Program> {
     (
         arb_overloads("p"),
         arb_overloads("q"),
+        arb_generic_functions(),
         prop::collection::vec(prop::sample::select(LITERALS.to_vec()), 4),
         prop::collection::vec(arb_statement(), 1..=6),
     )
-        .prop_map(|(p, q, initial, statements)| {
+        .prop_map(|(p, q, generic, initial, statements)| {
             // Two structs with a field of the same name, so `x.n` and the
             // getter `n` have overloads to choose from.
-            let mut source = format!("struct S {{ n: Int }}\nstruct T {{ n: String }}\n{p}{q}");
+            let mut source =
+                format!("struct S {{ n: Int }}\nstruct T {{ n: String }}\n{p}{q}{generic}");
             for (variable, value) in VARIABLES.iter().zip(initial) {
                 source.push_str(&format!("let {variable} = {value};\n"));
             }

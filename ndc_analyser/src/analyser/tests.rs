@@ -1565,3 +1565,121 @@ fn a_generic_function_stored_in_a_variable_keeps_its_constraints() {
         vec!["No function called '+' found that matches the arguments 'String, Int'"]
     );
 }
+
+/// How many instances of generic functions analysing `source` makes.
+fn instance_count(source: &str, globals: Vec<(String, StaticType)>) -> usize {
+    let (_, result) = analyse_with_globals(source, globals);
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    result.analysis.instances.values().map(Vec::len).sum()
+}
+
+#[test]
+fn each_set_of_key_types_gets_one_instance() {
+    let (_, result) = analyse_with_globals(
+        "fn inc(x) => x + 1; inc(1); inc(2.5); inc(3);",
+        ambiguous_plus(),
+    );
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    let instances = result
+        .analysis
+        .instances
+        .values()
+        .flatten()
+        .collect::<Vec<_>>();
+    assert_eq!(instances.len(), 2);
+    // Each picks its `+` from its types.
+    for instance in instances {
+        assert!(
+            instance
+                .bindings
+                .values()
+                .any(|binding| matches!(binding, Binding::Resolved(_))),
+            "{instance:?}"
+        );
+    }
+}
+
+#[test]
+fn a_function_whose_calls_dont_depend_on_its_types_has_no_instances() {
+    assert_eq!(
+        instance_count("fn wrap(x) => [x]; wrap(1); wrap(\"a\");", vec![]),
+        0
+    );
+}
+
+#[test]
+fn a_call_with_any_arguments_uses_the_function_itself() {
+    assert_eq!(
+        instance_count(
+            "fn inc(x) => x + 1; let a: Any = 1; inc(a);",
+            ambiguous_plus()
+        ),
+        0
+    );
+}
+
+#[test]
+fn an_instance_calls_the_instances_its_types_need() {
+    // `twice(2.5)` needs `twice` for Floats, which needs `inc` for Floats.
+    let (_, result) = analyse_with_globals(
+        "fn inc(x) => x + 1; fn twice(x) => inc(inc(x)); twice(2.5);",
+        ambiguous_plus(),
+    );
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    assert_eq!(
+        result.analysis.instances.len(),
+        2,
+        "{:?}",
+        result.analysis.instances
+    );
+    let twice = result
+        .analysis
+        .instances
+        .values()
+        .flatten()
+        .find(|instance| instance.bindings.len() == 2)
+        .expect("twice's instance picks its two calls of inc");
+    let inc = result
+        .analysis
+        .instances
+        .values()
+        .flatten()
+        .find(|instance| instance.bindings.len() == 1)
+        .expect("inc's instance picks its +");
+    assert!(
+        twice
+            .bindings
+            .values()
+            .all(|binding| *binding == Binding::Resolved(Candidate::Scalar(inc.variable))),
+        "{twice:?}"
+    );
+}
+
+#[test]
+fn an_instance_calls_itself_where_its_body_recurses() {
+    let globals = natives(&[
+        ("<", "(Int, Int) -> Bool"),
+        ("-", "(Int, Int) -> Int"),
+        ("+", "(Int, Int) -> Int"),
+    ]);
+    let (_, result) = analyse_with_globals(
+        "fn fib(n) => if n < 2 { n } else { fib(n - 1) + fib(n - 2) }; fib(10);",
+        globals,
+    );
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    let [instance] = &result
+        .analysis
+        .instances
+        .values()
+        .flatten()
+        .collect::<Vec<_>>()[..]
+    else {
+        panic!("one instance expected: {:?}", result.analysis.instances);
+    };
+    let calls_itself = instance
+        .bindings
+        .values()
+        .filter(|binding| **binding == Binding::Resolved(Candidate::Scalar(instance.variable)))
+        .count();
+    assert_eq!(calls_itself, 2, "{instance:?}");
+}

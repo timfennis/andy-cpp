@@ -1,7 +1,8 @@
 use crate::chunk::{JumpTarget, LabelId, OpCode, OptimizerIr};
 use crate::value::{CompiledFunction, Function};
 use crate::{Object, Value};
-use ndc_analysis::{Analysis, Binding, Candidate, ResolvedVar};
+use ahash::AHashMap;
+use ndc_analysis::{Analysis, Binding, Candidate, Instance, ResolvedVar};
 use ndc_core::NodeId;
 use ndc_core::StaticType;
 use ndc_lexer::{NumericLiteral, Span};
@@ -9,6 +10,7 @@ use ndc_parser::{
     AssignmentTarget, AssignmentTargetLocation, BindingPattern, BindingPatternLocation, Expression,
     ExpressionLocation, ForBody, ForIteration, LogicalOperator,
 };
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 pub struct Compiler {
@@ -21,6 +23,17 @@ pub struct Compiler {
     optimize: bool,
     /// What the analyser worked out about the batch being compiled.
     analysis: Rc<Analysis>,
+    /// The instance of a generic function whose body is being compiled,
+    /// whose picks take the place of the function's own.
+    instance: Option<Rc<Instance>>,
+    /// Whether the code compiled so far used a pick of `instance` that
+    /// differs from the function's own, so it differs from what the
+    /// function's own body compiles to.
+    used_instance: Cell<bool>,
+    /// The functions compiled outside of any instance, by declaration. A
+    /// function an instance's body declares is the same function when it
+    /// compiles the same, so it keeps its identity.
+    prototypes: Rc<RefCell<AHashMap<NodeId, Rc<CompiledFunction>>>>,
 }
 
 impl Compiler {
@@ -34,6 +47,9 @@ impl Compiler {
             allow_return: false,
             optimize: true,
             analysis: Rc::default(),
+            instance: None,
+            used_instance: Cell::new(false),
+            prototypes: Rc::default(),
         }
     }
 
@@ -47,6 +63,9 @@ impl Compiler {
             allow_return: false,
             optimize: false,
             analysis: Rc::default(),
+            instance: None,
+            used_instance: Cell::new(false),
+            prototypes: Rc::default(),
         }
     }
     /// Compiles a program, or one REPL line, into a function the VM runs at
@@ -200,8 +219,7 @@ impl Compiler {
                 self.ir.write(OpCode::Constant(idx), span);
             }
             Expression::Identifier { .. } => {
-                let analysis = Rc::clone(&self.analysis);
-                self.compile_binding(analysis.binding(id), span)?;
+                self.compile_binding(&self.binding(id), span)?;
             }
             Expression::Cast { value, .. } => {
                 self.compile_expr(*value)?;
@@ -257,8 +275,7 @@ impl Compiler {
                     value: container,
                     index,
                 } => {
-                    let analysis = Rc::clone(&self.analysis);
-                    self.compile_binding(analysis.setter(l_value.id), span)?;
+                    self.compile_binding(&self.setter(l_value.id), span)?;
                     self.compile_expr(*container)?;
                     self.compile_expr(*index)?;
                     self.compile_expr(*value)?;
@@ -282,8 +299,7 @@ impl Compiler {
                     member_span,
                     ..
                 } => {
-                    let analysis = Rc::clone(&self.analysis);
-                    self.compile_binding(analysis.setter(l_value.id), member_span)?;
+                    self.compile_binding(&self.setter(l_value.id), member_span)?;
                     self.compile_expr(*receiver)?;
                     self.compile_expr(*value)?;
                     self.ir.write(OpCode::Call(2), member_span);
@@ -293,13 +309,12 @@ impl Compiler {
                 l_value, r_value, ..
             } => {
                 let target = PreparedAssignmentTarget::prepare(self, l_value)?;
-                let analysis = Rc::clone(&self.analysis);
-                let Some(binding) = analysis.augmented_assignments.get(&id) else {
+                let Some(binding) = self.augmented_assignment(id) else {
                     return Err(CompileError::unresolved_binding(span));
                 };
 
-                let opcode = Self::call_opcode_for(binding, 2);
-                self.compile_binding(binding, span)?;
+                let opcode = Self::call_opcode_for(&binding, 2);
+                self.compile_binding(&binding, span)?;
                 target.emit_read(self)?;
                 self.compile_expr(*r_value)?;
                 self.ir.write(opcode, span);
@@ -393,7 +408,7 @@ impl Compiler {
                 let function_span = function.span;
                 let opcode = match &function.expression {
                     Expression::Identifier { .. } => {
-                        Self::call_opcode_for(self.analysis.binding(function.id), arguments.len())
+                        Self::call_opcode_for(&self.binding(function.id), arguments.len())
                     }
                     _ => OpCode::Call(arguments.len()),
                 };
@@ -410,11 +425,10 @@ impl Compiler {
                 member_span,
                 ..
             } => {
-                let analysis = Rc::clone(&self.analysis);
-                let getter = analysis
+                let getter = self
                     .getter(id)
                     .expect("internal error: every member access is analysed before it's compiled");
-                self.compile_binding(getter, member_span)?;
+                self.compile_binding(&getter, member_span)?;
                 self.compile_expr(*receiver)?;
                 self.ir.write(OpCode::Call(1), member_span);
             }
@@ -519,8 +533,7 @@ impl Compiler {
                 let tmp_value = self.allocate_temp();
                 self.write_temp(tmp_value, span, OpCode::SetLocal);
 
-                let analysis = Rc::clone(&self.analysis);
-                self.compile_binding(analysis.setter(l_value.id), span)?;
+                self.compile_binding(&self.setter(l_value.id), span)?;
                 self.compile_expr(*value)?;
                 self.compile_expr(*index)?;
                 self.write_temp(tmp_value, span, OpCode::GetLocal);
@@ -572,10 +585,52 @@ impl Compiler {
 
     /// The function an augmented assignment reads the target at `target` with.
     fn target_getter(&self, target: NodeId) -> Binding {
-        self.analysis
-            .getter(target)
+        self.getter(target)
             .expect("internal error: an augmented assignment's target has a getter")
+    }
+
+    /// What the identifier `id` refers to, in the instance being compiled.
+    fn binding(&self, id: NodeId) -> Binding {
+        self.instance_pick(|instance| instance.bindings.get(&id))
+            .unwrap_or_else(|| self.analysis.binding(id))
             .clone()
+    }
+
+    /// The pick `pick` finds in the instance being compiled, if any, noting
+    /// that the code depends on the instance.
+    fn instance_pick<'a>(
+        &'a self,
+        pick: impl FnOnce(&'a Instance) -> Option<&'a Binding>,
+    ) -> Option<&'a Binding> {
+        let found = self.instance.as_deref().and_then(pick);
+        if found.is_some() {
+            self.used_instance.set(true);
+        }
+        found
+    }
+
+    /// The function that reads through the target at `id`, if it reads, in
+    /// the instance being compiled.
+    fn getter(&self, id: NodeId) -> Option<Binding> {
+        self.instance_pick(|instance| instance.getters.get(&id))
+            .or_else(|| self.analysis.getter(id))
+            .cloned()
+    }
+
+    /// The function that writes through the target at `id`, in the instance
+    /// being compiled.
+    fn setter(&self, id: NodeId) -> Binding {
+        self.instance_pick(|instance| instance.setters.get(&id))
+            .unwrap_or_else(|| self.analysis.setter(id))
+            .clone()
+    }
+
+    /// The function the augmented assignment `id` calls, in the instance
+    /// being compiled.
+    fn augmented_assignment(&self, id: NodeId) -> Option<Binding> {
+        self.instance_pick(|instance| instance.augmented_assignments.get(&id))
+            .or_else(|| self.analysis.augmented_assignments.get(&id))
+            .cloned()
     }
 
     /// Emit code that puts the resolved callee on top of the stack.
@@ -785,36 +840,26 @@ impl Compiler {
         span: Span,
     ) -> Result<(), CompileError> {
         let name_variable = self.analysis.variable(id);
-        let static_type = self.analysis.function_type(id).clone();
-        let mut fn_compiler = Self {
-            ir: Default::default(),
-            source_locals: self.analysis.frame_size(id),
-            temp_count: 0,
-            temp_uses: Vec::new(),
-            loop_stack: vec![],
-            allow_return: true,
-            optimize: self.optimize,
-            analysis: Rc::clone(&self.analysis),
-        };
-        fn_compiler.compile_expr(body)?;
-        fn_compiler.ir.write(OpCode::Return, Span::synthetic());
-        fn_compiler.layout_temporaries();
-
-        if fn_compiler.optimize {
-            fn_compiler.ir.peephole();
-        }
-
-        let num_locals = fn_compiler.num_locals();
-        let compiled = CompiledFunction {
-            name,
-            static_type,
-            body: fn_compiler.ir.into_chunk(),
-            num_locals,
-            num_globals: 0,
+        let analysis = Rc::clone(&self.analysis);
+        let instances = analysis.instances.get(&id).map_or(&[][..], Vec::as_slice);
+        // The function's own body comes first, so the functions it declares
+        // are there for its instances to reuse.
+        let (compiled, instance_bodies) = if instances.is_empty() {
+            (self.prototype(id, name, body)?, Vec::new())
+        } else {
+            let compiled = self.prototype(id, name.clone(), body.clone())?;
+            let instance_bodies = instances
+                .iter()
+                .map(|instance| {
+                    self.compile_function_body(id, name.clone(), body.clone(), Some(instance))
+                        .map(|(compiled, _)| compiled)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            (compiled, instance_bodies)
         };
         let idx = self
             .ir
-            .add_constant(Value::function(Function::Compiled(Rc::new(compiled))));
+            .add_constant(Value::function(Function::Compiled(compiled)));
 
         // A captured function may capture itself, before its value exists, so
         // its cell must be in place before the closure is made.
@@ -846,11 +891,9 @@ impl Compiler {
         match name_variable {
             Some(var @ (ResolvedVar::Local { .. } | ResolvedVar::Global { .. })) => {
                 self.emit_declare(var, span);
-                self.emit_unit();
             }
             Some(ResolvedVar::Cell { slot }) => {
                 self.ir.write(OpCode::SetCell(slot), span);
-                self.emit_unit();
             }
             Some(ResolvedVar::Upvalue { .. }) => {
                 unreachable!("the analyser never assigns a declaration to an upvalue")
@@ -858,7 +901,101 @@ impl Compiler {
             None => {}
         }
 
+        // Each instance of a generic function is its body compiled with the
+        // instance's picks. A generic function is declared at the top level,
+        // so it captures nothing and is a global, and its instances are
+        // stored in globals of their own. A `pure fn`'s instances share its
+        // cache, as they compute what it does.
+        for (instance, instance_body) in instances.iter().zip(instance_bodies) {
+            let idx = self
+                .ir
+                .add_constant(Value::function(Function::Compiled(Rc::new(instance_body))));
+            self.ir.write(OpCode::Constant(idx), span);
+            if pure && let Some(function) = name_variable {
+                self.emit_get_var(function, span);
+                self.ir.write(OpCode::MemoizeLike, span);
+            }
+            self.emit_declare(instance.variable, span);
+        }
+
+        if name_variable.is_some() {
+            self.emit_unit();
+        }
+
         Ok(())
+    }
+
+    /// The compiled function declared at `id`. Inside an instance's body, a
+    /// function that compiles as it does outside of it is the same one.
+    fn prototype(
+        &self,
+        id: NodeId,
+        name: Option<String>,
+        body: ExpressionLocation,
+    ) -> Result<Rc<CompiledFunction>, CompileError> {
+        let (compiled, used_instance) = self.compile_function_body(id, name, body, None)?;
+        if self.instance.is_none() {
+            let compiled = Rc::new(compiled);
+            self.prototypes
+                .borrow_mut()
+                .insert(id, Rc::clone(&compiled));
+            return Ok(compiled);
+        }
+        if used_instance {
+            self.used_instance.set(true);
+        } else if let Some(prototype) = self.prototypes.borrow().get(&id) {
+            return Ok(Rc::clone(prototype));
+        }
+        Ok(Rc::new(compiled))
+    }
+
+    /// Compiles the body of the function declared at `id`, with the picks
+    /// of `instance` if it's an instance of a generic function. The
+    /// functions it declares are compiled with them too. Also returns
+    /// whether the body used a pick of the instance it's compiled in.
+    fn compile_function_body(
+        &self,
+        id: NodeId,
+        name: Option<String>,
+        body: ExpressionLocation,
+        instance: Option<&Instance>,
+    ) -> Result<(CompiledFunction, bool), CompileError> {
+        let static_type = self.analysis.function_type(id).clone();
+        let mut fn_compiler = Self {
+            ir: Default::default(),
+            source_locals: self.analysis.frame_size(id),
+            temp_count: 0,
+            temp_uses: Vec::new(),
+            loop_stack: vec![],
+            allow_return: true,
+            optimize: self.optimize,
+            analysis: Rc::clone(&self.analysis),
+            instance: instance
+                .map(|instance| Rc::new(instance.clone()))
+                .or_else(|| self.instance.clone()),
+            used_instance: Cell::new(false),
+            prototypes: Rc::clone(&self.prototypes),
+        };
+        fn_compiler.compile_expr(body)?;
+        fn_compiler.ir.write(OpCode::Return, Span::synthetic());
+        fn_compiler.layout_temporaries();
+
+        if fn_compiler.optimize {
+            fn_compiler.ir.peephole();
+        }
+
+        let num_locals = fn_compiler.num_locals();
+        let used_instance = fn_compiler.used_instance.get();
+        Ok((
+            CompiledFunction {
+                name,
+                static_type,
+                body: fn_compiler.ir.into_chunk(),
+                num_locals,
+                num_globals: 0,
+            },
+            used_instance,
+        ))
     }
 
     fn compile_for(
@@ -1079,7 +1216,7 @@ impl PreparedAssignmentTarget {
                     container_span,
                     index_span,
                     getter: compiler.target_getter(l_value.id),
-                    setter: compiler.analysis.setter(l_value.id).clone(),
+                    setter: compiler.setter(l_value.id),
                 })
             }
             AssignmentTarget::Member {
@@ -1098,7 +1235,7 @@ impl PreparedAssignmentTarget {
                     receiver_span,
                     member_span,
                     getter: compiler.target_getter(l_value.id),
-                    setter: compiler.analysis.setter(l_value.id).clone(),
+                    setter: compiler.setter(l_value.id),
                 })
             }
             AssignmentTarget::Sequence(_) => unreachable!(

@@ -18,11 +18,13 @@ mod calls;
 mod declarations;
 mod function_values;
 pub(crate) mod generics;
+mod instances;
 mod solver;
 
 use declarations::FunctionDeclaration;
 pub use generics::tied_natives;
-use solver::{Constraint, EarlyPick, Origin, Waiting};
+use instances::{GenericUse, Pending, Scheme};
+use solver::{EarlyPick, Origin, Waiting};
 #[cfg(test)]
 mod tests;
 
@@ -53,10 +55,26 @@ pub struct Analyser {
     /// The constraints of each generic function declared in the program,
     /// such as `+(A, Int) -> B` for `fn inc(x) => x + 1`, which a call of it
     /// copies with the types it's called with.
-    schemes: AHashMap<SymbolId, Rc<[Waiting]>>,
-    /// The constraints a call just copied from a generic function, with the
-    /// function, until the call is known to commit to it.
-    pending_copies: Vec<(SymbolId, Constraint, Option<Origin>)>,
+    schemes: AHashMap<SymbolId, Scheme>,
+    /// What a call just copied from a generic function, until the call is
+    /// known to commit to it.
+    pending: Pending,
+    /// The uses of generic functions in the batch whose instances aren't
+    /// known yet.
+    uses: Vec<GenericUse>,
+    /// The instance of each generic function for each set of types of its
+    /// key that a call gave it.
+    instances: AHashMap<(SymbolId, Vec<StaticType>), SymbolId>,
+    /// The instance whose constraints are being solved, which gets the
+    /// picks they make.
+    recording: Option<SymbolId>,
+    /// The generic functions the batch declares, which the batch compiles
+    /// instances of.
+    declared_in_batch: AHashSet<SymbolId>,
+    /// The generic function whose body is being analysed.
+    declaring: Option<SymbolId>,
+    /// The calls its body makes of itself.
+    recursive_calls: Vec<NodeId>,
     /// The calls the constraint being solved was copied through, when it's
     /// a copy of a generic function's constraint.
     copied_through: Option<Origin>,
@@ -112,7 +130,13 @@ impl Analyser {
             vars: TypeVars::default(),
             waiting: BTreeMap::new(),
             schemes: AHashMap::new(),
-            pending_copies: Vec::new(),
+            pending: Pending::default(),
+            uses: Vec::new(),
+            instances: AHashMap::new(),
+            recording: None,
+            declared_in_batch: AHashSet::new(),
+            declaring: None,
+            recursive_calls: Vec::new(),
             copied_through: None,
             next_serial: 0,
             watchers: AHashMap::new(),
@@ -136,6 +160,8 @@ impl Analyser {
         // so the ones left unsettled get their fallbacks, what waited on them
         // is solved, and no variable leaves the analyser.
         self.settle_waiting(0);
+        self.instantiate_uses();
+        self.declared_in_batch.clear();
         debug_assert!(self.waiting.is_empty(), "unsolved: {:?}", self.waiting);
         self.watchers.clear();
         if cfg!(debug_assertions) {
@@ -171,6 +197,11 @@ impl Analyser {
     /// a copy of a generic function's constraint is the call's: it's
     /// reported there, with notes pointing into the function.
     fn emit(&mut self, err: AnalysisError) {
+        // An instance's constraints were checked where they were copied to
+        // its calls.
+        if self.recording.is_some() {
+            return;
+        }
         let err = match &self.copied_through {
             Some(frames) => {
                 err.through_calls(frames.iter().map(|frame| (frame.name.as_str(), frame.call)))

@@ -603,6 +603,25 @@ impl Vm {
                         function: Rc::new(func),
                     }));
                 }
+                OpCode::MemoizeLike => {
+                    let memoized = self.stack.pop().expect("stack underflow");
+                    let function = self.stack.pop().expect("stack underflow");
+                    let (Value::Object(memoized), Value::Object(function)) = (memoized, function)
+                    else {
+                        panic!("MemoizeLike: expected two functions on the stack");
+                    };
+                    let (
+                        Object::Function(Function::Memoized { cache, .. }),
+                        Object::Function(function),
+                    ) = (memoized.as_ref(), function.as_ref())
+                    else {
+                        panic!("MemoizeLike: expected a function and a memoized function");
+                    };
+                    self.stack.push(Value::function(Function::Memoized {
+                        cache: Rc::clone(cache),
+                        function: Rc::new(function.clone()),
+                    }));
+                }
             }
         };
 

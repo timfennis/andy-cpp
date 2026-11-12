@@ -218,3 +218,21 @@ fn configure_after_a_line_ran_updates_the_globals() {
     let out = String::from_utf8(interp.get_output().unwrap()).unwrap();
     assert_eq!(out.trim(), "1");
 }
+
+#[test]
+fn a_generic_function_from_an_earlier_line_takes_a_call_with_new_types() {
+    // The line that declared `inc` compiled its instance for Ints. A later
+    // line calls it with a Float, which its own body takes.
+    let out = repl_output(&[
+        "fn inc(x) => x + 1;",
+        "print(inc(1));",
+        "print(inc(2.5), inc(1));",
+    ]);
+    assert_eq!(out.trim(), "2\n3.5 2");
+}
+
+#[test]
+fn a_generic_function_on_one_line_uses_its_instances() {
+    let out = repl_output(&["fn inc(x) => x + 1; print(inc(1), inc(2.5));"]);
+    assert_eq!(out.trim(), "2 3.5");
+}

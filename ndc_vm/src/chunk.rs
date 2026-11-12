@@ -74,6 +74,7 @@ impl std::fmt::Debug for JumpTarget {
 /// | `Unpack`      | `[… compound → … v1…vn]`               | +(n−1) (pops 1, pushes n)                  |
 /// | `NewCell`     | `[…]`                                   | 0 (puts a fresh cell in a slot)            |
 /// | `Memoize`     | `[… fn → … memoized_fn]`               | 0 (pops and pushes)                        |
+/// | `MemoizeLike` | `[… fn memoized → … memoized_fn]`      | −1 (shares memoized's cache)               |
 // NOTE: OpCode cannot be Copy because the Closure variant holds Rc<[CaptureSource]>.
 // The dispatch loop accesses opcodes by reference to avoid cloning the 32-byte enum on
 // every iteration; see Vm::run_to_depth.
@@ -147,6 +148,10 @@ pub enum OpCode {
     NewCell(usize),
     /// Pops function, pushes memoized wrapper. `[… fn → … memoized_fn]`
     Memoize,
+    /// Pops a memoized function and a function, and pushes the function
+    /// memoized with the same cache, as an instance of a generic `pure fn`
+    /// shares the function's. `[… fn memoized → … memoized_fn]`
+    MemoizeLike,
     /// Peeks top; errors if the value does not conform to the type. `[… value → … value]`
     CheckType(Rc<StaticType>),
 }
@@ -184,6 +189,7 @@ impl OpCode {
             Self::Return => "Return",
             Self::NewCell(_) => "NewCell",
             Self::Memoize => "Memoize",
+            Self::MemoizeLike => "MemoizeLike",
             Self::CheckType(_) => "CheckType",
         }
     }
@@ -239,6 +245,7 @@ impl OpCode {
             Self::Return => -1,
             Self::NewCell(_) => 0,
             Self::Memoize => 0,
+            Self::MemoizeLike => -1,
             // Peeks the value without popping it.
             Self::CheckType(_) => 0,
         }
@@ -293,6 +300,7 @@ impl std::fmt::Debug for OpCode {
             Self::Return => write!(f, "Return"),
             Self::Unpack(n) => write!(f, "Unpack({n})"),
             Self::Memoize => write!(f, "Memoize"),
+            Self::MemoizeLike => write!(f, "MemoizeLike"),
             Self::CheckType(typ) => write!(f, "CheckType({typ})"),
         }
     }
