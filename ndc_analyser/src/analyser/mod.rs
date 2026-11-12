@@ -538,7 +538,7 @@ impl Analyser {
                     let typ = self.analyse_expr(value);
                     types.push(match self.vars.resolve(&typ) {
                         StaticType::Var(_) => typ,
-                        _ => self.holding(vec![(value.id, value.span, typ)]),
+                        _ => self.holding(vec![(Some(value.id), value.span, typ)]),
                     });
                 }
 
@@ -550,7 +550,7 @@ impl Analyser {
                 } else {
                     let values = values
                         .iter()
-                        .map(|value| (value.id, value.span, self.analyse_expr(value)))
+                        .map(|value| (Some(value.id), value.span, self.analyse_expr(value)))
                         .collect();
                     self.holding(values)
                 };
@@ -560,19 +560,21 @@ impl Analyser {
                 let mut keys = Vec::new();
                 let mut held = Vec::new();
                 for (key, value) in values {
-                    keys.push((key.id, key.span, self.analyse_expr(key)));
+                    keys.push((Some(key.id), key.span, self.analyse_expr(key)));
                     if let Some(value) = value {
-                        held.push((value.id, value.span, self.analyse_expr(value)));
+                        held.push((Some(value.id), value.span, self.analyse_expr(value)));
                     }
                 }
 
                 // Reads can produce the default value, so its type is part of
-                // the map's value type. A function default's values are what
-                // it returns, which has no node to check them at.
+                // the map's value type. A default that's a function, as an
+                // `Any` one may be as the program runs, is called for each
+                // missing key, so what it makes isn't the default's own
+                // value, and has no node to be checked at.
                 if let Some(default) = default {
                     let default_type = self.analyse_expr(default);
                     let default_type = self.constrain_default_value(default_type, default.span);
-                    held.push((default.id, default.span, default_type));
+                    held.push((None, default.span, default_type));
                 }
 
                 let key_type = if keys.is_empty() {
@@ -680,10 +682,11 @@ impl Analyser {
     }
 
     /// The type of the elements of a literal holding `values`, each with
-    /// its node and type, which takes the type its uses settle: in
+    /// where it is and its type, which takes the type its uses settle: in
     /// `let xs: List<Any> = [1, 2]`, `Any`. A value of type `Any` among
-    /// them is checked against it as the program runs.
-    fn holding(&mut self, values: Vec<(NodeId, Span, StaticType)>) -> StaticType {
+    /// them is checked against it as the program runs, at its node if it
+    /// has one.
+    fn holding(&mut self, values: Vec<(Option<NodeId>, Span, StaticType)>) -> StaticType {
         let element = self.vars.fresh_holding(
             values
                 .iter()
@@ -691,7 +694,9 @@ impl Analyser {
                 .collect(),
         );
         for (node, _, typ) in values {
-            self.expect_if_any(node, typ, element.clone());
+            if let Some(node) = node {
+                self.expect_if_any(node, typ, element.clone());
+            }
         }
         element
     }
