@@ -1,0 +1,5 @@
+// `f(1, 2)` fits both overloads, and neither is more specific, so nothing
+// would say which one it means.
+// expect-error: A call could fit both f(_, Int) and f(Int, _)
+fn f(x: Int, y) { "first" }
+fn f(x, y: Int) { "second" }

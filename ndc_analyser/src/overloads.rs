@@ -394,20 +394,32 @@ impl<'a> Overloads<'a> {
         let mut all_by_name = Vec::new();
 
         for group in self.reachable(candidates) {
-            if let Some(exact) = self.most_specific_match(group, sig) {
-                return ScalarWalk {
-                    exact: Some(exact),
-                    loose: None,
-                    all_by_name: Vec::new(),
-                };
-            }
-
-            if loose.is_none() {
+            let compatible = || {
                 let compatible = group
                     .iter()
                     .copied()
                     .filter(|&symbol| self.is_compatible(symbol, sig))
                     .collect::<Vec<_>>();
+                self.most_specific_first(compatible)
+            };
+            if let Some(exact) = self.most_specific_match(group, sig) {
+                // An overload in this scope takes the call, so it's this
+                // scope's, but a more specific one here may take it as the
+                // program runs, which then picks among them.
+                let (exact, loose) = if self.a_more_specific_one_could_fit(group, exact, sig) {
+                    (None, Some(compatible()))
+                } else {
+                    (Some(exact), None)
+                };
+                return ScalarWalk {
+                    exact,
+                    loose,
+                    all_by_name: Vec::new(),
+                };
+            }
+
+            if loose.is_none() {
+                let compatible = compatible();
                 if !compatible.is_empty() {
                     loose = Some(compatible);
                 }
@@ -485,6 +497,68 @@ impl<'a> Overloads<'a> {
         })
     }
 
+    /// The parameter types of `symbol`, if it's a function that isn't
+    /// variadic.
+    fn parameters_of(self, symbol: SymbolId) -> Option<Vec<StaticType>> {
+        match self.type_of(symbol).into_owned() {
+            StaticType::Function {
+                parameters: Some(parameters),
+                ..
+            } => Some(parameters),
+            _ => None,
+        }
+    }
+
+    /// Whether an overload in `group` more specific than `exact`, which
+    /// accepts `sig`, might accept the call when the program runs. An
+    /// argument of type `Any` fits `show(x: Any)`, but if it's an Int when
+    /// the program runs, `show(x: Int)` is the overload that takes it.
+    fn a_more_specific_one_could_fit(
+        self,
+        group: &[SymbolId],
+        exact: SymbolId,
+        sig: &[StaticType],
+    ) -> bool {
+        let Some(exact) = self.parameters_of(exact) else {
+            return false;
+        };
+        group.iter().any(|&other| {
+            self.parameters_of(other).is_some_and(|other_parameters| {
+                is_strictly_more_specific(&other_parameters, &exact)
+                    && self.is_compatible(other, sig)
+            })
+        })
+    }
+
+    /// `symbols` with each one before every one it's more specific than,
+    /// and otherwise in the order given. The program tries the overloads it
+    /// picks from as it runs in this order, and takes the first that
+    /// accepts the arguments. Overloads in one scope don't tie, so of those
+    /// that accept them, one is more specific than the others, and it's the
+    /// first.
+    fn most_specific_first(self, mut symbols: Vec<SymbolId>) -> Vec<SymbolId> {
+        let mut ordered = Vec::with_capacity(symbols.len());
+        while !symbols.is_empty() {
+            let next = symbols
+                .iter()
+                .position(|&symbol| {
+                    let Some(parameters) = self.parameters_of(symbol) else {
+                        // A variadic function is the least specific.
+                        return symbols
+                            .iter()
+                            .all(|&other| self.parameters_of(other).is_none());
+                    };
+                    symbols.iter().all(|&other| {
+                        self.parameters_of(other)
+                            .is_none_or(|other| !is_strictly_more_specific(&other, &parameters))
+                    })
+                })
+                .unwrap_or(0);
+            ordered.push(symbols.remove(next));
+        }
+        ordered
+    }
+
     /// Whether `symbol` is a function whose parameters don't provably conflict
     /// with `sig`, so it might accept the call at runtime.
     fn is_compatible(self, symbol: SymbolId, sig: &[StaticType]) -> bool {
@@ -492,10 +566,9 @@ impl<'a> Overloads<'a> {
         let StaticType::Function { parameters, .. } = typ.as_ref() else {
             return false;
         };
+        // A variadic function accepts any arguments.
         let Some(parameters) = parameters else {
-            unreachable!(
-                "a variadic function always matches exactly before compatibility is checked"
-            );
+            return true;
         };
         parameters.len() == sig.len()
             && parameters
@@ -853,6 +926,57 @@ mod tests {
                 .all(|&foo| picked.contains(&Candidate::Scalar(foo)))
         );
         assert_eq!(resolved.return_type, list_of(StaticType::Any));
+    }
+
+    #[test]
+    fn an_unknown_argument_leaves_a_fallback_to_the_program_with_the_more_specific_first() {
+        // An `Any` argument fits `show(Any)`, but when it's an Int as the
+        // program runs, `show(Int)` takes it. The program takes the first
+        // overload that accepts the arguments, so that one comes first,
+        // whichever was declared first.
+        let (types, shows) = table(vec![
+            fn_type(vec![StaticType::Int], StaticType::String),
+            fn_type(vec![StaticType::Any], StaticType::String),
+        ]);
+        for group in [[shows[0], shows[1]], [shows[1], shows[0]]] {
+            let resolved = resolve(
+                &types,
+                &candidates(&[&group]),
+                &[StaticType::Any],
+                CallKind::Regular,
+            );
+            assert_eq!(
+                resolved.binding,
+                Binding::Dynamic(vec![
+                    Candidate::Scalar(shows[0]),
+                    Candidate::Scalar(shows[1])
+                ]),
+                "declared in the order {group:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_fallback_left_to_the_program_still_hides_the_overloads_further_out() {
+        // The inner `show(Any)` takes every call, so the outer one never does.
+        let (types, shows) = table(vec![
+            fn_type(vec![StaticType::Any], StaticType::String),
+            fn_type(vec![StaticType::Int], StaticType::String),
+            fn_type(vec![StaticType::Any], StaticType::String),
+        ]);
+        let resolved = resolve(
+            &types,
+            &candidates(&[&shows[1..], &shows[..1]]),
+            &[StaticType::Any],
+            CallKind::Regular,
+        );
+        assert_eq!(
+            resolved.binding,
+            Binding::Dynamic(vec![
+                Candidate::Scalar(shows[1]),
+                Candidate::Scalar(shows[2])
+            ]),
+        );
     }
 
     #[test]

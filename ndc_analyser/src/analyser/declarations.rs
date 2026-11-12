@@ -8,7 +8,6 @@ use ndc_parser::{
     BindingPattern, BindingPatternLocation, ExpressionLocation, FunctionParameter, StructField,
     TypeExpr,
 };
-use ndc_resolver::SymbolId;
 use std::rc::Rc;
 
 /// What a function declaration consists of, named like `fn f(x) { … }` or
@@ -24,10 +23,12 @@ pub(super) struct FunctionDeclaration<'a> {
 }
 
 impl Analyser {
-    /// Analyses a function declaration and returns its type. A named
-    /// function's unannotated parameters are `Any`. A lambda's are type
-    /// variables that its uses settle: in `xs.map(fn(x) => x + 1)`, `x` gets
-    /// the type of `xs`'s elements.
+    /// Analyses a function declaration and returns its type. Its
+    /// unannotated parameters are type variables that what the body does
+    /// with them constrains. A lambda's, and a nested `fn`'s, are settled by
+    /// how the code around it uses it: in `xs.map(fn(x) => x + 1)`, `x` gets
+    /// the type of `xs`'s elements. A `fn` in the program scope is generic:
+    /// each call settles them anew (see [`Self::generalize`]).
     pub(super) fn analyse_function_declaration(
         &mut self,
         function: FunctionDeclaration<'_>,
@@ -40,51 +41,70 @@ impl Analyser {
             return_annotation,
             span,
         } = function;
-        let first_var = self.vars.count();
+        let declared = name.map(|name| (name, self.resolver.declared_symbol(id)));
+        let generic = declared.is_some_and(|(_, symbol)| self.is_generic_function(symbol));
+        if generic {
+            self.vars.enter_level();
+        }
+        let annotations = parameters
+            .iter()
+            .map(|param| self.lower_annotation(param.annotation.as_ref()))
+            .collect::<Vec<_>>();
         let type_signature = TypeSignature::from_annotated_bindings(
             parameters
                 .iter()
-                .map(|param| {
-                    let annotation = match self.lower_annotation(param.annotation.as_ref()) {
-                        Some(annotation) => Some(annotation),
-                        None if name.is_none() => Some(self.vars.fresh(StaticType::Any)),
-                        None => None,
-                    };
-                    (param.name().to_string(), annotation)
+                .zip(&annotations)
+                .map(|(param, annotation)| {
+                    let typ = annotation
+                        .clone()
+                        .unwrap_or_else(|| self.vars.fresh(StaticType::Any));
+                    (param.name().to_string(), Some(typ))
                 })
                 .collect(),
         );
         let annotated_return = self.lower_annotation(return_annotation);
+        // Until the body says more, a named function's value takes what its
+        // annotations say, as its body is compiled once for every type it's
+        // called with.
+        let runtime_parameters = match declared {
+            Some(_) => Some(
+                annotations
+                    .iter()
+                    .map(|annotation| annotation.clone().unwrap_or(StaticType::Any))
+                    .collect(),
+            ),
+            None => type_signature.types(),
+        };
         self.result.analysis.function_types.insert(
             id,
             StaticType::Function {
-                parameters: type_signature.types(),
+                parameters: runtime_parameters,
                 return_type: Box::new(annotated_return.clone().unwrap_or_default()),
             },
         );
 
-        // Pre-register the function before analyzing its body so recursive calls can
-        // resolve the name. The return type is unknown at this point so we use Any.
-        // A redefinition is reported but still bound, since the resolver declared it.
-        let declared = if let Some(name) = name {
-            let symbol = self.resolver.declared_symbol(id);
+        // The function is declared before its body is analysed, so a
+        // recursive call can call it. Its return type is what the body
+        // returns, which the recursive calls share. A redefinition is
+        // reported but still bound, since the resolver declared it.
+        let recursive_return = match (&declared, &annotated_return) {
+            (Some(_), None) => Some(self.vars.fresh(StaticType::Any)),
+            _ => None,
+        };
+        if let Some((name, symbol)) = declared {
             let parameters = type_signature.types();
-            if self.redefines_function(symbol, parameters.as_deref()) {
-                self.emit(AnalysisError::function_redefinition(
-                    name,
-                    parameters.as_deref(),
-                    span,
-                ));
-            }
+            self.check_overlap(symbol, name, parameters.as_deref(), span);
             let placeholder = StaticType::Function {
-                parameters: type_signature.types(),
-                return_type: Box::new(annotated_return.clone().unwrap_or_default()),
+                parameters,
+                return_type: Box::new(
+                    annotated_return
+                        .clone()
+                        .or_else(|| recursive_return.clone())
+                        .unwrap_or_default(),
+                ),
             };
             self.types.declare(symbol, placeholder);
-            Some(symbol)
-        } else {
-            None
-        };
+        }
 
         self.return_type_stack.push(None);
         // A function body starts outside of any loop: `break` can't
@@ -121,13 +141,37 @@ impl Analyser {
         {
             self.accepts_write(annotated, &inferred_return);
         }
-
-        // Nothing outside a named function's body can settle the type
-        // variables made in it, as its parameters have their types. A
-        // lambda's variables are settled by how the code around it uses it.
-        if declared.is_some() {
-            self.settle_waiting(first_var);
+        if let Some(returns) = &recursive_return
+            && !self.vars.try_unify(returns, &inferred_return)
+        {
+            // A function that returns itself, like `fn f() { f }`, would
+            // have a type that contains itself, so it returns `Any`.
+            if matches!(self.vars.resolve(returns), StaticType::Var(_)) {
+                self.vars.unify(returns, &StaticType::Any);
+            } else {
+                self.emit(AnalysisError::mismatched_types(
+                    &self.vars.shown(&inferred_return),
+                    &self.vars.shown(returns),
+                    span,
+                ));
+            }
         }
+
+        let signature = StaticType::Function {
+            parameters: Some(param_types.clone()),
+            return_type: Box::new(
+                annotated_return
+                    .clone()
+                    .unwrap_or_else(|| inferred_return.clone()),
+            ),
+        };
+        let function_type = match declared {
+            Some((_, symbol)) if generic => {
+                self.vars.leave_level();
+                self.generalize(symbol, &signature)
+            }
+            _ => signature,
+        };
         let inferred_return = self.vars.resolve(&inferred_return);
 
         // If there is an annotated return type, report a body that doesn't
@@ -152,17 +196,32 @@ impl Analyser {
             }
         }
 
-        let effective_return = annotated_return.unwrap_or(inferred_return);
-
-        let function_type = StaticType::Function {
-            parameters: Some(param_types.clone()),
-            return_type: Box::new(effective_return),
-        };
+        // A named function's value is checked as the program runs against
+        // what it takes, as far as that can be checked: its body may have
+        // made an unannotated parameter an Int.
+        if declared.is_some()
+            && let StaticType::Function {
+                parameters: Some(parameters),
+                ..
+            } = self.vars.resolve(&function_type)
+            && let Some(StaticType::Function {
+                parameters: Some(runtime),
+                ..
+            }) = self.result.analysis.function_types.get_mut(&id)
+        {
+            for ((runtime, parameter), annotation) in
+                runtime.iter_mut().zip(parameters).zip(&annotations)
+            {
+                if annotation.is_none() {
+                    *runtime = checkable_as_the_program_runs(&parameter);
+                }
+            }
+        }
 
         // A named declaration stores the function under its name and, like
         // `let`, evaluates to unit. An anonymous one evaluates to the function.
         match declared {
-            Some(symbol) => {
+            Some((_, symbol)) => {
                 self.types.declare(symbol, function_type);
                 self.picks.variables.insert(id, symbol);
                 StaticType::unit()
@@ -210,25 +269,6 @@ impl Analyser {
         self.picks.structs.insert(id, StructInfo::clone(&info));
 
         StaticType::unit()
-    }
-
-    /// Whether a function declared earlier in the same scope as `symbol` has
-    /// its name and the same parameter types, which makes `symbol` an illegal
-    /// redefinition. `fn f(x: Int)` and `fn f(x: String)` are two overloads,
-    /// but `fn f(x)` and `fn f(y)` both take `Any`. `None` is variadic.
-    fn redefines_function(&self, symbol: SymbolId, parameters: Option<&[StaticType]>) -> bool {
-        let name = self.resolver.symbol_name(symbol);
-        let scope = self.resolver.scope(self.resolver.scope_of(symbol));
-        scope.bindings()[..self.resolver.binding_position(symbol)]
-            .iter()
-            .filter(|&&earlier| self.resolver.symbol_name(earlier) == name)
-            .any(|&earlier| match self.types.get_type(earlier) {
-                StaticType::Function {
-                    parameters: earlier,
-                    ..
-                } => earlier.as_deref() == parameters,
-                _ => false,
-            })
     }
 
     /// Declares a function's parameters and returns their types.
@@ -358,5 +398,33 @@ impl Analyser {
         for pattern in patterns {
             self.declare_binding_pattern(pattern, None, StaticType::Any, span);
         }
+    }
+}
+
+/// What the program can check about a value of type `typ` as it runs: the
+/// kind of value, but not what a container holds, and nothing about a type
+/// parameter, which takes anything. `List<Int>` is checked as a list.
+fn checkable_as_the_program_runs(typ: &StaticType) -> StaticType {
+    let any = || Box::new(StaticType::Any);
+    match typ {
+        StaticType::Var(_) | StaticType::Generic(_) | StaticType::Tuple(_) => StaticType::Any,
+        StaticType::List(_) => StaticType::List(any()),
+        StaticType::Deque(_) => StaticType::Deque(any()),
+        StaticType::Sequence(_) => StaticType::Sequence(any()),
+        StaticType::Iterator(_) => StaticType::Iterator(any()),
+        StaticType::MinHeap(_) => StaticType::MinHeap(any()),
+        StaticType::MaxHeap(_) => StaticType::MaxHeap(any()),
+        StaticType::Option(_) => StaticType::Option(any()),
+        StaticType::Map { .. } => StaticType::Map {
+            key: any(),
+            value: any(),
+        },
+        StaticType::Function { parameters, .. } => StaticType::Function {
+            parameters: parameters
+                .as_ref()
+                .map(|parameters| vec![StaticType::Any; parameters.len()]),
+            return_type: any(),
+        },
+        other => other.clone(),
     }
 }

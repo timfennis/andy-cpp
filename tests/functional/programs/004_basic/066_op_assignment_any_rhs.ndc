@@ -3,7 +3,7 @@
 // nothing downstream would check the elements. Cast the operand to state what
 // it holds.
 // expect-error: mismatched types: found Any but expected List<Int>
-fn opaque(x) => x;
+fn opaque(x) -> Any => x;
 let values = [1];
 values ++= opaque([2, 3]);
 print(values)

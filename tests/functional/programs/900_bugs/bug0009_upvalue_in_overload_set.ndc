@@ -7,7 +7,7 @@ fn outer() {
     fn describe(x: Int) { "int" }
     fn describe(x: String) { "string" }
     fn middle() {
-        fn inner(v) { describe(v) }
+        fn inner(v: Any) { describe(v) }
         inner(1) ++ " " ++ inner("a")
     }
     middle()

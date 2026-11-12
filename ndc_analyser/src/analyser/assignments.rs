@@ -45,6 +45,23 @@ impl Analyser {
             self.validate_assignment_write(l_value, &left_type, &result, span);
             return StaticType::unit();
         }
+        let written = self.op_assignment_now(id, &left_type, &right_type, operation, span);
+        self.validate_assignment_write(l_value, &left_type, &written, span);
+        StaticType::unit()
+    }
+
+    /// Picks what `a op= b` with operands of these types does and returns
+    /// the type of the value written back to `a`. An in-place overload
+    /// such as `++=` is used where it keeps `a`'s type, and otherwise `op`
+    /// makes a new value.
+    pub(super) fn op_assignment_now(
+        &mut self,
+        id: NodeId,
+        left_type: &StaticType,
+        right_type: &StaticType,
+        operation: &str,
+        span: Span,
+    ) -> StaticType {
         let arg_types = vec![left_type.clone(), right_type.clone()];
 
         let ResolvedCall {
@@ -64,13 +81,11 @@ impl Analyser {
             CallKind::Operator,
         );
         let has_op_binding = !matches!(op_binding, Binding::None);
-        let assign_is_eligible = Self::augmented_rhs_is_compatible(&left_type, &right_type);
+        let assign_is_eligible = Self::augmented_rhs_is_compatible(left_type, right_type);
 
         let writeback_type = match assign_binding {
             Binding::Resolved(candidate) if assign_is_eligible => {
-                self.picks
-                    .augmented_assignments
-                    .insert(id, Binding::Resolved(candidate));
+                self.record_augmented_pick(id, Binding::Resolved(candidate));
                 None
             }
             Binding::Dynamic(mut assign_candidates) if assign_is_eligible => {
@@ -95,9 +110,7 @@ impl Analyser {
                 } else {
                     assign_return
                 };
-                self.picks
-                    .augmented_assignments
-                    .insert(id, Binding::Dynamic(assign_candidates));
+                self.record_augmented_pick(id, Binding::Dynamic(assign_candidates));
                 Some(result_type)
             }
             Binding::Resolved(_) | Binding::Dynamic(_) => {
@@ -105,30 +118,22 @@ impl Analyser {
                 // change the concrete left type. Reject it here rather
                 // than falling through to an ordinary operation whose
                 // erased return type could widen the same target.
-                self.emit(AnalysisError::mismatched_types(
-                    &right_type,
-                    &left_type,
-                    span,
-                ));
-                None
+                self.emit(AnalysisError::mismatched_types(right_type, left_type, span));
+                Some(StaticType::Any)
             }
             Binding::None if has_op_binding => {
-                self.picks.augmented_assignments.insert(id, op_binding);
+                self.record_augmented_pick(id, op_binding);
                 Some(op_return)
             }
             Binding::None => {
                 self.emit(AnalysisError::function_not_found(
                     operation, &arg_types, span,
                 ));
-                None
+                Some(StaticType::Any)
             }
         };
 
-        if let Some(result_type) = writeback_type {
-            self.validate_assignment_write(l_value, &left_type, &result_type, span);
-        }
-
-        StaticType::unit()
+        writeback_type.unwrap_or_else(|| left_type.clone())
     }
 
     /// Records where an assignment stores its value, and returns the type of

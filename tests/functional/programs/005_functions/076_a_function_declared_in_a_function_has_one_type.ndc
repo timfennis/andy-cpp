@@ -1,0 +1,9 @@
+// Only a function declared in the program is generic. One declared in a
+// function or a block has one type, like a lambda in a variable: its first
+// call decides it.
+// expect-error: No function called 'same' found that matches the arguments 'String'
+fn outer() {
+    fn same(v) => v;
+    same(1);
+    same("a");
+}

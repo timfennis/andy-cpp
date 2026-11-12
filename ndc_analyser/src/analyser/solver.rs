@@ -6,11 +6,13 @@ use super::Analyser;
 use super::function_values::{Choice, FunctionValue};
 use crate::error::AnalysisError;
 use crate::overloads::{CallKind, ResolvedCall, is_strictly_more_specific};
+use crate::types::TypeVars;
 use ndc_analysis::{Binding, Candidate};
 use ndc_core::{NodeId, StaticType, TypeVar};
 use ndc_lexer::Span;
 use ndc_resolver::{Candidates, SymbolId};
 use std::collections::BTreeSet;
+use std::rc::Rc;
 
 /// What a call can commit to before its arguments are fully known.
 pub(super) enum EarlyOverload {
@@ -38,7 +40,7 @@ pub(super) enum CallSite {
 }
 
 /// Something that waits until the types it depends on are known.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(super) enum Constraint {
     /// A call whose overload can't be picked yet.
     Call(CallConstraint),
@@ -71,16 +73,94 @@ pub(super) enum Constraint {
 
 impl Constraint {
     /// The types whose variables the constraint waits on.
-    fn inputs(&self) -> &[StaticType] {
+    pub(super) fn inputs(&self) -> &[StaticType] {
         match self {
             Self::Call(call) => &call.arguments,
             Self::FunctionValue(value) => std::slice::from_ref(value.expected()),
             Self::Iterate { sequence, .. } => std::slice::from_ref(sequence),
             Self::Unpack { value, .. } => std::slice::from_ref(value),
             Self::MapDefault { default, .. } => std::slice::from_ref(default),
+            // A result known from outside says what each branch is.
             Self::Join { types, .. } => types,
         }
     }
+
+    /// The types the constraint settles once it's solved, which are known
+    /// once its inputs are.
+    pub(super) fn outputs(&self) -> &[StaticType] {
+        match self {
+            Self::Call(call) => std::slice::from_ref(&call.result),
+            Self::FunctionValue(_) => &[],
+            Self::Iterate { element, .. } => std::slice::from_ref(element),
+            Self::Unpack { parts, .. } => parts,
+            Self::MapDefault { value, .. } => std::slice::from_ref(value),
+            Self::Join { types, .. } => &types[2..],
+        }
+    }
+
+    /// The constraint with `replace` applied to each of its types.
+    pub(super) fn map_types(&self, replace: &mut impl FnMut(&StaticType) -> StaticType) -> Self {
+        match self {
+            Self::Call(call) => Self::Call(CallConstraint {
+                arguments: call.arguments.iter().map(&mut *replace).collect(),
+                result: replace(&call.result),
+                ..call.clone()
+            }),
+            Self::FunctionValue(value) => Self::FunctionValue(value.clone()),
+            Self::Iterate {
+                sequence,
+                element,
+                span,
+            } => Self::Iterate {
+                sequence: replace(sequence),
+                element: replace(element),
+                span: *span,
+            },
+            Self::Unpack { value, parts, span } => Self::Unpack {
+                value: replace(value),
+                parts: parts.iter().map(&mut *replace).collect(),
+                span: *span,
+            },
+            Self::MapDefault {
+                default,
+                value,
+                span,
+            } => Self::MapDefault {
+                default: replace(default),
+                value: replace(value),
+                span: *span,
+            },
+            Self::Join { types, span } => Self::Join {
+                types: types.clone().map(|typ| replace(&typ)),
+                span: *span,
+            },
+        }
+    }
+}
+
+/// A call to a generic function, through which a constraint of the
+/// function's body was copied to the code calling it.
+#[derive(Debug, Clone)]
+pub(super) struct Frame {
+    /// The generic function called.
+    pub(super) function: SymbolId,
+    /// Its name, for errors.
+    pub(super) name: String,
+    /// The call.
+    pub(super) call: Span,
+}
+
+/// The calls a constraint was copied through, outermost first: the call in
+/// the code being analysed, then the call in that function's body that
+/// copied it there, and so on. Its own span is in the last function's body.
+pub(super) type Origin = Rc<[Frame]>;
+
+/// A constraint that waits, and the calls it was copied through if it's a
+/// copy of a generic function's constraint.
+#[derive(Debug, Clone)]
+pub(super) struct Waiting {
+    pub(super) constraint: Constraint,
+    pub(super) origin: Option<Origin>,
 }
 
 /// An overload a call committed to before its arguments were known, which
@@ -100,7 +180,7 @@ pub(super) enum EarlyPick {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(super) struct CallConstraint {
     site: CallSite,
     candidates: Candidates,
@@ -110,6 +190,42 @@ pub(super) struct CallConstraint {
     kind: CallKind,
     name: String,
     span: Span,
+}
+
+impl CallConstraint {
+    pub(super) fn site(&self) -> CallSite {
+        self.site
+    }
+
+    pub(super) fn candidates(&self) -> &Candidates {
+        &self.candidates
+    }
+
+    pub(super) fn arguments(&self) -> &[StaticType] {
+        &self.arguments
+    }
+
+    pub(super) fn result(&self) -> &StaticType {
+        &self.result
+    }
+
+    pub(super) fn kind(&self) -> CallKind {
+        self.kind
+    }
+
+    /// Whether `other` calls what this calls, the same way, with arguments
+    /// of the same types, so it returns the same type.
+    pub(super) fn is_same_call(&self, other: &Self, vars: &TypeVars) -> bool {
+        std::mem::discriminant(&self.site) == std::mem::discriminant(&other.site)
+            && self.kind == other.kind
+            && self.candidates == other.candidates
+            && self.arguments.len() == other.arguments.len()
+            && self
+                .arguments
+                .iter()
+                .zip(&other.arguments)
+                .all(|(a, b)| vars.resolve(a) == vars.resolve(b))
+    }
 }
 
 impl Analyser {
@@ -246,11 +362,14 @@ impl Analyser {
         arguments: &[StaticType],
         picked: SymbolId,
     ) -> Option<StaticType> {
-        let typ = self.commit_call(
+        let Some(typ) = self.commit_call(
             &Binding::Resolved(Candidate::Scalar(picked)),
             arguments,
             StaticType::Any,
-        )?;
+        ) else {
+            self.pending_copies.clear();
+            return None;
+        };
         let arguments = arguments
             .iter()
             .map(|argument| self.vars.resolve(argument))
@@ -274,6 +393,7 @@ impl Analyser {
             });
         }
         self.record_pick(call.site, binding, &arguments);
+        self.flush_copies(call.span);
         Some(typ)
     }
 
@@ -364,20 +484,39 @@ impl Analyser {
     /// Makes `constraint` wait, in the order it started waiting, until one
     /// of the variables it waits on is settled.
     pub(super) fn wait(&mut self, constraint: Constraint) {
-        let serial = self.next_serial;
-        self.next_serial += 1;
-        self.wait_again(serial, constraint);
+        let origin = self.copied_through.clone();
+        self.wait_as(Waiting { constraint, origin });
     }
 
-    fn wait_again(&mut self, serial: u64, constraint: Constraint) {
-        for var in constraint
+    /// Makes `waiting` wait, as [`Self::wait`].
+    pub(super) fn wait_as(&mut self, waiting: Waiting) {
+        let serial = self.next_serial;
+        self.next_serial += 1;
+        self.wait_again(serial, waiting);
+    }
+
+    fn wait_again(&mut self, serial: u64, waiting: Waiting) {
+        for var in waiting
+            .constraint
             .inputs()
             .iter()
             .flat_map(|input| self.vars.unsettled(input))
         {
             self.watchers.entry(var).or_default().push(serial);
         }
-        self.waiting.insert(serial, constraint);
+        self.waiting.insert(serial, waiting);
+    }
+
+    /// Solves `waiting` if what it waits on is known, as
+    /// [`Self::try_constraint`], and returns whether it did. A copy of a
+    /// generic function's constraint reports its errors at the call it was
+    /// copied through, and records no pick: the function's body was
+    /// compiled with its own.
+    pub(super) fn try_waiting(&mut self, waiting: &mut Waiting) -> bool {
+        let outer = std::mem::replace(&mut self.copied_through, waiting.origin.clone());
+        let solved = self.try_constraint(&mut waiting.constraint);
+        self.copied_through = outer;
+        solved
     }
 
     /// Tries again each waiting constraint that waits on a variable settled
@@ -403,13 +542,13 @@ impl Analyser {
             self.watched_settlings = self.vars.settled_count();
             for serial in woken {
                 // A constraint woken by an earlier variable may be solved already.
-                let Some(mut constraint) = self.waiting.remove(&serial) else {
+                let Some(mut waiting) = self.waiting.remove(&serial) else {
                     continue;
                 };
-                if self.try_constraint(&mut constraint) {
+                if self.try_waiting(&mut waiting) {
                     still_waiting.remove(&serial);
                 } else {
-                    self.wait_again(serial, constraint);
+                    self.wait_again(serial, waiting);
                     still_waiting.insert(serial);
                 }
             }
@@ -461,36 +600,46 @@ impl Analyser {
         // type might have settled since, which nothing watches.
         let serials = self.waiting.keys().copied().collect::<Vec<_>>();
         for serial in serials {
-            let Some(mut constraint) = self.waiting.remove(&serial) else {
-                continue;
-            };
-            if !self.try_constraint(&mut constraint) {
-                self.wait_again(serial, constraint);
-            }
+            self.retry(serial);
         }
         self.solve_waiting();
+    }
+
+    /// Tries the waiting constraint `serial` again, if it's still waiting.
+    /// A call can wait although its arguments are known: a variable's type
+    /// might have settled since, which nothing watches.
+    pub(super) fn retry(&mut self, serial: u64) {
+        let Some(mut waiting) = self.waiting.remove(&serial) else {
+            return;
+        };
+        if !self.try_waiting(&mut waiting) {
+            self.wait_again(serial, waiting);
+        }
     }
 
     /// The unsettled variables made since `first` that the waiting
     /// constraint `serial` waits on, if it's still waiting.
     fn waits_on_vars_since(&self, serial: u64, first: usize) -> Vec<TypeVar> {
-        self.waiting
-            .get(&serial)
-            .map_or_else(Vec::new, |constraint| {
-                constraint
-                    .inputs()
-                    .iter()
-                    .flat_map(|input| self.vars.unsettled(input))
-                    .filter(|var| var.0 as usize >= first)
-                    .collect()
-            })
+        self.waiting.get(&serial).map_or_else(Vec::new, |waiting| {
+            waiting
+                .constraint
+                .inputs()
+                .iter()
+                .flat_map(|input| self.vars.unsettled(input))
+                .filter(|var| var.0 as usize >= first)
+                .collect()
+        })
     }
 
     /// What nothing else settled in the waiting `a op= b` keeps the type it
     /// already had, so it's taken from `b`: in `m["k"] += 3` on an empty
     /// map, the values are Ints. Returns whether that settled anything.
-    fn default_to_operand(&mut self, serial: u64) -> bool {
-        let Some(Constraint::Call(call)) = self.waiting.get(&serial) else {
+    pub(super) fn default_to_operand(&mut self, serial: u64) -> bool {
+        let Some(Waiting {
+            constraint: Constraint::Call(call),
+            ..
+        }) = self.waiting.get(&serial)
+        else {
             return false;
         };
         let (CallSite::OpAssignment(_), [target, operand]) = (call.site, &call.arguments[..])
@@ -659,6 +808,9 @@ impl Analyser {
         }
 
         if arguments.iter().all(|argument| !argument.has_vars()) {
+            if let (CallSite::OpAssignment(id), [left, right]) = (call.site, &arguments[..]) {
+                return Some(self.op_assignment_now(id, left, right, &call.name, call.span));
+            }
             return Some(self.resolve_call_now(call, &arguments));
         }
 
@@ -740,10 +892,14 @@ impl Analyser {
         }
         let typ = self.commit_call(&binding, arguments, return_type);
         self.record_pick(call.site, binding, arguments);
-        typ.unwrap_or_else(|| {
+        if let Some(typ) = typ {
+            self.flush_copies(call.span);
+            typ
+        } else {
+            self.pending_copies.clear();
             self.report_failed_call(call, arguments);
             StaticType::Any
-        })
+        }
     }
 
     /// Settles the types a call's arguments leave unknown from the overload
@@ -788,10 +944,8 @@ impl Analyser {
             }
             Binding::Dynamic(_) | Binding::None => None,
         };
-        let signature = picked.map(|symbol| {
-            let declared = self.vars.resolve(self.types.get_type(symbol));
-            self.vars.instantiate(&declared)
-        });
+        let pending = self.pending_copies.len();
+        let signature = picked.map(|symbol| self.instantiate_function(symbol));
         let Some(StaticType::Function {
             parameters: Some(parameters),
             return_type: declared_return,
@@ -803,13 +957,75 @@ impl Analyser {
             return Some(return_type);
         };
 
-        self.bind_signature(
+        let typ = self.bind_signature(
             &StaticType::Function {
                 parameters: Some(parameters),
                 return_type: declared_return,
             },
             arguments,
-        )
+        );
+        if typ.is_none() {
+            self.pending_copies.truncate(pending);
+        }
+        typ
+    }
+
+    /// `symbol`'s type with new variables for its type parameters. For a
+    /// generic function declared in the program, its constraints get the
+    /// same variables, and wait in [`Self::pending_copies`] until
+    /// [`Self::flush_copies`] knows which call they're for.
+    pub(super) fn instantiate_function(&mut self, symbol: SymbolId) -> StaticType {
+        let declared = self.vars.resolve(self.types.get_type(symbol));
+        let mut made = Vec::new();
+        let typ = self.vars.instantiate_with(&declared, &mut made);
+        // A copy of a function's own constraint that calls the function
+        // again, as a recursive call its body couldn't decide does, is
+        // checked by the copies the outer call already made: recursion
+        // doesn't change the types.
+        let recursive = self
+            .copied_through
+            .iter()
+            .flat_map(|frames| frames.iter())
+            .any(|frame| frame.function == symbol);
+        if let Some(scheme) = self.schemes.get(&symbol).cloned()
+            && !recursive
+        {
+            for waiting in scheme.iter() {
+                let constraint = waiting
+                    .constraint
+                    .map_types(&mut |typ| self.vars.instantiate_with(typ, &mut made));
+                self.pending_copies
+                    .push((symbol, constraint, waiting.origin.clone()));
+            }
+        }
+        typ
+    }
+
+    /// Adds the constraints [`Self::instantiate_function`] copied for a call
+    /// at `call`, and solves the ones it can.
+    pub(super) fn flush_copies(&mut self, call: Span) {
+        let copies = std::mem::take(&mut self.pending_copies);
+        for (function, constraint, origin) in copies {
+            let name = self.resolver.symbol_name(function).to_string();
+            let frames = self
+                .copied_through
+                .iter()
+                .flat_map(|outer| outer.iter().cloned())
+                .chain(std::iter::once(Frame {
+                    function,
+                    name,
+                    call,
+                }))
+                .chain(origin.iter().flat_map(|inner| inner.iter().cloned()))
+                .collect::<Vec<_>>();
+            let mut waiting = Waiting {
+                constraint,
+                origin: Some(frames.into()),
+            };
+            if !self.try_waiting(&mut waiting) {
+                self.wait_as(waiting);
+            }
+        }
     }
 
     /// Passes each argument where `signature` expects its parameter, which
@@ -874,6 +1090,7 @@ impl Analyser {
         let fits = !matches!(binding, Binding::None)
             && self.commit_call(&binding, arguments, return_type).is_some();
         self.vars.rollback(snapshot);
+        self.pending_copies.clear();
         fits
     }
 
@@ -887,8 +1104,12 @@ impl Analyser {
     /// otherwise win, and when each unknown is inside an argument whose kind
     /// is known: an argument nothing at all is known about is `Any`, which
     /// the overloads taking `Any` take.
-    fn default_to_narrowest(&mut self, serial: u64) -> bool {
-        let Some(Constraint::Call(call)) = self.waiting.get(&serial) else {
+    pub(super) fn default_to_narrowest(&mut self, serial: u64) -> bool {
+        let Some(Waiting {
+            constraint: Constraint::Call(call),
+            ..
+        }) = self.waiting.get(&serial)
+        else {
             return false;
         };
         let arguments = call
@@ -923,15 +1144,30 @@ impl Analyser {
         else {
             return false;
         };
-        let Some(Constraint::Call(call)) = self.waiting.remove(&serial) else {
+        let Some(Waiting {
+            constraint: Constraint::Call(call),
+            origin,
+        }) = self.waiting.remove(&serial)
+        else {
             unreachable!("the call was waiting a moment ago");
         };
-        let Some(typ) = self.commit_early(&call, &arguments, narrowest) else {
-            self.wait_again(serial, Constraint::Call(call));
+        let outer = std::mem::replace(&mut self.copied_through, origin.clone());
+        let committed = self.commit_early(&call, &arguments, narrowest);
+        if let Some(typ) = &committed {
+            let result = call.result.clone();
+            self.settle_waited_for(&result, typ, call.span);
+        }
+        self.copied_through = outer;
+        if committed.is_none() {
+            self.wait_again(
+                serial,
+                Waiting {
+                    constraint: Constraint::Call(call),
+                    origin,
+                },
+            );
             return false;
-        };
-        let result = call.result.clone();
-        self.settle_waited_for(&result, &typ, call.span);
+        }
         true
     }
 
@@ -961,12 +1197,15 @@ impl Analyser {
     }
 
     /// Whether `symbol` is a function whose parameters take these arguments
-    /// without an `Any` parameter standing in for an argument of another
-    /// type. One that does is a fallback that only wins over the overloads
+    /// as the types they are. An `Any` parameter standing in for an argument
+    /// of another type is a fallback that only wins over the overloads
     /// taking exact types once the arguments are known, so a waiting call
     /// doesn't commit to it: `xs[0] = []` on a `List<Int>` leaves only
     /// `[]=(List<T>, Any, Any)` taking the empty list, but it's still an
-    /// error once the list's type is known.
+    /// error once the list's type is known. A `Sequence` parameter takes
+    /// lists, strings, maps and more, so committing to it would make an
+    /// argument nothing is known about a `Sequence` rather than what it is:
+    /// in `fn f(xs) { xs.len(); xs[0] = 1 }`, `xs` is a list.
     fn fits_without_any(&self, symbol: SymbolId, arguments: &[StaticType]) -> bool {
         match self.vars.resolve(self.types.get_type(symbol)) {
             StaticType::Function {
@@ -975,8 +1214,10 @@ impl Analyser {
             } => parameters
                 .iter()
                 .zip(arguments)
-                .all(|(parameter, argument)| {
-                    *parameter != StaticType::Any || *argument == StaticType::Any
+                .all(|(parameter, argument)| match (parameter, argument) {
+                    (StaticType::Any, argument) => *argument == StaticType::Any,
+                    (StaticType::Sequence(_), StaticType::Var(_)) => false,
+                    _ => true,
                 }),
             _ => false,
         }
@@ -1025,17 +1266,24 @@ impl Analyser {
         }
     }
 
-    fn record_pick(
+    pub(super) fn record_pick(
         &mut self,
         site: CallSite,
         binding: Binding<SymbolId>,
         arguments: &[StaticType],
     ) {
+        if self.copied_through.is_some() {
+            return;
+        }
         match site {
-            CallSite::Call(id) => self.picks.bindings.insert(id, binding),
-            CallSite::Getter(id) => self.picks.getters.insert(id, binding),
+            CallSite::Call(id) => {
+                self.picks.bindings.insert(id, binding);
+            }
+            CallSite::Getter(id) => {
+                self.picks.getters.insert(id, binding);
+            }
             CallSite::Setter(id) | CallSite::FieldSetter(id) => {
-                self.picks.setters.insert(id, binding)
+                self.picks.setters.insert(id, binding);
             }
             // An in-place overload such as `++=` does the same thing faster,
             // so it's used where one takes the operands as they are.
@@ -1049,17 +1297,36 @@ impl Analyser {
                     &arguments,
                     CallKind::Operator,
                 );
-                let binding = match in_place.binding {
-                    Binding::Resolved(candidate)
-                        if Self::augmented_rhs_is_compatible(&arguments[0], &arguments[1]) =>
-                    {
-                        Binding::Resolved(candidate)
+                let compatible = Self::augmented_rhs_is_compatible(&arguments[0], &arguments[1]);
+                let binding = match (in_place.binding, binding) {
+                    (Binding::Resolved(candidate), _) if compatible => Binding::Resolved(candidate),
+                    // Which one applies is left to the program as it runs,
+                    // which mutates in place where it can.
+                    (Binding::Dynamic(mut candidates), operators) if compatible => {
+                        let operators = match operators {
+                            Binding::Resolved(operator) => vec![operator],
+                            Binding::Dynamic(operators) => operators,
+                            Binding::None => Vec::new(),
+                        };
+                        for operator in operators {
+                            if !candidates.contains(&operator) {
+                                candidates.push(operator);
+                            }
+                        }
+                        Binding::Dynamic(candidates)
                     }
-                    _ => binding,
+                    (_, binding) => binding,
                 };
-                self.picks.augmented_assignments.insert(id, binding)
+                self.record_augmented_pick(id, binding);
             }
         };
+    }
+
+    /// Records what `a op= b` at `id` does, as [`Self::record_pick`].
+    pub(super) fn record_augmented_pick(&mut self, id: NodeId, binding: Binding<SymbolId>) {
+        if self.copied_through.is_none() {
+            self.picks.augmented_assignments.insert(id, binding);
+        }
     }
 
     /// Reports that no overload accepts `call`. Writing `xs[i] += 1` reads

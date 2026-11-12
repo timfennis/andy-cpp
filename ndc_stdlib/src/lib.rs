@@ -49,3 +49,21 @@ pub fn register(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     string::register(env);
     value::register(env);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A call that fits two overloads in one scope must find one of them
+    /// more specific, so it never has to choose between generic overloads.
+    #[test]
+    fn no_two_overloads_tie() {
+        let mut registry = FunctionRegistry::default();
+        register(&mut registry);
+        let natives = registry
+            .iter()
+            .map(|function| (function.name.clone(), function.static_type.clone()))
+            .collect::<Vec<_>>();
+        assert_eq!(ndc_analyser::tied_natives(&natives), Vec::<String>::new());
+    }
+}

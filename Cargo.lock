@@ -1281,6 +1281,7 @@ dependencies = [
  "factorial",
  "itertools 0.15.0",
  "md5",
+ "ndc_analyser",
  "ndc_core",
  "ndc_macros",
  "ndc_vm",

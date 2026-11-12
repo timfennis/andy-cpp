@@ -76,7 +76,9 @@ impl Analyser {
             .insert(id, Binding::Resolved(Candidate::Scalar(symbol)));
         // A generic function used as a value, as in `let p = push`, has one
         // type there, which its uses settle.
-        self.instantiated_type(symbol)
+        let typ = self.instantiate_function(symbol);
+        self.flush_copies(span);
+        typ
     }
 
     /// The functions the name at `id` can mean, grouped by scope, nearest
@@ -263,8 +265,9 @@ impl Analyser {
     }
 
     fn commit_function_value(&mut self, value: &FunctionValue, symbol: SymbolId, early: bool) {
-        let typ = self.instantiated_type(symbol);
+        let typ = self.instantiate_function(symbol);
         self.vars.bind_argument(&value.expected, &typ);
+        self.flush_copies(value.span);
         if early && cfg!(debug_assertions) {
             self.remember_early_function_value(value, symbol);
         }
