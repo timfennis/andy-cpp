@@ -4,7 +4,7 @@
 //! `split(String, String)`.
 
 use super::Analyser;
-use super::solver::{Constraint, EarlyOverload};
+use super::solver::{CallSite, Constraint, EarlyOverload};
 use crate::error::AnalysisError;
 use crate::overloads::CallKind;
 use ndc_analysis::{Binding, Candidate};
@@ -77,7 +77,7 @@ impl Analyser {
         // A generic function used as a value, as in `let p = push`, has one
         // type there, which its uses settle.
         let typ = self.instantiate_function(symbol);
-        self.flush_copies(span);
+        self.flush_copies(CallSite::Call(id), span);
         typ
     }
 
@@ -267,7 +267,7 @@ impl Analyser {
     fn commit_function_value(&mut self, value: &FunctionValue, symbol: SymbolId, early: bool) {
         let typ = self.instantiate_function(symbol);
         self.vars.bind_argument(&value.expected, &typ);
-        self.flush_copies(value.span);
+        self.flush_copies(CallSite::Call(value.id), value.span);
         if early && cfg!(debug_assertions) {
             self.remember_early_function_value(value, symbol);
         }

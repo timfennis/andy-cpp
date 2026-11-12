@@ -4,3 +4,4 @@
 #
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
+cc ccf1065cc5b6785de2f3e60fab2f91a07dbf049d640de1fd8e4cd69e87a31628 # shrinks to program =  struct S { n: Int } struct T { n: String } fn p(x: List<Int>) => 1; fn q(x: List<Int>) => 1; fn g(a) => a.len(); fn h(a) => g(a); let v0 = 1; let v1 = 1; let v2 = 1; let v3 = 1; v0[0] += (if true { q(push).fold(0, fn(acc, a) => acc + a) } else { fn(a) => a ++ "!" });  

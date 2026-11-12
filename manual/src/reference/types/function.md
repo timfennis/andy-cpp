@@ -210,6 +210,8 @@ fn fib(n) => if n < 2 { n } else { fib(n - 1) + fib(n - 2) };
 let i: Int = fib(10);
 ```
 
+The body is compiled for each set of types it's called with, so the calls in it are picked when the program is compiled, not as it runs. Called with a value of type `Any`, the function picks them as it runs.
+
 A call with an argument the body can't use is an error at the call, with a note on the line in the body that can't take it:
 
 ```ndc

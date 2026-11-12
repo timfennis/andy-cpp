@@ -367,7 +367,7 @@ impl Analyser {
             arguments,
             StaticType::Any,
         ) else {
-            self.pending_copies.clear();
+            self.pending.clear();
             return None;
         };
         let arguments = arguments
@@ -393,7 +393,7 @@ impl Analyser {
             });
         }
         self.record_pick(call.site, binding, &arguments);
-        self.flush_copies(call.span);
+        self.flush_copies(call.site, call.span);
         Some(typ)
     }
 
@@ -893,10 +893,10 @@ impl Analyser {
         let typ = self.commit_call(&binding, arguments, return_type);
         self.record_pick(call.site, binding, arguments);
         if let Some(typ) = typ {
-            self.flush_copies(call.span);
+            self.flush_copies(call.site, call.span);
             typ
         } else {
-            self.pending_copies.clear();
+            self.pending.clear();
             self.report_failed_call(call, arguments);
             StaticType::Any
         }
@@ -944,7 +944,7 @@ impl Analyser {
             }
             Binding::Dynamic(_) | Binding::None => None,
         };
-        let pending = self.pending_copies.len();
+        let pending = self.pending.len();
         let signature = picked.map(|symbol| self.instantiate_function(symbol));
         let Some(StaticType::Function {
             parameters: Some(parameters),
@@ -965,14 +965,14 @@ impl Analyser {
             arguments,
         );
         if typ.is_none() {
-            self.pending_copies.truncate(pending);
+            self.pending.truncate(pending);
         }
         typ
     }
 
     /// `symbol`'s type with new variables for its type parameters. For a
     /// generic function declared in the program, its constraints get the
-    /// same variables, and wait in [`Self::pending_copies`] until
+    /// same variables, and wait in [`Self::pending`] until
     /// [`Self::flush_copies`] knows which call they're for.
     pub(super) fn instantiate_function(&mut self, symbol: SymbolId) -> StaticType {
         let declared = self.vars.resolve(self.types.get_type(symbol));
@@ -987,24 +987,38 @@ impl Analyser {
             .iter()
             .flat_map(|frames| frames.iter())
             .any(|frame| frame.function == symbol);
-        if let Some(scheme) = self.schemes.get(&symbol).cloned()
-            && !recursive
-        {
-            for waiting in scheme.iter() {
+        let Some(scheme) = self.schemes.get(&symbol).cloned() else {
+            return typ;
+        };
+        if !recursive {
+            for waiting in scheme.constraints.iter() {
                 let constraint = waiting
                     .constraint
                     .map_types(&mut |typ| self.vars.instantiate_with(typ, &mut made));
-                self.pending_copies
+                self.pending
+                    .copies
                     .push((symbol, constraint, waiting.origin.clone()));
             }
+        }
+        if !scheme.key.is_empty() {
+            let key = scheme
+                .key
+                .iter()
+                .map(|name| {
+                    self.vars
+                        .instantiate_with(&StaticType::Generic(name.clone()), &mut made)
+                })
+                .collect();
+            self.pending.uses.push((symbol, key));
         }
         typ
     }
 
     /// Adds the constraints [`Self::instantiate_function`] copied for a call
     /// at `call`, and solves the ones it can.
-    pub(super) fn flush_copies(&mut self, call: Span) {
-        let copies = std::mem::take(&mut self.pending_copies);
+    pub(super) fn flush_copies(&mut self, site: CallSite, call: Span) {
+        self.record_uses(site);
+        let copies = std::mem::take(&mut self.pending.copies);
         for (function, constraint, origin) in copies {
             let name = self.resolver.symbol_name(function).to_string();
             let frames = self
@@ -1090,7 +1104,7 @@ impl Analyser {
         let fits = !matches!(binding, Binding::None)
             && self.commit_call(&binding, arguments, return_type).is_some();
         self.vars.rollback(snapshot);
-        self.pending_copies.clear();
+        self.pending.clear();
         fits
     }
 
@@ -1276,14 +1290,11 @@ impl Analyser {
             return;
         }
         match site {
-            CallSite::Call(id) => {
-                self.picks.bindings.insert(id, binding);
-            }
-            CallSite::Getter(id) => {
-                self.picks.getters.insert(id, binding);
-            }
-            CallSite::Setter(id) | CallSite::FieldSetter(id) => {
-                self.picks.setters.insert(id, binding);
+            CallSite::Call(_)
+            | CallSite::Getter(_)
+            | CallSite::Setter(_)
+            | CallSite::FieldSetter(_) => {
+                self.pick_tables(self.recording).insert(site, binding);
             }
             // An in-place overload such as `++=` does the same thing faster,
             // so it's used where one takes the operands as they are.
@@ -1325,7 +1336,8 @@ impl Analyser {
     /// Records what `a op= b` at `id` does, as [`Self::record_pick`].
     pub(super) fn record_augmented_pick(&mut self, id: NodeId, binding: Binding<SymbolId>) {
         if self.copied_through.is_none() {
-            self.picks.augmented_assignments.insert(id, binding);
+            self.pick_tables(self.recording)
+                .insert(CallSite::OpAssignment(id), binding);
         }
     }
 

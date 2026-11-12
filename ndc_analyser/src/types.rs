@@ -103,6 +103,12 @@ impl TypeVars {
         self.settle(var, StaticType::Generic(name.into()));
     }
 
+    /// How many variables there are, so [`Self::settle_from`] can settle
+    /// the ones made after this point.
+    pub(crate) fn count(&self) -> usize {
+        self.solutions.len()
+    }
+
     fn solution(&self, var: TypeVar) -> Option<&StaticType> {
         self.solutions[var.0 as usize].as_ref()
     }

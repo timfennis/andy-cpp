@@ -62,6 +62,29 @@ pub struct Analysis {
     /// How many global slots the program needs: the natives and every
     /// top-level declaration, counting earlier REPL lines.
     pub global_count: usize,
+    /// The instances of each generic function the batch declares, keyed by
+    /// the declaration. An instance is the function's body for the types one
+    /// set of calls gives it, which picks the overloads its calls use from
+    /// those types: `fn inc(x) => x + 1` has one for Ints, whose `+` is
+    /// `+(Int, Int)`. The declaration itself is the instance for arguments
+    /// of any type, whose calls are picked as the program runs.
+    pub instances: AHashMap<NodeId, Vec<Instance>>,
+}
+
+/// One instance of a generic function: where it's stored, and the picks in
+/// its body that differ from the function's own.
+#[derive(Debug, Clone)]
+pub struct Instance {
+    /// The global the instance is stored in.
+    pub variable: ResolvedVar,
+    /// As [`Analysis::bindings`], for the instance's body.
+    pub bindings: AHashMap<NodeId, Binding>,
+    /// As [`Analysis::getters`], for the instance's body.
+    pub getters: AHashMap<NodeId, Binding>,
+    /// As [`Analysis::setters`], for the instance's body.
+    pub setters: AHashMap<NodeId, Binding>,
+    /// As [`Analysis::augmented_assignments`], for the instance's body.
+    pub augmented_assignments: AHashMap<NodeId, Binding>,
 }
 
 impl Analysis {

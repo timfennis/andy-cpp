@@ -6,11 +6,12 @@
 //! the call's type as `Float`.
 
 use super::Analyser;
+use super::instances::Scheme;
 use super::solver::{CallConstraint, Constraint, Waiting};
 use crate::error::AnalysisError;
 use crate::overloads::is_strictly_more_specific;
 use ahash::AHashSet;
-use ndc_core::{StaticType, TypeVar};
+use ndc_core::{NodeId, StaticType, TypeVar};
 use ndc_lexer::Span;
 use ndc_resolver::{ScopeKind, SymbolId};
 
@@ -30,7 +31,13 @@ impl Analyser {
     /// decide, like the element type of `[]` in `fn f(x) { [].push(x) }`,
     /// can't be decided by a call either, so it's settled here first, as at
     /// the end of the program.
-    pub(super) fn generalize(&mut self, symbol: SymbolId, signature: &StaticType) -> StaticType {
+    pub(super) fn generalize(
+        &mut self,
+        symbol: SymbolId,
+        signature: &StaticType,
+        declaration: NodeId,
+        first_use: usize,
+    ) -> StaticType {
         self.solve_waiting();
         self.settle_ambiguous(signature);
         self.merge_copies();
@@ -44,6 +51,22 @@ impl Analyser {
                     .expect("the constraint is waiting")
             })
             .collect::<Vec<_>>();
+
+        // The generic functions the body calls with types that depend on
+        // its type parameters are the instance's to pick.
+        let (uses, outside): (Vec<_>, Vec<_>) = self
+            .uses
+            .split_off(first_use)
+            .into_iter()
+            .partition(|generic_use| {
+                generic_use.key.iter().any(|typ| {
+                    self.vars
+                        .unsettled(typ)
+                        .into_iter()
+                        .any(|var| self.vars.is_generalizable(var))
+                })
+            });
+        self.uses.extend(outside);
 
         // Name the type parameters in the order they appear.
         let mut parameters = self.vars.unsettled(signature);
@@ -68,6 +91,24 @@ impl Analyser {
                 named += 1;
             }
         }
+
+        // A type only the body makes, as of a list nothing else uses, gets
+        // its fallback.
+        let uses = uses
+            .into_iter()
+            .map(|mut generic_use| {
+                for typ in &generic_use.key {
+                    let unnamed = self.vars.unsettled(typ);
+                    self.vars.settle_with_fallbacks(&unnamed);
+                }
+                generic_use.key = generic_use
+                    .key
+                    .iter()
+                    .map(|typ| self.vars.resolve(typ))
+                    .collect();
+                generic_use
+            })
+            .collect::<Vec<_>>();
         self.watched_settlings = self.vars.settled_count();
 
         let scheme = scheme
@@ -86,7 +127,25 @@ impl Analyser {
                 self.pick_for_any_arguments(call);
             }
         }
-        self.schemes.insert(symbol, scheme.into());
+        // An instance is for the types of the type parameters the
+        // constraints and uses depend on.
+        let mut key: Vec<Box<str>> = Vec::new();
+        for typ in scheme
+            .iter()
+            .flat_map(|waiting| waiting.constraint.inputs())
+            .chain(uses.iter().flat_map(|generic_use| &generic_use.key))
+        {
+            collect_type_parameters(typ, &mut key);
+        }
+        self.schemes.insert(
+            symbol,
+            Scheme {
+                constraints: scheme.into(),
+                key: key.into(),
+                uses: uses.into(),
+                declaration,
+            },
+        );
         self.vars.resolve(signature)
     }
 
@@ -377,6 +436,22 @@ impl Analyser {
                 ));
                 return;
             }
+        }
+    }
+}
+
+/// Adds the type parameters in `typ` that `parameters` doesn't have yet.
+fn collect_type_parameters(typ: &StaticType, parameters: &mut Vec<Box<str>>) {
+    let found = std::cell::RefCell::new(Vec::new());
+    typ.contains(&|part| {
+        if let StaticType::Generic(name) = part {
+            found.borrow_mut().push(name.clone());
+        }
+        false
+    });
+    for name in found.into_inner() {
+        if !parameters.contains(&name) {
+            parameters.push(name);
         }
     }
 }
