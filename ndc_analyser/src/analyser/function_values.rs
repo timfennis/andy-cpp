@@ -103,7 +103,7 @@ impl Analyser {
 
     /// `symbol`'s type with fresh variables for its type parameters.
     fn instantiated_type(&mut self, symbol: SymbolId) -> StaticType {
-        let typ = self.vars.resolve(self.types.get_type(symbol));
+        let typ = self.vars.resolve(&self.types.callable_type(symbol));
         if typ.contains(&|part| matches!(part, StaticType::Generic(_))) {
             self.vars.instantiate(&typ)
         } else {
@@ -228,7 +228,7 @@ impl Analyser {
     /// `Fn(Int, Int) -> Int` isn't.
     fn might_be_expected(&self, symbol: SymbolId, expected: &StaticType) -> bool {
         self.vars
-            .resolve(self.types.get_type(symbol))
+            .resolve(&self.types.callable_type(symbol))
             .may_fit(&self.vars.resolve(expected))
     }
 
@@ -292,7 +292,7 @@ impl Analyser {
             })
             .unwrap_or_else(|| self.resolver.innermost_reference(value.id));
         self.vars
-            .shown(self.types.get_type(symbol))
+            .shown(&self.types.callable_type(symbol))
             .replace(&|part| matches!(part, StaticType::Generic(_)).then_some(StaticType::Any))
     }
 

@@ -113,6 +113,15 @@ impl AnalysisError {
         }
     }
 
+    pub(crate) fn not_iterable(typ: &StaticType, span: Span) -> Self {
+        Self {
+            text: format!("{typ} is not iterable"),
+            span,
+            help_text: None,
+            notes: Vec::new(),
+        }
+    }
+
     pub(crate) fn iterable_outside_a_parameter(span: Span) -> Self {
         Self {
             text: "`Iterable<T>` can only be the type of a parameter".to_string(),

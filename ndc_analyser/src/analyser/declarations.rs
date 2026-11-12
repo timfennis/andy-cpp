@@ -101,7 +101,25 @@ impl Analyser {
         };
         if let Some((name, symbol)) = declared {
             let parameters = type_signature.types();
-            self.check_overlap(symbol, name, parameters.as_deref(), span);
+            // An `Iterable<T>` parameter takes what each call settles, but
+            // only sequences of `T`s, which tells it from its other overloads.
+            let shape = iterates
+                .iter()
+                .map(|element| {
+                    element
+                        .as_ref()
+                        .map(|element| StaticType::Iterable(Box::new(element.clone())))
+                })
+                .collect::<Vec<_>>();
+            let shaped = parameters.as_ref().map(|parameters| {
+                parameters
+                    .iter()
+                    .zip(&shape)
+                    .map(|(parameter, shape)| shape.clone().unwrap_or_else(|| parameter.clone()))
+                    .collect::<Vec<_>>()
+            });
+            self.types.declare_shape(symbol, shape);
+            self.check_overlap(symbol, name, shaped.as_deref(), span);
             let placeholder = StaticType::Function {
                 parameters,
                 return_type: Box::new(

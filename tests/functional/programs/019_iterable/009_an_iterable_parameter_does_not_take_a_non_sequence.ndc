@@ -1,0 +1,3 @@
+// expect-error: No function called 'consume' found that matches the arguments 'Bool'
+fn consume(xs: Iterable<Int>) => 0;
+consume(true);

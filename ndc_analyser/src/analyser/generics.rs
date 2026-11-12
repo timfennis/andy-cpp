@@ -401,7 +401,7 @@ impl Analyser {
             .iter()
             .filter(|&&earlier| self.resolver.symbol_name(earlier) == name)
             .filter_map(
-                |&earlier| match self.vars.resolve(self.types.get_type(earlier)) {
+                |&earlier| match self.vars.resolve(&self.types.callable_type(earlier)) {
                     StaticType::Function { parameters, .. } => Some(parameters),
                     _ => None,
                 },

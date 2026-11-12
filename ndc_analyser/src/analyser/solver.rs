@@ -278,24 +278,27 @@ impl Analyser {
     /// What iterating over a value of type `sequence` gives, which waits
     /// until the kind of sequence is known.
     pub(super) fn constrain_iteration(&mut self, sequence: StaticType, span: Span) -> StaticType {
-        match self.vars.resolve(&sequence) {
-            StaticType::Var(_) => {
-                let element = self.vars.fresh(StaticType::Any);
-                self.wait(Constraint::Iterate {
-                    sequence,
-                    element: element.clone(),
-                    span,
-                });
-                element
-            }
-            known => self.iteration_gives(&known),
+        if self.vars.waits_to_iterate(&sequence) {
+            let element = self.vars.fresh(StaticType::Any);
+            self.wait(Constraint::Iterate {
+                sequence,
+                element: element.clone(),
+                span,
+            });
+            return element;
         }
+        self.iteration_gives(&sequence, span)
     }
 
-    /// What iterating over a value of the known type `sequence` gives. What
-    /// doesn't iterate is left to the program as it runs.
-    fn iteration_gives(&mut self, sequence: &StaticType) -> StaticType {
-        self.vars.element_type(sequence).unwrap_or(StaticType::Any)
+    /// What iterating over a value of the known type `sequence` gives,
+    /// reporting a value that doesn't iterate, like `true`.
+    fn iteration_gives(&mut self, sequence: &StaticType, span: Span) -> StaticType {
+        if let Some(element) = self.vars.element_type(sequence) {
+            return element;
+        }
+        let error = AnalysisError::not_iterable(&self.vars.shown(sequence), span);
+        self.emit(error);
+        StaticType::Any
     }
 
     /// The types `let (a, b, …) = value` gives each name when the kind of
@@ -726,7 +729,7 @@ impl Analyser {
         }
         let reachable = self.overloads().reachable_symbols(&call.candidates);
         reachable.into_iter().any(|symbol| {
-            let function = self.vars.resolve(self.types.get_type(symbol));
+            let function = self.vars.resolve(&self.types.callable_type(symbol));
             let StaticType::Function {
                 parameters: Some(_),
                 ..
@@ -833,11 +836,11 @@ impl Analyser {
                 span,
             } => {
                 let sequence = self.vars.resolve(sequence);
-                if matches!(sequence, StaticType::Var(_)) {
+                if self.vars.waits_to_iterate(&sequence) {
                     return false;
                 }
                 let (element, span) = (element.clone(), *span);
-                let found = self.iteration_gives(&sequence);
+                let found = self.iteration_gives(&sequence, span);
                 self.settle_waited_for(&element, &found, span, None);
                 true
             }
@@ -1165,7 +1168,7 @@ impl Analyser {
         let StaticType::Function {
             parameters: Some(_),
             ..
-        } = self.vars.resolve(self.types.get_type(symbol))
+        } = self.vars.resolve(&self.types.callable_type(symbol))
         else {
             return false;
         };
@@ -1175,7 +1178,7 @@ impl Analyser {
             ..
         } = self
             .vars
-            .instantiate(&self.vars.resolve(self.types.get_type(symbol)))
+            .instantiate(&self.vars.resolve(&self.types.callable_type(symbol)))
         else {
             unreachable!("instantiating a function type gives a function type");
         };
@@ -1579,7 +1582,7 @@ impl Analyser {
         let parameters = symbols
             .iter()
             .map(
-                |&symbol| match self.vars.resolve(self.types.get_type(symbol)) {
+                |&symbol| match self.vars.resolve(&self.types.callable_type(symbol)) {
                     StaticType::Function {
                         parameters: Some(parameters),
                         ..
@@ -1607,7 +1610,7 @@ impl Analyser {
     /// any kind of sequence, so it can't tell what an argument nothing is
     /// known about is, and the call waits for it as `for x in xs` does.
     fn fits_without_any(&self, symbol: SymbolId, arguments: &[StaticType]) -> bool {
-        match self.vars.resolve(self.types.get_type(symbol)) {
+        match self.vars.resolve(&self.types.callable_type(symbol)) {
             StaticType::Function {
                 parameters: Some(parameters),
                 ..
@@ -1626,7 +1629,7 @@ impl Analyser {
     /// Whether `symbol` can accept arguments of these types, where each part
     /// not known yet fits anything.
     fn could_accept(&mut self, symbol: SymbolId, arguments: &[StaticType]) -> bool {
-        match self.vars.resolve(self.types.get_type(symbol)) {
+        match self.vars.resolve(&self.types.callable_type(symbol)) {
             StaticType::Function {
                 parameters: None, ..
             } => true,

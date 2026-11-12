@@ -353,6 +353,28 @@ impl Analyser {
             StaticType::Iterable(element) => {
                 (None, Some(self.without_iterables(*element, expr.span())))
             }
+            // A function passed for the parameter may return any kind of
+            // sequence, as `flat_map`'s callback does.
+            StaticType::Function {
+                parameters,
+                return_type,
+            } if matches!(*return_type, StaticType::Iterable(_)) => {
+                let StaticType::Iterable(element) = *return_type else {
+                    unreachable!("checked by the guard");
+                };
+                let parameters = parameters.map(|parameters| {
+                    parameters
+                        .into_iter()
+                        .map(|parameter| self.without_iterables(parameter, expr.span()))
+                        .collect()
+                });
+                let element = self.without_iterables(*element, expr.span());
+                let callback = StaticType::Function {
+                    parameters,
+                    return_type: Box::new(StaticType::Iterable(Box::new(element))),
+                };
+                (Some(callback), None)
+            }
             typ => (Some(self.without_iterables(typ, expr.span())), None),
         }
     }

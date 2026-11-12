@@ -8,6 +8,10 @@ use ndc_resolver::SymbolId;
 #[derive(Debug, Default)]
 pub(crate) struct TypeTable {
     types: AHashMap<SymbolId, StaticType>,
+    /// The parameter types calls see, by function, where they differ from
+    /// the declared type's: a parameter annotated `Iterable<Int>` has a type
+    /// each call settles, but only takes sequences of Ints.
+    shapes: AHashMap<SymbolId, Vec<Option<StaticType>>>,
 }
 
 impl TypeTable {
@@ -21,6 +25,41 @@ impl TypeTable {
         self.types
             .get(&symbol)
             .expect("internal error: a value is analysed after its declaration")
+    }
+
+    /// Records the parameter types calls of the function `symbol` see, for
+    /// the parameters whose declared type doesn't say what they take.
+    pub(crate) fn declare_shape(&mut self, symbol: SymbolId, shape: Vec<Option<StaticType>>) {
+        if shape.iter().any(Option::is_some) {
+            self.shapes.insert(symbol, shape);
+        }
+    }
+
+    /// The type of `symbol` as a call sees it, which picks the overload a
+    /// call means: `fn total(xs: Iterable<Int>)` takes an `Iterable<Int>`,
+    /// although its declared type takes a type parameter each call settles.
+    pub(crate) fn callable_type(&self, symbol: SymbolId) -> std::borrow::Cow<'_, StaticType> {
+        let typ = self.get_type(symbol);
+        let (
+            Some(shape),
+            StaticType::Function {
+                parameters: Some(parameters),
+                return_type,
+            },
+        ) = (self.shapes.get(&symbol), typ)
+        else {
+            return std::borrow::Cow::Borrowed(typ);
+        };
+        std::borrow::Cow::Owned(StaticType::Function {
+            parameters: Some(
+                parameters
+                    .iter()
+                    .zip(shape)
+                    .map(|(parameter, shape)| shape.clone().unwrap_or_else(|| parameter.clone()))
+                    .collect(),
+            ),
+            return_type: return_type.clone(),
+        })
     }
 
     /// Replaces the settled type variables in every value's type with what
@@ -763,12 +802,38 @@ impl TypeVars {
         }
     }
 
+    /// Whether what iterating over a value of type `typ` gives isn't known
+    /// yet: it's not known what `typ` is, or it's a tuple whose elements
+    /// aren't all known.
+    pub(crate) fn waits_to_iterate(&self, typ: &StaticType) -> bool {
+        match self.resolve(typ) {
+            StaticType::Var(var) => !self.is_literal(var),
+            StaticType::Tuple(elements) => elements.iter().any(|e| self.has_unknowns(e)),
+            _ => false,
+        }
+    }
+
+    /// Whether `typ` has a part not known yet that isn't a literal's type.
+    fn has_unknowns(&self, typ: &StaticType) -> bool {
+        self.unsettled(typ)
+            .into_iter()
+            .any(|var| !self.is_literal(var))
+    }
+
     /// What iterating over a value of type `typ` gives, or `None` if it
     /// doesn't iterate. A tuple iterates as the one type its elements are
     /// once made the same, or as `Any` if they can't be: `(1, 2.5)` iterates
     /// as Floats, and `(1, "a")` as `Any`.
     pub(crate) fn element_type(&mut self, typ: &StaticType) -> Option<StaticType> {
         match self.resolve(typ) {
+            // A number doesn't iterate, whatever kind of number it becomes.
+            StaticType::Var(var) if self.is_number(var) => None,
+            // What its elements are isn't known yet, and they don't have to
+            // be one type, so they're not made one: `(a, b)` iterates as
+            // `Any` until `a` and `b` are known.
+            StaticType::Tuple(elements) if elements.iter().any(|e| self.has_unknowns(e)) => {
+                Some(StaticType::Any)
+            }
             StaticType::Tuple(elements) if !elements.is_empty() => {
                 let snapshot = self.snapshot();
                 if elements[1..]

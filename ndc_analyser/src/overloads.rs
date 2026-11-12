@@ -152,11 +152,9 @@ impl<'a> Overloads<'a> {
     /// The type of `symbol` as far as it's known: a parameter `g` whose type
     /// a call such as `g(1)` settled is a function from then on.
     fn type_of(self, symbol: SymbolId) -> Cow<'a, StaticType> {
-        let typ = self.types.get_type(symbol);
-        if typ.has_vars() {
-            Cow::Owned(self.vars.resolve(typ))
-        } else {
-            Cow::Borrowed(typ)
+        match self.types.callable_type(symbol) {
+            typ if typ.has_vars() => Cow::Owned(self.vars.resolve(&typ)),
+            typ => typ,
         }
     }
 
