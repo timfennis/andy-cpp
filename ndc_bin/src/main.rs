@@ -14,6 +14,7 @@ mod phase_timing;
 mod repl;
 
 mod docs;
+mod fmt;
 mod highlighter;
 #[cfg(unix)]
 mod isolation;
@@ -49,6 +50,14 @@ enum Command {
 
     /// Print the disassembled bytecode for an .ndc file
     Disassemble { file: PathBuf },
+
+    /// Format .ndc files in place, or standard input to standard output
+    Fmt {
+        files: Vec<PathBuf>,
+        /// Change nothing; list the files that aren't formatted and fail if there are any
+        #[arg(long)]
+        check: bool,
+    },
 
     /// Output the documentation optionally searched using a query string
     Docs {
@@ -110,6 +119,10 @@ enum Action {
         options: RunOptions,
     },
     DisassembleFile(PathBuf),
+    Format {
+        files: Vec<PathBuf>,
+        check: bool,
+    },
     HighlightFile(PathBuf),
     StartRepl,
     Docs {
@@ -133,6 +146,7 @@ impl TryFrom<Command> for Action {
             Command::Run { file: None, .. } => Self::StartRepl,
             Command::Lsp { stdio: _ } => Self::RunLsp,
             Command::Disassemble { file } => Self::DisassembleFile(file),
+            Command::Fmt { files, check } => Self::Format { files, check },
             Command::Highlight { file } => Self::HighlightFile(file),
             Command::Docs { query, no_color } => Self::Docs { query, no_color },
             Command::Unknown(args) => {
@@ -217,6 +231,7 @@ fn main() -> anyhow::Result<()> {
                 }
             }
         }
+        Action::Format { files, check } => fmt::run(&files, check)?,
         Action::HighlightFile(path) => {
             let string = fs::read_to_string(path)?;
 
