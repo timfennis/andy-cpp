@@ -1,0 +1,10 @@
+// A function declared in a generic function's body is compiled again for
+// each type the generic function is called with. Where it compiles the same,
+// it's the same function, so `make(1)` and `make(1.5)` return equal values.
+// expect-output: true 42
+fn make(x) {
+    x + 1;
+    fn f() => 42;
+    f
+}
+print(make(1) == make(1.5), make(1)());

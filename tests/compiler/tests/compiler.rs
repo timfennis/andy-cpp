@@ -675,3 +675,61 @@ fn temporaries_in_a_function_come_after_its_frames_own_locals() {
     written.dedup();
     assert_eq!(written, [0, 1, 2, 3, 4], "{ops:?}");
 }
+
+/// The functions `function`'s code puts on the stack, in order.
+fn nested_functions(function: &CompiledFunction) -> Vec<Rc<CompiledFunction>> {
+    function
+        .opcodes()
+        .iter()
+        .filter_map(|opcode| match opcode {
+            Constant(index)
+            | Closure {
+                constant_idx: index,
+                ..
+            } => Some(*index),
+            _ => None,
+        })
+        .filter_map(|index| match function.body().constant(index) {
+            ndc_vm::Value::Object(object) => match object.as_ref() {
+                ndc_vm::Object::Function(ndc_vm::Function::Compiled(function)) => {
+                    Some(Rc::clone(function))
+                }
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
+
+/// The compiled top-level code of `input`, with the standard library.
+fn compile_program_with_stdlib(input: &str) -> CompiledFunction {
+    let mut interp = ndc_interpreter::Interpreter::capturing();
+    interp.configure(ndc_stdlib::register);
+    interp
+        .compile_str_unoptimized(input)
+        .expect("compile failed")
+}
+
+// A generic function's declaration compiles its own body (constant 0), then
+// each instance (constant 1 for `adder` with Ints). A lambda in the body is
+// compiled with the instance: its `+` is picked for Ints there, and as the
+// program runs in the function's own body, so the two differ.
+#[test]
+fn a_function_declared_in_an_instance_uses_the_instances_picks() {
+    let program =
+        compile_program_with_stdlib("fn adder(x) { let g = fn(y) => y + 1; g(x) } adder(1);");
+    let own = nested_functions(&function_constant(&program, 0))[0].clone();
+    let instance = nested_functions(&function_constant(&program, 1))[0].clone();
+    assert!(!Rc::ptr_eq(&own, &instance));
+    assert_ne!(own.opcodes(), instance.opcodes());
+}
+
+// A function declared in an instance that compiles as it does in the
+// function's own body is the same function, so it keeps its identity.
+#[test]
+fn a_function_declared_in_an_instance_that_compiles_the_same_is_the_same() {
+    let program = compile_program_with_stdlib("fn make(x) { x + 1; fn f() => 42; f } make(1);");
+    let own = nested_functions(&function_constant(&program, 0))[0].clone();
+    let instance = nested_functions(&function_constant(&program, 1))[0].clone();
+    assert!(Rc::ptr_eq(&own, &instance));
+}
