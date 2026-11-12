@@ -29,6 +29,8 @@ pub(super) struct Scheme {
     pub(super) uses: Rc<[GenericUse]>,
     /// The function's declaration.
     pub(super) declaration: NodeId,
+    /// The calls its body makes of itself, which have its own types.
+    pub(super) recursive_calls: Rc<[NodeId]>,
 }
 
 /// A call of a generic function, or its name used as a value, which needs
@@ -230,6 +232,12 @@ impl Analyser {
             if !self.try_waiting(&mut copy) {
                 self.wait_as(copy);
             }
+        }
+        for &call in scheme.recursive_calls.iter() {
+            self.pick_tables(Some(instance)).insert(
+                CallSite::Call(call),
+                Binding::Resolved(Candidate::Scalar(instance)),
+            );
         }
         for generic_use in scheme.uses.iter() {
             let key = generic_use

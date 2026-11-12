@@ -1654,3 +1654,32 @@ fn an_instance_calls_the_instances_its_types_need() {
         "{twice:?}"
     );
 }
+
+#[test]
+fn an_instance_calls_itself_where_its_body_recurses() {
+    let globals = natives(&[
+        ("<", "(Int, Int) -> Bool"),
+        ("-", "(Int, Int) -> Int"),
+        ("+", "(Int, Int) -> Int"),
+    ]);
+    let (_, result) = analyse_with_globals(
+        "fn fib(n) => if n < 2 { n } else { fib(n - 1) + fib(n - 2) }; fib(10);",
+        globals,
+    );
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    let [instance] = &result
+        .analysis
+        .instances
+        .values()
+        .flatten()
+        .collect::<Vec<_>>()[..]
+    else {
+        panic!("one instance expected: {:?}", result.analysis.instances);
+    };
+    let calls_itself = instance
+        .bindings
+        .values()
+        .filter(|binding| **binding == Binding::Resolved(Candidate::Scalar(instance.variable)))
+        .count();
+    assert_eq!(calls_itself, 2, "{instance:?}");
+}

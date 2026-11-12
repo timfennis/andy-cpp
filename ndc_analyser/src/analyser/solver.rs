@@ -393,7 +393,7 @@ impl Analyser {
             });
         }
         self.record_pick(call.site, binding, &arguments);
-        self.flush_copies(call.site, call.span);
+        self.flush_copies(Some(call.site), call.span);
         Some(typ)
     }
 
@@ -893,7 +893,7 @@ impl Analyser {
         let typ = self.commit_call(&binding, arguments, return_type);
         self.record_pick(call.site, binding, arguments);
         if let Some(typ) = typ {
-            self.flush_copies(call.site, call.span);
+            self.flush_copies(Some(call.site), call.span);
             typ
         } else {
             self.pending.clear();
@@ -1015,9 +1015,14 @@ impl Analyser {
     }
 
     /// Adds the constraints [`Self::instantiate_function`] copied for a call
-    /// at `call`, and solves the ones it can.
-    pub(super) fn flush_copies(&mut self, site: CallSite, call: Span) {
-        self.record_uses(site);
+    /// at `call`, and solves the ones it can. A call at `site` gets the
+    /// instance its types need; a function's name used as a value, with no
+    /// `site`, stays the function itself, so two values of it are equal.
+    pub(super) fn flush_copies(&mut self, site: Option<CallSite>, call: Span) {
+        match site {
+            Some(site) => self.record_uses(site),
+            None => self.pending.uses.clear(),
+        }
         let copies = std::mem::take(&mut self.pending.copies);
         for (function, constraint, origin) in copies {
             let name = self.resolver.symbol_name(function).to_string();
@@ -1288,6 +1293,14 @@ impl Analyser {
     ) {
         if self.copied_through.is_some() {
             return;
+        }
+        // A generic function's body calls itself with its own types, so an
+        // instance's recursive call is a call of the instance.
+        if let (CallSite::Call(id), Binding::Resolved(Candidate::Scalar(callee)), None) =
+            (site, &binding, self.recording)
+            && self.declaring == Some(*callee)
+        {
+            self.recursive_calls.push(id);
         }
         match site {
             CallSite::Call(_)

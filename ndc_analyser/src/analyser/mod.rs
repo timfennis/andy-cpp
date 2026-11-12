@@ -71,6 +71,10 @@ pub struct Analyser {
     /// The generic functions the batch declares, which the batch compiles
     /// instances of.
     declared_in_batch: AHashSet<SymbolId>,
+    /// The generic function whose body is being analysed.
+    declaring: Option<SymbolId>,
+    /// The calls its body makes of itself.
+    recursive_calls: Vec<NodeId>,
     /// The calls the constraint being solved was copied through, when it's
     /// a copy of a generic function's constraint.
     copied_through: Option<Origin>,
@@ -131,6 +135,8 @@ impl Analyser {
             instances: AHashMap::new(),
             recording: None,
             declared_in_batch: AHashSet::new(),
+            declaring: None,
+            recursive_calls: Vec::new(),
             copied_through: None,
             next_serial: 0,
             watchers: AHashMap::new(),

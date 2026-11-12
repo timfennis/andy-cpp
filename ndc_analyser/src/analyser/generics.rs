@@ -144,6 +144,7 @@ impl Analyser {
                 key: key.into(),
                 uses: uses.into(),
                 declaration,
+                recursive_calls: std::mem::take(&mut self.recursive_calls).into(),
             },
         );
         self.vars.resolve(signature)
