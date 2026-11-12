@@ -84,7 +84,7 @@ impl<'a> Formatter<'a> {
             self.comments_among_statements(start, &mut head, &mut body);
             self.separate(&mut body, start);
             body.push(self.expr(statement));
-            body.push(self.trailing_comment(statement.span.end(), &Token::Semicolon));
+            body.push(self.trailing_comment(statement.span.end(), Some(&Token::Semicolon)));
         }
         self.comments_among_statements(end, &mut head, &mut body);
         (concat(head), body)
@@ -160,8 +160,8 @@ impl<'a> Formatter<'a> {
     }
 
     /// A comment on the same line as `end` with nothing between them but
-    /// `separator`, as in `let x = 1; // one`
-    fn trailing_comment(&mut self, end: usize, separator: &Token) -> Doc {
+    /// `separator`, if any, as in `let x = 1; // one`
+    fn trailing_comment(&mut self, end: usize, separator: Option<&Token>) -> Doc {
         let Some(comment) = self.source.comments.get(self.next_comment) else {
             return nil();
         };
@@ -172,7 +172,7 @@ impl<'a> Formatter<'a> {
                 .source
                 .tokens_in(between)
                 .iter()
-                .all(|token| &token.token == separator)
+                .all(|token| Some(&token.token) == separator)
         {
             return nil();
         }
@@ -502,7 +502,7 @@ impl<'a> Formatter<'a> {
             {
                 stays_broken = self.source.spans_lines(open_at..span.offset());
             }
-            let trailing = self.trailing_comment(span.end(), &Token::Comma);
+            let trailing = self.trailing_comment(span.end(), Some(&Token::Comma));
             docs.push(Rc::new(concat([doc, trailing])));
             spans.push(span);
         }
@@ -788,11 +788,17 @@ impl<'a> Formatter<'a> {
 
         let first = self.expr(leftmost);
         let mut docs = Vec::new();
+        let mut previous = leftmost;
         for (operator, right) in rest.into_iter().rev() {
+            // A comment after an operand stays on its line, before the break
+            // to the next operator. The one after the last operand is left
+            // to the code around the chain.
+            docs.push(self.trailing_comment(previous.span.end(), None));
             docs.push(line());
             docs.push(text(operator));
             docs.push(text(" "));
             docs.push(self.expr(right));
+            previous = right;
         }
         group(concat([first, indent(concat(docs))]))
     }
@@ -872,6 +878,12 @@ impl<'a> Formatter<'a> {
     /// `(a, b)`, `[a, b]` or `a, b`, as in the source
     fn sequence(&self, span: Span, items: Vec<Doc>) -> Doc {
         let (range, parentheses) = self.source.without_parentheses(span);
+        // `()` has nothing inside to unwrap
+        let parentheses = parentheses
+            || self
+                .source
+                .bracketed(&range, &Token::LeftParentheses)
+                .is_some();
         let one = items.len() == 1;
         let (open, close) = if parentheses {
             ("(", if one { ",)" } else { ")" })

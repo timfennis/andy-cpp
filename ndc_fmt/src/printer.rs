@@ -80,11 +80,7 @@ pub fn print(doc: &Doc, width: usize) -> String {
                     column += 1;
                 }
                 (Mode::Break, _) | (_, Line::Hard) => {
-                    for text in line_suffix.drain(..) {
-                        out.push_str(text);
-                    }
-                    trim_end(&mut out);
-                    out.push('\n');
+                    end_line(&mut out, &mut line_suffix, indent);
                     out.extend(std::iter::repeat_n(' ', indent));
                     column = indent;
                 }
@@ -92,11 +88,7 @@ pub fn print(doc: &Doc, width: usize) -> String {
         }
     }
 
-    for text in line_suffix {
-        out.push_str(text);
-    }
-    trim_end(&mut out);
-    out.push('\n');
+    end_line(&mut out, &mut line_suffix, 0);
     out
 }
 
@@ -154,6 +146,22 @@ fn fits(doc: &Doc, width: usize, rest: &Stack<'_>) -> bool {
             Doc::LineSuffix(_) | Doc::BreakParent => {}
         }
     }
+}
+
+/// Ends the line with the comments waiting for its end. A second comment
+/// can't follow the first on the line, as it would become part of it, so it
+/// goes on a line of its own at `indent`.
+fn end_line(out: &mut String, line_suffix: &mut Vec<&str>, indent: usize) {
+    for (i, text) in line_suffix.drain(..).enumerate() {
+        if i > 0 {
+            trim_end(out);
+            out.push('\n');
+            out.extend(std::iter::repeat_n(' ', indent));
+        }
+        out.push_str(if i > 0 { text.trim_start() } else { text });
+    }
+    trim_end(out);
+    out.push('\n');
 }
 
 fn trim_end(out: &mut String) {
@@ -217,6 +225,18 @@ mod tests {
         let long = format!("\"ab\n{}\"", "x".repeat(100));
         let doc = concat([call(&[&long, "a"]), text(";")]);
         assert_eq!(print(&doc, 20), format!("f({long}, a);\n"));
+    }
+
+    #[test]
+    fn a_second_line_suffix_goes_on_a_line_of_its_own() {
+        let doc = indent(concat([
+            text("a"),
+            Doc::LineSuffix(" // one".into()),
+            Doc::LineSuffix(" // two".into()),
+            hardline(),
+            text("b"),
+        ]));
+        assert_eq!(print(&doc, 80), "a // one\n    // two\n    b\n");
     }
 
     #[test]

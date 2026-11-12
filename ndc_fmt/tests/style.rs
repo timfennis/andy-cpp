@@ -156,10 +156,18 @@ fn a_comment_breaks_everything_around_it() {
 }
 
 #[test]
-fn the_manual_example() {
+fn a_comment_after_an_operand_stays_on_its_line() {
     assert_formats(
-        "let   xs =[1,2 ,3];\nfn double(x) => { x*2 }\n",
-        "let xs = [1, 2, 3];\nfn double(x) { x * 2 }\n",
+        "let x = 1 // first\n    + 2; // second\n",
+        "let x = 1 // first\n    + 2; // second\n",
+    );
+}
+
+#[test]
+fn empty_destructuring_keeps_its_brackets() {
+    assert_formats(
+        "let () = ();\nlet [] = [];\n() = ();\n",
+        "let () = ();\nlet [] = [];\n() = ();\n",
     );
 }
 
