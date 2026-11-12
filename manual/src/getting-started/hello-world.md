@@ -14,3 +14,11 @@ In Andy C++ we don't need a main function. Semicolons are mandatory, just like t
 $ ndc hello.ndc
 Hello, world!
 ```
+
+You can also pass a program on the command line with `--eval` (or `-e`), without
+creating a file. Errors in it are reported against `<eval>`:
+
+```bash
+$ ndc run --eval 'print("Hello, world!");'
+Hello, world!
+```

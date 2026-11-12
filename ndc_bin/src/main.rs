@@ -36,6 +36,9 @@ enum Command {
     /// Execute an .ndc file or start the repl (this default action may be omitted)
     Run {
         file: Option<PathBuf>,
+        /// Run SOURCE as the program instead of reading a file
+        #[arg(short, long, value_name = "SOURCE", conflicts_with = "file")]
+        eval: Option<String>,
         #[command(flatten)]
         options: RunOptions,
     },
@@ -107,15 +110,24 @@ impl Default for Command {
     fn default() -> Self {
         Self::Run {
             file: None,
+            eval: None,
             options: RunOptions::default(),
         }
     }
 }
 
+/// Where the program to run comes from.
+#[derive(Debug, PartialEq, Eq)]
+enum Program {
+    File(PathBuf),
+    /// Source passed on the command line with `--eval`
+    Eval(String),
+}
+
 enum Action {
     RunLsp,
-    RunFile {
-        path: PathBuf,
+    Run {
+        program: Program,
         options: RunOptions,
     },
     DisassembleFile(PathBuf),
@@ -139,11 +151,20 @@ impl TryFrom<Command> for Action {
             Command::Run {
                 file: Some(file),
                 options,
-            } => Self::RunFile {
-                path: file,
+                ..
+            } => Self::Run {
+                program: Program::File(file),
                 options,
             },
-            Command::Run { file: None, .. } => Self::StartRepl,
+            Command::Run {
+                eval: Some(source),
+                options,
+                ..
+            } => Self::Run {
+                program: Program::Eval(source),
+                options,
+            },
+            Command::Run { .. } => Self::StartRepl,
             Command::Lsp { stdio: _ } => Self::RunLsp,
             Command::Disassemble { file } => Self::DisassembleFile(file),
             Command::Fmt { files, check } => Self::Format { files, check },
@@ -155,8 +176,8 @@ impl TryFrom<Command> for Action {
                 )
                 .map_err(|err| anyhow!(err.render().to_string()))?;
 
-                Self::RunFile {
-                    path: implicit_run.file,
+                Self::Run {
+                    program: Program::File(implicit_run.file),
                     options: implicit_run.options,
                 }
             }
@@ -171,13 +192,18 @@ fn main() -> anyhow::Result<()> {
     let action: Action = cli.command.unwrap_or_default().try_into()?;
 
     match action {
-        Action::RunFile { path, options } => {
-            let filename = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .map(|string| string.to_string());
-
-            let string = fs::read_to_string(path)?;
+        Action::Run { program, options } => {
+            let (name, string) = match program {
+                Program::File(path) => {
+                    let name = path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or("<input>")
+                        .to_string();
+                    (name, fs::read_to_string(path)?)
+                }
+                Program::Eval(source) => ("<eval>".to_string(), source),
+            };
 
             let mut interpreter = Interpreter::one_shot();
             interpreter.configure(ndc_stdlib::register);
@@ -203,7 +229,6 @@ fn main() -> anyhow::Result<()> {
                 }
             }
 
-            let name = filename.as_deref().unwrap_or("<input>");
             if options.time {
                 match interpreter.eval_named_with_timings(name, &string) {
                     Ok((_, timings)) => {
@@ -271,7 +296,17 @@ mod test {
     use clap::CommandFactory;
     use std::path::PathBuf;
 
-    use crate::{Action, Cli, Command};
+    use clap::Parser;
+
+    use crate::{Action, Cli, Command, Program};
+
+    fn parse(args: &[&str]) -> Result<Action, String> {
+        let cli = Cli::try_parse_from(args).map_err(|err| err.to_string())?;
+        cli.command
+            .unwrap_or_default()
+            .try_into()
+            .map_err(|err: anyhow::Error| err.to_string())
+    }
 
     #[test]
     fn test_clap() {
@@ -287,11 +322,32 @@ mod test {
         .expect("implicit run flags should parse");
 
         match action {
-            Action::RunFile { path, options } => {
-                assert_eq!(path, PathBuf::from("script.ndc"));
+            Action::Run { program, options } => {
+                assert_eq!(program, Program::File(PathBuf::from("script.ndc")));
                 assert!(options.time);
             }
             _ => panic!("expected run action"),
         }
+    }
+
+    #[test]
+    fn run_eval_runs_the_given_source() {
+        for flag in ["--eval", "-e"] {
+            match parse(&["ndc", "run", flag, "print(1);", "--time"]) {
+                Ok(Action::Run { program, options }) => {
+                    assert_eq!(program, Program::Eval("print(1);".to_string()));
+                    assert!(options.time);
+                }
+                _ => panic!("expected run action for {flag}"),
+            }
+        }
+    }
+
+    #[test]
+    fn run_eval_conflicts_with_a_file() {
+        let err = parse(&["ndc", "run", "script.ndc", "--eval", "print(1);"])
+            .err()
+            .expect("a file and --eval together should be rejected");
+        assert!(err.contains("cannot be used with"), "{err}");
     }
 }
