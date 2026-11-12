@@ -226,7 +226,7 @@ impl TypeVars {
     /// What the unsettled literal type `var` could be when nothing says
     /// otherwise, best first. `None` if that isn't known yet: a list of
     /// numbers is a list of whatever the numbers are, which is up to them.
-    pub(crate) fn literal_defaults(&self, var: TypeVar) -> Option<Vec<StaticType>> {
+    pub(crate) fn literal_defaults(&mut self, var: TypeVar) -> Option<Vec<StaticType>> {
         let mut defaults = Vec::new();
         let mut waits = false;
         let mut unknown = None;
@@ -272,8 +272,38 @@ impl TypeVars {
             // the literal's type with a default it doesn't take falls back
             // to.
             defaults.push(unknown.unwrap_or(StaticType::Any));
+        } else if !defaults.contains(&StaticType::Any) && self.a_literal_holds_any(var) {
+            // A literal whose values share no type is held as `Any`, which
+            // any literal can be too: after `let v = [1, "a"]`, `v = ["b"]`
+            // holds `Any`s like `v` does.
+            defaults.push(StaticType::Any);
         }
         Some(defaults)
+    }
+
+    /// Whether a literal whose values `var` holds holds values that share no
+    /// type, as `[1, "a"]` does, and is held as `Any` on its own.
+    fn a_literal_holds_any(&mut self, var: TypeVar) -> bool {
+        let mut literals = Vec::new();
+        for bound in &self.bounds[var.0 as usize] {
+            match bound {
+                Bound::Holds(held, literal, _) => match literals
+                    .iter_mut()
+                    .find(|(found, _): &&mut (TypeVar, Vec<StaticType>)| found == literal)
+                {
+                    Some((_, held_by_it)) => held_by_it.push(held.clone()),
+                    None => literals.push((*literal, vec![held.clone()])),
+                },
+                // A number literal is a number.
+                Bound::Number(..) => {}
+            }
+        }
+        literals.into_iter().any(|(_, held)| {
+            let snapshot = self.snapshot();
+            let shared = held[1..].iter().all(|other| self.unify(&held[0], other));
+            self.rollback(snapshot);
+            !shared
+        })
     }
 
     /// Whether the unsettled literal type `var` could still be settled as
