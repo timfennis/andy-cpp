@@ -1,0 +1,10 @@
+// `outer` doesn't check anything itself, but its instance for a
+// `List<Int>` calls the instance of `has` that checks `v` for an Int.
+// expect-error: expected Int but found String
+fn has(xs, v) { xs.contains(v) }
+pure fn outer(xs, v) { has(xs, v) }
+let anything: List<Any> = [];
+let numbers: List<Int> = [];
+let a: Any = "s";
+print(outer(anything, a));
+print(outer(numbers, a));
