@@ -102,7 +102,7 @@ let name: String = "world";
 let xs: List<Int> = [1, 2, 3];
 ```
 
-A subtype is fine. All concrete types fit where `Any` is requested:
+Every value fits where `Any` is requested:
 
 ```ndc
 let n: Number = 3n;

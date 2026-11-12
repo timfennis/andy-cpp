@@ -2,7 +2,7 @@
 
 Andy C++ runs as a dynamically typed language — values carry their types at runtime and most checking happens then. You can also attach type annotations to variables, function parameters, and return values, and the analyser will use them to flag obvious mismatches before the program runs.
 
-The type system is hierarchical with `Any` at the root:
+Every value is an `Any`. The other types are:
 
 * `Any`
   * [`Option<T>`](./types/option.md)
@@ -57,6 +57,14 @@ xs.push("three");
 let mixed = [1, "a"];             // List<Any>
 ```
 
+The branches of an `if` work the same way. They're one type when they can be, with literals taking the other branch's type, and `Any` when they can't:
+
+```ndc
+let a = if true { 1 } else { 2.5 };   // Float
+let b = if true { 1 } else { "a" };   // Any
+let c = if true { [] } else { [1] };  // List<Int>
+```
+
 [Struct](./types/struct.md) names are type names like any other, including inside generics:
 
 ```ndc
@@ -71,7 +79,7 @@ used before (or inside) its own declaration, and it goes out of scope together w
 block or function that declared it. See [Struct](./types/struct.md) for the scoping
 rules.
 
-> **Note:** `Any` is the base type for every other type, so an `Any`-annotated binding will accept anything. When a value has no annotation and the analyser can't infer a type, it falls back to `Any`. A parameter of a function declared in the program gets the type of each call's argument instead (see [Generic functions](./types/function.md#generic-functions)). There is also a `Never` type used internally for things like `break` that don't produce a value — you'll rarely need to write it by hand.
+> **Note:** every value fits `Any`, so an `Any`-annotated binding will accept anything. When a value has no annotation and the analyser can't infer a type, it falls back to `Any`. A parameter of a function declared in the program gets the type of each call's argument instead (see [Generic functions](./types/function.md#generic-functions)). There is also a `Never` type used internally for things like `break` that don't produce a value — you'll rarely need to write it by hand.
 
 ### Using an `Any` value where a type is expected
 

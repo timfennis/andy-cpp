@@ -245,9 +245,10 @@ impl<'a> Overloads<'a> {
     ///      position and no looser scalar competes. Returns
     ///      `Binding::Resolved(Vec)`, return type = `Tuple<scalar_return; n>`.
     ///   3. **Loose scalar or vec candidates** — returns
-    ///      `Binding::Dynamic(candidates)`, return type = LUB of contributions
-    ///      (pure-scalar LUBs declared returns; pure-vec LUBs per position and
-    ///      wraps in `Tuple<…>`; mixed scalar+vec collapses to `Any`).
+    ///      `Binding::Dynamic(candidates)`, return type = the join of the
+    ///      contributions (pure-scalar joins the declared returns; pure-vec
+    ///      joins per position and wraps in `Tuple<…>`; mixed scalar+vec
+    ///      collapses to `Any`).
     ///   4. **Same-name callables, no signature match** — last-resort
     ///      fallback so `Any`-typed callees still get a candidate list.
     ///      Returns `Binding::Dynamic`, return type = `Any`.
@@ -667,14 +668,14 @@ impl<'a> Overloads<'a> {
         }
     }
 
-    /// LUB the return types of a list of scalar candidates. Used when every
+    /// Join the return types of a list of scalar candidates. Used when every
     /// candidate in a Dynamic binding came from the compat-filtered walk and
     /// is therefore guaranteed to be a function.
-    fn lub_scalar_returns(self, symbols: &[SymbolId]) -> StaticType {
+    fn join_scalar_returns(self, symbols: &[SymbolId]) -> StaticType {
         symbols
             .iter()
             .map(|&symbol| self.scalar_return_type(symbol))
-            .reduce(|a, b| a.lub(&b))
+            .reduce(|a, b| a.join(&b))
             .unwrap_or(StaticType::Any)
     }
 
@@ -687,14 +688,14 @@ impl<'a> Overloads<'a> {
     ) -> StaticType {
         let has_scalar = !scalar_loose.is_empty();
 
-        // Pure scalar: LUB the declared returns. This is the precision-recovery
-        // case PR #140 had to widen to `Any` for soundness; routing it through
-        // the LUB now is safe because we know none of the candidates can vec.
+        // Pure scalar: join the declared returns. This is the precision-recovery
+        // case PR #140 had to widen to `Any` for soundness; joining them now is
+        // safe because we know none of the candidates can vec.
         if has_scalar && vec_resolution.is_none() {
-            return self.lub_scalar_returns(scalar_loose);
+            return self.join_scalar_returns(scalar_loose);
         }
 
-        // Pure static vec: per-position LUB → Tuple<…> of element returns.
+        // Pure static vec: per-position join → Tuple<…> of element returns.
         if !has_scalar
             && let Some(VecResolution::Static {
                 axis_len,
@@ -703,16 +704,16 @@ impl<'a> Overloads<'a> {
         {
             let elements: Vec<StaticType> = positions
                 .iter()
-                .map(|pos| self.lub_scalar_returns(pos))
+                .map(|pos| self.join_scalar_returns(pos))
                 .collect();
             debug_assert_eq!(elements.len(), *axis_len);
             return StaticType::Tuple(elements);
         }
 
         // Mixed scalar+vec, Any-fallback vec, or empty (defensive): the
-        // result has no useful upper bound — widen to `Any`. `LUB(scalar,
-        // Tuple<…>)` collapses to `Any` in our lattice anyway, so there's
-        // nothing more precise to compute for the mixed case.
+        // result has no type in common — widen to `Any`. A scalar and a
+        // `Tuple<…>` join as `Any` anyway, so there's nothing more precise to
+        // compute for the mixed case.
         StaticType::Any
     }
 }
@@ -902,7 +903,8 @@ mod tests {
             foos.iter()
                 .all(|&foo| picked.contains(&Candidate::Scalar(foo)))
         );
-        assert_eq!(resolved.return_type, list_of(StaticType::Any));
+        // A List<Int> and a List<String> have no type in common but `Any`.
+        assert_eq!(resolved.return_type, StaticType::Any);
     }
 
     #[test]

@@ -8,7 +8,7 @@ Andy C++ exposes three sibling numeric types:
 * `Float` stores an IEEE 754 `f64`.
 * `Number` supports arbitrary-size integers, exact rational values, floats, and complex values.
 
-`Int`, `Float`, and `Number` share `Any` as their nearest common supertype. An `Int` value does not satisfy a `Number` annotation. Use an `n` literal or the `Number` constructor when you need the advanced mode:
+`Int`, `Float`, and `Number` are separate types, which have only `Any` in common. An `Int` value does not satisfy a `Number` annotation. Use an `n` literal or the `Number` constructor when you need the advanced mode:
 
 ```ndc
 let count: Int = 42;

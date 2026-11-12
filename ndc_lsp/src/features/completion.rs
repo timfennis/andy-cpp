@@ -197,11 +197,11 @@ fn group_overloads<'a>(
 /// candidate subsuming all others wins); `[Int, Float, Number]` ->
 /// `Int | Float | Number` (no candidate subsumes the others).
 fn merged_type_display(candidates: &[&StaticType]) -> String {
-    if let Some(supertype) = candidates
+    if let Some(widest) = candidates
         .iter()
         .find(|t| candidates.iter().all(|c| c.fits(t)))
     {
-        return supertype.to_string();
+        return widest.to_string();
     }
     candidates
         .iter()

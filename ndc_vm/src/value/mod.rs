@@ -44,7 +44,7 @@ fn bounded_element_type<'a>(
         }
         let found = value.static_type_with_budget(depth, budget);
         element_type = Some(match element_type {
-            Some(previous) => previous.lub(&found),
+            Some(previous) => previous.join(&found),
             None => found,
         });
     }
@@ -277,7 +277,7 @@ impl Value {
     /// # Performance
     ///
     /// **O(n) for `List`, `Map`, and `Deque`** — these variants iterate all
-    /// elements to compute the element type via `lub`.  Avoid calling this in
+    /// elements to join their types into the element type.  Avoid calling this in
     /// hot paths on container values.  Use the dedicated helpers instead:
     ///
     /// - [`Value::is_number`] — O(1) check for numeric types
@@ -325,26 +325,12 @@ impl Value {
     /// When `param` is a container type whose inner types are all `Any` (e.g.
     /// `Sequence(Any)`, `Map { Any, Any }`, `List(Any)`), only the outer kind is
     /// checked — no element iteration occurs. Typed container parameters are
-    /// rejected rather than scanned; the remaining cases fall back to
-    /// `self.static_type().is_subtype(param)`.
+    /// rejected rather than scanned; the remaining cases are checked as
+    /// [`Value::is_a`] does.
     pub fn matches_param(&self, param: &StaticType) -> bool {
         match param {
             // A type parameter like `T` in `push<T>(List<T>, T)` takes any value.
             param if param.is_unknown() => true,
-            // What a function takes and returns can't be checked as the
-            // program runs, only how many arguments it takes.
-            StaticType::Function {
-                parameters: expected,
-                ..
-            } => match self.static_type() {
-                StaticType::Function {
-                    parameters: takes, ..
-                } => match (expected, takes) {
-                    (Some(expected), Some(takes)) => expected.len() == takes.len(),
-                    _ => true,
-                },
-                _ => false,
-            },
             StaticType::Int => {
                 matches!(self, Self::Int(_))
             }
@@ -363,6 +349,21 @@ impl Value {
             StaticType::Map { key, value } if key.is_unknown() && value.is_unknown() => {
                 matches!(self, Self::Object(o) if matches!(o.as_ref(), Object::Map { .. }))
             }
+            StaticType::MinHeap(t) if t.is_unknown() => {
+                matches!(self, Self::Object(o) if matches!(o.as_ref(), Object::MinHeap(_)))
+            }
+            StaticType::MaxHeap(t) if t.is_unknown() => {
+                matches!(self, Self::Object(o) if matches!(o.as_ref(), Object::MaxHeap(_)))
+            }
+            // An option holds at most one value, which is cheap to check.
+            StaticType::Option(t) => match self {
+                Self::None => true,
+                Self::Object(o) => match o.as_ref() {
+                    Object::Some(value) => value.matches_param(t),
+                    _ => false,
+                },
+                _ => false,
+            },
             StaticType::Sequence(t) if t.is_unknown() => {
                 matches!(self, Self::Object(o) if matches!(
                     o.as_ref(),
@@ -383,8 +384,34 @@ impl Value {
             | StaticType::Deque(_)
             | StaticType::Sequence(_)
             | StaticType::Map { .. }
-            | StaticType::Tuple(_) => false,
-            _ => self.static_type().is_subtype(param),
+            | StaticType::Tuple(_)
+            | StaticType::MinHeap(_)
+            | StaticType::MaxHeap(_) => false,
+            _ => self.is_a(param),
+        }
+    }
+
+    /// Whether this value is a `target`, a type that holds no other values
+    /// as a container does: a scalar, a struct, a function or an iterator.
+    /// What a function takes and returns can't be checked as the program
+    /// runs, only how many arguments it takes, and what an iterator makes
+    /// can't be either without making it.
+    fn is_a(&self, target: &StaticType) -> bool {
+        match (target, self.static_type()) {
+            (
+                StaticType::Function {
+                    parameters: expected,
+                    ..
+                },
+                StaticType::Function {
+                    parameters: takes, ..
+                },
+            ) => match (expected, takes) {
+                (Some(expected), Some(takes)) => expected.len() == takes.len(),
+                _ => true,
+            },
+            (StaticType::Iterator(element), StaticType::Iterator(_)) => element.is_unknown(),
+            (target, found) => found == *target,
         }
     }
 
@@ -488,7 +515,7 @@ impl Value {
                         .borrow()
                         .iter()
                         .all(|value| value.conforms_to_cached(element, cache)),
-                    Object::String(_) => StaticType::String.is_subtype(element),
+                    Object::String(_) => StaticType::String.fits(element),
                     Object::Map { entries, .. } => {
                         entries
                             .borrow()
@@ -537,7 +564,7 @@ impl Value {
                 {
                     false
                 }
-                _ => self.static_type().is_subtype(target),
+                _ => self.is_a(target),
             },
         };
 
@@ -664,8 +691,8 @@ impl Object {
     /// Returns the best static type descriptor for this runtime value.
     ///
     /// `[1, 2]` reports `List<Int>` and `%{"a": 1}` reports `Map<String, Int>`:
-    /// lists and deques join their element types into a least upper bound, while
-    /// maps do so separately for keys and values. Tuples preserve each position's
+    /// lists and deques join their element types, the type they share or else
+    /// `Any`, while maps do so separately for keys and values. Tuples preserve each position's
     /// type, and `Some` wraps the type of its inner value. Empty lists, deques, and
     /// maps report `Any` for the types they cannot infer.
     ///
@@ -739,11 +766,11 @@ impl Object {
                     }
                     let found_value = value.static_type_with_budget(depth - 1, budget);
                     key_type = Some(match key_type {
-                        Some(previous) => previous.lub(&found_key),
+                        Some(previous) => previous.join(&found_key),
                         None => found_key,
                     });
                     value_type = Some(match value_type {
-                        Some(previous) => previous.lub(&found_value),
+                        Some(previous) => previous.join(&found_value),
                         None => found_value,
                     });
                 }
