@@ -1,0 +1,8 @@
+// `pick`'s body makes `x` an Int, so a call decided as the program runs
+// tells it apart from the `Any` fallback, as a call with known types does.
+// expect-output: 1 fallback 1
+fn need_int(x: Int) => x;
+fn pick(x) => need_int(x);
+fn pick(x: Any) => "fallback";
+fn via(x: Any) => pick(x);
+print(via(1), via("a"), pick(1));

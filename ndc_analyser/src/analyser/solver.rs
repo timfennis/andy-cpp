@@ -143,7 +143,9 @@ impl Constraint {
 #[derive(Debug, Clone)]
 pub(super) struct Frame {
     /// The generic function called.
-    pub(super) function: String,
+    pub(super) function: SymbolId,
+    /// Its name, for errors.
+    pub(super) name: String,
     /// The call.
     pub(super) call: Span,
 }
@@ -976,14 +978,24 @@ impl Analyser {
         let declared = self.vars.resolve(self.types.get_type(symbol));
         let mut made = Vec::new();
         let typ = self.vars.instantiate_with(&declared, &mut made);
-        if let Some(scheme) = self.schemes.get(&symbol).cloned() {
-            let function = self.resolver.symbol_name(symbol).to_string();
+        // A copy of a function's own constraint that calls the function
+        // again, as a recursive call its body couldn't decide does, is
+        // checked by the copies the outer call already made: recursion
+        // doesn't change the types.
+        let recursive = self
+            .copied_through
+            .iter()
+            .flat_map(|frames| frames.iter())
+            .any(|frame| frame.function == symbol);
+        if let Some(scheme) = self.schemes.get(&symbol).cloned()
+            && !recursive
+        {
             for waiting in scheme.iter() {
                 let constraint = waiting
                     .constraint
                     .map_types(&mut |typ| self.vars.instantiate_with(typ, &mut made));
                 self.pending_copies
-                    .push((function.clone(), constraint, waiting.origin.clone()));
+                    .push((symbol, constraint, waiting.origin.clone()));
             }
         }
         typ
@@ -994,11 +1006,16 @@ impl Analyser {
     pub(super) fn flush_copies(&mut self, call: Span) {
         let copies = std::mem::take(&mut self.pending_copies);
         for (function, constraint, origin) in copies {
+            let name = self.resolver.symbol_name(function).to_string();
             let frames = self
                 .copied_through
                 .iter()
                 .flat_map(|outer| outer.iter().cloned())
-                .chain(std::iter::once(Frame { function, call }))
+                .chain(std::iter::once(Frame {
+                    function,
+                    name,
+                    call,
+                }))
                 .chain(origin.iter().flat_map(|inner| inner.iter().cloned()))
                 .collect::<Vec<_>>();
             let mut waiting = Waiting {

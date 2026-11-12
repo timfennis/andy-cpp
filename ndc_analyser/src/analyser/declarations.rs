@@ -63,9 +63,9 @@ impl Analyser {
                 .collect(),
         );
         let annotated_return = self.lower_annotation(return_annotation);
-        // A named function's value is checked as the program runs against
-        // what its annotations say, as its body is compiled once for every
-        // type it's called with.
+        // Until the body says more, a named function's value takes what its
+        // annotations say, as its body is compiled once for every type it's
+        // called with.
         let runtime_parameters = match declared {
             Some(_) => Some(
                 annotations
@@ -193,6 +193,28 @@ impl Analyser {
                     .analysis
                     .inferred_return_types
                     .insert(id, inferred_return.clone());
+            }
+        }
+
+        // A named function's value is checked as the program runs against
+        // what it takes, as far as that can be checked: its body may have
+        // made an unannotated parameter an Int.
+        if declared.is_some()
+            && let StaticType::Function {
+                parameters: Some(parameters),
+                ..
+            } = self.vars.resolve(&function_type)
+            && let Some(StaticType::Function {
+                parameters: Some(runtime),
+                ..
+            }) = self.result.analysis.function_types.get_mut(&id)
+        {
+            for ((runtime, parameter), annotation) in
+                runtime.iter_mut().zip(parameters).zip(&annotations)
+            {
+                if annotation.is_none() {
+                    *runtime = checkable_as_the_program_runs(&parameter);
+                }
             }
         }
 
@@ -376,5 +398,33 @@ impl Analyser {
         for pattern in patterns {
             self.declare_binding_pattern(pattern, None, StaticType::Any, span);
         }
+    }
+}
+
+/// What the program can check about a value of type `typ` as it runs: the
+/// kind of value, but not what a container holds, and nothing about a type
+/// parameter, which takes anything. `List<Int>` is checked as a list.
+fn checkable_as_the_program_runs(typ: &StaticType) -> StaticType {
+    let any = || Box::new(StaticType::Any);
+    match typ {
+        StaticType::Var(_) | StaticType::Generic(_) | StaticType::Tuple(_) => StaticType::Any,
+        StaticType::List(_) => StaticType::List(any()),
+        StaticType::Deque(_) => StaticType::Deque(any()),
+        StaticType::Sequence(_) => StaticType::Sequence(any()),
+        StaticType::Iterator(_) => StaticType::Iterator(any()),
+        StaticType::MinHeap(_) => StaticType::MinHeap(any()),
+        StaticType::MaxHeap(_) => StaticType::MaxHeap(any()),
+        StaticType::Option(_) => StaticType::Option(any()),
+        StaticType::Map { .. } => StaticType::Map {
+            key: any(),
+            value: any(),
+        },
+        StaticType::Function { parameters, .. } => StaticType::Function {
+            parameters: parameters
+                .as_ref()
+                .map(|parameters| vec![StaticType::Any; parameters.len()]),
+            return_type: any(),
+        },
+        other => other.clone(),
     }
 }

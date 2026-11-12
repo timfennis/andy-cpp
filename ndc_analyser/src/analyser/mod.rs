@@ -55,8 +55,8 @@ pub struct Analyser {
     /// copies with the types it's called with.
     schemes: AHashMap<SymbolId, Rc<[Waiting]>>,
     /// The constraints a call just copied from a generic function, with the
-    /// function's name, until the call is known to commit to it.
-    pending_copies: Vec<(String, Constraint, Option<Origin>)>,
+    /// function, until the call is known to commit to it.
+    pending_copies: Vec<(SymbolId, Constraint, Option<Origin>)>,
     /// The calls the constraint being solved was copied through, when it's
     /// a copy of a generic function's constraint.
     copied_through: Option<Origin>,
@@ -172,11 +172,9 @@ impl Analyser {
     /// reported there, with notes pointing into the function.
     fn emit(&mut self, err: AnalysisError) {
         let err = match &self.copied_through {
-            Some(frames) => err.through_calls(
-                frames
-                    .iter()
-                    .map(|frame| (frame.function.as_str(), frame.call)),
-            ),
+            Some(frames) => {
+                err.through_calls(frames.iter().map(|frame| (frame.name.as_str(), frame.call)))
+            }
             None => err,
         };
         self.result.errors.push(err);

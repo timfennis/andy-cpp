@@ -1,0 +1,6 @@
+// The recursive call could mean either `f`, so it waits until `f` is
+// called. Checking it with the call's types doesn't check `f` again.
+// expect-output: a 1
+fn f(x: Int) => x;
+fn f(x) => if true { x } else { f(x) };
+print(f("a"), f(1));
