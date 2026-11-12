@@ -124,10 +124,18 @@ impl NumberLexer for Lexer<'_> {
                     self.source.next();
                     buf.push(c);
                 }
-                // A `_` inside a number is ignored unless it's after a `.`
+                '_' if is_float => {
+                    let span = self.source.span();
+                    self.source.next();
+                    return Err(Error::text(
+                        "underscores are not allowed in the fractional part of a number"
+                            .to_string(),
+                        span,
+                    ));
+                }
+                // Ignore separators in the whole part.
                 '_' => {
                     self.source.next();
-                    // ignore underscore for nice number formatting
                 }
                 '.' if !is_float => {
                     // if we find a dot we're likely dealing with a float, but it could
@@ -263,6 +271,34 @@ mod tests {
         Lexer::new(source, SourceId::SYNTHETIC)
             .next()
             .expect("literal should produce a lexer result")
+    }
+
+    #[test]
+    fn fractional_underscores_are_rejected_at_the_separator() {
+        for (source, expected_range) in [("1.0_0", 3..4), ("1_000.2_n", 7..8), ("0.5_i", 3..4)] {
+            let error = lex_one(source).expect_err("fractional separator should be invalid");
+
+            assert_eq!(
+                error.to_string(),
+                "underscores are not allowed in the fractional part of a number",
+                "unexpected diagnostic for {source}"
+            );
+            assert_eq!(error.location().range(), expected_range, "{source}");
+        }
+    }
+
+    #[test]
+    fn whole_part_underscores_remain_valid() {
+        for (source, expected) in [
+            ("1_000", NumericLiteral::Int64(1000)),
+            ("1_000.25", NumericLiteral::Float64(1000.25)),
+            ("1_000.25n", NumericLiteral::NumberFloat(1000.25)),
+            ("0xFF_FF", NumericLiteral::Int64(65535)),
+        ] {
+            let token = lex_one(source).expect("whole-part separator should be valid");
+            assert_eq!(token.token, Token::NumericLiteral(expected), "{source}");
+            assert_eq!(token.span.range(), 0..source.len(), "{source}");
+        }
     }
 
     #[test]
