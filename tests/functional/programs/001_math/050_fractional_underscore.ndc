@@ -1,0 +1,2 @@
+// expect-error: underscores are not allowed in the fractional part of a number
+print(1.0_0);

@@ -21,6 +21,8 @@ print(Number(42.0) == 42.0n);  // true
 
 ## Literals
 
+Use `_` to group digits in an integer or in the whole part of a decimal literal, as in `1_000` or `1_000.25`. The fractional part accepts digits only.
+
 The `n` suffix creates a `Number` from a decimal integer or float. Binary, octal, and hexadecimal integers also accept it:
 
 ```ndc
