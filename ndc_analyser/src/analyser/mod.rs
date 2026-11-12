@@ -78,6 +78,10 @@ pub struct Analyser {
     /// The calls the constraint being solved was copied through, when it's
     /// a copy of a generic function's constraint.
     copied_through: Option<Origin>,
+    /// Where a value of type `Any` is checked as the program runs, and the
+    /// type it's checked against, which may still have variables in it, by
+    /// the instance whose body checks it, or `None` for code compiled once.
+    checks: Vec<(Option<SymbolId>, NodeId, StaticType)>,
     /// The number the next waiting constraint gets.
     next_serial: u64,
     /// The waiting constraints that each unsettled variable would let make
@@ -95,10 +99,9 @@ pub struct Analyser {
     /// What each struct's type symbol stands for, so `p: Point` lowers to
     /// `Point`'s struct type. Every other type name is built in.
     struct_types: AHashMap<SymbolId, Rc<StructInfo>>,
-    /// Stack of explicit `return` types for each enclosing function scope.
-    /// Pushed on function entry, popped on exit. The value accumulates the
-    /// lub of all `return <expr>` types seen so far.
-    return_type_stack: Vec<Option<StaticType>>,
+    /// What each enclosing function returns with `return`, innermost last.
+    /// Pushed on function entry, popped on exit.
+    return_type_stack: Vec<Returns>,
     /// How many loops enclose the expression being analysed in the current
     /// function, so `break` and `continue` outside of one are reported.
     loop_depth: usize,
@@ -110,6 +113,15 @@ pub struct Analyser {
     /// How many resolver scopes earlier batches created. The current batch's
     /// scopes come after them.
     laid_out_scopes: usize,
+}
+
+/// What a function returns.
+#[derive(Debug)]
+pub(super) struct Returns {
+    /// Its annotated return type.
+    annotated: Option<StaticType>,
+    /// The type its values have in common, without an annotation.
+    joined: Option<StaticType>,
 }
 
 impl Analyser {
@@ -138,6 +150,7 @@ impl Analyser {
             declaring: None,
             recursive_calls: Vec::new(),
             copied_through: None,
+            checks: Vec::new(),
             next_serial: 0,
             watchers: AHashMap::new(),
             watched_settlings: 0,
@@ -169,6 +182,21 @@ impl Analyser {
         }
         self.failed_reads.clear();
         self.types.resolve_all(&self.vars);
+        for (instance, node, expected) in std::mem::take(&mut self.checks) {
+            let expected = self
+                .vars
+                .resolve(&expected)
+                .replace(&|part| matches!(part, StaticType::Generic(_)).then_some(StaticType::Any));
+            if expected == StaticType::Any {
+                continue;
+            }
+            let checks = match instance.and_then(|instance| self.picks.instances.get_mut(&instance))
+            {
+                Some(picks) => &mut picks.type_checks,
+                None => &mut self.result.analysis.type_checks,
+            };
+            checks.insert(node, expected);
+        }
         let analysis = &mut self.result.analysis;
         for table in [
             &mut analysis.expr_types,
@@ -190,6 +218,18 @@ impl Analyser {
         );
         self.laid_out_scopes = self.resolver.scope_count();
         result
+    }
+
+    /// Records that the value of type `Any` at `node` is checked to be an
+    /// `expected` as the program runs, in the instance whose constraints are
+    /// being solved, if any. A function's own body checks its type
+    /// parameters as `Any`. A copy of a constraint checks nothing, as its
+    /// node is in the body of the function it was copied from, which the
+    /// instance for the call checks.
+    pub(super) fn expect(&mut self, node: NodeId, expected: StaticType) {
+        if self.copied_through.is_none() {
+            self.checks.push((self.recording, node, expected));
+        }
     }
 
     /// Records an analysis error. The analyser continues with a fallback type
@@ -463,11 +503,11 @@ impl Analyser {
             | Expression::MethodCall {
                 function,
                 arguments,
-            } => self.analyse_call(function, arguments, CallKind::Regular, *span),
+            } => self.analyse_call(*id, function, arguments, CallKind::Regular, *span),
             Expression::OperatorCall {
                 function,
                 arguments,
-            } => self.analyse_call(function, arguments, CallKind::Operator, *span),
+            } => self.analyse_call(*id, function, arguments, CallKind::Operator, *span),
             Expression::MemberAccess {
                 receiver,
                 member,
@@ -526,9 +566,9 @@ impl Analyser {
             Expression::Return { value } => {
                 let typ = self.analyse_expr(value);
                 match self.return_type_stack.pop() {
-                    Some(mut returned) => {
-                        self.fold_join(&mut returned, typ, *span);
-                        self.return_type_stack.push(returned);
+                    Some(mut returns) => {
+                        self.add_return(&mut returns, value, typ);
+                        self.return_type_stack.push(returns);
                     }
                     None => self.emit(AnalysisError::return_outside_function(*span)),
                 }
@@ -632,6 +672,21 @@ impl Analyser {
     }
 
     /// Joins a new type into an accumulator, as with [`Self::join`].
+    /// Adds the value `value` of type `typ` that a function returns to
+    /// `returns`. A function with an annotated return type returns that
+    /// type, and each value it returns has to fit it.
+    fn add_return(&mut self, returns: &mut Returns, value: &ExpressionLocation, typ: StaticType) {
+        match &returns.annotated {
+            Some(annotated) => {
+                let annotated = annotated.clone();
+                if !self.accepts_write(&annotated, &typ, Some(value.id)) {
+                    self.emit_rejected_write(&annotated, &typ, value.span);
+                }
+            }
+            None => self.fold_join(&mut returns.joined, typ, value.span),
+        }
+    }
+
     fn fold_join(&mut self, acc: &mut Option<StaticType>, new_type: StaticType, span: Span) {
         *acc = Some(match acc.take() {
             Some(prev) => self.join(&prev, &new_type, span),

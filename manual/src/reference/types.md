@@ -54,4 +54,19 @@ rules.
 
 > **Note:** `Any` is the base type for every other type, so an `Any`-annotated binding will accept anything. When a value has no annotation and the analyser can't infer a type, it falls back to `Any`. A parameter of a function declared in the program gets the type of each call's argument instead (see [Generic functions](./types/function.md#generic-functions)). There is also a `Never` type used internally for things like `break` that don't produce a value — you'll rarely need to write it by hand.
 
-To go the other way — recover a precise type from an `Any`-typed value — use a [cast](../features/casts.md): `value as List<Int>`.
+### Using an `Any` value where a type is expected
+
+You can use an `Any` value where a specific type is expected. The program checks the value when it gets there:
+
+```ndc,fails
+let a: Any = 5;
+let n: Int = a;      // fine: a holds an Int
+print(n + 1);        // 6
+
+let b: Any = "five";
+let m: Int = b;      // error: expected Int but found String
+```
+
+The same goes for assigning it, passing it to a function, or returning it from one. For a list or a map, every element is checked.
+
+You can also check it yourself with a [cast](../features/casts.md): `value as List<Int>`.

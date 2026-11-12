@@ -1,0 +1,6 @@
+// A value of type `Any` fits where an Int is expected, and is checked to be
+// one as the program runs.
+// expect-output: 6
+let a: Any = 5;
+let n: Int = a;
+print(n + 1);

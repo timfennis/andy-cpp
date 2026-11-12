@@ -1,5 +1,5 @@
 use super::Analyser;
-use super::solver::CallSite;
+use super::solver::{CallNodes, CallSite};
 use crate::error::AnalysisError;
 use crate::overloads::{CallKind, Overloads};
 use ndc_core::{NodeId, StaticType};
@@ -53,6 +53,10 @@ impl Analyser {
         self.constrain_call(
             CallSite::Getter(id),
             vec![receiver_type],
+            CallNodes {
+                arguments: vec![Some(receiver.id)],
+                result: Some(id),
+            },
             CallKind::Regular,
             member,
             member_span,
@@ -63,6 +67,7 @@ impl Analyser {
     /// Only operator-form calls are eligible for vec dispatch.
     pub(super) fn analyse_call(
         &mut self,
+        id: NodeId,
         function: &ExpressionLocation,
         arguments: &[ExpressionLocation],
         kind: CallKind,
@@ -72,6 +77,7 @@ impl Analyser {
         // function position, so the callee is analysed as a value. The callee
         // comes before the arguments, in source order like the resolver, so
         // declarations in it get their slots first.
+        let nodes = arguments.iter().map(|arg| Some(arg.id)).collect::<Vec<_>>();
         let Expression::Identifier { name, .. } = &function.expression else {
             let callee_type = self.analyse_expr(function);
             let arguments = arguments
@@ -83,18 +89,27 @@ impl Analyser {
                 callee @ StaticType::Function {
                     parameters: Some(_),
                     ..
-                } => self.bind_signature(&callee, &arguments).unwrap_or_else(|| {
-                    let arguments = arguments
-                        .iter()
-                        .map(|argument| self.vars.shown(argument))
-                        .collect::<Vec<_>>();
-                    self.emit(AnalysisError::callee_rejects_arguments(
-                        &self.vars.shown(&callee),
-                        &arguments,
-                        span,
-                    ));
-                    StaticType::Any
-                }),
+                } => {
+                    if let Some((typ, parameters)) = self.bind_signature(&callee, &arguments) {
+                        for (node, expected) in
+                            self.expected_of_any(&parameters, &arguments, &nodes)
+                        {
+                            self.expect(node, expected);
+                        }
+                        typ
+                    } else {
+                        let arguments = arguments
+                            .iter()
+                            .map(|argument| self.vars.shown(argument))
+                            .collect::<Vec<_>>();
+                        self.emit(AnalysisError::callee_rejects_arguments(
+                            &self.vars.shown(&callee),
+                            &arguments,
+                            span,
+                        ));
+                        StaticType::Any
+                    }
+                }
                 callee @ StaticType::Var(_) => self.call_unknown_function(&callee, arguments),
                 // Nothing tells what the callee does with its arguments.
                 callee if callee.could_be_callable() => {
@@ -119,6 +134,16 @@ impl Analyser {
             .iter()
             .map(|arg| self.analyse_expr(arg))
             .collect::<Vec<_>>();
-        self.constrain_call(CallSite::Call(function.id), arguments, kind, name, span)
+        self.constrain_call(
+            CallSite::Call(function.id),
+            arguments,
+            CallNodes {
+                arguments: nodes,
+                result: Some(id),
+            },
+            kind,
+            name,
+            span,
+        )
     }
 }

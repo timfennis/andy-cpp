@@ -279,10 +279,12 @@ impl Compiler {
                     self.compile_expr(*container)?;
                     self.compile_expr(*index)?;
                     self.compile_expr(*value)?;
+                    self.expect_type(l_value.id, span);
                     self.ir.write(OpCode::Call(3), span);
                 }
                 AssignmentTarget::Identifier { span: lv_span, .. } => {
                     self.compile_expr(*value)?;
+                    self.expect_type(l_value.id, lv_span);
                     self.emit_set_var(self.assigned_variable(l_value.id), lv_span);
                     self.emit_unit();
                 }
@@ -302,12 +304,14 @@ impl Compiler {
                     self.compile_binding(&self.setter(l_value.id), member_span)?;
                     self.compile_expr(*receiver)?;
                     self.compile_expr(*value)?;
+                    self.expect_type(l_value.id, member_span);
                     self.ir.write(OpCode::Call(2), member_span);
                 }
             },
             Expression::OpAssignment {
                 l_value, r_value, ..
             } => {
+                let target_id = l_value.id;
                 let target = PreparedAssignmentTarget::prepare(self, l_value)?;
                 let Some(binding) = self.augmented_assignment(id) else {
                     return Err(CompileError::unresolved_binding(span));
@@ -318,6 +322,7 @@ impl Compiler {
                 target.emit_read(self)?;
                 self.compile_expr(*r_value)?;
                 self.ir.write(opcode, span);
+                self.expect_type(target_id, span);
                 target.emit_store(self)?;
 
                 self.emit_unit();
@@ -507,10 +512,25 @@ impl Compiler {
             }
         }
 
+        if leaves_value {
+            self.expect_type(id, span);
+        }
         // Every expression except a statement leaves exactly one value.
         self.ir
             .set_stack_depth(entry_depth + isize::from(leaves_value));
         Ok(())
+    }
+
+    /// Checks the value on top of the stack, which comes from `Any`, where
+    /// the analyser says code at `at` expects a type.
+    fn expect_type(&mut self, at: NodeId, span: Span) {
+        if let Some(expected) = self
+            .instance_pick(|instance| instance.type_checks.get(&at))
+            .or_else(|| self.analysis.type_checks.get(&at))
+        {
+            let expected = Rc::new(expected.clone());
+            self.ir.write(OpCode::ExpectType(expected), span);
+        }
     }
 
     fn compile_assignment_target(
@@ -520,6 +540,7 @@ impl Compiler {
     ) -> Result<(), CompileError> {
         match l_value.target {
             AssignmentTarget::Identifier { span: lv_span, .. } => {
+                self.expect_type(l_value.id, lv_span);
                 self.emit_set_var(self.assigned_variable(l_value.id), lv_span);
             }
             AssignmentTarget::Index { value, index } => {
@@ -530,6 +551,7 @@ impl Compiler {
                 // 4. Call []= function
                 // 5. Pop the return value
 
+                self.expect_type(l_value.id, span);
                 let tmp_value = self.allocate_temp();
                 self.write_temp(tmp_value, span, OpCode::SetLocal);
 
@@ -564,6 +586,7 @@ impl Compiler {
                 let variable = self.analysis.variable(pattern.id).expect(
                     "internal error: every binding pattern is analysed before it's compiled",
                 );
+                self.expect_type(pattern.id, span);
                 self.emit_declare(variable, span);
             }
             BindingPattern::Sequence(seq) => {
@@ -598,10 +621,10 @@ impl Compiler {
 
     /// The pick `pick` finds in the instance being compiled, if any, noting
     /// that the code depends on the instance.
-    fn instance_pick<'a>(
+    fn instance_pick<'a, T>(
         &'a self,
-        pick: impl FnOnce(&'a Instance) -> Option<&'a Binding>,
-    ) -> Option<&'a Binding> {
+        pick: impl FnOnce(&'a Instance) -> Option<&'a T>,
+    ) -> Option<&'a T> {
         let found = self.instance.as_deref().and_then(pick);
         if found.is_some() {
             self.used_instance.set(true);
@@ -904,16 +927,18 @@ impl Compiler {
         // Each instance of a generic function is its body compiled with the
         // instance's picks. A generic function is declared at the top level,
         // so it captures nothing and is a global, and its instances are
-        // stored in globals of their own. A `pure fn`'s instances share its
-        // cache, as they compute what it does.
+        // stored in globals of their own. A `pure fn`'s instance has a cache
+        // of its own, as instances may check values of type `Any` against
+        // their own types: `pure fn has(xs, v) { xs.contains(v) }` checks `v`
+        // for an Int in its instance for `List<Int>`, but not for
+        // `List<Any>`, and both may be called with an empty list.
         for (instance, instance_body) in instances.iter().zip(instance_bodies) {
             let idx = self
                 .ir
                 .add_constant(Value::function(Function::Compiled(Rc::new(instance_body))));
             self.ir.write(OpCode::Constant(idx), span);
-            if pure && let Some(function) = name_variable {
-                self.emit_get_var(function, span);
-                self.ir.write(OpCode::MemoizeLike, span);
+            if pure {
+                self.ir.write(OpCode::Memoize, span);
             }
             self.emit_declare(instance.variable, span);
         }

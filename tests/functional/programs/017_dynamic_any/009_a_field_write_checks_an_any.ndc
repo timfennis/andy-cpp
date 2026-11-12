@@ -1,0 +1,6 @@
+// expect-error: expected Int but found String
+struct Point { x: Int, y: Int }
+let p = Point(1, 2);
+let a: Any = "three";
+p.x = a;
+print(p);

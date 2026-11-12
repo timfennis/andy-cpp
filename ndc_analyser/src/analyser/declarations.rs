@@ -1,4 +1,4 @@
-use super::Analyser;
+use super::{Analyser, Returns};
 use crate::error::AnalysisError;
 use itertools::{Itertools, izip};
 use ndc_core::r#struct::StructInfo;
@@ -108,7 +108,10 @@ impl Analyser {
             self.types.declare(symbol, placeholder);
         }
 
-        self.return_type_stack.push(None);
+        self.return_type_stack.push(Returns {
+            annotated: annotated_return.clone(),
+            joined: None,
+        });
         // A function body starts outside of any loop: `break` can't
         // leave the function to end a loop around its declaration.
         let outer_loop_depth = std::mem::take(&mut self.loop_depth);
@@ -123,26 +126,16 @@ impl Analyser {
         }
 
         let implicit_return = self.analyse_expr(body);
-        let explicit_return = self.return_type_stack.pop().unwrap();
+        let mut returns = self.return_type_stack.pop().unwrap();
         self.loop_depth = outer_loop_depth;
 
-        // Combine explicit `return` types with the block's implicit return type.
-        let inferred_return = match explicit_return {
-            Some(ret) => self.join(&ret, &implicit_return, span),
-            None => implicit_return,
-        };
+        // The body's value is returned like the values of `return`. An
+        // annotated return type is what each of them returns, which can
+        // settle what the body left waiting: in `fn f() -> Fn(String) ->
+        // List<String> { split }`, it picks `split(String)`.
+        self.add_return(&mut returns, body, implicit_return);
+        let inferred_return = returns.joined.unwrap_or(StaticType::Never);
 
-        // An annotated return type is what the body returns, which can settle
-        // what the body left waiting: in `fn f() -> Fn(String) -> List<String>
-        // { split }`, it picks `split(String)`.
-        // What isn't known about the body's value yet is settled from the
-        // annotation, like a write: `-> Sequence<Int>` takes a `List<?T>` and
-        // settles `?T`.
-        if let Some(annotated) = &annotated_return
-            && self.vars.resolve(&inferred_return).has_vars()
-        {
-            self.accepts_write(annotated, &inferred_return);
-        }
         if let Some(returns) = &recursive_return
             && !self.vars.try_unify(returns, &inferred_return)
         {
@@ -178,26 +171,11 @@ impl Analyser {
         };
         let inferred_return = self.vars.resolve(&inferred_return);
 
-        // If there is an annotated return type, report a body that doesn't
-        // return it; otherwise record the inferred type in the analysis.
-        match &annotated_return {
-            Some(annotated)
-                if !self.vars.try_unify(annotated, &inferred_return)
-                    && !inferred_return.is_subtype(annotated) =>
-            {
-                self.emit(AnalysisError::mismatched_types(
-                    &self.vars.shown(&inferred_return),
-                    annotated,
-                    span,
-                ));
-            }
-            Some(_) => {}
-            None => {
-                self.result
-                    .analysis
-                    .inferred_return_types
-                    .insert(id, inferred_return.clone());
-            }
+        if annotated_return.is_none() {
+            self.result
+                .analysis
+                .inferred_return_types
+                .insert(id, inferred_return.clone());
         }
 
         // A named function's value is checked as the program runs against
@@ -311,7 +289,7 @@ impl Analyser {
                 // The value is checked like an assignment to the annotated
                 // variable, so `let o: Option<Int> = None` settles `None`.
                 if let Some(expected_type) = &expected_type
-                    && !self.accepts_write(expected_type, &found_type)
+                    && !self.accepts_write(expected_type, &found_type, Some(lvalue.id))
                 {
                     self.emit_rejected_write(expected_type, &found_type, *span);
                 }

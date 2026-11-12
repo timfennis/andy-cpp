@@ -1,0 +1,5 @@
+// A function annotated to return an Int can return a value of type `Any`,
+// which is checked as the program runs.
+// expect-output: 3
+fn first(xs: Any) -> Int { xs[0] }
+print(first([3]));
