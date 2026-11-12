@@ -1186,8 +1186,10 @@ dependencies = [
  "libc",
  "ndc_core",
  "ndc_diagnostics",
+ "ndc_fmt",
  "ndc_highlight",
  "ndc_interpreter",
+ "ndc_lexer",
  "ndc_lsp",
  "ndc_stdlib",
  "rustyline",
@@ -1211,6 +1213,15 @@ dependencies = [
  "codespan-reporting",
  "ndc_interpreter",
  "ndc_lexer",
+]
+
+[[package]]
+name = "ndc_fmt"
+version = "0.3.0"
+dependencies = [
+ "ndc_lexer",
+ "ndc_parser",
+ "thiserror",
 ]
 
 [[package]]

@@ -45,6 +45,9 @@ mdbook serve manual
 # `./manual/editor/build.sh add <package>`, which only takes versions over 30 days old.
 ./manual/editor/build.sh
 
+# Format .ndc files in place (--check lists unformatted files instead)
+cargo run --bin ndc -- fmt script.ndc
+
 # Show documentation (optionally filtered by query)
 cargo run --bin ndc -- docs [query] [--no-color]
 
@@ -102,6 +105,7 @@ The AST is syntax only. The analyser runs name resolution (`ndc_resolver`) on ea
 | `ndc_lsp` | Language features (completion, hover, diagnostics, inlay hints, symbols, go-to-definition) over a `Document`; with the default `server` feature, the LSP server that serves them over stdio |
 | `ndc_diagnostics` | Renders `InterpreterError`s as codespan reports, for the CLI (coloured, `color` feature) and the browser (plain text) |
 | `ndc_highlight` | Classifies the pieces of a program (keyword, function, comment, …) for syntax highlighting, from the lexer and parser |
+| `ndc_fmt` | Code formatter (`ndc fmt`): lays the AST out as a Wadler/Prettier-style document and prints it within 120 columns, keeping the source's tokens, parentheses and comments; re-parses its output to check the program is unchanged |
 | `ndc_bin` | CLI entry point, REPL, terminal colours for the highlighting |
 | `ndc_wasm` | The interpreter, highlighter and language features (`ndc_lsp` without its server) for the browser via wasm-bindgen, used by the manual's playground; its editor is bundled from `manual/editor/` |
 
