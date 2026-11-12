@@ -58,7 +58,7 @@ fn register_get(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     // An element by its index, or a slice by a range of indices.
     for signature in [
         "<T>(List<T>, Int) -> T",
-        "<T>(List<T>, Iterator<Any>) -> List<T>",
+        "<T>(List<T>, Iterator<Int>) -> List<T>",
         // An index whose type isn't known could be either, and keeps the
         // allocation-free path rather than falling back to `[](Any, Any)`.
         "<T>(List<T>, Any) -> Any",
@@ -98,7 +98,7 @@ fn register_get(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     // A deque is indexed like a list, and a range of it is a list too.
     for signature in [
         "<T>(Deque<T>, Int) -> T",
-        "<T>(Deque<T>, Iterator<Any>) -> List<T>",
+        "<T>(Deque<T>, Iterator<Int>) -> List<T>",
         "<T>(Deque<T>, Any) -> Any",
     ] {
         env.declare_global_fn(Rc::new(NativeFunction {
@@ -123,7 +123,7 @@ fn register_set(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     // An element by its index, or a slice by a range of indices.
     for signature in [
         "<T>(List<T>, Int, T)",
-        "<T>(List<T>, Iterator<Any>, Sequence<T>)",
+        "<T>(List<T>, Iterator<Int>, Sequence<T>)",
         // An index whose type isn't known could be either.
         "<T>(List<T>, Any, Any)",
     ] {

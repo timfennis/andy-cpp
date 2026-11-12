@@ -38,6 +38,25 @@ Nested generics work too — the parser handles the `>>` ambiguity for you:
 let grid: List<List<Int>> = [[1, 2], [3, 4]];
 ```
 
+### Element types are exact
+
+A `List<Int>` is not a `List<Any>`: a `List<Any>` could be given a String, which the list of Ints would then hold. The same goes for maps, tuples, options, the other containers, and function types. To change a container's element type, go through `Any`:
+
+```ndc,fails
+let words = "a b".split(" ");     // List<String>
+let any: Any = words;
+let anything: List<Any> = any;    // fine: checked as the program runs
+let wrong: List<Any> = words;     // error: found List<String> but expected List<Any>
+```
+
+A literal takes the type its use needs, so an annotation can widen it directly. A literal whose values share no type is a container of `Any`:
+
+```ndc
+let xs: List<Any> = [1, 2];
+xs.push("three");
+let mixed = [1, "a"];             // List<Any>
+```
+
 [Struct](./types/struct.md) names are type names like any other, including inside generics:
 
 ```ndc

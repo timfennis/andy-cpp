@@ -205,7 +205,15 @@ impl Compiler {
             }
             Expression::NumericLiteral(literal) => {
                 let value = match literal {
-                    NumericLiteral::Int64(i) => Value::int(i),
+                    // An integer literal is what its use made it: `1` in
+                    // `[1.5, 1]` is a Float.
+                    NumericLiteral::Int64(i) => match self.analysis.expr_types.get(&id) {
+                        Some(StaticType::Float) => Value::float(i as f64),
+                        Some(StaticType::Number) => {
+                            Value::number(crate::value::AdvancedNumber::Int(i.into()))
+                        }
+                        _ => Value::int(i),
+                    },
                     NumericLiteral::Float64(f) => Value::float(f),
                     NumericLiteral::NumberInt(i) => {
                         Value::number(crate::value::AdvancedNumber::Int(i))

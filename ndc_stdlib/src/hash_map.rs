@@ -47,7 +47,7 @@ mod inner {
     }
 
     /// Inserts a value into a set.
-    #[function(name = "insert", signature = "<K>(Map<K, Any>, K)")]
+    #[function(name = "insert", signature = "<K>(Map<K, ()>, K)")]
     pub fn insert_set(map: &mut HashMap<Value, Value>, key: Value) {
         map.insert(key, Value::unit());
     }

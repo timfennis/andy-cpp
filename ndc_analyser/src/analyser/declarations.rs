@@ -285,7 +285,6 @@ impl Analyser {
     ) {
         match &lvalue.pattern {
             BindingPattern::Identifier { span, .. } => {
-                // If there is a type annotation and the given type is not a subtype of the annotated type we emit an error
                 // The value is checked like an assignment to the annotated
                 // variable, so `let o: Option<Int> = None` settles `None`.
                 if let Some(expected_type) = &expected_type

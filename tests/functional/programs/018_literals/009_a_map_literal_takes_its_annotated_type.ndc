@@ -1,0 +1,4 @@
+// expect-output: 1 two
+let m: Map<String, Any> = %{"a": 1};
+m["b"] = "two";
+print(m["a"], m["b"]);

@@ -590,6 +590,11 @@ impl Analyser {
         // on no variable made since `first` never needs them.
         let mut fallen_back = 0;
         loop {
+            // A literal takes its default before anything else's is applied,
+            // as a call its type would settle may be waiting for it.
+            if self.default_literals(|_, var| var.0 as usize >= first) {
+                unchecked.extend(self.waiting.keys().copied());
+            }
             while let Some(serial) = unchecked.pop_first() {
                 if !self.waits_on_vars_since(serial, first).is_empty()
                     && (self.default_to_narrowest(serial) || self.default_to_operand(serial))
@@ -621,6 +626,140 @@ impl Analyser {
             self.retry(serial);
         }
         self.solve_waiting();
+    }
+
+    /// Settles the types of the literals that `belongs` says to that nothing
+    /// settled, and returns whether it settled any. Each takes the first of
+    /// its defaults that every waiting call it's in can still take: in
+    /// `let total = 0; total += 2.5`, `+` with a Float can't give an Int
+    /// back to `total`, so `0` is a Float.
+    pub(super) fn default_literals(
+        &mut self,
+        belongs: impl Fn(&TypeVars, TypeVar) -> bool,
+    ) -> bool {
+        let mut settled_any = false;
+        loop {
+            let mut progress = false;
+            for var in self.vars.unsettled_literals(&belongs) {
+                if !self.vars.is_literal(var) {
+                    continue;
+                }
+                let Some(defaults) = self.vars.literal_defaults(var) else {
+                    continue;
+                };
+                let fits = defaults.iter().position(|default| {
+                    let snapshot = self.vars.snapshot();
+                    let fits = self.vars.settle_literal(var, default) && self.calls_still_fit(var);
+                    self.vars.rollback(snapshot);
+                    fits
+                });
+                // When none fits, the first one says best what's wrong.
+                let default = &defaults[fits.unwrap_or(0)];
+                let snapshot = self.vars.snapshot();
+                if !self.vars.settle_literal(var, default) {
+                    self.vars.rollback(snapshot);
+                    if self.vars.holds_several_literals(var) {
+                        self.report_literals_that_differ(var, default);
+                    } else {
+                        self.vars.settle_with_fallbacks(&[var]);
+                    }
+                }
+                self.solve_waiting();
+                progress = true;
+                settled_any = true;
+            }
+            if !progress {
+                // What's left holds literals that aren't these to settle,
+                // like `n` in `let n = 1; fn f() { [n] }`, and is what they
+                // are: a list of whatever `n` is.
+                let left = self.vars.unsettled_literals(&belongs);
+                if left.is_empty() {
+                    return settled_any;
+                }
+                for var in left {
+                    match self.vars.held_literal(var) {
+                        Some(held) if self.vars.is_literal(var) => {
+                            self.vars.settle_literal(var, &StaticType::Var(held));
+                        }
+                        _ => self.vars.settle_with_fallbacks(&[var]),
+                    }
+                }
+                self.solve_waiting();
+                settled_any = true;
+            }
+        }
+    }
+
+    /// Reports the values of the literals whose element type is `var` that
+    /// don't fit `default`, and settles it as `default`: after `let v =
+    /// ["s"]; v = [1]`, `1` isn't a String.
+    fn report_literals_that_differ(&mut self, var: TypeVar, default: &StaticType) {
+        for (held, span) in self.vars.held(var) {
+            let snapshot = self.vars.snapshot();
+            let fits = self.vars.bind_argument(default, &held);
+            self.vars.rollback(snapshot);
+            if !fits {
+                let error = AnalysisError::mismatched_types(&self.vars.shown(&held), default, span);
+                self.emit(error);
+            }
+        }
+        self.vars.settle_literal(var, default);
+    }
+
+    /// Whether each waiting call that waits on `var` can still take its
+    /// arguments, and give back what's expected of it.
+    fn calls_still_fit(&mut self, var: TypeVar) -> bool {
+        let serials = self.watchers.get(&var).cloned().unwrap_or_default();
+        serials.into_iter().all(|serial| {
+            let Some(Waiting {
+                constraint: Constraint::Call(call),
+                ..
+            }) = self.waiting.get(&serial).cloned()
+            else {
+                return true;
+            };
+            self.call_still_fits(&call)
+        })
+    }
+
+    /// Whether some overload of `call` takes its arguments, as far as
+    /// they're known, and returns what fits its result.
+    fn call_still_fits(&mut self, call: &CallConstraint) -> bool {
+        let arguments = call
+            .arguments
+            .iter()
+            .map(|argument| self.vars.resolve(argument))
+            .collect::<Vec<_>>();
+        if Self::operand_could_be_a_tuple(call.kind, &arguments) {
+            return true;
+        }
+        let reachable = self.overloads().reachable_symbols(&call.candidates);
+        reachable.into_iter().any(|symbol| {
+            let function = self.vars.resolve(self.types.get_type(symbol));
+            let StaticType::Function {
+                parameters: Some(_),
+                ..
+            } = &function
+            else {
+                return true;
+            };
+            let snapshot = self.vars.snapshot();
+            let StaticType::Function {
+                parameters: Some(parameters),
+                return_type,
+            } = self.vars.instantiate(&function)
+            else {
+                unreachable!("instantiating a function type gives a function type");
+            };
+            let fits = parameters.len() == arguments.len()
+                && parameters
+                    .iter()
+                    .zip(&arguments)
+                    .all(|(parameter, argument)| self.vars.bind_argument(parameter, argument))
+                && self.vars.bind_argument(&call.result, &return_type);
+            self.vars.rollback(snapshot);
+            fits
+        })
     }
 
     /// Tries the waiting constraint `serial` again, if it's still waiting.
@@ -815,7 +954,8 @@ impl Analyser {
         // A variable whose type isn't known yet, like the parameter `f` in
         // `fn(f) => f(1)`, holds a function that takes these arguments.
         if let [only] = reachable[..]
-            && let callee @ StaticType::Var(_) = self.vars.resolve(self.types.get_type(only))
+            && let callee @ StaticType::Var(var) = self.vars.resolve(self.types.get_type(only))
+            && !self.vars.is_literal(var)
         {
             let typ = self.call_unknown_function(&callee, arguments);
             self.record_pick(
@@ -826,10 +966,22 @@ impl Analyser {
             return Some(typ);
         }
 
+        // A variable holding a literal, like `n` in `let n = 1; n(2)`, can't
+        // be called, which is said best once it's settled.
+        if reachable.iter().any(|&symbol| {
+            matches!(
+                self.vars.resolve(self.types.get_type(symbol)),
+                StaticType::Var(var) if self.vars.is_literal(var)
+            )
+        }) {
+            return None;
+        }
+
         // A write waits for the value it stores, which is analysed after the
         // target: only then can it tell whether the value is what's wrong.
-        if let (CallSite::Setter(_) | CallSite::FieldSetter(_), Some(StaticType::Var(_))) =
+        if let (CallSite::Setter(_) | CallSite::FieldSetter(_), Some(StaticType::Var(var))) =
             (call.site, arguments.last())
+            && !self.vars.is_literal(*var)
         {
             return None;
         }
@@ -846,6 +998,16 @@ impl Analyser {
             // type is known, which also says better what's wrong.
             EarlyOverload::NoneFits
                 if matches!(call.site, CallSite::Setter(_) | CallSite::FieldSetter(_)) =>
+            {
+                None
+            }
+            // A literal takes the type its uses need, or else its default,
+            // which says better what's wrong: `f(1)` with `f(String)` gets
+            // an Int. On tuples, an operator may apply to each element.
+            EarlyOverload::NoneFits
+                if arguments
+                    .iter()
+                    .any(|argument| self.vars.has_unsettled_literals(argument)) =>
             {
                 None
             }
@@ -885,22 +1047,150 @@ impl Analyser {
         arguments: &[StaticType],
         kind: CallKind,
     ) -> EarlyOverload {
-        let viable = self
-            .overloads()
-            .reachable_symbols(candidates)
-            .into_iter()
+        let reachable = self.overloads().reachable_symbols(candidates);
+        let literals = arguments
+            .iter()
+            .flat_map(|argument| self.vars.unsettled(argument))
+            .filter(|&var| self.vars.is_literal(var))
+            .collect::<Vec<_>>();
+        let viable = reachable
+            .iter()
+            .copied()
             .filter(|&symbol| self.could_accept(symbol, arguments))
             .collect::<Vec<_>>();
         match viable[..] {
+            // A literal may still become `Any`, which an overload that can't
+            // take it now might take: `[1, "s"]` holds `Any`s, which
+            // `p(x: String)` may get.
+            [] if !literals.is_empty() && self.fits_once_any(&reachable, arguments, None) => {
+                EarlyOverload::Undecided
+            }
             [] => EarlyOverload::NoneFits,
             [only]
                 if self.fits_without_any(only, arguments)
-                    && !Self::operand_could_be_a_tuple(kind, arguments) =>
+                    && !Self::operand_could_be_a_tuple(kind, arguments)
+                    && !self.merges_literals(only, arguments) =>
             {
+                // When the pick depends on what a literal is now, as
+                // `p(x)` over `p(x: Int)` does for the Strings in
+                // `["s"].map(p)`, the literal is what it is from here on:
+                // the first use that depends on it decides it.
+                if !literals.is_empty()
+                    && self.fits_once_any(&reachable, arguments, Some(only))
+                    && !self.decide_literals(&literals, only, arguments)
+                {
+                    return EarlyOverload::Undecided;
+                }
                 EarlyOverload::Only(only)
             }
             _ => EarlyOverload::Undecided,
         }
+    }
+
+    /// Whether one of `reachable` other than `except` takes `arguments`
+    /// once each literal among them is `Any`.
+    fn fits_once_any(
+        &mut self,
+        reachable: &[SymbolId],
+        arguments: &[StaticType],
+        except: Option<SymbolId>,
+    ) -> bool {
+        let as_any = arguments
+            .iter()
+            .map(|argument| {
+                self.vars.resolve(argument).replace(&|part| match part {
+                    StaticType::Var(var) if self.vars.is_literal(*var) => Some(StaticType::Any),
+                    _ => None,
+                })
+            })
+            .collect::<Vec<_>>();
+        reachable
+            .iter()
+            .filter(|&&symbol| Some(symbol) != except)
+            .any(|&symbol| self.could_accept(symbol, &as_any))
+    }
+
+    /// Settles each of `literals` as the first of its defaults with which
+    /// `only` still takes `arguments`, and returns whether it could.
+    fn decide_literals(
+        &mut self,
+        literals: &[TypeVar],
+        only: SymbolId,
+        arguments: &[StaticType],
+    ) -> bool {
+        for &var in literals {
+            // A list of numbers is what the numbers are.
+            while let Some(held) = self.vars.held_literal(var) {
+                if !self.decide_literals(&[held], only, arguments) {
+                    return false;
+                }
+            }
+            if !self.vars.is_literal(var) {
+                continue;
+            }
+            let Some(defaults) = self.vars.literal_defaults(var) else {
+                return false;
+            };
+            let decided = defaults.iter().any(|default| {
+                let snapshot = self.vars.snapshot();
+                let fits =
+                    self.vars.settle_literal(var, default) && self.could_accept(only, arguments);
+                if !fits {
+                    self.vars.rollback(snapshot);
+                }
+                fits
+            });
+            if !decided {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Whether passing these arguments to `symbol` would make the types of
+    /// two literals one, as `++(List<T>, List<T>)` does with `[1]` and
+    /// `["a"]`. Each literal first gets its own type, which says better
+    /// whether they're the same.
+    fn merges_literals(&mut self, symbol: SymbolId, arguments: &[StaticType]) -> bool {
+        let literals = arguments
+            .iter()
+            .flat_map(|argument| self.vars.unsettled(argument))
+            .filter(|&var| self.vars.is_literal(var))
+            .collect::<Vec<_>>();
+        if literals.len() < 2 {
+            return false;
+        }
+        let StaticType::Function {
+            parameters: Some(_),
+            ..
+        } = self.vars.resolve(self.types.get_type(symbol))
+        else {
+            return false;
+        };
+        let snapshot = self.vars.snapshot();
+        let StaticType::Function {
+            parameters: Some(parameters),
+            ..
+        } = self
+            .vars
+            .instantiate(&self.vars.resolve(self.types.get_type(symbol)))
+        else {
+            unreachable!("instantiating a function type gives a function type");
+        };
+        for (parameter, argument) in parameters.iter().zip(arguments) {
+            self.vars.bind_argument(parameter, argument);
+        }
+        let mut became = Vec::new();
+        let merged = literals.iter().any(|&var| {
+            let StaticType::Var(now) = self.vars.resolve(&StaticType::Var(var)) else {
+                return false;
+            };
+            let merged = became.contains(&now);
+            became.push(now);
+            merged
+        });
+        self.vars.rollback(snapshot);
+        merged
     }
 
     /// Resolves `call` with the arguments as they are, reporting it when no

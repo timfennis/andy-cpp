@@ -1,3 +1,4 @@
-// Int, Float, and Number are siblings, so a heterogeneous list is List<Any>.
+// The elements share no type, so the list is a List<Any>, which no `sum`
+// takes.
 // expect-error: No function called 'sum'
-print([1, 2.0].sum());
+print([1, "two"].sum());

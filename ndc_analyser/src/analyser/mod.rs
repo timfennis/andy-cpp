@@ -78,10 +78,11 @@ pub struct Analyser {
     /// The calls the constraint being solved was copied through, when it's
     /// a copy of a generic function's constraint.
     copied_through: Option<Origin>,
-    /// Where a value of type `Any` is checked as the program runs, and the
-    /// type it's checked against, which may still have variables in it, by
-    /// the instance whose body checks it, or `None` for code compiled once.
-    checks: Vec<(Option<SymbolId>, NodeId, StaticType)>,
+    /// Where a value is checked as the program runs if it's of type `Any`,
+    /// with its type and the type it's checked against, which may both
+    /// still have variables in them, by the instance whose body checks it,
+    /// or `None` for code compiled once.
+    checks: Vec<(Option<SymbolId>, NodeId, StaticType, StaticType)>,
     /// The number the next waiting constraint gets.
     next_serial: u64,
     /// The waiting constraints that each unsettled variable would let make
@@ -173,6 +174,7 @@ impl Analyser {
         // so the ones left unsettled get their fallbacks, what waited on them
         // is solved, and no variable leaves the analyser.
         self.settle_waiting(0);
+        self.vars.forget_literals();
         self.instantiate_uses();
         self.declared_in_batch.clear();
         debug_assert!(self.waiting.is_empty(), "unsolved: {:?}", self.waiting);
@@ -182,7 +184,10 @@ impl Analyser {
         }
         self.failed_reads.clear();
         self.types.resolve_all(&self.vars);
-        for (instance, node, expected) in std::mem::take(&mut self.checks) {
+        for (instance, node, typ, expected) in std::mem::take(&mut self.checks) {
+            if self.vars.resolve(&typ) != StaticType::Any {
+                continue;
+            }
             let expected = self
                 .vars
                 .resolve(&expected)
@@ -227,8 +232,14 @@ impl Analyser {
     /// node is in the body of the function it was copied from, which the
     /// instance for the call checks.
     pub(super) fn expect(&mut self, node: NodeId, expected: StaticType) {
+        self.expect_if_any(node, StaticType::Any, expected);
+    }
+
+    /// As [`Self::expect`], for a value of type `typ`, which is checked if
+    /// it turns out to be `Any`.
+    pub(super) fn expect_if_any(&mut self, node: NodeId, typ: StaticType, expected: StaticType) {
         if self.copied_through.is_none() {
-            self.checks.push((self.recording, node, expected));
+            self.checks.push((self.recording, node, typ, expected));
         }
     }
 
@@ -353,7 +364,7 @@ impl Analyser {
                 StaticType::Option(Box::new(self.vars.fresh(StaticType::Any)))
             }
             Expression::StringLiteral(_) => StaticType::String,
-            Expression::NumericLiteral(NumericLiteral::Int64(_)) => StaticType::Int,
+            Expression::NumericLiteral(NumericLiteral::Int64(_)) => self.vars.fresh_number(*span),
             Expression::NumericLiteral(NumericLiteral::Float64(_)) => StaticType::Float,
             Expression::NumericLiteral(
                 NumericLiteral::NumberInt(_)
@@ -394,15 +405,20 @@ impl Analyser {
                 let found = self.analyse_expr(value);
                 // What isn't known about the value yet is what the cast says
                 // it is: `(fn(x) => x) as Fn(Int) -> Int` takes an Int, and
-                // needs no check as the program runs. Known parts are checked.
-                if self.vars.resolve(&found).has_vars() {
+                // needs no check as the program runs, and `1 as Float` is a
+                // Float. Known parts are checked, and so is a value nothing
+                // is known about, like what a call that waits returns.
+                let found = self.vars.resolve(&found);
+                let unknown = matches!(found, StaticType::Var(var) if !self.vars.is_literal(var));
+                if found.has_vars() && !unknown {
                     self.vars.try_unify(&found, &target);
                 }
                 let found = self.vars.resolve(&found);
                 if !found.overlaps(&target) {
+                    let found = self.vars.shown(&found);
                     self.emit(AnalysisError::impossible_cast(&found, &target, *span));
                 }
-                let check = (!found.is_subtype(&target)).then(|| target.clone());
+                let check = (!found.fits(&target)).then(|| target.clone());
                 self.result.analysis.cast_checks.insert(*id, check);
                 target
             }
@@ -513,50 +529,64 @@ impl Analyser {
                 member,
                 member_span,
             } => self.analyse_member_access(*id, receiver, member, *member_span),
+            // Each element of a tuple literal takes the type its uses settle,
+            // as a list literal's elements do: `let t: (Any, Int) = ("a", 1)`.
+            // An element whose type isn't known yet already does.
             Expression::Tuple { values } => {
                 let mut types = Vec::with_capacity(values.len());
-                for v in values {
-                    types.push(self.analyse_expr(v));
+                for value in values {
+                    let typ = self.analyse_expr(value);
+                    types.push(match self.vars.resolve(&typ) {
+                        StaticType::Var(_) => typ,
+                        _ => self.holding(vec![(value.id, value.span, typ)]),
+                    });
                 }
 
                 StaticType::Tuple(types)
             }
             Expression::List { values } => {
-                let element_type = match self.analyse_multiple_expression_with_same_type(values) {
-                    Some(element_type) => element_type,
-                    None => self.vars.fresh(StaticType::Any),
+                let element_type = if values.is_empty() {
+                    self.vars.fresh(StaticType::Any)
+                } else {
+                    let values = values
+                        .iter()
+                        .map(|value| (value.id, value.span, self.analyse_expr(value)))
+                        .collect();
+                    self.holding(values)
                 };
                 StaticType::List(Box::new(element_type))
             }
             Expression::Map { values, default } => {
-                let mut key_type: Option<StaticType> = None;
-                let mut value_type: Option<StaticType> = None;
+                let mut keys = Vec::new();
+                let mut held = Vec::new();
                 for (key, value) in values {
-                    let found = self.analyse_expr(key);
-                    self.fold_join(&mut key_type, found, key.span);
+                    keys.push((key.id, key.span, self.analyse_expr(key)));
                     if let Some(value) = value {
-                        let found = self.analyse_expr(value);
-                        self.fold_join(&mut value_type, found, value.span);
+                        held.push((value.id, value.span, self.analyse_expr(value)));
                     }
                 }
 
                 // Reads can produce the default value, so its type is part of
-                // the map's value type.
+                // the map's value type. A function default's values are what
+                // it returns, which has no node to check them at.
                 if let Some(default) = default {
                     let default_type = self.analyse_expr(default);
                     let default_type = self.constrain_default_value(default_type, default.span);
-                    self.fold_join(&mut value_type, default_type, default.span);
+                    held.push((default.id, default.span, default_type));
                 }
 
-                let key_type = match key_type {
-                    Some(key_type) => key_type,
-                    None => self.vars.fresh(StaticType::Any),
+                let key_type = if keys.is_empty() {
+                    self.vars.fresh(StaticType::Any)
+                } else {
+                    self.holding(keys)
                 };
                 // A literal with keys but no values, like `%{1, 2}`, is a set.
-                let value_type = match value_type {
-                    Some(value_type) => value_type,
-                    None if values.is_empty() => self.vars.fresh(StaticType::unit()),
-                    None => StaticType::unit(),
+                let value_type = if !held.is_empty() {
+                    self.holding(held)
+                } else if values.is_empty() {
+                    self.vars.fresh(StaticType::unit())
+                } else {
+                    StaticType::unit()
                 };
                 StaticType::Map {
                     key: Box::new(key_type),
@@ -649,16 +679,21 @@ impl Analyser {
         typ
     }
 
-    fn analyse_multiple_expression_with_same_type(
-        &mut self,
-        expressions: &Vec<ExpressionLocation>,
-    ) -> Option<StaticType> {
-        let mut element_type: Option<StaticType> = None;
-        for expression in expressions {
-            let found = self.analyse_expr(expression);
-            self.fold_join(&mut element_type, found, expression.span);
+    /// The type of the elements of a literal holding `values`, each with
+    /// its node and type, which takes the type its uses settle: in
+    /// `let xs: List<Any> = [1, 2]`, `Any`. A value of type `Any` among
+    /// them is checked against it as the program runs.
+    fn holding(&mut self, values: Vec<(NodeId, Span, StaticType)>) -> StaticType {
+        let element = self.vars.fresh_holding(
+            values
+                .iter()
+                .map(|(_, span, typ)| (typ.clone(), *span))
+                .collect(),
+        );
+        for (node, _, typ) in values {
+            self.expect_if_any(node, typ, element.clone());
         }
-        element_type
+        element
     }
 
     /// The type of the values a map default of type `default` produces. A

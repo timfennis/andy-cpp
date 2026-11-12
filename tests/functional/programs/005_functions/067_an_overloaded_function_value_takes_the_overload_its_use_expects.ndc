@@ -17,6 +17,6 @@ print(g("a b"));
 fn pick(x: Int) { 1 }
 {
     fn pick(x: Any) { "inner" }
-    let h: Fn(Int) -> Any = pick;
+    let h: Fn(Any) -> String = pick;
     print(h(1));
 }

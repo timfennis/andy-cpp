@@ -1,5 +1,6 @@
-use ahash::AHashMap;
+use ahash::{AHashMap, AHashSet};
 use ndc_core::{StaticType, TypeVar};
+use ndc_lexer::Span;
 use ndc_resolver::SymbolId;
 
 /// The type of every value the name resolver declared, natives included,
@@ -56,6 +57,31 @@ pub(crate) struct TypeVars {
     /// The levels lowered so far, with what each was before, so a
     /// [`Snapshot`] can raise them again.
     lowered: Vec<(TypeVar, u32)>,
+    /// What each variable may stand for beyond what unifying says, which
+    /// settling it checks: the type of the literal `1` is an `Int`, a
+    /// `Float` or a `Number`.
+    bounds: Vec<Vec<Bound>>,
+    /// The variables a bound was added to after they were made, in order,
+    /// so a [`Snapshot`] can take the bounds off again.
+    bounded: Vec<TypeVar>,
+    /// The variables that got a bound, in the order they got it, which are
+    /// the types of literals.
+    literals: Vec<TypeVar>,
+}
+
+/// What a variable may stand for, beyond what unifying says.
+#[derive(Debug, Clone)]
+enum Bound {
+    /// It's the type of an integer literal, like `1`: an `Int`, a `Float`
+    /// or a `Number`, or `Any`, which takes anything. It's an `Int` unless
+    /// something says otherwise. With the literal's type as it was made,
+    /// and where the literal is.
+    Number(TypeVar, Span),
+    /// It's the type of the elements of a literal that holds a value of
+    /// this type, like `[1, 2.5]`, so the value has to fit it. With the
+    /// literal, as the type of the elements it was made for, and where the
+    /// value is.
+    Holds(StaticType, TypeVar, Span),
 }
 
 /// The state of the variables at one point, which [`TypeVars::rollback`]
@@ -65,6 +91,7 @@ pub(crate) struct Snapshot {
     vars: usize,
     trail: usize,
     lowered: usize,
+    bounded: usize,
 }
 
 impl TypeVars {
@@ -75,7 +102,223 @@ impl TypeVars {
         self.solutions.push(None);
         self.fallbacks.push(fallback);
         self.levels.push(self.level);
+        self.bounds.push(Vec::new());
         StaticType::Var(var)
+    }
+
+    /// The type of an integer literal, like `1`, which its uses settle as an
+    /// `Int`, a `Float` or a `Number`: `1` in `[1.5, 1]` is a Float. It's an
+    /// `Int` unless something says otherwise.
+    pub(crate) fn fresh_number(&mut self, span: Span) -> StaticType {
+        let literal = self.next_var();
+        self.fresh_bounded(StaticType::Int, vec![Bound::Number(literal, span)])
+    }
+
+    /// The variable [`Self::fresh`] makes next.
+    fn next_var(&self) -> TypeVar {
+        TypeVar(u32::try_from(self.solutions.len()).expect("fewer than 2^32 type variables"))
+    }
+
+    /// The type of the elements of a literal holding values of the types
+    /// `held`, which its uses settle as any type each value fits: in
+    /// `let xs: List<Any> = [1, 2]`, `Any`. Unless something says otherwise
+    /// it's the type the values share, or `Any` if they share none.
+    pub(crate) fn fresh_holding(&mut self, held: Vec<(StaticType, Span)>) -> StaticType {
+        let literal = self.next_var();
+        self.fresh_bounded(
+            StaticType::Any,
+            held.into_iter()
+                .map(|(typ, span)| Bound::Holds(typ, literal, span))
+                .collect(),
+        )
+    }
+
+    /// A literal whose type the literal type `var` holds values of and that
+    /// isn't settled yet, as `1`'s is in `[1]`.
+    pub(crate) fn held_literal(&self, var: TypeVar) -> Option<TypeVar> {
+        self.bounds[var.0 as usize]
+            .iter()
+            .find_map(|bound| match bound {
+                Bound::Holds(held, _, _) => match self.resolve(held) {
+                    StaticType::Var(held) if held != var && self.is_literal(held) => Some(held),
+                    _ => None,
+                },
+                Bound::Number(..) => None,
+            })
+    }
+
+    /// The values the literal type `var` holds, with where each is.
+    pub(crate) fn held(&self, var: TypeVar) -> Vec<(StaticType, Span)> {
+        self.bounds[var.0 as usize]
+            .iter()
+            .map(|bound| match bound {
+                Bound::Holds(typ, _, span) => (typ.clone(), *span),
+                Bound::Number(_, span) => (StaticType::Int, *span),
+            })
+            .collect()
+    }
+
+    /// Whether the literal type `var` holds the values of more than one
+    /// literal, as it does once `v = [1]` makes it the type of `v`'s
+    /// `["s"]` too. Values of one literal that share no type are held as
+    /// `Any`, but two literals of different types are an error.
+    pub(crate) fn holds_several_literals(&self, var: TypeVar) -> bool {
+        let mut literals = self.bounds[var.0 as usize].iter().map(|bound| match bound {
+            Bound::Holds(_, literal, _) | Bound::Number(literal, _) => *literal,
+        });
+        literals
+            .next()
+            .is_some_and(|first| literals.any(|literal| literal != first))
+    }
+
+    fn fresh_bounded(&mut self, fallback: StaticType, bounds: Vec<Bound>) -> StaticType {
+        let typ = self.fresh(fallback);
+        let StaticType::Var(var) = typ else {
+            unreachable!("a fresh type is a variable");
+        };
+        self.bounds[var.0 as usize] = bounds;
+        self.literals.push(var);
+        typ
+    }
+
+    /// The unsettled types of literals that `belongs` says to settle, the
+    /// ones holding values before the numbers, so a value can still say
+    /// what a number is: `1` in `[1, 2.5]` is a Float.
+    pub(crate) fn unsettled_literals(
+        &self,
+        belongs: impl Fn(&Self, TypeVar) -> bool,
+    ) -> Vec<TypeVar> {
+        let mut literals = Vec::new();
+        let mut seen = AHashSet::new();
+        for &var in &self.literals {
+            if (var.0 as usize) < self.solutions.len()
+                && self.solution(var).is_none()
+                && !self.bounds[var.0 as usize].is_empty()
+                && belongs(self, var)
+                && seen.insert(var)
+            {
+                literals.push(var);
+            }
+        }
+        literals.sort_by_key(|&var| self.is_number(var));
+        literals
+    }
+
+    /// Forgets the types of literals, once they're all settled at the end
+    /// of a batch.
+    pub(crate) fn forget_literals(&mut self) {
+        debug_assert!(
+            self.literals
+                .iter()
+                .all(|&var| var.0 as usize >= self.solutions.len() || !self.is_literal(var)),
+            "a literal's type is left unsettled"
+        );
+        self.literals.clear();
+    }
+
+    /// Whether `var` is the type of an integer literal.
+    fn is_number(&self, var: TypeVar) -> bool {
+        self.bounds[var.0 as usize]
+            .iter()
+            .any(|bound| matches!(bound, Bound::Number(..)))
+    }
+
+    /// What the unsettled literal type `var` could be when nothing says
+    /// otherwise, best first. `None` if that isn't known yet: a list of
+    /// numbers is a list of whatever the numbers are, which is up to them.
+    pub(crate) fn literal_defaults(&self, var: TypeVar) -> Option<Vec<StaticType>> {
+        let mut defaults = Vec::new();
+        let mut waits = false;
+        let mut unknown = None;
+        // The literal made first says first what the type is: after `let v
+        // = ["s"]; v = [1]`, it's what `v` was.
+        let mut bounds = self.bounds[var.0 as usize].iter().collect::<Vec<_>>();
+        bounds.sort_by_key(|bound| match bound {
+            Bound::Holds(_, literal, _) | Bound::Number(literal, _) => literal.0,
+        });
+        for bound in bounds {
+            let held = match bound {
+                Bound::Number(..) => {
+                    for number in [StaticType::Int, StaticType::Float, StaticType::Number] {
+                        if !defaults.contains(&number) {
+                            defaults.push(number);
+                        }
+                    }
+                    continue;
+                }
+                Bound::Holds(held, _, _) => held,
+            };
+            match self.resolve(held) {
+                StaticType::Var(held) if self.is_literal(held) => waits = true,
+                // A value whose type isn't known holds what its type is:
+                // `fn wrap(x) => [x]` returns a list of what `x` is.
+                StaticType::Var(held) => {
+                    unknown.get_or_insert(StaticType::Var(held));
+                }
+                // A value that never arrives says nothing about the type.
+                StaticType::Never => {}
+                held => {
+                    if !defaults.contains(&held) {
+                        defaults.push(held);
+                    }
+                }
+            }
+        }
+        if defaults.is_empty() && waits {
+            return None;
+        }
+        if defaults.is_empty() {
+            // Values that share no type are held as `Any`, which settling
+            // the literal's type with a default it doesn't take falls back
+            // to.
+            defaults.push(unknown.unwrap_or(StaticType::Any));
+        }
+        Some(defaults)
+    }
+
+    /// What the unsettled literal type `var` is shown as: what it would be
+    /// if nothing said otherwise, as far as that's known.
+    pub(crate) fn preview(&self, var: TypeVar) -> StaticType {
+        if self.is_number(var) {
+            return StaticType::Int;
+        }
+        let mut held = Vec::new();
+        for bound in &self.bounds[var.0 as usize] {
+            // A literal that holds itself, like `[xs]` pushed to `xs`, says
+            // nothing more about what it is.
+            if let Bound::Holds(typ, _, _) = bound
+                && !self
+                    .resolve(typ)
+                    .contains(&|part| *part == StaticType::Var(var))
+            {
+                let shown = self.shown(typ);
+                if !held.contains(&shown) {
+                    held.push(shown);
+                }
+            }
+        }
+        match &held[..] {
+            [only] => only.clone(),
+            _ => StaticType::Any,
+        }
+    }
+
+    /// Whether `var` is unsettled and has bounds, as a literal's type does.
+    pub(crate) fn is_literal(&self, var: TypeVar) -> bool {
+        self.solution(var).is_none() && !self.bounds[var.0 as usize].is_empty()
+    }
+
+    /// Whether `typ` has a part that's a literal's type not settled yet.
+    pub(crate) fn has_unsettled_literals(&self, typ: &StaticType) -> bool {
+        self.unsettled(typ)
+            .into_iter()
+            .any(|var| self.is_literal(var))
+    }
+
+    /// Settles `var` as `typ`, and returns whether `typ` is within its
+    /// bounds, as [`Self::unify`] does.
+    pub(crate) fn settle_literal(&mut self, var: TypeVar, typ: &StaticType) -> bool {
+        self.unify(&StaticType::Var(var), typ)
     }
 
     /// Starts the body of a generic function: the variables made until
@@ -98,8 +341,13 @@ impl TypeVars {
     }
 
     /// Settles `var` as the type parameter `name` of the generic function
-    /// whose body made it.
+    /// whose body made it. A literal's type is settled before, so `var` has
+    /// no bounds.
     pub(crate) fn generalize(&mut self, var: TypeVar, name: &str) {
+        debug_assert!(
+            self.bounds[var.0 as usize].is_empty(),
+            "the literal type {var:?} is generalized"
+        );
         self.settle(var, StaticType::Generic(name.into()));
     }
 
@@ -113,8 +361,10 @@ impl TypeVars {
         self.solutions[var.0 as usize].as_ref()
     }
 
-    /// Settles `var` as `typ`.
-    fn settle(&mut self, var: TypeVar, typ: StaticType) {
+    /// Settles `var` as `typ`, and returns whether `typ` is within the
+    /// bounds of `var`. When `typ` is another variable, it gets them. On a
+    /// mismatch, `var` and the variables settled meanwhile stay settled.
+    fn settle(&mut self, var: TypeVar, typ: StaticType) -> bool {
         debug_assert!(self.solution(var).is_none(), "{var:?} is settled twice");
         // What `var` stands for now belongs where `var` does.
         let level = self.levels[var.0 as usize];
@@ -127,8 +377,37 @@ impl TypeVars {
                 }
             }
         }
+        let shallow = self.shallow(&typ);
         self.solutions[var.0 as usize] = Some(typ);
         self.trail.push(var);
+        let bounds = self.bounds[var.0 as usize].clone();
+        if bounds.is_empty() {
+            return true;
+        }
+        match shallow {
+            StaticType::Var(other) => {
+                for bound in bounds {
+                    // A literal holding a value of the type the other
+                    // variable already is says nothing more.
+                    if let Bound::Holds(held, _, _) = &bound
+                        && self.shallow(held) == StaticType::Var(other)
+                    {
+                        continue;
+                    }
+                    self.bounds[other.0 as usize].push(bound);
+                    self.bounded.push(other);
+                    self.literals.push(other);
+                }
+                true
+            }
+            typ => bounds.iter().all(|bound| match bound {
+                Bound::Number(..) => matches!(
+                    typ,
+                    StaticType::Int | StaticType::Float | StaticType::Number | StaticType::Any
+                ),
+                Bound::Holds(held, _, _) => self.bind_argument(&typ, held),
+            }),
+        }
     }
 
     /// How many settlings there have been, to pass to
@@ -150,6 +429,7 @@ impl TypeVars {
             vars: self.solutions.len(),
             trail: self.trail.len(),
             lowered: self.lowered.len(),
+            bounded: self.bounded.len(),
         }
     }
 
@@ -162,9 +442,15 @@ impl TypeVars {
         for (var, level) in self.lowered.drain(snapshot.lowered..).rev() {
             self.levels[var.0 as usize] = level;
         }
+        for var in self.bounded.drain(snapshot.bounded..).rev() {
+            if (var.0 as usize) < snapshot.vars {
+                self.bounds[var.0 as usize].pop();
+            }
+        }
         self.solutions.truncate(snapshot.vars);
         self.fallbacks.truncate(snapshot.vars);
         self.levels.truncate(snapshot.vars);
+        self.bounds.truncate(snapshot.vars);
     }
 
     /// Unifies `a` and `b` if they can be made the same type, and otherwise
@@ -193,18 +479,46 @@ impl TypeVars {
     }
 
     /// `typ` as an error shows it: the parts not known yet could still be
-    /// anything, so they're shown as `Any`.
+    /// anything, so they're shown as `Any`, except a literal's, which is
+    /// shown as what it is unless something says otherwise: `[1]` as a
+    /// `List<Int>`.
     pub(crate) fn shown(&self, typ: &StaticType) -> StaticType {
-        self.resolve(typ)
-            .replace(&|part| matches!(part, StaticType::Var(_)).then_some(StaticType::Any))
+        self.resolve(typ).replace(&|part| match part {
+            StaticType::Var(var) if self.is_literal(*var) => Some(self.preview(*var)),
+            StaticType::Var(_) => Some(StaticType::Any),
+            _ => None,
+        })
     }
 
-    /// Settles each of `vars` that is still unsettled with its fallback.
+    /// Settles each of `vars` that is still unsettled with its fallback. A
+    /// literal's type gets the first of its defaults within its bounds.
     pub(crate) fn settle_with_fallbacks(&mut self, vars: &[TypeVar]) {
         for &var in vars {
-            if self.solution(var).is_none() {
-                let fallback = self.fallbacks[var.0 as usize].clone();
-                self.settle(var, fallback);
+            if self.solution(var).is_some() {
+                continue;
+            }
+            let defaults = match self.literal_defaults(var) {
+                Some(defaults) if !self.bounds[var.0 as usize].is_empty() => defaults,
+                _ => vec![self.fallbacks[var.0 as usize].clone()],
+            };
+            let settled = defaults.iter().any(|default| {
+                // A variable can't stand for a type that contains it.
+                if self
+                    .resolve(default)
+                    .contains(&|part| *part == StaticType::Var(var))
+                {
+                    return false;
+                }
+                let snapshot = self.snapshot();
+                let settled = self.settle(var, default.clone());
+                if !settled {
+                    self.rollback(snapshot);
+                }
+                settled
+            });
+            if !settled {
+                // `Any` takes anything a literal holds.
+                self.settle(var, StaticType::Any);
             }
         }
     }
@@ -247,8 +561,7 @@ impl TypeVars {
                 {
                     return false;
                 }
-                self.settle(*var, other.clone());
-                true
+                self.settle(*var, other.clone())
             }
             (StaticType::Option(x), StaticType::Option(y))
             | (StaticType::Sequence(x), StaticType::Sequence(y))
@@ -332,79 +645,49 @@ impl TypeVars {
     /// Settles the parts of `argument` that aren't known yet by passing it
     /// where a `parameter` is expected, and returns whether it fits there. In
     /// `push(xs, 1)` with `push(List<?0>, ?0)` and `xs: List<?1>`, both
-    /// variables become `Int`. A parameter of type `Any` settles what's
-    /// unknown in the argument as `Any`, because the function may store
-    /// anything in it.
+    /// variables become `Int`. Passing makes the two types the same, except
+    /// that a parameter of type `Any` takes anything, and an argument of
+    /// type `Any` goes anywhere, as it's checked as the program runs. Inside
+    /// a container, a function type, an `Option` or a tuple, `Any` is just
+    /// another type: a `List<Int>` doesn't fit a `List<Any>`. A
+    /// `Sequence<T>` takes any kind of sequence, and settles `T` from its
+    /// elements.
     pub(crate) fn bind_argument(&mut self, parameter: &StaticType, argument: &StaticType) -> bool {
         let (parameter, argument) = (self.shallow(parameter), self.shallow(argument));
         match (&parameter, &argument) {
-            (_, StaticType::Never) => true,
-            (StaticType::Any, _) => {
-                self.settle_unknowns(&argument, &StaticType::Any);
-                true
-            }
+            (_, StaticType::Never) | (StaticType::Any, _) => true,
+            // A value of type `Any` is checked where it goes, so it leaves a
+            // literal's type what the literal says: `n` in `let n = 1;
+            // n = a` is still an Int.
+            (StaticType::Var(var), StaticType::Any) if self.is_literal(*var) => true,
             (StaticType::Var(_), _) | (_, StaticType::Var(_)) => self.unify(&parameter, &argument),
-            (StaticType::Option(p), StaticType::Option(a))
-            | (StaticType::List(p), StaticType::List(a))
-            | (StaticType::Iterator(p), StaticType::Iterator(a))
-            | (StaticType::MinHeap(p), StaticType::MinHeap(a))
-            | (StaticType::MaxHeap(p), StaticType::MaxHeap(a))
-            | (StaticType::Deque(p), StaticType::Deque(a))
-            | (StaticType::Sequence(p), StaticType::Sequence(a)) => self.bind_argument(p, a),
-            // A function passed as an argument gets the parameter types the
-            // function type passes it, and returns what the function type
-            // returns: `map(xs, fn(x) => x + 1)` passes `xs`'s elements to
-            // `x` and settles `U`. A parameter of type `Any` takes anything,
-            // so it settles nothing.
+            (_, StaticType::Any) => true,
+            // A function type that says nothing about the parameters takes
+            // any function that returns what it says.
             (
                 StaticType::Function {
-                    parameters: expected,
+                    parameters: None,
                     return_type: p,
                 },
-                StaticType::Function {
-                    parameters: takes,
-                    return_type: a,
-                },
-            ) => {
-                let mut fits = true;
-                if let (Some(expected), Some(takes)) = (expected, takes) {
-                    // A function taking another number of arguments can't be
-                    // called the way the function type says.
-                    fits = expected.len() == takes.len();
-                    for (expected, takes) in expected.iter().zip(takes) {
-                        if self.shallow(takes) != StaticType::Any {
-                            fits &= self.bind_argument(takes, expected);
-                        }
-                    }
-                }
-                fits && self.bind_argument(p, a)
-            }
-            (StaticType::Tuple(ps), StaticType::Tuple(args)) if ps.len() == args.len() => {
-                ps.iter().zip(args).all(|(p, a)| self.bind_argument(p, a))
-            }
-            (StaticType::Map { key: pk, value: pv }, StaticType::Map { key: ak, value: av }) => {
-                let keys = self.bind_argument(pk, ak);
-                let values = self.bind_argument(pv, av);
-                keys && values
-            }
-            // Any sequence passes as a `Sequence<T>` of its elements.
+                StaticType::Function { return_type: a, .. },
+            ) => self.unify(p, a),
+            (StaticType::Sequence(p), StaticType::Sequence(a)) => self.bind_argument(p, a),
             (StaticType::Sequence(p), _) if argument.sequence_element_type().is_some() => {
                 let element = argument
                     .sequence_element_type()
                     .expect("checked by the guard");
                 self.bind_argument(p, &element)
             }
-            _ => {
-                let argument = self.resolve(&argument);
-                argument.is_unknown() || argument.is_subtype(&self.resolve(&parameter))
-            }
+            _ => self.unify(&parameter, &argument),
         }
     }
 
     /// Settles every unsettled variable in `typ` as `to`.
     pub(crate) fn settle_unknowns(&mut self, typ: &StaticType, to: &StaticType) {
         for var in self.unsettled(typ) {
-            self.settle(var, to.clone());
+            if self.solution(var).is_none() {
+                self.settle(var, to.clone());
+            }
         }
     }
 
@@ -415,5 +698,80 @@ impl TypeVars {
             let var = TypeVar(u32::try_from(index).expect("fewer than 2^32 type variables"));
             self.settle_with_fallbacks(&[var]);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TypeVars;
+    use ndc_core::StaticType;
+    use ndc_lexer::Span;
+
+    fn span() -> Span {
+        Span::synthetic()
+    }
+
+    #[test]
+    fn a_number_literal_is_a_number_or_any() {
+        let mut vars = TypeVars::default();
+        for typ in [
+            StaticType::Int,
+            StaticType::Float,
+            StaticType::Number,
+            StaticType::Any,
+        ] {
+            let literal = vars.fresh_number(span());
+            assert!(vars.try_unify(&literal, &typ), "{typ}");
+        }
+        let literal = vars.fresh_number(span());
+        assert!(!vars.try_unify(&literal, &StaticType::String));
+    }
+
+    #[test]
+    fn a_literal_holds_what_each_value_fits() {
+        let mut vars = TypeVars::default();
+        let number = vars.fresh_number(span());
+        let element =
+            vars.fresh_holding(vec![(number.clone(), span()), (StaticType::Float, span())]);
+        assert!(!vars.try_unify(&element, &StaticType::String));
+        assert!(vars.try_unify(&element, &StaticType::Float));
+        // Holding a Float made the number a Float too.
+        assert_eq!(vars.resolve(&number), StaticType::Float);
+    }
+
+    #[test]
+    fn a_rollback_takes_back_the_bounds_another_variable_got() {
+        let mut vars = TypeVars::default();
+        let literal = vars.fresh_number(span());
+        let other = vars.fresh(StaticType::Any);
+        let snapshot = vars.snapshot();
+        assert!(vars.unify(&literal, &other));
+        // `other` is the literal now, so it can't be a String.
+        assert!(!vars.try_unify(&other, &StaticType::String));
+        vars.rollback(snapshot);
+        assert!(vars.try_unify(&other, &StaticType::String));
+    }
+
+    #[test]
+    fn a_literal_defaults_to_what_its_values_share() {
+        let mut vars = TypeVars::default();
+        let number = vars.fresh_number(span());
+        let StaticType::Var(element) =
+            vars.fresh_holding(vec![(number, span()), (StaticType::Float, span())])
+        else {
+            unreachable!("a literal's type is a variable");
+        };
+        assert_eq!(
+            vars.literal_defaults(element),
+            Some(vec![StaticType::Float])
+        );
+        let StaticType::Var(mixed) = vars.fresh_holding(vec![
+            (StaticType::String, span()),
+            (StaticType::Int, span()),
+        ]) else {
+            unreachable!("a literal's type is a variable");
+        };
+        vars.settle_with_fallbacks(&[mixed]);
+        assert_eq!(vars.resolve(&StaticType::Var(mixed)), StaticType::Any);
     }
 }
