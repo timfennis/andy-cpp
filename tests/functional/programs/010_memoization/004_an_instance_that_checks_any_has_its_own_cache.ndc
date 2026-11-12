@@ -1,0 +1,10 @@
+// The instance of `has` for a `List<Int>` checks that `v` is an Int, which
+// the one for a `List<Any>` doesn't. Both get an empty list, so a cache
+// they shared would hand the second call the first one's result.
+// expect-error: expected Int but found String
+pure fn has(xs, v) { xs.contains(v) }
+let anything: List<Any> = [];
+let numbers: List<Int> = [];
+let a: Any = "s";
+print(has(anything, a));
+print(has(numbers, a));

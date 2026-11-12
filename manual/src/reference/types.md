@@ -54,15 +54,19 @@ rules.
 
 > **Note:** `Any` is the base type for every other type, so an `Any`-annotated binding will accept anything. When a value has no annotation and the analyser can't infer a type, it falls back to `Any`. A parameter of a function declared in the program gets the type of each call's argument instead (see [Generic functions](./types/function.md#generic-functions)). There is also a `Never` type used internally for things like `break` that don't produce a value — you'll rarely need to write it by hand.
 
-A value of type `Any` also goes where another type is expected, and is checked to have that type when the program gets there:
+### Using an `Any` value where a type is expected
 
-```ndc
+You can use an `Any` value where a specific type is expected. The program checks the value when it gets there:
+
+```ndc,fails
 let a: Any = 5;
-let n: Int = a;      // checked: a holds an Int
-fn first(xs: Any) -> Int { xs[0] }
-print(first([3]));   // checked: xs[0] is an Int
+let n: Int = a;      // fine: a holds an Int
+print(n + 1);        // 6
+
+let b: Any = "five";
+let m: Int = b;      // error: expected Int but found String
 ```
 
-The check happens when a value is stored in an annotated variable, assigned to a variable, an element or a field, passed for a parameter whose type is known, or returned from a function with an annotated return type. If it fails, the program stops with an error like `expected Int but found String`. A container is checked element by element.
+The same goes for assigning it, passing it to a function, or returning it from one. For a list or a map, every element is checked.
 
-To recover a precise type explicitly, use a [cast](../features/casts.md): `value as List<Int>`.
+You can also check it yourself with a [cast](../features/casts.md): `value as List<Int>`.

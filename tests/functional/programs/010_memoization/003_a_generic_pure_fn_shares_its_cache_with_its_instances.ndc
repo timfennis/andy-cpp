@@ -1,5 +1,5 @@
 // A generic `pure fn` is compiled once for each type it's called with, and
-// all of them share its cache: a call through a value of it, which is the
+// they share its cache: a call through a value of it, which is the
 // function itself, finds what a direct call computed.
 // expect-output: 10 10 2.5 2
 let calls = 0;

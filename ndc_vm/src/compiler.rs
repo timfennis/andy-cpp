@@ -928,15 +928,26 @@ impl Compiler {
         // instance's picks. A generic function is declared at the top level,
         // so it captures nothing and is a global, and its instances are
         // stored in globals of their own. A `pure fn`'s instances share its
-        // cache, as they compute what it does.
+        // cache, as they compute what it does. One that checks a value of
+        // type `Any` against its own types can fail where the others don't,
+        // for arguments they cache a result for, so it has a cache of its
+        // own: `pure fn has(xs, v) { xs.contains(v) }` checks `v` for an Int
+        // in its instance for `List<Int>`, but not for `List<Any>`, and
+        // both may be called with an empty list.
         for (instance, instance_body) in instances.iter().zip(instance_bodies) {
             let idx = self
                 .ir
                 .add_constant(Value::function(Function::Compiled(Rc::new(instance_body))));
             self.ir.write(OpCode::Constant(idx), span);
-            if pure && let Some(function) = name_variable {
-                self.emit_get_var(function, span);
-                self.ir.write(OpCode::MemoizeLike, span);
+            match name_variable {
+                Some(function) if pure && instance.type_checks.is_empty() => {
+                    self.emit_get_var(function, span);
+                    self.ir.write(OpCode::MemoizeLike, span);
+                }
+                _ if pure => {
+                    self.ir.write(OpCode::Memoize, span);
+                }
+                _ => {}
             }
             self.emit_declare(instance.variable, span);
         }
