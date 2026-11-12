@@ -47,7 +47,7 @@ pub fn print(doc: &Doc, width: usize) -> String {
                 };
                 stack.push((indent, mode, doc));
             }
-            Doc::Group { doc, breaks } => {
+            Doc::Group { doc, breaks, .. } => {
                 let flat = !breaks
                     && (mode == Mode::Flat || fits(doc, width.saturating_sub(column), &stack));
                 let mode = if flat { Mode::Flat } else { Mode::Break };
@@ -127,7 +127,7 @@ fn fits(doc: &Doc, width: usize, rest: &Stack<'_>) -> bool {
             }
             Doc::Concat(docs) => stack.extend(docs.iter().rev().map(|doc| (mode, doc))),
             Doc::Indent(doc) => stack.push((mode, doc)),
-            Doc::Group { doc, breaks } => {
+            Doc::Group { doc, breaks, .. } => {
                 let mode = if *breaks { Mode::Break } else { mode };
                 stack.push((mode, doc));
             }

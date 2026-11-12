@@ -22,11 +22,15 @@ pub enum Doc {
     /// Lines inside it start one indentation level deeper.
     Indent(Box<Self>),
     /// Printed on one line if it fits, otherwise with its lines broken.
-    /// `breaks` is set when it holds a hard line or [`Doc::BreakParent`],
-    /// which can't be printed on one line.
     Group {
         doc: Box<Self>,
+        /// Printed broken whether it fits or not: it holds a hard line or a
+        /// [`Doc::BreakParent`], or is a block written over several lines
         breaks: bool,
+        /// It holds a hard line or a [`Doc::BreakParent`], which break every
+        /// group around it too. A block written over several lines breaks
+        /// only itself.
+        breaks_parents: bool,
     },
     Line(Line),
     /// `broken` where the enclosing group breaks, `flat` where it doesn't.
@@ -76,6 +80,7 @@ pub fn group(doc: Doc) -> Doc {
     Doc::Group {
         doc: Box::new(doc),
         breaks,
+        breaks_parents: breaks,
     }
 }
 
@@ -103,12 +108,18 @@ pub fn nil() -> Doc {
 }
 
 /// `doc` with its outermost group broken: `[1, 2]` as `[`, `1,`, `2,`, `]`
-/// on lines of their own, whether or not it would fit on one
+/// on lines of their own, whether or not it would fit on one. The groups
+/// around it don't break because of it.
 pub fn broken(doc: &Doc) -> Doc {
     match doc {
-        Doc::Group { doc, .. } => Doc::Group {
+        Doc::Group {
+            doc,
+            breaks_parents,
+            ..
+        } => Doc::Group {
             doc: doc.clone(),
             breaks: true,
+            breaks_parents: *breaks_parents,
         },
         Doc::Concat(docs) => {
             let mut docs = docs.clone();
@@ -127,9 +138,10 @@ fn is_nil(doc: &Doc) -> bool {
     matches!(doc, Doc::Concat(docs) if docs.iter().all(is_nil))
 }
 
-/// Whether `doc` can't be printed on one line. A nested group has already
-/// worked this out for itself, so each part of a document is looked at once.
-pub fn must_break(doc: &Doc) -> bool {
+/// Whether `doc` holds a hard line or a [`Doc::BreakParent`], which break
+/// the group it's in. A nested group has already worked this out for
+/// itself, so each part of a document is looked at once.
+fn must_break(doc: &Doc) -> bool {
     match doc {
         Doc::Text(_) | Doc::LineSuffix(_) | Doc::Conditional(_) => false,
         Doc::Line(line) => *line == Line::Hard,
@@ -137,7 +149,23 @@ pub fn must_break(doc: &Doc) -> bool {
         Doc::Concat(docs) => docs.iter().any(must_break),
         Doc::Indent(doc) => must_break(doc),
         Doc::Shared(doc) => must_break(doc),
-        Doc::Group { breaks, .. } => *breaks,
+        Doc::Group { breaks_parents, .. } => *breaks_parents,
         Doc::IfBreak { broken, flat } => must_break(broken) || must_break(flat),
+    }
+}
+
+/// Whether `doc` won't print on one line: it holds a line break that must
+/// be printed, or a group that is broken whether it fits or not
+pub fn will_break(doc: &Doc) -> bool {
+    match doc {
+        Doc::Text(_) | Doc::LineSuffix(_) => false,
+        Doc::Line(line) => *line == Line::Hard,
+        Doc::BreakParent => true,
+        Doc::Concat(docs) => docs.iter().any(will_break),
+        Doc::Indent(doc) => will_break(doc),
+        Doc::Shared(doc) => will_break(doc),
+        Doc::Group { doc, breaks, .. } => *breaks || will_break(doc),
+        Doc::Conditional(states) => states.first().is_some_and(will_break),
+        Doc::IfBreak { broken, flat } => will_break(broken) || will_break(flat),
     }
 }

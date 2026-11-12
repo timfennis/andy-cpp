@@ -140,6 +140,22 @@ fn a_function_passed_last_after_a_comment_is_not_on_the_line_of_the_call() {
 }
 
 #[test]
+fn a_block_over_several_lines_breaks_only_itself() {
+    assert_formats(
+        "let x = {\n    let a = 3;\n    a * a\n} + 1;\nlet xs = [{\n    1\n}, 2];\n",
+        "let x = {\n    let a = 3;\n    a * a\n} + 1;\nlet xs = [{\n    1\n}, 2];\n",
+    );
+}
+
+#[test]
+fn a_comment_breaks_everything_around_it() {
+    assert_formats(
+        "let xs = [f(1, // one\n    2), 3];\n",
+        "let xs = [\n    f(\n        1, // one\n        2,\n    ),\n    3,\n];\n",
+    );
+}
+
+#[test]
 fn the_manual_example() {
     assert_formats(
         "let   xs =[1,2 ,3];\nfn double(x) => { x*2 }\n",

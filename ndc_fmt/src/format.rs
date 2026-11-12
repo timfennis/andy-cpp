@@ -6,7 +6,7 @@
 //! `=>` before a function body in braces, and where comments go.
 
 use crate::doc::{
-    Doc, broken, concat, group, hardline, if_break, indent, line, must_break, nil, softline, text,
+    Doc, broken, concat, group, hardline, if_break, indent, line, nil, softline, text, will_break,
 };
 use crate::source::Source;
 use ndc_lexer::{Span, Token};
@@ -286,7 +286,11 @@ impl<'a> Formatter<'a> {
                     docs.push(text(" else "));
                     docs.push(self.node(on_false, false));
                 }
-                maybe_group(concat(docs), grouped)
+                match (grouped, self.branches_span_lines(expression)) {
+                    (true, true) => broken(&group(concat(docs))),
+                    (true, false) => group(concat(docs)),
+                    (false, _) => concat(docs),
+                }
             }
             Expression::While {
                 expression,
@@ -538,7 +542,7 @@ impl<'a> Formatter<'a> {
             && dangling.is_empty()
             && !docs
                 .split_last()
-                .is_some_and(|(_, others)| others.iter().any(|doc| must_break(doc)))
+                .is_some_and(|(_, others)| others.iter().any(|doc| will_break(doc)))
             && !self.comment_before_last(&spans);
         let edge = if brackets.padded { line } else { softline };
         let inside = if items.is_empty() {
@@ -606,32 +610,50 @@ impl<'a> Formatter<'a> {
     }
 
     /// `{ ... }`: on one line if it is in the source and still fits, and
-    /// otherwise with each statement on its own line
+    /// otherwise with each statement on its own line. When it's a branch of
+    /// an `if`, the `if` decides.
     fn block(
         &mut self,
         statements: &[ExpressionLocation],
         range: Range<usize>,
         grouped: bool,
     ) -> Doc {
-        let multiline = if self.source.spans_lines(range.clone()) {
-            Doc::BreakParent
-        } else {
-            nil()
-        };
+        let multiline = self.source.spans_lines(range.clone());
         let (head, body) = self.statements(statements, range.end - 1);
-        let doc = if body.is_empty() {
-            concat([text("{"), head, softline(), text("}")])
-        } else {
-            concat([
-                text("{"),
-                head,
-                multiline,
-                indent(concat([line(), concat(body)])),
-                line(),
-                text("}"),
-            ])
-        };
-        maybe_group(doc, grouped)
+        if body.is_empty() {
+            return maybe_group(concat([text("{"), head, softline(), text("}")]), grouped);
+        }
+        let doc = concat([
+            text("{"),
+            head,
+            indent(concat([line(), concat(body)])),
+            line(),
+            text("}"),
+        ]);
+        match (grouped, multiline) {
+            (true, true) => broken(&group(doc)),
+            (true, false) => group(doc),
+            (false, _) => doc,
+        }
+    }
+
+    /// Whether a block of the `if` at `expression`, or of an `else if` after
+    /// it, is written over several lines
+    fn branches_span_lines(&self, expression: &ExpressionLocation) -> bool {
+        match &expression.expression {
+            Expression::If {
+                on_true, on_false, ..
+            } => {
+                self.branches_span_lines(on_true)
+                    || on_false
+                        .as_deref()
+                        .is_some_and(|on_false| self.branches_span_lines(on_false))
+            }
+            Expression::Block { statements } => {
+                !statements.is_empty() && self.source.spans_lines(expression.span.range())
+            }
+            _ => false,
+        }
     }
 
     fn function(
