@@ -822,23 +822,13 @@ impl Compiler {
     ) -> Result<(), CompileError> {
         let name_variable = self.analysis.variable(id);
         let analysis = Rc::clone(&self.analysis);
-        // Each instance of a generic function is its body compiled with the
-        // instance's picks. A generic function is declared at the top level,
-        // so it captures nothing, and its instances are stored in globals of
-        // their own.
-        for instance in analysis.instances.get(&id).into_iter().flatten() {
-            let instance_body =
-                self.compile_function_body(id, name.clone(), body.clone(), Some(instance))?;
-            let idx = self
-                .ir
-                .add_constant(Value::function(Function::Compiled(Rc::new(instance_body))));
-            self.ir.write(OpCode::Constant(idx), span);
-            if pure {
-                self.ir.write(OpCode::Memoize, span);
-            }
-            self.emit_declare(instance.variable, span);
-        }
-
+        let instances = analysis.instances.get(&id).map_or(&[][..], Vec::as_slice);
+        let instance_bodies = instances
+            .iter()
+            .map(|instance| {
+                self.compile_function_body(id, name.clone(), body.clone(), Some(instance))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         let compiled = self.compile_function_body(id, name, body, None)?;
         let idx = self
             .ir
@@ -874,16 +864,35 @@ impl Compiler {
         match name_variable {
             Some(var @ (ResolvedVar::Local { .. } | ResolvedVar::Global { .. })) => {
                 self.emit_declare(var, span);
-                self.emit_unit();
             }
             Some(ResolvedVar::Cell { slot }) => {
                 self.ir.write(OpCode::SetCell(slot), span);
-                self.emit_unit();
             }
             Some(ResolvedVar::Upvalue { .. }) => {
                 unreachable!("the analyser never assigns a declaration to an upvalue")
             }
             None => {}
+        }
+
+        // Each instance of a generic function is its body compiled with the
+        // instance's picks. A generic function is declared at the top level,
+        // so it captures nothing and is a global, and its instances are
+        // stored in globals of their own. A `pure fn`'s instances share its
+        // cache, as they compute what it does.
+        for (instance, instance_body) in instances.iter().zip(instance_bodies) {
+            let idx = self
+                .ir
+                .add_constant(Value::function(Function::Compiled(Rc::new(instance_body))));
+            self.ir.write(OpCode::Constant(idx), span);
+            if pure && let Some(function) = name_variable {
+                self.emit_get_var(function, span);
+                self.ir.write(OpCode::MemoizeLike, span);
+            }
+            self.emit_declare(instance.variable, span);
+        }
+
+        if name_variable.is_some() {
+            self.emit_unit();
         }
 
         Ok(())
