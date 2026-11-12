@@ -1152,10 +1152,10 @@ fn a_return_annotation_settles_what_the_body_left_unknown() {
         errors("fn f() -> Sequence<Int> { let xs = []; xs }", vec![]),
         Vec::<String>::new()
     );
-    // Returns that join at `Any` still don't fit an `Int`.
+    // Each value returned has to fit the annotation.
     assert_eq!(
         errors("fn f(x) -> Int { if x { return \"s\"; } 1 }", vec![]),
-        vec!["mismatched types: found Any but expected Int"]
+        vec!["mismatched types: found String but expected Int"]
     );
 }
 

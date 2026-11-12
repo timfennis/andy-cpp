@@ -1,5 +1,5 @@
 use super::Analyser;
-use super::solver::CallSite;
+use super::solver::{CallNodes, CallSite};
 use crate::error::AnalysisError;
 use crate::overloads::{CallKind, ResolvedCall};
 use itertools::izip;
@@ -38,6 +38,10 @@ impl Analyser {
             let result = self.constrain_call(
                 CallSite::OpAssignment(id),
                 vec![left_type.clone(), right_type],
+                CallNodes {
+                    arguments: vec![None, Some(r_value.id)],
+                    result: None,
+                },
                 CallKind::Operator,
                 operation,
                 span,
@@ -160,6 +164,10 @@ impl Analyser {
                     Some(_) => self.constrain_call(
                         CallSite::Getter(lvalue.id),
                         vec![container.clone(), index_type.clone()],
+                        CallNodes {
+                            arguments: vec![Some(value.id), Some(index.id)],
+                            result: None,
+                        },
                         CallKind::Regular,
                         "[]",
                         span,
@@ -171,6 +179,10 @@ impl Analyser {
                 self.constrain_call(
                     CallSite::Setter(lvalue.id),
                     vec![container, index_type, stored.clone()],
+                    CallNodes {
+                        arguments: vec![Some(value.id), Some(index.id), Some(lvalue.id)],
+                        result: None,
+                    },
                     CallKind::Regular,
                     "[]=",
                     span,
@@ -194,6 +206,10 @@ impl Analyser {
                 let stored = self.constrain_call(
                     CallSite::Getter(lvalue.id),
                     vec![receiver_type.clone()],
+                    CallNodes {
+                        arguments: vec![Some(receiver.id)],
+                        result: None,
+                    },
                     CallKind::Regular,
                     member,
                     *member_span,
@@ -201,6 +217,10 @@ impl Analyser {
                 self.constrain_call(
                     CallSite::FieldSetter(lvalue.id),
                     vec![receiver_type, stored.clone()],
+                    CallNodes {
+                        arguments: vec![Some(receiver.id), Some(lvalue.id)],
+                        result: None,
+                    },
                     CallKind::Regular,
                     &format!("{member}="),
                     *member_span,
@@ -245,17 +265,24 @@ impl Analyser {
     /// `stored_type` are kept, settling type variables on the way: in
     /// `let xs = []; xs[0] = 1`, the write settles the element type of `xs`
     /// as `Int`. The stored type never widens to fit the value. An `Any`
-    /// value fits anywhere, as `Any` is the dynamic type.
+    /// value fits anywhere, as `Any` is the dynamic type, and is checked at
+    /// `node` as the program runs.
     pub(super) fn accepts_write(
         &mut self,
         stored_type: &StaticType,
         value_type: &StaticType,
+        node: Option<NodeId>,
     ) -> bool {
         // A write passes the value where a value of the stored type is
         // expected, as a call passes an argument: `let xs: Sequence<Int> =
         // []` settles the list's elements as Ints.
         let snapshot = self.vars.snapshot();
         if self.vars.bind_argument(stored_type, value_type) {
+            if let Some(node) = node
+                && self.vars.resolve(value_type) == StaticType::Any
+            {
+                self.expect(node, stored_type.clone());
+            }
             return true;
         }
         self.vars.rollback(snapshot);
@@ -293,17 +320,17 @@ impl Analyser {
             AssignmentTarget::Identifier { .. }
                 if self.picks.variables.contains_key(&lvalue.id) =>
             {
-                if !self.accepts_write(stored_type, value_type) {
+                if !self.accepts_write(stored_type, value_type, Some(lvalue.id)) {
                     self.emit_rejected_write(stored_type, value_type, span);
                 }
             }
             AssignmentTarget::Member { .. } => {
-                if !self.accepts_write(stored_type, value_type) {
+                if !self.accepts_write(stored_type, value_type, Some(lvalue.id)) {
                     self.emit_rejected_write(stored_type, value_type, span);
                 }
             }
             AssignmentTarget::Index { index, .. } => {
-                if self.accepts_write(stored_type, value_type) {
+                if self.accepts_write(stored_type, value_type, Some(lvalue.id)) {
                     return;
                 }
                 // `xs[0..2] = (1, 2)` stores the tuple's elements.
@@ -317,7 +344,7 @@ impl Analyser {
                     && let Some(stored_element) =
                         self.vars.resolve(stored_type).index_element_type()
                     && let Some(value_element) = value_type.sequence_element_type()
-                    && self.accepts_write(&stored_element, &value_element)
+                    && self.accepts_write(&stored_element, &value_element, None)
                 {
                     return;
                 }

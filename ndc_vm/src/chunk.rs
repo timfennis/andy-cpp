@@ -154,6 +154,9 @@ pub enum OpCode {
     MemoizeLike,
     /// Peeks top; errors if the value does not conform to the type. `[… value → … value]`
     CheckType(Rc<StaticType>),
+    /// Peeks top, a value of type `Any` where code expects the type; errors
+    /// if it isn't one. `[… value → … value]`
+    ExpectType(Rc<StaticType>),
 }
 
 impl OpCode {
@@ -191,6 +194,7 @@ impl OpCode {
             Self::Memoize => "Memoize",
             Self::MemoizeLike => "MemoizeLike",
             Self::CheckType(_) => "CheckType",
+            Self::ExpectType(_) => "ExpectType",
         }
     }
 
@@ -247,7 +251,7 @@ impl OpCode {
             Self::Memoize => 0,
             Self::MemoizeLike => -1,
             // Peeks the value without popping it.
-            Self::CheckType(_) => 0,
+            Self::CheckType(_) | Self::ExpectType(_) => 0,
         }
     }
 }
@@ -302,6 +306,7 @@ impl std::fmt::Debug for OpCode {
             Self::Memoize => write!(f, "Memoize"),
             Self::MemoizeLike => write!(f, "MemoizeLike"),
             Self::CheckType(typ) => write!(f, "CheckType({typ})"),
+            Self::ExpectType(typ) => write!(f, "ExpectType({typ})"),
         }
     }
 }

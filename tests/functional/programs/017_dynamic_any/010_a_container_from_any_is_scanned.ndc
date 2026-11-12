@@ -1,0 +1,4 @@
+// expect-error: expected List<Int> but found List<String>
+let a: Any = ["one"];
+let xs: List<Int> = a;
+print(xs);

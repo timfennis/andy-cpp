@@ -534,6 +534,31 @@ fn a_proven_cast_needs_no_runtime_check() {
     );
 }
 
+// let a: Any = 1; let n: Int = a;
+//
+// An `Any` stored where an Int is expected is checked before it's stored.
+#[test]
+fn an_any_stored_in_a_typed_variable_is_checked() {
+    let ops = compile_with_analysis("let a: Any = 1; let n: Int = a;");
+    assert!(
+        ops.iter()
+            .any(|op| matches!(op, ExpectType(t) if **t == ndc_core::StaticType::Int)),
+        "expected an ExpectType(Int) guard, got: {ops:?}",
+    );
+}
+
+// let n: Int = 1; let m = n;
+//
+// A value whose type is known needs no check.
+#[test]
+fn a_typed_value_stored_in_a_typed_variable_is_not_checked() {
+    let ops = compile_with_analysis("let n: Int = 1; let m: Int = n;");
+    assert!(
+        ops.iter().all(|op| !matches!(op, ExpectType(_))),
+        "a value of a known type must not be checked, got: {ops:?}",
+    );
+}
+
 // fn outer() {
 //     let x = 1;
 //     let f = fn() { x };

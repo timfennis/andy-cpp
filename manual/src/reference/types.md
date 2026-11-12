@@ -54,4 +54,15 @@ rules.
 
 > **Note:** `Any` is the base type for every other type, so an `Any`-annotated binding will accept anything. When a value has no annotation and the analyser can't infer a type, it falls back to `Any`. A parameter of a function declared in the program gets the type of each call's argument instead (see [Generic functions](./types/function.md#generic-functions)). There is also a `Never` type used internally for things like `break` that don't produce a value — you'll rarely need to write it by hand.
 
-To go the other way — recover a precise type from an `Any`-typed value — use a [cast](../features/casts.md): `value as List<Int>`.
+A value of type `Any` also goes where another type is expected, and is checked to have that type when the program gets there:
+
+```ndc
+let a: Any = 5;
+let n: Int = a;      // checked: a holds an Int
+fn first(xs: Any) -> Int { xs[0] }
+print(first([3]));   // checked: xs[0] is an Int
+```
+
+The check happens when a value is stored in an annotated variable, assigned to a variable, an element or a field, passed for a parameter whose type is known, or returned from a function with an annotated return type. If it fails, the program stops with an error like `expected Int but found String`. A container is checked element by element.
+
+To recover a precise type explicitly, use a [cast](../features/casts.md): `value as List<Int>`.

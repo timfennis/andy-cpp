@@ -1,0 +1,5 @@
+// expect-error: expected Int but found String
+let xs = [1, 2];
+let a: Any = "three";
+xs[0] = a;
+print(xs);

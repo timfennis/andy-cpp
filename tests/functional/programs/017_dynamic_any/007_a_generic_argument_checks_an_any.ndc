@@ -1,0 +1,7 @@
+// `push(List<T>, T)` takes an Int for a `List<Int>`, so an argument of type
+// `Any` is checked to be one.
+// expect-error: expected Int but found String
+let xs = [1, 2];
+let a: Any = "three";
+xs.push(a);
+print(xs);

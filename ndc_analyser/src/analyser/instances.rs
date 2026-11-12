@@ -47,8 +47,9 @@ pub(super) struct GenericUse {
     pub(super) instance: Option<SymbolId>,
 }
 
-/// What a call that's about to commit to a generic function copied from it,
-/// until it's known whether the call commits.
+/// What a call that's about to commit copied from the generic function it
+/// commits to, and the checks its arguments need, until it's known whether
+/// the call commits.
 #[derive(Debug, Default)]
 pub(super) struct Pending {
     /// Its constraints, with the function they're copied from and the calls
@@ -56,21 +57,24 @@ pub(super) struct Pending {
     pub(super) copies: Vec<(SymbolId, Constraint, Option<Origin>)>,
     /// The function and the types the call gives its key.
     pub(super) uses: Vec<(SymbolId, Vec<StaticType>)>,
+    /// Where an argument of type `Any` is checked, and against what.
+    pub(super) checks: Vec<(NodeId, StaticType)>,
 }
 
 impl Pending {
     /// How much is pending, to [`Self::truncate`] to later.
-    pub(super) fn len(&self) -> (usize, usize) {
-        (self.copies.len(), self.uses.len())
+    pub(super) fn len(&self) -> (usize, usize, usize) {
+        (self.copies.len(), self.uses.len(), self.checks.len())
     }
 
-    pub(super) fn truncate(&mut self, (copies, uses): (usize, usize)) {
+    pub(super) fn truncate(&mut self, (copies, uses, checks): (usize, usize, usize)) {
         self.copies.truncate(copies);
         self.uses.truncate(uses);
+        self.checks.truncate(checks);
     }
 
     pub(super) fn clear(&mut self) {
-        self.truncate((0, 0));
+        self.truncate((0, 0, 0));
     }
 }
 

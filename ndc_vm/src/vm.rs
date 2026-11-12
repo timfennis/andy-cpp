@@ -226,6 +226,15 @@ impl Vm {
                         ));
                     }
                 }
+                OpCode::ExpectType(target) => {
+                    let value = self.stack.last().expect("stack underflow");
+                    if !value.conforms_to(target) {
+                        return Err(VmError::new(
+                            format!("expected {target} but found {}", value.diagnostic_type()),
+                            span,
+                        ));
+                    }
+                }
                 OpCode::GetLocal(slot) => {
                     let slot = *slot;
                     self.stack.push(self.stack[frame.slot(slot)].clone());

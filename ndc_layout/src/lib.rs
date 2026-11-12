@@ -11,8 +11,8 @@ use ahash::AHashMap;
 use ndc_analysis::{
     Analysis, Binding, CaptureSource, DeclaredStruct, FieldAccessors, Instance, ResolvedVar,
 };
-use ndc_core::NodeId;
 use ndc_core::r#struct::StructInfo;
+use ndc_core::{NodeId, StaticType};
 use ndc_resolver::{NameResolver, ScopeId, ScopeKind, SymbolId};
 
 #[cfg(test)]
@@ -49,6 +49,8 @@ pub struct InstancePicks {
     pub getters: AHashMap<NodeId, Binding<SymbolId>>,
     pub setters: AHashMap<NodeId, Binding<SymbolId>>,
     pub augmented_assignments: AHashMap<NodeId, Binding<SymbolId>>,
+    /// As [`Analysis::type_checks`], for the instance's body.
+    pub type_checks: AHashMap<NodeId, StaticType>,
 }
 
 impl InstancePicks {
@@ -59,6 +61,7 @@ impl InstancePicks {
             getters: AHashMap::new(),
             setters: AHashMap::new(),
             augmented_assignments: AHashMap::new(),
+            type_checks: AHashMap::new(),
         }
     }
 }
@@ -158,6 +161,7 @@ impl<'a> Layout<'a> {
                     .into_iter()
                     .map(locate_binding)
                     .collect(),
+                type_checks: picks.type_checks,
             };
             analysis
                 .instances

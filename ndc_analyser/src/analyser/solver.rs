@@ -180,11 +180,26 @@ pub(super) enum EarlyPick {
     },
 }
 
+/// The expressions a call's arguments and value come from, where a value
+/// of type `Any` is checked against the type the call expects of it as the
+/// program runs: in `xs.push(a)` on a `List<Int>`, `a` is checked to be an
+/// Int. The value an assignment stores is checked at the assignment's
+/// target.
+#[derive(Debug, Clone, Default)]
+pub(super) struct CallNodes {
+    /// Where each argument comes from.
+    pub(super) arguments: Vec<Option<NodeId>>,
+    /// The call itself, whose value is checked when it's `Any` but code
+    /// meanwhile settled the type it has.
+    pub(super) result: Option<NodeId>,
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct CallConstraint {
     site: CallSite,
     candidates: Candidates,
     arguments: Vec<StaticType>,
+    nodes: CallNodes,
     /// The call's type, which the picked overload's return type settles.
     result: StaticType,
     kind: CallKind,
@@ -236,6 +251,7 @@ impl Analyser {
         &mut self,
         site: CallSite,
         arguments: Vec<StaticType>,
+        nodes: CallNodes,
         kind: CallKind,
         name: &str,
         span: Span,
@@ -244,6 +260,7 @@ impl Analyser {
             candidates: self.site_candidates(site).clone(),
             site,
             arguments,
+            nodes,
             result: StaticType::Never,
             kind,
             name: name.to_string(),
@@ -365,6 +382,7 @@ impl Analyser {
         let Some(typ) = self.commit_call(
             &Binding::Resolved(Candidate::Scalar(picked)),
             arguments,
+            &call.nodes.arguments,
             StaticType::Any,
         ) else {
             self.pending.clear();
@@ -665,13 +683,15 @@ impl Analyser {
                     // the read said what the field holds, so it's the value
                     // that doesn't fit. The write fails the same way and
                     // isn't reported again.
-                    CallSite::Getter(id) if !self.accepts_write(&result, &typ) => {
+                    CallSite::Getter(id)
+                        if !self.accepts_write(&result, &typ, call.nodes.result) =>
+                    {
                         self.emit_rejected_write(&typ, &result, call.span);
                         self.failed_reads.insert(id);
                     }
                     CallSite::Getter(_) => {}
                     _ => {
-                        self.settle_waited_for(&result, &typ, call.span);
+                        self.settle_waited_for(&result, &typ, call.span, call.nodes.result);
                     }
                 }
                 true
@@ -688,7 +708,7 @@ impl Analyser {
                 }
                 let found = sequence.sequence_element_type().unwrap_or(StaticType::Any);
                 let element = element.clone();
-                self.settle_waited_for(&element, &found, *span);
+                self.settle_waited_for(&element, &found, *span, None);
                 true
             }
             Constraint::Unpack { value, parts, span } => {
@@ -717,7 +737,7 @@ impl Analyser {
                 };
                 let found = found.unwrap_or_else(|| vec![StaticType::Any; parts.len()]);
                 for (part, found) in parts.iter().zip(found) {
-                    self.settle_waited_for(part, &found, *span);
+                    self.settle_waited_for(part, &found, *span, None);
                 }
                 true
             }
@@ -731,7 +751,7 @@ impl Analyser {
                     return false;
                 }
                 let value = value.clone();
-                self.settle_waited_for(&value, &Self::default_value_type(default), *span);
+                self.settle_waited_for(&value, &Self::default_value_type(default), *span, None);
                 true
             }
             Constraint::Join {
@@ -756,7 +776,7 @@ impl Analyser {
                 if a.has_vars() || b.has_vars() {
                     return false;
                 }
-                self.settle_waited_for(&result, &a.lub(&b), *span);
+                self.settle_waited_for(&result, &a.lub(&b), *span, None);
                 true
             }
         }
@@ -764,9 +784,16 @@ impl Analyser {
 
     /// Settles `waited`, the type a constraint gave out while it waited, as
     /// `found`, the type it turned out to be. Code analysed meanwhile may
-    /// have settled `waited` already, and then `found` has to fit it.
-    fn settle_waited_for(&mut self, waited: &StaticType, found: &StaticType, span: Span) {
-        if !self.accepts_write(waited, found) {
+    /// have settled `waited` already, and then `found` has to fit it: a
+    /// value of type `Any` is checked at `node` as the program runs.
+    fn settle_waited_for(
+        &mut self,
+        waited: &StaticType,
+        found: &StaticType,
+        span: Span,
+        node: Option<NodeId>,
+    ) {
+        if !self.accepts_write(waited, found, node) {
             self.emit_rejected_write(waited, found, span);
         }
     }
@@ -890,7 +917,7 @@ impl Analyser {
             self.record_pick(call.site, binding, arguments);
             return StaticType::Any;
         }
-        let typ = self.commit_call(&binding, arguments, return_type);
+        let typ = self.commit_call(&binding, arguments, &call.nodes.arguments, return_type);
         self.record_pick(call.site, binding, arguments);
         if let Some(typ) = typ {
             self.flush_copies(Some(call.site), call.span);
@@ -910,11 +937,13 @@ impl Analyser {
     /// When the pick is left to the program as it runs, any function may get
     /// the arguments, so what's unknown in them becomes `Any`. Returns `None`
     /// when an argument doesn't fit the picked overload after all, which
-    /// settles nothing.
+    /// settles nothing. An argument of type `Any` is checked at its node in
+    /// `nodes` as the program runs, once the call commits.
     fn commit_call(
         &mut self,
         binding: &Binding<SymbolId>,
         arguments: &[StaticType],
+        nodes: &[Option<NodeId>],
         return_type: StaticType,
     ) -> Option<StaticType> {
         let picked = match binding {
@@ -938,7 +967,7 @@ impl Analyser {
                             scalar => scalar.clone(),
                         })
                         .collect::<Vec<_>>();
-                    returns.push(self.commit_call(&scalar, &arguments, StaticType::Any)?);
+                    returns.push(self.commit_call(&scalar, &arguments, &[], StaticType::Any)?);
                 }
                 return Some(StaticType::Tuple(returns));
             }
@@ -964,10 +993,13 @@ impl Analyser {
             },
             arguments,
         );
-        if typ.is_none() {
+        let Some((typ, parameters)) = typ else {
             self.pending.truncate(pending);
-        }
-        typ
+            return None;
+        };
+        let checks = self.expected_of_any(&parameters, arguments, nodes);
+        self.pending.checks.extend(checks);
+        Some(typ)
     }
 
     /// `symbol`'s type with new variables for its type parameters. For a
@@ -1023,6 +1055,9 @@ impl Analyser {
             Some(site) => self.record_uses(site),
             None => self.pending.uses.clear(),
         }
+        for (node, expected) in std::mem::take(&mut self.pending.checks) {
+            self.expect(node, expected);
+        }
         let copies = std::mem::take(&mut self.pending.copies);
         for (function, constraint, origin) in copies {
             let name = self.resolver.symbol_name(function).to_string();
@@ -1049,13 +1084,13 @@ impl Analyser {
 
     /// Passes each argument where `signature` expects its parameter, which
     /// settles what's unknown in either, and returns what the signature
-    /// returns. Returns `None` and settles nothing when an argument doesn't
-    /// fit, or the number of arguments is wrong.
+    /// returns, and its parameters. Returns `None` and settles nothing when
+    /// an argument doesn't fit, or the number of arguments is wrong.
     pub(super) fn bind_signature(
         &mut self,
         signature: &StaticType,
         arguments: &[StaticType],
-    ) -> Option<StaticType> {
+    ) -> Option<(StaticType, Vec<StaticType>)> {
         let StaticType::Function {
             parameters: Some(parameters),
             return_type,
@@ -1073,7 +1108,26 @@ impl Analyser {
             self.vars.rollback(snapshot);
             return None;
         }
-        Some(self.vars.resolve(return_type))
+        Some((self.vars.resolve(return_type), parameters.clone()))
+    }
+
+    /// Where each argument of type `Any` that `nodes` has a node for is
+    /// checked against the parameter it was passed for.
+    pub(super) fn expected_of_any(
+        &self,
+        parameters: &[StaticType],
+        arguments: &[StaticType],
+        nodes: &[Option<NodeId>],
+    ) -> Vec<(NodeId, StaticType)> {
+        parameters
+            .iter()
+            .zip(arguments)
+            .zip(nodes)
+            .filter_map(|((parameter, argument), node)| {
+                let node = (*node)?;
+                (self.vars.resolve(argument) == StaticType::Any).then(|| (node, parameter.clone()))
+            })
+            .collect()
     }
 
     /// The type of calling a value whose type isn't known yet, like `g` in
@@ -1107,7 +1161,9 @@ impl Analyser {
             .overloads()
             .resolve_call(&call.candidates, arguments, call.kind);
         let fits = !matches!(binding, Binding::None)
-            && self.commit_call(&binding, arguments, return_type).is_some();
+            && self
+                .commit_call(&binding, arguments, &call.nodes.arguments, return_type)
+                .is_some();
         self.vars.rollback(snapshot);
         self.pending.clear();
         fits
@@ -1174,7 +1230,7 @@ impl Analyser {
         let committed = self.commit_early(&call, &arguments, narrowest);
         if let Some(typ) = &committed {
             let result = call.result.clone();
-            self.settle_waited_for(&result, typ, call.span);
+            self.settle_waited_for(&result, typ, call.span, call.nodes.result);
         }
         self.copied_through = outer;
         if committed.is_none() {

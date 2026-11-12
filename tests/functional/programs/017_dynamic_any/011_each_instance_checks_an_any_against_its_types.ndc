@@ -1,0 +1,11 @@
+// `put` picks `push` for each set of types it's called with, so each
+// instance checks an argument of type `Any` against its own: the String
+// goes into the list of Strings, but not into the list of Ints.
+// expect-error: expected Int but found String
+fn put(xs, v) { xs.push(v) }
+let a: Any = "s";
+let words = ["t"];
+put(words, a);
+print(words);
+let numbers = [1];
+put(numbers, a);
