@@ -40,7 +40,7 @@ pub(crate) enum VecResolution {
 
 /// Output of a single scalar overload walk across the scope chain.
 struct ScalarWalk {
-    /// First exact-subtype match found; short-circuits the walk.
+    /// First exact match found; short-circuits the walk.
     exact: Option<SymbolId>,
     /// First-scope-wins loose-compatibility candidates.
     loose: Option<Vec<SymbolId>>,
@@ -50,54 +50,32 @@ struct ScalarWalk {
 }
 
 /// Whether a value of type `arg` might be accepted where `param` is expected
-/// when the program runs. For a function passed for a function parameter,
-/// only what both types know has to agree: `fn(x) => x * 2`, typed
-/// `Fn(Any) -> Any`, can be passed for an `Fn(Int) -> Int`, but
+/// when the program runs: an `Any` might turn out to be anything, and the
+/// parts of either type not known yet could be anything. A lambda
+/// `fn(x) => x * 2` can be passed for an `Fn(Int) -> Int`, but
 /// `fn(x: String) => 1` can't, and neither can a function of two arguments.
 fn could_pass(param: &StaticType, arg: &StaticType) -> bool {
-    match (param, arg) {
-        (
-            StaticType::Function {
-                parameters: expected,
-                return_type: expected_return,
-            },
-            StaticType::Function {
-                parameters: takes,
-                return_type: returns,
-            },
-        ) => {
-            let parameters = match (expected, takes) {
-                // What the parameter passes has to fit what the function takes.
-                (Some(expected), Some(takes)) => {
-                    expected.len() == takes.len()
-                        && expected
-                            .iter()
-                            .zip(takes)
-                            .all(|(expected, takes)| could_pass(takes, expected))
-                }
-                _ => true,
-            };
-            parameters && could_pass(expected_return, returns)
-        }
-        _ => !param.is_incompatible_with(arg),
-    }
+    arg.may_fit(param)
 }
 
-/// Returns `true` iff `more` is a strict subtype of `less` pointwise — i.e.
-/// every position satisfies `more[i] <: less[i]` and at least one position is
-/// not bidirectionally equivalent. Used by [`Overloads::most_specific_match`] to order
-/// matching overloads by specificity: an overload with `more` parameters
-/// accepts strictly fewer call signatures than one with `less` parameters.
+/// Returns `true` iff `more` is strictly more specific than `less`: each of
+/// its parameter types is the other's, or an instance of it, and at least
+/// one isn't the other's. An instance of a type parameter is any type, and
+/// every type is an instance of `Any`: `f(Int)` is more specific than
+/// `f(x)` and `f(Any)`, but `f(List<Int>)` and `f(List<Any>)` are
+/// unrelated. Used by [`Overloads::most_specific_match`] to order matching
+/// overloads by specificity: an overload with `more` parameters accepts
+/// strictly fewer call signatures than one with `less` parameters.
 pub(crate) fn is_strictly_more_specific(more: &[StaticType], less: &[StaticType]) -> bool {
     if more.len() != less.len() {
         return false;
     }
     let mut any_strict = false;
     for (m, l) in more.iter().zip(less) {
-        if !m.is_subtype(l) {
+        if !m.fits(l) {
             return false;
         }
-        if !l.is_subtype(m) {
+        if !l.fits(m) {
             any_strict = true;
         }
     }
@@ -244,7 +222,7 @@ impl<'a> Overloads<'a> {
                 && parameters
                     .iter()
                     .zip(sig)
-                    .any(|(param, arg)| !arg.is_subtype(param))
+                    .any(|(param, arg)| !arg.fits(param))
         })
     }
 
@@ -447,11 +425,10 @@ impl<'a> Overloads<'a> {
     ///
     /// Resolution proceeds in two stages:
     ///   1. Filter to overloads whose declared signature accepts `sig`
-    ///      (the usual subtype check via [`StaticType::is_fn_and_matches`]).
+    ///      (each argument [`StaticType::fits`] its parameter).
     ///   2. Among the survivors, pick the one whose parameter signature is
     ///      most specific — i.e. not strictly dominated by any other match's
-    ///      parameter signature in the subtype partial order. A signature `b`
-    ///      strictly dominates `a` when `b <: a` and `a` is not `<: b`.
+    ///      parameter signature (see [`is_strictly_more_specific`]).
     ///
     /// Variadic overloads (`parameters: None`) match anything but are treated
     /// as the least specific shape: any concrete overload that also matches
@@ -827,7 +804,7 @@ mod tests {
     #[test]
     fn more_specific_overload_wins_in_same_scope() {
         let seq_any = StaticType::Sequence(Box::new(StaticType::Any));
-        let fn_any = variadic_fn(StaticType::Any);
+        let fn_any = variadic_fn(StaticType::Generic("U".into()));
         let (types, locates) = table(vec![
             fn_type(vec![seq_any.clone(), fn_any], StaticType::Any),
             fn_type(vec![seq_any, StaticType::Any], StaticType::Any),

@@ -1,6 +1,6 @@
 // A variable keeps the type its first value gave it, so a call resolved
 // against that type, like the `+` in `f`, stays right.
 // expect-error: mismatched types: found Float but expected Int
-let x = 1;
+let x = "a".len();
 fn f() { x + 1 }
 x = 2.5;

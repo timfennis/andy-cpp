@@ -10,6 +10,7 @@ use super::instances::Scheme;
 use super::solver::{CallConstraint, Constraint, Waiting};
 use crate::error::AnalysisError;
 use crate::overloads::is_strictly_more_specific;
+use crate::types::TypeVars;
 use ahash::AHashSet;
 use ndc_core::{NodeId, StaticType, TypeVar};
 use ndc_lexer::Span;
@@ -39,6 +40,8 @@ impl Analyser {
         first_use: usize,
     ) -> StaticType {
         self.solve_waiting();
+        // A literal in the body has one type, which a call can't change.
+        self.default_literals(TypeVars::is_generalizable);
         self.settle_ambiguous(signature);
         self.merge_copies();
 

@@ -145,7 +145,21 @@ impl Analyser {
                     .binding
                 {
                     Binding::Resolved(Candidate::Scalar(symbol)) => Some(symbol),
-                    Binding::Dynamic(_) => return Choice::Undecided,
+                    // The program would pick one as it runs, but a function
+                    // value is one function. When the expected type's `Any`
+                    // could be what's not known yet, as in a generic
+                    // function's own body, more than one might be meant.
+                    Binding::Dynamic(candidates) => {
+                        let might = candidates.into_iter().any(|candidate| match candidate {
+                            Candidate::Scalar(symbol) => self.might_be_expected(symbol, expected),
+                            Candidate::Vec(_) => false,
+                        });
+                        return if might {
+                            Choice::Undecided
+                        } else {
+                            Choice::None
+                        };
+                    }
                     _ => None,
                 }
             };
@@ -208,6 +222,16 @@ impl Analyser {
             .all(|&symbol| parameters(symbol) == parameters(symbols[0]))
     }
 
+    /// Whether a value of `symbol`'s type might be passed where `expected`
+    /// is, once what's not known about either is: an `Fn(Int) -> Int` might
+    /// be the `Fn(Any) -> Any` a generic function's body expects, but an
+    /// `Fn(Int, Int) -> Int` isn't.
+    fn might_be_expected(&self, symbol: SymbolId, expected: &StaticType) -> bool {
+        self.vars
+            .resolve(self.types.get_type(symbol))
+            .may_fit(&self.vars.resolve(expected))
+    }
+
     /// Whether a value of `symbol`'s type can be passed where `expected` is.
     fn fits_expected(&mut self, symbol: SymbolId, expected: &StaticType) -> bool {
         let snapshot = self.vars.snapshot();
@@ -258,6 +282,14 @@ impl Analyser {
             .fitting_groups(value, expected)
             .first()
             .and_then(|group| group.first().copied())
+            .or_else(|| {
+                value
+                    .groups
+                    .iter()
+                    .flatten()
+                    .copied()
+                    .find(|&symbol| self.might_be_expected(symbol, expected))
+            })
             .unwrap_or_else(|| self.resolver.innermost_reference(value.id));
         self.vars
             .shown(self.types.get_type(symbol))

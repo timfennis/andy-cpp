@@ -44,10 +44,10 @@ fn index_natives() -> Vec<(String, StaticType)> {
     // The stdlib's list and map overloads.
     [
         ("[]", "<T>(List<T>, Int) -> T"),
-        ("[]", "<T>(List<T>, Iterator<Any>) -> List<T>"),
+        ("[]", "<T>(List<T>, Iterator<Int>) -> List<T>"),
         ("[]", "<K, V>(Map<K, V>, K) -> V"),
         ("[]=", "<T>(List<T>, Int, T)"),
-        ("[]=", "<T>(List<T>, Iterator<Any>, Sequence<T>)"),
+        ("[]=", "<T>(List<T>, Iterator<Int>, Sequence<T>)"),
         ("[]=", "<K, V>(Map<K, V>, K, V)"),
         ("[]=", "(String, Any, String)"),
     ]
@@ -199,11 +199,8 @@ fn annotated_identifier_augmented_assignment_rejects_widening() {
 
 #[test]
 fn an_in_place_operator_assignment_keeps_the_target_type() {
-    let list_any = StaticType::List(Box::new(StaticType::Any));
-    let append = StaticType::Function {
-        parameters: Some(vec![list_any.clone(), list_any.clone()]),
-        return_type: Box::new(list_any),
-    };
+    let append =
+        StaticType::signature("<T>(List<T>, List<T>) -> List<T>").expect("valid signature");
 
     assert_eq!(
         analyse_last_type_with_globals(
@@ -216,11 +213,8 @@ fn an_in_place_operator_assignment_keeps_the_target_type() {
 
 #[test]
 fn an_in_place_operator_assignment_cannot_change_the_target_type() {
-    let list_any = StaticType::List(Box::new(StaticType::Any));
-    let concat = StaticType::Function {
-        parameters: Some(vec![list_any.clone(), list_any.clone()]),
-        return_type: Box::new(list_any),
-    };
+    let concat =
+        StaticType::signature("<T>(List<T>, List<T>) -> List<T>").expect("valid signature");
 
     assert_analysis_error(
         "let values = [1]; values ++= [\"two\"];",
@@ -423,18 +417,31 @@ fn a_variable_keeps_its_inferred_type() {
         parameters: Some(vec![StaticType::Int, StaticType::Float]),
         return_type: Box::new(StaticType::Float),
     };
-    let globals = [index_natives(), vec![("+".to_string(), add)]].concat();
+    // `one()` is an Int that isn't a literal, which would take the type
+    // its uses need.
+    let globals = [
+        index_natives(),
+        vec![("+".to_string(), add)],
+        natives(&[("one", "() -> Int")]),
+    ]
+    .concat();
     let scalar = "mismatched types: found Float but expected Int";
     let list = "mismatched types: found List<Float> but expected List<Int>";
     for (source, expected) in [
-        ("let x = 3; x = 0.5;", scalar),
-        ("let x = 3; x += 0.5;", scalar),
-        ("let a = 1; let b = 2; (a, b) = (0.5, 2);", scalar),
-        ("for x in [1] { x = 0.5; }", scalar),
-        ("let values = [1]; values[0] = 0.5;", scalar),
-        ("let values = [1]; values[0..1] = [0.5];", list),
-        ("let values = [1]; values[0] += 0.5;", scalar),
-        ("let values = %{\"one\": 1}; values[\"two\"] = 0.5;", scalar),
+        ("let x = one(); x = 0.5;", scalar),
+        ("let x = one(); x += 0.5;", scalar),
+        (
+            "let a = one(); let b = one(); (a, b) = (0.5, one());",
+            scalar,
+        ),
+        ("for x in [one()] { x = 0.5; }", scalar),
+        ("let values = [one()]; values[0] = 0.5;", scalar),
+        ("let values = [one()]; values[0..1] = [0.5];", list),
+        ("let values = [one()]; values[0] += 0.5;", scalar),
+        (
+            "let values = %{\"one\": one()}; values[\"two\"] = 0.5;",
+            scalar,
+        ),
     ] {
         assert_eq!(errors(source, globals.clone()), vec![expected], "{source}");
     }
@@ -815,7 +822,10 @@ fn a_lambda_passed_to_a_function_takes_its_parameter_types_from_the_call() {
 #[test]
 fn a_lambda_in_a_variable_has_one_type() {
     assert_eq!(
-        errors("let f = fn(x) => x + 1; f(1); f(2.5);", ambiguous_plus()),
+        errors(
+            "let f = fn(x) => x + 1; f(one()); f(2.5);",
+            [ambiguous_plus(), natives(&[("one", "() -> Int")])].concat()
+        ),
         vec!["The variable 'f' holds a function that doesn't accept the arguments 'Float'"]
     );
 }
@@ -961,13 +971,14 @@ fn a_call_nothing_else_settles_takes_no_narrowest_overload_when_unsure() {
         ),
         function(StaticType::Any, StaticType::Any)
     );
-    // Overloads in two scopes fit, so none settles `x`: it's `Any`, and the
-    // call resolves as it does for any `Any` argument.
+    // Overloads in two scopes fit, so none settles `x`: it's `Any`, and
+    // `[x]` is a `List<Any>`, which neither takes.
     assert_eq!(
-        analyse_last_type(
-            "fn pick(xs: List<String>) => \"outer\"; { fn pick(xs: List<Int>) => 1; let f = fn(x) => pick([x]); f }"
+        errors(
+            "fn pick(xs: List<String>) => \"outer\"; { fn pick(xs: List<Int>) => 1; let f = fn(x) => pick([x]); f }",
+            vec![]
         ),
-        function(StaticType::Any, StaticType::Int)
+        vec!["No function called 'pick' found that matches the arguments 'List<Any>'"]
     );
 }
 
@@ -1682,4 +1693,17 @@ fn an_instance_calls_itself_where_its_body_recurses() {
         .filter(|binding| **binding == Binding::Resolved(Candidate::Scalar(instance.variable)))
         .count();
     assert_eq!(calls_itself, 2, "{instance:?}");
+}
+
+#[test]
+fn a_list_literal_holding_the_list_it_is_pushed_to_is_analysed() {
+    // `[xs]` holds a list of what it is itself, which used to recurse
+    // forever while its type was settled.
+    for source in [
+        "let xs = []; xs.push([xs]);",
+        "let xs = [\"s\"]; xs = [xs];",
+    ] {
+        let (_, result) = analyse_with_globals(source, natives(&[("push", "<T>(List<T>, T)")]));
+        assert!(result.errors.len() <= 1, "{source}: {:?}", result.errors);
+    }
 }

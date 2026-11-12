@@ -157,7 +157,7 @@ fn group_overloads<'a>(
             continue;
         };
         if let (Some(recv), Some(params)) = (receiver_type, parameters)
-            && (params.is_empty() || !recv.is_subtype(&params[0]))
+            && (params.is_empty() || !recv.may_fit(&params[0]))
         {
             continue;
         }
@@ -199,7 +199,7 @@ fn group_overloads<'a>(
 fn merged_type_display(candidates: &[&StaticType]) -> String {
     if let Some(supertype) = candidates
         .iter()
-        .find(|t| candidates.iter().all(|c| c.is_subtype(t)))
+        .find(|t| candidates.iter().all(|c| c.fits(t)))
     {
         return supertype.to_string();
     }

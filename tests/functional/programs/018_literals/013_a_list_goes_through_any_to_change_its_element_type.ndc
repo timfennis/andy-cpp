@@ -1,0 +1,6 @@
+// expect-output: ["a","b",1]
+let words = "a b".split(" ");
+let any: Any = words;
+let anything: List<Any> = any;
+anything.push(1);
+print(anything);

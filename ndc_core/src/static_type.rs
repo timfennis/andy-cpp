@@ -540,6 +540,91 @@ impl StaticType {
         }
     }
 
+    /// Whether a value of this type can be passed where `parameter` is
+    /// expected as it is, with nothing to check as the program runs. The
+    /// two types are the same, except that `parameter` can be `Any`, which
+    /// takes anything, and that its type parameters and the parts of it not
+    /// known yet stand for any type. Inside a container, a function type,
+    /// an `Option` or a tuple, `Any` is just another type: a `List<Int>`
+    /// doesn't fit a `List<Any>`, as the list could then get a String. A
+    /// `Sequence<T>` takes any kind of sequence of what fits `T`.
+    pub fn fits(&self, parameter: &Self) -> bool {
+        matches!(parameter, Self::Any) || self.matches(parameter, false)
+    }
+
+    /// Whether a value of this type might be passed where `parameter` is
+    /// expected, once what isn't known about it is: as [`Self::fits`],
+    /// except that the parts of this type not known yet, and the whole of
+    /// it if it's `Any`, stand for any type too. `Any` checked as the
+    /// program runs can turn out to be an Int, but a `List<Any>` is never a
+    /// `List<Int>`.
+    pub fn may_fit(&self, parameter: &Self) -> bool {
+        matches!(self, Self::Any) || self.fits(parameter) || self.matches(parameter, true)
+    }
+
+    /// Whether this type is `parameter`, where what [`Self::fits`] and
+    /// [`Self::may_fit`] let stand for any type does, and the variables of
+    /// this type too if `unknowns_match`.
+    fn matches(&self, parameter: &Self, unknowns_match: bool) -> bool {
+        let wildcard = |typ: &Self| matches!(typ, Self::Var(_) | Self::Generic(_));
+        if wildcard(parameter) || (unknowns_match && wildcard(self)) {
+            return true;
+        }
+        let matches = |a: &Self, p: &Self| a.matches(p, unknowns_match);
+        match (self, parameter) {
+            (Self::Never, _) => true,
+            (Self::Sequence(a), Self::Sequence(p)) => a.fits(p) || matches(a, p),
+            (argument, Self::Sequence(p)) if Self::is_sequence(argument) => {
+                let element = argument
+                    .sequence_element_type()
+                    .expect("a sequence has elements");
+                element.fits(p) || matches(&element, p)
+            }
+            (Self::Option(a), Self::Option(p))
+            | (Self::List(a), Self::List(p))
+            | (Self::Iterator(a), Self::Iterator(p))
+            | (Self::MinHeap(a), Self::MinHeap(p))
+            | (Self::MaxHeap(a), Self::MaxHeap(p))
+            | (Self::Deque(a), Self::Deque(p)) => matches(a, p),
+            (Self::Tuple(a), Self::Tuple(p)) => {
+                a.len() == p.len() && a.iter().zip(p).all(|(a, p)| matches(a, p))
+            }
+            (Self::Map { key: ak, value: av }, Self::Map { key: pk, value: pv }) => {
+                matches(ak, pk) && matches(av, pv)
+            }
+            (
+                Self::Function {
+                    parameters: a,
+                    return_type: ar,
+                },
+                Self::Function {
+                    parameters: p,
+                    return_type: pr,
+                },
+            ) => {
+                // What a function value takes and returns isn't checked as
+                // the program runs, so whether it might fit only depends on
+                // what both types know: `fn(x) => x > 1`, typed `Fn(Any) ->
+                // Any` where nothing says what `x` is, might be a predicate.
+                let part = |a: &Self, p: &Self| {
+                    matches(a, p)
+                        || (unknowns_match && (matches!(a, Self::Any) || matches!(p, Self::Any)))
+                };
+                let parameters = match (a, p) {
+                    // A function value whose parameters aren't known fits
+                    // a function type that says nothing about them either.
+                    (_, None) => true,
+                    (None, Some(_)) => unknowns_match,
+                    (Some(a), Some(p)) => {
+                        a.len() == p.len() && a.iter().zip(p).all(|(a, p)| part(a, p))
+                    }
+                };
+                parameters && part(ar, pr)
+            }
+            _ => self == parameter,
+        }
+    }
+
     /// Whether this type stands for every type: `Any`, a type variable or
     /// a type parameter, which are all `Any` to the methods here.
     pub fn is_unknown(&self) -> bool {
@@ -785,15 +870,16 @@ impl StaticType {
             return false;
         };
 
-        let Some(_) = parameters else {
+        let Some(parameters) = parameters else {
             // If this branch happens then the function we're matching against is variadic meaning it's always a match
             return true;
         };
 
-        self.is_subtype(&Self::Function {
-            parameters: Some(types.to_vec()),
-            return_type: Box::new(Self::Any),
-        })
+        parameters.len() == types.len()
+            && types
+                .iter()
+                .zip(parameters)
+                .all(|(argument, parameter)| argument.fits(parameter))
     }
 
     pub fn unpack(&self) -> Option<Box<dyn Iterator<Item = &Self> + '_>> {
@@ -905,7 +991,10 @@ mod test {
             StaticType::Int,
         ])));
 
-        assert!(fun.is_fn_and_matches(&[list_of_two_tuple_int, StaticType::Int]));
+        // A list of tuples isn't a list of `Any`, which could get a String.
+        assert!(!fun.is_fn_and_matches(&[list_of_two_tuple_int.clone(), StaticType::Int]));
+        let generic = StaticType::signature("<T>(List<T>, Int) -> T").expect("valid signature");
+        assert!(generic.is_fn_and_matches(&[list_of_two_tuple_int, StaticType::Int]));
     }
 
     #[test]

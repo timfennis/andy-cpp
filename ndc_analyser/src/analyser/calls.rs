@@ -84,6 +84,14 @@ impl Analyser {
                 .iter()
                 .map(|arg| self.analyse_expr(arg))
                 .collect::<Vec<_>>();
+            // A call needs to know what it calls now, so what a literal
+            // holds, like the functions in `[f, g][0](1)`, is settled.
+            if let StaticType::Var(var) = self.vars.resolve(&callee_type)
+                && self.vars.is_literal(var)
+            {
+                self.vars.settle_with_fallbacks(&[var]);
+                self.solve_waiting();
+            }
             return match self.vars.resolve(&callee_type) {
                 // The callee's type says what it takes, like a picked overload's.
                 callee @ StaticType::Function {
@@ -122,7 +130,7 @@ impl Analyser {
                     }
                 }
                 other => {
-                    self.emit(AnalysisError::not_callable(&other, span));
+                    self.emit(AnalysisError::not_callable(&self.vars.shown(&other), span));
                     StaticType::Any
                 }
             };

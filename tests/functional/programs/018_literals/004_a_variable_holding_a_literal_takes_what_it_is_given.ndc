@@ -1,0 +1,5 @@
+// `+` with a Float can't give `total` an Int back, so `0` is a Float.
+// expect-output: 2.5
+let total = 0;
+total += 2.5;
+print(total);

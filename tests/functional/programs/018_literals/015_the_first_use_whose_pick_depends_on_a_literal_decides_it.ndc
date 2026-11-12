@@ -1,0 +1,9 @@
+// `describe(x)` takes the Strings, but would lose to `describe(x: Int)` if
+// the list held `Any`, so `map` decides that the list holds Strings. It
+// can't become a List<Any> after that.
+// expect-error: mismatched types: found List<String> but expected List<Any>
+fn describe(x: Int) => "int";
+fn describe(x) => "other";
+let words = ["a"];
+print(words.map(describe));
+let anything: List<Any> = words;

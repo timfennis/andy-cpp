@@ -8,7 +8,7 @@ Andy C++ exposes three sibling numeric types:
 * `Float` stores an IEEE 754 `f64`.
 * `Number` supports arbitrary-size integers, exact rational values, floats, and complex values.
 
-`Int`, `Float`, and `Number` share `Any` as their nearest common supertype. An `Int` does not satisfy a `Number` annotation. Use an `n` literal or the `Number` constructor when you need the advanced mode:
+`Int`, `Float`, and `Number` share `Any` as their nearest common supertype. An `Int` value does not satisfy a `Number` annotation. Use an `n` literal or the `Number` constructor when you need the advanced mode:
 
 ```ndc
 let count: Int = 42;
@@ -32,6 +32,22 @@ let hexadecimal = 0x2an;
 ```
 
 An integer literal without `n` must fit in `i64`. The lexer reports an error and suggests the suffixed form when it does not fit.
+
+An integer literal without a suffix is an `Int`, unless how it's used says otherwise. Then it's a `Float` or a `Number`:
+
+```ndc
+print(7 / 2);          // 3
+let f: Float = 7;
+print(f / 2);          // 3.5
+
+let total = 0;
+total += 2.5;          // total is a Float
+print(total);          // 2.5
+
+print([1.5, 2.25].fold(0, fn(acc, x) => acc + x));  // 3.75
+```
+
+A value that's already an `Int`, like the result of `len`, stays one.
 
 Arbitrary-radix literals such as `16r2a` remain `Int` literals and do not accept `n`. The `i` and `j` suffixes create complex `Number` values:
 

@@ -1,0 +1,6 @@
+// `push` is the same whatever the list holds, so the Float that's pushed
+// later decides that `1` is a Float too.
+// expect-output: 0.5
+let xs = [1];
+xs.push(1.5);
+print(xs[0] / 2);

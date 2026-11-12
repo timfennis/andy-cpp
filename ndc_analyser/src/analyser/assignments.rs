@@ -233,7 +233,7 @@ impl Analyser {
     /// An index expression typed as an integer sequence (e.g. `0..2`) selects
     /// a slice of the container rather than a single element.
     pub(super) fn index_type_is_slice(index_type: &StaticType) -> bool {
-        index_type.is_subtype(&StaticType::Iterator(Box::new(StaticType::Int)))
+        index_type.fits(&StaticType::Iterator(Box::new(StaticType::Int)))
     }
 
     /// Specialized `op=` implementations mutate the left operand in place and
@@ -251,13 +251,10 @@ impl Analyser {
         match (left_type, right_type) {
             (StaticType::Tuple(left), StaticType::Tuple(right)) => {
                 left.len() == right.len()
-                    && right
-                        .iter()
-                        .zip(left)
-                        .all(|(right, left)| right.is_subtype(left))
+                    && right.iter().zip(left).all(|(right, left)| right.fits(left))
             }
-            (StaticType::Tuple(left), right) => left.iter().all(|left| right.is_subtype(left)),
-            (left, right) => right.is_subtype(left),
+            (StaticType::Tuple(left), right) => left.iter().all(|left| right.fits(left)),
+            (left, right) => right.fits(left),
         }
     }
 
@@ -277,18 +274,16 @@ impl Analyser {
         // expected, as a call passes an argument: `let xs: Sequence<Int> =
         // []` settles the list's elements as Ints.
         let snapshot = self.vars.snapshot();
-        if self.vars.bind_argument(stored_type, value_type) {
-            if let Some(node) = node
-                && self.vars.resolve(value_type) == StaticType::Any
-            {
-                self.expect(node, stored_type.clone());
-            }
-            return true;
+        if !self.vars.bind_argument(stored_type, value_type) {
+            self.vars.rollback(snapshot);
+            return false;
         }
-        self.vars.rollback(snapshot);
-        let stored_type = self.vars.resolve(stored_type);
-        let value_type = self.vars.resolve(value_type);
-        value_type == StaticType::Any || value_type.is_subtype(&stored_type)
+        if let Some(node) = node
+            && self.vars.resolve(value_type) == StaticType::Any
+        {
+            self.expect(node, stored_type.clone());
+        }
+        true
     }
 
     /// Reports that a value of `value_type` can't be stored where values of
