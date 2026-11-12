@@ -1,4 +1,4 @@
-//! Formats Andy C++ code: `let   xs=[1,2 ,3]` becomes `let xs = [1, 2, 3];`.
+//! Formats Andy C++ code: `let   xs =[1,2 ,3]` becomes `let xs = [1, 2, 3];`.
 //!
 //! Only the whitespace between tokens changes, apart from a few rewrites that
 //! keep the meaning: a list broken over several lines gets a comma after its

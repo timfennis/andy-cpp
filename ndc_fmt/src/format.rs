@@ -80,7 +80,7 @@ impl<'a> Formatter<'a> {
         let mut head = Vec::new();
         let mut body = Vec::new();
         for statement in statements {
-            let start = self.start_of(statement);
+            let start = self.start_of(statement.span);
             self.comments_among_statements(start, &mut head, &mut body);
             self.separate(&mut body, start);
             body.push(self.expr(statement));
@@ -123,10 +123,10 @@ impl<'a> Formatter<'a> {
         }
     }
 
-    /// Where `statement` starts: a `pure fn` starts at `pure`, although its
-    /// span starts at `fn`
-    fn start_of(&self, statement: &ExpressionLocation) -> usize {
-        let mut start = statement.span.offset();
+    /// Where the code at `span` starts: a `pure fn` starts at `pure`,
+    /// although its span starts at `fn`
+    fn start_of(&self, span: Span) -> usize {
+        let mut start = span.offset();
         while let Some(token) = self.source.token_before(start)
             && token.token == Token::Pure
         {
@@ -578,11 +578,12 @@ impl<'a> Formatter<'a> {
         let Some(last) = spans.last() else {
             return false;
         };
+        let start = self.start_of(*last);
         let after = self
             .source
-            .token_before(last.offset())
+            .token_before(start)
             .map_or(0, |token| token.span.end());
-        self.source.has_comment_in(after..last.offset())
+        self.source.has_comment_in(after..start)
     }
 
     fn arguments(&mut self, arguments: &[ExpressionLocation], close_at: usize) -> Doc {

@@ -28,7 +28,11 @@ pub fn print(doc: &Doc, width: usize) -> String {
         match doc {
             Doc::Text(text) => {
                 out.push_str(text);
-                column += text.chars().count();
+                // A string literal may hold line breaks
+                column = match text.rsplit_once('\n') {
+                    Some((_, last_line)) => last_line.chars().count(),
+                    None => column + text.chars().count(),
+                };
             }
             Doc::Concat(docs) => {
                 stack.extend(docs.iter().rev().map(|doc| (indent, mode, doc)));
@@ -109,9 +113,16 @@ fn fits(doc: &Doc, width: usize, rest: &Stack<'_>) -> bool {
         };
         match doc {
             Doc::Text(text) => {
-                width -= text.chars().count() as isize;
+                let (first_line, more_lines) = match text.split_once('\n') {
+                    Some((first_line, _)) => (first_line, true),
+                    None => (text.as_str(), false),
+                };
+                width -= first_line.chars().count() as isize;
                 if width < 0 {
                     return false;
+                }
+                if more_lines {
+                    return true;
                 }
             }
             Doc::Concat(docs) => stack.extend(docs.iter().rev().map(|doc| (mode, doc))),
@@ -198,6 +209,14 @@ mod tests {
             text("}"),
         ]));
         assert_eq!(print(&doc, 80), "{\n    a\n    b\n}\n");
+    }
+
+    #[test]
+    fn only_the_last_line_of_a_text_counts_towards_the_next() {
+        // Only `"ab` has to fit before the line break in the string
+        let long = format!("\"ab\n{}\"", "x".repeat(100));
+        let doc = concat([call(&[&long, "a"]), text(";")]);
+        assert_eq!(print(&doc, 20), format!("f({long}, a);\n"));
     }
 
     #[test]

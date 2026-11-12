@@ -132,6 +132,22 @@ fn a_function_passed_last_stays_on_the_line_of_the_call() {
 }
 
 #[test]
+fn a_function_passed_last_after_a_comment_is_not_on_the_line_of_the_call() {
+    assert_formats(
+        "f(a,\n    // why\n    pure fn() {\n        1\n    });\n",
+        "f(\n    a,\n    // why\n    pure fn() {\n        1\n    },\n);\n",
+    );
+}
+
+#[test]
+fn the_manual_example() {
+    assert_formats(
+        "let   xs =[1,2 ,3];\nfn double(x) => { x*2 }\n",
+        "let xs = [1, 2, 3];\nfn double(x) { x * 2 }\n",
+    );
+}
+
+#[test]
 fn a_long_operator_chain_breaks_before_each_operator() {
     let operands: Vec<String> = (0..12).map(|i| format!("operand_{i:02}")).collect();
     let source = format!("let total = {};\n", operands.join(" + "));

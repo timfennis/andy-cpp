@@ -26,7 +26,7 @@ The formatter has no options. It changes the spaces and line breaks between
 tokens and leaves everything else as you wrote it, so
 
 ```ndc,norun
-let   xs=[1,2 ,3];
+let   xs =[1,2 ,3];
 fn double(x) => { x*2 }
 ```
 
