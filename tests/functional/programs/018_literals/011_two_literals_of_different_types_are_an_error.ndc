@@ -1,4 +1,4 @@
 // `v` is a list of Strings, so it can't be given a list of Ints.
-// expect-error: mismatched types: found Int but expected String
+// expect-error: mismatched types: found List<Int> but expected List<String>
 let v = ["s"];
 v = [1];

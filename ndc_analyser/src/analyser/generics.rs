@@ -294,7 +294,7 @@ impl Analyser {
     /// In `fn fib(n) => if n < 2 { n } else { fib(n - 1) + fib(n - 2) }`,
     /// what `+` returns is what `fib` returns, which is what the `if`
     /// returns: nothing but the other branch can say what it is.
-    fn default_to_branch(&mut self, serial: u64, ambiguous: &[TypeVar]) -> bool {
+    pub(super) fn default_to_branch(&mut self, serial: u64, ambiguous: &[TypeVar]) -> bool {
         let Some(Waiting {
             constraint: Constraint::Join {
                 types: [a, b, _], ..

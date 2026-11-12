@@ -68,7 +68,7 @@ pub enum StaticType {
     /// here treats one as `Any`.
     Generic(Box<str>),
     /// Bottom type for diverging expressions (`return`, `break`, `continue`).
-    /// `Never` is a subtype of every type: `lub(T, Never) = T`.
+    /// A value of it fits anywhere, and it joins with any type as that type.
     Never,
     Bool,
     Function {
@@ -228,275 +228,27 @@ impl StaticType {
         }
     }
 
-    /// Checks if `self` is a subtype of `other`.
-    ///
-    /// A type S is a subtype of T (S <: T) if a value of type S can be safely
-    /// used wherever a value of type T is expected.
-    ///
-    /// # Key Rules
-    /// - `Any` is the top type (supertype of all types)
-    /// - `Int`, `Float`, and `Number` are sibling types
-    /// - `Sequence<T>` > sequence types with element type T
-    /// - Generic types are covariant in their type parameters
-    /// - Function parameters are **contravariant**, returns are **covariant**
-    ///
-    /// Note: this function probably doesn't handle variadic functions correctly
-    pub fn is_subtype(&self, other: &Self) -> bool {
-        // Never is the bottom type: subtype of everything
-        if matches!(self, Self::Never) {
-            return true;
-        }
-
-        // Any is the universal supertype
-        if other.is_unknown() {
-            return true;
-        }
-
-        // Only Any satisfies the above; all other types fail here
-        if self.is_unknown() {
-            return false;
-        }
-
-        #[allow(clippy::match_same_arms)]
-        #[allow(clippy::unnested_or_patterns)]
+    /// The type a value of either type has: the type itself when both are
+    /// the same, and otherwise `Any`. `Never` has no values, so it joins as
+    /// the other type. `List<Int>` and `List<Float>` join as `Any`, not as
+    /// `List<Any>`, which neither list is.
+    #[must_use]
+    pub fn join(&self, other: &Self) -> Self {
         match (self, other) {
-            // Reflexivity: every type is a subtype of itself
-            _ if self == other => true,
-
-            // Sequence hierarchy: specific sequences are subtypes of Sequence<T>
-            // where T is their element type (covariant)
-            (Self::List(s), Self::Sequence(t))
-            | (Self::Iterator(s), Self::Sequence(t))
-            | (Self::MinHeap(s), Self::Sequence(t))
-            | (Self::MaxHeap(s), Self::Sequence(t))
-            | (Self::Deque(s), Self::Sequence(t)) => s.is_subtype(t),
-
-            // String is Sequence<String>
-            (Self::String, Self::Sequence(t)) => Self::String.is_subtype(t.as_ref()),
-
-            // Tuple is Sequence<LUB of all elements>
-            (Self::Tuple(elems), Self::Sequence(t)) => {
-                Self::compute_tuple_element_type(elems).is_subtype(t)
-            }
-
-            // Map<K,V> is Sequence<Tuple<K,V>>
-            (Self::Map { key, value }, Self::Sequence(t)) => {
-                Self::Tuple(vec![key.as_ref().clone(), value.as_ref().clone()])
-                    .is_subtype(t.as_ref())
-            }
-
-            // Generic types are covariant: Container<S> <: Container<T> if S <: T
-            (Self::Option(s), Self::Option(t))
-            | (Self::List(s), Self::List(t))
-            | (Self::Iterator(s), Self::Iterator(t))
-            | (Self::MinHeap(s), Self::MinHeap(t))
-            | (Self::MaxHeap(s), Self::MaxHeap(t))
-            | (Self::Deque(s), Self::Deque(t))
-            | (Self::Sequence(s), Self::Sequence(t)) => s.is_subtype(t),
-
-            // Tuples are covariant pointwise and must have the same arity
-            (Self::Tuple(s_elems), Self::Tuple(t_elems)) => {
-                s_elems.len() == t_elems.len()
-                    && s_elems.iter().zip(t_elems).all(|(s, t)| s.is_subtype(t))
-            }
-
-            // Maps are covariant in both key and value type parameters
-            (Self::Map { key: k1, value: v1 }, Self::Map { key: k2, value: v2 }) => {
-                k1.is_subtype(k2) && v1.is_subtype(v2)
-            }
-
-            // Functions: contravariant in parameters, covariant in return type
-            // F1 <: F2 iff params(F2) <: params(F1) AND return(F1) <: return(F2)
-            (
-                Self::Function {
-                    parameters: p1,
-                    return_type: r1,
-                },
-                Self::Function {
-                    parameters: p2,
-                    return_type: r2,
-                },
-            ) => {
-                // Return type is covariant: must satisfy r1 <: r2
-                let return_ok = r1.is_subtype(r2);
-
-                // Parameters are contravariant: must satisfy p2 <: p1 (reversed!)
-                let params_ok = match (p1, p2) {
-                    (None, None) => true,
-                    // A function with specific params is a subtype of one with generic params
-                    (Some(_), None) => true,
-                    // Cannot substitute generic params with specific ones
-                    (None, Some(_)) => false,
-                    (Some(ps1), Some(ps2)) => {
-                        ps1.len() == ps2.len() &&
-                            // Note the reversal: p2 must be subtype of p1!
-                            // A type parameter of a signature, like `T` in
-                            // `Fn(T) -> U`, fits whatever the function takes:
-                            // the call works out what it stands for. An `Any`
-                            // doesn't, as a value of that type is only
-                            // checked when the program runs.
-                            ps1.iter()
-                                .zip(ps2)
-                                .all(|(p1, p2)| matches!(p2, Self::Generic(_)) || p2.is_subtype(p1))
-                    }
-                };
-
-                return_ok && params_ok
-            }
-
-            _ => false,
-        }
-    }
-
-    //
-    /// Computes the Least Upper Bound (join) of two types.
-    ///
-    /// The LUB is the most specific type that is a supertype of both inputs.
-    ///
-    /// # Examples
-    /// - `lub(Int, Float) = Any`
-    /// - `lub(List<Int>, List<Float>) = List<Any>`
-    /// - `lub(List<Int>, Iterator<Int>) = Sequence<Int>`
-    /// - `lub(Int, String) = Any`
-    pub fn lub(&self, other: &Self) -> Self {
-        // Never is the bottom type: lub(T, Never) = T
-        if matches!(self, Self::Never) {
-            return other.clone();
-        }
-        if matches!(other, Self::Never) {
-            return self.clone();
-        }
-
-        // Any is the top type
-        if self.is_unknown() || other.is_unknown() {
-            return Self::Any;
-        }
-
-        // Reflexivity: lub(T, T) = T
-        if self == other {
-            return self.clone();
-        }
-
-        // If one is a subtype of the other, return the supertype
-        if self.is_subtype(other) {
-            return other.clone();
-        }
-        if other.is_subtype(self) {
-            return self.clone();
-        }
-
-        match (self, other) {
-            // Covariant generic types: compute LUB pointwise
-            (Self::Option(s), Self::Option(t)) => Self::Option(Box::new(s.lub(t))),
-            (Self::List(s), Self::List(t)) => Self::List(Box::new(s.lub(t))),
-            (Self::Iterator(s), Self::Iterator(t)) => Self::Iterator(Box::new(s.lub(t))),
-            (Self::MinHeap(s), Self::MinHeap(t)) => Self::MinHeap(Box::new(s.lub(t))),
-            (Self::MaxHeap(s), Self::MaxHeap(t)) => Self::MaxHeap(Box::new(s.lub(t))),
-            (Self::Deque(s), Self::Deque(t)) => Self::Deque(Box::new(s.lub(t))),
-            (Self::Sequence(s), Self::Sequence(t)) => Self::Sequence(Box::new(s.lub(t))),
-
-            // Maps are covariant in both parameters
-            (Self::Map { key: k1, value: v1 }, Self::Map { key: k2, value: v2 }) => Self::Map {
-                key: Box::new(k1.lub(k2)),
-                value: Box::new(v1.lub(v2)),
-            },
-
-            // Tuples of same arity: compute LUB pointwise
-            (Self::Tuple(e1), Self::Tuple(e2)) if e1.len() == e2.len() => {
-                Self::Tuple(e1.iter().zip(e2).map(|(a, b)| a.lub(b)).collect())
-            }
-
-            // Different sequence types: generalize to Sequence<lub of elements>
-            _ if Self::is_sequence(self) && Self::is_sequence(other) => {
-                let elem1 = self.sequence_element_type().expect("must be seq");
-                let elem2 = other.sequence_element_type().expect("must be seq");
-                Self::Sequence(Box::new(elem1.lub(&elem2)))
-            }
-
-            // Functions: covariant in return, contravariant in parameters
-            (
-                Self::Function {
-                    parameters: p1,
-                    return_type: r1,
-                },
-                Self::Function {
-                    parameters: p2,
-                    return_type: r2,
-                },
-            ) => {
-                // Return type: covariant, so take LUB
-                let return_type = Box::new(r1.lub(r2));
-
-                // Parameters: contravariant, so we need GLB (greatest lower bound)
-                let parameters = match (p1, p2) {
-                    (Some(ps1), Some(ps2)) if ps1.len() == ps2.len() => {
-                        Some(ps1.iter().zip(ps2).map(|(a, b)| a.glb(b)).collect())
-                    }
-                    // Incompatible or unknown parameter lists
-                    _ => None,
-                };
-
-                Self::Function {
-                    parameters,
-                    return_type,
-                }
-            }
-
-            // No common supertype found: default to Any
+            (Self::Never, other) | (other, Self::Never) => other.clone(),
+            _ if self == other => self.clone(),
             _ => Self::Any,
         }
     }
 
-    /// Computes the Greatest Lower Bound (meet) of two types.
-    ///
-    /// The GLB is the most general type that is a subtype of both inputs.
-    /// This is required for contravariant positions (e.g., function parameters).
-    ///
-    /// Note: Not all type pairs have a representable GLB in our type system.
-    /// In such cases, we return a conservative approximation.
-    fn glb(&self, other: &Self) -> Self {
-        // Any is the top type: glb(Any, T) = T
-        match (self, other) {
-            (unknown, t) | (t, unknown) if unknown.is_unknown() => t.clone(),
-            _ if self == other => self.clone(),
-            _ if self.is_subtype(other) => self.clone(),
-            _ if other.is_subtype(self) => other.clone(),
-
-            // Covariant types: compute GLB pointwise
-            (Self::Option(s), Self::Option(t)) => Self::Option(Box::new(s.glb(t))),
-            (Self::List(s), Self::List(t)) => Self::List(Box::new(s.glb(t))),
-            (Self::Iterator(s), Self::Iterator(t)) => Self::Iterator(Box::new(s.glb(t))),
-            (Self::MinHeap(s), Self::MinHeap(t)) => Self::MinHeap(Box::new(s.glb(t))),
-            (Self::MaxHeap(s), Self::MaxHeap(t)) => Self::MaxHeap(Box::new(s.glb(t))),
-            (Self::Deque(s), Self::Deque(t)) => Self::Deque(Box::new(s.glb(t))),
-            (Self::Sequence(s), Self::Sequence(t)) => Self::Sequence(Box::new(s.glb(t))),
-
-            (Self::Map { key: k1, value: v1 }, Self::Map { key: k2, value: v2 }) => Self::Map {
-                key: Box::new(k1.glb(k2)),
-                value: Box::new(v1.glb(v2)),
-            },
-
-            (Self::Tuple(e1), Self::Tuple(e2)) if e1.len() == e2.len() => {
-                Self::Tuple(e1.iter().zip(e2).map(|(a, b)| a.glb(b)).collect())
-            }
-
-            // No representable GLB: conservatively return first type
-            // A complete type system would have a Bottom type (⊥) here
-            _ => self.clone(),
-        }
-    }
-
-    /// Computes the element type of a tuple when viewed as a sequence.
-    /// Returns the LUB of all tuple elements.
+    /// Computes the element type of a tuple when viewed as a sequence: the
+    /// type its elements join as.
     fn compute_tuple_element_type(elems: &[Self]) -> Self {
-        if elems.is_empty() {
-            return Self::Any;
-        }
-
         elems
             .iter()
-            .skip(1)
-            .fold(elems[0].clone(), |acc, elem| acc.lub(elem))
+            .cloned()
+            .reduce(|acc, elem| acc.join(&elem))
+            .unwrap_or(Self::Any)
     }
 
     /// Checks if a type is a sequence-like type.
@@ -519,7 +271,7 @@ impl StaticType {
     ///
     /// - `List<T>`, `Iterator<T>`, etc. → `T`
     /// - `String` → `String`
-    /// - `Tuple<T1, ..., Tn>` → `lub(T1, ..., Tn)`
+    /// - `Tuple<T1, ..., Tn>` → the join of `T1`, ..., `Tn`
     /// - `Map<K, V>` → `Tuple<K, V>`
     pub fn sequence_element_type(&self) -> Option<Self> {
         match self {
@@ -732,8 +484,8 @@ impl StaticType {
     /// Checks whether some runtime value could satisfy both `self` and `other`.
     ///
     /// # Examples
-    /// - `Sequence<String>` overlaps `List<Any>`: a `List<String>` inhabits
-    ///   both, even though neither type is a subtype of the other
+    /// - `Sequence<String>` overlaps `List<Any>`: a list of Strings is
+    ///   both
     /// - `Any` overlaps every type
     /// - `List<Int>` does not overlap `List<String>`
     /// - `Int` does not overlap `String`
@@ -752,22 +504,20 @@ impl StaticType {
     /// `Never` overlaps nothing, since no value inhabits it.
     pub fn overlaps(&self, other: &Self) -> bool {
         // Never has no inhabitants, so nothing can satisfy it — not even
-        // another Never. This has to come first: Never is a subtype of every
-        // type, so the shortcut below would otherwise report overlap.
+        // another Never.
         if matches!(self, Self::Never) || matches!(other, Self::Never) {
             return false;
         }
 
-        // A subtype relation in either direction implies a common inhabitant.
-        // This also handles Any, the supertype of everything.
-        if self.is_subtype(other) || other.is_subtype(self) {
+        // `Any` and what isn't known yet could be anything, and a type has
+        // the values it has.
+        if self.is_unknown() || other.is_unknown() || self == other {
             return true;
         }
 
         match (self, other) {
             // Sequence<T> overlaps every sequence-family type whose element
-            // type overlaps T, even when the subtype check fails because the
-            // relationship points in different directions per layer.
+            // type overlaps T.
             (
                 Self::Sequence(t),
                 Self::List(u)
@@ -823,11 +573,6 @@ impl StaticType {
 
             _ => false,
         }
-    }
-
-    // BRUH
-    pub fn is_incompatible_with(&self, other: &Self) -> bool {
-        !self.is_subtype(other) && !other.is_subtype(self)
     }
 
     /// Returns a new type with the element type replaced. For container types
@@ -967,13 +712,17 @@ mod test {
     use super::*;
 
     #[test]
-    fn test_list_of_type_compatibility() {
+    fn a_list_fits_only_a_list_of_its_own_element_type() {
         let list_of_two_tuple_int = StaticType::List(Box::new(StaticType::Tuple(vec![
             StaticType::Int,
             StaticType::Int,
         ])));
         let list_of_any = StaticType::List(Box::new(StaticType::Any));
-        assert!(list_of_two_tuple_int.is_subtype(&list_of_any));
+        assert!(!list_of_two_tuple_int.fits(&list_of_any));
+        assert!(list_of_two_tuple_int.fits(&list_of_two_tuple_int));
+        assert!(list_of_two_tuple_int.fits(&StaticType::Any));
+        // ...but might once an `Any` it's passed for turns out to hold one.
+        assert!(StaticType::Any.may_fit(&list_of_two_tuple_int));
     }
 
     #[test]
@@ -1042,10 +791,10 @@ mod test {
 
     #[test]
     fn public_numeric_types_are_siblings() {
-        assert!(!StaticType::Int.is_subtype(&StaticType::Number));
-        assert!(!StaticType::Float.is_subtype(&StaticType::Number));
-        assert_eq!(StaticType::Int.lub(&StaticType::Float), StaticType::Any);
-        assert_eq!(StaticType::Int.lub(&StaticType::Number), StaticType::Any);
+        assert!(!StaticType::Int.fits(&StaticType::Number));
+        assert!(!StaticType::Float.fits(&StaticType::Number));
+        assert_eq!(StaticType::Int.join(&StaticType::Float), StaticType::Any);
+        assert_eq!(StaticType::Int.join(&StaticType::Number), StaticType::Any);
         assert!(StaticType::from_name_and_args("Rational", vec![]).is_err());
         assert!(StaticType::from_name_and_args("Complex", vec![]).is_err());
     }

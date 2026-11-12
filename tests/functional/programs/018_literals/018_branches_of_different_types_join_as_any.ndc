@@ -1,0 +1,6 @@
+// The `1` becomes a Float like the other branch, but a String and an Int
+// have no type in common but `Any`.
+// expect-output: 1 1
+print(if true { 1 } else { 2.5 }, if true { 1 } else { "a" });
+let x = if false { 1 } else { "a" };
+x = 2.5;

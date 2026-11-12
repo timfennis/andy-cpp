@@ -110,7 +110,7 @@ impl Analyser {
                 }
 
                 let result_type = if has_op_binding {
-                    assign_return.lub(&op_return)
+                    assign_return.join(&op_return)
                 } else {
                     assign_return
                 };

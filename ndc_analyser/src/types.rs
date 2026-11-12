@@ -276,6 +276,26 @@ impl TypeVars {
         Some(defaults)
     }
 
+    /// Whether the unsettled literal type `var` could still be settled as
+    /// one of its defaults, or waits for the literals it holds to say.
+    fn some_default_fits(&mut self, var: TypeVar) -> bool {
+        let Some(defaults) = self.literal_defaults(var) else {
+            return true;
+        };
+        defaults.iter().any(|default| {
+            if self
+                .resolve(default)
+                .contains(&|part| *part == StaticType::Var(var))
+            {
+                return false;
+            }
+            let snapshot = self.snapshot();
+            let fits = self.settle(var, default.clone());
+            self.rollback(snapshot);
+            fits
+        })
+    }
+
     /// What the unsettled literal type `var` is shown as: what it would be
     /// if nothing said otherwise, as far as that's known.
     pub(crate) fn preview(&self, var: TypeVar) -> StaticType {
@@ -398,7 +418,9 @@ impl TypeVars {
                     self.bounded.push(other);
                     self.literals.push(other);
                 }
-                true
+                // The values of two literals have to have a type in common:
+                // `["s"]` and `[1]` can't be one literal's type.
+                !self.holds_several_literals(other) || self.some_default_fits(other)
             }
             typ => bounds.iter().all(|bound| match bound {
                 Bound::Number(..) => matches!(

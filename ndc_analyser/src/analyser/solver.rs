@@ -66,8 +66,8 @@ pub(super) enum Constraint {
         value: StaticType,
         span: Span,
     },
-    /// The one type the two branches of an `if` have, once both are known:
-    /// the branches' types and then the result's.
+    /// The one type the two branches of an `if` have, once neither is
+    /// wholly unknown: the branches' types and then the result's.
     Join { types: [StaticType; 3], span: Span },
 }
 
@@ -312,51 +312,20 @@ impl Analyser {
     }
 
     /// The one type that values of type `a` and `b` both have, as the two
-    /// branches of an `if`: their least upper bound. Where a part of either
-    /// isn't known yet, that part waits until it is, so a lambda's parameter
+    /// branches of an `if`: the type they are once made the same, or `Any`
+    /// if they can't be. `if c { 1 } else { 2.5 }` is a Float, `if c { [] }
+    /// else { [1] }` a `List<Int>`, and `if c { 1 } else { "a" }` is `Any`.
+    /// A branch nothing is known about yet waits, so a lambda's parameter
     /// isn't fixed by the branch next to it: in `fn(x) => if c { x } else
-    /// { 0 }`, `x` can still be a `Float`. Parts both sides share are joined
-    /// part by part, so `if c { [] } else { [1] }` is a list either way.
+    /// { 0 }`, `x` can still be a `String`.
     pub(super) fn join(&mut self, a: &StaticType, b: &StaticType, span: Span) -> StaticType {
         let (a, b) = (self.vars.resolve(a), self.vars.resolve(b));
+        let unknown = |this: &Self, typ: &StaticType| matches!(typ, StaticType::Var(var) if !this.vars.is_literal(*var));
         match (&a, &b) {
             (StaticType::Never, _) => b,
             (_, StaticType::Never) => a,
             _ if a == b => a,
-            _ if !a.has_vars() && !b.has_vars() => a.lub(&b),
-            (StaticType::Option(x), StaticType::Option(y)) => {
-                StaticType::Option(Box::new(self.join(x, y, span)))
-            }
-            (StaticType::List(x), StaticType::List(y)) => {
-                StaticType::List(Box::new(self.join(x, y, span)))
-            }
-            (StaticType::Iterator(x), StaticType::Iterator(y)) => {
-                StaticType::Iterator(Box::new(self.join(x, y, span)))
-            }
-            (StaticType::Deque(x), StaticType::Deque(y)) => {
-                StaticType::Deque(Box::new(self.join(x, y, span)))
-            }
-            (StaticType::MinHeap(x), StaticType::MinHeap(y)) => {
-                StaticType::MinHeap(Box::new(self.join(x, y, span)))
-            }
-            (StaticType::MaxHeap(x), StaticType::MaxHeap(y)) => {
-                StaticType::MaxHeap(Box::new(self.join(x, y, span)))
-            }
-            (StaticType::Map { key: k1, value: v1 }, StaticType::Map { key: k2, value: v2 }) => {
-                StaticType::Map {
-                    key: Box::new(self.join(k1, k2, span)),
-                    value: Box::new(self.join(v1, v2, span)),
-                }
-            }
-            (StaticType::Tuple(xs), StaticType::Tuple(ys)) if xs.len() == ys.len() => {
-                StaticType::Tuple(
-                    xs.iter()
-                        .zip(ys)
-                        .map(|(x, y)| self.join(x, y, span))
-                        .collect(),
-                )
-            }
-            _ => {
+            _ if unknown(self, &a) || unknown(self, &b) => {
                 let result = self.vars.fresh(StaticType::Any);
                 self.wait(Constraint::Join {
                     types: [a, b, result.clone()],
@@ -364,7 +333,19 @@ impl Analyser {
                 });
                 result
             }
+            _ => self.join_known(&a, &b),
         }
+    }
+
+    /// [`Self::join`] of two types that aren't wholly unknown: the type
+    /// they are once made the same, or `Any`.
+    fn join_known(&mut self, a: &StaticType, b: &StaticType) -> StaticType {
+        let snapshot = self.vars.snapshot();
+        if self.vars.unify(a, b) {
+            return self.vars.resolve(a);
+        }
+        self.vars.rollback(snapshot);
+        StaticType::Any
     }
 
     /// Commits `call` to `picked` while its arguments still have unknown
@@ -576,10 +557,11 @@ impl Analyser {
     }
 
     /// Solves what waits on the variables made since `first`, which nothing
-    /// outside the code they were made in can settle. A call that a default
-    /// rule can decide is decided by it first: it commits to its narrowest
-    /// overload, or `a op= b` keeps the type of `b`. What's left gets its
-    /// fallbacks, oldest constraint first. Constraints that wait only on
+    /// outside the code they were made in can settle. Literals take their
+    /// defaults first. Then what a default rule can decide is decided by it:
+    /// a call commits to its narrowest overload, `a op= b` keeps the type of
+    /// `b`, and a branch of an `if` takes the other branch's type. What's
+    /// left gets its fallbacks, oldest constraint first. Constraints that wait only on
     /// older variables keep waiting.
     pub(super) fn settle_waiting(&mut self, first: usize) {
         // Each constraint is checked for a default rule once, and again only
@@ -596,8 +578,11 @@ impl Analyser {
                 unchecked.extend(self.waiting.keys().copied());
             }
             while let Some(serial) = unchecked.pop_first() {
-                if !self.waits_on_vars_since(serial, first).is_empty()
-                    && (self.default_to_narrowest(serial) || self.default_to_operand(serial))
+                let vars = self.waits_on_vars_since(serial, first);
+                if !vars.is_empty()
+                    && (self.default_to_narrowest(serial)
+                        || self.default_to_operand(serial)
+                        || self.default_to_branch(serial, &vars))
                 {
                     unchecked.extend(self.solve_waiting_and_report());
                 }
@@ -912,10 +897,15 @@ impl Analyser {
                     }
                 }
                 let (a, b) = (self.vars.resolve(&a), self.vars.resolve(&b));
-                if a.has_vars() || b.has_vars() {
+                let unknown = |typ: &StaticType| matches!(typ, StaticType::Var(var) if !self.vars.is_literal(*var));
+                if unknown(&a) || unknown(&b) {
                     return false;
                 }
-                self.settle_waited_for(&result, &a.lub(&b), *span, None);
+                let joined = match (&a, &b) {
+                    (StaticType::Never, other) | (other, StaticType::Never) => other.clone(),
+                    _ => self.join_known(&a, &b),
+                };
+                self.settle_waited_for(&result, &joined, *span, None);
                 true
             }
         }
@@ -1075,11 +1065,17 @@ impl Analyser {
                 // `p(x)` over `p(x: Int)` does for the Strings in
                 // `["s"].map(p)`, the literal is what it is from here on:
                 // the first use that depends on it decides it.
-                if !literals.is_empty()
-                    && self.fits_once_any(&reachable, arguments, Some(only))
-                    && !self.decide_literals(&literals, only, arguments)
-                {
-                    return EarlyOverload::Undecided;
+                // What they're decided as may still leave the pick open,
+                // as `Any` would, so it's made again with them settled.
+                if !literals.is_empty() && self.fits_once_any(&reachable, arguments, Some(only)) {
+                    if !self.decide_literals(&literals, only, arguments) {
+                        return EarlyOverload::Undecided;
+                    }
+                    let arguments = arguments
+                        .iter()
+                        .map(|argument| self.vars.resolve(argument))
+                        .collect::<Vec<_>>();
+                    return self.early_overload(candidates, &arguments, kind);
                 }
                 EarlyOverload::Only(only)
             }

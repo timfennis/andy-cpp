@@ -172,6 +172,7 @@ fn a_function_returns_the_join_of_its_body_and_every_return() {
          }",
         vec![],
     );
+    // Tuples of different types have no type in common but `Any`.
     assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
     assert_eq!(
         result
@@ -180,7 +181,7 @@ fn a_function_returns_the_join_of_its_body_and_every_return() {
             .values()
             .exactly_one()
             .ok(),
-        Some(&StaticType::Tuple(vec![StaticType::Any; 3])),
+        Some(&StaticType::Any),
     );
 }
 
@@ -1265,8 +1266,14 @@ fn a_join_waits_until_both_branches_are_known() {
         analyse_last_type("let f = fn(x) => if true { x } else { 1 }; f(2)"),
         StaticType::Int
     );
+    // The literal `1` becomes a Float like `x`, but a String and an Int join
+    // as `Any`.
     assert_eq!(
         analyse_last_type("let f = fn(x) => if true { x } else { 1 }; f(2.5)"),
+        StaticType::Float
+    );
+    assert_eq!(
+        analyse_last_type("let f = fn(x) => if true { x } else { 1 }; f(\"a\")"),
         StaticType::Any
     );
     // What both branches share is known meanwhile: two lists join as a list
