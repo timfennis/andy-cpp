@@ -10,7 +10,7 @@ Every value is an `Any`. The other types are:
   * [`Int`](./types/number.md) — checked signed 64-bit integers
   * [`Float`](./types/number.md) — IEEE 754 `f64` values
   * [`Number`](./types/number.md) — arbitrary-size, rational, floating-point, and complex values
-  * `Sequence<T>`
+  * Sequences, which a `for` loop iterates over:
     * [`String`](./types/string.md): a mutable list of characters
     * [`List<T>`](./types/list.md): a mutable list
     * [`Tuple<T, ...>`](./types/tuple.md): an immutable list
@@ -37,6 +37,23 @@ Nested generics work too — the parser handles the `>>` ambiguity for you:
 ```ndc
 let grid: List<List<Int>> = [[1, 2], [3, 4]];
 ```
+
+### `Iterable<T>` parameters
+
+A parameter of type `Iterable<T>` takes any kind of sequence of `T`s. The function is compiled once for each kind it's called with:
+
+```ndc
+fn total(xs: Iterable<Int>) {
+    let sum = 0;
+    for x in xs {
+        sum += x;
+    }
+    sum
+}
+print(total([1, 2]), total((3, 4)), total(1..4));   // 3 7 6
+```
+
+A value has a kind of sequence, so `Iterable<T>` can only be a parameter's type: `let xs: Iterable<Int> = [1]` is an error. A tuple whose elements have different types iterates as `Any`.
 
 ### Element types are exact
 

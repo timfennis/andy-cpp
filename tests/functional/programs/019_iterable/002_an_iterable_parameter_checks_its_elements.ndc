@@ -1,0 +1,9 @@
+// expect-error: mismatched types: found String but expected Int
+fn total(xs: Iterable<Int>) {
+    let sum = 0;
+    for x in xs {
+        sum += x;
+    }
+    sum
+}
+total(["a"]);

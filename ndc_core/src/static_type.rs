@@ -86,8 +86,8 @@ pub enum StaticType {
     Float,
     Int,
 
-    // Sequences List<Int> -> Sequence<Int>
-    Sequence(Box<Self>),
+    // What a value of a kind of sequence iterates as, which only a parameter is: `List<Int>` passes for an `Iterable<Int>`.
+    Iterable(Box<Self>),
     List(Box<Self>),
     String,
     Tuple(Vec<Self>),
@@ -131,7 +131,7 @@ impl StaticType {
     /// Must stay in sync with its match arms; the unit test
     /// `builtin_type_names_are_constructible` guards this.
     pub const BUILTIN_TYPE_NAMES: &'static [&'static str] = &[
-        "Any", "Never", "Bool", "Number", "Float", "Int", "String", "Option", "Sequence", "List",
+        "Any", "Never", "Bool", "Number", "Float", "Int", "String", "Option", "Iterable", "List",
         "Iterator", "MinHeap", "MaxHeap", "Deque", "Tuple", "Map",
     ];
 
@@ -150,8 +150,8 @@ impl StaticType {
             "Option" => {
                 Self::require_exactly_one_arg(name, args).map(|elem| Self::Option(Box::new(elem)))
             }
-            "Sequence" => {
-                Self::require_exactly_one_arg(name, args).map(|elem| Self::Sequence(Box::new(elem)))
+            "Iterable" => {
+                Self::require_exactly_one_arg(name, args).map(|elem| Self::Iterable(Box::new(elem)))
             }
             "List" => {
                 Self::require_exactly_one_arg(name, args).map(|elem| Self::List(Box::new(elem)))
@@ -255,7 +255,7 @@ impl StaticType {
     fn is_sequence(ty: &Self) -> bool {
         matches!(
             ty,
-            Self::Sequence(_)
+            Self::Iterable(_)
                 | Self::List(_)
                 | Self::String
                 | Self::Tuple(_)
@@ -275,7 +275,7 @@ impl StaticType {
     /// - `Map<K, V>` → `Tuple<K, V>`
     pub fn sequence_element_type(&self) -> Option<Self> {
         match self {
-            Self::Sequence(t)
+            Self::Iterable(t)
             | Self::List(t)
             | Self::Iterator(t)
             | Self::MinHeap(t)
@@ -299,7 +299,7 @@ impl StaticType {
     /// known yet stand for any type. Inside a container, a function type,
     /// an `Option` or a tuple, `Any` is just another type: a `List<Int>`
     /// doesn't fit a `List<Any>`, as the list could then get a String. A
-    /// `Sequence<T>` takes any kind of sequence of what fits `T`.
+    /// `Iterable<T>` takes any kind of sequence of what fits `T`.
     pub fn fits(&self, parameter: &Self) -> bool {
         matches!(parameter, Self::Any) || self.matches(parameter, false)
     }
@@ -325,8 +325,8 @@ impl StaticType {
         let matches = |a: &Self, p: &Self| a.matches(p, unknowns_match);
         match (self, parameter) {
             (Self::Never, _) => true,
-            (Self::Sequence(a), Self::Sequence(p)) => a.fits(p) || matches(a, p),
-            (argument, Self::Sequence(p)) if Self::is_sequence(argument) => {
+            (Self::Iterable(a), Self::Iterable(p)) => a.fits(p) || matches(a, p),
+            (argument, Self::Iterable(p)) if Self::is_sequence(argument) => {
                 let element = argument
                     .sequence_element_type()
                     .expect("a sequence has elements");
@@ -403,7 +403,7 @@ impl StaticType {
                 return_type: map(return_type),
             },
             Self::Option(t) => Self::Option(map(t)),
-            Self::Sequence(t) => Self::Sequence(map(t)),
+            Self::Iterable(t) => Self::Iterable(map(t)),
             Self::List(t) => Self::List(map(t)),
             Self::Iterator(t) => Self::Iterator(map(t)),
             Self::MinHeap(t) => Self::MinHeap(map(t)),
@@ -446,7 +446,7 @@ impl StaticType {
                         .any(|parameter| parameter.contains(test))
             }
             Self::Option(t)
-            | Self::Sequence(t)
+            | Self::Iterable(t)
             | Self::List(t)
             | Self::Iterator(t)
             | Self::MinHeap(t)
@@ -484,7 +484,7 @@ impl StaticType {
     /// Checks whether some runtime value could satisfy both `self` and `other`.
     ///
     /// # Examples
-    /// - `Sequence<String>` overlaps `List<Any>`: a list of Strings is
+    /// - `Iterable<String>` overlaps `List<Any>`: a list of Strings is
     ///   both
     /// - `Any` overlaps every type
     /// - `List<Int>` does not overlap `List<String>`
@@ -516,16 +516,16 @@ impl StaticType {
         }
 
         match (self, other) {
-            // Sequence<T> overlaps every sequence-family type whose element
+            // Iterable<T> overlaps every sequence-family type whose element
             // type overlaps T.
             (
-                Self::Sequence(t),
+                Self::Iterable(t),
                 Self::List(u)
                 | Self::Iterator(u)
                 | Self::MinHeap(u)
                 | Self::MaxHeap(u)
                 | Self::Deque(u)
-                | Self::Sequence(u),
+                | Self::Iterable(u),
             )
             | (
                 Self::List(u)
@@ -533,16 +533,16 @@ impl StaticType {
                 | Self::MinHeap(u)
                 | Self::MaxHeap(u)
                 | Self::Deque(u),
-                Self::Sequence(t),
+                Self::Iterable(t),
             ) => t.overlaps(u),
-            (Self::Sequence(t), Self::String) | (Self::String, Self::Sequence(t)) => {
+            (Self::Iterable(t), Self::String) | (Self::String, Self::Iterable(t)) => {
                 Self::String.overlaps(t)
             }
-            (Self::Sequence(t), Self::Tuple(elems)) | (Self::Tuple(elems), Self::Sequence(t)) => {
+            (Self::Iterable(t), Self::Tuple(elems)) | (Self::Tuple(elems), Self::Iterable(t)) => {
                 elems.iter().all(|elem| elem.overlaps(t))
             }
-            (Self::Sequence(t), Self::Map { key, value })
-            | (Self::Map { key, value }, Self::Sequence(t)) => {
+            (Self::Iterable(t), Self::Map { key, value })
+            | (Self::Map { key, value }, Self::Iterable(t)) => {
                 Self::Tuple(vec![key.as_ref().clone(), value.as_ref().clone()]).overlaps(t)
             }
 
@@ -581,7 +581,7 @@ impl StaticType {
     pub fn with_element_type(&self, new_elem: Self) -> Self {
         match self {
             Self::List(_) => Self::List(Box::new(new_elem)),
-            Self::Sequence(_) => Self::Sequence(Box::new(new_elem)),
+            Self::Iterable(_) => Self::Iterable(Box::new(new_elem)),
             Self::Iterator(_) => Self::Iterator(Box::new(new_elem)),
             Self::MinHeap(_) => Self::MinHeap(Box::new(new_elem)),
             Self::MaxHeap(_) => Self::MaxHeap(Box::new(new_elem)),
@@ -635,7 +635,7 @@ impl StaticType {
                 Some(Box::new(std::iter::repeat(&Self::Any)))
             }
             Self::List(elem)
-            | Self::Sequence(elem)
+            | Self::Iterable(elem)
             | Self::Iterator(elem)
             | Self::MinHeap(elem)
             | Self::MaxHeap(elem)
@@ -677,7 +677,7 @@ impl fmt::Display for StaticType {
             Self::Number => write!(f, "Number"),
             Self::Float => write!(f, "Float"),
             Self::Int => write!(f, "Int"),
-            Self::Sequence(elem) => write!(f, "Sequence<{elem}>"),
+            Self::Iterable(elem) => write!(f, "Iterable<{elem}>"),
             Self::List(elem) => write!(f, "List<{elem}>"),
             Self::String => write!(f, "String"),
             Self::Tuple(tup) if tup.is_empty() => write!(f, "()"),
@@ -749,7 +749,7 @@ mod test {
     #[test]
     fn test_overlaps() {
         let list_of = |elem: StaticType| StaticType::List(Box::new(elem));
-        let seq_of = |elem: StaticType| StaticType::Sequence(Box::new(elem));
+        let seq_of = |elem: StaticType| StaticType::Iterable(Box::new(elem));
 
         // Mixed-direction relationships overlap: a List<String> inhabits both.
         assert!(seq_of(StaticType::String).overlaps(&list_of(StaticType::Any)));

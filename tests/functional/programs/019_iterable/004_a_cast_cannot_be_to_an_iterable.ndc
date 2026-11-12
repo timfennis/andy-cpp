@@ -1,0 +1,2 @@
+// expect-error: `Iterable<T>` can only be the type of a parameter
+print([1] as Iterable<Int>);

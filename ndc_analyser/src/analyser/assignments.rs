@@ -271,7 +271,7 @@ impl Analyser {
         node: Option<NodeId>,
     ) -> bool {
         // A write passes the value where a value of the stored type is
-        // expected, as a call passes an argument: `let xs: Sequence<Int> =
+        // expected, as a call passes an argument: `let xs: Iterable<Int> =
         // []` settles the list's elements as Ints.
         let snapshot = self.vars.snapshot();
         if !self.vars.bind_argument(stored_type, value_type) {

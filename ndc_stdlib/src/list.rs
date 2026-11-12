@@ -9,7 +9,7 @@ mod inner {
     use num::{BigInt, ToPrimitive};
 
     /// Converts any sequence into a list
-    #[function(signature = "<T>(Sequence<T>) -> List<T>")]
+    #[function(signature = "<T>(Iterable<T>) -> List<T>")]
     pub fn list(seq: SeqValue) -> anyhow::Result<Value> {
         Ok(Value::list(
             seq.try_into_iter()

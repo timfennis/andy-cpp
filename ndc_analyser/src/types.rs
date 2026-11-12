@@ -616,7 +616,7 @@ impl TypeVars {
                 self.settle(*var, other.clone())
             }
             (StaticType::Option(x), StaticType::Option(y))
-            | (StaticType::Sequence(x), StaticType::Sequence(y))
+            | (StaticType::Iterable(x), StaticType::Iterable(y))
             | (StaticType::List(x), StaticType::List(y))
             | (StaticType::Iterator(x), StaticType::Iterator(y))
             | (StaticType::MinHeap(x), StaticType::MinHeap(y))
@@ -701,9 +701,10 @@ impl TypeVars {
     /// that a parameter of type `Any` takes anything, and an argument of
     /// type `Any` goes anywhere, as it's checked as the program runs. Inside
     /// a container, a function type, an `Option` or a tuple, `Any` is just
-    /// another type: a `List<Int>` doesn't fit a `List<Any>`. A
-    /// `Sequence<T>` takes any kind of sequence, and settles `T` from its
-    /// elements.
+    /// another type: a `List<Int>` doesn't fit a `List<Any>`. An
+    /// `Iterable<T>` takes any kind of sequence, and settles `T` from its
+    /// elements. An argument nothing is known about yet stays what it is,
+    /// as the call that takes it waits for it to iterate.
     pub(crate) fn bind_argument(&mut self, parameter: &StaticType, argument: &StaticType) -> bool {
         let (parameter, argument) = (self.shallow(parameter), self.shallow(argument));
         match (&parameter, &argument) {
@@ -712,25 +713,75 @@ impl TypeVars {
             // literal's type what the literal says: `n` in `let n = 1;
             // n = a` is still an Int.
             (StaticType::Var(var), StaticType::Any) if self.is_literal(*var) => true,
+            (StaticType::Iterable(_), StaticType::Var(var)) if !self.is_literal(*var) => true,
             (StaticType::Var(_), _) | (_, StaticType::Var(_)) => self.unify(&parameter, &argument),
             (_, StaticType::Any) => true,
-            // A function type that says nothing about the parameters takes
-            // any function that returns what it says.
             (
                 StaticType::Function {
-                    parameters: None,
+                    parameters: expected,
                     return_type: p,
                 },
-                StaticType::Function { return_type: a, .. },
-            ) => self.unify(p, a),
-            (StaticType::Sequence(p), StaticType::Sequence(a)) => self.bind_argument(p, a),
-            (StaticType::Sequence(p), _) if argument.sequence_element_type().is_some() => {
-                let element = argument
-                    .sequence_element_type()
-                    .expect("checked by the guard");
-                self.bind_argument(p, &element)
+                StaticType::Function {
+                    parameters: takes,
+                    return_type: a,
+                },
+            ) => {
+                // A function type that says nothing about the parameters
+                // takes any function.
+                let parameters = match (expected, takes) {
+                    (None, _) => true,
+                    (Some(expected), Some(takes)) => {
+                        expected.len() == takes.len()
+                            && expected.iter().zip(takes).all(|(e, t)| self.passes(e, t))
+                    }
+                    (Some(_), None) => false,
+                };
+                // A function returning an `Iterable<U>` may return any kind of
+                // sequence of `U`s, as `flat_map`'s callback does.
+                parameters
+                    && match self.shallow(p) {
+                        StaticType::Iterable(_) => self.bind_argument(p, a),
+                        _ => self.unify(p, a),
+                    }
             }
+            (StaticType::Iterable(p), _) => match self.element_type(&argument) {
+                Some(element) => self.bind_argument(p, &element),
+                None => false,
+            },
             _ => self.unify(&parameter, &argument),
+        }
+    }
+
+    /// Whether what a function type passes as an `expected` parameter is
+    /// what a function that `takes` it takes: the same type, or any kind of
+    /// sequence for an `Iterable<T>`, as `len` takes the lists that
+    /// `[[1], [2]].map(len)` passes.
+    fn passes(&mut self, expected: &StaticType, takes: &StaticType) -> bool {
+        match self.shallow(takes) {
+            StaticType::Iterable(_) => self.bind_argument(takes, expected),
+            _ => self.unify(expected, takes),
+        }
+    }
+
+    /// What iterating over a value of type `typ` gives, or `None` if it
+    /// doesn't iterate. A tuple iterates as the one type its elements are
+    /// once made the same, or as `Any` if they can't be: `(1, 2.5)` iterates
+    /// as Floats, and `(1, "a")` as `Any`.
+    pub(crate) fn element_type(&mut self, typ: &StaticType) -> Option<StaticType> {
+        match self.resolve(typ) {
+            StaticType::Tuple(elements) if !elements.is_empty() => {
+                let snapshot = self.snapshot();
+                if elements[1..]
+                    .iter()
+                    .all(|element| self.unify(&elements[0], element))
+                {
+                    Some(self.resolve(&elements[0]))
+                } else {
+                    self.rollback(snapshot);
+                    Some(StaticType::Any)
+                }
+            }
+            other => other.sequence_element_type(),
         }
     }
 

@@ -210,7 +210,7 @@ mod inner {
     }
 
     /// Converts the given sequence to set.
-    #[function(signature = "<T>(Sequence<T>) -> Map<T, ()>")]
+    #[function(signature = "<T>(Iterable<T>) -> Map<T, ()>")]
     pub fn set(seq: SeqValue) -> anyhow::Result<Value> {
         use ndc_vm::hash_map::HashMap;
 

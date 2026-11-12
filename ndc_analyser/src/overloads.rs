@@ -804,7 +804,7 @@ mod tests {
     // version must win even though the element version was registered later.
     #[test]
     fn more_specific_overload_wins_in_same_scope() {
-        let seq_any = StaticType::Sequence(Box::new(StaticType::Any));
+        let seq_any = StaticType::Iterable(Box::new(StaticType::Any));
         let fn_any = variadic_fn(StaticType::Generic("U".into()));
         let (types, locates) = table(vec![
             fn_type(vec![seq_any.clone(), fn_any], StaticType::Any),

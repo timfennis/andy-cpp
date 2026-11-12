@@ -193,7 +193,7 @@ fn group_overloads<'a>(
     groups
 }
 
-/// `[Int]` -> `Int`; `[List<Int>, Sequence<Int>]` -> `Sequence<Int>` (a
+/// `[Int]` -> `Int`; `[List<Int>, Iterable<Int>]` -> `Iterable<Int>` (a
 /// candidate subsuming all others wins); `[Int, Float, Number]` ->
 /// `Int | Float | Number` (no candidate subsumes the others).
 fn merged_type_display(candidates: &[&StaticType]) -> String {
@@ -498,7 +498,7 @@ mod tests {
     #[test]
     fn merged_type_display_shows_a_common_supertype_or_a_union() {
         let list = StaticType::List(Box::new(StaticType::Int));
-        let seq = StaticType::Sequence(Box::new(StaticType::Int));
+        let seq = StaticType::Iterable(Box::new(StaticType::Int));
         assert_eq!(merged_type_display(&[&list, &seq]), seq.to_string());
         assert_eq!(
             merged_type_display(&[&StaticType::Int, &StaticType::Float]),

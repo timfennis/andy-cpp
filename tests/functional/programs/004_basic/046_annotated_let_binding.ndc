@@ -12,7 +12,6 @@ let number_value: Number = 3n;
 let string_value: String = "hello";
 
 let option_value: Option<Any> = Some(3);
-let sequence_value: Sequence<Int> = [1, 2, 3];
 let list_value: List<Int> = [1, 2, 3];
 let iterator_value: Iterator<Int> = 1..10;
 let min_heap_value: MinHeap<Any> = MinHeap();

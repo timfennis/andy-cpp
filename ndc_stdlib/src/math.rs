@@ -712,7 +712,7 @@ fn register_aggregates(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
             declare(
                 env,
                 name,
-                vec![StaticType::Sequence(Box::new(mode.static_type()))],
+                vec![StaticType::Iterable(Box::new(mode.static_type()))],
                 mode.static_type(),
                 if product {
                     "Returns the product of a numeric sequence."

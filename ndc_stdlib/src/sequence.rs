@@ -60,7 +60,7 @@ mod inner {
     use std::rc::Rc;
 
     /// Returns `true` if the element is contained in the sequence.
-    #[function(name = "in", signature = "<T>(T, Sequence<T>) -> Bool")]
+    #[function(name = "in", signature = "<T>(T, Iterable<T>) -> Bool")]
     pub fn op_contains(elem: Value, seq: SeqValue) -> bool {
         contains(&elem, &seq)
     }
@@ -136,7 +136,7 @@ mod inner {
     }
 
     /// Returns the highest element in the sequence.
-    #[function(signature = "<T>(Sequence<T>) -> T")]
+    #[function(signature = "<T>(Iterable<T>) -> T")]
     pub fn max(seq: SeqValue) -> anyhow::Result<Value> {
         highest(seq)
     }
@@ -170,13 +170,13 @@ mod inner {
     }
 
     /// Returns the element for which the key function returns the highest value.
-    #[function(signature = "<T, U>(Sequence<T>, Fn(T) -> U) -> T")]
+    #[function(signature = "<T, U>(Iterable<T>, Fn(T) -> U) -> T")]
     pub fn max_by_key(seq: SeqValue, func: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         by_key(seq, func, Ordering::Greater)
     }
 
     /// Returns the element for which the key function returns the lowest value.
-    #[function(signature = "<T, U>(Sequence<T>, Fn(T) -> U) -> T")]
+    #[function(signature = "<T, U>(Iterable<T>, Fn(T) -> U) -> T")]
     pub fn min_by_key(seq: SeqValue, func: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         by_key(seq, func, Ordering::Less)
     }
@@ -186,7 +186,7 @@ mod inner {
     /// The comparator function takes two elements and returns a number. A positive result means the
     /// first argument is greater than the second, a negative result means the first argument is
     /// less than the second, and zero means they are equal.
-    #[function(signature = "<T, U>(Sequence<T>, Fn(T, T) -> U) -> T")]
+    #[function(signature = "<T, U>(Iterable<T>, Fn(T, T) -> U) -> T")]
     pub fn max_by(seq: SeqValue, comp: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         by_comp(seq, comp, Ordering::Greater)
     }
@@ -196,13 +196,13 @@ mod inner {
     /// The comparator function takes two elements and returns a number. A positive result means the
     /// first argument is greater than the second, a negative result means the first argument is
     /// less than the second, and zero means they are equal.
-    #[function(signature = "<T, U>(Sequence<T>, Fn(T, T) -> U) -> T")]
+    #[function(signature = "<T, U>(Iterable<T>, Fn(T, T) -> U) -> T")]
     pub fn min_by(seq: SeqValue, comp: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         by_comp(seq, comp, Ordering::Less)
     }
 
     /// Returns the lowest element in the sequence.
-    #[function(signature = "<T>(Sequence<T>) -> T")]
+    #[function(signature = "<T>(Iterable<T>) -> T")]
     pub fn min(seq: SeqValue) -> anyhow::Result<Value> {
         lowest(seq)
     }
@@ -293,7 +293,7 @@ mod inner {
     }
 
     /// Returns a sorted copy of the input sequence as a list.
-    #[function(signature = "<T>(Sequence<T>) -> List<T>")]
+    #[function(signature = "<T>(Iterable<T>) -> List<T>")]
     pub fn sorted(seq: SeqValue) -> anyhow::Result<Value> {
         let mut list: Vec<Value> = seq
             .try_into_iter()
@@ -311,7 +311,7 @@ mod inner {
     /// - for values lower than `0` the first argument is smaller than the second argument
     /// - for values higher than `0` the first argument is greater than the second argument
     /// - for values equal to `0` the first argument is equal to the second argument
-    #[function(signature = "<T, U>(Sequence<T>, Fn(T, T) -> U) -> List<T>")]
+    #[function(signature = "<T, U>(Iterable<T>, Fn(T, T) -> U) -> List<T>")]
     pub fn sorted_by(seq: SeqValue, comp: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         let mut list: Vec<Value> = seq
             .try_into_iter()
@@ -348,7 +348,7 @@ mod inner {
     }
 
     /// Returns the length of the sequence, for strings this returns the number of UTF-8 characters.
-    #[function(signature = "<T>(Sequence<T>) -> Int")]
+    #[function(signature = "<T>(Iterable<T>) -> Int")]
     pub fn len(seq: SeqValue) -> anyhow::Result<i64> {
         match &seq {
             Value::Object(obj) => match obj.as_ref() {
@@ -370,7 +370,7 @@ mod inner {
     }
 
     /// Returns a lazy iterator yielding `(index, value)` tuples for each element of `seq`.
-    #[function(signature = "<T>(Sequence<T>) -> Iterator<(Int, T)>")]
+    #[function(signature = "<T>(Iterable<T>) -> Iterator<(Int, T)>")]
     pub fn enumerate(seq: SeqValue) -> anyhow::Result<Value> {
         let iter =
             EnumerateIter::new(seq).ok_or_else(|| anyhow!("enumerate requires a sequence"))?;
@@ -378,7 +378,7 @@ mod inner {
     }
 
     /// Reduces/folds the given sequence using the given combining function and a custom initial value.
-    #[function(signature = "<T, A>(Sequence<T>, A, Fn(A, T) -> A) -> A")]
+    #[function(signature = "<T, A>(Iterable<T>, A, Fn(A, T) -> A) -> A")]
     pub fn fold(
         seq: SeqValue,
         initial: Value,
@@ -393,7 +393,7 @@ mod inner {
     }
 
     /// Reduces/folds the given sequence using the given combining function.
-    #[function(signature = "<T>(Sequence<T>, Fn(T, T) -> T) -> T")]
+    #[function(signature = "<T>(Iterable<T>, Fn(T, T) -> T) -> T")]
     pub fn reduce(seq: SeqValue, function: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         let mut iterator = seq
             .try_into_iter()
@@ -405,7 +405,7 @@ mod inner {
     }
 
     /// Filters the given sequence using the `predicate`.
-    #[function(signature = "<T>(Sequence<T>, Fn(T) -> Bool) -> List<T>")]
+    #[function(signature = "<T>(Iterable<T>, Fn(T) -> Bool) -> List<T>")]
     pub fn filter(seq: SeqValue, predicate: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         let mut out = Vec::new();
         for element in seq
@@ -425,7 +425,7 @@ mod inner {
     }
 
     /// Returns the number of elements in the input sequence for which the given `predicate` returns `true`.
-    #[function(signature = "<T>(Sequence<T>, Fn(T) -> Bool) -> Int")]
+    #[function(signature = "<T>(Iterable<T>, Fn(T) -> Bool) -> Int")]
     pub fn count(seq: SeqValue, predicate: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         let mut out = 0i64;
         for element in seq
@@ -442,7 +442,7 @@ mod inner {
     }
 
     /// Returns the value of the first element for which the `predicate` is true for the given input sequence.
-    #[function(signature = "<T>(Sequence<T>, Fn(T) -> Bool) -> T")]
+    #[function(signature = "<T>(Iterable<T>, Fn(T) -> Bool) -> T")]
     pub fn find(seq: SeqValue, predicate: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         for element in seq
             .try_into_iter()
@@ -461,7 +461,7 @@ mod inner {
     }
 
     /// Returns the first index of the element for which the `predicate` is true in the input sequence.
-    #[function(signature = "<T>(Sequence<T>, Fn(T) -> Bool) -> Int")]
+    #[function(signature = "<T>(Iterable<T>, Fn(T) -> Bool) -> Int")]
     pub fn locate(seq: SeqValue, predicate: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         for (idx, element) in seq
             .try_into_iter()
@@ -478,7 +478,7 @@ mod inner {
     }
 
     /// Returns the first index of the element or produces an error
-    #[function(name = "locate", signature = "<T>(Sequence<T>, T) -> Int")]
+    #[function(name = "locate", signature = "<T>(Iterable<T>, T) -> Int")]
     pub fn locate_element(seq: SeqValue, element: Value) -> anyhow::Result<Value> {
         for (idx, el) in seq
             .try_into_iter()
@@ -493,7 +493,7 @@ mod inner {
     }
 
     /// Returns `true` if the `predicate` is true for none of the elements in `seq`.
-    #[function(signature = "<T>(Sequence<T>, Fn(T) -> Bool) -> Bool")]
+    #[function(signature = "<T>(Iterable<T>, Fn(T) -> Bool) -> Bool")]
     pub fn none(seq: SeqValue, function: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         for item in seq
             .try_into_iter()
@@ -514,7 +514,7 @@ mod inner {
     }
 
     /// Returns `true` if the `predicate` is true for all the elements in `seq`.
-    #[function(signature = "<T>(Sequence<T>, Fn(T) -> Bool) -> Bool")]
+    #[function(signature = "<T>(Iterable<T>, Fn(T) -> Bool) -> Bool")]
     pub fn all(seq: SeqValue, function: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         for item in seq
             .try_into_iter()
@@ -535,7 +535,7 @@ mod inner {
     }
 
     /// Returns `true` if the `predicate` is true for any of the elements in `seq`.
-    #[function(signature = "<T>(Sequence<T>, Fn(T) -> Bool) -> Bool")]
+    #[function(signature = "<T>(Iterable<T>, Fn(T) -> Bool) -> Bool")]
     pub fn any(seq: SeqValue, predicate: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         for item in seq
             .try_into_iter()
@@ -556,7 +556,7 @@ mod inner {
     }
 
     /// Applies the function to each element in a sequence returning the result as a list.
-    #[function(signature = "<T, U>(Sequence<T>, Fn(T) -> U) -> List<U>")]
+    #[function(signature = "<T, U>(Iterable<T>, Fn(T) -> U) -> List<U>")]
     pub fn map(seq: SeqValue, function: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         let mut out = Vec::new();
         for item in seq
@@ -569,7 +569,7 @@ mod inner {
     }
 
     /// Applies a function to each item in a sequence, flattens the resulting sequences, and returns a single combined sequence.
-    #[function(signature = "<T, U>(Sequence<T>, Fn(T) -> Sequence<U>) -> List<U>")]
+    #[function(signature = "<T, U>(Iterable<T>, Fn(T) -> Iterable<U>) -> List<U>")]
     pub fn flat_map(seq: SeqValue, function: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         let mut out = Vec::new();
         for item in seq
@@ -586,7 +586,7 @@ mod inner {
     }
 
     /// Returns the first element of the sequence or the `default` value otherwise.
-    #[function(signature = "<T>(Sequence<T>, T) -> T")]
+    #[function(signature = "<T>(Iterable<T>, T) -> T")]
     pub fn first_or(seq: SeqValue, default: Value) -> Value {
         seq.try_into_iter()
             .and_then(|mut i| i.next())
@@ -594,7 +594,7 @@ mod inner {
     }
 
     /// Returns the first element of the sequence or the return value of the given function.
-    #[function(signature = "<T>(Sequence<T>, Fn() -> T) -> T")]
+    #[function(signature = "<T>(Iterable<T>, Fn() -> T) -> T")]
     pub fn first_or_else(seq: SeqValue, default: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         if let Some(item) = seq.try_into_iter().and_then(|mut i| i.next()) {
             return Ok(item);
@@ -603,7 +603,7 @@ mod inner {
     }
 
     /// Returns the `k` sized combinations of the given sequence `seq` as a lazy iterator of tuples.
-    #[function(signature = "<T>(Sequence<T>, Int) -> Iterator<Any>")]
+    #[function(signature = "<T>(Iterable<T>, Int) -> Iterator<Any>")]
     pub fn combinations(seq: SeqValue, k: usize) -> anyhow::Result<Value> {
         let iter = CombinationsIter::new(seq, k)
             .ok_or_else(|| anyhow!("combinations requires a sequence"))?;
@@ -611,14 +611,14 @@ mod inner {
     }
 
     /// Returns a lazy iterator yielding the first `n` elements of `seq`.
-    #[function(signature = "<T>(Sequence<T>, Int) -> Iterator<T>")]
+    #[function(signature = "<T>(Iterable<T>, Int) -> Iterator<T>")]
     pub fn take(seq: SeqValue, n: usize) -> anyhow::Result<Value> {
         let iter = TakeIter::new(seq, n).ok_or_else(|| anyhow!("take requires a sequence"))?;
         Ok(Value::iterator(iter.into_shared()))
     }
 
     /// Returns the `k` sized permutations of the given sequence `seq` as a list of tuples.
-    #[function(signature = "<T>(Sequence<T>, Int) -> List<Any>")]
+    #[function(signature = "<T>(Iterable<T>, Int) -> List<Any>")]
     pub fn permutations(seq: SeqValue, k: usize) -> anyhow::Result<Value> {
         Ok(Value::list(
             seq.try_into_iter()
@@ -647,7 +647,7 @@ mod inner {
     }
 
     /// Returns all prefixes of a sequence, each as a list; for strings, returns string prefixes.
-    #[function(signature = "<T>(Sequence<T>) -> List<Sequence<T>>")]
+    #[function(signature = "<T>(Iterable<T>) -> List<List<T>>")]
     pub fn prefixes(seq: SeqValue) -> anyhow::Result<Value> {
         // A sequence-typed caller can still supply a string.
         if let Value::Object(ref obj) = seq
@@ -681,7 +681,7 @@ mod inner {
     }
 
     /// Returns all suffixes of a sequence, each as a list; for strings, returns all trailing substrings.
-    #[function(signature = "<T>(Sequence<T>) -> List<Sequence<T>>")]
+    #[function(signature = "<T>(Iterable<T>) -> List<List<T>>")]
     pub fn suffixes(seq: SeqValue) -> anyhow::Result<Value> {
         // A sequence-typed caller can still supply a string.
         if let Value::Object(ref obj) = seq
@@ -701,7 +701,7 @@ mod inner {
     }
 
     /// Transposes a sequence of sequences, turning rows into columns, and returns the result as a list of lists.
-    #[function(signature = "<T>(Sequence<T>) -> List<List<Any>>")]
+    #[function(signature = "<T>(Iterable<T>) -> List<List<Any>>")]
     pub fn transposed(seq: SeqValue) -> anyhow::Result<Value> {
         let main: Vec<Value> = seq
             .try_into_iter()
@@ -724,7 +724,7 @@ mod inner {
     }
 
     /// Return a list of all windows, wrapping back to the first elements when the window would otherwise exceed the length of source list, producing tuples of size 2.
-    #[function(signature = "<T>(Sequence<T>) -> List<(T, T)>")]
+    #[function(signature = "<T>(Iterable<T>) -> List<(T, T)>")]
     pub fn circular_tuple_windows(seq: SeqValue) -> anyhow::Result<Value> {
         Ok(Value::list(
             seq.try_into_iter()
@@ -738,7 +738,7 @@ mod inner {
     }
 
     /// Returns a list of all size-2 windows in `seq`.
-    #[function(signature = "<T>(Sequence<T>) -> List<List<T>>")]
+    #[function(signature = "<T>(Iterable<T>) -> List<List<T>>")]
     pub fn pairwise(seq: SeqValue) -> anyhow::Result<Value> {
         Ok(Value::list(
             seq.try_into_iter()
@@ -753,7 +753,7 @@ mod inner {
     /// Applies a function to each pair of consecutive elements in a sequence and returns the results as a list.
     #[function(
         name = "pairwise",
-        signature = "<T, U>(Sequence<T>, Fn(T, T) -> U) -> List<U>"
+        signature = "<T, U>(Iterable<T>, Fn(T, T) -> U) -> List<U>"
     )]
     pub fn pairwise_map(seq: SeqValue, function: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         let main: Vec<Value> = seq
@@ -768,7 +768,7 @@ mod inner {
     }
 
     /// Returns a list of all contiguous windows of `length` size. The windows overlap. If the `seq` is shorter than size, the iterator returns no values.
-    #[function(signature = "<T>(Sequence<T>, Int) -> List<List<T>>")]
+    #[function(signature = "<T>(Iterable<T>, Int) -> List<List<T>>")]
     pub fn windows(seq: SeqValue, length: usize) -> anyhow::Result<Value> {
         if length == 0 {
             return Err(anyhow!("window size must be non-zero"));
@@ -787,7 +787,7 @@ mod inner {
     ///
     /// The powerset of a set contains all subsets including the empty set and the full input set. A powerset has length `2^n` where `n` is the length of the input set.
     /// Each list produced by this function represents a subset of the elements in the source sequence.
-    #[function(signature = "<T>(Sequence<T>) -> List<List<T>>")]
+    #[function(signature = "<T>(Iterable<T>) -> List<List<T>>")]
     pub fn subsequences(seq: SeqValue) -> anyhow::Result<Value> {
         Ok(Value::list(
             seq.try_into_iter()
@@ -801,7 +801,7 @@ mod inner {
     /// Return a list that represents the powerset of the elements of `seq` that are exactly `length` long.
     #[function(
         name = "subsequences",
-        signature = "<T>(Sequence<T>, Int) -> List<List<T>>"
+        signature = "<T>(Iterable<T>, Int) -> List<List<T>>"
     )]
     pub fn subsequences_len(seq: SeqValue, length: usize) -> anyhow::Result<Value> {
         Ok(Value::list(
@@ -840,7 +840,7 @@ mod inner {
     ///   [3,"c",false]
     /// ]
     /// ```
-    #[function(signature = "<T>(Sequence<T>) -> List<List<Any>>")]
+    #[function(signature = "<T>(Iterable<T>) -> List<List<Any>>")]
     pub fn multi_cartesian_product(seq: SeqValue) -> anyhow::Result<Value> {
         let mut iterators = Vec::new();
         for elem in seq
@@ -864,7 +864,7 @@ mod inner {
 
     /// Split the input sequence into evenly sized chunks. If the input length of the sequence
     /// is not dividable by the chunk_size the last chunk will contain fewer elements.
-    #[function(signature = "<T>(Sequence<T>, Int) -> List<List<T>>")]
+    #[function(signature = "<T>(Iterable<T>, Int) -> List<List<T>>")]
     pub fn chunks(seq: SeqValue, chunk_size: usize) -> anyhow::Result<Value> {
         if chunk_size == 0 {
             return Err(anyhow!("chunk size must be non-zero"));
@@ -966,7 +966,7 @@ pub mod extra {
     pub fn register(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
         for signature in [
             // Two sequences zip into pairs of their elements.
-            "<A, B>(Sequence<A>, Sequence<B>) -> List<(A, B)>",
+            "<A, B>(Iterable<A>, Iterable<B>) -> List<(A, B)>",
             // More make tuples as long as the number of arguments.
             "(*) -> List<Any>",
         ] {

@@ -61,9 +61,9 @@ value's type and checks it at the cast site.
 A wider annotation than the value needs can lose the detail a function needs:
 
 ```ndc
-let words: Sequence<String> = "a b c".split(" ");
-words.remove(0);           // error: no `remove` matches Sequence<String>, Int
-assert_eq((words as List<String>).remove(0), "a");
+let values: List<Any> = [1, 2, 3];
+values.sum();              // error: no `sum` matches List<Any>
+assert_eq((values as List<Int>).sum(), 6);
 ```
 
 A specialized `op=` mutates its target in place and keeps its type, so it only

@@ -366,7 +366,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
         NdcType::SeqValue => VmInputArg {
             extract: quote! {},
             pass: quote! { #raw.clone() },
-            static_type: quote! { ndc_core::StaticType::Sequence(Box::new(ndc_core::StaticType::Any)) },
+            static_type: quote! { ndc_core::StaticType::Iterable(Box::new(ndc_core::StaticType::Any)) },
         },
 
         NdcType::MapValue => VmInputArg {

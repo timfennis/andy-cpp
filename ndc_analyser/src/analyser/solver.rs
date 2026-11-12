@@ -288,8 +288,14 @@ impl Analyser {
                 });
                 element
             }
-            known => known.sequence_element_type().unwrap_or(StaticType::Any),
+            known => self.iteration_gives(&known),
         }
+    }
+
+    /// What iterating over a value of the known type `sequence` gives. What
+    /// doesn't iterate is left to the program as it runs.
+    fn iteration_gives(&mut self, sequence: &StaticType) -> StaticType {
+        self.vars.element_type(sequence).unwrap_or(StaticType::Any)
     }
 
     /// The types `let (a, b, …) = value` gives each name when the kind of
@@ -830,9 +836,9 @@ impl Analyser {
                 if matches!(sequence, StaticType::Var(_)) {
                     return false;
                 }
-                let found = sequence.sequence_element_type().unwrap_or(StaticType::Any);
-                let element = element.clone();
-                self.settle_waited_for(&element, &found, *span, None);
+                let (element, span) = (element.clone(), *span);
+                let found = self.iteration_gives(&sequence);
+                self.settle_waited_for(&element, &found, span, None);
                 true
             }
             Constraint::Unpack { value, parts, span } => {
@@ -1285,6 +1291,8 @@ impl Analyser {
         };
         let checks = self.expected_of_any(&parameters, arguments, nodes);
         self.pending.checks.extend(checks);
+        let iterations = self.iterations_waited_for(&parameters, arguments);
+        self.pending.iterations.extend(iterations);
         Some(typ)
     }
 
@@ -1344,6 +1352,13 @@ impl Analyser {
         for (node, expected) in std::mem::take(&mut self.pending.checks) {
             self.expect(node, expected);
         }
+        for (sequence, element) in std::mem::take(&mut self.pending.iterations) {
+            self.wait(Constraint::Iterate {
+                sequence,
+                element,
+                span: call,
+            });
+        }
         let copies = std::mem::take(&mut self.pending.copies);
         for (function, constraint, origin) in copies {
             let name = self.resolver.symbol_name(function).to_string();
@@ -1395,6 +1410,31 @@ impl Analyser {
             return None;
         }
         Some((self.vars.resolve(return_type), parameters.clone()))
+    }
+
+    /// Each argument nothing is known about yet that was passed for an
+    /// `Iterable<T>`, with the `T` that iterating over it gives once it's
+    /// known: in `fn total(xs) => xs.sum()`, what `xs` is waits for a call.
+    pub(super) fn iterations_waited_for(
+        &self,
+        parameters: &[StaticType],
+        arguments: &[StaticType],
+    ) -> Vec<(StaticType, StaticType)> {
+        parameters
+            .iter()
+            .zip(arguments)
+            .filter_map(|(parameter, argument)| {
+                let StaticType::Iterable(element) = self.vars.resolve(parameter) else {
+                    return None;
+                };
+                match self.vars.resolve(argument) {
+                    sequence @ StaticType::Var(var) if !self.vars.is_literal(var) => {
+                        Some((sequence, *element))
+                    }
+                    _ => None,
+                }
+            })
+            .collect()
     }
 
     /// Where each argument of type `Any` that `nodes` has a node for is
@@ -1563,10 +1603,9 @@ impl Analyser {
     /// taking exact types once the arguments are known, so a waiting call
     /// doesn't commit to it: `xs[0] = []` on a `List<Int>` leaves only
     /// `[]=(List<T>, Any, Any)` taking the empty list, but it's still an
-    /// error once the list's type is known. A `Sequence` parameter takes
-    /// lists, strings, maps and more, so committing to it would make an
-    /// argument nothing is known about a `Sequence` rather than what it is:
-    /// in `fn f(xs) { xs.len(); xs[0] = 1 }`, `xs` is a list.
+    /// error once the list's type is known. An `Iterable<T>` parameter takes
+    /// any kind of sequence, so it can't tell what an argument nothing is
+    /// known about is, and the call waits for it as `for x in xs` does.
     fn fits_without_any(&self, symbol: SymbolId, arguments: &[StaticType]) -> bool {
         match self.vars.resolve(self.types.get_type(symbol)) {
             StaticType::Function {
@@ -1577,7 +1616,7 @@ impl Analyser {
                 .zip(arguments)
                 .all(|(parameter, argument)| match (parameter, argument) {
                     (StaticType::Any, argument) => *argument == StaticType::Any,
-                    (StaticType::Sequence(_), StaticType::Var(_)) => false,
+                    (StaticType::Iterable(_), StaticType::Var(var)) => self.vars.is_literal(*var),
                     _ => true,
                 }),
             _ => false,

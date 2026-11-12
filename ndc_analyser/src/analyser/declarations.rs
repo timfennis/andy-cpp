@@ -1,3 +1,4 @@
+use super::solver::Constraint;
 use super::{Analyser, Returns};
 use crate::error::AnalysisError;
 use itertools::{Itertools, izip};
@@ -48,10 +49,10 @@ impl Analyser {
             self.declaring = declared.map(|(_, symbol)| symbol);
         }
         let first_use = self.uses.len();
-        let annotations = parameters
+        let (annotations, iterates): (Vec<_>, Vec<_>) = parameters
             .iter()
-            .map(|param| self.lower_annotation(param.annotation.as_ref()))
-            .collect::<Vec<_>>();
+            .map(|param| self.lower_parameter_annotation(param.annotation.as_ref()))
+            .unzip();
         let type_signature = TypeSignature::from_annotated_bindings(
             parameters
                 .iter()
@@ -72,7 +73,12 @@ impl Analyser {
             Some(_) => Some(
                 annotations
                     .iter()
-                    .map(|annotation| annotation.clone().unwrap_or(StaticType::Any))
+                    .zip(&iterates)
+                    .map(|(annotation, iterates)| match (annotation, iterates) {
+                        (Some(annotation), _) => annotation.clone(),
+                        (None, Some(_)) => StaticType::Iterable(Box::new(StaticType::Any)),
+                        (None, None) => StaticType::Any,
+                    })
                     .collect(),
             ),
             None => type_signature.types(),
@@ -123,6 +129,19 @@ impl Analyser {
                 .analysis
                 .variable_types
                 .insert(param.lvalue.id, typ.clone());
+        }
+        // An `Iterable<T>` parameter is what each call passes, which has to
+        // iterate as `T`: `fn total(xs: Iterable<Int>)` takes a list or a
+        // tuple of Ints.
+        for ((param, typ), element) in parameters.iter().zip(&param_types).zip(&iterates) {
+            if let Some(element) = element {
+                let span = param.annotation.as_ref().map_or(span, TypeExpr::span);
+                self.wait(Constraint::Iterate {
+                    sequence: typ.clone(),
+                    element: element.clone(),
+                    span,
+                });
+            }
         }
 
         let implicit_return = self.analyse_expr(body);
@@ -191,10 +210,13 @@ impl Analyser {
                 ..
             }) = self.result.analysis.function_types.get_mut(&id)
         {
-            for ((runtime, parameter), annotation) in
-                runtime.iter_mut().zip(parameters).zip(&annotations)
+            for (((runtime, parameter), annotation), iterates) in runtime
+                .iter_mut()
+                .zip(parameters)
+                .zip(&annotations)
+                .zip(&iterates)
             {
-                if annotation.is_none() {
+                if annotation.is_none() && iterates.is_none() {
                     *runtime = checkable_as_the_program_runs(&parameter);
                 }
             }
@@ -221,7 +243,7 @@ impl Analyser {
     ) -> StaticType {
         let field_types: Vec<StaticType> = fields
             .iter()
-            .map(|f| self.lower_type_expr(&f.annotation))
+            .map(|f| self.lower_value_type(&f.annotation))
             .collect();
 
         let struct_id = self.struct_registry.register(
@@ -391,7 +413,7 @@ fn checkable_as_the_program_runs(typ: &StaticType) -> StaticType {
         StaticType::Var(_) | StaticType::Generic(_) | StaticType::Tuple(_) => StaticType::Any,
         StaticType::List(_) => StaticType::List(any()),
         StaticType::Deque(_) => StaticType::Deque(any()),
-        StaticType::Sequence(_) => StaticType::Sequence(any()),
+        StaticType::Iterable(_) => StaticType::Iterable(any()),
         StaticType::Iterator(_) => StaticType::Iterator(any()),
         StaticType::MinHeap(_) => StaticType::MinHeap(any()),
         StaticType::MaxHeap(_) => StaticType::MaxHeap(any()),

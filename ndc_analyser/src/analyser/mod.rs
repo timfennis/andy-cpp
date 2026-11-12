@@ -314,8 +314,47 @@ impl Analyser {
         }
     }
 
+    /// Lowers an annotation of something other than a parameter, which an
+    /// `Iterable<T>` can't be: `let xs: Iterable<Int>` doesn't say what
+    /// kind of sequence `xs` is.
     fn lower_annotation(&mut self, annotation: Option<&TypeExpr>) -> Option<StaticType> {
-        annotation.map(|expr| self.lower_type_expr(expr))
+        annotation.map(|expr| self.lower_value_type(expr))
+    }
+
+    /// [`Self::lower_type_expr`] for the type of a value, which an
+    /// `Iterable<T>` is only part of as a parameter's type.
+    fn lower_value_type(&mut self, expr: &TypeExpr) -> StaticType {
+        let typ = self.lower_type_expr(expr);
+        self.without_iterables(typ, expr.span())
+    }
+
+    /// `typ`, reporting each `Iterable<T>` in it, which only a parameter's
+    /// type can be, as `Any`.
+    fn without_iterables(&mut self, typ: StaticType, span: Span) -> StaticType {
+        if !typ.contains(&|part| matches!(part, StaticType::Iterable(_))) {
+            return typ;
+        }
+        self.emit(AnalysisError::iterable_outside_a_parameter(span));
+        typ.replace(&|part| matches!(part, StaticType::Iterable(_)).then_some(StaticType::Any))
+    }
+
+    /// Lowers a parameter's annotation, returning its type, and the element
+    /// type for an `Iterable<T>`, which takes any kind of sequence of `T`s:
+    /// the parameter's type is then what each call passes, and only has to
+    /// iterate as `T`.
+    fn lower_parameter_annotation(
+        &mut self,
+        annotation: Option<&TypeExpr>,
+    ) -> (Option<StaticType>, Option<StaticType>) {
+        let Some(expr) = annotation else {
+            return (None, None);
+        };
+        match self.lower_type_expr(expr) {
+            StaticType::Iterable(element) => {
+                (None, Some(self.without_iterables(*element, expr.span())))
+            }
+            typ => (Some(self.without_iterables(typ, expr.span())), None),
+        }
     }
 
     /// Analyses a top-level statement. Names resolve first; a statement with
@@ -401,7 +440,7 @@ impl Analyser {
             }
             Expression::Grouping(expr) => self.analyse_expr(expr),
             Expression::Cast { value, annotation } => {
-                let target = self.lower_type_expr(annotation);
+                let target = self.lower_value_type(annotation);
                 let found = self.analyse_expr(value);
                 // What isn't known about the value yet is what the cast says
                 // it is: `(fn(x) => x) as Fn(Int) -> Int` takes an Int, and
