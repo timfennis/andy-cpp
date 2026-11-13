@@ -76,7 +76,9 @@ impl Analyser {
                     .zip(&iterates)
                     .map(|(annotation, iterates)| match (annotation, iterates) {
                         (Some(annotation), _) => annotation.clone(),
-                        (None, Some(_)) => StaticType::Iterable(Box::new(StaticType::Any)),
+                        // What it iterates as is checked too, so a call the
+                        // program picks for doesn't take another kind.
+                        (None, Some(element)) => StaticType::Iterable(Box::new(element.clone())),
                         (None, None) => StaticType::Any,
                     })
                     .collect(),

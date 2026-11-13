@@ -1416,8 +1416,10 @@ impl Analyser {
     }
 
     /// Each argument nothing is known about yet that was passed for an
-    /// `Iterable<T>`, with the `T` that iterating over it gives once it's
-    /// known: in `fn total(xs) => xs.sum()`, what `xs` is waits for a call.
+    /// `Iterable<T>`, or that a function passed for one returns, with the
+    /// `T` that iterating over it gives once it's known: in `fn total(xs)
+    /// => xs.sum()`, what `xs` is waits for a call, and so does `xs` in
+    /// `fn flatten(xs) => [0].flat_map(fn(_) => xs)`.
     pub(super) fn iterations_waited_for(
         &self,
         parameters: &[StaticType],
@@ -1427,13 +1429,23 @@ impl Analyser {
             .iter()
             .zip(arguments)
             .filter_map(|(parameter, argument)| {
-                let StaticType::Iterable(element) = self.vars.resolve(parameter) else {
-                    return None;
-                };
-                match self.vars.resolve(argument) {
-                    sequence @ StaticType::Var(var) if !self.vars.is_literal(var) => {
-                        Some((sequence, *element))
-                    }
+                let (element, sequence) =
+                    match (self.vars.resolve(parameter), self.vars.resolve(argument)) {
+                        (StaticType::Iterable(element), sequence) => (*element, sequence),
+                        (
+                            StaticType::Function { return_type, .. },
+                            StaticType::Function {
+                                return_type: returns,
+                                ..
+                            },
+                        ) => match *return_type {
+                            StaticType::Iterable(element) => (*element, *returns),
+                            _ => return None,
+                        },
+                        _ => return None,
+                    };
+                match sequence {
+                    StaticType::Var(var) if !self.vars.is_literal(var) => Some((sequence, element)),
                     _ => None,
                 }
             })
