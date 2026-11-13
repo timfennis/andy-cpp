@@ -1,0 +1,5 @@
+// expect-error: No function called 'len' found that matches the arguments 'Bool'
+// The list holds what a failed call gave, so `sum` isn't reported as well.
+let x = len(true)[0];
+let xs = [x, x];
+print(xs.sum());

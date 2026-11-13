@@ -520,7 +520,11 @@ impl TypeVars {
             typ => bounds.iter().all(|bound| match bound {
                 Bound::Number(..) => matches!(
                     typ,
-                    StaticType::Int | StaticType::Float | StaticType::Number | StaticType::Any
+                    StaticType::Int
+                        | StaticType::Float
+                        | StaticType::Number
+                        | StaticType::Any
+                        | StaticType::Error
                 ),
                 Bound::Holds(held, _, _) => self.bind_argument(&typ, held),
             }),
@@ -636,6 +640,17 @@ impl TypeVars {
         })
     }
 
+    /// `typ` as the analysis hands it on, once every variable in it is
+    /// settled: [`Self::resolve`]d, and with each failed check's type shown
+    /// as `Any`, which is what's known about it.
+    pub(crate) fn finish(&self, typ: &StaticType) -> StaticType {
+        typ.replace(&|part| match part {
+            StaticType::Var(var) => self.solution(*var).map(|solution| self.finish(solution)),
+            StaticType::Error => Some(StaticType::Any),
+            _ => None,
+        })
+    }
+
     /// `typ`, or what it stands for if it's a settled variable.
     fn shallow(&self, typ: &StaticType) -> StaticType {
         match typ {
@@ -668,6 +683,9 @@ impl TypeVars {
                 }
                 self.settle(*var, other.clone())
             }
+            // A failed check's type is every type, so nothing built from it
+            // fails again.
+            (StaticType::Error, _) | (_, StaticType::Error) => true,
             (StaticType::Option(x), StaticType::Option(y))
             | (StaticType::Iterable(x), StaticType::Iterable(y))
             | (StaticType::List(x), StaticType::List(y))
@@ -794,8 +812,12 @@ impl TypeVars {
             (_, StaticType::Never) | (StaticType::Any, _) => true,
             // A value of type `Any` is checked where it goes, so it leaves a
             // literal's type what the literal says: `n` in `let n = 1;
-            // n = a` is still an Int.
-            (StaticType::Var(var), StaticType::Any) if self.is_literal(*var) => true,
+            // n = a` is still an Int. So does a value whose check failed.
+            (StaticType::Var(var), StaticType::Any | StaticType::Error)
+                if self.is_literal(*var) =>
+            {
+                true
+            }
             (StaticType::Iterable(_), StaticType::Var(var)) if !self.is_literal(*var) => true,
             // A literal passed for an `Iterable<T>` is the sequence it holds,
             // as `["a"]` passed to `len` is a `List<String>`: only a
@@ -810,7 +832,7 @@ impl TypeVars {
                 self.settle_literal(*var, &held) && self.bind_argument(&parameter, &held)
             }
             (StaticType::Var(_), _) | (_, StaticType::Var(_)) => self.unify(&parameter, &argument),
-            (_, StaticType::Any) => true,
+            (_, StaticType::Any | StaticType::Error) | (StaticType::Error, _) => true,
             (
                 StaticType::Function {
                     parameters: expected,
@@ -911,6 +933,18 @@ impl TypeVars {
         for var in self.unsettled(typ) {
             if self.solution(var).is_none() {
                 self.settle(var, to.clone());
+            }
+        }
+    }
+
+    /// Settles every unsettled variable in `typ` but a literal's as the
+    /// type of a failed check: in `missing(xs).map(fn(x) => x.size)`, the
+    /// call of `map` says nothing about `x`, which then isn't checked.
+    /// Literals take their defaults as usual.
+    pub(crate) fn settle_unknowns_as_errors(&mut self, typ: &StaticType) {
+        for var in self.unsettled(typ) {
+            if self.solution(var).is_none() && !self.is_literal(var) {
+                self.settle(var, StaticType::Error);
             }
         }
     }

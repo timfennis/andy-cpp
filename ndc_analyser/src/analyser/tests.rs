@@ -1743,3 +1743,85 @@ fn a_call_no_overload_takes_says_what_the_overloads_take() {
         result.errors
     );
 }
+
+/// Natives for the tests of what's built from a failed check.
+fn failed_check_natives() -> Vec<(String, StaticType)> {
+    let mut globals = natives(&[
+        ("len", "<T>(Iterable<T>) -> Int"),
+        ("map", "<T, U>(Iterable<T>, Fn(T) -> U) -> List<U>"),
+        ("sum", "(Iterable<Int>) -> Int"),
+        ("sum", "(Iterable<Float>) -> Float"),
+        ("abs", "(Int) -> Int"),
+        ("abs", "(Float) -> Float"),
+        ("++", "<T>(List<T>, List<T>) -> List<T>"),
+        ("++", "(String, String) -> String"),
+    ]);
+    globals.extend(index_natives());
+    globals
+}
+
+#[test]
+fn what_is_built_from_a_failed_call_is_not_reported_again() {
+    let globals = failed_check_natives();
+    assert_eq!(
+        errors(
+            "struct Player { name: String, score: Int }
+            let players = [Player(\"ann\", 3), Player(\"bob\", 5)];
+            players.map(fn(p) => p.len).sum();",
+            globals,
+        ),
+        vec!["No function called 'len' found that matches the arguments 'Player'"]
+    );
+}
+
+#[test]
+fn a_failed_call_is_reported_once_wherever_its_value_goes() {
+    let globals = failed_check_natives();
+    let failed = "No function called 'len' found that matches the arguments 'Bool'";
+    for source in [
+        // Indexed.
+        "let x = len(true)[0]; [x].sum();",
+        // Iterated.
+        "for x in len(true) { [x].sum(); }",
+        "let xs: List<String> = [x for x in len(true)];",
+        // Passed on.
+        "[len(true)].sum();",
+        "len(true).map(abs);",
+        "len(true).map(fn(x) => [x]).sum();",
+        "abs(len(true)) ++ \"a\";",
+        // Assigned to a typed variable.
+        "let xs: List<String> = [len(true)];",
+        "let s: String = len(true);",
+        // Called.
+        "let f = len(true); [f(1)].sum();",
+        // Unpacked.
+        "let (a, b) = len(true); [a, b].sum();",
+    ] {
+        assert_eq!(errors(source, globals.clone()), vec![failed], "{source}");
+    }
+}
+
+#[test]
+fn an_error_after_a_failed_call_is_still_reported() {
+    let globals = failed_check_natives();
+    assert_eq!(
+        errors(
+            "let n = len(true); let s: String = 1; [\"a\"].sum();",
+            globals,
+        ),
+        vec![
+            "No function called 'len' found that matches the arguments 'Bool'",
+            "mismatched types: found Int but expected String",
+            "No function called 'sum' found that matches the arguments 'List<String>'",
+        ]
+    );
+}
+
+#[test]
+fn a_failed_annotation_is_not_reported_again() {
+    let globals = failed_check_natives();
+    assert_eq!(
+        errors("let x: Int<String> = 1; [x].sum();", globals),
+        vec!["type `Int` does not take generic arguments"]
+    );
+}

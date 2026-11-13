@@ -333,7 +333,7 @@ impl Analyser {
         }
         let error = AnalysisError::not_iterable(&self.vars.shown(sequence), span);
         self.emit(error);
-        StaticType::Any
+        StaticType::Error
     }
 
     /// The types `let (a, b, …) = value` gives each name when the kind of
@@ -459,6 +459,11 @@ impl Analyser {
                         .iter()
                         .map(|argument| self.vars.resolve(argument))
                         .collect::<Vec<_>>();
+                    // A call passed a value whose check failed later picks
+                    // nothing, and the program doesn't run.
+                    if arguments.iter().any(StaticType::has_errors) {
+                        continue;
+                    }
                     // A pick left to the program among one overload is a
                     // call of it, with its `Any` arguments checked.
                     let binding = match self
@@ -489,6 +494,9 @@ impl Analyser {
                 }
                 EarlyPick::FunctionValue { value, picked } => {
                     let expected = self.vars.resolve(value.expected());
+                    if expected.has_errors() {
+                        continue;
+                    }
                     let choice = self.choose_function_value(&value, &expected);
                     assert!(
                         choice == Choice::One(picked),
@@ -1109,7 +1117,7 @@ impl Analyser {
                         found
                     }
                 };
-                let found = found.unwrap_or_else(|| vec![StaticType::Any; parts.len()]);
+                let found = found.unwrap_or_else(|| vec![StaticType::Error; parts.len()]);
                 for (part, found) in parts.iter().zip(found) {
                     self.check_write(part, &found, *span, None);
                 }
@@ -1173,6 +1181,9 @@ impl Analyser {
             .iter()
             .map(|argument| self.vars.resolve(argument))
             .collect::<Vec<_>>();
+        if arguments.iter().any(StaticType::has_errors) {
+            return Some(self.skip_failed_call(call, &arguments));
+        }
         // A tuple indexed by a number written in the code gives that
         // element, of its own type: `(1, "a")[1]` is a String, and
         // `(1, "a")[-2]` an Int.
@@ -1196,7 +1207,7 @@ impl Analyser {
                     elements.len(),
                     call.span,
                 ));
-                return Some(StaticType::Any);
+                return Some(StaticType::Error);
             };
             return Some(element);
         }
@@ -1236,22 +1247,28 @@ impl Analyser {
                 Binding::Resolved(Candidate::Scalar(function)),
                 &call.arguments,
             );
-            return Some(StaticType::Any);
+            return Some(StaticType::Error);
         }
 
-        // A variable whose type isn't known yet, like the parameter `f` in
-        // `fn(f) => f(1)`, holds a function that takes these arguments.
-        if let [only] = reachable[..]
-            && let callee @ StaticType::Var(var) = self.vars.resolve(self.types.get_type(only))
-            && !self.vars.is_literal(var)
-        {
-            let typ = self.call_unknown_function(&callee, arguments);
-            self.record_pick(
-                call.site,
-                Binding::Resolved(Candidate::Scalar(only)),
-                &call.arguments,
-            );
-            return Some(typ);
+        if let [only] = reachable[..] {
+            match self.vars.resolve(self.types.get_type(only)) {
+                // A variable whose type isn't known yet, like the parameter
+                // `f` in `fn(f) => f(1)`, holds a function that takes these
+                // arguments.
+                callee @ StaticType::Var(var) if !self.vars.is_literal(var) => {
+                    let typ = self.call_unknown_function(&callee, arguments);
+                    self.record_pick(
+                        call.site,
+                        Binding::Resolved(Candidate::Scalar(only)),
+                        &call.arguments,
+                    );
+                    return Some(typ);
+                }
+                // A variable whose value's check failed, like `f` in `let f
+                // = missing(); f(1)`, was reported there.
+                StaticType::Error => return Some(self.skip_failed_call(call, &arguments)),
+                _ => {}
+            }
         }
 
         // A variable holding a literal, like `n` in `let n = 1; n(2)`, can't
@@ -1318,12 +1335,25 @@ impl Analyser {
             EarlyOverload::Only(only) => {
                 let Some(typ) = self.commit_early(call, &arguments, only) else {
                     self.report_failed_call(call, &arguments);
-                    return Some(StaticType::Any);
+                    return Some(StaticType::Error);
                 };
                 Some(typ)
             }
             EarlyOverload::Undecided => None,
         }
+    }
+
+    /// Skips a call that's passed a value whose check failed, or that calls
+    /// one, as that was reported where it failed: the call picks nothing,
+    /// settles what only it could have said about its arguments as failed
+    /// too, and gives a value whose check failed. In `missing().len()`, only
+    /// `missing` is reported.
+    fn skip_failed_call(&mut self, call: &CallConstraint, arguments: &[StaticType]) -> StaticType {
+        for argument in arguments {
+            self.vars.settle_unknowns_as_errors(argument);
+        }
+        self.record_pick(call.site, Binding::None, arguments);
+        StaticType::Error
     }
 
     /// Whether an operator might still apply to each element of a tuple: an
@@ -1599,7 +1629,7 @@ impl Analyser {
         if matches!(binding, Binding::None) {
             self.report_failed_call(call, arguments);
             self.record_pick(call.site, binding, arguments);
-            return StaticType::Any;
+            return StaticType::Error;
         }
         let typ = self.commit_call(&binding, arguments, &call.nodes.arguments, return_type);
         self.record_pick(call.site, binding, arguments);
@@ -1609,7 +1639,7 @@ impl Analyser {
         } else {
             self.pending.clear();
             self.report_failed_call(call, arguments);
-            StaticType::Any
+            StaticType::Error
         }
     }
 

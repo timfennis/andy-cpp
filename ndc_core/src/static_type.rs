@@ -47,6 +47,13 @@ pub enum StaticType {
     /// it, which the analyser works out from the arguments. Every method
     /// here treats one as `Any`.
     Generic(Box<str>),
+    /// The type of an expression whose check failed, which was reported.
+    /// Nothing built from it is reported again: it fits anything, anything
+    /// fits it, and a call it's passed to fails silently. In `[p].map(fn(p)
+    /// => p.size).sum()`, only the missing `size` is reported, not `sum` of
+    /// a list of what it gave. Only the analyser makes it, and it shows as
+    /// `Any`.
+    Error,
     /// Bottom type for diverging expressions (`return`, `break`, `continue`).
     /// A value of it fits anywhere, and it joins with any type as that type.
     Never,
@@ -216,6 +223,7 @@ impl StaticType {
     pub fn join(&self, other: &Self) -> Self {
         match (self, other) {
             (Self::Never, other) | (other, Self::Never) => other.clone(),
+            (Self::Error, _) | (_, Self::Error) => Self::Error,
             _ if self == other => self.clone(),
             _ => Self::Any,
         }
@@ -267,6 +275,7 @@ impl StaticType {
                 key.as_ref().clone(),
                 value.as_ref().clone(),
             ])),
+            Self::Error => Some(Self::Error),
             unknown if unknown.is_unknown() => Some(Self::Any),
             _ => None,
         }
@@ -299,7 +308,11 @@ impl StaticType {
     /// this type too if `unknowns_match`.
     fn matches(&self, parameter: &Self, unknowns_match: bool) -> bool {
         let wildcard = |typ: &Self| matches!(typ, Self::Var(_) | Self::Generic(_));
-        if wildcard(parameter) || (unknowns_match && wildcard(self)) {
+        if wildcard(parameter)
+            || (unknowns_match && wildcard(self))
+            || self.is_error()
+            || parameter.is_error()
+        {
             return true;
         }
         let matches = |a: &Self, p: &Self| a.matches(p, unknowns_match);
@@ -357,10 +370,25 @@ impl StaticType {
         }
     }
 
-    /// Whether this type stands for every type: `Any`, a type variable or
-    /// a type parameter, which are all `Any` to the methods here.
+    /// Whether this type stands for every type: `Any`, a type variable, a
+    /// type parameter or a failed check's type, which are all `Any` to the
+    /// methods here.
     pub fn is_unknown(&self) -> bool {
-        matches!(self, Self::Any | Self::Var(_) | Self::Generic(_))
+        matches!(
+            self,
+            Self::Any | Self::Var(_) | Self::Generic(_) | Self::Error
+        )
+    }
+
+    /// Whether this is the type of an expression whose check failed.
+    pub fn is_error(&self) -> bool {
+        matches!(self, Self::Error)
+    }
+
+    /// Whether a failed check's type is part of this type: `List<Error>`
+    /// is the type of a list holding a value whose check failed.
+    pub fn has_errors(&self) -> bool {
+        self.contains(&Self::is_error)
     }
 
     /// This type with each part that `replace` gives a type for replaced by
@@ -399,6 +427,7 @@ impl StaticType {
             Self::Any
             | Self::Var(_)
             | Self::Generic(_)
+            | Self::Error
             | Self::Never
             | Self::Bool
             | Self::Struct { .. }
@@ -437,6 +466,7 @@ impl StaticType {
             Self::Any
             | Self::Var(_)
             | Self::Generic(_)
+            | Self::Error
             | Self::Never
             | Self::Bool
             | Self::Struct { .. }
@@ -678,7 +708,12 @@ impl StaticType {
     /// Whether this type and `other` could be one type, where what isn't
     /// known yet in either could be anything.
     fn agrees_with(&self, other: &Self) -> bool {
-        let unknown = |typ: &Self| matches!(typ, Self::Var(_) | Self::Generic(_) | Self::Never);
+        let unknown = |typ: &Self| {
+            matches!(
+                typ,
+                Self::Var(_) | Self::Generic(_) | Self::Never | Self::Error
+            )
+        };
         if unknown(self) || unknown(other) {
             return true;
         }
@@ -725,6 +760,7 @@ impl StaticType {
             Self::Any | Self::Var(_) | Self::Generic(_) => {
                 Some(Box::new(std::iter::repeat(&Self::Any)))
             }
+            Self::Error => Some(Box::new(std::iter::repeat(&Self::Error))),
             Self::List(elem)
             | Self::Iterable(elem)
             | Self::Iterator(elem)
@@ -749,7 +785,8 @@ impl StaticType {
 impl fmt::Display for StaticType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Any => write!(f, "Any"),
+            // A failed check's type shows as what it was before there was one.
+            Self::Any | Self::Error => write!(f, "Any"),
             Self::Var(_) => write!(f, "_"),
             Self::Never => write!(f, "Never"),
             Self::Bool => write!(f, "Bool"),
