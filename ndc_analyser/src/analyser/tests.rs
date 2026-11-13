@@ -641,14 +641,14 @@ fn a_function_argument_gets_what_the_function_parameter_passes() {
 #[test]
 fn a_function_argument_fits_a_function_parameter_where_their_known_parts_agree() {
     let apply = "fn apply(f: Fn(Int) -> Int) { f(1) } ";
-    // An untyped lambda is `Fn(Any) -> Any`, which is checked as the program runs.
+    // An untyped lambda's parameters take the types `apply` passes.
     assert_eq!(
         errors(&format!("{apply}apply(fn(x) => x);"), vec![]),
         Vec::<String>::new()
     );
     for (lambda, shown) in [
         ("fn(x: String) => 1", "Fn(String) -> Int"),
-        ("fn(x) => \"a\"", "Fn(Any) -> String"),
+        ("fn(x) => \"a\"", "Fn(Int) -> String"),
         ("fn(a, b) => 1", "Fn(Any, Any) -> Int"),
     ] {
         assert_eq!(

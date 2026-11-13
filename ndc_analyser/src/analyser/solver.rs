@@ -8,6 +8,7 @@ use crate::error::AnalysisError;
 use crate::overloads::{CallKind, ResolvedCall, is_strictly_more_specific};
 use crate::types::TypeVars;
 use ahash::{AHashMap, AHashSet};
+use itertools::Itertools;
 use ndc_analysis::{Binding, Candidate};
 use ndc_core::{NodeId, StaticType, TypeVar};
 use ndc_lexer::Span;
@@ -1484,10 +1485,13 @@ impl Analyser {
     /// `["a"]`. Each literal first gets its own type, which says better
     /// whether they're the same.
     fn merges_literals(&mut self, symbol: SymbolId, arguments: &[StaticType]) -> bool {
+        // A literal in two arguments, as the element of `[0]` is in
+        // `[0].flat_map(fn(x) => …)` once `x` has its type, is one literal.
         let literals = arguments
             .iter()
             .flat_map(|argument| self.vars.unsettled(argument))
             .filter(|&var| self.vars.is_literal(var))
+            .unique()
             .collect::<Vec<_>>();
         if literals.len() < 2 {
             return false;

@@ -54,13 +54,16 @@ impl Analyser {
             .iter()
             .map(|param| self.lower_parameter_annotation(param.annotation.as_ref()))
             .unzip();
+        let expected = self.expected_parameters.remove(&id).unwrap_or_default();
         let type_signature = TypeSignature::from_annotated_bindings(
             parameters
                 .iter()
                 .zip(&annotations)
-                .map(|(param, annotation)| {
+                .enumerate()
+                .map(|(position, (param, annotation))| {
                     let typ = annotation
                         .clone()
+                        .or_else(|| expected.get(position).cloned().flatten())
                         .unwrap_or_else(|| self.vars.fresh(StaticType::Any));
                     (param.name().to_string(), Some(typ))
                 })

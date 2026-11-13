@@ -1,0 +1,8 @@
+// Each lambda's parameters take the types the function it's passed to
+// gives them, from the arguments before and after it.
+// expect-output: 8 ["ann","bob"] ["bob"]
+struct Player { name: String, score: Int }
+struct Team { name: String, score: Int }
+let players = [Player("ann", 3), Player("bob", 5)];
+let total = players.fold(0, fn(sum, p) => sum + p.score);
+print(total, players.map(fn(p) => p.name), players.filter(fn(p) => p.score > 4).map(fn(p) => p.name));

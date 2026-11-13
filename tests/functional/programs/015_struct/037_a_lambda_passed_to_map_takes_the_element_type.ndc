@@ -1,0 +1,8 @@
+// A lambda passed to `map` gets its parameter's type from the list before
+// its body is checked: `p` is a `Player`, which has no `size`, though a
+// `Team` does.
+// expect-error: No function called 'size' found that matches the arguments 'Player'
+struct Player { name: String, score: Int }
+struct Team { name: String, size: Int }
+let players = [Player("ann", 3), Player("bob", 5)];
+print(players.map(fn(p) => p.size));
