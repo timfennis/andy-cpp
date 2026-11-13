@@ -113,6 +113,27 @@ impl AnalysisError {
         }
     }
 
+    pub(crate) fn not_iterable(typ: &StaticType, span: Span) -> Self {
+        Self {
+            text: format!("{typ} is not iterable"),
+            span,
+            help_text: None,
+            notes: Vec::new(),
+        }
+    }
+
+    pub(crate) fn iterable_outside_a_parameter(span: Span) -> Self {
+        Self {
+            text: "`Iterable<T>` can only be the type of a parameter".to_string(),
+            span,
+            help_text: Some(
+                "It takes any kind of sequence. Say which kind a value is, as in `List<Int>`"
+                    .to_string(),
+            ),
+            notes: Vec::new(),
+        }
+    }
+
     pub(crate) fn impossible_cast(found: &StaticType, target: &StaticType, span: Span) -> Self {
         Self {
             text: format!("invalid cast: {found} can never be {target}"),

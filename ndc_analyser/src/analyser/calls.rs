@@ -1,5 +1,5 @@
 use super::Analyser;
-use super::solver::{CallNodes, CallSite};
+use super::solver::{CallNodes, CallSite, Constraint};
 use crate::error::AnalysisError;
 use crate::overloads::{CallKind, Overloads};
 use ndc_core::{NodeId, StaticType};
@@ -103,6 +103,15 @@ impl Analyser {
                             self.expected_of_any(&parameters, &arguments, &nodes)
                         {
                             self.expect(node, expected);
+                        }
+                        for (sequence, element) in
+                            self.iterations_waited_for(&parameters, &arguments)
+                        {
+                            self.wait(Constraint::Iterate {
+                                sequence,
+                                element,
+                                span,
+                            });
                         }
                         typ
                     } else {

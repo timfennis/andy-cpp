@@ -23,7 +23,7 @@ iterating the container contents. Specifically:
 | `List` | Is the value a list? |
 | `Map` | Is the value a map? |
 | `Deque` | Is the value a deque? |
-| `Sequence` | Is the value any sequence type? |
+| `Iterable` | Is the value any sequence type? |
 | `String`, `Int`, … | Exact kind check |
 
 This means that dispatch is **O(1)** regardless of how many elements are in the collection.
@@ -45,9 +45,9 @@ Standard library overloads do differ by element type. Numeric sequence functions
 concrete numeric type, so `sum` has three typed overloads:
 
 ```
-fn sum(Sequence<Int>) -> Int
-fn sum(Sequence<Float>) -> Float
-fn sum(Sequence<Number>) -> Number
+fn sum(Iterable<Int>) -> Int
+fn sum(Iterable<Float>) -> Float
+fn sum(Iterable<Number>) -> Number
 ```
 
 A value the analyser only knows as `List<Any>` matches none of them. Rather than dispatch on

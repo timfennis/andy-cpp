@@ -1,0 +1,10 @@
+// `total` is generic: each kind of sequence gets its own copy.
+// expect-output: 3 7 6
+fn total(xs: Iterable<Int>) {
+    let sum = 0;
+    for x in xs {
+        sum += x;
+    }
+    sum
+}
+print(total([1, 2]), total((3, 4)), total(1..4));

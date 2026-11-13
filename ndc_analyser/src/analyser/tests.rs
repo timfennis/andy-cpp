@@ -47,7 +47,7 @@ fn index_natives() -> Vec<(String, StaticType)> {
         ("[]", "<T>(List<T>, Iterator<Int>) -> List<T>"),
         ("[]", "<K, V>(Map<K, V>, K) -> V"),
         ("[]=", "<T>(List<T>, Int, T)"),
-        ("[]=", "<T>(List<T>, Iterator<Int>, Sequence<T>)"),
+        ("[]=", "<T>(List<T>, Iterator<Int>, Iterable<T>)"),
         ("[]=", "<K, V>(Map<K, V>, K, V)"),
         ("[]=", "(String, Any, String)"),
     ]
@@ -616,7 +616,7 @@ fn a_function_annotation_types_a_variable() {
 
 #[test]
 fn a_function_argument_gets_what_the_function_parameter_passes() {
-    let globals = natives(&[("map", "<T, U>(Sequence<T>, Fn(T) -> U) -> List<U>")]);
+    let globals = natives(&[("map", "<T, U>(Iterable<T>, Fn(T) -> U) -> List<U>")]);
     // A typed lambda fits a type parameter, and settles it.
     assert_eq!(
         analyse_last_type_with_globals(
@@ -1098,12 +1098,10 @@ fn an_operator_doesnt_commit_early_while_an_operand_is_any() {
 
 #[test]
 fn a_write_passes_its_value_like_an_argument() {
-    // Any sequence goes where a `Sequence<Int>` is expected, and settles its
+    // Any sequence goes where an `Iterable<Int>` is expected, and settles its
     // elements as Ints.
     assert_eq!(
-        analyse_last_type(
-            "let xs: Sequence<Int> = []; let ys = []; let zs: Sequence<Int> = ys; ys"
-        ),
+        analyse_last_type("fn total(xs: Iterable<Int>) => xs; let ys = []; total(ys); ys"),
         StaticType::List(Box::new(StaticType::Int))
     );
 }
@@ -1161,7 +1159,7 @@ fn a_return_annotation_picks_the_overloaded_function_value_returned() {
 #[test]
 fn a_return_annotation_settles_what_the_body_left_unknown() {
     assert_eq!(
-        errors("fn f() -> Sequence<Int> { let xs = []; xs }", vec![]),
+        errors("fn f() -> List<Int> { let xs = []; xs }", vec![]),
         Vec::<String>::new()
     );
     // Each value returned has to fit the annotation.

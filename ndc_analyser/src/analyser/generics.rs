@@ -401,7 +401,7 @@ impl Analyser {
             .iter()
             .filter(|&&earlier| self.resolver.symbol_name(earlier) == name)
             .filter_map(
-                |&earlier| match self.vars.resolve(self.types.get_type(earlier)) {
+                |&earlier| match self.vars.resolve(&self.types.callable_type(earlier)) {
                     StaticType::Function { parameters, .. } => Some(parameters),
                     _ => None,
                 },
@@ -500,7 +500,7 @@ fn may_take_the_same(a: &StaticType, b: &StaticType) -> bool {
     match (a, b) {
         _ if wildcard(a) || wildcard(b) => true,
         (StaticType::Option(x), StaticType::Option(y))
-        | (StaticType::Sequence(x), StaticType::Sequence(y))
+        | (StaticType::Iterable(x), StaticType::Iterable(y))
         | (StaticType::List(x), StaticType::List(y))
         | (StaticType::Iterator(x), StaticType::Iterator(y))
         | (StaticType::MinHeap(x), StaticType::MinHeap(y))

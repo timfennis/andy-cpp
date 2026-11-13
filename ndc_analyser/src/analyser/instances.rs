@@ -59,22 +59,31 @@ pub(super) struct Pending {
     pub(super) uses: Vec<(SymbolId, Vec<StaticType>)>,
     /// Where an argument of type `Any` is checked, and against what.
     pub(super) checks: Vec<(NodeId, StaticType)>,
+    /// The arguments not known yet that were passed for an `Iterable<T>`,
+    /// with the `T` their elements settle once they're known.
+    pub(super) iterations: Vec<(StaticType, StaticType)>,
 }
 
 impl Pending {
     /// How much is pending, to [`Self::truncate`] to later.
-    pub(super) fn len(&self) -> (usize, usize, usize) {
-        (self.copies.len(), self.uses.len(), self.checks.len())
+    pub(super) fn len(&self) -> [usize; 4] {
+        [
+            self.copies.len(),
+            self.uses.len(),
+            self.checks.len(),
+            self.iterations.len(),
+        ]
     }
 
-    pub(super) fn truncate(&mut self, (copies, uses, checks): (usize, usize, usize)) {
+    pub(super) fn truncate(&mut self, [copies, uses, checks, iterations]: [usize; 4]) {
         self.copies.truncate(copies);
         self.uses.truncate(uses);
         self.checks.truncate(checks);
+        self.iterations.truncate(iterations);
     }
 
     pub(super) fn clear(&mut self) {
-        self.truncate((0, 0, 0));
+        self.truncate([0; 4]);
     }
 }
 

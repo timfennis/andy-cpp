@@ -1,0 +1,8 @@
+// When the program picks the overload as it runs, an `Iterable<Int>`
+// parameter isn't scanned to see what it holds, as a `List<Int>` one isn't,
+// so a value of type `Any` goes to the overload that takes anything.
+// expect-output: 2 1
+fn describe(xs: Iterable<Int>) => 1;
+fn describe(x: Any) => 2;
+let x: Any = ["a"];
+print(describe(x), describe([1]));

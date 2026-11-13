@@ -1,8 +1,8 @@
 // The general overload must retain string behavior when the concrete kind is hidden.
-let text: Sequence<String> = "aé🦀";
+let text: Any = "aé🦀";
 assert_eq(text.prefixes(), ["a", "aé", "aé🦀"]);
 assert_eq(text.suffixes(), ["aé🦀", "é🦀", "🦀"]);
-let empty_text: Sequence<Any> = "";
+let empty_text: Any = "";
 assert_eq(empty_text.prefixes(), []);
 assert_eq(empty_text.suffixes(), []);
 

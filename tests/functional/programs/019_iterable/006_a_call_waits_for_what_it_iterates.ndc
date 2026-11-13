@@ -1,0 +1,5 @@
+// `len` takes any kind of sequence, so `f` waits for its calls to say what
+// `xs` is, and each gets its own copy.
+// expect-output: 2 3
+fn f(xs) => xs.len();
+print(f("ab"), f([1, 2, 3]));

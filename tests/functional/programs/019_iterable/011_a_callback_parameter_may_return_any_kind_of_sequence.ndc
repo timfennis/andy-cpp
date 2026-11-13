@@ -1,0 +1,3 @@
+// expect-output: [1,1,2,2] [1,2]
+fn apply(f: Fn(Int) -> Iterable<Int>) => [1, 2].flat_map(f);
+print(apply(fn(x) => [x, x]), apply(fn(x) => (x,)));

@@ -130,11 +130,11 @@ impl Ord for OrdValue {
     }
 }
 
-/// Type alias for [`Value`] that signals `StaticType::Sequence` to the `#[export_module]` macro.
+/// Type alias for [`Value`] that signals `StaticType::Iterable` to the `#[export_module]` macro.
 ///
 /// Use this instead of `ndc_vm::value::Value` in stdlib function signatures when the parameter
 /// must accept any iterable sequence. The extraction is identical (zero-copy pass-through on the
-/// VM path) but the macro emits `StaticType::Sequence(Any)` instead of `StaticType::Any`, which
+/// VM path) but the macro emits `StaticType::Iterable(Any)` instead of `StaticType::Any`, which
 /// preserves the correct type for dispatch and static analysis.
 pub type SeqValue = Value;
 
@@ -323,7 +323,7 @@ impl Value {
     /// avoiding full container iteration for common cases.
     ///
     /// When `param` is a container type whose inner types are all `Any` (e.g.
-    /// `Sequence(Any)`, `Map { Any, Any }`, `List(Any)`), only the outer kind is
+    /// `Iterable(Any)`, `Map { Any, Any }`, `List(Any)`), only the outer kind is
     /// checked — no element iteration occurs. Typed container parameters are
     /// rejected rather than scanned; the remaining cases are checked as
     /// [`Value::is_a`] does.
@@ -364,7 +364,7 @@ impl Value {
                 },
                 _ => false,
             },
-            StaticType::Sequence(t) if t.is_unknown() => {
+            StaticType::Iterable(t) if t.is_unknown() => {
                 matches!(self, Self::Object(o) if matches!(
                     o.as_ref(),
                     Object::List(_)
@@ -382,7 +382,7 @@ impl Value {
             // compile time; if it falls through to dynamic dispatch, return false.
             StaticType::List(_)
             | StaticType::Deque(_)
-            | StaticType::Sequence(_)
+            | StaticType::Iterable(_)
             | StaticType::Map { .. }
             | StaticType::Tuple(_)
             | StaticType::MinHeap(_)
@@ -502,7 +502,7 @@ impl Value {
                 Self::Object(object) if matches!(object.as_ref(), Object::MaxHeap(values)
                     if values.borrow().iter().all(|OrdValue(value)| value.conforms_to_cached(element, cache)))
             ),
-            StaticType::Sequence(element) => match self {
+            StaticType::Iterable(element) => match self {
                 Self::Object(object) => match object.as_ref() {
                     Object::List(values) => values
                         .borrow()
@@ -526,7 +526,7 @@ impl Value {
                                     key.conforms_to_cached(&elements[0], cache)
                                         && value.conforms_to_cached(&elements[1], cache)
                                 }
-                                StaticType::Sequence(inner) => {
+                                StaticType::Iterable(inner) => {
                                     key.conforms_to_cached(inner, cache)
                                         && value.conforms_to_cached(inner, cache)
                                 }
@@ -1296,7 +1296,7 @@ mod tests {
         // Dynamic dispatch must only inspect the outer container kind.
         let _borrow = elements.borrow_mut();
         assert!(value.matches_param(&StaticType::List(Box::new(StaticType::Any))));
-        assert!(value.matches_param(&StaticType::Sequence(Box::new(StaticType::Any,))));
+        assert!(value.matches_param(&StaticType::Iterable(Box::new(StaticType::Any,))));
         assert!(!value.matches_param(&StaticType::List(Box::new(StaticType::Int,))));
     }
 

@@ -125,7 +125,7 @@ mod inner {
     }
 
     /// Joins elements of the sequence into a single string using `sep` as the separator.
-    #[function(signature = "<T>(Sequence<T>, String) -> String")]
+    #[function(signature = "<T>(Iterable<T>, String) -> String")]
     pub fn join(list: SeqValue, sep: &str) -> anyhow::Result<String> {
         join_to_string(list, sep)
     }
@@ -137,7 +137,7 @@ mod inner {
     }
 
     /// Joins paragraphs into a single string, inserting blank lines between them.
-    #[function(signature = "<T>(Sequence<T>) -> String")]
+    #[function(signature = "<T>(Iterable<T>) -> String")]
     pub fn unparagraphs(list: SeqValue) -> anyhow::Result<String> {
         join_to_string(list, "\n\n")
     }
@@ -149,7 +149,7 @@ mod inner {
     }
 
     /// Joins lines into a single string, inserting newline characters between them.
-    #[function(signature = "<T>(Sequence<T>) -> String")]
+    #[function(signature = "<T>(Iterable<T>) -> String")]
     pub fn unlines(list: SeqValue) -> anyhow::Result<String> {
         join_to_string(list, "\n")
     }
@@ -161,7 +161,7 @@ mod inner {
     }
 
     /// Joins words into a single string, separating them with spaces.
-    #[function(signature = "<T>(Sequence<T>) -> String")]
+    #[function(signature = "<T>(Iterable<T>) -> String")]
     pub fn unwords(list: SeqValue) -> anyhow::Result<String> {
         join_to_string(list, " ")
     }

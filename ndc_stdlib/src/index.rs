@@ -123,7 +123,7 @@ fn register_set(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     // An element by its index, or a slice by a range of indices.
     for signature in [
         "<T>(List<T>, Int, T)",
-        "<T>(List<T>, Iterator<Int>, Sequence<T>)",
+        "<T>(List<T>, Iterator<Int>, Iterable<T>)",
         // An index whose type isn't known could be either.
         "<T>(List<T>, Any, Any)",
     ] {
