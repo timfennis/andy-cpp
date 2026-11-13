@@ -432,8 +432,23 @@ impl Value {
     }
 
     fn conforms_to_cached(&self, target: &StaticType, cache: &mut ConformanceCache) -> bool {
+        // Only a container target looks inside the value, which may be shared
+        // or cyclic; checking against another type takes no time to redo.
+        let looks_inside = matches!(
+            target,
+            StaticType::Option(_)
+                | StaticType::List(_)
+                | StaticType::Deque(_)
+                | StaticType::Tuple(_)
+                | StaticType::Map { .. }
+                | StaticType::MinHeap(_)
+                | StaticType::MaxHeap(_)
+                | StaticType::Iterable(_)
+        );
         let cache_key = match self {
-            Self::Object(object) => Some((Rc::as_ptr(object), std::ptr::from_ref(target))),
+            Self::Object(object) if looks_inside => {
+                Some((Rc::as_ptr(object), std::ptr::from_ref(target)))
+            }
             _ => None,
         };
         if let Some(cache_key) = cache_key
@@ -1296,7 +1311,8 @@ mod tests {
         let mut cache = ConformanceCache::default();
 
         assert!(value.conforms_to_cached(&target, &mut cache));
-        assert_eq!(cache.len(), 4);
+        // One entry per list level; the `Any` inside needs no looking into.
+        assert_eq!(cache.len(), 3);
 
         // Break the reference cycle so the test does not leak its allocations.
         elements.borrow_mut().clear();

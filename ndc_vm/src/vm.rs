@@ -776,9 +776,17 @@ impl Vm {
         match &self.stack[self.stack.len() - args - 1] {
             Value::Object(obj) => match obj.as_ref() {
                 Object::Function(f) => Ok(Some(f.clone())),
-                Object::OverloadSet { scalars, .. } => {
+                Object::OverloadSet {
+                    scalars,
+                    vec_candidates,
+                } => {
                     let start = self.stack.len() - args;
-                    Ok(self.find_scalar_overload(scalars, &self.stack[start..]))
+                    let args = &self.stack[start..];
+                    // An operator on tuples applies to each element, which
+                    // comes before looking inside containers for a scalar
+                    // overload: that's only before the call fails.
+                    let elementwise = !vec_candidates.is_empty() && vec_axis_len(args).is_some();
+                    Ok(self.find_scalar_overload(scalars, args, !elementwise))
                 }
                 other => Err(format!(
                     "Unable to invoke {} as a function.",
@@ -844,9 +852,15 @@ impl Vm {
     /// code stays at the same shape and footprint. A parameter like
     /// `List<Int>` isn't checked element by element on that path, so when no
     /// candidate accepts the arguments that way, they're checked again
-    /// element by element before the call fails: a struct with a
-    /// `List<Int>` field can be made through `Any` with a list of Ints.
-    fn find_scalar_overload(&self, scalars: &[ResolvedVar], args: &[Value]) -> Option<Function> {
+    /// element by element before the call fails, if `look_inside`: a struct
+    /// with a `List<Int>` field can be made through `Any` with a list of
+    /// Ints.
+    fn find_scalar_overload(
+        &self,
+        scalars: &[ResolvedVar],
+        args: &[Value],
+        look_inside: bool,
+    ) -> Option<Function> {
         let frame_pointer = self.frames.last().expect("no frame").frame_pointer;
         let function = |var| {
             let value = self.resolve_var(var, frame_pointer);
@@ -862,9 +876,11 @@ impl Vm {
             .iter()
             .find_map(|var| function(var).filter(|f| f.matches_value_args(args)))
             .or_else(|| {
-                scalars
-                    .iter()
-                    .find_map(|var| function(var).filter(|f| f.conforms_value_args(args)))
+                look_inside.then(|| {
+                    scalars
+                        .iter()
+                        .find_map(|var| function(var).filter(|f| f.conforms_value_args(args)))
+                })?
             })
     }
 

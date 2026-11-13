@@ -874,6 +874,9 @@ impl Analyser {
                 .resolve_call(&call.candidates, &arguments, call.kind)
                 .binding
         {
+            if self.takes_a_number_as_a_fallback(symbol, &call.candidates, &arguments) {
+                return Fit::No;
+            }
             let snapshot = self.vars.snapshot();
             if self.overload_fits(symbol, &arguments, &call.result) {
                 return Fit::Picked;
@@ -889,6 +892,58 @@ impl Analyser {
             fits
         });
         if fits { Fit::Maybe } else { Fit::No }
+    }
+
+    /// Whether `symbol` takes a number among `arguments` through an `Any`
+    /// parameter where another of `candidates` takes a number type, which
+    /// makes `symbol` a fallback that a literal doesn't take a type to reach:
+    /// `[](List<T>, Any)` takes the Float index `0.0`, but `[](List<T>,
+    /// Int)` is what takes an index. Where nothing else takes a number, as
+    /// for `print`, the `Any` says nothing about what the literal is.
+    fn takes_a_number_as_a_fallback(
+        &self,
+        symbol: SymbolId,
+        candidates: &Candidates,
+        arguments: &[StaticType],
+    ) -> bool {
+        let parameters_of =
+            |symbol: SymbolId| match self.vars.resolve(&self.types.callable_type(symbol)) {
+                StaticType::Function {
+                    parameters: Some(parameters),
+                    ..
+                } if parameters.len() == arguments.len() => Some(parameters),
+                _ => None,
+            };
+        let is_number = |typ: &StaticType| {
+            matches!(
+                typ,
+                StaticType::Int | StaticType::Float | StaticType::Number
+            )
+        };
+        let Some(parameters) = parameters_of(symbol) else {
+            return false;
+        };
+        let fallbacks = parameters
+            .iter()
+            .zip(arguments)
+            .enumerate()
+            .filter(|(_, (parameter, argument))| {
+                **parameter == StaticType::Any && is_number(argument)
+            })
+            .map(|(position, _)| position)
+            .collect::<Vec<_>>();
+        !fallbacks.is_empty()
+            && self
+                .overloads()
+                .reachable_symbols(candidates)
+                .into_iter()
+                .filter(|&other| other != symbol)
+                .filter_map(parameters_of)
+                .any(|parameters| {
+                    fallbacks
+                        .iter()
+                        .any(|&position| is_number(&parameters[position]))
+                })
     }
 
     /// Whether `symbol` takes `arguments` and returns what fits `result`,
@@ -1210,6 +1265,24 @@ impl Analyser {
                 if arguments
                     .iter()
                     .any(|argument| self.vars.has_unsettled_literals(argument)) =>
+            {
+                None
+            }
+            // An operator applies to each element of a tuple, which waits
+            // for the operands and elements nothing is known about yet: in
+            // `(xs[0], 1) - (1, 1)`, the first element is whatever `xs`
+            // holds, and in `p - (1, 1)`, `p` may be a tuple of anything. An
+            // element partly known, as `[]` is a list, is settled by the
+            // overload each position picks.
+            EarlyOverload::NoneFits
+                if call.kind == CallKind::Operator
+                    && arguments.iter().any(|argument| match argument {
+                        StaticType::Var(_) => true,
+                        StaticType::Tuple(elements) => elements
+                            .iter()
+                            .any(|element| matches!(element, StaticType::Var(_))),
+                        _ => false,
+                    }) =>
             {
                 None
             }
