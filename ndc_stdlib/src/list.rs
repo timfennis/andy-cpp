@@ -98,10 +98,12 @@ mod inner {
         }
     }
 
-    /// Removes and returns the last element from the list, or unit if empty.
+    /// Removes and returns the last element from the list. Use `pop?` to get
+    /// `None` from an empty list instead of an error.
     #[function(signature = "<T>(List<T>) -> T")]
-    pub fn pop(list: &mut Vec<Value>) -> Value {
-        list.pop().unwrap_or_else(Value::unit)
+    pub fn pop(list: &mut Vec<Value>) -> anyhow::Result<Value> {
+        list.pop()
+            .ok_or_else(|| anyhow::anyhow!("the list is empty"))
     }
 
     /// Removes and returns the first element from the list, or `None` if empty.
@@ -113,13 +115,14 @@ mod inner {
         Value::Object(Rc::new(Object::Some(list.remove(0))))
     }
 
-    /// Removes and returns the first element from the list, or unit if empty.
+    /// Removes and returns the first element from the list. Use `pop_left?`
+    /// to get `None` from an empty list instead of an error.
     #[function(signature = "<T>(List<T>) -> T")]
-    pub fn pop_left(list: &mut Vec<Value>) -> Value {
+    pub fn pop_left(list: &mut Vec<Value>) -> anyhow::Result<Value> {
         if list.is_empty() {
-            return Value::unit();
+            return Err(anyhow::anyhow!("the list is empty"));
         }
-        list.remove(0)
+        Ok(list.remove(0))
     }
 
     /// Resolves a possibly-negative index against `len`, wrapping negative

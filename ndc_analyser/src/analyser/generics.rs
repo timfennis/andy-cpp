@@ -375,8 +375,7 @@ impl Analyser {
             })
             .collect::<Vec<_>>();
         let binding = self
-            .overloads()
-            .resolve_call(call.candidates(), &arguments, call.kind())
+            .resolve_overloads(call.candidates(), &arguments, call.kind())
             .binding;
         self.record_pick(call.site(), binding, &arguments);
     }

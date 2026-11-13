@@ -124,8 +124,6 @@ fn register_set(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     for signature in [
         "<T>(List<T>, Int, T)",
         "<T>(List<T>, Iterator<Int>, Iterable<T>)",
-        // An index whose type isn't known could be either.
-        "<T>(List<T>, Any, Any)",
     ] {
         env.declare_global_fn(Rc::new(NativeFunction {
             name: "[]=".to_string(),
