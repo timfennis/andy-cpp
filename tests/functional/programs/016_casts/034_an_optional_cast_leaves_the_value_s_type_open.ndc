@@ -1,0 +1,7 @@
+// `as?` only tests a value: a list whose elements aren't known yet stays
+// open, so it can still hold Strings. The empty list is a `List<Int>` then.
+// expect-output: true ["a"]
+let xs = [];
+let ints = (xs as? List<Int>).is_some();
+xs.push("a");
+print(ints, xs);

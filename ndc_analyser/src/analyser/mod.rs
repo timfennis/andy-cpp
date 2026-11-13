@@ -445,9 +445,14 @@ impl Analyser {
                 // needs no check as the program runs, and `1 as Float` is a
                 // Float. Known parts are checked, and so is a value nothing
                 // is known about, like what a call that waits returns.
+                // `as?` only tests the value, which stays what it is: in `fn
+                // f(xs) { (xs as? List<Int>).is_some() }`, `xs` can still be a
+                // list of Strings. A number written there is what it's cast
+                // to, as with `as`: `1 as? Float` is `Some(1.0)`.
                 let found = self.vars.resolve(&found);
                 let unknown = matches!(found, StaticType::Var(var) if !self.vars.is_literal(var));
-                if found.has_vars() && !unknown {
+                let literal = matches!(found, StaticType::Var(var) if self.vars.is_literal(var));
+                if found.has_vars() && !unknown && (!*optional || literal) {
                     self.vars.try_unify(&found, &target);
                 }
                 let found = self.vars.resolve(&found);
