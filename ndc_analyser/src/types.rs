@@ -817,6 +817,18 @@ impl TypeVars {
             // n = a` is still an Int.
             (StaticType::Var(var), StaticType::Any) if self.is_literal(*var) => true,
             (StaticType::Iterable(_), StaticType::Var(var)) if !self.is_literal(*var) => true,
+            // A literal passed for an `Iterable<T>` is the sequence it holds,
+            // as `["a"]` passed to `len` is a `List<String>`: only a
+            // parameter is ever an `Iterable` itself.
+            (StaticType::Iterable(_), StaticType::Var(var)) => {
+                let Some(held) = self
+                    .literal_defaults(*var)
+                    .and_then(|defaults| defaults.into_iter().next())
+                else {
+                    return true;
+                };
+                self.settle_literal(*var, &held) && self.bind_argument(&parameter, &held)
+            }
             (StaticType::Var(_), _) | (_, StaticType::Var(_)) => self.unify(&parameter, &argument),
             (_, StaticType::Any) => true,
             (

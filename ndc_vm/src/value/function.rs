@@ -32,7 +32,22 @@ pub enum Function {
         /// every function value bigger.
         typ: Box<StaticType>,
     },
+
+    /// The overloads of a function, most specific first, of which each call
+    /// calls the first that accepts its arguments: an overloaded function's
+    /// name used as a value where the analyser couldn't tell which one is
+    /// meant, as `signum` in the body of `fn signs(xs) => xs.map(signum)`
+    /// compiled for arguments of any type.
+    Overloads(Rc<[Self]>),
 }
+
+/// The type of a [`Function::Overloads`], which takes what one of its
+/// overloads takes and returns what it returns.
+static ANY_FUNCTION: std::sync::LazyLock<StaticType> =
+    std::sync::LazyLock::new(|| StaticType::Function {
+        parameters: None,
+        return_type: Box::new(StaticType::Any),
+    });
 
 /// How a function fits a function type, from the function's own type,
 /// which leaves out what isn't known as the program runs.
@@ -208,7 +223,7 @@ impl Function {
             Self::Memoized { function, .. } | Self::Checked { function, .. } => {
                 function.prototype()
             }
-            Self::Native(_) => None,
+            Self::Native(_) | Self::Overloads(_) => None,
         }
     }
 
@@ -228,6 +243,7 @@ impl Function {
             Self::Native(f) => Some(&f.name),
             Self::Closure(c) => c.prototype.name.as_deref(),
             Self::Memoized { function, .. } | Self::Checked { function, .. } => function.name(),
+            Self::Overloads(candidates) => candidates.first().and_then(Self::name),
         }
     }
 
@@ -244,6 +260,7 @@ impl Function {
             Self::Closure(c) => &c.prototype.static_type,
             Self::Memoized { function, .. } => function.signature(),
             Self::Checked { typ, .. } => typ,
+            Self::Overloads(_) => &ANY_FUNCTION,
         }
     }
 
@@ -315,6 +332,11 @@ impl Function {
     /// element of a container argument against a parameter like
     /// `List<Int>`, which [`Self::matches_value_args`] doesn't.
     pub fn conforms_value_args(&self, args: &[Value]) -> bool {
+        if let Self::Overloads(candidates) = self {
+            return candidates
+                .iter()
+                .any(|candidate| candidate.conforms_value_args(args));
+        }
         match self.signature() {
             StaticType::Function {
                 parameters: Some(params),
@@ -336,6 +358,11 @@ impl Function {
     /// Returns true if this function accepts the given arguments, without
     /// allocating a `StaticType` for each of them.
     pub fn matches_value_args(&self, args: &[Value]) -> bool {
+        if let Self::Overloads(candidates) = self {
+            return candidates
+                .iter()
+                .any(|candidate| candidate.matches_value_args(args));
+        }
         let StaticType::Function { parameters, .. } = self.signature() else {
             return false;
         };
@@ -360,6 +387,7 @@ impl fmt::Debug for Function {
             Self::Closure(closure) => write!(f, "<closure over {:?}>", closure.prototype.name),
             Self::Memoized { function, .. } => write!(f, "<memoized {:?}>", function),
             Self::Checked { function, typ } => write!(f, "<{function:?} checked as {typ}>"),
+            Self::Overloads(candidates) => write!(f, "<overloads {candidates:?}>"),
         }
     }
 }
@@ -375,6 +403,10 @@ impl fmt::Display for Function {
             Self::Closure(closure) => write!(f, "<closure over {:?}>", closure.prototype.name),
             Self::Memoized { function, .. } => write!(f, "<memoized {function}>"),
             Self::Checked { function, .. } => write!(f, "{function}"),
+            Self::Overloads(candidates) => match candidates.first().and_then(Self::name) {
+                Some(name) => write!(f, "<fn {name}>"),
+                None => write!(f, "<fn>"),
+            },
         }
     }
 }
@@ -444,7 +476,12 @@ fn could_be(found: &StaticType, expected: &StaticType) -> bool {
 /// takes `Any` takes anything, and one that returns a `List<Int>` returns an
 /// `Iterable<Int>`.
 fn proves(found: &StaticType, expected: &StaticType) -> bool {
-    *expected == StaticType::Any || (!has_unknowns(found) && found.fits(expected))
+    // A type parameter of a built-in's signature, as `U` in `map`'s
+    // `Fn(T) -> U`, is whatever the function gives it.
+    matches!(
+        expected,
+        StaticType::Any | StaticType::Generic(_) | StaticType::Var(_)
+    ) || (!has_unknowns(found) && found.fits(expected))
 }
 
 /// Whether `typ` leaves something unknown: `Any` or a type parameter.

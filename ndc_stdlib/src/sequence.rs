@@ -997,22 +997,84 @@ pub mod extra {
     use std::rc::Rc;
 
     pub fn register(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
-        for signature in [
-            // Two sequences zip into pairs of their elements, three into
-            // triples, and four into quadruples.
-            "<A, B>(Iterable<A>, Iterable<B>) -> List<(A, B)>",
-            "<A, B, C>(Iterable<A>, Iterable<B>, Iterable<C>) -> List<(A, B, C)>",
-            "<A, B, C, D>(Iterable<A>, Iterable<B>, Iterable<C>, Iterable<D>) -> List<(A, B, C, D)>",
-            // More make tuples as long as the number of arguments.
-            "(*) -> List<Any>",
-        ] {
+        // A tuple's elements have their own types, and a signature can't say
+        // "a tuple of any length", so each length up to twelve, as far as
+        // Rust's standard library goes for tuples, gets one that says which.
+        const LONGEST: usize = 12;
+        let names = |count: usize| {
+            ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"][..count].to_vec()
+        };
+        for length in 1..=LONGEST {
+            let names = names(length);
+            let parameters = names.join(", ");
+            let tuple = if length == 1 {
+                "(A,)".to_string()
+            } else {
+                format!("({parameters})")
+            };
+            for (name, returns, documentation) in [
+                ("first", names[0], "Returns the first element of a tuple."),
+                (
+                    "last",
+                    names[length - 1],
+                    "Returns the last element of a tuple.",
+                ),
+            ] {
+                env.declare_global_fn(Rc::new(NativeFunction {
+                    name: name.to_string(),
+                    documentation: Some(documentation.to_string()),
+                    static_type: StaticType::signature(&format!(
+                        "<{parameters}>({tuple}) -> {returns}"
+                    ))
+                    .expect("valid signature"),
+                    func: NativeFunc::Simple(Box::new(move |args| {
+                        tuple_end(args, name == "first")
+                    })),
+                }));
+            }
+        }
+        // Two or more sequences zip into tuples of their elements.
+        for length in 2..=LONGEST {
+            let names = names(length);
+            let sequences = names
+                .iter()
+                .map(|name| format!("Iterable<{name}>"))
+                .collect::<Vec<_>>()
+                .join(", ");
             env.declare_global_fn(Rc::new(NativeFunction {
                 name: "zip".to_string(),
-                documentation: Some("Zips two or more sequences together into a list of tuples. The result length is the minimum length of the inputs.".to_string()),
-                static_type: StaticType::signature(signature).expect("valid signature"),
+                documentation: Some(ZIP_DOCUMENTATION.to_string()),
+                static_type: StaticType::signature(&format!(
+                    "<{}>({sequences}) -> List<({})>",
+                    names.join(", "),
+                    names.join(", ")
+                ))
+                .expect("valid signature"),
                 func: NativeFunc::Simple(Box::new(zip)),
             }));
         }
+        // More make tuples as long as the number of arguments.
+        env.declare_global_fn(Rc::new(NativeFunction {
+            name: "zip".to_string(),
+            documentation: Some(ZIP_DOCUMENTATION.to_string()),
+            static_type: StaticType::signature("(*) -> List<Any>").expect("valid signature"),
+            func: NativeFunc::Simple(Box::new(zip)),
+        }));
+    }
+
+    const ZIP_DOCUMENTATION: &str = "Zips two or more sequences together into a list of tuples. The result length is the minimum length of the inputs.";
+
+    /// The first or last element of the tuple in `args`.
+    fn tuple_end(args: &[Value], first: bool) -> Result<Value, VmError> {
+        let [Value::Object(object)] = args else {
+            return Err(VmError::native("expected one tuple".to_string()));
+        };
+        let Object::Tuple(values) = object.as_ref() else {
+            return Err(VmError::native("expected a tuple".to_string()));
+        };
+        let end = if first { values.first() } else { values.last() };
+        end.cloned()
+            .ok_or_else(|| VmError::native("the tuple is empty".to_string()))
     }
 
     fn zip(args: &[Value]) -> Result<Value, VmError> {

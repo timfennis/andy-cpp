@@ -374,6 +374,13 @@ let g = split;      // error: 'split' has several overloads, and nothing here sa
 
 Like a call, a value uses the nearest scope with an overload that fits.
 
+In a generic function, each call's types pick the overload, as they pick the calls in its body:
+
+```ndc
+fn signs(xs) => xs.map(signum);
+print(signs([3, -2]), signs([0.5, -1.5]));   // [1,-1] [1.0,-1.0]
+```
+
 ## How a call finds its function
 
 A call such as `foo(x)` looks for `foo` in the scope it's written in first, then in each enclosing scope in turn, and finally among the built-in functions.

@@ -533,7 +533,7 @@ impl<'a> Overloads<'a> {
     /// accepts the arguments. Overloads in one scope don't tie, so of those
     /// that accept them, one is more specific than the others, and it's the
     /// first.
-    fn most_specific_first(self, mut symbols: Vec<SymbolId>) -> Vec<SymbolId> {
+    pub(crate) fn most_specific_first(self, mut symbols: Vec<SymbolId>) -> Vec<SymbolId> {
         let mut ordered = Vec::with_capacity(symbols.len());
         while !symbols.is_empty() {
             let next = symbols

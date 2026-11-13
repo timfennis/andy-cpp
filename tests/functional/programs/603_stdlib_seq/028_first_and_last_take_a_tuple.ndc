@@ -1,0 +1,4 @@
+// `first` and `last` take a tuple, and give its first or last element's type.
+// expect-output: 2 3.0 [(-1,0)]
+let t = (1, "a", 2.5);
+print(t.first + 1, t.last + 0.5, [((-1, 0), true), ((1, 0), false)].filter(fn(x) => x[1]).map(first));

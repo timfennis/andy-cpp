@@ -1,0 +1,7 @@
+// A list literal passed where any sequence is expected is still a list, so
+// `++` takes it afterwards.
+// expect-output: ["A","A"]
+let t = ("A", ["A"]);
+let cur, path = t;
+let n = path.len;
+print(path ++ [cur]);

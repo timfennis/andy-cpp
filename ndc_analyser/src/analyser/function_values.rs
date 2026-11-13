@@ -4,7 +4,7 @@
 //! `split(String, String)`.
 
 use super::Analyser;
-use super::solver::{Constraint, EarlyOverload};
+use super::solver::{CallSite, Constraint, EarlyOverload};
 use crate::error::AnalysisError;
 use crate::overloads::CallKind;
 use ndc_analysis::{Binding, Candidate};
@@ -35,12 +35,26 @@ impl FunctionValue {
         &self.expected
     }
 
+    /// This value with `expected` as the type expected of it, as a copy of
+    /// a generic function's constraints gets the types of its call.
+    pub(super) fn with_expected(&self, expected: StaticType) -> Self {
+        Self {
+            expected,
+            ..self.clone()
+        }
+    }
+
     pub(super) fn id(&self) -> NodeId {
         self.id
     }
 
     pub(super) fn mark_in_literal(&mut self) {
         self.in_literal = true;
+    }
+
+    /// The functions the name can mean, grouped by scope, nearest first.
+    pub(super) fn groups(&self) -> &[Vec<SymbolId>] {
+        &self.groups
     }
 }
 
@@ -250,6 +264,21 @@ impl Analyser {
         fits
     }
 
+    /// Every overload `value` can mean, for the program to pick from as it
+    /// calls it: nearest scope first, and in each the most specific first,
+    /// as for a call the program picks for, since it takes the first that
+    /// accepts the arguments.
+    pub(super) fn every_overload(&self, value: &FunctionValue) -> Binding<SymbolId> {
+        Binding::Dynamic(
+            value
+                .groups()
+                .iter()
+                .flat_map(|group| self.overloads().most_specific_first(group.clone()))
+                .map(Candidate::Scalar)
+                .collect(),
+        )
+    }
+
     /// Picks the overload `value` means if what's known of the type expected
     /// of it decides it, and returns whether it did.
     pub(super) fn try_function_value(&mut self, value: &FunctionValue) -> bool {
@@ -325,9 +354,20 @@ impl Analyser {
         if early && cfg!(debug_assertions) {
             self.remember_early_function_value(value, symbol);
         }
-        self.picks
-            .bindings
-            .insert(value.id, Binding::Resolved(Candidate::Scalar(symbol)));
+        self.record_function_value(value, symbol);
+    }
+
+    /// Records that `value` means `symbol`, in the instance whose
+    /// constraints are being solved, if any. A copy of a generic function's
+    /// constraint records nothing, as the value is in that function's body,
+    /// whose instance for the call records it.
+    fn record_function_value(&mut self, value: &FunctionValue, symbol: SymbolId) {
+        if self.copied_through.is_none() {
+            self.pick_tables(self.recording).insert(
+                CallSite::Call(value.id),
+                Binding::Resolved(Candidate::Scalar(symbol)),
+            );
+        }
     }
 
     /// Picks the nearest overload after an error, so analysis carries on
@@ -336,8 +376,6 @@ impl Analyser {
         let symbol = self.resolver.innermost_reference(value.id);
         let typ = self.instantiated_type(symbol);
         self.vars.try_unify(&value.expected, &typ);
-        self.picks
-            .bindings
-            .insert(value.id, Binding::Resolved(Candidate::Scalar(symbol)));
+        self.record_function_value(value, symbol);
     }
 }
