@@ -650,12 +650,13 @@ impl Parser {
 
     fn cast(&mut self) -> Result<ExpressionLocation, Error> {
         let mut expression = self.tight_unary()?;
-        while self.consume_token_if(&[Token::As]).is_some() {
+        while let Some(operator) = self.consume_token_if(&[Token::As, Token::AsOptional]) {
             let annotation = self.cast_type_annotation()?;
             let span = expression.span.merge(annotation.span());
             expression = Expression::Cast {
                 value: Box::new(expression),
                 annotation,
+                optional: operator.token == Token::AsOptional,
             }
             .to_location(span);
         }

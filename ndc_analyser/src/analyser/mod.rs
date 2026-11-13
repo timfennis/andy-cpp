@@ -433,7 +433,11 @@ impl Analyser {
                 StaticType::Bool
             }
             Expression::Grouping(expr) => self.analyse_expr(expr),
-            Expression::Cast { value, annotation } => {
+            Expression::Cast {
+                value,
+                annotation,
+                optional,
+            } => {
                 let target = self.lower_value_type(annotation);
                 let found = self.analyse_expr(value);
                 // What isn't known about the value yet is what the cast says
@@ -453,7 +457,14 @@ impl Analyser {
                 }
                 let check = (!found.fits(&target)).then(|| target.clone());
                 self.result.analysis.cast_checks.insert(*id, check);
-                target
+                // `as?` is the same cast, with `None` where `as` would fail.
+                // One that can never succeed is an error like `as`: it would
+                // always be `None`.
+                if *optional {
+                    StaticType::Option(Box::new(target))
+                } else {
+                    target
+                }
             }
             Expression::VariableDeclaration {
                 l_value,

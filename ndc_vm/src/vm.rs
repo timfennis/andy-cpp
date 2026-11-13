@@ -239,6 +239,7 @@ impl Vm {
                         ));
                     }
                 }
+                OpCode::TryCast(target) => try_cast(&mut self.stack, target),
                 OpCode::ExpectType(target) => {
                     if !convert_top(&mut self.stack, target) {
                         let value = self.stack.last().expect("stack underflow");
@@ -1290,6 +1291,18 @@ fn bad_range_bound(value: &Value) -> String {
         return "Integer too large for range bounds".to_string();
     }
     format!("range bounds must be Int, got {}", value.diagnostic_type())
+}
+
+/// Replaces the value on top of `stack` with `Some` of it, made the
+/// `target` as [`Value::converted_to`] does, or with `None` when it isn't
+/// one.
+#[cold]
+fn try_cast(stack: &mut [Value], target: &StaticType) {
+    let value = stack.last_mut().expect("stack underflow");
+    *value = match value.converted_to(target) {
+        Some(converted) => Value::Object(Rc::new(Object::Some(converted))),
+        None => Value::None,
+    };
 }
 
 /// Checks that the value on top of `stack` is a `target`, and makes it one:

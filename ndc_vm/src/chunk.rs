@@ -154,6 +154,9 @@ pub enum OpCode {
     Memoize,
     /// Peeks top; errors if the value does not conform to the type. `[… value → … value]`
     CheckType(Rc<StaticType>),
+    /// Pops a value, pushes `Some(value)` if it conforms to the type and
+    /// `None` if it doesn't. `[… value → … option]`
+    TryCast(Rc<StaticType>),
     /// Peeks top, a value of type `Any` where code expects the type; errors
     /// if it isn't one. `[… value → … value]`
     ExpectType(Rc<StaticType>),
@@ -194,6 +197,7 @@ impl OpCode {
             Self::NewCell(_) => "NewCell",
             Self::Memoize => "Memoize",
             Self::CheckType(_) => "CheckType",
+            Self::TryCast(_) => "TryCast",
             Self::ExpectType(_) => "ExpectType",
         }
     }
@@ -251,6 +255,8 @@ impl OpCode {
             Self::Memoize => 0,
             // Peeks the value without popping it.
             Self::CheckType(_) | Self::ExpectType(_) => 0,
+            // Replaces the value with the option holding it.
+            Self::TryCast(_) => 0,
         }
     }
 }
@@ -305,6 +311,7 @@ impl std::fmt::Debug for OpCode {
             Self::Unpack(n) => write!(f, "Unpack({n})"),
             Self::Memoize => write!(f, "Memoize"),
             Self::CheckType(typ) => write!(f, "CheckType({typ})"),
+            Self::TryCast(typ) => write!(f, "TryCast({typ})"),
             Self::ExpectType(typ) => write!(f, "ExpectType({typ})"),
         }
     }

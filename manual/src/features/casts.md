@@ -62,12 +62,66 @@ The analyser rejects casts between types that cannot share a value:
 // error[analysis]: invalid cast: String can never be Int
 ```
 
+## Testing a value's type with `as?`
+
+`value as? T` is the cast that doesn't fail: it is `Some(value)`, as a `T`,
+when the value is a `T`, and `None` when it isn't. Its type is `Option<T>`.
+
+```ndc
+let value: Any = 5;
+print(value as? Int);     // Some(5)
+print(value as? String);  // None
+```
+
+It checks a value the way `as` does, so a container is checked element by
+element, and a function that may fit a function type comes out checking its
+calls:
+
+```ndc
+let mixed: Any = [1, "a"];
+print(mixed as? List<Int>);  // None
+print(mixed as? List<Any>);  // Some([1,"a"])
+
+fn inc(x: Int) => x + 1;
+let f: Any = inc;
+print((f as? Fn(Int) -> Int).unwrap()(2));  // 3
+print((f as? Fn(String) -> Int).is_some());  // false
+```
+
+That makes it the way to ask what a value is:
+
+```ndc
+fn describe(value: Any) {
+    if (value as? Int).is_some() {
+        "a number"
+    } else if (value as? String).is_some() {
+        "some text"
+    } else {
+        "something else"
+    }
+}
+print(describe(1));    // a number
+print(describe("a"));  // some text
+print(describe([1]));  // something else
+```
+
+An `as?` that can never succeed is rejected like the `as` it stands for,
+since it would always be `None`:
+
+```ndc,fails
+"foo" as? Int
+// error[analysis]: invalid cast: String can never be Int
+```
+
 ## Precedence
 
-`as` binds tighter than binary operators and looser than unary operators
+`as` and `as?` bind tighter than binary operators and looser than unary operators
 and calls, so `a + b as Int` means `a + (b as Int)`. Method calls bind
 tighter than the cast: recovering an element type before a method call
-needs parentheses, as in `(values.keys as List<Int>).max()`.
+needs parentheses, as in `(values.keys as List<Int>).max()`. An `as?` cast
+needs them too before a method call on the option: `(value as? Int).is_some()`.
+A name can contain `?`, so `as?` needs a space after it: `x as?Int` reads as
+`x` followed by a name `as?Int`.
 
 A `<` after the cast type is read as a type argument list when the tokens
 that follow form one, and as a less-than comparison otherwise, so
