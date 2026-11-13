@@ -113,9 +113,11 @@ pub struct Analyser {
     /// What each enclosing function returns with `return`, innermost last.
     /// Pushed on function entry, popped on exit.
     return_type_stack: Vec<Returns>,
-    /// How many loops enclose the expression being analysed in the current
-    /// function, so `break` and `continue` outside of one are reported.
-    loop_depth: usize,
+    /// The loops that enclose the expression being analysed in the current
+    /// function, innermost last, each with whether a `break` leaves it: a
+    /// `while true` that none leaves never ends. `break` and `continue`
+    /// outside of one are reported.
+    loops: Vec<bool>,
     /// What the current batch's analysis has found so far.
     result: AnalysisResult,
     /// The symbols the current batch's uses pick, which the layout turns into
@@ -173,7 +175,7 @@ impl Analyser {
             struct_registry: StructRegistry::default(),
             struct_types: AHashMap::new(),
             return_type_stack: Vec::new(),
-            loop_depth: 0,
+            loops: Vec::new(),
             result: AnalysisResult::default(),
             picks: Picks::default(),
             laid_out_scopes: 0,
@@ -411,13 +413,14 @@ impl Analyser {
                 | NumericLiteral::Complex(_),
             ) => StaticType::Number,
             Expression::Break => {
-                if self.loop_depth == 0 {
-                    self.emit(AnalysisError::break_outside_loop(*span));
+                match self.loops.last_mut() {
+                    Some(broken) => *broken = true,
+                    None => self.emit(AnalysisError::break_outside_loop(*span)),
                 }
                 StaticType::Never
             }
             Expression::Continue => {
-                if self.loop_depth == 0 {
+                if self.loops.is_empty() {
                     self.emit(AnalysisError::continue_outside_loop(*span));
                 }
                 StaticType::Never
@@ -533,11 +536,18 @@ impl Analyser {
             } => {
                 // The condition is part of the loop too, as it runs on every
                 // iteration.
-                self.loop_depth += 1;
+                self.loops.push(false);
                 self.analyse_expr(expression);
                 self.analyse_expr(loop_body);
-                self.loop_depth -= 1;
-                StaticType::unit()
+                let broken = self.loops.pop().expect("the loop was pushed");
+                // A `while true` that no `break` leaves only ends by
+                // returning, so it has no value, like a `return`: a function
+                // whose body ends in one returns what its `return`s do.
+                if !broken && matches!(expression.expression, Expression::BoolLiteral(true)) {
+                    StaticType::Never
+                } else {
+                    StaticType::unit()
+                }
             }
             Expression::For { iterations, body } => {
                 // A map comprehension's default is evaluated once, before the
@@ -700,7 +710,7 @@ impl Analyser {
 
                 let found_type = self.constrain_iteration(sequence_type, sequence_span);
 
-                self.loop_depth += 1;
+                self.loops.push(false);
                 // A `for` binder has no type annotation.
                 self.declare_binding_pattern(l_value, None, found_type, sequence_span);
             }
@@ -734,7 +744,7 @@ impl Analyser {
             }
         };
         if matches!(iteration, ForIteration::Iteration { .. }) {
-            self.loop_depth -= 1;
+            self.loops.pop();
         }
         typ
     }
