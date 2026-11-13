@@ -243,7 +243,7 @@ impl Analyser {
         known: &[Option<StaticType>],
         position: usize,
     ) -> Expects {
-        let function = self.vars.resolve(&self.types.callable_type(symbol));
+        let function = self.vars.resolve(self.types.get_type(symbol));
         let first = self.vars.count();
         let Some((parameters, _)) = self.vars.instantiate_signature(&function) else {
             return Expects::Anything;

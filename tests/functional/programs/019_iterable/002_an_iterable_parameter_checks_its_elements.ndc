@@ -1,9 +1,0 @@
-// expect-error: No function called 'total' found that matches the arguments 'List<String>'
-fn total(xs: Iterable<Int>) {
-    let sum = 0;
-    for x in xs {
-        sum += x;
-    }
-    sum
-}
-total(["a"]);

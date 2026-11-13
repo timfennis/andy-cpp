@@ -1,2 +1,2 @@
-// expect-error: `Iterable<T>` can only be the type of a parameter
+// expect-error: `Iterable<T>` can't be written in a type annotation
 print([1] as Iterable<Int>);

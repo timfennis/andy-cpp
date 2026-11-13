@@ -41,12 +41,12 @@ let grid: List<List<Int>> = [[1, 2], [3, 4]];
 print(grid);  // [[1,2],[3,4]]
 ```
 
-### `Iterable<T>` parameters
+### Any kind of sequence
 
-A parameter of type `Iterable<T>` takes any kind of sequence of `T`s. The function is compiled once for each kind it's called with:
+A parameter without an annotation takes any kind of sequence its body can iterate. The function is compiled once for each kind it's called with:
 
 ```ndc
-fn total(xs: Iterable<Int>) {
+fn total(xs) {
     let sum = 0;
     for x in xs {
         sum += x;
@@ -56,7 +56,7 @@ fn total(xs: Iterable<Int>) {
 print(total([1, 2]), total((3, 4)), total(1..4));   // 3 7 6
 ```
 
-A value has a kind of sequence, so `Iterable<T>` can only be a parameter's type: `let xs: Iterable<Int> = [1]` is an error. A tuple whose elements have different types iterates as `Any`.
+Built-in functions say this with `Iterable<T>` in their signatures, as `sum(Iterable<Int>)` does, but an annotation can't: a value has a kind of sequence, which its annotation names, as in `List<Int>`. A tuple whose elements have different types iterates as `Any`.
 
 ### Element types are exact
 

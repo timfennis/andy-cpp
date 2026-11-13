@@ -539,7 +539,7 @@ impl Analyser {
                     .reachable_symbols(call.candidates())
                     .into_iter()
                     .filter(
-                        |&symbol| match self.vars.resolve(&self.types.callable_type(symbol)) {
+                        |&symbol| match self.vars.resolve(self.types.get_type(symbol)) {
                             StaticType::Function {
                                 parameters: Some(parameters),
                                 ..
@@ -583,7 +583,7 @@ impl Analyser {
             .iter()
             .filter(|&&earlier| self.resolver.symbol_name(earlier) == name)
             .filter_map(
-                |&earlier| match self.vars.resolve(&self.types.callable_type(earlier)) {
+                |&earlier| match self.vars.resolve(self.types.get_type(earlier)) {
                     StaticType::Function { parameters, .. } => Some(parameters),
                     _ => None,
                 },

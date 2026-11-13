@@ -1,4 +1,3 @@
-use super::solver::Constraint;
 use super::{Analyser, Returns};
 use crate::error::AnalysisError;
 use itertools::izip;
@@ -51,10 +50,10 @@ impl Analyser {
         let first_use = self.uses.len();
         let first_literal = self.number_literals.len();
         let first_check = self.checks.len();
-        let (annotations, iterates): (Vec<_>, Vec<_>) = parameters
+        let annotations = parameters
             .iter()
-            .map(|param| self.lower_parameter_annotation(param.annotation.as_ref()))
-            .unzip();
+            .map(|param| self.lower_annotation(param.annotation.as_ref()))
+            .collect::<Vec<_>>();
         let expected = self.expected_parameters.remove(&id).unwrap_or_default();
         let param_types = annotations
             .iter()
@@ -74,14 +73,7 @@ impl Analyser {
             Some(_) => Some(
                 annotations
                     .iter()
-                    .zip(&iterates)
-                    .map(|(annotation, iterates)| match (annotation, iterates) {
-                        (Some(annotation), _) => annotation.clone(),
-                        // What it iterates as is checked too, so a call the
-                        // program picks for doesn't take another kind.
-                        (None, Some(element)) => StaticType::Iterable(Box::new(element.clone())),
-                        (None, None) => StaticType::Any,
-                    })
+                    .map(|annotation| annotation.clone().unwrap_or(StaticType::Any))
                     .collect(),
             ),
             None => Some(param_types.clone()),
@@ -103,23 +95,7 @@ impl Analyser {
             _ => None,
         };
         if let Some((name, symbol)) = declared {
-            // An `Iterable<T>` parameter takes what each call settles, but
-            // only sequences of `T`s, which tells it from its other overloads.
-            let shape = iterates
-                .iter()
-                .map(|element| {
-                    element
-                        .as_ref()
-                        .map(|element| StaticType::Iterable(Box::new(element.clone())))
-                })
-                .collect::<Vec<_>>();
-            let shaped = param_types
-                .iter()
-                .zip(&shape)
-                .map(|(parameter, shape)| shape.clone().unwrap_or_else(|| parameter.clone()))
-                .collect::<Vec<_>>();
-            self.types.declare_shape(symbol, shape);
-            self.check_overlap(symbol, name, Some(&shaped), span);
+            self.check_overlap(symbol, name, Some(&param_types), span);
             let placeholder = StaticType::Function {
                 parameters: Some(param_types.clone()),
                 return_type: Box::new(
@@ -146,19 +122,6 @@ impl Analyser {
                 .analysis
                 .variable_types
                 .insert(param.lvalue.id, typ.clone());
-        }
-        // An `Iterable<T>` parameter is what each call passes, which has to
-        // iterate as `T`: `fn total(xs: Iterable<Int>)` takes a list or a
-        // tuple of Ints.
-        for ((param, typ), element) in parameters.iter().zip(&param_types).zip(&iterates) {
-            if let Some(element) = element {
-                let span = param.annotation.as_ref().map_or(span, TypeExpr::span);
-                self.wait(Constraint::Iterate {
-                    sequence: typ.clone(),
-                    element: element.clone(),
-                    span,
-                });
-            }
         }
 
         let implicit_return = self.analyse_expr(body);
@@ -240,13 +203,10 @@ impl Analyser {
                 ..
             }) = self.result.analysis.function_types.get_mut(&id)
         {
-            for (((runtime, parameter), annotation), iterates) in runtime
-                .iter_mut()
-                .zip(parameters)
-                .zip(&annotations)
-                .zip(&iterates)
+            for ((runtime, parameter), annotation) in
+                runtime.iter_mut().zip(parameters).zip(&annotations)
             {
-                if annotation.is_none() && iterates.is_none() {
+                if annotation.is_none() {
                     *runtime = checkable_as_the_program_runs(&parameter);
                 }
             }
