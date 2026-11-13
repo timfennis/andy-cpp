@@ -1,0 +1,10 @@
+// The `1` and `2` are Floats, as adding 0.5 to an element of the list
+// gives a Float that's written back into it.
+// expect-output: [1.5,2.0] [[1.0,2.5]] %{"a": 1.5}
+let xs = [1, 2];
+xs[0] += 0.5;
+let grid = [[1, 2]];
+grid[0][1] = grid[0][1] + 0.5;
+let m = %{"a": 1};
+m["a"] += 0.5;
+print(xs, grid, m);

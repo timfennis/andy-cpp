@@ -100,6 +100,14 @@ let numbers = ["a".len()];   // a List<Int>
 numbers[0] += 0.5;           // error: Int + Float is a Float, which doesn't fit in List<Int>
 ```
 
+A list of number literals takes the type its uses need, so there the numbers are Floats:
+
+```ndc
+let numbers = [1, 2];
+numbers[0] += 0.5;
+print(numbers);  // [1.5,2.0]
+```
+
 ## Optimization
 
 You might expect `list ++= [1,2,3]` to desugar to `list = list ++ [1,2,3]`, but that would waste work. Andy C++ handles some augmented assignments directly. In this case, it appends `[1,2,3]` without creating an intermediate list.
