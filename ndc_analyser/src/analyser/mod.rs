@@ -564,14 +564,26 @@ impl Analyser {
             Expression::For { iterations, body } => {
                 // A map comprehension's default is evaluated once, before the
                 // loop starts.
-                if let ForBody::Map {
-                    default: Some(default),
-                    ..
-                } = body.as_ref()
-                {
-                    self.analyse_expr(default);
+                let default = match body.as_ref() {
+                    ForBody::Map {
+                        default: Some(default),
+                        ..
+                    } => {
+                        let typ = self.analyse_expr(default);
+                        Some(self.constrain_default_value(typ, default.span))
+                    }
+                    _ => None,
+                };
+                match (self.analyse_for_iterations(iterations, body), default) {
+                    // Reads can produce the default value, so it's one of the
+                    // map's values: `%{:"none", x: x for x in xs}` holds
+                    // Strings as well as what `xs` does.
+                    (StaticType::Map { key, value }, Some(default)) => StaticType::Map {
+                        key,
+                        value: Box::new(self.join(&value, &default, *span)),
+                    },
+                    (typ, _) => typ,
                 }
-                self.analyse_for_iterations(iterations, body)
             }
             Expression::Call {
                 function,
@@ -624,6 +636,13 @@ impl Analyser {
                     keys.push((Some(key.id), key.span, self.analyse_expr(key)));
                     if let Some(value) = value {
                         held.push((Some(value.id), value.span, self.analyse_expr(value)));
+                    }
+                }
+                // A key without a value holds `()`, which in `%{"a", "b": 1}`
+                // is one of the map's values too.
+                if !held.is_empty() {
+                    for (key, _) in values.iter().filter(|(_, value)| value.is_none()) {
+                        held.push((None, key.span, StaticType::unit()));
                     }
                 }
 

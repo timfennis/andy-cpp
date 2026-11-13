@@ -355,6 +355,10 @@ impl Value {
             StaticType::MaxHeap(t) if t.is_unknown() => {
                 matches!(self, Self::Object(o) if matches!(o.as_ref(), Object::MaxHeap(_)))
             }
+            // Unit, the empty tuple, is checked as cheaply as a scalar.
+            StaticType::Tuple(elements) if elements.is_empty() => {
+                matches!(self, Self::Object(o) if matches!(o.as_ref(), Object::Tuple(values) if values.is_empty()))
+            }
             // An option holds at most one value, which is cheap to check.
             StaticType::Option(t) => match self {
                 Self::None => true,
@@ -410,7 +414,7 @@ impl Value {
                 (Some(expected), Some(takes)) => expected.len() == takes.len(),
                 _ => true,
             },
-            (StaticType::Iterator(element), StaticType::Iterator(_)) => element.is_unknown(),
+            (StaticType::Iterator(_), StaticType::Iterator(_)) => true,
             (target, found) => found == *target,
         }
     }

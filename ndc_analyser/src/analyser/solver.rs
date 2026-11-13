@@ -426,8 +426,7 @@ impl Analyser {
                         .map(|argument| self.vars.resolve(argument))
                         .collect::<Vec<_>>();
                     let binding = self
-                        .overloads()
-                        .resolve_call(&candidates, &arguments, kind)
+                        .resolve_overloads(&candidates, &arguments, kind)
                         .binding;
                     assert!(
                         binding == picked,
@@ -1198,15 +1197,60 @@ impl Analyser {
         merged
     }
 
+    /// [`Overloads::resolve_call`], with the overloads it leaves the program
+    /// to pick from as it runs cut to the ones that take the arguments with
+    /// each type parameter one type. Picking looks at each argument on its
+    /// own, so `[]=(List<T>, Int, T)` looks like it takes a String for a
+    /// `List<Int>` when the index is `Any`, but it can't.
+    pub(super) fn resolve_overloads(
+        &mut self,
+        candidates: &Candidates,
+        arguments: &[StaticType],
+        kind: CallKind,
+    ) -> ResolvedCall {
+        let mut resolved = self.overloads().resolve_call(candidates, arguments, kind);
+        // An operator may apply an overload to each element of a tuple
+        // instead, which takes what the elements are.
+        if kind == CallKind::Operator {
+            return resolved;
+        }
+        if let Binding::Dynamic(picked) = &resolved.binding {
+            let picked = picked.clone();
+            // What a function takes and returns isn't checked as the program
+            // runs, so it's left out: a lambda that returns `Any` may still be
+            // what's expected.
+            let snapshot = self.vars.snapshot();
+            let arguments = arguments
+                .iter()
+                .map(|argument| match self.vars.resolve(argument) {
+                    StaticType::Function { .. } => self.vars.fresh(StaticType::Any),
+                    argument => argument,
+                })
+                .collect::<Vec<_>>();
+            let kept = picked
+                .into_iter()
+                .filter(|candidate| match candidate {
+                    Candidate::Scalar(symbol) => self.could_accept(*symbol, &arguments),
+                    Candidate::Vec(_) => true,
+                })
+                .collect::<Vec<_>>();
+            self.vars.rollback(snapshot);
+            resolved.binding = if kept.is_empty() {
+                Binding::None
+            } else {
+                Binding::Dynamic(kept)
+            };
+        }
+        resolved
+    }
+
     /// Resolves `call` with the arguments as they are, reporting it when no
     /// overload accepts them.
     fn resolve_call_now(&mut self, call: &CallConstraint, arguments: &[StaticType]) -> StaticType {
         let ResolvedCall {
             binding,
             return_type,
-        } = self
-            .overloads()
-            .resolve_call(&call.candidates, arguments, call.kind);
+        } = self.resolve_overloads(&call.candidates, arguments, call.kind);
         if matches!(binding, Binding::None) {
             self.report_failed_call(call, arguments);
             self.record_pick(call.site, binding, arguments);
@@ -1498,9 +1542,7 @@ impl Analyser {
         let ResolvedCall {
             binding,
             return_type,
-        } = self
-            .overloads()
-            .resolve_call(&call.candidates, arguments, call.kind);
+        } = self.resolve_overloads(&call.candidates, arguments, call.kind);
         let fits = !matches!(binding, Binding::None)
             && self
                 .commit_call(&binding, arguments, &call.nodes.arguments, return_type)

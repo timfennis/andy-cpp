@@ -1,0 +1,6 @@
+// expect-output: unit int
+fn g(x: Int) => "int";
+fn g(x: ()) => "unit";
+fn g(x: Any) => "any";
+let m = %{"a", "b": 1};
+print(g(m["a"]), g(m["b"]));

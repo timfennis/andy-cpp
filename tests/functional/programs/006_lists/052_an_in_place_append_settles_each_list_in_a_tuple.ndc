@@ -1,6 +1,7 @@
 // `++=` on a tuple of lists appends to each one, so each empty list takes
 // the type of what it appends.
-// expect-error: mismatched types: found String but expected Int
+// expect-error: No function called '++' found that matches the arguments 'Tuple<List<String>, List<Any>>, List<Int>'
+// (`a[0] = "x"` decides first that `a` holds Strings.)
 let t = ([], []);
 t ++= [1, 2];
 let a, b = t;
