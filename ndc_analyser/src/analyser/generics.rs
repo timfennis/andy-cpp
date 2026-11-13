@@ -134,9 +134,8 @@ impl Analyser {
                 // which overload a function value means, so the program
                 // picks as it calls it.
                 Constraint::FunctionValue(value) if waiting.origin.is_none() => {
-                    self.picks
-                        .bindings
-                        .insert(value.id(), value.every_overload());
+                    let binding = self.every_overload(value);
+                    self.picks.bindings.insert(value.id(), binding);
                 }
                 _ => {}
             }
