@@ -895,13 +895,12 @@ impl Analyser {
     }
 
     /// Whether `symbol` takes a number among `arguments` through an `Any`
-    /// parameter where another of `candidates` takes a number type or a type
-    /// parameter, which makes `symbol` a fallback that a literal doesn't take
-    /// a type to reach: `[](List<T>, Any)` takes the Float index `0.0`, but
-    /// `[](List<T>, Int)` is what takes an index, and `min(Any, Any)` takes
-    /// the Int in `min(2.5, 1)`, where `min<T>(T, T)` takes a Float. Where
-    /// nothing else takes a number, as for `print`, the `Any` says nothing
-    /// about what the literal is.
+    /// parameter where another of `candidates` in its scope takes a number
+    /// type or a type parameter, which makes `symbol` a fallback that a
+    /// literal doesn't take a type to reach: `[](List<T>, Any)` takes the
+    /// Float index `0.0`, but `[](List<T>, Int)` is what takes an index.
+    /// Where nothing else in that scope takes a number, as for `print`, the
+    /// `Any` says nothing about what the literal is.
     fn takes_a_number_as_a_fallback(
         &self,
         symbol: SymbolId,
@@ -937,7 +936,7 @@ impl Analyser {
         !fallbacks.is_empty()
             && self
                 .overloads()
-                .reachable_symbols(candidates)
+                .same_scope_symbols(candidates, symbol)
                 .into_iter()
                 .filter(|&other| other != symbol)
                 .filter_map(parameters_of)

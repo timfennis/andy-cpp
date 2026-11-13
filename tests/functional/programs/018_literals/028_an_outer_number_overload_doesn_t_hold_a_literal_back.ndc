@@ -1,0 +1,11 @@
+// The inner `f` takes the call whatever `n` is, so the outer `f(Int)` says
+// nothing about `n`, which `n += 0.5` makes a Float.
+// expect-output: 0.5
+fn f(x: Int) => "outer";
+{
+    fn f(x: Any) => 0.5;
+    let n = 0;
+    f(n);
+    n += 0.5;
+    print(n);
+}

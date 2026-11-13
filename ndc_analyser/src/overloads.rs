@@ -170,6 +170,20 @@ impl<'a> Overloads<'a> {
         self.reachable(candidates).flatten().copied().collect()
     }
 
+    /// The reachable candidates in the scope `symbol` is declared in, which
+    /// are the ones a call that picks `symbol` could pick instead: one
+    /// further out loses to any that takes the call.
+    pub(crate) fn same_scope_symbols(
+        self,
+        candidates: &Candidates,
+        symbol: SymbolId,
+    ) -> Vec<SymbolId> {
+        self.reachable(candidates)
+            .find(|group| group.contains(&symbol))
+            .map(<[SymbolId]>::to_vec)
+            .unwrap_or_default()
+    }
+
     /// The variable that ends the search, if one does: in
     /// `fn foo(a) { … } let foo = fn(a, b) { … };`, a call of `foo` ends at the `let`.
     pub(crate) fn variable_ending_search(self, candidates: &Candidates) -> Option<SymbolId> {
