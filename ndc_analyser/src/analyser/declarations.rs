@@ -115,7 +115,7 @@ impl Analyser {
         });
         // A function body starts outside of any loop: `break` can't
         // leave the function to end a loop around its declaration.
-        let outer_loop_depth = std::mem::take(&mut self.loop_depth);
+        let outer_loops = std::mem::take(&mut self.loops);
         for (param, typ) in parameters.iter().zip(&param_types) {
             let symbol = self.resolver.declared_symbol(param.lvalue.id);
             self.types.declare(symbol, typ.clone());
@@ -127,7 +127,7 @@ impl Analyser {
 
         let implicit_return = self.analyse_expr(body);
         let mut returns = self.return_type_stack.pop().unwrap();
-        self.loop_depth = outer_loop_depth;
+        self.loops = outer_loops;
 
         // The body's value is returned like the values of `return`. An
         // annotated return type is what each of them returns, which can
