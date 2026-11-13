@@ -2,6 +2,7 @@ use super::Analyser;
 use super::solver::{CallNodes, CallSite, Constraint};
 use crate::error::AnalysisError;
 use crate::overloads::{CallKind, Overloads};
+use itertools::Itertools;
 use ndc_core::{NodeId, StaticType};
 use ndc_lexer::{NumericLiteral, Span};
 use ndc_parser::{Expression, ExpressionLocation};
@@ -32,7 +33,31 @@ impl Analyser {
             AnalysisError::function_not_found_suggest_cast(name, types, span)
         } else {
             AnalysisError::function_not_found(name, types, span)
+                .with_overloads(name, &self.what_the_overloads_take(candidates))
         }
+    }
+
+    /// What each overload `candidates` can reach takes, as `(Int, String)`,
+    /// when there are few enough to list: why `put("a")` doesn't fit a `put`
+    /// whose body made its parameter an Int.
+    fn what_the_overloads_take(&self, candidates: &Candidates) -> Vec<String> {
+        const MOST: usize = 3;
+        let symbols = self.overloads().reachable_symbols(candidates);
+        if symbols.len() > MOST {
+            return Vec::new();
+        }
+        symbols
+            .into_iter()
+            .filter_map(
+                |symbol| match self.vars.shown(self.types.get_type(symbol)) {
+                    StaticType::Function {
+                        parameters: Some(parameters),
+                        ..
+                    } => Some(format!("({})", parameters.iter().join(", "))),
+                    _ => None,
+                },
+            )
+            .collect()
     }
 
     /// Overload resolution over the types declared so far.
