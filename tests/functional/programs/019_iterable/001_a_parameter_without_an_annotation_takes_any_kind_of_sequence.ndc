@@ -1,6 +1,7 @@
-// `total` is generic: each kind of sequence gets its own copy.
+// A parameter without an annotation takes any kind of sequence its body can
+// iterate, and each kind gets its own copy.
 // expect-output: 3 7 6
-fn total(xs: Iterable<Int>) {
+fn total(xs) {
     let sum = 0;
     for x in xs {
         sum += x;

@@ -8,10 +8,6 @@ use ndc_resolver::SymbolId;
 #[derive(Debug, Default)]
 pub(crate) struct TypeTable {
     types: AHashMap<SymbolId, StaticType>,
-    /// The parameter types calls see, by function, where they differ from
-    /// the declared type's: a parameter annotated `Iterable<Int>` has a type
-    /// each call settles, but only takes sequences of Ints.
-    shapes: AHashMap<SymbolId, Vec<Option<StaticType>>>,
 }
 
 impl TypeTable {
@@ -25,48 +21,6 @@ impl TypeTable {
         self.types
             .get(&symbol)
             .expect("internal error: a value is analysed after its declaration")
-    }
-
-    /// Records the parameter types calls of the function `symbol` see, for
-    /// the parameters whose declared type doesn't say what they take.
-    pub(crate) fn declare_shape(&mut self, symbol: SymbolId, shape: Vec<Option<StaticType>>) {
-        if shape.iter().any(Option::is_some) {
-            self.shapes.insert(symbol, shape);
-        }
-    }
-
-    /// The type of `symbol` as a call sees it, which picks the overload a
-    /// call means: `fn total(xs: Iterable<Int>)` takes an `Iterable<Int>`,
-    /// although its declared type takes a type parameter each call settles.
-    /// Whether a parameter of `symbol` takes any sequence of a type, as
-    /// `xs: Iterable<Int>` does, which its declared type leaves to an
-    /// iteration constraint.
-    pub(crate) fn has_shape(&self, symbol: SymbolId) -> bool {
-        self.shapes.contains_key(&symbol)
-    }
-
-    pub(crate) fn callable_type(&self, symbol: SymbolId) -> std::borrow::Cow<'_, StaticType> {
-        let typ = self.get_type(symbol);
-        let (
-            Some(shape),
-            StaticType::Function {
-                parameters: Some(parameters),
-                return_type,
-            },
-        ) = (self.shapes.get(&symbol), typ)
-        else {
-            return std::borrow::Cow::Borrowed(typ);
-        };
-        std::borrow::Cow::Owned(StaticType::Function {
-            parameters: Some(
-                parameters
-                    .iter()
-                    .zip(shape)
-                    .map(|(parameter, shape)| shape.clone().unwrap_or_else(|| parameter.clone()))
-                    .collect(),
-            ),
-            return_type: return_type.clone(),
-        })
     }
 
     /// Replaces the settled type variables in every value's type with what

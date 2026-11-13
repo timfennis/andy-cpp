@@ -1,0 +1,10 @@
+// What a sequence holds has to work in the body.
+// expect-error: No function called '+' found that matches the arguments 'Int, String'
+fn total(xs) {
+    let sum = 0;
+    for x in xs {
+        sum += x;
+    }
+    sum
+}
+total(["a"]);

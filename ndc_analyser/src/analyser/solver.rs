@@ -467,11 +467,10 @@ impl Analyser {
                     {
                         Binding::Dynamic(only)
                             if let [Candidate::Scalar(only)] = only[..]
-                                && !self.types.has_shape(only)
                                 && let StaticType::Function {
                                     parameters: Some(_),
                                     ..
-                                } = self.vars.resolve(&self.types.callable_type(only)) =>
+                                } = self.vars.resolve(self.types.get_type(only)) =>
                         {
                             Binding::Resolved(Candidate::Scalar(only))
                         }
@@ -990,7 +989,7 @@ impl Analyser {
         arguments: &[StaticType],
         result: &StaticType,
     ) -> bool {
-        let function = self.vars.resolve(&self.types.callable_type(symbol));
+        let function = self.vars.resolve(self.types.get_type(symbol));
         let Some((parameters, return_type)) = self.vars.instantiate_signature(&function) else {
             return true;
         };
@@ -1473,7 +1472,7 @@ impl Analyser {
         if literals.len() < 2 {
             return false;
         }
-        let function = self.vars.resolve(&self.types.callable_type(symbol));
+        let function = self.vars.resolve(self.types.get_type(symbol));
         let snapshot = self.vars.snapshot();
         let Some((parameters, _)) = self.vars.instantiate_signature(&function) else {
             return false;
@@ -1522,19 +1521,17 @@ impl Analyser {
         } = self.resolve_overloads(&call.candidates, arguments, call.kind);
         // A pick left to the program among one function with known
         // parameters is a call of it, whose `Any` arguments are checked where
-        // they're passed. A variable of type `Any` may hold any function, an
-        // `Iterable<T>` parameter's kind isn't in its declared type, and an
-        // `Any` without a node to check it at, as the target of `a op= b`,
+        // they're passed. A variable of type `Any` may hold any function, and
+        // an `Any` without a node to check it at, as the target of `a op= b`,
         // isn't checked where it's passed, so the program checks those itself.
         let binding = match binding {
             Binding::Dynamic(only)
                 if let [Candidate::Scalar(only)] = only[..]
-                    && !self.types.has_shape(only)
                     && Self::checks_every_any(arguments, &call.nodes.arguments)
                     && let StaticType::Function {
                         parameters: Some(_),
                         ..
-                    } = self.vars.resolve(&self.types.callable_type(only)) =>
+                    } = self.vars.resolve(self.types.get_type(only)) =>
             {
                 Binding::Resolved(Candidate::Scalar(only))
             }
@@ -1984,7 +1981,7 @@ impl Analyser {
     /// Whether `symbol` can accept arguments of these types, where each part
     /// not known yet fits anything.
     fn could_accept(&mut self, symbol: SymbolId, arguments: &[StaticType]) -> bool {
-        let function = self.vars.resolve(&self.types.callable_type(symbol));
+        let function = self.vars.resolve(self.types.get_type(symbol));
         let snapshot = self.vars.snapshot();
         let Some((parameters, _)) = self.vars.instantiate_signature(&function) else {
             return matches!(function, StaticType::Function { .. }) || function.is_unknown();

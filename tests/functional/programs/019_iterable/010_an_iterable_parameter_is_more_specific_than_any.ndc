@@ -1,5 +1,0 @@
-// The two are different overloads, and a sequence of Ints takes the first.
-// expect-output: 1 2 2
-fn describe(xs: Iterable<Int>) => 1;
-fn describe(x: Any) => 2;
-print(describe([1]), describe(true), describe("a"));

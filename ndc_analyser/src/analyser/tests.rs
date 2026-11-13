@@ -1107,7 +1107,10 @@ fn a_write_passes_its_value_like_an_argument() {
     // Any sequence goes where an `Iterable<Int>` is expected, and settles its
     // elements as Ints.
     assert_eq!(
-        analyse_last_type("fn total(xs: Iterable<Int>) => xs; let ys = []; total(ys); ys"),
+        analyse_last_type_with_globals(
+            "let ys = []; total(ys); ys",
+            natives(&[("total", "(Iterable<Int>) -> Int")])
+        ),
         StaticType::List(Box::new(StaticType::Int))
     );
 }

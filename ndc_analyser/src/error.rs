@@ -145,12 +145,12 @@ impl AnalysisError {
         }
     }
 
-    pub(crate) fn iterable_outside_a_parameter(span: Span) -> Self {
+    pub(crate) fn iterable_in_an_annotation(span: Span) -> Self {
         Self {
-            text: "`Iterable<T>` can only be the type of a parameter".to_string(),
+            text: "`Iterable<T>` can't be written in a type annotation".to_string(),
             span,
             help_text: Some(
-                "It takes any kind of sequence. Say which kind a value is, as in `List<Int>`"
+                "A parameter without an annotation takes any kind of sequence. Say which kind a value is, as in `List<Int>`"
                     .to_string(),
             ),
             notes: Vec::new(),

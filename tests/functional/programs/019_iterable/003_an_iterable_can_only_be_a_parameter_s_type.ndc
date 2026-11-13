@@ -1,3 +1,0 @@
-// A value has a kind of sequence, which the annotation has to say.
-// expect-error: `Iterable<T>` can only be the type of a parameter
-let xs: Iterable<Int> = [1];

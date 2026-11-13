@@ -337,61 +337,20 @@ impl Analyser {
     }
 
     /// [`Self::lower_type_expr`] for the type of a value, which an
-    /// `Iterable<T>` is only part of as a parameter's type.
+    /// `Iterable<T>` is never part of: only a built-in function takes any
+    /// kind of sequence of a type.
     fn lower_value_type(&mut self, expr: &TypeExpr) -> StaticType {
         let typ = self.lower_type_expr(expr);
         self.without_iterables(typ, expr.span())
     }
 
-    /// `typ`, reporting each `Iterable<T>` in it, which only a parameter's
-    /// type can be, as `Any`.
+    /// `typ`, reporting each `Iterable<T>` in it as `Any`.
     fn without_iterables(&mut self, typ: StaticType, span: Span) -> StaticType {
         if !typ.contains(&|part| matches!(part, StaticType::Iterable(_))) {
             return typ;
         }
-        self.emit(AnalysisError::iterable_outside_a_parameter(span));
+        self.emit(AnalysisError::iterable_in_an_annotation(span));
         typ.replace(&|part| matches!(part, StaticType::Iterable(_)).then_some(StaticType::Any))
-    }
-
-    /// Lowers a parameter's annotation, returning its type, and the element
-    /// type for an `Iterable<T>`, which takes any kind of sequence of `T`s:
-    /// the parameter's type is then what each call passes, and only has to
-    /// iterate as `T`.
-    fn lower_parameter_annotation(
-        &mut self,
-        annotation: Option<&TypeExpr>,
-    ) -> (Option<StaticType>, Option<StaticType>) {
-        let Some(expr) = annotation else {
-            return (None, None);
-        };
-        match self.lower_type_expr(expr) {
-            StaticType::Iterable(element) => {
-                (None, Some(self.without_iterables(*element, expr.span())))
-            }
-            // A function passed for the parameter may return any kind of
-            // sequence, as `flat_map`'s callback does.
-            StaticType::Function {
-                parameters,
-                return_type,
-            } if matches!(*return_type, StaticType::Iterable(_)) => {
-                let StaticType::Iterable(element) = *return_type else {
-                    unreachable!("checked by the guard");
-                };
-                let parameters = parameters.map(|parameters| {
-                    parameters
-                        .into_iter()
-                        .map(|parameter| self.without_iterables(parameter, expr.span()))
-                        .collect()
-                });
-                let element = self.without_iterables(*element, expr.span());
-                let callback = StaticType::Function {
-                    parameters,
-                    return_type: Box::new(StaticType::Iterable(Box::new(element))),
-                };
-                (Some(callback), None)
-            }
-            typ => (Some(self.without_iterables(typ, expr.span())), None),
-        }
     }
 
     /// Analyses a top-level statement. Names resolve first; a statement with
