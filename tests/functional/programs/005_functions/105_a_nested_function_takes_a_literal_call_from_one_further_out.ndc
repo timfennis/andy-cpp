@@ -1,0 +1,7 @@
+// The nearest scope with a function that takes a call is the call's, so a
+// later call with another type can't hand an earlier one to an outer `d`.
+// expect-output: inner inner
+fn d(x: Int) => "outer";
+fn run() { fn d(x) => "inner"; d(1) }
+fn run2() { fn d(x) => "inner"; let r = d(1); d(2.5); r }
+print(run(), run2());

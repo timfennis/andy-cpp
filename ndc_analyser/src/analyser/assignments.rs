@@ -296,29 +296,8 @@ impl Analyser {
             {
                 self.check_write(stored_type, value_type, span, Some(lvalue.id));
             }
-            AssignmentTarget::Member { .. } => {
+            AssignmentTarget::Member { .. } | AssignmentTarget::Index { .. } => {
                 self.check_write(stored_type, value_type, span, Some(lvalue.id));
-            }
-            AssignmentTarget::Index { index, .. } => {
-                if self.accepts_write(stored_type, value_type, Some(lvalue.id)) {
-                    return;
-                }
-                // `xs[0..2] = (1, 2)` stores the tuple's elements.
-                let is_slice = self
-                    .result
-                    .analysis
-                    .expr_types
-                    .get(&index.id)
-                    .is_some_and(Self::index_type_is_slice);
-                if is_slice
-                    && let Some(stored_element) =
-                        self.vars.resolve(stored_type).index_element_type()
-                    && let Some(value_element) = value_type.sequence_element_type()
-                    && self.accepts_write(&stored_element, &value_element, None)
-                {
-                    return;
-                }
-                self.emit_rejected_write(stored_type, value_type, span);
             }
             // Each target gets the element unpacked for it, as in a `let`.
             AssignmentTarget::Sequence(targets) => {

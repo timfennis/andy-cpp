@@ -20,6 +20,8 @@ pub(super) struct FunctionDeclaration<'a> {
     pub parameters: &'a [FunctionParameter],
     pub body: &'a ExpressionLocation,
     pub return_annotation: Option<&'a TypeExpr>,
+    /// Whether it's a `pure fn`, whose results are cached.
+    pub pure: bool,
     pub span: Span,
 }
 
@@ -40,6 +42,7 @@ impl Analyser {
             parameters,
             body,
             return_annotation,
+            pure,
             span,
         } = function;
         let declared = name.map(|name| (name, self.resolver.declared_symbol(id)));
@@ -164,7 +167,7 @@ impl Analyser {
                 self.vars.leave_level();
                 self.declaring = None;
                 self.declared_in_batch.insert(symbol);
-                let typ = self.generalize(symbol, &signature, id, [first_use, first_check]);
+                let typ = self.generalize(symbol, &signature, id, pure, [first_use, first_check]);
                 self.within_size_limit(symbol, name, typ, span)
             }
             _ => signature,

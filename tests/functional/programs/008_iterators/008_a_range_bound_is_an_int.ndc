@@ -1,0 +1,10 @@
+// A range counts in Ints, so a literal used as its bound is an Int, and a
+// list mixing it with a Float holds `Any`s.
+// expect-output: 3 [0.5,3]
+let n = 3;
+let xs = [0.5, n];
+let total = 0;
+for i in 0..n {
+    total += i;
+}
+print(total, xs);

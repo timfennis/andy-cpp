@@ -1,0 +1,6 @@
+// A tuple whose elements wait for a literal's type iterates as that type
+// once it's known, as a list does.
+// expect-output: [2,5] [2,5]
+let x = 3;
+let y = 4;
+print((x - 1, y + 1).map(abs), [x - 1, y + 1].map(abs));

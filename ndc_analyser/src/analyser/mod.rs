@@ -489,6 +489,7 @@ impl Analyser {
                 parameters,
                 body,
                 return_annotation,
+                pure,
                 ..
             } => self.analyse_function_declaration(FunctionDeclaration {
                 id: *id,
@@ -496,6 +497,7 @@ impl Analyser {
                 parameters,
                 body,
                 return_annotation: return_annotation.as_ref(),
+                pure: *pure,
                 span: *span,
             }),
             Expression::Block { statements } => {
@@ -667,11 +669,11 @@ impl Analyser {
             }
             Expression::RangeInclusive { start, end }
             | Expression::RangeExclusive { start, end } => {
-                if let Some(start) = start {
-                    self.analyse_expr(start);
-                }
-                if let Some(end) = end {
-                    self.analyse_expr(end);
+                // A range counts in Ints, so its bounds are Ints: in `0..n`,
+                // `n` is one, whatever else it's used for.
+                for bound in [start, end].into_iter().flatten() {
+                    let typ = self.analyse_expr(bound);
+                    self.check_write(&StaticType::Int, &typ, bound.span, Some(bound.id));
                 }
 
                 StaticType::Iterator(Box::new(StaticType::Int))
