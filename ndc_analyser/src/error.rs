@@ -136,6 +136,20 @@ impl AnalysisError {
         }
     }
 
+    pub(crate) fn type_too_large(function: &str, limit: usize, span: Span) -> Self {
+        Self {
+            text: format!(
+                "The type of `{function}` has more than {limit} parts, too many to work with"
+            ),
+            span,
+            help_text: Some(
+                "Each call through it makes a bigger type. Annotate a parameter or the return type with `Any` to stop it growing"
+                    .to_string(),
+            ),
+            notes: Vec::new(),
+        }
+    }
+
     pub(crate) fn tuple_index_out_of_bounds(index: i64, length: usize, span: Span) -> Self {
         Self {
             text: format!("Index {index} is out of bounds for a tuple of {length} elements"),
