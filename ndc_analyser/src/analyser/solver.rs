@@ -418,8 +418,13 @@ impl Analyser {
             .map(|argument| self.vars.resolve(argument))
             .collect::<Vec<_>>();
         // An argument of type `Any` is checked where it's passed, so the
-        // program can call `picked` directly.
-        let binding = Binding::Resolved(Candidate::Scalar(picked));
+        // program can call `picked` directly, unless one has nowhere to be
+        // checked.
+        let binding = if Self::checks_every_any(&arguments, &call.nodes.arguments) {
+            Binding::Resolved(Candidate::Scalar(picked))
+        } else {
+            Binding::Dynamic(vec![Candidate::Scalar(picked)])
+        };
         if cfg!(debug_assertions) {
             self.early_picks.push(EarlyPick::Call {
                 candidates: call.candidates.clone(),
@@ -1489,6 +1494,15 @@ impl Analyser {
         merged
     }
 
+    /// Whether every argument of type `Any` has a node in `nodes` to be checked
+    /// at where it's passed.
+    fn checks_every_any(arguments: &[StaticType], nodes: &[Option<NodeId>]) -> bool {
+        arguments
+            .iter()
+            .zip(nodes)
+            .all(|(argument, node)| node.is_some() || *argument != StaticType::Any)
+    }
+
     /// [`Overloads::resolve_call`] over the types as they're known now.
     pub(super) fn resolve_overloads(
         &mut self,
@@ -1508,13 +1522,15 @@ impl Analyser {
         } = self.resolve_overloads(&call.candidates, arguments, call.kind);
         // A pick left to the program among one function with known
         // parameters is a call of it, whose `Any` arguments are checked where
-        // they're passed. A variable of type `Any` may hold any function, and
-        // an `Iterable<T>` parameter's kind isn't in its declared type, so the
-        // program checks those arguments itself.
+        // they're passed. A variable of type `Any` may hold any function, an
+        // `Iterable<T>` parameter's kind isn't in its declared type, and an
+        // `Any` without a node to check it at, as the target of `a op= b`,
+        // isn't checked where it's passed, so the program checks those itself.
         let binding = match binding {
             Binding::Dynamic(only)
                 if let [Candidate::Scalar(only)] = only[..]
                     && !self.types.has_shape(only)
+                    && Self::checks_every_any(arguments, &call.nodes.arguments)
                     && let StaticType::Function {
                         parameters: Some(_),
                         ..
