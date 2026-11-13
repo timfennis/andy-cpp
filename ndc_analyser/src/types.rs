@@ -38,6 +38,13 @@ impl TypeTable {
     /// The type of `symbol` as a call sees it, which picks the overload a
     /// call means: `fn total(xs: Iterable<Int>)` takes an `Iterable<Int>`,
     /// although its declared type takes a type parameter each call settles.
+    /// Whether a parameter of `symbol` takes any sequence of a type, as
+    /// `xs: Iterable<Int>` does, which its declared type leaves to an
+    /// iteration constraint.
+    pub(crate) fn has_shape(&self, symbol: SymbolId) -> bool {
+        self.shapes.contains_key(&symbol)
+    }
+
     pub(crate) fn callable_type(&self, symbol: SymbolId) -> std::borrow::Cow<'_, StaticType> {
         let typ = self.get_type(symbol);
         let (

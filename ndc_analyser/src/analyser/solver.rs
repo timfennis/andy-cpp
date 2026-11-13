@@ -462,6 +462,7 @@ impl Analyser {
                     {
                         Binding::Dynamic(only)
                             if let [Candidate::Scalar(only)] = only[..]
+                                && !self.types.has_shape(only)
                                 && let StaticType::Function {
                                     parameters: Some(_),
                                     ..
@@ -1547,11 +1548,13 @@ impl Analyser {
         } = self.resolve_overloads(&call.candidates, arguments, call.kind);
         // A pick left to the program among one function with known
         // parameters is a call of it, whose `Any` arguments are checked where
-        // they're passed. A variable of type `Any` may hold any function, so
-        // the program checks the arguments against the one it holds.
+        // they're passed. A variable of type `Any` may hold any function, and
+        // an `Iterable<T>` parameter's kind isn't in its declared type, so the
+        // program checks those arguments itself.
         let binding = match binding {
             Binding::Dynamic(only)
                 if let [Candidate::Scalar(only)] = only[..]
+                    && !self.types.has_shape(only)
                     && let StaticType::Function {
                         parameters: Some(_),
                         ..

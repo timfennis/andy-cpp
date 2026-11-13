@@ -75,6 +75,9 @@ pub struct CallFrame {
     /// cache to write into and the hash key when the frame returns.  `None`
     /// for ordinary (non-memoized) calls.
     memo: Option<MemoCache>,
+    /// What the frame's call has to return, when it's a call of a
+    /// [`Function::Checked`]. Boxed to keep frames small.
+    returns: Option<Box<StaticType>>,
 }
 
 /// The VM's globals for `natives`: native `i` is global slot `i`. The analyser
@@ -109,6 +112,7 @@ impl Vm {
                 ip: 0,
                 frame_pointer: 0,
                 memo: None,
+                returns: None,
             }],
             output: OutputSink::Stdout,
             #[cfg(feature = "trace")]
@@ -196,19 +200,27 @@ impl Vm {
                 }
                 OpCode::Return => {
                     let ret = self.stack.pop().expect("stack underflow");
-                    let frame = self.frames.last().expect("no frame");
+                    let frame = self.frames.last_mut().expect("no frame");
                     let frame_pointer = frame.frame_pointer;
                     // If this was a memoized call, cache the return value now,
                     // before the frame is torn down.
                     if let Some((cache, key)) = &frame.memo {
                         cache.borrow_mut().insert(*key, ret.clone());
                     }
+                    let returns = frame.returns.take();
                     if frame_pointer == 0 {
                         return Err(VmError::new("Return at top level", span));
                     }
                     self.stack.truncate(frame_pointer - 1);
                     self.frames.pop().expect("no frame to pop");
                     self.stack.push(ret);
+                    // A checked call's result is checked where it was called.
+                    if let Some(returns) = returns {
+                        let caller = self.frames.last().expect("a call has a caller");
+                        let call = caller.closure.prototype.body.span(caller.ip - 1);
+                        convert_result(&mut self.stack, &returns)
+                            .map_err(|message| VmError::new(message, call))?;
+                    }
                     if self.frames.len() == target_depth {
                         break Ok(());
                     }
@@ -668,9 +680,9 @@ impl Vm {
         }
     }
 
-    /// Calls the function a [`Function::Checked`] checks to completion, and
-    /// checks that what it returns is what the function type it's used as
-    /// says.
+    /// Calls the function a [`Function::Checked`] checks, and checks that
+    /// what it returns is what the function type it's used as says: right
+    /// away when the call completes here, or when its frame returns.
     #[cold]
     fn call_checked(
         &mut self,
@@ -681,18 +693,16 @@ impl Vm {
         let StaticType::Function { return_type, .. } = typ else {
             unreachable!("a checked function is used as a function type");
         };
-        let depth = self.frames.len();
-        if self.dispatch_call(Rc::unwrap_or_clone(function), args)? == Dispatch::FramePushed {
-            self.run_to_depth(depth)?;
+        match self.dispatch_call(Rc::unwrap_or_clone(function), args)? {
+            Dispatch::FramePushed => {
+                self.frames.last_mut().expect("a frame was pushed").returns = Some(return_type);
+                Ok(Dispatch::FramePushed)
+            }
+            Dispatch::Completed => {
+                convert_result(&mut self.stack, &return_type).map_err(VmError::native)?;
+                Ok(Dispatch::Completed)
+            }
         }
-        let returned = self.stack.last().expect("a call leaves its result");
-        if returned.conforms_to(&return_type) {
-            return Ok(Dispatch::Completed);
-        }
-        Err(VmError::native(format!(
-            "expected the function to return {return_type} but it returned {}",
-            returned.diagnostic_type()
-        )))
     }
 
     /// Inner helper that pushes a new call frame.  `memo` is `Some` when the
@@ -747,6 +757,7 @@ impl Vm {
             ip: 0,
             frame_pointer: self.stack.len() - args,
             memo,
+            returns: None,
         });
         for _ in args..num_locals {
             self.stack.push(Value::unit());
@@ -1214,4 +1225,18 @@ fn convert_top(stack: &mut [Value], target: &StaticType) -> bool {
         }
         None => false,
     }
+}
+
+/// Checks that the result of a call of a [`Function::Checked`], on top of
+/// `stack`, is a `returns`, and makes it one, as [`convert_top`] does: a
+/// function it returns may get its own calls checked.
+fn convert_result(stack: &mut [Value], returns: &StaticType) -> Result<(), String> {
+    if convert_top(stack, returns) {
+        return Ok(());
+    }
+    let returned = stack.last().expect("a call leaves its result");
+    Err(format!(
+        "expected the function to return {returns} but it returned {}",
+        returned.diagnostic_type()
+    ))
 }

@@ -1,0 +1,5 @@
+// An `Any` passed for an `Iterable<T>` parameter is checked to be a sequence.
+// expect-error: no function called 'consume' found matches the arguments: (Bool)
+fn consume(xs: Iterable<Int>) => 0;
+let a: Any = true;
+print(consume(a));

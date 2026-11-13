@@ -300,6 +300,7 @@ impl Function {
         if !takes || !could_be(return_type, expected_return) {
             FunctionFit::No
         } else if **expected_return == StaticType::Any
+            || **return_type == StaticType::Never
             || (return_type == expected_return && !has_unknowns(return_type))
         {
             FunctionFit::Proven
@@ -390,7 +391,8 @@ fn could_be(found: &StaticType, expected: &StaticType) -> bool {
             StaticType::Any | StaticType::Generic(_) | StaticType::Var(_)
         )
     };
-    if unknown(found) || unknown(expected) {
+    // A function that never returns returns whatever is expected.
+    if unknown(found) || unknown(expected) || *found == StaticType::Never {
         return true;
     }
     match (found, expected) {
