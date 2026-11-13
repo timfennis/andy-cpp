@@ -1481,7 +1481,7 @@ impl Analyser {
             Binding::Dynamic(_) | Binding::None => None,
         };
         let pending = self.pending.len();
-        let signature = picked.map(|symbol| self.instantiate_function(symbol));
+        let signature = picked.map(|symbol| self.instantiate_function(symbol, true));
         let Some(StaticType::Function {
             parameters: Some(parameters),
             return_type: declared_return,
@@ -1514,15 +1514,18 @@ impl Analyser {
     /// `symbol`'s type with new variables for its type parameters. For a
     /// generic function declared in the program, its constraints get the
     /// same variables, and wait in [`Self::pending`] until
-    /// [`Self::flush_copies`] knows which call they're for.
-    pub(super) fn instantiate_function(&mut self, symbol: SymbolId) -> StaticType {
+    /// [`Self::flush_copies`] knows which call they're for. `call` says
+    /// whether it's for a call, which may get an instance of its own.
+    pub(super) fn instantiate_function(&mut self, symbol: SymbolId, call: bool) -> StaticType {
         let declared = self.vars.resolve(self.types.get_type(symbol));
         let mut made = Vec::new();
         if let Some(scheme) = self.schemes.get(&symbol) {
             let literals = Rc::clone(&scheme.literals);
-            // A function an earlier batch declared has no new instances, and
-            // its own body has the integer literals it compiled, Ints.
-            if !self.declared_in_batch.contains(&symbol) {
+            // Only a call in the batch that declares the function gets an
+            // instance. A value, as in `let f = pair`, or a call of a
+            // function an earlier batch declared, runs the function's own
+            // body, whose integer literals are Ints.
+            if !call || !self.declared_in_batch.contains(&symbol) {
                 made.extend(
                     literals
                         .iter()

@@ -131,6 +131,14 @@ enum Bound {
 pub(crate) struct LiteralBounds(Vec<Bound>);
 
 impl Bound {
+    /// The type of the value it holds, if it holds one.
+    fn held(&self) -> Option<&StaticType> {
+        match self {
+            Self::Holds(held, _, _) => Some(held),
+            Self::Number(..) => None,
+        }
+    }
+
     /// Which bound of which literal it is: the value's kind and where it is
     /// in the source.
     fn position(&self) -> (bool, usize, usize, usize) {
@@ -662,11 +670,17 @@ impl TypeVars {
         match shallow {
             StaticType::Var(other) => {
                 // Copies of one literal, as two calls of a generic function
-                // make, have the same bounds, which it needs once.
-                let mut known = self.bounds[other.0 as usize]
-                    .iter()
-                    .map(Bound::position)
-                    .collect::<AHashSet<_>>();
+                // make, have the same bounds, which it needs once. Copies
+                // may hold values of different types, as `wrap(1)` and
+                // `wrap("s")` of `fn wrap(x) => [x]` do, which it needs both.
+                let mut known = AHashMap::<_, Vec<StaticType>>::new();
+                for bound in &self.bounds[other.0 as usize] {
+                    known.entry(bound.position()).or_default().push(
+                        bound
+                            .held()
+                            .map_or(StaticType::Int, |held| self.resolve(held)),
+                    );
+                }
                 for bound in bounds {
                     // A literal holding a value of the type the other
                     // variable already is says nothing more.
@@ -675,9 +689,14 @@ impl TypeVars {
                     {
                         continue;
                     }
-                    if !known.insert(bound.position()) {
+                    let held = bound
+                        .held()
+                        .map_or(StaticType::Int, |held| self.resolve(held));
+                    let same = known.entry(bound.position()).or_default();
+                    if same.contains(&held) {
                         continue;
                     }
+                    same.push(held);
                     self.bounds[other.0 as usize].push(bound);
                     self.bounded.push(other);
                     self.literals.push(other);
