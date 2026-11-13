@@ -287,22 +287,24 @@ impl Function {
         else {
             return FunctionFit::No;
         };
-        let takes = match (expected_parameters, parameters) {
-            (Some(expected), Some(parameters)) => {
+        let (takes, takes_proven) = match (expected_parameters, parameters) {
+            (Some(expected), Some(parameters)) => (
                 expected.len() == parameters.len()
                     && expected
                         .iter()
                         .zip(parameters)
-                        .all(|(expected, parameter)| could_be(expected, parameter))
-            }
-            _ => true,
+                        .all(|(expected, parameter)| could_be(expected, parameter)),
+                expected
+                    .iter()
+                    .zip(parameters)
+                    .all(|(expected, parameter)| proves(expected, parameter)),
+            ),
+            (_, None) => (true, true),
+            (None, Some(_)) => (true, false),
         };
         if !takes || !could_be(return_type, expected_return) {
             FunctionFit::No
-        } else if **expected_return == StaticType::Any
-            || **return_type == StaticType::Never
-            || (return_type == expected_return && !has_unknowns(return_type))
-        {
+        } else if takes_proven && proves(return_type, expected_return) {
             FunctionFit::Proven
         } else {
             FunctionFit::IfChecked
@@ -436,6 +438,13 @@ fn could_be(found: &StaticType, expected: &StaticType) -> bool {
         }
         (found, expected) => found == expected,
     }
+}
+
+/// Whether every value of type `found` is an `expected`: a function that
+/// takes `Any` takes anything, and one that returns a `List<Int>` returns an
+/// `Iterable<Int>`.
+fn proves(found: &StaticType, expected: &StaticType) -> bool {
+    *expected == StaticType::Any || (!has_unknowns(found) && found.fits(expected))
 }
 
 /// Whether `typ` leaves something unknown: `Any` or a type parameter.

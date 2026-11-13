@@ -662,6 +662,14 @@ impl Vm {
             let mut hasher = DefaultHasher::default();
             for arg in &self.stack[start..] {
                 arg.hash(&mut hasher);
+                // A function checked as another function type is the same
+                // function, but a call may return it, so the cache tells
+                // them apart.
+                if let Value::Object(object) = arg
+                    && let Object::Function(Function::Checked { typ, .. }) = object.as_ref()
+                {
+                    typ.hash(&mut hasher);
+                }
             }
             let key = hasher.finish();
 
@@ -693,6 +701,19 @@ impl Vm {
         let StaticType::Function { return_type, .. } = typ else {
             unreachable!("a checked function is used as a function type");
         };
+        // The function type it's used as may take more than the function
+        // does, as `Fn(Any) -> Int` would of a function taking an Int.
+        let arguments = &self.stack[self.stack.len() - args..];
+        if !function.conforms_value_args(arguments) {
+            return Err(VmError::native(format!(
+                "the function doesn't take the arguments ({})",
+                arguments
+                    .iter()
+                    .map(|argument| argument.diagnostic_type().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )));
+        }
         match self.dispatch_call(Rc::unwrap_or_clone(function), args)? {
             Dispatch::FramePushed => {
                 self.frames.last_mut().expect("a frame was pushed").returns = Some(return_type);
