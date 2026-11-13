@@ -16,6 +16,13 @@ mod inner {
         }
     }
 
+    /// Stops the program with the error `message`. It never returns, so it
+    /// can end a branch whose other branches give a value.
+    #[function(signature = "(String) -> Never")]
+    pub fn panic(message: &str) -> anyhow::Result<Value> {
+        Err(anyhow!(message.to_string()))
+    }
+
     /// Produces an error if the arguments aren't equal to each other.
     #[function(signature = "<A, B>(A, B)")]
     pub fn assert_eq(left: Value, right: Value) -> anyhow::Result<()> {

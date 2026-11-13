@@ -603,8 +603,8 @@ mod inner {
         default.call(&[]).map_err(|e| anyhow!(e))
     }
 
-    /// Returns the `k` sized combinations of the given sequence `seq` as a lazy iterator of tuples.
-    #[function(signature = "<T>(Iterable<T>, Int) -> Iterator<Any>")]
+    /// Returns the `k` sized combinations of the given sequence `seq` as a lazy iterator of lists.
+    #[function(signature = "<T>(Iterable<T>, Int) -> Iterator<List<T>>")]
     pub fn combinations(seq: SeqValue, k: usize) -> anyhow::Result<Value> {
         let iter = CombinationsIter::new(seq, k)
             .ok_or_else(|| anyhow!("combinations requires a sequence"))?;
@@ -618,14 +618,14 @@ mod inner {
         Ok(Value::iterator(iter.into_shared()))
     }
 
-    /// Returns the `k` sized permutations of the given sequence `seq` as a list of tuples.
-    #[function(signature = "<T>(Iterable<T>, Int) -> List<Any>")]
+    /// Returns the `k` sized permutations of the given sequence `seq` as a list of lists.
+    #[function(signature = "<T>(Iterable<T>, Int) -> List<List<T>>")]
     pub fn permutations(seq: SeqValue, k: usize) -> anyhow::Result<Value> {
         Ok(Value::list(
             seq.try_into_iter()
                 .ok_or_else(|| anyhow!("permutations requires a sequence"))?
                 .permutations(k)
-                .map(Value::tuple)
+                .map(Value::list)
                 .collect::<Vec<Value>>(),
         ))
     }

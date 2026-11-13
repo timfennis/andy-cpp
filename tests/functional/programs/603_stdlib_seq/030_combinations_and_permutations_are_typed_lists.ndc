@@ -1,0 +1,4 @@
+// Combinations and permutations are lists of the elements, so what they hold
+// is typed.
+// expect-output: [3,4,5] [3,4,3,5,4,5]
+print([a + b for [a, b] in [1, 2, 3].combinations(2)], [p.sum() for p in [1, 2, 3].permutations(2)]);
