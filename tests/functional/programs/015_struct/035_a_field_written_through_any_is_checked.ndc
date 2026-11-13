@@ -1,0 +1,5 @@
+// expect-error: expected Int but found String
+struct P { x: Int }
+let p: Any = P(1);
+let v: Any = "s";
+p.x = v;
