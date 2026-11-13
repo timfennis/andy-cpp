@@ -240,7 +240,9 @@ impl CallConstraint {
     }
 
     /// Whether `other` calls what this calls, the same way, with arguments
-    /// of the same types, so it returns the same type.
+    /// of the same types, so it returns the same type. Copies of one
+    /// literal count as the same type, as the same call settles them the
+    /// same way.
     pub(super) fn is_same_call(&self, other: &Self, vars: &TypeVars) -> bool {
         std::mem::discriminant(&self.site) == std::mem::discriminant(&other.site)
             && self.kind == other.kind
@@ -250,7 +252,7 @@ impl CallConstraint {
                 .arguments
                 .iter()
                 .zip(&other.arguments)
-                .all(|(a, b)| vars.resolve(a) == vars.resolve(b))
+                .all(|(a, b)| vars.with_literals_named(a) == vars.with_literals_named(b))
     }
 }
 
@@ -1516,6 +1518,20 @@ impl Analyser {
     pub(super) fn instantiate_function(&mut self, symbol: SymbolId) -> StaticType {
         let declared = self.vars.resolve(self.types.get_type(symbol));
         let mut made = Vec::new();
+        if let Some(scheme) = self.schemes.get(&symbol) {
+            let literals = Rc::clone(&scheme.literals);
+            // A function an earlier batch declared has no new instances, and
+            // its own body has the integer literals it compiled, Ints.
+            if !self.declared_in_batch.contains(&symbol) {
+                made.extend(
+                    literals
+                        .iter()
+                        .filter(|(_, bounds)| bounds.is_number())
+                        .map(|(name, _)| (name.clone(), StaticType::Int)),
+                );
+            }
+            self.vars.instantiate_literals(&literals, &mut made);
+        }
         let typ = self.vars.instantiate_with(&declared, &mut made);
         // A copy of a function's own constraint that calls the function
         // again, as a recursive call its body couldn't decide does, is

@@ -123,6 +123,44 @@ enum Bound {
     Holds(StaticType, TypeVar, Span),
 }
 
+/// The bounds of a literal's type that became a type parameter of a generic
+/// function, which each call's copy of the parameter gets: the `1` in
+/// `fn fact(n) => if n < 2 { 1 } else { n * fact(n - 1) }` is an Int or a
+/// Float, whichever the call needs.
+#[derive(Debug, Clone)]
+pub(crate) struct LiteralBounds(Vec<Bound>);
+
+impl Bound {
+    /// Which bound of which literal it is: the value's kind and where it is
+    /// in the source.
+    fn position(&self) -> (bool, usize, usize, usize) {
+        let (is_number, span) = match self {
+            Self::Number(_, span) => (true, span),
+            Self::Holds(_, _, span) => (false, span),
+        };
+        (
+            is_number,
+            span.source_id().index(),
+            span.offset(),
+            span.end(),
+        )
+    }
+}
+
+impl LiteralBounds {
+    /// Adds the bounds of another literal of the same type.
+    pub(crate) fn extend(&mut self, other: Self) {
+        self.0.extend(other.0);
+    }
+
+    /// Whether they're an integer literal's.
+    pub(crate) fn is_number(&self) -> bool {
+        self.0
+            .iter()
+            .any(|bound| matches!(bound, Bound::Number(..)))
+    }
+}
+
 /// The state of the variables at one point, which [`TypeVars::rollback`]
 /// returns to: overload resolution tries each candidate this way.
 #[derive(Debug, Clone, Copy)]
@@ -310,7 +348,7 @@ impl TypeVars {
     }
 
     /// Whether `var` is the type of an integer literal.
-    fn is_number(&self, var: TypeVar) -> bool {
+    pub(crate) fn is_number(&self, var: TypeVar) -> bool {
         self.bounds[var.0 as usize]
             .iter()
             .any(|bound| matches!(bound, Bound::Number(..)))
@@ -484,14 +522,108 @@ impl TypeVars {
     }
 
     /// Settles `var` as the type parameter `name` of the generic function
-    /// whose body made it. A literal's type is settled before, so `var` has
-    /// no bounds.
-    pub(crate) fn generalize(&mut self, var: TypeVar, name: &str) {
-        debug_assert!(
-            self.bounds[var.0 as usize].is_empty(),
-            "the literal type {var:?} is generalized"
-        );
+    /// whose body made it, and returns its bounds if it's a literal's type,
+    /// which the parameter keeps.
+    pub(crate) fn generalize(&mut self, var: TypeVar, name: &str) -> Option<LiteralBounds> {
+        let bounds = std::mem::take(&mut self.bounds[var.0 as usize]);
         self.settle(var, StaticType::Generic(name.into()));
+        (!bounds.is_empty()).then_some(LiteralBounds(bounds))
+    }
+
+    /// `bounds` with the types the values held have now, which are type
+    /// parameters once the generic function's body has ended.
+    pub(crate) fn resolve_bounds(&self, bounds: &LiteralBounds) -> LiteralBounds {
+        LiteralBounds(
+            bounds
+                .0
+                .iter()
+                .map(|bound| match bound {
+                    Bound::Holds(held, literal, span) => {
+                        Bound::Holds(self.resolve(held), *literal, *span)
+                    }
+                    number @ Bound::Number(..) => number.clone(),
+                })
+                .collect(),
+        )
+    }
+
+    /// Adds a new literal type to `made` for each of a generic function's
+    /// literal type parameters `literals` it doesn't have yet, with the
+    /// parameter's bounds, so each call settles its own: `fact(5.0)` makes
+    /// the `1` in `fact` a Float.
+    pub(crate) fn instantiate_literals(
+        &mut self,
+        literals: &[(Box<str>, LiteralBounds)],
+        made: &mut Vec<(Box<str>, StaticType)>,
+    ) {
+        let mut new = Vec::new();
+        for (name, bounds) in literals {
+            if made.iter().any(|(generic, _)| generic == name) {
+                continue;
+            }
+            let is_number = bounds
+                .0
+                .iter()
+                .any(|bound| matches!(bound, Bound::Number(..)));
+            let typ = self.fresh(if is_number {
+                StaticType::Int
+            } else {
+                StaticType::Any
+            });
+            let StaticType::Var(var) = typ else {
+                unreachable!("a fresh type is a variable");
+            };
+            made.push((name.clone(), typ));
+            new.push((var, bounds));
+        }
+        for (var, bounds) in new {
+            let bounds = bounds
+                .0
+                .iter()
+                .map(|bound| match bound {
+                    Bound::Number(_, span) => Bound::Number(var, *span),
+                    Bound::Holds(held, _, span) => {
+                        Bound::Holds(self.instantiate_with(held, made), var, *span)
+                    }
+                })
+                .collect();
+            self.bounds[var.0 as usize] = bounds;
+            self.literals.push(var);
+        }
+    }
+
+    /// `typ` with each unsettled literal type in it replaced by a type that
+    /// says which literals it's the type of, so two copies of one generic
+    /// function's literal type parameter look the same: each call of `f0`
+    /// in `fn f1(x) => f0(x) + f0(x)` copies the `1` of `fn f0(x) => x + 1`.
+    pub(crate) fn with_literals_named(&self, typ: &StaticType) -> StaticType {
+        self.resolve(typ).replace(&|part| match part {
+            StaticType::Var(var) if self.is_literal(*var) => {
+                let mut spans = self.bounds[var.0 as usize]
+                    .iter()
+                    .map(|bound| match bound {
+                        Bound::Number(_, span) | Bound::Holds(_, _, span) => {
+                            (span.source_id().index(), span.offset(), span.end())
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                spans.sort_unstable();
+                spans.dedup();
+                Some(StaticType::Generic(format!("literal{spans:?}").into()))
+            }
+            _ => None,
+        })
+    }
+
+    /// The variables in what the literal type `var` holds: `x`'s in `[x, 1]`.
+    pub(crate) fn held_vars(&self, var: TypeVar) -> Vec<TypeVar> {
+        self.bounds[var.0 as usize]
+            .iter()
+            .flat_map(|bound| match bound {
+                Bound::Holds(held, _, _) => self.unsettled(held),
+                Bound::Number(..) => Vec::new(),
+            })
+            .collect()
     }
 
     /// How many variables there are, so [`Self::settle_from`] can settle
@@ -529,12 +661,21 @@ impl TypeVars {
         }
         match shallow {
             StaticType::Var(other) => {
+                // Copies of one literal, as two calls of a generic function
+                // make, have the same bounds, which it needs once.
+                let mut known = self.bounds[other.0 as usize]
+                    .iter()
+                    .map(Bound::position)
+                    .collect::<AHashSet<_>>();
                 for bound in bounds {
                     // A literal holding a value of the type the other
                     // variable already is says nothing more.
                     if let Bound::Holds(held, _, _) = &bound
                         && self.shallow(held) == StaticType::Var(other)
                     {
+                        continue;
+                    }
+                    if !known.insert(bound.position()) {
                         continue;
                     }
                     self.bounds[other.0 as usize].push(bound);

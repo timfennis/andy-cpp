@@ -233,6 +233,15 @@ print(a, b, i);                        // 2 3.5 55
 
 The body is compiled for each set of types it's called with, so the calls in it are picked when the program is compiled, not as it runs. Called with a value of type `Any`, the function picks them as it runs.
 
+A number literal in the body that meets a parameter takes its type from each call, as a literal written at the call would:
+
+```ndc
+fn fact(n) => if n < 2 { 1 } else { n * fact(n - 1) };
+fn pair(x) => [x, 1];
+print(fact(5), fact(5.0));    // 120 120.0
+print(pair(2), pair(2.5));    // [2,1] [2.5,1.0]
+```
+
 A call with an argument the body can't use is an error at the call, with a note on the line in the body that can't take it:
 
 ```ndc,fails

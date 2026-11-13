@@ -75,6 +75,9 @@ pub struct Analyser {
     declaring: Option<SymbolId>,
     /// The calls its body makes of itself.
     recursive_calls: Vec<NodeId>,
+    /// The integer literals in the batch, with their types, which a
+    /// generic function's instances may give types of their own.
+    number_literals: Vec<(NodeId, StaticType)>,
     /// The calls the constraint being solved was copied through, when it's
     /// a copy of a generic function's constraint.
     copied_through: Option<Origin>,
@@ -150,6 +153,7 @@ impl Analyser {
             declared_in_batch: AHashSet::new(),
             declaring: None,
             recursive_calls: Vec::new(),
+            number_literals: Vec::new(),
             copied_through: None,
             checks: Vec::new(),
             next_serial: 0,
@@ -183,6 +187,7 @@ impl Analyser {
             self.check_early_picks();
         }
         self.failed_reads.clear();
+        self.number_literals.clear();
         self.types.resolve_all(&self.vars);
         for (instance, node, typ, expected) in std::mem::take(&mut self.checks) {
             if self.vars.resolve(&typ) != StaticType::Any {
@@ -425,7 +430,11 @@ impl Analyser {
                 StaticType::Option(Box::new(self.vars.fresh(StaticType::Any)))
             }
             Expression::StringLiteral(_) => StaticType::String,
-            Expression::NumericLiteral(NumericLiteral::Int64(_)) => self.vars.fresh_number(*span),
+            Expression::NumericLiteral(NumericLiteral::Int64(_)) => {
+                let typ = self.vars.fresh_number(*span);
+                self.number_literals.push((*id, typ.clone()));
+                typ
+            }
             Expression::NumericLiteral(NumericLiteral::Float64(_)) => StaticType::Float,
             Expression::NumericLiteral(
                 NumericLiteral::NumberInt(_)

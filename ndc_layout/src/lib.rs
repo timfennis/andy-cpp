@@ -51,6 +51,9 @@ pub struct InstancePicks {
     pub augmented_assignments: AHashMap<NodeId, Binding<SymbolId>>,
     /// As [`Analysis::type_checks`], for the instance's body.
     pub type_checks: AHashMap<NodeId, StaticType>,
+    /// The types of the integer literals in the instance's body whose type
+    /// is one of the function's type parameters.
+    pub literal_types: AHashMap<NodeId, StaticType>,
 }
 
 impl InstancePicks {
@@ -62,6 +65,7 @@ impl InstancePicks {
             setters: AHashMap::new(),
             augmented_assignments: AHashMap::new(),
             type_checks: AHashMap::new(),
+            literal_types: AHashMap::new(),
         }
     }
 }
@@ -162,6 +166,7 @@ impl<'a> Layout<'a> {
                     .map(locate_binding)
                     .collect(),
                 type_checks: picks.type_checks,
+                literal_types: picks.literal_types,
             };
             analysis
                 .instances
