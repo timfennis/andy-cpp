@@ -278,6 +278,20 @@ impl AnalysisError {
         }
     }
 
+    /// This error with help saying what the overloads of `name` take, given
+    /// as `(Int, String)` each, if any.
+    pub(crate) fn with_overloads(self, name: &str, overloads: &[String]) -> Self {
+        let help_text = match overloads {
+            [] => return self,
+            [only] => format!("`{name}` takes {only}"),
+            several => format!("The overloads of `{name}` take {}", several.join(", ")),
+        };
+        Self {
+            help_text: Some(help_text),
+            ..self
+        }
+    }
+
     /// Same as [`Self::function_not_found`], for a call an overload would
     /// accept if the arguments were known more precisely.
     pub(crate) fn function_not_found_suggest_cast(

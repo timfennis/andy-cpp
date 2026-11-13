@@ -1721,3 +1721,23 @@ fn a_list_literal_holding_the_list_it_is_pushed_to_is_analysed() {
         assert!(result.errors.len() <= 1, "{source}: {:?}", result.errors);
     }
 }
+
+#[test]
+fn a_call_no_overload_takes_says_what_the_overloads_take() {
+    // `put`'s body puts `x` in `r`, which the first call settles as holding
+    // Ints, so `put` takes an Int from then on.
+    let (_, result) = analyse_with_globals(
+        "let r = []; fn put(x) { r.push(x); 0 } put(1); put(\"a\");",
+        natives(&[("push", "<T>(List<T>, T)")]),
+    );
+    let help = result
+        .errors
+        .iter()
+        .find_map(|error| error.help_text().map(str::to_string));
+    assert_eq!(
+        help.as_deref(),
+        Some("`put` takes (Int)"),
+        "{:?}",
+        result.errors
+    );
+}
