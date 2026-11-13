@@ -1557,15 +1557,17 @@ fn a_lambda_a_generic_function_passes_on_takes_what_each_call_gives_it() {
 }
 
 #[test]
-fn an_overloaded_function_value_in_a_generic_function_is_decided_by_its_body() {
-    // The body is compiled once, so `g` has to be one `abs`, whatever `f`
-    // is called with.
+fn an_overloaded_function_value_in_a_generic_function_is_picked_for_each_call() {
+    // Each instance of `f` picks the `abs` its argument's type calls for.
     let globals = natives(&[("abs", "(Int) -> Int"), ("abs", "(Float) -> Float")]);
+    let source = "fn f(x) { let g = abs; g(x) }";
     assert_eq!(
-        errors("fn f(x) { let g = abs; g(x) } f(1);", globals.clone()),
-        vec![
-            "'abs' has several overloads that are a Fn(Any) -> Any, and nothing here says which one is meant"
-        ]
+        analyse_last_type_with_globals(&format!("{source} f(1)"), globals.clone()),
+        StaticType::Int
+    );
+    assert_eq!(
+        analyse_last_type_with_globals(&format!("{source} f(2.5)"), globals.clone()),
+        StaticType::Float
     );
     assert_eq!(
         errors(

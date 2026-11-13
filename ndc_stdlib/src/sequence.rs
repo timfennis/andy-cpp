@@ -997,6 +997,41 @@ pub mod extra {
     use std::rc::Rc;
 
     pub fn register(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
+        // A tuple's first and last elements have their own types, so each
+        // length up to four gets a signature that says which.
+        for (name, signatures, documentation) in [
+            (
+                "first",
+                [
+                    "<A>((A,)) -> A",
+                    "<A, B>((A, B)) -> A",
+                    "<A, B, C>((A, B, C)) -> A",
+                    "<A, B, C, D>((A, B, C, D)) -> A",
+                ],
+                "Returns the first element of a tuple.",
+            ),
+            (
+                "last",
+                [
+                    "<A>((A,)) -> A",
+                    "<A, B>((A, B)) -> B",
+                    "<A, B, C>((A, B, C)) -> C",
+                    "<A, B, C, D>((A, B, C, D)) -> D",
+                ],
+                "Returns the last element of a tuple.",
+            ),
+        ] {
+            for signature in signatures {
+                env.declare_global_fn(Rc::new(NativeFunction {
+                    name: name.to_string(),
+                    documentation: Some(documentation.to_string()),
+                    static_type: StaticType::signature(signature).expect("valid signature"),
+                    func: NativeFunc::Simple(Box::new(move |args| {
+                        tuple_end(args, name == "first")
+                    })),
+                }));
+            }
+        }
         for signature in [
             // Two sequences zip into pairs of their elements, three into
             // triples, and four into quadruples.
@@ -1013,6 +1048,19 @@ pub mod extra {
                 func: NativeFunc::Simple(Box::new(zip)),
             }));
         }
+    }
+
+    /// The first or last element of the tuple in `args`.
+    fn tuple_end(args: &[Value], first: bool) -> Result<Value, VmError> {
+        let [Value::Object(object)] = args else {
+            return Err(VmError::native("expected one tuple".to_string()));
+        };
+        let Object::Tuple(values) = object.as_ref() else {
+            return Err(VmError::native("expected a tuple".to_string()));
+        };
+        let end = if first { values.first() } else { values.last() };
+        end.cloned()
+            .ok_or_else(|| VmError::native("the tuple is empty".to_string()))
     }
 
     fn zip(args: &[Value]) -> Result<Value, VmError> {

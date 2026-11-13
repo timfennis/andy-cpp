@@ -126,10 +126,19 @@ impl Analyser {
             })
             .collect::<Vec<_>>();
         for waiting in &scheme {
-            if waiting.origin.is_none()
-                && let Constraint::Call(call) = &waiting.constraint
-            {
-                self.pick_for_any_arguments(call);
+            match &waiting.constraint {
+                Constraint::Call(call) if waiting.origin.is_none() => {
+                    self.pick_for_any_arguments(call);
+                }
+                // The body compiled for arguments of type `Any` can't tell
+                // which overload a function value means, so the program
+                // picks as it calls it.
+                Constraint::FunctionValue(value) if waiting.origin.is_none() => {
+                    self.picks
+                        .bindings
+                        .insert(value.id(), value.every_overload());
+                }
+                _ => {}
             }
         }
         // A value of type `Any` that the body passes where a type parameter
@@ -209,15 +218,35 @@ impl Analyser {
     /// The generic function's variables that `constraint` settles once it's
     /// solved. A function passed to a call gets the types the call passes
     /// it, as `fn(a, x) => a + x` in `xs.fold(0, fn(a, x) => a + x)`, so
-    /// they count as settled by the call too.
+    /// they count as settled by the call too, and so does an overloaded
+    /// function's name passed to one, as `signum` in `xs.map(signum)`,
+    /// whose type is what the call expects of it.
     fn generic_outputs(&self, constraint: &Constraint) -> Vec<TypeVar> {
         let passed_functions = match constraint {
-            Constraint::Call(call) => call
-                .arguments()
-                .iter()
-                .map(|argument| self.vars.resolve(argument))
-                .filter(|argument| matches!(argument, StaticType::Function { .. }))
-                .collect(),
+            Constraint::Call(call) => {
+                let values = self
+                    .waiting
+                    .values()
+                    .filter_map(|waiting| match &waiting.constraint {
+                        Constraint::FunctionValue(value) => {
+                            Some(self.vars.resolve(value.expected()))
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                call.arguments()
+                    .iter()
+                    .map(|argument| self.vars.resolve(argument))
+                    .filter(|argument| {
+                        matches!(argument, StaticType::Function { .. }) || values.contains(argument)
+                    })
+                    .collect()
+            }
+            // Picking the overload settles what the value returns.
+            Constraint::FunctionValue(value) => match self.vars.resolve(value.expected()) {
+                StaticType::Function { return_type, .. } => vec![*return_type],
+                _ => Vec::new(),
+            },
             _ => Vec::new(),
         };
         constraint
@@ -232,8 +261,8 @@ impl Analyser {
     /// The generic function's variables that its constraints wait on but
     /// that its parameters don't decide, by constraint, oldest first. What
     /// a constraint settles is decided when what it waits on is. An
-    /// overloaded function's name used as a value has to be decided in the
-    /// body, which is compiled once, so what it waits on counts too.
+    /// overloaded function's name used as a value is picked like a call:
+    /// for each instance, from the types its parameters decide.
     fn ambiguous_vars(&self, parameters: &[StaticType]) -> Vec<(u64, Vec<TypeVar>)> {
         let serials = self.generic_constraints();
         let mut decided = parameters
@@ -245,11 +274,10 @@ impl Analyser {
             let mut changed = false;
             for serial in &serials {
                 let constraint = &self.waiting[serial].constraint;
-                if matches!(constraint, Constraint::FunctionValue(_))
-                    || !self
-                        .generic_inputs(constraint)
-                        .iter()
-                        .all(|var| decided.contains(var))
+                if !self
+                    .generic_inputs(constraint)
+                    .iter()
+                    .all(|var| decided.contains(var))
                 {
                     continue;
                 }
@@ -265,14 +293,11 @@ impl Analyser {
             .into_iter()
             .filter_map(|serial| {
                 let constraint = &self.waiting[&serial].constraint;
-                let ambiguous = match constraint {
-                    Constraint::FunctionValue(_) => self.generic_inputs(constraint),
-                    _ => self
-                        .generic_inputs(constraint)
-                        .into_iter()
-                        .filter(|var| !decided.contains(var))
-                        .collect(),
-                };
+                let ambiguous = self
+                    .generic_inputs(constraint)
+                    .into_iter()
+                    .filter(|var| !decided.contains(var))
+                    .collect::<Vec<_>>();
                 (!ambiguous.is_empty()).then_some((serial, ambiguous))
             })
             .collect()

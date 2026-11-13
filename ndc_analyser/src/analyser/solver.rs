@@ -118,7 +118,9 @@ impl Constraint {
                 result: replace(&call.result),
                 ..call.clone()
             }),
-            Self::FunctionValue(value) => Self::FunctionValue(value.clone()),
+            Self::FunctionValue(value) => {
+                Self::FunctionValue(value.with_expected(replace(value.expected())))
+            }
             Self::Iterate {
                 sequence,
                 element,
