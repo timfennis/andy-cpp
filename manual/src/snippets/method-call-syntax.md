@@ -7,10 +7,10 @@ fn add(x, y) {
 }
 
 // Normal function call
-print(add(3, 5));
+print(add(3, 5));  // 8
 
 // Method-like syntax
-print(3.add(5));
+print(3.add(5));   // 8
 ```
 
 Both forms do the same thing, except that a method call only looks among functions: a variable named `add` is
@@ -23,4 +23,5 @@ You can also omit `()` when you call a 0-ary function.
 ```ndc
 let input = "some text\nsome more text";
 let lines = input.lines;
+print(lines);  // ["some text","some more text"]
 ```

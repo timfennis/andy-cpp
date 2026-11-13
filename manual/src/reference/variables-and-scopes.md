@@ -44,36 +44,41 @@ print(x); // 3
 
 The `=` operator assigns a new value to an existing variable. A variable keeps the type its first value gave it, so a new value has to fit that type:
 
+```ndc,fails
+let n = "abc".len();  // n is Int
+n = 2;                // fine
+n = 3.14;             // error: mismatched types: found Float but expected Int
+```
+
+A number literal takes the type its uses need, so a variable that starts at `1` and is later given `3.14` is a `Float` from the start:
+
 ```ndc
-let x = 1;     // x is Int
-x = 2;         // fine
-x = 3.14;      // ERROR: mismatched types: found Float but expected Int
+let x = 1;
+x = 3.14;
+print(x);  // 3.14
 ```
 
 Augmented assignment is checked the same way, against the result of the operation:
 
-```ndc
-let total = 3;
-total += 0.5;  // ERROR: Int + Float is a Float, which doesn't fit in Int
-
-let sum = 3.0;
-sum += 0.5;    // fine
+```ndc,fails
+let total = "abc".len();
+total += 0.5;  // error: Int + Float is a Float, which doesn't fit in Int
 ```
 
 What an empty list or map holds, or what `None` will hold, isn't known yet. The first assignment that stores something settles it, and later ones have to fit:
 
-```ndc
-let counts = %{};       // key and value types not known yet
-counts["a"] = 1;        // counts is Map<String, Int> from here on
-counts["b"] = "two";    // ERROR: mismatched types: found String but expected Int
+```ndc,fails
+let counts = %{};     // key and value types not known yet
+counts["a"] = 1;      // counts is Map<String, Int> from here on
+counts["b"] = "two";  // error: mismatched types: found String but expected Int
 ```
 
 Calls settle them too, through the types the called function takes. `push` takes a `List<T>` and a `T`, so pushing an `Int` makes the list a `List<Int>`, and later pushes have to fit:
 
-```ndc
+```ndc,fails
 let xs = [];
 xs.push(1);       // xs is List<Int> from here on
-xs.push("two");   // ERROR: No function called 'push' found that matches the arguments 'List<Int>, String'
+xs.push("two");   // error: No function called 'push' found that matches the arguments 'List<Int>, String'
 ```
 
 When nothing settles them, they stay `Any`.
@@ -83,6 +88,7 @@ A variable that only gets its real value later holds an `Option`:
 ```ndc
 let pos = None;
 pos = Some((1, 2));
+print(pos);    // Some((1,2))
 ```
 
 To store values of different types in one variable, annotate it with `Any`:
@@ -90,6 +96,7 @@ To store values of different types in one variable, annotate it with `Any`:
 ```ndc
 let x: Any = 1;
 x = "text";    // fine
+print(x);      // text
 ```
 
 ## Type annotations
@@ -100,6 +107,7 @@ You can pin a variable's type by adding `: Type` after the name. The initialiser
 let count: Int = 0;
 let name: String = "world";
 let xs: List<Int> = [1, 2, 3];
+print(count, name, xs);  // 0 world [1,2,3]
 ```
 
 Every value fits where `Any` is requested:
@@ -107,11 +115,12 @@ Every value fits where `Any` is requested:
 ```ndc
 let n: Number = 3n;
 let x: Any = "anything";  // every value fits Any
+print(n, x);              // 3 anything
 ```
 
 A mismatch is rejected with a `mismatched types` error:
 
-```ndc
+```ndc,fails
 let x: Int = "hello";   // ERROR: mismatched types: found String but expected Int
 ```
 
@@ -122,13 +131,18 @@ from, so the annotation decides:
 let xs: List<Int> = [];        // xs is List<Int>, not List<Any>
 let m: Map<Int, Int> = %{};    // m is Map<Int, Int>
 let nested: List<List<Int>> = [[]];
+print(xs, m, nested);          // [] %{} [[]]
 ```
 
 An annotated variable keeps its annotated type, just as an inferred one keeps the type of its first value:
 
-```ndc
+```ndc,fails
 let x: Int = 5;
 x = "test";   // ERROR: mismatched types
+```
+
+```ndc,fails
+let x: Int = 5;
 x += 0.5;     // ERROR: the Float result doesn't fit in Int
 ```
 
@@ -147,10 +161,12 @@ let a, b = 3, 4;
 let [a, b] = 3, 4;
 let (a, b) = [3, 4];
 let [a, b] = (3, 4);
+print(a, b);  // 3 4
 ```
 
 You can also destructure nested patterns:
 
-```
+```ndc
 let [a, (b, c)] = (1, [2, 3]);
+print(a, b, c);  // 1 2 3
 ```

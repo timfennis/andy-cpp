@@ -3,8 +3,11 @@
 Andy C++ uses the keywords `and`, `or`, and `not` for logical operators. If you are coming from Rust, write `and` and `or` instead of `&&` and `||`.
 
 ```ndc
+let has_input, failed, timed_out, disconnected = true, false, false, true;
+
 let ready = has_input and not failed;
 let retry = timed_out or disconnected;
+print(ready, retry);  // true true
 ```
 
 ## Short-circuiting
@@ -19,7 +22,7 @@ false and { x = x + 1; false };
 true or { x = x + 1; false };
 false or { x = x + 1; false };
 
-assert_eq(x, 2);
+print(x);  // 2
 ```
 
 `false and ...` stops at `false`, and `true or ...` stops at `true`.
@@ -29,15 +32,15 @@ assert_eq(x, 2);
 `and` binds tighter than `or`.
 
 ```ndc
-let a = true or true and false;  // true
-let b = false and true or true;  // true
+print(true or true and false);  // true
+print(false and true or true);  // true
 ```
 
 That means Andy C++ reads those expressions as:
 
 ```ndc
-let a = true or (true and false);
-let b = (false and true) or true;
+print(true or (true and false));  // true
+print((false and true) or true);  // true
 ```
 
 ## Bitwise operators

@@ -311,7 +311,7 @@ checksum = "af491d569909a7e4dee0ad7db7f5341fef5c614d5b8ec8cf765732aba3cff681"
 dependencies = [
  "serde",
  "termcolor",
- "unicode-width 0.1.14",
+ "unicode-width 0.2.2",
 ]
 
 [[package]]
@@ -331,6 +331,16 @@ dependencies = [
  "ndc_parser",
  "ndc_stdlib",
  "ndc_vm",
+]
+
+[[package]]
+name = "console_error_panic_hook"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a06aeb73f470f66dcdbf7223caeebb85984942f22f1adb2a088cf9668146bbbc"
+dependencies = [
+ "cfg-if",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -761,9 +771,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "899def5c37c4fd7b2664648c28120ecec138e4d395b459e5ca34f9cce2dd77fd"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "r-efi 5.3.0",
  "wasip2",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -773,11 +785,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0de51e6874e94e7bf76d726fc5d13ba782deca734ff60d5bb2fb2607c7406555"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "r-efi 6.0.0",
  "rand_core 0.10.1",
  "wasip2",
  "wasip3",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -1166,17 +1180,17 @@ dependencies = [
 name = "ndc_bin"
 version = "0.3.0"
 dependencies = [
- "ahash",
  "anyhow",
  "clap",
- "codespan-reporting",
  "itertools 0.15.0",
  "libc",
  "ndc_core",
+ "ndc_diagnostics",
+ "ndc_fmt",
+ "ndc_highlight",
  "ndc_interpreter",
  "ndc_lexer",
  "ndc_lsp",
- "ndc_parser",
  "ndc_stdlib",
  "rustyline",
  "strsim",
@@ -1193,6 +1207,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "ndc_diagnostics"
+version = "0.3.0"
+dependencies = [
+ "codespan-reporting",
+ "ndc_interpreter",
+ "ndc_lexer",
+]
+
+[[package]]
+name = "ndc_fmt"
+version = "0.3.0"
+dependencies = [
+ "ndc_lexer",
+ "ndc_parser",
+ "thiserror",
+]
+
+[[package]]
+name = "ndc_highlight"
+version = "0.3.0"
+dependencies = [
+ "ahash",
+ "ndc_lexer",
+ "ndc_parser",
+]
+
+[[package]]
 name = "ndc_interpreter"
 version = "0.3.0"
 dependencies = [
@@ -1203,6 +1244,7 @@ dependencies = [
  "ndc_parser",
  "ndc_vm",
  "thiserror",
+ "web-time",
 ]
 
 [[package]]
@@ -1231,6 +1273,7 @@ name = "ndc_lsp"
 version = "0.3.0"
 dependencies = [
  "ahash",
+ "lsp-types",
  "ndc_analysis",
  "ndc_core",
  "ndc_interpreter",
@@ -1305,8 +1348,24 @@ dependencies = [
  "ndc_lexer",
  "ndc_parser",
  "num",
- "ryu",
  "thiserror",
+]
+
+[[package]]
+name = "ndc_wasm"
+version = "0.3.0"
+dependencies = [
+ "console_error_panic_hook",
+ "getrandom 0.3.4",
+ "getrandom 0.4.2",
+ "ndc_diagnostics",
+ "ndc_highlight",
+ "ndc_interpreter",
+ "ndc_lsp",
+ "ndc_stdlib",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -2463,6 +2522,16 @@ name = "web-sys"
 version = "0.3.79"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "50462a022f46851b81d5441d1a6f5bac0b21a1d72d64bd4906fbdd4bf7230ec7"
+dependencies = [
+ "js-sys",
+ "wasm-bindgen",
+]
+
+[[package]]
+name = "web-time"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
 dependencies = [
  "js-sys",
  "wasm-bindgen",

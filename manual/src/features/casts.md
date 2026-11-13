@@ -8,11 +8,13 @@ let values: List<Any> = [1, 2];
 // values is a List<Any>; the cast recovers the element type so the
 // result works with functions that expect a List<Int>.
 let ints = values as List<Int>;
+print(ints.sum());  // 3
 ```
 
-A cast checks the value without converting it. `5 as Float` is an error
-because `5` is an `Int`; use conversion functions like `float(5)` to change
-a value's type.
+A cast checks the value without converting it. `n as Float` is an error
+when `n` is an `Int`; use conversion functions like `float(n)` to change a
+value's type. A number literal takes the type the cast says, so `5 as Float`
+is the Float `5.0`.
 
 ## Checking
 
@@ -20,7 +22,7 @@ When the compiler can already prove the cast from the value's static type,
 the cast is free: no runtime check is emitted. Otherwise the value is
 checked at runtime, and a failed check raises an error at the cast site:
 
-```ndc
+```ndc,fails
 let value: Any = ["a"];
 value as List<Int>
 // error[vm]: cannot cast List<String> to List<Int>
@@ -37,7 +39,7 @@ type is `Any`.
 
 The analyser rejects casts between types that cannot share a value:
 
-```ndc
+```ndc,fails
 "foo" as Int
 // error[analysis]: invalid cast: String can never be Int
 ```
@@ -60,10 +62,16 @@ value's type and checks it at the cast site.
 
 A wider annotation than the value needs can lose the detail a function needs:
 
+```ndc,fails
+let values: List<Any> = [1, 2, 3];
+values.sum();  // error: no `sum` matches List<Any>
+```
+
+A cast states what the list holds:
+
 ```ndc
 let values: List<Any> = [1, 2, 3];
-values.sum();              // error: no `sum` matches List<Any>
-assert_eq((values as List<Int>).sum(), 6);
+print((values as List<Int>).sum());  // 6
 ```
 
 A specialized `op=` mutates its target in place and keeps its type, so it only
@@ -75,7 +83,7 @@ target unverified:
 fn opaque(x) => x;
 let values = [1];
 values ++= opaque([2, 3]) as List<Int>;
-assert_eq(values, [1, 2, 3]);
+print(values);  // [1,2,3]
 ```
 
 ## Limitations

@@ -27,15 +27,18 @@ These are also the names you write in annotations. Generic types take their para
 ```ndc
 let xs: List<Int> = [1, 2, 3];
 let table: Map<String, Int> = %{"a": 1, "b": 2};
-let maybe: Option<Any> = Some("hi");
+let maybe: Option<String> = Some("hi");
 let pair: Tuple<Int, String> = (1, "hi");
 let pair2: (Int, String) = (1, "hi");  // tuple shorthand
+
+print(maybe, pair2);  // Some("hi") (1,"hi")
 ```
 
 Nested generics work too — the parser handles the `>>` ambiguity for you:
 
 ```ndc
 let grid: List<List<Int>> = [[1, 2], [3, 4]];
+print(grid);  // [[1,2],[3,4]]
 ```
 
 ### `Iterable<T>` parameters
@@ -72,6 +75,7 @@ A literal takes the type its use needs, so an annotation can widen it directly. 
 let xs: List<Any> = [1, 2];
 xs.push("three");
 let mixed = [1, "a"];             // List<Any>
+print(xs, mixed);                 // [1,2,"three"] [1,"a"]
 ```
 
 The branches of an `if` work the same way. They're one type when they can be, with literals taking the other branch's type, and `Any` when they can't:
@@ -80,6 +84,7 @@ The branches of an `if` work the same way. They're one type when they can be, wi
 let a = if true { 1 } else { 2.5 };   // Float
 let b = if true { 1 } else { "a" };   // Any
 let c = if true { [] } else { [1] };  // List<Int>
+print(a, b, c);                       // 1.0 1 []
 ```
 
 [Struct](./types/struct.md) names are type names like any other, including inside generics:
@@ -89,6 +94,7 @@ struct Point { x: Int, y: Int }
 
 fn manhattan(p: Point) => p.x + p.y
 let points: List<Point> = [Point(1, 2), Point(3, 4)];
+print(points.map(manhattan));  // [3,7]
 ```
 
 A struct name refers to the struct declared earlier in an enclosing scope; it cannot be

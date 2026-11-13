@@ -1,0 +1,14 @@
+/* Andy C++ in the manual: code colours, and the playground chapter. This file
+   is served from theme/, so the playground directory is one level up. */
+@import url("../playground/andy.css");
+
+/* mdBook's highlight.js themes colour .hljs code; ours are ndc's own. */
+code.language-ndc.hljs { color: var(--fg); }
+
+/* Results are output, not code: keep long lines readable. */
+pre > .result.ndc { white-space: pre-wrap; word-break: break-word; }
+
+iframe.ndc-playground {
+  display: block; width: 100%; height: min(75vh, 720px); margin: 1em 0;
+  border: 1px solid var(--theme-popup-border); border-radius: 6px;
+}

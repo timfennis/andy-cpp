@@ -1,10 +1,10 @@
 use ahash::AHashMap;
-use ndc_core::StaticType;
-use ndc_interpreter::Interpreter;
-use tower_lsp::lsp_types::{
+use lsp_types::{
     CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionResponse,
     Documentation, MarkupContent, MarkupKind, Position,
 };
+use ndc_core::StaticType;
+use ndc_interpreter::Interpreter;
 
 use crate::scope_resolve::{collect_declarations, file_scope, is_visible};
 use crate::state::DocumentState;

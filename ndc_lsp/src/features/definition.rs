@@ -1,7 +1,7 @@
+use lsp_types::{Position, Range};
 use ndc_core::NodeId;
 use ndc_lexer::{SourceId, Span};
 use ndc_parser::Expression;
-use tower_lsp::lsp_types::{Location, Position, Url};
 
 use crate::scope_resolve::{Decl, collect_declarations, file_scope, is_visible, scope_len};
 use crate::state::DocumentState;
@@ -17,7 +17,7 @@ use crate::visitor::{AstVisitor, node_at_offset, walk_ast};
 /// call to one of several same-named functions resolves to whichever visible
 /// declaration is innermost/latest rather than the overload the analyser actually
 /// selected. The follow-up that exposes the analyser's resolution fixes this.
-pub fn goto_definition(state: &DocumentState, position: Position, uri: Url) -> Option<Location> {
+pub fn goto_definition(state: &DocumentState, position: Position) -> Option<Range> {
     let offset = state.line_index.offset(&state.source, position)?;
     let (name, source_id) = identifier_at(&state.ast, offset)?;
 
@@ -29,10 +29,7 @@ pub fn goto_definition(state: &DocumentState, position: Position, uri: Url) -> O
         .filter(|d| d.name == name && is_visible(d, offset))
         .reduce(|a, b| if better(b, a) { b } else { a })?;
 
-    Some(Location {
-        uri,
-        range: state.line_index.range(&state.source, best.name_span),
-    })
+    Some(state.line_index.range(&state.source, best.name_span))
 }
 
 /// The identifier name the cursor is on, plus the document's `SourceId`.
@@ -106,31 +103,27 @@ mod tests {
         DocumentState::from_analysis(source.to_string(), ast, analysis)
     }
 
-    fn uri() -> Url {
-        Url::parse("file:///test.ndc").unwrap()
-    }
-
-    fn start_offset(state: &DocumentState, location: &Location) -> usize {
+    fn start_offset(state: &DocumentState, location: &Range) -> usize {
         state
             .line_index
-            .offset(&state.source, location.range.start)
+            .offset(&state.source, location.start)
             .unwrap()
     }
 
     /// Does `location` cover the `len` bytes at `offset`?
-    fn covers(state: &DocumentState, location: &Location, offset: usize, len: usize) -> bool {
+    fn covers(state: &DocumentState, location: &Range, offset: usize, len: usize) -> bool {
         let start = start_offset(state, location);
         let end = state
             .line_index
-            .offset(&state.source, location.range.end)
+            .offset(&state.source, location.end)
             .unwrap();
         start <= offset && offset + len <= end
     }
 
     /// Resolve at `byte`.
-    fn def_at(state: &DocumentState, byte: usize) -> Option<Location> {
+    fn def_at(state: &DocumentState, byte: usize) -> Option<Range> {
         let pos = state.line_index.position(&state.source, byte);
-        goto_definition(state, pos, uri())
+        goto_definition(state, pos)
     }
 
     #[test]
@@ -254,7 +247,7 @@ mod tests {
             let loc = def_at(&state, src.rfind(name).unwrap()).expect("definition found");
             assert_eq!(start_offset(&state, &loc), src.find(name).unwrap());
             assert_eq!(
-                state.line_index.offset(&state.source, loc.range.end),
+                state.line_index.offset(&state.source, loc.end),
                 Some(src.find(name).unwrap() + name.len()),
             );
         }

@@ -721,13 +721,25 @@ impl fmt::Display for AdvancedNumber {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Int(i) => write!(f, "{i}"),
-            Self::Float(ff) => {
-                let mut buffer = ryu::Buffer::new();
-                f.write_str(buffer.format(*ff))
-            }
+            Self::Float(ff) => format_float(*ff, f),
             Self::Rational(r) => write!(f, "{r}"),
             Self::Complex(r) => write!(f, "{r}"),
         }
+    }
+}
+
+/// A float the way it would be written in a program: `5.0` (not `5`), `0.1`,
+/// `0.00000015`, `Inf`, `-Inf` and `NaN`. The digits are the fewest that read
+/// back as the same float.
+pub fn format_float(value: f64, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    if value.is_nan() {
+        f.write_str("NaN")
+    } else if value.is_infinite() {
+        f.write_str(if value > 0.0 { "Inf" } else { "-Inf" })
+    } else if value.fract() == 0.0 {
+        write!(f, "{value}.0")
+    } else {
+        write!(f, "{value}")
     }
 }
 

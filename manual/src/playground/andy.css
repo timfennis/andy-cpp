@@ -1,0 +1,53 @@
+/* Andy C++ code colours and the editor, shared by the playground page and the
+   manual. The colours follow mdBook's theme classes on <html>, which the
+   playground page sets too: light and rust are light, coal, navy and ayu dark. */
+
+:root, :root.light, :root.rust {
+  /* One Light */
+  --ndc-string: #50a14f; --ndc-literal: #986801; --ndc-keyword: #e45649; --ndc-function: #b07100;
+  --ndc-variable: #4078f2; --ndc-assignment: #0184bc; --ndc-punctuation: #696c77;
+  --ndc-operator: #a626a4; --ndc-comment: #a0a1a7; --ndc-invalid: #e45649;
+  --ndc-error: #b42318; --ndc-muted: #6b6860; --ndc-selection: rgba(64, 120, 242, .22);
+  --ndc-caret: #383a42;
+}
+
+:root.coal, :root.navy, :root.ayu {
+  /* One Dark, as the REPL colours it */
+  --ndc-string: #98c379; --ndc-literal: #d19a66; --ndc-keyword: #e06c75; --ndc-function: #e5c07b;
+  --ndc-variable: #61afef; --ndc-assignment: #56b6c2; --ndc-punctuation: #abb2bf;
+  --ndc-operator: #c678dd; --ndc-comment: #7f848e; --ndc-invalid: #e06c75;
+  --ndc-error: #f97066; --ndc-muted: #7f848e; --ndc-selection: rgba(97, 175, 239, .25);
+  --ndc-caret: #abb2bf;
+}
+
+.tok-string { color: var(--ndc-string); }
+.tok-literal { color: var(--ndc-literal); }
+.tok-keyword { color: var(--ndc-keyword); }
+.tok-function { color: var(--ndc-function); }
+.tok-variable { color: var(--ndc-variable); }
+.tok-assignment { color: var(--ndc-assignment); }
+.tok-punctuation { color: var(--ndc-punctuation); }
+.tok-operator { color: var(--ndc-operator); }
+.tok-comment { color: var(--ndc-comment); font-style: italic; }
+.tok-invalid { color: var(--ndc-invalid); text-decoration: wavy underline; text-underline-offset: 3px; }
+
+.ndc-error { color: var(--ndc-error); }
+.ndc-muted { color: var(--ndc-muted); font-style: italic; }
+
+/* The editor: a transparent textarea over the highlighted code. Both must lay
+   text out identically, so they share every metric below. */
+.ndc-editor { position: relative; min-width: 0; }
+.ndc-editor > * {
+  position: absolute; inset: 0; margin: 0; padding: 16px; border: 0;
+  font: 14px/1.55 ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  tab-size: 4; letter-spacing: 0; white-space: pre; overflow-wrap: normal;
+  background: transparent; color: inherit;
+}
+/* The textarea's scrollbars let it scroll further than the bare <pre>; extra
+   room at the end lets the <pre> always follow. */
+.ndc-editor > pre { overflow: hidden; pointer-events: none; padding-bottom: 64px; padding-right: 64px; }
+.ndc-editor > textarea {
+  /* The text itself shows through from the <pre>; only the caret is drawn here. */
+  overflow: auto; resize: none; outline: none; color: transparent; caret-color: var(--ndc-caret);
+}
+.ndc-editor > textarea::selection { background: var(--ndc-selection); }

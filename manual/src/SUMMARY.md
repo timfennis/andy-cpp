@@ -1,6 +1,7 @@
 # Summary
 
 [Welcome](./welcome.md)
+[Playground](./playground.md)
 
 # Getting Started
 - [Installation](./getting-started/installation.md)
@@ -38,6 +39,7 @@
 
 # Tooling
 - [Editor support](./tooling/editor-support.md)
+- [Formatter](./tooling/formatter.md)
 
 # Troubleshooting
 - [Overload dispatch with collections](./troubleshooting/overload-dispatch-collections.md)

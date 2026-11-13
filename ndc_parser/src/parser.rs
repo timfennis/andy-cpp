@@ -16,7 +16,13 @@ pub struct Parser {
 }
 
 impl Parser {
+    /// A parser over `tokens`, without their comments: a comment can stand
+    /// between any two tokens and never changes what the program means.
     pub fn from_tokens(tokens: Vec<TokenLocation>) -> Self {
+        let tokens = tokens
+            .into_iter()
+            .filter(|token| !matches!(token.token, Token::Comment(_)))
+            .collect();
         Self { tokens, current: 0 }
     }
 
@@ -410,9 +416,13 @@ impl Parser {
         let mut expressions = vec![next(self)?];
         let mut must_be_tuple = must_be_tuple;
         while self.consume_token_if(&[Token::Comma]).is_some() {
-            // Peek at right paren, if that matches we break
-            // this helps us support expressions like `(1,)` and `(1,2,)`
-            if self.match_token(&[Token::RightParentheses]).is_some() {
+            // A comma right before a closing bracket is a trailing comma, as in
+            // `(1, 2,)` and `[1, 2,]`. After a single value in parentheses it
+            // makes a 1-tuple: `(1,)`
+            if self
+                .match_token(&[Token::RightParentheses, Token::RightSquareBracket])
+                .is_some()
+            {
                 must_be_tuple = true;
                 break;
             }
@@ -904,10 +914,12 @@ impl Parser {
     ) -> Result<ExpressionLocation, Error> {
         self.require_current_token_matches(&Token::For)
             .expect("guaranteed to match");
-        let mut iterations = Vec::new();
+        let mut iterations = vec![self.comprehension_clause()?];
 
-        loop {
+        while self.consume_token_if(&[Token::Comma]).is_some() {
             match self.peek_current_token() {
+                // A trailing comma, as in `[x for x in xs,]`
+                Some(token) if token == end_token => break,
                 Some(Token::Comma) => {
                     let current_token = self.require_current_token().expect("must have a token");
                     return Err(Error::with_help(
@@ -916,16 +928,8 @@ impl Parser {
                         "The for comprehension contains two consecutive commas".to_string(),
                     ));
                 }
-                Some(Token::RightSquareBracket) => break,
-                Some(Token::If) => iterations.push(self.if_guard()?),
-                Some(_) => iterations.push(self.for_iteration()?),
-                _ => {}
+                _ => iterations.push(self.comprehension_clause()?),
             }
-
-            // If next is not a comma we break
-            if self.consume_token_if(&[Token::Comma]).is_none() {
-                break;
-            };
         }
 
         let end = self.require_current_token_matches(end_token)?;
@@ -935,6 +939,15 @@ impl Parser {
             iterations,
         }
         .to_location(span.merge(end.span)))
+    }
+
+    /// Parses one clause of a comprehension: an iteration `x in xs` or a guard `if x > 1`
+    fn comprehension_clause(&mut self) -> Result<ForIteration, Error> {
+        if self.peek_current_token() == Some(&Token::If) {
+            self.if_guard()
+        } else {
+            self.for_iteration()
+        }
     }
 
     fn if_guard(&mut self) -> Result<ForIteration, Error> {

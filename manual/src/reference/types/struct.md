@@ -9,10 +9,10 @@ struct Point {
 }
 
 let p = Point(1, 2);
-assert_eq(p.x, 1);
+print(p.x);  // 1
 
 p.y = 20;
-assert_eq(p, Point(1, 20));
+print(p);    // Point {x: 1, y: 20}
 ```
 
 ## Declaring a struct
@@ -29,6 +29,9 @@ struct Person {
 }
 
 struct Marker { }
+
+print(Person("Ada", 36, ["London"]));  // Person {name: "Ada", age: 36, locations: ["London"]}
+print(Marker());                       // Marker {}
 ```
 
 Declare a struct on its own line, like a `let` declaration — at the top level of
@@ -40,7 +43,7 @@ the same name in the same scope is an error, but the name can be reused in
 scopes that never coexist, and a declaration in an inner scope shadows a
 same-named struct from an outer scope.
 
-```ndc
+```ndc,fails
 struct Point { x: Int }
 struct Point { y: Int } // ERROR: Illegal redefinition of struct 'Point'
 ```
@@ -51,7 +54,7 @@ outside.
 
 A struct cannot take the name of a built-in type:
 
-```ndc
+```ndc,fails
 struct Int { x: Float } // ERROR: Struct 'Int' is not allowed to shadow the built-in type 'Int'
 ```
 
@@ -67,13 +70,19 @@ field values positionally, in declaration order.
 struct Point { x: Int, y: Int }
 
 let p = Point(1, 2);
+print(p);  // Point {x: 1, y: 2}
 ```
 
 Constructor calls are checked before the program runs: passing the wrong number of
 arguments or incompatible types is a compile-time error.
 
-```ndc
+```ndc,fails
+struct Point { x: Int, y: Int }
 Point(1);      // ERROR: no 'Point' matches the arguments 'Int'
+```
+
+```ndc,fails
+struct Point { x: Int, y: Int }
 Point("x", 2); // ERROR: no 'Point' matches the arguments 'String, Int'
 ```
 
@@ -88,9 +97,9 @@ works too, so `p.x()` is the same call again.
 struct Point { x: Int, y: Int }
 let p = Point(1, 2);
 
-assert_eq(p.x, 1);
-assert_eq(x(p), 1);
-assert_eq(p.x(), 1);
+print(p.x);    // 1
+print(x(p));   // 1
+print(p.x());  // 1
 ```
 
 Like a method call, `p.x` only looks among functions, so a variable named `x`
@@ -98,21 +107,25 @@ doesn't get in its way, as described in
 [How a call finds its function](function.md#how-a-call-finds-its-function):
 
 ```ndc
+struct Point { x: Int, y: Int }
 fn shift(p, x) { p.x + x }   // p.x is the field, x the parameter
+
+print(shift(Point(1, 2), 10));  // 11
 ```
 
 Because getters are ordinary function values you can pass them to higher-order
 functions:
 
 ```ndc
+struct Point { x: Int, y: Int }
 let points = [Point(1, 10), Point(2, 20)];
 
-assert_eq(points.map(x), [1, 2]);
-assert_eq(points.map(fn (p) => p.x), points.map(x));
+print(points.map(x));                // [1,2]
+print(points.map(fn (p) => p.x));    // [1,2]
 
 // The constructor is a function value too.
 struct Wrap { v: Int }
-assert_eq([1, 2, 3].map(Wrap), [Wrap(1), Wrap(2), Wrap(3)]);
+print([1, 2, 3].map(Wrap));          // [Wrap {v: 1},Wrap {v: 2},Wrap {v: 3}]
 ```
 
 Accessors are resolved by overloading, so two structs can share a field name
@@ -122,8 +135,8 @@ without interfering:
 struct Foo { size: Int }
 struct Bar { size: Int }
 
-assert_eq(Foo(1).size, 1);
-assert_eq(Bar(10).size, 10);
+print(Foo(1).size);   // 1
+print(Bar(10).size);  // 10
 ```
 
 Because `s.f()` is method-call syntax, calling a *function stored in a field*
@@ -134,19 +147,24 @@ needs parentheses around the member access: `(s.f)()` first evaluates `s.f`
 struct Callback { f: Any }
 let cb = Callback(fn (a) => a * 2);
 
+print((cb.f)(21));  // 42
+```
+
+```ndc,fails
+struct Callback { f: Any }
+let cb = Callback(fn (a) => a * 2);
+
 cb.f(21);    // ERROR: this is method-call syntax for `f(cb, 21)`
-(cb.f)(21)   // 42: reads the field, then calls the stored function
 ```
 
 ## Field assignment
 
 `p.x = value` writes to a field. The value must fit the field's declared type:
 
-```ndc
+```ndc,fails
 struct Point { x: Int }
 let p = Point(1);
 
-p.x = 10;      // fine
 p.x = "ten";   // ERROR: mismatched types: found String but expected Int
 ```
 
@@ -158,13 +176,16 @@ struct Counter { hits: Int }
 let c = Counter(1);
 
 c.hits += 4;
-assert_eq(c.hits, 5);
+print(c.hits);  // 5
 ```
 
 A field is a typed location, so an augmented assignment whose result would not
 fit the field type is rejected:
 
-```ndc
+```ndc,fails
+struct Counter { hits: Int }
+let c = Counter(1);
+
 c.hits += 0.5; // ERROR: mismatched types: found Float but expected Int
 ```
 
@@ -181,7 +202,7 @@ let a = Point(1, 2);
 let b = a;
 b.x = 99;
 
-assert_eq(a.x, 99);
+print(a.x);  // 99
 ```
 
 Use `clone` for an independent instance (nested containers are still shared,
@@ -189,10 +210,13 @@ like cloning a list of lists) or `deepcopy` to duplicate nested mutable state
 as well:
 
 ```ndc
+struct Point { x: Int, y: Int }
+let a = Point(99, 2);
+
 let c = clone(a);
 c.x = 1;
-assert_eq(a.x, 99);
-assert_eq(c.x, 1);
+print(a.x);  // 99
+print(c.x);  // 1
 ```
 
 ## Equality and hashing
@@ -204,9 +228,9 @@ instances of different structs are never equal, even when the fields match.
 struct Foo { v: Int }
 struct Bar { v: Int }
 
-assert_eq(Foo(1) == Foo(1), true);
-assert_eq(Foo(1) == Foo(2), false);
-assert_eq(Foo(1) == Bar(1), false);
+print(Foo(1) == Foo(1));  // true
+print(Foo(1) == Foo(2));  // false
+print(Foo(1) == Bar(1));  // false
 ```
 
 Instances are hashable, so they work as map keys and set members:
@@ -215,7 +239,7 @@ Instances are hashable, so they work as map keys and set members:
 struct Point { x: Int, y: Int }
 
 let visited = %{Point(0, 0): true};
-assert_eq(visited[Point(0, 0)], true);
+print(visited[Point(0, 0)]);  // true
 ```
 
 ## Structs and JSON
@@ -224,11 +248,11 @@ assert_eq(visited[Point(0, 0)], true);
 object decodes back to a map, not a struct. Use `json_encode_lossy` to encode an
 instance as a JSON object with the field names as keys.
 
-```ndc
+```ndc,fails
 struct Point { x: Int, y: Int }
 
-json_encode_lossy(Point(1, 2)); // "{\"x\":1,\"y\":2}"
-json_encode(Point(1, 2));       // ERROR: cannot convert a struct to JSON
+print(json_encode_lossy(Point(1, 2)));  // {"x":1,"y":2}
+json_encode(Point(1, 2));                // ERROR: cannot convert a struct to JSON
 ```
 
 ## Current limitations

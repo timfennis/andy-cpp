@@ -32,6 +32,22 @@ cargo run --bin ndc -- script.ndc
 # Disassemble bytecode
 cargo run --bin ndc -- disassemble script.ndc
 
+# Build the interpreter for the browser into manual/src/playground/pkg (needs the
+# wasm32-unknown-unknown target and wasm-bindgen-cli at the version in Cargo.lock),
+# then serve the manual with its playground and runnable examples
+./ndc_wasm/build.sh
+mdbook serve manual
+
+# Bundle the playground's code editor (CodeMirror) into manual/src/playground/editor.js.
+# Without it the playground falls back to a plain editor. npm never runs on the host:
+# the script runs it in a Docker image pinned by digest, from manual/editor's lockfile
+# (exact versions, install scripts off). Add or upgrade packages with
+# `./manual/editor/build.sh add <package>`, which only takes versions over 30 days old.
+./manual/editor/build.sh
+
+# Format .ndc files in place (--check lists unformatted files instead)
+cargo run --bin ndc -- fmt script.ndc
+
 # Show documentation (optionally filtered by query)
 cargo run --bin ndc -- docs [query] [--no-color]
 
@@ -48,6 +64,8 @@ perf report -i /tmp/out.perf --stdio --no-children --percent-limit=1
 User-facing language documentation lives in `manual/src/`. It is an mdBook project. The entry point is `manual/src/SUMMARY.md`.
 
 When making changes that affect language behaviour or runtime semantics, update the relevant manual page.
+
+The published manual highlights ` ```ndc ` code blocks and gives them a Run button, running them on the interpreter compiled to WebAssembly (`manual/theme/ndc.js`). Mark a block that can't run on its own, such as a fragment that uses names from an earlier block, as ` ```ndc,norun `. Write examples so running them shows the result: `print(-7 / 2);  // -3` rather than `assert_eq(-7 / 2, -3);`, with the exact printed output in the comment. A block that demonstrates a runtime error ends with it, as nothing after the first error runs, and is marked ` ```ndc,fails `. `tests/functional/tests/manual.rs` runs every block that isn't `norun` and checks all of this: blocks fail exactly when marked `fails`, the others show something, and print comments match the output (`cargo test -p functional_tests --test manual`). The playground page and the code it shares with the manual live in `manual/src/playground/`.
 
 ## Architecture
 
@@ -84,8 +102,12 @@ The AST is syntax only. The analyser runs name resolution (`ndc_resolver`) on ea
 | `ndc_interpreter` | `Interpreter` facade (analyse + compile + run via VM) |
 | `ndc_vm` | Bytecode `Compiler`, stack-based `Vm`, and the runtime `Value` (including `Number`) |
 | `ndc_stdlib` | Built-in functions registered via `FunctionRegistry` |
-| `ndc_lsp` | LSP backend (hover, inlay hints) |
-| `ndc_bin` | CLI entry point, REPL, syntax highlighting |
+| `ndc_lsp` | Language features (completion, hover, diagnostics, inlay hints, symbols, go-to-definition) over a `Document`; with the default `server` feature, the LSP server that serves them over stdio |
+| `ndc_diagnostics` | Renders `InterpreterError`s as codespan reports, for the CLI (coloured, `color` feature) and the browser (plain text) |
+| `ndc_highlight` | Classifies the pieces of a program (keyword, function, comment, …) for syntax highlighting, from the lexer and parser |
+| `ndc_fmt` | Code formatter (`ndc fmt`): lays the AST out as a Wadler/Prettier-style document and prints it within 120 columns, keeping the source's tokens, parentheses and comments; re-parses its output to check the program is unchanged |
+| `ndc_bin` | CLI entry point, REPL, terminal colours for the highlighting |
+| `ndc_wasm` | The interpreter, highlighter and language features (`ndc_lsp` without its server) for the browser via wasm-bindgen, used by the manual's playground; its editor is bundled from `manual/editor/` |
 
 ### Key Concepts
 
@@ -112,6 +134,7 @@ Test crates live under `tests/`:
   // expect-output: 42      ← assert stdout equals this
   // expect-error: divide   ← assert error message contains this substring
   ```
+  It also generates one test per ` ```ndc ` block in the manual (`manual_<page>_<line>`), run by `tests/manual.rs`; see [Manual](#manual).
 - `tests/compiler/` (`compiler_tests`) — validates the bytecode compiler by asserting exact `OpCode` sequences. Use when adding new VM instructions.
 - `ndc_bin/tests/repl.rs` — feeds lines to the built `ndc` binary's REPL (Unix only) and checks what it prints, e.g. that a failed line leaves no trace.
 - `tests/proptest/` (`proptest_tests`) — property-based panic fuzzer over random token streams. The fresh-fuzz test is `#[ignore]`d; regression replay (from `panic.regressions`) runs by default. See [CONTRIBUTING.md](CONTRIBUTING.md) for run commands.

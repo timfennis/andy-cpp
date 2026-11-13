@@ -1,7 +1,7 @@
+use lsp_types::{Diagnostic, DiagnosticSeverity};
 use ndc_interpreter::{AnalysisError, AnalysisResult, InterpreterError};
 use ndc_lexer::{SourceId, Span};
 use ndc_parser::ExpressionLocation;
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity};
 
 use crate::util::span_to_range;
 

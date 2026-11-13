@@ -1,2 +1,7 @@
 /target
 /*.ndc
+# Built by ndc_wasm/build.sh
+/manual/src/playground/pkg/
+# Built by manual/editor/build.sh
+/manual/src/playground/editor.js
+/manual/src/playground/editor.licenses.txt

@@ -1,0 +1,13 @@
+[package]
+name = "ndc_diagnostics"
+edition.workspace = true
+version.workspace = true
+
+[features]
+# Printing coloured reports to stderr; the browser build only renders strings.
+color = ["codespan-reporting/termcolor"]
+
+[dependencies]
+codespan-reporting = { version = "0.13.1", default-features = false, features = ["std"] }
+ndc_interpreter.workspace = true
+ndc_lexer.workspace = true

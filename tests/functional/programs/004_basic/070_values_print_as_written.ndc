@@ -1,0 +1,21 @@
+// Values print the way they would be written in a program.
+print([()]);
+print((1,));
+print(Some("hi"), Some(()));
+print(%{1});
+// Map order varies, so check the mixed map either way round.
+let mixed = "" <> %{1: (), 2: 3};
+print(mixed == "%{1: (),2: 3}" or mixed == "%{2: 3,1: ()}");
+print(5.0, 0.1, 2.0 ^ 70, 0.00000015);
+print(1.0 / 0.0, -1.0 / 0.0, 0.0 / 0.0);
+print(1n / 0n, 42.0n);
+print(10 <> 5.0);
+// expect-output: [()]
+// expect-output: (1,)
+// expect-output: Some("hi") Some(())
+// expect-output: %{1}
+// expect-output: true
+// expect-output: 5.0 0.1 1180591620717411300000.0 0.00000015
+// expect-output: Inf -Inf NaN
+// expect-output: Inf 42.0
+// expect-output: 105.0

@@ -42,13 +42,14 @@ You can use the same syntax in a list comprehension.
 
 ```ndc
 // Produce a series of perfect squares
-let perfect_squares = [x * x for x in 1..10];
+let perfect_squares = [x * x for x in 1..=10];
 
-assert_eq([1,4,9,16,25,36,49,64,81,100], perfect_squares);
+print(perfect_squares);  // [1,4,9,16,25,36,49,64,81,100]
 ```
 
 The earlier example can also produce pairs:
 
 ```ndc
-let pairs_with_even_sum = [x, y for x in 1..10, y in 1..10, if (x + y) % 2 == 0]
+let pairs_with_even_sum = [x, y for x in 1..10, y in 1..10, if (x + y) % 2 == 0];
+print(pairs_with_even_sum[0..4]);  // [(1,1),(1,3),(1,5),(1,7)]
 ```

@@ -1,0 +1,9 @@
+[package]
+name = "ndc_highlight"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+ahash.workspace = true
+ndc_lexer.workspace = true
+ndc_parser.workspace = true

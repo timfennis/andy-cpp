@@ -51,7 +51,7 @@ fn sum(Iterable<Number>) -> Number
 A value the analyser only knows as `List<Any>` matches none of them. Rather than dispatch on
 it and scan, the call is rejected at compile time:
 
-```ndc
+```ndc,fails
 let values: List<Any> = [1, 2, 3];
 values.sum()
 // error[analysis]: No function called 'sum' found that matches the arguments 'List<Any>'
@@ -73,14 +73,14 @@ cost lands at a site you wrote rather than inside every dispatch:
 let values: List<Any> = [1, 2, 3];
 
 // values is typed List<Any>; the cast recovers Int so sum can resolve.
-assert_eq((values as List<Int>).sum(), 6);
+print((values as List<Int>).sum());  // 6
 ```
 
 Otherwise, move the call to a location where Andy C++ can infer the argument types
 statically — for example, directly at the call site rather than through an intermediate
 untyped function parameter:
 
-```ndc
+```ndc,norun
 // The type of `data` is Any here — dynamic dispatch used
 fn handle(data) {
     process(data)
