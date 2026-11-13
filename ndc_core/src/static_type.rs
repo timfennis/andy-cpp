@@ -14,26 +14,6 @@ impl Default for TypeSignature {
     }
 }
 
-impl TypeSignature {
-    pub fn from_annotated_bindings(bindings: Vec<(String, Option<StaticType>)>) -> Self {
-        Self::Exact(
-            bindings
-                .into_iter()
-                .map(|(name, annotation)| {
-                    Parameter::new(name, annotation.unwrap_or(StaticType::Any))
-                })
-                .collect(),
-        )
-    }
-
-    pub fn types(&self) -> Option<Vec<StaticType>> {
-        match self {
-            Self::Variadic => None,
-            Self::Exact(v) => Some(v.iter().map(|p| p.type_name.clone()).collect()),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct Parameter {
     pub name: String,
@@ -465,6 +445,21 @@ impl StaticType {
             | Self::Int
             | Self::String => false,
         }
+    }
+
+    /// The type parameters in this type, each once, outermost first: `T`
+    /// and `U` in `Fn(T) -> List<U>`.
+    pub fn type_parameters(&self) -> Vec<Box<str>> {
+        let names = std::cell::RefCell::new(Vec::<Box<str>>::new());
+        self.contains(&|part| {
+            if let Self::Generic(name) = part
+                && !names.borrow().contains(name)
+            {
+                names.borrow_mut().push(name.clone());
+            }
+            false
+        });
+        names.into_inner()
     }
 
     /// Whether any type variable is left in this type.

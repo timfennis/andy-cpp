@@ -59,9 +59,6 @@ fn register_get(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     for signature in [
         "<T>(List<T>, Int) -> T",
         "<T>(List<T>, Iterator<Int>) -> List<T>",
-        // An index whose type isn't known could be either, and keeps the
-        // allocation-free path rather than falling back to `[](Any, Any)`.
-        "<T>(List<T>, Any) -> Any",
     ] {
         env.declare_global_fn(Rc::new(NativeFunction {
             name: "[]".to_string(),
@@ -99,7 +96,6 @@ fn register_get(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     for signature in [
         "<T>(Deque<T>, Int) -> T",
         "<T>(Deque<T>, Iterator<Int>) -> List<T>",
-        "<T>(Deque<T>, Any) -> Any",
     ] {
         env.declare_global_fn(Rc::new(NativeFunction {
             name: "[]".to_string(),

@@ -2,21 +2,13 @@
 
 ## Background
 
-When Andy C++ can determine at compile time which function overload to call, it does so — the
-call is free of any type-checking overhead at runtime. When it cannot (because an argument was
-inferred as `Any`), the VM performs **dynamic dispatch**: it tests each candidate overload at
-runtime to find the best match.
+Andy C++ picks the overload a call uses before the program runs, from the types of its arguments, so the call costs nothing extra at runtime. Only when an argument has type `Any`, because it was annotated as `Any` or comes from a function that returns `Any`, does the VM pick as the program runs, by testing each candidate overload against the values.
 
-The reverse also holds. Sometimes every argument type is known at compile time, but no
-overload can accept them: each candidate is fully annotated, and none matches the call's
-arity and argument types. Such a call could only ever fail at runtime. Instead of waiting
-for that, it is rejected at compile time with a
-`No function called '…' found that matches the arguments` error.
+The reverse also holds. When every argument type is known and no overload can accept them, the call could only ever fail at runtime, so it is rejected before the program runs with a `No function called '…' found that matches the arguments` error.
 
-## O(1) dispatch guarantee
+## Element types cost a scan
 
-For dynamic dispatch the VM checks whether a value *conforms to* the parameter type without
-iterating the container contents. Specifically:
+To pick an overload for a value of type `Any`, the VM first looks only at what kind of value it is, which doesn't depend on its size:
 
 | Parameter type | Check performed |
 |---|---|
@@ -26,21 +18,18 @@ iterating the container contents. Specifically:
 | `Iterable` | Is the value any sequence type? |
 | `String`, `Int`, … | Exact kind check |
 
-This means that dispatch is **O(1)** regardless of how many elements are in the collection.
-
-## Element types are checked only when nothing else fits
-
-Because the element-type check is skipped, a parameter like `List<Int>` doesn't take a list in that first pass. When no overload takes the arguments without looking at their elements, the VM checks the elements before the call fails, scanning each container. So two overloads like these still work under dynamic dispatch:
+A parameter like `List<Int>` doesn't take a list in that first pass. When no overload takes the arguments without looking at their elements, the VM checks the elements before the call fails, scanning each container. So two overloads like these still work for a value of type `Any`:
 
 ```
-fn process(List<Int>)
-fn process(List<String>)
+fn process(xs: List<Int>)
+fn process(xs: List<String>)
 ```
 
-Each call through an `Any` scans the list, though, and an overload that takes the value without looking at its elements, like `process(Any)`, is picked before either of them.
+Each call through an `Any` scans the list, though, and an overload that takes the value without looking at its elements, like `process(x: Any)`, is picked before either of them.
 
-Standard library overloads do differ by element type. Numeric sequence functions preserve the
-concrete numeric type, so `sum` has three typed overloads:
+## A `List<Any>` fits no typed overload
+
+Standard library overloads also differ by element type. Numeric sequence functions keep the numeric type, so `sum` has three typed overloads:
 
 ```
 fn sum(Iterable<Int>) -> Int
@@ -48,8 +37,7 @@ fn sum(Iterable<Float>) -> Float
 fn sum(Iterable<Number>) -> Number
 ```
 
-A value the analyser only knows as `List<Any>` matches none of them. Rather than dispatch on
-it and scan, the call is rejected at compile time:
+A value known only as a `List<Any>` fits none of them, as its elements could be anything. Rather than pick as the program runs and scan, the call is rejected before it runs:
 
 ```ndc,fails
 let values: List<Any> = [1, 2, 3];
@@ -59,15 +47,9 @@ values.sum()
 //   as in `value as List<Int>`.
 ```
 
-Overloads that differ only by container *kind* (e.g. `pop(List<T>)` vs `pop(MinHeap<T>)`)
-are still distinguished by the kind check alone. User-defined functions cannot yet declare
-typed container parameters (the syntax is not implemented), so user overloads always use
-`Any`.
-
 ## Workaround
 
-State the element type with a [cast](../features/casts.md). A cast scans the value, but the
-cost lands at a site you wrote rather than inside every dispatch:
+State the element type with a [cast](../features/casts.md). A cast scans the value, but the cost lands at a site you wrote rather than inside every call:
 
 ```ndc
 let values: List<Any> = [1, 2, 3];
@@ -76,16 +58,4 @@ let values: List<Any> = [1, 2, 3];
 print((values as List<Int>).sum());  // 6
 ```
 
-Otherwise, move the call to a location where Andy C++ can infer the argument types
-statically — for example, directly at the call site rather than through an intermediate
-untyped function parameter:
-
-```ndc,norun
-// The type of `data` is Any here — dynamic dispatch used
-fn handle(data) {
-    process(data)
-}
-
-// Preferred: call process() directly where the type is known
-process(my_list)
-```
+Better still, leave out the `Any`: a value keeps the type it was created with unless it passes through something typed `Any`, and a parameter without an annotation takes the type of each call's argument.

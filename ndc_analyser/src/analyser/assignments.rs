@@ -3,10 +3,11 @@ use super::solver::{CallNodes, CallSite};
 use crate::error::AnalysisError;
 use crate::overloads::{CallKind, ResolvedCall};
 use itertools::izip;
-use ndc_analysis::Binding;
+use ndc_analysis::{Binding, Candidate};
 use ndc_core::{NodeId, StaticType};
 use ndc_lexer::Span;
 use ndc_parser::{AssignmentTarget, AssignmentTargetLocation, ExpressionLocation};
+use ndc_resolver::SymbolId;
 
 impl Analyser {
     /// Analyses `l_value op= r_value`: picks the in-place overload (`+=`) if one
@@ -92,29 +93,14 @@ impl Analyser {
                 self.record_augmented_pick(id, Binding::Resolved(candidate));
                 None
             }
-            Binding::Dynamic(mut assign_candidates) if assign_is_eligible => {
-                match op_binding.clone() {
-                    Binding::Resolved(candidate) => {
-                        if !assign_candidates.contains(&candidate) {
-                            assign_candidates.push(candidate);
-                        }
-                    }
-                    Binding::Dynamic(op_candidates) => {
-                        for candidate in op_candidates {
-                            if !assign_candidates.contains(&candidate) {
-                                assign_candidates.push(candidate);
-                            }
-                        }
-                    }
-                    Binding::None => {}
-                }
-
+            Binding::Dynamic(assign_candidates) if assign_is_eligible => {
+                let binding = Self::in_place_then_operators(assign_candidates, op_binding.clone());
                 let result_type = if has_op_binding {
                     assign_return.join(&op_return)
                 } else {
                     assign_return
                 };
-                self.record_augmented_pick(id, Binding::Dynamic(assign_candidates));
+                self.record_augmented_pick(id, binding);
                 Some(result_type)
             }
             Binding::Resolved(_) | Binding::Dynamic(_) => {
@@ -138,6 +124,26 @@ impl Analyser {
         };
 
         writeback_type.unwrap_or_else(|| left_type.clone())
+    }
+
+    /// What `a op= b` does when the program picks as it runs: the in-place
+    /// overloads `in_place` first, so it mutates in place where it can, and
+    /// then the operators `operators` picks that aren't among them.
+    pub(super) fn in_place_then_operators(
+        mut in_place: Vec<Candidate<SymbolId>>,
+        operators: Binding<SymbolId>,
+    ) -> Binding<SymbolId> {
+        let operators = match operators {
+            Binding::Resolved(operator) => vec![operator],
+            Binding::Dynamic(operators) => operators,
+            Binding::None => Vec::new(),
+        };
+        for operator in operators {
+            if !in_place.contains(&operator) {
+                in_place.push(operator);
+            }
+        }
+        Binding::Dynamic(in_place)
     }
 
     /// Records where an assignment stores its value, and returns the type of
@@ -286,6 +292,22 @@ impl Analyser {
         true
     }
 
+    /// Checks that a value of `value_type` can be stored where values of
+    /// `stored_type` are kept, as [`Self::accepts_write`], and reports it
+    /// where it can't. A constraint that waited settles the type it gave
+    /// out this way, which code analysed meanwhile may have settled already.
+    pub(super) fn check_write(
+        &mut self,
+        stored_type: &StaticType,
+        value_type: &StaticType,
+        span: Span,
+        node: Option<NodeId>,
+    ) {
+        if !self.accepts_write(stored_type, value_type, node) {
+            self.emit_rejected_write(stored_type, value_type, span);
+        }
+    }
+
     /// Reports that a value of `value_type` can't be stored where values of
     /// `stored_type` are kept.
     pub(super) fn emit_rejected_write(
@@ -315,14 +337,10 @@ impl Analyser {
             AssignmentTarget::Identifier { .. }
                 if self.picks.variables.contains_key(&lvalue.id) =>
             {
-                if !self.accepts_write(stored_type, value_type, Some(lvalue.id)) {
-                    self.emit_rejected_write(stored_type, value_type, span);
-                }
+                self.check_write(stored_type, value_type, span, Some(lvalue.id));
             }
             AssignmentTarget::Member { .. } => {
-                if !self.accepts_write(stored_type, value_type, Some(lvalue.id)) {
-                    self.emit_rejected_write(stored_type, value_type, span);
-                }
+                self.check_write(stored_type, value_type, span, Some(lvalue.id));
             }
             AssignmentTarget::Index { index, .. } => {
                 if self.accepts_write(stored_type, value_type, Some(lvalue.id)) {

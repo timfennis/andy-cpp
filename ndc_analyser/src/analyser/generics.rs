@@ -201,7 +201,11 @@ impl Analyser {
             .chain(uses.iter().flat_map(|generic_use| &generic_use.key))
             .chain(literal_nodes.iter().map(|(_, typ)| typ))
         {
-            collect_type_parameters(typ, &mut key);
+            for name in typ.type_parameters() {
+                if !key.contains(&name) {
+                    key.push(name);
+                }
+            }
         }
         self.schemes.insert(
             symbol,
@@ -456,55 +460,38 @@ impl Analyser {
     fn merge_copies(&mut self) {
         let serials = self.generic_constraints();
         let mut kept: Vec<u64> = Vec::new();
+        // A call's arguments and result, as one type, so copies of one
+        // literal in them become one, as they're settled the same way.
+        let call_types = |call: &CallConstraint| {
+            StaticType::Tuple(
+                call.arguments()
+                    .iter()
+                    .chain([call.result()])
+                    .cloned()
+                    .collect(),
+            )
+        };
         for serial in serials {
-            let duplicate = {
-                let waiting = &self.waiting[&serial];
-                let Constraint::Call(call) = &waiting.constraint else {
-                    continue;
-                };
-                if waiting.origin.is_none() {
-                    kept.push(serial);
-                    continue;
-                }
-                kept.iter().copied().find(|earlier| {
-                    let Constraint::Call(earlier) = &self.waiting[earlier].constraint else {
-                        return false;
-                    };
-                    earlier.is_same_call(call, &self.vars)
-                })
+            let waiting = &self.waiting[&serial];
+            let Constraint::Call(call) = &waiting.constraint else {
+                continue;
             };
-            match duplicate {
-                Some(earlier) => {
-                    let (Constraint::Call(earlier), Constraint::Call(call)) = (
-                        &self.waiting[&earlier].constraint,
-                        &self.waiting[&serial].constraint,
-                    ) else {
-                        unreachable!("both are calls");
-                    };
-                    // Copies of one literal become one, as they're settled
-                    // the same way.
-                    let earlier = StaticType::Tuple(
-                        earlier
-                            .arguments()
-                            .iter()
-                            .chain([earlier.result()])
-                            .cloned()
-                            .collect(),
-                    );
-                    let later = StaticType::Tuple(
-                        call.arguments()
-                            .iter()
-                            .chain([call.result()])
-                            .cloned()
-                            .collect(),
-                    );
-                    if self.vars.try_unify(&earlier, &later) {
-                        self.waiting.remove(&serial);
-                    } else {
-                        kept.push(serial);
-                    }
-                }
-                None => kept.push(serial),
+            // Only a copy can be the same as an earlier call.
+            let earlier = waiting.origin.as_ref().and_then(|_| {
+                kept.iter()
+                    .find_map(|earlier| match &self.waiting[earlier].constraint {
+                        Constraint::Call(earlier) if earlier.is_same_call(call, &self.vars) => {
+                            Some(earlier)
+                        }
+                        _ => None,
+                    })
+            });
+            if let Some(earlier) = earlier
+                && self.vars.try_unify(&call_types(earlier), &call_types(call))
+            {
+                self.waiting.remove(&serial);
+            } else {
+                kept.push(serial);
             }
         }
         self.solve_waiting();
@@ -620,22 +607,6 @@ impl Analyser {
                 ));
                 return;
             }
-        }
-    }
-}
-
-/// Adds the type parameters in `typ` that `parameters` doesn't have yet.
-fn collect_type_parameters(typ: &StaticType, parameters: &mut Vec<Box<str>>) {
-    let found = std::cell::RefCell::new(Vec::new());
-    typ.contains(&|part| {
-        if let StaticType::Generic(name) = part {
-            found.borrow_mut().push(name.clone());
-        }
-        false
-    });
-    for name in found.into_inner() {
-        if !parameters.contains(&name) {
-            parameters.push(name);
         }
     }
 }
