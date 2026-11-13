@@ -216,6 +216,9 @@ pub(super) struct CallConstraint {
     kind: CallKind,
     name: String,
     span: Span,
+    /// The index of `t[1]`, a number written in the code, which picks the
+    /// element of a tuple `t` and its type.
+    tuple_index: Option<i64>,
 }
 
 impl CallConstraint {
@@ -247,6 +250,7 @@ impl CallConstraint {
         std::mem::discriminant(&self.site) == std::mem::discriminant(&other.site)
             && self.kind == other.kind
             && self.candidates == other.candidates
+            && self.tuple_index == other.tuple_index
             && self.arguments.len() == other.arguments.len()
             && self
                 .arguments
@@ -269,6 +273,22 @@ impl Analyser {
         name: &str,
         span: Span,
     ) -> StaticType {
+        self.constrain_index_call(site, arguments, nodes, kind, name, span, None)
+    }
+
+    /// [`Self::constrain_call`], for `[]` with the index `tuple_index` when
+    /// it's a number written in the code, which picks a tuple's element.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn constrain_index_call(
+        &mut self,
+        site: CallSite,
+        arguments: Vec<StaticType>,
+        nodes: CallNodes,
+        kind: CallKind,
+        name: &str,
+        span: Span,
+        tuple_index: Option<i64>,
+    ) -> StaticType {
         let mut call = CallConstraint {
             candidates: self.site_candidates(site).clone(),
             site,
@@ -278,6 +298,7 @@ impl Analyser {
             kind,
             name: name.to_string(),
             span,
+            tuple_index,
         };
         if let Some(typ) = self.try_call(&call) {
             return typ;
@@ -1172,6 +1193,34 @@ impl Analyser {
             .iter()
             .map(|argument| self.vars.resolve(argument))
             .collect::<Vec<_>>();
+        // A tuple indexed by a number written in the code gives that
+        // element, of its own type: `(1, "a")[1]` is a String, and
+        // `(1, "a")[-2]` an Int.
+        if let (Some(index), Some(StaticType::Tuple(elements))) =
+            (call.tuple_index, arguments.first())
+        {
+            let length = i64::try_from(elements.len()).expect("a tuple's length fits an i64");
+            let position = if index < 0 { length + index } else { index };
+            let element = usize::try_from(position)
+                .ok()
+                .and_then(|position| elements.get(position))
+                .cloned();
+            let indexed = vec![arguments[0].clone(), StaticType::Int];
+            if let [_, index_type] = &arguments[..] {
+                self.vars.bind_argument(&StaticType::Int, index_type);
+            }
+            self.resolve_call_now(call, &indexed);
+            let Some(element) = element else {
+                self.emit(AnalysisError::tuple_index_out_of_bounds(
+                    index,
+                    elements.len(),
+                    call.span,
+                ));
+                return Some(StaticType::Any);
+            };
+            return Some(element);
+        }
+
         let reachable = self.overloads().reachable_symbols(&call.candidates);
 
         // A generic function that calls itself with an argument made from
