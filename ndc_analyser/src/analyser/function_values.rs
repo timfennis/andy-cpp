@@ -283,6 +283,12 @@ impl Analyser {
     /// of it decides it, and returns whether it did.
     pub(super) fn try_function_value(&mut self, value: &FunctionValue) -> bool {
         let expected = self.vars.resolve(&value.expected);
+        // What's expected of it comes from a check that failed, as in
+        // `missing().map(abs)`, which was reported there.
+        if expected.has_errors() {
+            self.give_up_on_function_value(value);
+            return true;
+        }
         match self.choose_function_value(value, &expected) {
             Choice::One(symbol) => {
                 self.commit_function_value(value, symbol, expected.has_vars());

@@ -111,6 +111,14 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_check_is_shown_as_any() {
+        // `len(true)` fails, and what it gives is shown as `Any`.
+        let hints = collect_hints("let n = len(true);\nlet m = [n, n];");
+        assert!(has_label(&hints, |l| l == ": Any"), "{hints:?}");
+        assert!(has_label(&hints, |l| l == ": List<Any>"), "{hints:?}");
+    }
+
+    #[test]
     fn annotated_let_binding_skips_type_inlay() {
         let hints = collect_hints("let value: Int = 1;");
         assert!(!has_label(&hints, |l| l == ": Int"));

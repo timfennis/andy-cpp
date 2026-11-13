@@ -226,8 +226,9 @@ impl Analyser {
     /// `typ`, the type of the generic function `symbol`, unless it has more
     /// parts than the analyser can work with, as when each function in a
     /// chain doubles what the previous one returns: `fn f1(x) => f0(f0(x))`
-    /// with `fn f0(x) => (x, x)`. Then it's reported, and the function takes
-    /// and returns `Any`, so what calls it isn't built from its type.
+    /// with `fn f0(x) => (x, x)`. Then it's reported, and what the function
+    /// takes and returns are failed checks, so what calls it isn't built
+    /// from its type, and isn't reported again.
     fn within_size_limit(
         &mut self,
         symbol: SymbolId,
@@ -251,11 +252,11 @@ impl Analyser {
         ));
         self.schemes.remove(&symbol);
         let StaticType::Function { parameters, .. } = typ else {
-            return StaticType::Any;
+            return StaticType::Error;
         };
         StaticType::Function {
-            parameters: parameters.map(|parameters| vec![StaticType::Any; parameters.len()]),
-            return_type: Box::new(StaticType::Any),
+            parameters: parameters.map(|parameters| vec![StaticType::Error; parameters.len()]),
+            return_type: Box::new(StaticType::Error),
         }
     }
 
@@ -336,7 +337,7 @@ impl Analyser {
                     return;
                 }
                 // If the type is a fixed-length Tuple whose arity doesn't match
-                // the number of bindings, fall back to Any for each element. This
+                // the number of bindings, bind each name as a failed check. This
                 // can happen when a variable is declared with one type (e.g. ())
                 // and later reassigned to a tuple of a different arity — the
                 // analyser doesn't track reassignment types.
@@ -351,7 +352,7 @@ impl Analyser {
                                 elems.len(),
                                 span,
                             ));
-                            self.bind_patterns_as_any(seq, span);
+                            self.bind_patterns_as_errors(seq, span);
                             return;
                         } else {
                             Box::new(elems.iter())
@@ -360,7 +361,7 @@ impl Analyser {
                         iter
                     } else {
                         self.emit(AnalysisError::unable_to_unpack_type(&resolved_type, span));
-                        self.bind_patterns_as_any(seq, span);
+                        self.bind_patterns_as_errors(seq, span);
                         return;
                     };
 
@@ -390,18 +391,18 @@ impl Analyser {
 
                 if desired_length != actual_len {
                     self.emit(AnalysisError::unable_to_unpack_type(&found_type, span));
-                    self.bind_patterns_as_any(&seq[actual_len..], span);
+                    self.bind_patterns_as_errors(&seq[actual_len..], span);
                 }
             }
         }
     }
 
-    /// Binds every name in `patterns` as `Any`, so a pattern that failed to
-    /// type-check still declares its names. In `let (a, b, c) = (1, 2)`, `c`
+    /// Binds every name in `patterns` as a failed check, so a pattern that
+    /// failed to type-check still declares its names. In `let (a, b, c) = (1, 2)`, `c`
     /// is bound and a later `print(c)` reports nothing further.
-    fn bind_patterns_as_any(&mut self, patterns: &[BindingPatternLocation], span: Span) {
+    fn bind_patterns_as_errors(&mut self, patterns: &[BindingPatternLocation], span: Span) {
         for pattern in patterns {
-            self.declare_binding_pattern(pattern, None, StaticType::Any, span);
+            self.declare_binding_pattern(pattern, None, StaticType::Error, span);
         }
     }
 }

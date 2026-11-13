@@ -140,10 +140,17 @@ impl Analyser {
                             &arguments,
                             span,
                         ));
-                        StaticType::Any
+                        StaticType::Error
                     }
                 }
                 callee @ StaticType::Var(_) => self.call_unknown_function(&callee, arguments),
+                // The callee's check failed, which was reported there.
+                StaticType::Error => {
+                    for argument in &arguments {
+                        self.vars.settle_unknowns_as_errors(argument);
+                    }
+                    StaticType::Error
+                }
                 // Nothing tells what the callee does with its arguments.
                 callee if callee.could_be_callable() => {
                     for argument in &arguments {
@@ -156,7 +163,7 @@ impl Analyser {
                 }
                 other => {
                     self.emit(AnalysisError::not_callable(&self.vars.shown(&other), span));
-                    StaticType::Any
+                    StaticType::Error
                 }
             };
         };

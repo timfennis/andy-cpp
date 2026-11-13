@@ -202,7 +202,7 @@ impl Analyser {
             }
             let expected = self
                 .vars
-                .resolve(&expected)
+                .finish(&expected)
                 .replace(&|part| matches!(part, StaticType::Generic(_)).then_some(StaticType::Any));
             if expected == StaticType::Any {
                 continue;
@@ -222,9 +222,12 @@ impl Analyser {
             &mut analysis.function_types,
         ] {
             for typ in table.values_mut() {
-                *typ = self.vars.resolve(typ);
+                *typ = self.vars.finish(typ);
                 debug_assert!(!typ.has_vars(), "unsettled type variable in {typ}");
             }
+        }
+        for typ in analysis.cast_checks.values_mut().flatten() {
+            *typ = self.vars.finish(typ);
         }
 
         let mut result = std::mem::take(&mut self.result);
@@ -256,7 +259,8 @@ impl Analyser {
     }
 
     /// Records an analysis error. The analyser continues with a fallback type
-    /// (usually `Any`) so that subsequent code is still checked. An error in
+    /// (usually [`StaticType::Error`], which nothing reports again) so that
+    /// the rest of the program is still checked. An error in
     /// a copy of a generic function's constraint is the call's: it's
     /// reported there, with notes pointing into the function.
     fn emit(&mut self, err: AnalysisError) {
@@ -279,7 +283,7 @@ impl Analyser {
     /// and a struct name becomes that struct's `StaticType::Struct`. The
     /// resolver has already matched each name to its type symbol. A wrong
     /// generic-argument count is reported as an analysis error at the
-    /// annotation's span, and the annotation falls back to `Any` so the rest
+    /// annotation's span, and the annotation is a failed check so the rest
     /// of the program is still checked.
     fn lower_type_expr(&mut self, expr: &TypeExpr) -> StaticType {
         match expr {
@@ -310,7 +314,7 @@ impl Analyser {
                 match self.struct_types.get(&symbol) {
                     Some(_) if has_args => {
                         self.emit(AnalysisError::type_does_not_take_generic_args(name, *span));
-                        StaticType::Any
+                        StaticType::Error
                     }
                     Some(info) => info.static_type(),
                     // A built-in type: `from_name_and_args` checks its generic arity.
@@ -318,7 +322,7 @@ impl Analyser {
                         Ok(typ) => typ,
                         Err(err) => {
                             self.emit(AnalysisError::invalid_type_annotation(&err, *span));
-                            StaticType::Any
+                            StaticType::Error
                         }
                     },
                 }
@@ -341,18 +345,19 @@ impl Analyser {
         self.without_iterables(typ, expr.span())
     }
 
-    /// `typ`, reporting each `Iterable<T>` in it as `Any`.
+    /// `typ`, reporting each `Iterable<T>` in it, which becomes the type of
+    /// a failed check.
     fn without_iterables(&mut self, typ: StaticType, span: Span) -> StaticType {
         if !typ.contains(&|part| matches!(part, StaticType::Iterable(_))) {
             return typ;
         }
         self.emit(AnalysisError::iterable_in_an_annotation(span));
-        typ.replace(&|part| matches!(part, StaticType::Iterable(_)).then_some(StaticType::Any))
+        typ.replace(&|part| matches!(part, StaticType::Iterable(_)).then_some(StaticType::Error))
     }
 
     /// Analyses a top-level statement. Names resolve first; a statement with
     /// unresolved names isn't analysed further, which would only repeat its errors.
-    /// The names it still declared are bound as `Any`, so in
+    /// The names it still declared are bound as failed checks, so in
     /// `fn f() { missing } let g = f`, only `missing` is reported.
     pub fn analyse(&mut self, expr_loc: &ExpressionLocation) -> StaticType {
         let bound_before = self.resolver.current_bindings().len();
@@ -364,9 +369,9 @@ impl Analyser {
                 .extend(name_errors.into_iter().map(AnalysisError::from));
             let declared = self.resolver.current_bindings()[bound_before..].to_vec();
             for symbol in declared {
-                self.types.declare(symbol, StaticType::Any);
+                self.types.declare(symbol, StaticType::Error);
             }
-            return StaticType::Any;
+            return StaticType::Error;
         }
         self.analyse_expr(expr_loc)
     }

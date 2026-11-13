@@ -68,6 +68,10 @@ impl Analyser {
         span: Span,
     ) -> StaticType {
         let arguments = [left_type.clone(), right_type.clone()];
+        // An operand whose check failed was reported there.
+        if arguments.iter().any(StaticType::has_errors) {
+            return StaticType::Error;
+        }
         let ResolvedCall { binding, .. } = self.overloads().resolve_call(
             &self.resolver.augmented_candidates(id).in_place,
             &arguments,
@@ -77,7 +81,7 @@ impl Analyser {
             self.emit(AnalysisError::function_not_found(
                 operation, &arguments, span,
             ));
-            return StaticType::Any;
+            return StaticType::Error;
         }
         self.record_augmented_pick(id, binding);
         left_type.clone()
