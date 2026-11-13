@@ -1,6 +1,7 @@
 #![allow(clippy::ptr_arg)]
 
 use anyhow::anyhow;
+use itertools::Itertools;
 use ndc_macros::export_module;
 use ndc_vm::VmCallable;
 use ndc_vm::value::{Object, SeqValue, Value};
@@ -701,26 +702,21 @@ mod inner {
     }
 
     /// Transposes a sequence of sequences, turning rows into columns, and returns the result as a list of lists.
-    #[function(signature = "<T>(Iterable<T>) -> List<List<Any>>")]
+    #[function(signature = "<T>(Iterable<List<T>>) -> List<List<T>>")]
     pub fn transposed(seq: SeqValue) -> anyhow::Result<Value> {
-        let main: Vec<Value> = seq
-            .try_into_iter()
-            .ok_or_else(|| anyhow!("transposed requires a sequence"))?
-            .collect();
-        let mut iterators: Vec<Box<dyn Iterator<Item = Value>>> = Vec::new();
-        for elem in main {
-            iterators.push(Box::new(elem.try_into_iter().ok_or_else(|| {
-                anyhow!("elements of transposed sequence must be iterable")
-            })?));
-        }
-        let mut out = Vec::new();
-        loop {
-            let row: Vec<Value> = iterators.iter_mut().filter_map(|i| i.next()).collect();
-            if row.is_empty() {
-                return Ok(Value::list(out));
-            }
-            out.push(Value::list(row));
-        }
+        transpose(seq)
+    }
+
+    /// Transposes a sequence of strings, turning rows of characters into columns.
+    #[function(name = "transposed", signature = "(Iterable<String>) -> List<List<String>>")]
+    pub fn transposed_strings(seq: SeqValue) -> anyhow::Result<Value> {
+        transpose(seq)
+    }
+
+    /// Transposes a sequence of sequences whose elements have different types.
+    #[function(name = "transposed", signature = "(Iterable<Any>) -> List<List<Any>>")]
+    pub fn transposed_any(seq: SeqValue) -> anyhow::Result<Value> {
+        transpose(seq)
     }
 
     /// Return a list of all windows, wrapping back to the first elements when the window would otherwise exceed the length of source list, producing tuples of size 2.
@@ -840,26 +836,18 @@ mod inner {
     ///   [3,"c",false]
     /// ]
     /// ```
-    #[function(signature = "<T>(Iterable<T>) -> List<List<Any>>")]
+    #[function(signature = "<T>(Iterable<List<T>>) -> List<List<T>>")]
     pub fn multi_cartesian_product(seq: SeqValue) -> anyhow::Result<Value> {
-        let mut iterators = Vec::new();
-        for elem in seq
-            .try_into_iter()
-            .ok_or_else(|| anyhow!("multi_cartesian_product requires a sequence"))?
-        {
-            let inner: Vec<Value> = elem
-                .try_into_iter()
-                .ok_or_else(|| anyhow!("elements of sequence must be iterable"))?
-                .collect_vec();
-            iterators.push(inner.into_iter());
-        }
-        Ok(Value::list(
-            iterators
-                .into_iter()
-                .multi_cartesian_product()
-                .map(Value::list)
-                .collect_vec(),
-        ))
+        cartesian_product(seq)
+    }
+
+    /// The cartesian product of sequences whose elements have different types.
+    #[function(
+        name = "multi_cartesian_product",
+        signature = "(Iterable<Any>) -> List<List<Any>>"
+    )]
+    pub fn multi_cartesian_product_any(seq: SeqValue) -> anyhow::Result<Value> {
+        cartesian_product(seq)
     }
 
     /// Split the input sequence into evenly sized chunks. If the input length of the sequence
@@ -894,6 +882,48 @@ mod inner {
             ndc_vm::RepeatIter::new_limited(value, times),
         )))
     }
+}
+
+fn transpose(seq: SeqValue) -> anyhow::Result<Value> {
+    let main: Vec<Value> = seq
+        .try_into_iter()
+        .ok_or_else(|| anyhow!("transposed requires a sequence"))?
+        .collect();
+    let mut iterators: Vec<Box<dyn Iterator<Item = Value>>> = Vec::new();
+    for elem in main {
+        iterators.push(Box::new(elem.try_into_iter().ok_or_else(|| {
+            anyhow!("elements of transposed sequence must be iterable")
+        })?));
+    }
+    let mut out = Vec::new();
+    loop {
+        let row: Vec<Value> = iterators.iter_mut().filter_map(|i| i.next()).collect();
+        if row.is_empty() {
+            return Ok(Value::list(out));
+        }
+        out.push(Value::list(row));
+    }
+}
+
+fn cartesian_product(seq: SeqValue) -> anyhow::Result<Value> {
+    let mut iterators = Vec::new();
+    for elem in seq
+        .try_into_iter()
+        .ok_or_else(|| anyhow!("multi_cartesian_product requires a sequence"))?
+    {
+        let inner: Vec<Value> = elem
+            .try_into_iter()
+            .ok_or_else(|| anyhow!("elements of sequence must be iterable"))?
+            .collect_vec();
+        iterators.push(inner.into_iter());
+    }
+    Ok(Value::list(
+        iterators
+            .into_iter()
+            .multi_cartesian_product()
+            .map(Value::list)
+            .collect_vec(),
+    ))
 }
 
 fn by_key(seq: Value, func: &mut VmCallable<'_>, better: Ordering) -> anyhow::Result<Value> {
@@ -965,8 +995,11 @@ pub mod extra {
 
     pub fn register(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
         for signature in [
-            // Two sequences zip into pairs of their elements.
+            // Two sequences zip into pairs of their elements, three into
+            // triples, and four into quadruples.
             "<A, B>(Iterable<A>, Iterable<B>) -> List<(A, B)>",
+            "<A, B, C>(Iterable<A>, Iterable<B>, Iterable<C>) -> List<(A, B, C)>",
+            "<A, B, C, D>(Iterable<A>, Iterable<B>, Iterable<C>, Iterable<D>) -> List<(A, B, C, D)>",
             // More make tuples as long as the number of arguments.
             "(*) -> List<Any>",
         ] {
