@@ -9,6 +9,7 @@ use ndc_parser::{
     BindingPattern, BindingPatternLocation, ExpressionLocation, FunctionParameter, StructField,
     TypeExpr,
 };
+use ndc_resolver::SymbolId;
 use std::rc::Rc;
 
 /// What a function declaration consists of, named like `fn f(x) { … }` or
@@ -201,12 +202,13 @@ impl Analyser {
                 self.vars.leave_level();
                 self.declaring = None;
                 self.declared_in_batch.insert(symbol);
-                self.generalize(
+                let typ = self.generalize(
                     symbol,
                     &signature,
                     id,
                     [first_use, first_literal, first_check],
-                )
+                );
+                self.within_size_limit(symbol, name, typ, span)
             }
             _ => signature,
         };
@@ -261,6 +263,42 @@ impl Analyser {
                 StaticType::unit()
             }
             None => function_type,
+        }
+    }
+
+    /// `typ`, the type of the generic function `symbol`, unless it has more
+    /// parts than the analyser can work with, as when each function in a
+    /// chain doubles what the previous one returns: `fn f1(x) => f0(f0(x))`
+    /// with `fn f0(x) => (x, x)`. Then it's reported, and the function takes
+    /// and returns `Any`, so what calls it isn't built from its type.
+    fn within_size_limit(
+        &mut self,
+        symbol: SymbolId,
+        name: Option<&str>,
+        typ: StaticType,
+        span: Span,
+    ) -> StaticType {
+        const LIMIT: usize = 10_000;
+        let parts = std::cell::Cell::new(0_usize);
+        let too_large = typ.contains(&|_| {
+            parts.set(parts.get() + 1);
+            parts.get() > LIMIT
+        });
+        if !too_large {
+            return typ;
+        }
+        self.emit(AnalysisError::type_too_large(
+            name.unwrap_or("?"),
+            LIMIT,
+            span,
+        ));
+        self.schemes.remove(&symbol);
+        let StaticType::Function { parameters, .. } = typ else {
+            return StaticType::Any;
+        };
+        StaticType::Function {
+            parameters: parameters.map(|parameters| vec![StaticType::Any; parameters.len()]),
+            return_type: Box::new(StaticType::Any),
         }
     }
 
