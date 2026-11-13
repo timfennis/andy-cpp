@@ -217,7 +217,13 @@ impl Function {
     /// element of a container argument against a parameter like
     /// `List<Int>`, which [`Self::matches_value_args`] doesn't.
     pub fn conforms_value_args(&self, args: &[Value]) -> bool {
-        match self.static_type() {
+        let st = match self {
+            Self::Native(f) => &f.static_type,
+            Self::Compiled(f) => &f.static_type,
+            Self::Closure(c) => &c.prototype.static_type,
+            Self::Memoized { function, .. } => return function.conforms_value_args(args),
+        };
+        match st {
             StaticType::Function {
                 parameters: Some(params),
                 ..

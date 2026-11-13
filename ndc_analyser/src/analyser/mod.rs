@@ -78,6 +78,9 @@ pub struct Analyser {
     /// The integer literals in the batch, with their types, which a
     /// generic function's instances may give types of their own.
     number_literals: Vec<(NodeId, StaticType)>,
+    /// The nodes of overloaded function values that waited for the type
+    /// expected of them, as `abs` in `[len, abs]` does.
+    waiting_function_values: AHashSet<NodeId>,
     /// The calls the constraint being solved was copied through, when it's
     /// a copy of a generic function's constraint.
     copied_through: Option<Origin>,
@@ -154,6 +157,7 @@ impl Analyser {
             declaring: None,
             recursive_calls: Vec::new(),
             number_literals: Vec::new(),
+            waiting_function_values: AHashSet::new(),
             copied_through: None,
             checks: Vec::new(),
             next_serial: 0,
@@ -188,6 +192,7 @@ impl Analyser {
         }
         self.failed_reads.clear();
         self.number_literals.clear();
+        self.waiting_function_values.clear();
         self.types.resolve_all(&self.vars);
         for (instance, node, typ, expected) in std::mem::take(&mut self.checks) {
             if self.vars.resolve(&typ) != StaticType::Any {
@@ -786,7 +791,7 @@ impl Analyser {
             if let Some(node) = node {
                 // An overloaded function value waiting for its type, as
                 // `abs` in `[len, abs]`, is one of the literal's values.
-                if matches!(self.vars.resolve(&typ), StaticType::Var(_)) {
+                if self.waiting_function_values.contains(&node) {
                     for waiting in self.waiting.values_mut() {
                         if let Constraint::FunctionValue(value) = &mut waiting.constraint
                             && value.id() == node

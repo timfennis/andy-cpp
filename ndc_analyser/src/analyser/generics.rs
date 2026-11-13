@@ -12,6 +12,7 @@ use crate::error::AnalysisError;
 use crate::overloads::is_strictly_more_specific;
 use crate::types::{LiteralBounds, TypeVars};
 use ahash::{AHashMap, AHashSet};
+use ndc_analysis::{Binding, Candidate};
 use ndc_core::{NodeId, StaticType, TypeVar};
 use ndc_lexer::Span;
 use ndc_resolver::{ScopeKind, SymbolId};
@@ -522,9 +523,41 @@ impl Analyser {
                 })
             })
             .collect::<Vec<_>>();
-        let binding = self
+        let binding = match self
             .resolve_overloads(call.candidates(), &arguments, call.kind())
-            .binding;
+            .binding
+        {
+            // An overload may take the values the body gets as the program
+            // runs although none takes their types with `Any` in them, as
+            // `sum` takes no `List<Any>`. The program picks among them as it
+            // runs, which looks at a container's elements.
+            Binding::None => {
+                let candidates = self
+                    .overloads()
+                    .reachable_symbols(call.candidates())
+                    .into_iter()
+                    .filter(
+                        |&symbol| match self.vars.resolve(&self.types.callable_type(symbol)) {
+                            StaticType::Function {
+                                parameters: Some(parameters),
+                                ..
+                            } => parameters.len() == arguments.len(),
+                            StaticType::Function {
+                                parameters: None, ..
+                            } => true,
+                            _ => false,
+                        },
+                    )
+                    .map(Candidate::Scalar)
+                    .collect::<Vec<_>>();
+                if candidates.is_empty() {
+                    Binding::None
+                } else {
+                    Binding::Dynamic(candidates)
+                }
+            }
+            binding => binding,
+        };
         self.record_pick(call.site(), binding, &arguments);
     }
 

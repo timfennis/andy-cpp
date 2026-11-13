@@ -1,0 +1,7 @@
+// The function's own body is compiled for arguments of any type, where
+// `sum` gets a list of what `s` holds: no overload takes a `List<Any>`, so
+// the call is picked as the program runs.
+// expect-output: 1 3
+fn f(s) { [i for (i, c) in s.enumerate()].sum() }
+let a: Any = "abc";
+print(f("ab"), f(a));

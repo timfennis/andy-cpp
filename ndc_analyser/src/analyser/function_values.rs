@@ -79,6 +79,7 @@ impl Analyser {
                 span,
             };
             if !self.try_function_value(&value) {
+                self.waiting_function_values.insert(id);
                 self.wait(Constraint::FunctionValue(value));
             }
             return self.vars.resolve(&expected);
