@@ -854,9 +854,9 @@ impl Analyser {
 
     /// Whether some overload of `call` takes its arguments, as far as
     /// they're known, and returns what fits its result. Once they're
-    /// known, the call gets the overload that resolution picks, so only
-    /// that one counts, and what it binds is kept: `[](Any, Any)` takes
-    /// `xs[0]` but loses to `[](List<T>, Int) -> T`.
+    /// known, the call gets the overload that resolution picks, scope by
+    /// scope, so only that one counts, and what it binds is kept:
+    /// `[](Any, Any)` takes `xs[0]` but loses to `[](List<T>, Int) -> T`.
     fn call_still_fits(&mut self, call: &CallConstraint) -> Fit {
         let arguments = call
             .arguments
@@ -866,22 +866,20 @@ impl Analyser {
         if Self::operand_could_be_a_tuple(call.kind, &arguments) {
             return Fit::Maybe;
         }
-        let reachable = self.overloads().reachable_symbols(&call.candidates);
-        if arguments.iter().all(|argument| !argument.has_vars()) {
-            let taking = reachable
-                .iter()
-                .copied()
-                .filter(|&symbol| self.could_accept(symbol, &arguments))
-                .collect::<Vec<_>>();
-            if let Some(symbol) = self.most_specific(&taking) {
-                let snapshot = self.vars.snapshot();
-                if self.overload_fits(symbol, &arguments, &call.result) {
-                    return Fit::Picked;
-                }
-                self.vars.rollback(snapshot);
-                return Fit::No;
+        if arguments.iter().all(|argument| !argument.has_vars())
+            && let Binding::Resolved(Candidate::Scalar(symbol)) = self
+                .overloads()
+                .resolve_call(&call.candidates, &arguments, call.kind)
+                .binding
+        {
+            let snapshot = self.vars.snapshot();
+            if self.overload_fits(symbol, &arguments, &call.result) {
+                return Fit::Picked;
             }
+            self.vars.rollback(snapshot);
+            return Fit::No;
         }
+        let reachable = self.overloads().reachable_symbols(&call.candidates);
         let fits = reachable.into_iter().any(|symbol| {
             let snapshot = self.vars.snapshot();
             let fits = self.overload_fits(symbol, &arguments, &call.result);
