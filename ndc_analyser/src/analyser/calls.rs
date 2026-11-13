@@ -1,5 +1,5 @@
 use super::Analyser;
-use super::solver::{CallNodes, CallSite, Constraint};
+use super::solver::{CallNodes, CallSite};
 use crate::error::AnalysisError;
 use crate::overloads::{CallKind, Overloads};
 use itertools::Itertools;
@@ -124,20 +124,11 @@ impl Analyser {
                     ..
                 } => {
                     if let Some((typ, parameters)) = self.bind_signature(&callee, &arguments) {
-                        for (node, expected) in
-                            self.expected_of_any(&parameters, &arguments, &nodes)
-                        {
-                            self.expect(node, expected);
-                        }
-                        for (sequence, element) in
-                            self.iterations_waited_for(&parameters, &arguments)
-                        {
-                            self.wait(Constraint::Iterate {
-                                sequence,
-                                element,
-                                span,
-                            });
-                        }
+                        let checks = self.expected_of_any(&parameters, &arguments, &nodes);
+                        self.pending.checks.extend(checks);
+                        let iterations = self.iterations_waited_for(&parameters, &arguments);
+                        self.pending.iterations.extend(iterations);
+                        self.flush_copies(None, span);
                         typ
                     } else {
                         let arguments = arguments

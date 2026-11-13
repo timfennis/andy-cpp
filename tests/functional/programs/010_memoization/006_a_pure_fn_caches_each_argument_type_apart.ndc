@@ -1,0 +1,7 @@
+// A `pure fn` caches by its arguments, and `1` and `1.0` are equal, so each
+// argument type gets a cache of its own.
+// expect-output: 1 1.5
+pure fn same(x) => x;
+let n = same(1);
+let f = same(1.0);
+print(n, f + 0.5);

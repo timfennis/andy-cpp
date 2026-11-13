@@ -135,15 +135,7 @@ impl TypeVars {
     /// A literal whose type the literal type `var` holds values of and that
     /// isn't settled yet, as `1`'s is in `[1]`.
     pub(crate) fn held_literal(&self, var: TypeVar) -> Option<TypeVar> {
-        self.bounds[var.0 as usize]
-            .iter()
-            .find_map(|bound| match bound {
-                Bound::Holds(held, _, _) => match self.resolve(held) {
-                    StaticType::Var(held) if held != var && self.is_literal(held) => Some(held),
-                    _ => None,
-                },
-                Bound::Number(..) => None,
-            })
+        self.held_literals(var).into_iter().next()
     }
 
     /// The unsettled literal types that each unsettled literal type is
@@ -366,26 +358,11 @@ impl TypeVars {
             return true;
         };
         let snapshot = self.snapshot();
-        let fits = defaults.iter().any(|default| self.try_settle(var, default));
+        let fits = defaults
+            .iter()
+            .any(|default| self.try_unify(&StaticType::Var(var), default));
         self.rollback(snapshot);
         fits
-    }
-
-    /// Settles `var` as `typ` if `typ` is within its bounds, and returns
-    /// whether it did. A variable can't stand for a type that contains it.
-    fn try_settle(&mut self, var: TypeVar, typ: &StaticType) -> bool {
-        if self
-            .resolve(typ)
-            .contains(&|part| *part == StaticType::Var(var))
-        {
-            return false;
-        }
-        let snapshot = self.snapshot();
-        let settled = self.settle(var, typ.clone());
-        if !settled {
-            self.rollback(snapshot);
-        }
-        settled
     }
 
     /// What the unsettled literal type `var` is shown as: what it would be
@@ -641,7 +618,10 @@ impl TypeVars {
                 Some(defaults) if !self.bounds[var.0 as usize].is_empty() => defaults,
                 _ => vec![self.fallbacks[var.0 as usize].clone()],
             };
-            if !defaults.iter().any(|default| self.try_settle(var, default)) {
+            if !defaults
+                .iter()
+                .any(|default| self.try_unify(&StaticType::Var(var), default))
+            {
                 // `Any` takes anything a literal holds.
                 self.settle(var, StaticType::Any);
             }

@@ -40,6 +40,7 @@ impl Analyser {
         symbol: SymbolId,
         signature: &StaticType,
         declaration: NodeId,
+        pure: bool,
         [first_use, first_check]: [usize; 2],
     ) -> StaticType {
         self.solve_waiting();
@@ -157,12 +158,23 @@ impl Analyser {
         // An instance is for the types of the type parameters that what it
         // compiles differently depends on: the constraints and uses it
         // picks for, and the checks.
+        // A `pure fn` caches its results by its arguments' values, which can
+        // be equal across types, as `1` and `1.0` are, so each set of types
+        // gets an instance, and a cache, of its own.
+        let parameters = match self.vars.resolve(signature) {
+            StaticType::Function {
+                parameters: Some(parameters),
+                ..
+            } if pure => parameters,
+            _ => Vec::new(),
+        };
         let mut key: Vec<Box<str>> = Vec::new();
         for typ in scheme
             .iter()
             .flat_map(|waiting| waiting.constraint.inputs())
             .chain(uses.iter().flat_map(|generic_use| &generic_use.key))
             .chain(checks.iter().map(|(_, _, expected)| expected))
+            .chain(&parameters)
         {
             for name in typ.type_parameters() {
                 if !key.contains(&name) {

@@ -455,21 +455,22 @@ fn vm_set_at_index(container: &Value, index_value: &Value, rhs: Value) -> Result
                         list[idx] = rhs;
                     }
                     VmOffset::Range(from, to) => {
-                        let rhs_vec = match rhs {
-                            Value::Object(o) => match o.as_ref() {
-                                Object::List(l) => l.borrow().clone(),
-                                Object::Tuple(t) => t.clone(),
-                                _ => {
-                                    return Err(VmError::native(
-                                        "cannot assign non-list to list slice",
-                                    ));
-                                }
-                            },
-                            _ => {
-                                return Err(VmError::native(
-                                    "cannot assign non-list to list slice",
-                                ));
+                        // Any sequence goes in a slice: a list, a tuple, a
+                        // range or another iterator.
+                        let rhs_vec = match &rhs {
+                            Value::Object(o) if matches!(o.as_ref(), Object::List(_)) => {
+                                let Object::List(l) = o.as_ref() else {
+                                    unreachable!("matched a list");
+                                };
+                                l.borrow().clone()
                             }
+                            _ => rhs
+                                .clone()
+                                .try_into_iter()
+                                .ok_or_else(|| {
+                                    VmError::native("cannot assign non-sequence to list slice")
+                                })?
+                                .collect(),
                         };
                         let tail: Vec<Value> = list.drain(from..).collect();
                         list.extend(rhs_vec);

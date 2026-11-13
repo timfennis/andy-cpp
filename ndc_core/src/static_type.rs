@@ -570,25 +570,6 @@ impl StaticType {
         }
     }
 
-    /// Returns a new type with the element type replaced. For container types
-    /// like `List<T>`, this returns `List<new_elem>`. Returns `None` if the
-    /// type does not have a replaceable element type.
-    pub fn with_element_type(&self, new_elem: Self) -> Self {
-        match self {
-            Self::List(_) => Self::List(Box::new(new_elem)),
-            Self::Iterable(_) => Self::Iterable(Box::new(new_elem)),
-            Self::Iterator(_) => Self::Iterator(Box::new(new_elem)),
-            Self::MinHeap(_) => Self::MinHeap(Box::new(new_elem)),
-            Self::MaxHeap(_) => Self::MaxHeap(Box::new(new_elem)),
-            Self::Deque(_) => Self::Deque(Box::new(new_elem)),
-            Self::Map { key, .. } => Self::Map {
-                key: key.clone(),
-                value: Box::new(new_elem),
-            },
-            _ => self.clone(),
-        }
-    }
-
     pub fn index_element_type(&self) -> Option<Self> {
         if let Self::Map { value, .. } = self {
             return Some(value.as_ref().clone());

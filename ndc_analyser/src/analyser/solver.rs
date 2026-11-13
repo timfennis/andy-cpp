@@ -1356,6 +1356,26 @@ impl Analyser {
             .flat_map(|argument| self.vars.unsettled(argument))
             .filter(|&var| self.vars.is_literal(var))
             .collect::<Vec<_>>();
+        // The nearest scope with an overload that takes the call hides those
+        // further out. When that scope has one overload, whose parameters
+        // take whatever the literals turn out to be, as a nested `fn d(x)`
+        // does, the call is its, though a literal isn't decided yet.
+        if !literals.is_empty()
+            && !Self::operand_could_be_a_tuple(kind, arguments)
+            && let Some(nearest) = self
+                .overloads()
+                .reachable_groups(candidates)
+                .into_iter()
+                .find(|group| {
+                    group
+                        .iter()
+                        .any(|&symbol| self.could_accept(symbol, arguments))
+                })
+            && let [only] = nearest[..]
+            && self.takes_any_literal(only, arguments)
+        {
+            return EarlyOverload::Only(only);
+        }
         let viable = reachable
             .iter()
             .copied()
@@ -1394,6 +1414,32 @@ impl Analyser {
             }
             _ => EarlyOverload::Undecided,
         }
+    }
+
+    /// Whether `symbol`'s parameter for each argument with a literal in it
+    /// takes any type, as an unannotated one does, so what the literal
+    /// becomes can't change whether `symbol` takes the call.
+    fn takes_any_literal(&self, symbol: SymbolId, arguments: &[StaticType]) -> bool {
+        let Some(parameters) = self.overloads().parameters_of(symbol) else {
+            return false;
+        };
+        parameters.len() == arguments.len()
+            && parameters
+                .iter()
+                .zip(arguments)
+                .all(|(parameter, argument)| {
+                    let has_literal = self
+                        .vars
+                        .unsettled(argument)
+                        .into_iter()
+                        .any(|var| self.vars.is_literal(var));
+                    !has_literal
+                        || match self.vars.resolve(parameter) {
+                            StaticType::Var(var) => !self.vars.is_literal(var),
+                            StaticType::Generic(_) => true,
+                            _ => false,
+                        }
+                })
     }
 
     /// Whether one of `reachable` other than `except` takes `arguments`
@@ -1955,8 +2001,8 @@ impl Analyser {
                     .zip(arguments)
                     .all(|(parameter, argument)| match (parameter, argument) {
                         (StaticType::Any, argument) => *argument == StaticType::Any,
-                        (StaticType::Iterable(_), StaticType::Var(var)) => {
-                            self.vars.is_literal(*var)
+                        (StaticType::Iterable(_), argument) => {
+                            !self.vars.waits_to_iterate(argument)
                         }
                         _ => true,
                     })
