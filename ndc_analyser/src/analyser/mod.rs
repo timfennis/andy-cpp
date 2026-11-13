@@ -81,6 +81,10 @@ pub struct Analyser {
     /// The nodes of overloaded function values that waited for the type
     /// expected of them, as `abs` in `[len, abs]` does.
     waiting_function_values: AHashSet<NodeId>,
+    /// The types an anonymous function's unannotated parameters get from
+    /// the call it's passed to, by the function's node: in
+    /// `players.map(fn(p) => p.score)`, `p` is a `Player`.
+    expected_parameters: AHashMap<NodeId, Vec<Option<StaticType>>>,
     /// The calls the constraint being solved was copied through, when it's
     /// a copy of a generic function's constraint.
     copied_through: Option<Origin>,
@@ -158,6 +162,7 @@ impl Analyser {
             recursive_calls: Vec::new(),
             number_literals: Vec::new(),
             waiting_function_values: AHashSet::new(),
+            expected_parameters: AHashMap::new(),
             copied_through: None,
             checks: Vec::new(),
             next_serial: 0,

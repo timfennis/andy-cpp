@@ -5,7 +5,7 @@ use crate::overloads::{CallKind, Overloads};
 use ndc_core::{NodeId, StaticType};
 use ndc_lexer::{NumericLiteral, Span};
 use ndc_parser::{Expression, ExpressionLocation};
-use ndc_resolver::Candidates;
+use ndc_resolver::{Candidates, SymbolId};
 
 impl Analyser {
     /// Why no candidate accepts a call of `name` with arguments of these types:
@@ -151,10 +151,7 @@ impl Analyser {
             [_, index] if name == "[]" => literal_index(index),
             _ => None,
         };
-        let arguments = arguments
-            .iter()
-            .map(|arg| self.analyse_expr(arg))
-            .collect::<Vec<_>>();
+        let arguments = self.analyse_arguments(function.id, arguments);
         self.constrain_index_call(
             CallSite::Call(function.id),
             arguments,
@@ -168,6 +165,167 @@ impl Analyser {
             tuple_index,
         )
     }
+
+    /// Analyses the arguments of a call of the function named at `callee`
+    /// and returns their types. An anonymous function among them is
+    /// analysed after the others, with the parameter types the overloads
+    /// that take those agree on, so its body is checked against what it
+    /// will be passed: in `players.map(fn(p) => p.size)`, `p` is a
+    /// `Player`, which has no `size`.
+    fn analyse_arguments(
+        &mut self,
+        callee: NodeId,
+        arguments: &[ExpressionLocation],
+    ) -> Vec<StaticType> {
+        let mut types = arguments
+            .iter()
+            .map(|argument| {
+                (!takes_parameter_types_from_the_call(argument))
+                    .then(|| self.analyse_expr(argument))
+            })
+            .collect::<Vec<_>>();
+        for (position, argument) in arguments.iter().enumerate() {
+            if types[position].is_some() {
+                continue;
+            }
+            if let Some(expected) = self.parameters_the_overloads_agree_on(callee, &types, position)
+                && expected.len() == parameter_count(argument)
+            {
+                self.expected_parameters.insert(argument.id, expected);
+            }
+            types[position] = Some(self.analyse_expr(argument));
+        }
+        types.into_iter().flatten().collect()
+    }
+
+    /// The types of the parameters of the function passed at `position`
+    /// that every overload at `callee` that takes the `known` arguments
+    /// agrees on, each `None` where they don't, or where it isn't known
+    /// yet. `None` when no overload takes them, or one takes a function of
+    /// any type there.
+    fn parameters_the_overloads_agree_on(
+        &mut self,
+        callee: NodeId,
+        known: &[Option<StaticType>],
+        position: usize,
+    ) -> Option<Vec<Option<StaticType>>> {
+        let candidates = self.resolver.reference_candidates(callee).clone();
+        let mut agreed: Option<Vec<Option<StaticType>>> = None;
+        for symbol in self.overloads().reachable_symbols(&candidates) {
+            let snapshot = self.vars.snapshot();
+            let expected = self.parameters_one_overload_expects(symbol, known, position);
+            self.vars.rollback(snapshot);
+            let expected = match expected {
+                Expects::Parameters(expected) => expected,
+                Expects::Nothing => continue,
+                Expects::Anything => return None,
+            };
+            agreed = Some(match agreed {
+                None => expected,
+                Some(agreed) => agreed
+                    .into_iter()
+                    .zip(expected)
+                    .map(|(agreed, expected)| {
+                        agreed.filter(|agreed| Some(agreed) == expected.as_ref())
+                    })
+                    .collect(),
+            });
+        }
+        agreed
+    }
+
+    /// The parameter types `symbol` expects of the function passed at
+    /// `position` if it takes the `known` arguments. Settles variables, so
+    /// the caller rolls them back.
+    fn parameters_one_overload_expects(
+        &mut self,
+        symbol: SymbolId,
+        known: &[Option<StaticType>],
+        position: usize,
+    ) -> Expects {
+        let function = self.vars.resolve(&self.types.callable_type(symbol));
+        if !matches!(
+            function,
+            StaticType::Function {
+                parameters: Some(_),
+                ..
+            }
+        ) {
+            return Expects::Anything;
+        }
+        let first = self.vars.count();
+        let StaticType::Function {
+            parameters: Some(parameters),
+            ..
+        } = self.vars.instantiate(&function)
+        else {
+            unreachable!("instantiating a function type gives a function type");
+        };
+        let takes_known = parameters.len() == known.len()
+            && parameters.iter().zip(known).all(|(parameter, argument)| {
+                argument
+                    .as_ref()
+                    .is_none_or(|argument| self.vars.bind_argument(parameter, argument))
+            });
+        if !takes_known {
+            return Expects::Nothing;
+        }
+        match self.vars.resolve(&parameters[position]) {
+            StaticType::Function {
+                parameters: Some(expected),
+                ..
+            } => Expects::Parameters(
+                expected
+                    .iter()
+                    .map(|typ| {
+                        Some(self.vars.resolve(typ)).filter(|typ| is_known_before(typ, first))
+                    })
+                    .collect(),
+            ),
+            _ => Expects::Anything,
+        }
+    }
+}
+
+/// What an overload expects of a function passed to it.
+enum Expects {
+    /// It doesn't take the call's other arguments.
+    Nothing,
+    /// A function whose parameters have these types, where they're known.
+    Parameters(Vec<Option<StaticType>>),
+    /// It takes a function of any type, or anything at all.
+    Anything,
+}
+
+/// Whether `argument` is an anonymous function with a parameter whose type
+/// isn't written, which the call it's passed to can give: `fn(p) =>
+/// p.score`, but not `fn(p: Player) => p.score`.
+fn takes_parameter_types_from_the_call(argument: &ExpressionLocation) -> bool {
+    matches!(
+        &argument.expression,
+        Expression::FunctionDeclaration { name: None, parameters, .. }
+            if parameters.iter().any(|parameter| parameter.annotation.is_none())
+    )
+}
+
+/// How many parameters the function declared by `argument` has.
+fn parameter_count(argument: &ExpressionLocation) -> usize {
+    match &argument.expression {
+        Expression::FunctionDeclaration { parameters, .. } => parameters.len(),
+        _ => 0,
+    }
+}
+
+/// Whether `typ` is known as far as the code around the call knows it:
+/// nothing in it is only known as the program runs, and its variables are
+/// from before `first`, not ones an overload's signature made. A list
+/// literal's elements are a variable until its uses settle them.
+fn is_known_before(typ: &StaticType, first: usize) -> bool {
+    !typ.contains(&|part| match part {
+        StaticType::Var(var) => var.0 as usize >= first,
+        StaticType::Any | StaticType::Generic(_) => true,
+        _ => false,
+    })
 }
 
 /// The value of an index that's an integer written in the code, as in

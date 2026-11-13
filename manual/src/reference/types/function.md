@@ -202,6 +202,15 @@ print(tens);         // [30,10,20]
 let double: Fn(Int) -> Int = fn(x) => x ++ "!";        // error: `x ++ "!"` makes x a String, so the lambda is a Fn(String) -> String
 ```
 
+A lambda passed to a function gets its parameter types from that function and its other arguments before its body is checked, so a mistake in the body is reported where it is:
+
+```ndc,fails
+struct Player { name: String, score: Int }
+struct Team { name: String, size: Int }
+let players = [Player("ann", 3), Player("bob", 5)];
+players.map(fn(p) => p.size);    // error: p is a Player, which has no size
+```
+
 A lambda stored in a variable has one type, like any variable, so it can't take an `Int` in one call and a `Float` in the next:
 
 ```ndc,fails
