@@ -8,6 +8,7 @@ use crate::iterator::{
 use crate::value::{CompiledFunction, Function, NativeFunc, NativeFunction};
 use crate::{ClosureFunction, Object, Value};
 use ndc_analysis::{CaptureSource, ResolvedVar};
+use ndc_core::StaticType;
 use ndc_lexer::Span;
 use std::cell::RefCell;
 use std::hash::{Hash, Hasher};
@@ -74,6 +75,9 @@ pub struct CallFrame {
     /// cache to write into and the hash key when the frame returns.  `None`
     /// for ordinary (non-memoized) calls.
     memo: Option<MemoCache>,
+    /// What the frame's call has to return, when it's a call of a
+    /// [`Function::Checked`]. Boxed to keep frames small.
+    returns: Option<Box<StaticType>>,
 }
 
 /// The VM's globals for `natives`: native `i` is global slot `i`. The analyser
@@ -108,6 +112,7 @@ impl Vm {
                 ip: 0,
                 frame_pointer: 0,
                 memo: None,
+                returns: None,
             }],
             output: OutputSink::Stdout,
             #[cfg(feature = "trace")]
@@ -195,19 +200,27 @@ impl Vm {
                 }
                 OpCode::Return => {
                     let ret = self.stack.pop().expect("stack underflow");
-                    let frame = self.frames.last().expect("no frame");
+                    let frame = self.frames.last_mut().expect("no frame");
                     let frame_pointer = frame.frame_pointer;
                     // If this was a memoized call, cache the return value now,
                     // before the frame is torn down.
                     if let Some((cache, key)) = &frame.memo {
                         cache.borrow_mut().insert(*key, ret.clone());
                     }
+                    let returns = frame.returns.take();
                     if frame_pointer == 0 {
                         return Err(VmError::new("Return at top level", span));
                     }
                     self.stack.truncate(frame_pointer - 1);
                     self.frames.pop().expect("no frame to pop");
                     self.stack.push(ret);
+                    // A checked call's result is checked where it was called.
+                    if let Some(returns) = returns {
+                        let caller = self.frames.last().expect("a call has a caller");
+                        let call = caller.closure.prototype.body.span(caller.ip - 1);
+                        convert_result(&mut self.stack, &returns)
+                            .map_err(|message| VmError::new(message, call))?;
+                    }
                     if self.frames.len() == target_depth {
                         break Ok(());
                     }
@@ -218,8 +231,8 @@ impl Vm {
                         .push(frame.closure.prototype.body.constant(idx).clone());
                 }
                 OpCode::CheckType(target) => {
-                    let value = self.stack.last().expect("stack underflow");
-                    if !value.conforms_to(target) {
+                    if !convert_top(&mut self.stack, target) {
+                        let value = self.stack.last().expect("stack underflow");
                         return Err(VmError::new(
                             format!("cannot cast {} to {target}", value.diagnostic_type()),
                             span,
@@ -227,8 +240,8 @@ impl Vm {
                     }
                 }
                 OpCode::ExpectType(target) => {
-                    let value = self.stack.last().expect("stack underflow");
-                    if !value.conforms_to(target) {
+                    if !convert_top(&mut self.stack, target) {
+                        let value = self.stack.last().expect("stack underflow");
                         return Err(VmError::new(
                             format!("expected {target} but found {}", value.diagnostic_type()),
                             span,
@@ -649,6 +662,14 @@ impl Vm {
             let mut hasher = DefaultHasher::default();
             for arg in &self.stack[start..] {
                 arg.hash(&mut hasher);
+                // A function checked as another function type is the same
+                // function, but a call may return it, so the cache tells
+                // them apart.
+                if let Value::Object(object) = arg
+                    && let Object::Function(Function::Checked { typ, .. }) = object.as_ref()
+                {
+                    typ.hash(&mut hasher);
+                }
             }
             let key = hasher.finish();
 
@@ -664,6 +685,44 @@ impl Vm {
             self.dispatch_call_with_memo(Rc::unwrap_or_clone(function), args, Some((cache, key)))
         } else {
             self.dispatch_call_with_memo(func, args, None)
+        }
+    }
+
+    /// Calls the function a [`Function::Checked`] checks, and checks that
+    /// what it returns is what the function type it's used as says: right
+    /// away when the call completes here, or when its frame returns.
+    #[cold]
+    fn call_checked(
+        &mut self,
+        function: Rc<Function>,
+        typ: StaticType,
+        args: usize,
+    ) -> Result<Dispatch, VmError> {
+        let StaticType::Function { return_type, .. } = typ else {
+            unreachable!("a checked function is used as a function type");
+        };
+        // The function type it's used as may take more than the function
+        // does, as `Fn(Any) -> Int` would of a function taking an Int.
+        let arguments = &self.stack[self.stack.len() - args..];
+        if !function.conforms_value_args(arguments) {
+            return Err(VmError::native(format!(
+                "the function doesn't take the arguments ({})",
+                arguments
+                    .iter()
+                    .map(|argument| argument.diagnostic_type().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )));
+        }
+        match self.dispatch_call(Rc::unwrap_or_clone(function), args)? {
+            Dispatch::FramePushed => {
+                self.frames.last_mut().expect("a frame was pushed").returns = Some(return_type);
+                Ok(Dispatch::FramePushed)
+            }
+            Dispatch::Completed => {
+                convert_result(&mut self.stack, &return_type).map_err(VmError::native)?;
+                Ok(Dispatch::Completed)
+            }
         }
     }
 
@@ -705,6 +764,7 @@ impl Vm {
                 prototype: f,
                 upvalues: Vec::new(),
             },
+            Function::Checked { function, typ } => return self.call_checked(function, *typ, args),
             Function::Memoized { .. } => {
                 // Already unwrapped in dispatch_call; this branch is unreachable.
                 unreachable!(
@@ -718,6 +778,7 @@ impl Vm {
             ip: 0,
             frame_pointer: self.stack.len() - args,
             memo,
+            returns: None,
         });
         for _ in args..num_locals {
             self.stack.push(Value::unit());
@@ -1168,4 +1229,35 @@ fn bad_range_bound(value: &Value) -> String {
         return "Integer too large for range bounds".to_string();
     }
     format!("range bounds must be Int, got {}", value.diagnostic_type())
+}
+
+/// Checks that the value on top of `stack` is a `target`, and makes it one:
+/// a function that may be a function `target` gets its calls checked (see
+/// [`Value::converted_to`]).
+fn convert_top(stack: &mut [Value], target: &StaticType) -> bool {
+    let value = stack.last_mut().expect("stack underflow");
+    if !matches!(target, StaticType::Function { .. }) {
+        return value.conforms_to(target);
+    }
+    match value.converted_to(target) {
+        Some(converted) => {
+            *value = converted;
+            true
+        }
+        None => false,
+    }
+}
+
+/// Checks that the result of a call of a [`Function::Checked`], on top of
+/// `stack`, is a `returns`, and makes it one, as [`convert_top`] does: a
+/// function it returns may get its own calls checked.
+fn convert_result(stack: &mut [Value], returns: &StaticType) -> Result<(), String> {
+    if convert_top(stack, returns) {
+        return Ok(());
+    }
+    let returned = stack.last().expect("a call leaves its result");
+    Err(format!(
+        "expected the function to return {returns} but it returned {}",
+        returned.diagnostic_type()
+    ))
 }

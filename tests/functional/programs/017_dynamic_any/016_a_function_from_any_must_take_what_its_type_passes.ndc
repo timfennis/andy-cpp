@@ -1,0 +1,4 @@
+// A lambda that takes a String isn't a `Fn(Int) -> Int`.
+// expect-error: expected Fn(Int) -> Int but found Fn(String) -> Int
+let a: Any = fn(s: String) => 1;
+let f: Fn(Int) -> Int = a;

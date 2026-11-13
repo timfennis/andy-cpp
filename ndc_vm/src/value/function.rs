@@ -22,6 +22,29 @@ pub enum Function {
         cache: Rc<RefCell<HashMap<u64, Value>>>,
         function: Rc<Self>,
     },
+
+    /// A function passed as a function type it may not have: a value of
+    /// type `Any` used as a `Fn(Int) -> Int` that holds a function whose
+    /// return type isn't known. Each call checks what it returns.
+    Checked {
+        function: Rc<Self>,
+        /// The function type it's used as, boxed so that it doesn't make
+        /// every function value bigger.
+        typ: Box<StaticType>,
+    },
+}
+
+/// How a function fits a function type, from the function's own type,
+/// which leaves out what isn't known as the program runs.
+#[derive(Debug, PartialEq, Eq)]
+pub enum FunctionFit {
+    /// It takes what the type passes and returns what it returns.
+    Proven,
+    /// It takes what the type passes, but what it returns has to be checked
+    /// at each call.
+    IfChecked,
+    /// It can't be a function of that type.
+    No,
 }
 
 pub struct NativeFunction {
@@ -182,7 +205,9 @@ impl Function {
         match self {
             Self::Closure(c) => Some(&c.prototype),
             Self::Compiled(f) => Some(f),
-            Self::Memoized { function, .. } => function.prototype(),
+            Self::Memoized { function, .. } | Self::Checked { function, .. } => {
+                function.prototype()
+            }
             Self::Native(_) => None,
         }
     }
@@ -190,7 +215,9 @@ impl Function {
     pub fn documentation(&self) -> Option<&str> {
         match self {
             Self::Native(f) => f.documentation.as_deref(),
-            Self::Memoized { function, .. } => function.documentation(),
+            Self::Memoized { function, .. } | Self::Checked { function, .. } => {
+                function.documentation()
+            }
             _ => None,
         }
     }
@@ -200,16 +227,87 @@ impl Function {
             Self::Compiled(f) => f.name.as_deref(),
             Self::Native(f) => Some(&f.name),
             Self::Closure(c) => c.prototype.name.as_deref(),
-            Self::Memoized { function, .. } => function.name(),
+            Self::Memoized { function, .. } | Self::Checked { function, .. } => function.name(),
         }
     }
 
     pub fn static_type(&self) -> StaticType {
+        self.signature().clone()
+    }
+
+    /// The function's type: what it takes and returns, as far as that's
+    /// known as the program runs.
+    fn signature(&self) -> &StaticType {
         match self {
-            Self::Compiled(f) => f.static_type.clone(),
-            Self::Native(f) => f.static_type.clone(),
-            Self::Closure(c) => c.prototype.static_type.clone(),
-            Self::Memoized { function, .. } => function.static_type(),
+            Self::Compiled(f) => &f.static_type,
+            Self::Native(f) => &f.static_type,
+            Self::Closure(c) => &c.prototype.static_type,
+            Self::Memoized { function, .. } => function.signature(),
+            Self::Checked { typ, .. } => typ,
+        }
+    }
+
+    /// The function a [`Self::Checked`] checks, or this one: checking its
+    /// calls doesn't make it another function, as far as `==` goes.
+    pub fn unchecked(&self) -> &Self {
+        match self {
+            Self::Checked { function, .. } => function.unchecked(),
+            function => function,
+        }
+    }
+
+    /// The types of the parameters, when it takes a known number of them.
+    pub fn parameters(&self) -> Option<&[StaticType]> {
+        match self.signature() {
+            StaticType::Function {
+                parameters: Some(parameters),
+                ..
+            } => Some(parameters),
+            _ => None,
+        }
+    }
+
+    /// How this function fits `expected`, a function type. A parameter or
+    /// return type that its own type leaves unknown, as `Any`, fits
+    /// anything, but an unknown return type has to be checked at each call:
+    /// a lambda that returns a String doesn't fit `Fn(Int) -> Int`, and one
+    /// whose return type isn't known fits it if checked.
+    pub fn fit(&self, expected: &StaticType) -> FunctionFit {
+        let StaticType::Function {
+            parameters: expected_parameters,
+            return_type: expected_return,
+        } = expected
+        else {
+            return FunctionFit::No;
+        };
+        let StaticType::Function {
+            parameters,
+            return_type,
+        } = self.signature()
+        else {
+            return FunctionFit::No;
+        };
+        let (takes, takes_proven) = match (expected_parameters, parameters) {
+            (Some(expected), Some(parameters)) => (
+                expected.len() == parameters.len()
+                    && expected
+                        .iter()
+                        .zip(parameters)
+                        .all(|(expected, parameter)| could_be(expected, parameter)),
+                expected
+                    .iter()
+                    .zip(parameters)
+                    .all(|(expected, parameter)| proves(expected, parameter)),
+            ),
+            (_, None) => (true, true),
+            (None, Some(_)) => (true, false),
+        };
+        if !takes || !could_be(return_type, expected_return) {
+            FunctionFit::No
+        } else if takes_proven && proves(return_type, expected_return) {
+            FunctionFit::Proven
+        } else {
+            FunctionFit::IfChecked
         }
     }
 
@@ -217,13 +315,7 @@ impl Function {
     /// element of a container argument against a parameter like
     /// `List<Int>`, which [`Self::matches_value_args`] doesn't.
     pub fn conforms_value_args(&self, args: &[Value]) -> bool {
-        let st = match self {
-            Self::Native(f) => &f.static_type,
-            Self::Compiled(f) => &f.static_type,
-            Self::Closure(c) => &c.prototype.static_type,
-            Self::Memoized { function, .. } => return function.conforms_value_args(args),
-        };
-        match st {
+        match self.signature() {
             StaticType::Function {
                 parameters: Some(params),
                 ..
@@ -244,13 +336,7 @@ impl Function {
     /// Returns true if this function accepts the given arguments, without
     /// allocating a `StaticType` for each of them.
     pub fn matches_value_args(&self, args: &[Value]) -> bool {
-        let st = match self {
-            Self::Native(f) => &f.static_type,
-            Self::Compiled(f) => &f.static_type,
-            Self::Closure(c) => &c.prototype.static_type,
-            Self::Memoized { function, .. } => return function.matches_value_args(args),
-        };
-        let StaticType::Function { parameters, .. } = st else {
+        let StaticType::Function { parameters, .. } = self.signature() else {
             return false;
         };
         match parameters {
@@ -273,6 +359,7 @@ impl fmt::Debug for Function {
             Self::Native(native) => write!(f, "{native:?}"),
             Self::Closure(closure) => write!(f, "<closure over {:?}>", closure.prototype.name),
             Self::Memoized { function, .. } => write!(f, "<memoized {:?}>", function),
+            Self::Checked { function, typ } => write!(f, "<{function:?} checked as {typ}>"),
         }
     }
 }
@@ -287,6 +374,7 @@ impl fmt::Display for Function {
             Self::Native(native) => write!(f, "<fn {}>", native.name),
             Self::Closure(closure) => write!(f, "<closure over {:?}>", closure.prototype.name),
             Self::Memoized { function, .. } => write!(f, "<memoized {function}>"),
+            Self::Checked { function, .. } => write!(f, "{function}"),
         }
     }
 }
@@ -294,4 +382,77 @@ impl fmt::Debug for NativeFunction {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "<native fn {} {:?}>", self.name, self.static_type)
     }
+}
+
+/// Whether a value of type `found` could be an `expected`, where what isn't
+/// known in either, `Any` or a type parameter, could be anything.
+fn could_be(found: &StaticType, expected: &StaticType) -> bool {
+    let unknown = |typ: &StaticType| {
+        matches!(
+            typ,
+            StaticType::Any | StaticType::Generic(_) | StaticType::Var(_)
+        )
+    };
+    // A function that never returns returns whatever is expected.
+    if unknown(found) || unknown(expected) || *found == StaticType::Never {
+        return true;
+    }
+    match (found, expected) {
+        (StaticType::List(a), StaticType::List(b))
+        | (StaticType::Deque(a), StaticType::Deque(b))
+        | (StaticType::Option(a), StaticType::Option(b))
+        | (StaticType::Iterator(a), StaticType::Iterator(b))
+        | (StaticType::Iterable(a), StaticType::Iterable(b))
+        | (StaticType::MinHeap(a), StaticType::MinHeap(b))
+        | (StaticType::MaxHeap(a), StaticType::MaxHeap(b)) => could_be(a, b),
+        (found, StaticType::Iterable(element)) => found
+            .sequence_element_type()
+            .is_some_and(|found| could_be(&found, element)),
+        (StaticType::Tuple(a), StaticType::Tuple(b)) => {
+            a.len() == b.len() && a.iter().zip(b).all(|(a, b)| could_be(a, b))
+        }
+        (
+            StaticType::Map { key, value },
+            StaticType::Map {
+                key: expected_key,
+                value: expected_value,
+            },
+        ) => could_be(key, expected_key) && could_be(value, expected_value),
+        (
+            StaticType::Function {
+                parameters,
+                return_type,
+            },
+            StaticType::Function {
+                parameters: expected_parameters,
+                return_type: expected_return,
+            },
+        ) => {
+            let takes = match (parameters, expected_parameters) {
+                (Some(a), Some(b)) => {
+                    a.len() == b.len() && a.iter().zip(b).all(|(a, b)| could_be(b, a))
+                }
+                _ => true,
+            };
+            takes && could_be(return_type, expected_return)
+        }
+        (found, expected) => found == expected,
+    }
+}
+
+/// Whether every value of type `found` is an `expected`: a function that
+/// takes `Any` takes anything, and one that returns a `List<Int>` returns an
+/// `Iterable<Int>`.
+fn proves(found: &StaticType, expected: &StaticType) -> bool {
+    *expected == StaticType::Any || (!has_unknowns(found) && found.fits(expected))
+}
+
+/// Whether `typ` leaves something unknown: `Any` or a type parameter.
+fn has_unknowns(typ: &StaticType) -> bool {
+    typ.contains(&|part| {
+        matches!(
+            part,
+            StaticType::Any | StaticType::Generic(_) | StaticType::Var(_)
+        )
+    })
 }

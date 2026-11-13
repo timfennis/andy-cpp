@@ -1,0 +1,6 @@
+// A function that never returns can be used as one returning anything.
+// expect-output: ok
+fn forever() -> Never { forever() }
+let a: Any = forever;
+let f = a as Fn() -> Int;
+print("ok");

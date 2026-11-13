@@ -37,6 +37,24 @@ missing-key lookup inserts it. A default *function*'s results can't be
 verified without calling it, so such a map only conforms when the value
 type is `Any`.
 
+A function is checked against what its own type says: one that takes a
+`String` can't be a `Fn(Int) -> Int`. What a function returns often isn't
+known until it runs, so a function that may fit a function type returns a
+function that checks each call's result:
+
+```ndc,fails
+fn text(x) => "s";             // its value takes and returns anything
+let value: Any = text;
+let f = value as Fn(Int) -> Int;
+f(1)
+// error[vm]: expected the function to return Int but it returned String
+```
+
+Inside a container, where the function can't be replaced by one that checks
+its calls, only a function whose own type shows it fits does. So does an
+overload picked as the program runs from a value of type `Any`: cast the
+value to the function type first to have its calls checked.
+
 The analyser rejects casts between types that cannot share a value:
 
 ```ndc,fails
