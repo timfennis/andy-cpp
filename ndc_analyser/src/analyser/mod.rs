@@ -24,7 +24,7 @@ mod solver;
 use declarations::FunctionDeclaration;
 pub use generics::tied_natives;
 use instances::{GenericUse, Pending, Scheme};
-use solver::{EarlyPick, Origin, Waiting};
+use solver::{Constraint, EarlyPick, Origin, Waiting};
 #[cfg(test)]
 mod tests;
 
@@ -784,6 +784,17 @@ impl Analyser {
         );
         for (node, _, typ) in values {
             if let Some(node) = node {
+                // An overloaded function value waiting for its type, as
+                // `abs` in `[len, abs]`, is one of the literal's values.
+                if matches!(self.vars.resolve(&typ), StaticType::Var(_)) {
+                    for waiting in self.waiting.values_mut() {
+                        if let Constraint::FunctionValue(value) = &mut waiting.constraint
+                            && value.id() == node
+                        {
+                            value.mark_in_literal();
+                        }
+                    }
+                }
                 self.expect_if_any(node, typ, element.clone());
             }
         }

@@ -1117,6 +1117,42 @@ impl Analyser {
             .collect::<Vec<_>>();
         let reachable = self.overloads().reachable_symbols(&call.candidates);
 
+        // A generic function that calls itself with an argument made from
+        // the parameter it's passed for, as `nest([x], n - 1)` in `fn
+        // nest(x, n)`, would need a version of itself for `x`'s type, one
+        // for lists of it, one for lists of those, without end.
+        // Another overload may take the call, as `f(xs: List<Any>)` does
+        // `f([x])`, so it's only this function's when no other can.
+        if let Some(function) = self.declaring
+            && self.copied_through.is_none()
+            && self.recording.is_none()
+            && reachable.contains(&function)
+            && reachable
+                .iter()
+                .all(|&symbol| symbol == function || !self.could_accept(symbol, &arguments))
+            && let StaticType::Function {
+                parameters: Some(parameters),
+                ..
+            } = self.vars.resolve(self.types.get_type(function))
+            && parameters.len() == arguments.len()
+            && parameters
+                .iter()
+                .zip(&arguments)
+                .any(|(parameter, argument)| {
+                    matches!(parameter, StaticType::Var(var)
+                    if *argument != *parameter && self.vars.is_made_from(argument, *var))
+                })
+        {
+            let name = self.resolver.symbol_name(function).to_string();
+            self.emit(AnalysisError::recursion_changes_types(&name, call.span));
+            self.record_pick(
+                call.site,
+                Binding::Resolved(Candidate::Scalar(function)),
+                &call.arguments,
+            );
+            return Some(StaticType::Any);
+        }
+
         // A variable whose type isn't known yet, like the parameter `f` in
         // `fn(f) => f(1)`, holds a function that takes these arguments.
         if let [only] = reachable[..]
@@ -1578,7 +1614,7 @@ impl Analyser {
     /// `site`, stays the function itself, so two values of it are equal.
     pub(super) fn flush_copies(&mut self, site: Option<CallSite>, call: Span) {
         match site {
-            Some(site) => self.record_uses(site),
+            Some(site) => self.record_uses(site, call),
             None => self.pending.uses.clear(),
         }
         for (node, expected) in std::mem::take(&mut self.pending.checks) {

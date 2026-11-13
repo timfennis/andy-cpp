@@ -623,6 +623,22 @@ impl TypeVars {
         })
     }
 
+    /// Whether `typ` is made from the unsettled variable `var`, directly or
+    /// through what a literal in it holds: `[x]` is made from `x`'s type.
+    pub(crate) fn is_made_from(&self, typ: &StaticType, var: TypeVar) -> bool {
+        let mut seen = AHashSet::new();
+        let mut todo = self.unsettled(typ);
+        while let Some(next) = todo.pop() {
+            if next == var {
+                return true;
+            }
+            if seen.insert(next) && self.is_literal(next) {
+                todo.extend(self.held_vars(next));
+            }
+        }
+        false
+    }
+
     /// The variables in what the literal type `var` holds: `x`'s in `[x, 1]`.
     pub(crate) fn held_vars(&self, var: TypeVar) -> Vec<TypeVar> {
         self.bounds[var.0 as usize]

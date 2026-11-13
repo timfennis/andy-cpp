@@ -24,12 +24,23 @@ pub(super) struct FunctionValue {
     groups: Vec<Vec<SymbolId>>,
     /// The type expected of the value, which its uses settle.
     expected: StaticType,
+    /// Whether it's a value of a literal, as `abs` is in `[len, abs]`, whose
+    /// other values say what's expected of it, but not which overload it is.
+    in_literal: bool,
     span: Span,
 }
 
 impl FunctionValue {
     pub(super) fn expected(&self) -> &StaticType {
         &self.expected
+    }
+
+    pub(super) fn id(&self) -> NodeId {
+        self.id
+    }
+
+    pub(super) fn mark_in_literal(&mut self) {
+        self.in_literal = true;
     }
 }
 
@@ -64,6 +75,7 @@ impl Analyser {
                 candidates: self.resolver.reference_candidates(id).clone(),
                 groups,
                 expected: expected.clone(),
+                in_literal: false,
                 span,
             };
             if !self.try_function_value(&value) {
@@ -256,6 +268,19 @@ impl Analyser {
                 self.emit(AnalysisError::ambiguous_function_value(
                     &value.name,
                     &self.vars.shown(&expected),
+                    &example,
+                    value.span,
+                ));
+                self.give_up_on_function_value(value);
+                true
+            }
+            // The other values of a literal can't say which overload is
+            // meant, as the literal could hold `Any`s: `[len, abs]`.
+            Choice::None if value.in_literal => {
+                let example = self.overload_example(value, &StaticType::Any);
+                self.emit(AnalysisError::ambiguous_function_value(
+                    &value.name,
+                    &StaticType::Any,
                     &example,
                     value.span,
                 ));
