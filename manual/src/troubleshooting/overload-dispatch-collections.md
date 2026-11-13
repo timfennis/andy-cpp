@@ -28,18 +28,16 @@ iterating the container contents. Specifically:
 
 This means that dispatch is **O(1)** regardless of how many elements are in the collection.
 
-## Limitation: element types are not checked at runtime
+## Element types are checked only when nothing else fits
 
-Because the element-type check is skipped, the VM **cannot distinguish** overloads that differ
-only in their container element types via dynamic dispatch. For example, two hypothetical overloads:
+Because the element-type check is skipped, a parameter like `List<Int>` doesn't take a list in that first pass. When no overload takes the arguments without looking at their elements, the VM checks the elements before the call fails, scanning each container. So two overloads like these still work under dynamic dispatch:
 
 ```
 fn process(List<Int>)
 fn process(List<String>)
 ```
 
-would both fail to match under dynamic dispatch if the list type cannot be resolved at compile
-time, because verifying element types would require scanning the entire container.
+Each call through an `Any` scans the list, though, and an overload that takes the value without looking at its elements, like `process(Any)`, is picked before either of them.
 
 Standard library overloads do differ by element type. Numeric sequence functions preserve the
 concrete numeric type, so `sum` has three typed overloads:

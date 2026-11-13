@@ -1,0 +1,4 @@
+// expect-error: no function called 'P' found matches the arguments: (String)
+struct P { x: Int }
+let make: Any = P;
+make("not an int");

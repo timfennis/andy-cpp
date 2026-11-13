@@ -1,0 +1,8 @@
+// Neither overload takes a list without looking at what it holds, so the
+// program checks the elements to pick one.
+// expect-output: ints strings
+fn process(xs: List<Int>) => "ints";
+fn process(xs: List<String>) => "strings";
+let a: Any = [1];
+let b: Any = ["s"];
+print(process(a), process(b));

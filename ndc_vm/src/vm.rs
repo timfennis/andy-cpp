@@ -841,10 +841,14 @@ impl Vm {
     /// Walks the `OverloadSet`'s scalar candidates in priority order,
     /// returning the first whose parameter types accept `args`. Mirrors
     /// master's `find_overload` body so the hot path on numerics-heavy
-    /// code stays at the same shape and footprint.
+    /// code stays at the same shape and footprint. A parameter like
+    /// `List<Int>` isn't checked element by element on that path, so when no
+    /// candidate accepts the arguments that way, they're checked again
+    /// element by element before the call fails: a struct with a
+    /// `List<Int>` field can be made through `Any` with a list of Ints.
     fn find_scalar_overload(&self, scalars: &[ResolvedVar], args: &[Value]) -> Option<Function> {
         let frame_pointer = self.frames.last().expect("no frame").frame_pointer;
-        scalars.iter().find_map(|var| {
+        let function = |var| {
             let value = self.resolve_var(var, frame_pointer);
             let Value::Object(obj) = value else {
                 return None;
@@ -852,8 +856,16 @@ impl Vm {
             let Object::Function(f) = obj.as_ref() else {
                 return None;
             };
-            f.matches_value_args(args).then(|| f.clone())
-        })
+            Some(f.clone())
+        };
+        scalars
+            .iter()
+            .find_map(|var| function(var).filter(|f| f.matches_value_args(args)))
+            .or_else(|| {
+                scalars
+                    .iter()
+                    .find_map(|var| function(var).filter(|f| f.conforms_value_args(args)))
+            })
     }
 
     /// Vec dispatch for `Binding::Dynamic` operator calls — the runtime
