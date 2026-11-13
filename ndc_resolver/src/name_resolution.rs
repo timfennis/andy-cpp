@@ -475,8 +475,6 @@ impl NameResolver {
         natives.into_iter().map(|(&symbol, _)| symbol).collect()
     }
 
-    /// The symbol a resolved declaration introduced: a binding pattern identifier's
-    /// or a named function's, keyed by its node.
     /// Declares a top-level value named `name` that no code refers to by
     /// name, as no identifier can be spelled like it: an instance of a generic
     /// function, which the analyser picks for the calls that use it. Being
@@ -488,6 +486,8 @@ impl NameResolver {
         symbol
     }
 
+    /// The symbol a resolved declaration introduced: a binding pattern identifier's
+    /// or a named function's, keyed by its node.
     pub fn declared_symbol(&self, node: NodeId) -> SymbolId {
         self.declarations[&node]
     }

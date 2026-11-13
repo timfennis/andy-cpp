@@ -13,6 +13,14 @@ use ndc_parser::{
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
+/// Where an instance of a generic function is in [`Analysis::instances`]:
+/// the declaration it's an instance of, and which of its instances it is.
+#[derive(Clone, Copy)]
+struct InstanceAt {
+    declaration: NodeId,
+    index: usize,
+}
+
 pub struct Compiler {
     ir: OptimizerIr,
     source_locals: usize,
@@ -25,7 +33,7 @@ pub struct Compiler {
     analysis: Rc<Analysis>,
     /// The instance of a generic function whose body is being compiled,
     /// whose picks take the place of the function's own.
-    instance: Option<Rc<Instance>>,
+    instance: Option<InstanceAt>,
     /// Whether the code compiled so far used a pick of `instance` that
     /// differs from the function's own, so it differs from what the
     /// function's own body compiles to.
@@ -633,7 +641,10 @@ impl Compiler {
         &'a self,
         pick: impl FnOnce(&'a Instance) -> Option<&'a T>,
     ) -> Option<&'a T> {
-        let found = self.instance.as_deref().and_then(pick);
+        let found = self
+            .instance
+            .map(|at| &self.analysis.instances[&at.declaration][at.index])
+            .and_then(pick);
         if found.is_some() {
             self.used_instance.set(true);
         }
@@ -879,9 +890,12 @@ impl Compiler {
             (self.prototype(id, name, body)?, Vec::new())
         } else {
             let compiled = self.prototype(id, name.clone(), body.clone())?;
-            let instance_bodies = instances
-                .iter()
-                .map(|instance| {
+            let instance_bodies = (0..instances.len())
+                .map(|index| {
+                    let instance = InstanceAt {
+                        declaration: id,
+                        index,
+                    };
                     self.compile_function_body(id, name.clone(), body.clone(), Some(instance))
                         .map(|(compiled, _)| compiled)
                 })
@@ -991,7 +1005,7 @@ impl Compiler {
         id: NodeId,
         name: Option<String>,
         body: ExpressionLocation,
-        instance: Option<&Instance>,
+        instance: Option<InstanceAt>,
     ) -> Result<(CompiledFunction, bool), CompileError> {
         let static_type = self.analysis.function_type(id).clone();
         let mut fn_compiler = Self {
@@ -1003,9 +1017,7 @@ impl Compiler {
             allow_return: true,
             optimize: self.optimize,
             analysis: Rc::clone(&self.analysis),
-            instance: instance
-                .map(|instance| Rc::new(instance.clone()))
-                .or_else(|| self.instance.clone()),
+            instance: instance.or(self.instance),
             used_instance: Cell::new(false),
             prototypes: Rc::clone(&self.prototypes),
         };

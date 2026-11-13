@@ -985,26 +985,24 @@ pub mod extra {
                 "zip must be called with 2 or more arguments".to_string(),
             ));
         }
-        let iters: Option<Vec<Vec<Value>>> = args
+        // The iterators are stepped together, so an endless one like `1..`
+        // stops with the others.
+        let mut iters = args
             .iter()
-            .map(|arg| match arg {
-                Value::Object(obj) => match obj.as_ref() {
-                    Object::List(l) => Some(l.borrow().clone()),
-                    Object::Tuple(t) => Some(t.clone()),
-                    _ => None,
-                },
-                _ => None,
-            })
-            .collect();
-        let iters = iters.ok_or_else(|| VmError::native("zip requires sequences".to_string()))?;
-        let min_len = iters.iter().map(|v| v.len()).min().unwrap_or(0);
-        let result: Vec<Value> = (0..min_len)
-            .map(|i| {
-                Value::Object(Rc::new(Object::Tuple(
-                    iters.iter().map(|v| v[i].clone()).collect(),
-                )))
-            })
-            .collect();
+            .map(|arg| arg.clone().try_into_iter())
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(|| VmError::native("zip requires sequences".to_string()))?;
+        let mut result = Vec::new();
+        'zipping: loop {
+            let mut tuple = Vec::with_capacity(iters.len());
+            for iter in &mut iters {
+                let Some(value) = iter.next() else {
+                    break 'zipping;
+                };
+                tuple.push(value);
+            }
+            result.push(Value::Object(Rc::new(Object::Tuple(tuple))));
+        }
         Ok(Value::Object(Rc::new(Object::list(result))))
     }
 }
