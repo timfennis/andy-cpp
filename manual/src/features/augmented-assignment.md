@@ -39,49 +39,53 @@ source order. The augmented assignment expression itself evaluates to `()`.
 
 ## Type checking
 
-An augmented assignment with an in-place operator such as `++=` never changes
-the type of its target. If the right-hand side would force a type change the
-program is rejected:
+`a op= b` is checked like `a = a op b`: the operator has to take both operands,
+and what it returns has to fit `a`. An in-place operator such as `++=` is used
+where it does the same thing, so it never changes the type of its target. A
+right-hand side whose element type differs is rejected:
 
 ```ndc,fails
 let values = [1];
-values ++= ["two"]; // error: mismatched types: found List<String> but expected List<Int>
+values ++= ["two"]; // error: No function called '++' found that matches the arguments 'List<Int>, List<String>'
 ```
 
-The right-hand side has to *provably* fit. A wider element type is not enough,
-because the operator copies the values across without checking them:
+A wider element type is not enough either, as `++` keeps one element type:
 
 ```ndc,fails
 let values: List<Int> = [1];
 let rhs: List<Number> = [0.5n];
-values ++= rhs; // error: mismatched types: found List<Number> but expected List<Int>
+values ++= rhs; // error: No function called '++' found that matches the arguments 'List<Int>, List<Number>'
 ```
 
-The same goes for an operand whose type is unknown. `Any` says nothing about
-what the value holds, and no later step re-checks it, so it is rejected too:
-
-```ndc,fails
-fn opaque(x: Any) => x;
-let values = [1];
-values ++= opaque([2, 3]); // error: mismatched types: found Any but expected List<Int>
-```
-
-[Cast](casts.md) the operand to say what it holds. The cast checks the value, so
-the assignment gets its guarantee from the cast site:
+An operand of type `Any` is checked as the program runs, as in `a = a op b`.
+What the operator makes is checked where it's written back, so a value that
+doesn't fit fails there and leaves the target as it was. As nothing says the
+operand fits before it's checked, the operator makes a new value rather than
+changing the target in place:
 
 ```ndc
 fn opaque(x: Any) => x;
 let values = [1];
-values ++= opaque([2, 3]) as List<Int>;
-print(values);  // [1,2,3]
+let same = values;
+values ++= opaque([2, 3]);
+print(values, same);  // [1,2,3] [1]
 ```
-
-A cast that does not hold fails there rather than corrupting the target:
 
 ```ndc,fails
 fn opaque(x: Any) => x;
 let values = [1];
-values ++= opaque([0.5]) as List<Int>; // error: cannot cast List<Float> to List<Int>
+values ++= opaque([0.5]); // error: expected List<Int> but found List<Any>
+```
+
+[Cast](casts.md) the operand to say what it holds, which checks it at the cast
+and lets `++=` change the target in place:
+
+```ndc
+fn opaque(x: Any) => x;
+let values = [1];
+let same = values;
+values ++= opaque([2, 3]) as List<Int>;
+print(values, same);  // [1,2,3] [1,2,3]
 ```
 
 Annotate the target with `Any` to opt into heterogeneous contents:

@@ -223,7 +223,7 @@ fn an_in_place_operator_assignment_cannot_change_the_target_type() {
             ("++=".to_string(), concat.clone()),
             ("++".to_string(), concat.clone()),
         ],
-        "mismatched types: found List<String> but expected List<Int>",
+        "No function called '++' found that matches the arguments 'List<Int>, List<String>'",
     );
     assert_analysis_error(
         "let values: List<Int> = [1]; values ++= [\"two\"];",
@@ -231,7 +231,7 @@ fn an_in_place_operator_assignment_cannot_change_the_target_type() {
             ("++=".to_string(), concat.clone()),
             ("++".to_string(), concat),
         ],
-        "mismatched types: found List<String> but expected List<Int>",
+        "No function called '++' found that matches the arguments 'List<Int>, List<String>'",
     );
 }
 
@@ -1055,16 +1055,22 @@ fn a_cast_settles_what_isnt_known_about_its_value() {
 
 #[test]
 fn a_waiting_call_does_not_commit_to_an_overload_taking_any_instead() {
-    // Only the catch-all `[]=` takes a list of unknown elements as an Int
-    // list's element, but once the elements are known the element-wise
-    // `[]=` is the one that fits, and it doesn't take a list.
+    // While the list's elements aren't known, both `[]=` might take the
+    // write, so it waits. Once they're Ints, only the catch-all takes a list
+    // as an element: the element-wise `[]=` would need its `T` to be both an
+    // Int and a list.
     let globals = [
         natives(&[("[]=", "<T>(List<T>, Any, Any)")]),
         index_natives(),
     ]
     .concat();
     assert_eq!(
-        errors("let xs = [1]; xs[0] = [];", globals),
+        errors("let xs = [1]; xs[0] = [];", globals.clone()),
+        Vec::<String>::new()
+    );
+    // Without the catch-all, nothing takes it.
+    assert_eq!(
+        errors("let xs = [1]; xs[0] = [];", index_natives()),
         vec!["mismatched types: found List<Any> but expected Int"]
     );
 }

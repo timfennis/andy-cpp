@@ -66,6 +66,7 @@ fn could_take(typ: &StaticType, sig: &[StaticType]) -> bool {
                     .iter()
                     .zip(sig)
                     .all(|(param, arg)| arg.may_fit(param))
+                && StaticType::type_parameters_agree(parameters, sig)
         }
         StaticType::Function {
             parameters: None, ..

@@ -1271,9 +1271,6 @@ impl Analyser {
         }
 
         if arguments.iter().all(|argument| !argument.has_vars()) {
-            if let (CallSite::OpAssignment(id), [left, right]) = (call.site, &arguments[..]) {
-                return Some(self.op_assignment_now(id, left, right, &call.name, call.span));
-            }
             return Some(self.resolve_call_now(call, &arguments));
         }
 
@@ -1492,51 +1489,14 @@ impl Analyser {
         merged
     }
 
-    /// [`Overloads::resolve_call`], with the overloads it leaves the program
-    /// to pick from as it runs cut to the ones that take the arguments with
-    /// each type parameter one type. Picking looks at each argument on its
-    /// own, so `[]=(List<T>, Int, T)` looks like it takes a String for a
-    /// `List<Int>` when the index is `Any`, but it can't.
+    /// [`Overloads::resolve_call`] over the types as they're known now.
     pub(super) fn resolve_overloads(
         &mut self,
         candidates: &Candidates,
         arguments: &[StaticType],
         kind: CallKind,
     ) -> ResolvedCall {
-        let mut resolved = self.overloads().resolve_call(candidates, arguments, kind);
-        // An operator may apply an overload to each element of a tuple
-        // instead, which takes what the elements are.
-        if kind == CallKind::Operator {
-            return resolved;
-        }
-        if let Binding::Dynamic(picked) = &resolved.binding {
-            let picked = picked.clone();
-            // What a function takes and returns isn't checked as the program
-            // runs, so it's left out: a lambda that returns `Any` may still be
-            // what's expected.
-            let snapshot = self.vars.snapshot();
-            let arguments = arguments
-                .iter()
-                .map(|argument| match self.vars.resolve(argument) {
-                    StaticType::Function { .. } => self.vars.fresh(StaticType::Any),
-                    argument => argument,
-                })
-                .collect::<Vec<_>>();
-            let kept = picked
-                .into_iter()
-                .filter(|candidate| match candidate {
-                    Candidate::Scalar(symbol) => self.could_accept(*symbol, &arguments),
-                    Candidate::Vec(_) => true,
-                })
-                .collect::<Vec<_>>();
-            self.vars.rollback(snapshot);
-            resolved.binding = if kept.is_empty() {
-                Binding::None
-            } else {
-                Binding::Dynamic(kept)
-            };
-        }
-        resolved
+        self.overloads().resolve_call(candidates, arguments, kind)
     }
 
     /// Resolves `call` with the arguments as they are, reporting it when no
@@ -1564,6 +1524,20 @@ impl Analyser {
             }
             binding => binding,
         };
+        // `a op= b` with no operator that takes the operands calls an in-place
+        // overload if one does, as a set has `-=` but no `-`, which keeps `a`.
+        if matches!(binding, Binding::None)
+            && let CallSite::OpAssignment(id) = call.site
+        {
+            let in_place = self.resolver.augmented_candidates(id).in_place.clone();
+            let in_place = self
+                .resolve_overloads(&in_place, arguments, call.kind)
+                .binding;
+            if !matches!(in_place, Binding::None) {
+                self.record_augmented_pick(id, in_place);
+                return arguments[0].clone();
+            }
+        }
         if matches!(binding, Binding::None) {
             self.report_failed_call(call, arguments);
             self.record_pick(call.site, binding, arguments);
@@ -2054,7 +2028,7 @@ impl Analyser {
                 );
                 let compatible = Self::augmented_rhs_is_compatible(&arguments[0], &arguments[1]);
                 let binding = match (in_place.binding, binding) {
-                    (Binding::Resolved(candidate), _) if compatible => Binding::Resolved(candidate),
+                    (Binding::Resolved(candidate), _) => Binding::Resolved(candidate),
                     // Which one applies is left to the program as it runs,
                     // which mutates in place where it can.
                     (Binding::Dynamic(in_place), operators) if compatible => {
