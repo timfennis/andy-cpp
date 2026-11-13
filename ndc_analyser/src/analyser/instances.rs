@@ -43,6 +43,10 @@ pub(super) struct Scheme {
     /// parameters, with that type, which an instance records its own types
     /// for.
     pub(super) literal_nodes: Rc<[(NodeId, StaticType)]>,
+    /// The values its body checks as the program runs against a type that
+    /// has its type parameters in it, with their types and that type, which
+    /// an instance checks against what its types make it.
+    pub(super) checks: Rc<[(NodeId, StaticType, StaticType)]>,
 }
 
 /// A call of a generic function, or its name used as a value, which needs
@@ -299,6 +303,11 @@ impl Analyser {
             if !self.try_waiting(&mut copy) {
                 self.wait_as(copy);
             }
+        }
+        for (node, typ, expected) in scheme.checks.iter() {
+            let typ = self.vars.instantiate_with(typ, &mut made);
+            let expected = self.vars.instantiate_with(expected, &mut made);
+            self.expect_if_any(*node, typ, expected);
         }
         for &call in scheme.recursive_calls.iter() {
             self.pick_tables(Some(instance)).insert(

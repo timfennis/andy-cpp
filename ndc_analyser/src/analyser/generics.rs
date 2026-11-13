@@ -38,8 +38,7 @@ impl Analyser {
         symbol: SymbolId,
         signature: &StaticType,
         declaration: NodeId,
-        first_use: usize,
-        first_literal: usize,
+        [first_use, first_literal, first_check]: [usize; 3],
     ) -> StaticType {
         self.solve_waiting();
         // A literal in the body that its type parameters don't reach has
@@ -191,15 +190,30 @@ impl Analyser {
                 self.pick_for_any_arguments(call);
             }
         }
-        // An instance is for the types of the type parameters the
-        // constraints and uses depend on.
+        // A value of type `Any` that the body passes where a type parameter
+        // is expected, as `a` in `fn f(x) { let a: Any = 5; [x].push(a) }`,
+        // is checked against what each call makes it.
+        let checks = self.checks[first_check..]
+            .iter()
+            .filter(|(instance, ..)| instance.is_none())
+            .map(|(_, node, typ, expected)| {
+                (*node, self.vars.resolve(typ), self.vars.resolve(expected))
+            })
+            .filter(|(_, typ, expected)| {
+                *typ == StaticType::Any
+                    && expected.contains(&|part| matches!(part, StaticType::Generic(_)))
+            })
+            .collect::<Vec<_>>();
+        // An instance is for the types of the type parameters that what it
+        // compiles differently depends on: the constraints and uses it
+        // picks for, the literals typed by a type parameter, and the checks.
         let mut key: Vec<Box<str>> = Vec::new();
-        // The literals typed by a type parameter compile to what it is.
         for typ in scheme
             .iter()
             .flat_map(|waiting| waiting.constraint.inputs())
             .chain(uses.iter().flat_map(|generic_use| &generic_use.key))
             .chain(literal_nodes.iter().map(|(_, typ)| typ))
+            .chain(checks.iter().map(|(_, _, expected)| expected))
         {
             for name in typ.type_parameters() {
                 if !key.contains(&name) {
@@ -217,6 +231,7 @@ impl Analyser {
                 recursive_calls: std::mem::take(&mut self.recursive_calls).into(),
                 literals: literals.into(),
                 literal_nodes: literal_nodes.into(),
+                checks: checks.into(),
             },
         );
         self.vars.resolve(signature)

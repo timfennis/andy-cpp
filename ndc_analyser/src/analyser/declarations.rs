@@ -50,6 +50,7 @@ impl Analyser {
         }
         let first_use = self.uses.len();
         let first_literal = self.number_literals.len();
+        let first_check = self.checks.len();
         let (annotations, iterates): (Vec<_>, Vec<_>) = parameters
             .iter()
             .map(|param| self.lower_parameter_annotation(param.annotation.as_ref()))
@@ -200,7 +201,12 @@ impl Analyser {
                 self.vars.leave_level();
                 self.declaring = None;
                 self.declared_in_batch.insert(symbol);
-                self.generalize(symbol, &signature, id, first_use, first_literal)
+                self.generalize(
+                    symbol,
+                    &signature,
+                    id,
+                    [first_use, first_literal, first_check],
+                )
             }
             _ => signature,
         };

@@ -1,0 +1,12 @@
+// A value of type `Any` passed where a generic function's type parameter is
+// expected is checked against what each call makes it: `with_five("s")`
+// pushes the Int 5 into a list of Strings.
+// expect-error: expected String but found Int
+fn with_five(x) {
+    let five: Any = 5;
+    let xs = [x];
+    xs.push(five);
+    xs
+}
+print(with_five(1));
+print(with_five("s"));
