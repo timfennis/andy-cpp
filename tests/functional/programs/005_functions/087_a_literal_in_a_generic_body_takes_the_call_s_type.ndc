@@ -1,0 +1,6 @@
+// The `1` in `fact` is what `fact` returns, so it's a Float when `fact` is
+// called with one: each call settles the literal as a literal there would be.
+// expect-output: 120 120.0 1.0 55.0
+fn fact(n) => if n < 2 { 1 } else { n * fact(n - 1) };
+fn fib(n) => if n < 2 { n } else { fib(n - 1) + fib(n - 2) };
+print(fact(5), fact(5.0), fact(1.0), fib(10.0));

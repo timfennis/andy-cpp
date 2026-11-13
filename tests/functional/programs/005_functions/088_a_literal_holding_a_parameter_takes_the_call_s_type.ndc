@@ -1,0 +1,7 @@
+// A literal that holds a parameter, or is passed with one, is as generic
+// as the parameter: `[x, 1]` is a list of Floats when `x` is a Float.
+// expect-output: [2.5,1.0] [2,1] [1,"b"] [2.5,1.0]
+fn g(x) => [x, 1];
+fn k(x) => [x, "b"];
+fn f(xs) { xs.push(1); xs }
+print(g(2.5), g(2), k(1), f([2.5]));

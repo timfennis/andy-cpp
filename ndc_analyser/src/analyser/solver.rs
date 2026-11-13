@@ -240,7 +240,9 @@ impl CallConstraint {
     }
 
     /// Whether `other` calls what this calls, the same way, with arguments
-    /// of the same types, so it returns the same type.
+    /// of the same types, so it returns the same type. Copies of one
+    /// literal count as the same type, as the same call settles them the
+    /// same way.
     pub(super) fn is_same_call(&self, other: &Self, vars: &TypeVars) -> bool {
         std::mem::discriminant(&self.site) == std::mem::discriminant(&other.site)
             && self.kind == other.kind
@@ -250,7 +252,7 @@ impl CallConstraint {
                 .arguments
                 .iter()
                 .zip(&other.arguments)
-                .all(|(a, b)| vars.resolve(a) == vars.resolve(b))
+                .all(|(a, b)| vars.with_literals_named(a) == vars.with_literals_named(b))
     }
 }
 
@@ -1479,7 +1481,7 @@ impl Analyser {
             Binding::Dynamic(_) | Binding::None => None,
         };
         let pending = self.pending.len();
-        let signature = picked.map(|symbol| self.instantiate_function(symbol));
+        let signature = picked.map(|symbol| self.instantiate_function(symbol, true));
         let Some(StaticType::Function {
             parameters: Some(parameters),
             return_type: declared_return,
@@ -1512,10 +1514,27 @@ impl Analyser {
     /// `symbol`'s type with new variables for its type parameters. For a
     /// generic function declared in the program, its constraints get the
     /// same variables, and wait in [`Self::pending`] until
-    /// [`Self::flush_copies`] knows which call they're for.
-    pub(super) fn instantiate_function(&mut self, symbol: SymbolId) -> StaticType {
+    /// [`Self::flush_copies`] knows which call they're for. `call` says
+    /// whether it's for a call, which may get an instance of its own.
+    pub(super) fn instantiate_function(&mut self, symbol: SymbolId, call: bool) -> StaticType {
         let declared = self.vars.resolve(self.types.get_type(symbol));
         let mut made = Vec::new();
+        if let Some(scheme) = self.schemes.get(&symbol) {
+            let literals = Rc::clone(&scheme.literals);
+            // Only a call in the batch that declares the function gets an
+            // instance. A value, as in `let f = pair`, or a call of a
+            // function an earlier batch declared, runs the function's own
+            // body, whose integer literals are Ints.
+            if !call || !self.declared_in_batch.contains(&symbol) {
+                made.extend(
+                    literals
+                        .iter()
+                        .filter(|(_, bounds)| bounds.is_number())
+                        .map(|(name, _)| (name.clone(), StaticType::Int)),
+                );
+            }
+            self.vars.instantiate_literals(&literals, &mut made);
+        }
         let typ = self.vars.instantiate_with(&declared, &mut made);
         // A copy of a function's own constraint that calls the function
         // again, as a recursive call its body couldn't decide does, is
