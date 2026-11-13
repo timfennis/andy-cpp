@@ -8,11 +8,13 @@
 
 use super::Analyser;
 use super::solver::{CallSite, Constraint, Origin, Waiting};
+use crate::error::AnalysisError;
 use crate::types::LiteralBounds;
 use ahash::AHashMap;
 use ndc_analysis::{Binding, Candidate};
 use ndc_core::{NodeId, StaticType};
 use ndc_layout::InstancePicks;
+use ndc_lexer::Span;
 use ndc_resolver::SymbolId;
 use std::rc::Rc;
 
@@ -55,6 +57,8 @@ pub(super) struct GenericUse {
     /// The instance whose body the use is in, `None` for code that's compiled
     /// once, like the program's top level.
     pub(super) instance: Option<SymbolId>,
+    /// Where the use is.
+    pub(super) span: Span,
 }
 
 /// What a call that's about to commit copied from the generic function it
@@ -102,7 +106,7 @@ impl Analyser {
     /// [`Pending::uses`] holds, unless it's in a copy of a constraint, whose
     /// pick belongs to the function it was copied from. A tuple operator's
     /// call commits to one overload per element, which needs no instance.
-    pub(super) fn record_uses(&mut self, site: CallSite) {
+    pub(super) fn record_uses(&mut self, site: CallSite, span: Span) {
         let uses = std::mem::take(&mut self.pending.uses);
         if self.copied_through.is_some() {
             return;
@@ -113,6 +117,7 @@ impl Analyser {
                 function: *function,
                 key: key.clone(),
                 instance: self.recording,
+                span,
             });
         }
     }
@@ -155,6 +160,17 @@ impl Analyser {
                 .any(|typ| typ.contains(&|part| matches!(part, StaticType::Generic(_)))),
             "internal error: a use outside of generic bodies has a type parameter in {key:?}"
         );
+        // A function whose instance calls it with types built from its own,
+        // as `fn f(x) => f([x])` does, would need instances without end.
+        // The call is left to the program as it runs.
+        if self.grows_an_instance(generic_use, &key) {
+            let name = self.resolver.symbol_name(generic_use.function).to_string();
+            self.emit(AnalysisError::recursion_changes_types(
+                &name,
+                generic_use.span,
+            ));
+            return;
+        }
         let instance = self.instance_for(generic_use.function, key, new);
         if instance == generic_use.function {
             return;
@@ -173,6 +189,25 @@ impl Analyser {
             generic_use.site,
             Binding::Resolved(Candidate::Scalar(instance)),
         );
+    }
+
+    /// Whether `generic_use`, in the body of an instance of the function it
+    /// uses, needs an instance whose key holds that instance's key inside a
+    /// bigger type: `f<List<Int>>` from `f<Int>`.
+    fn grows_an_instance(&self, generic_use: &GenericUse, key: &[StaticType]) -> bool {
+        let Some(outer) = generic_use.instance else {
+            return false;
+        };
+        self.instances
+            .iter()
+            .any(|((function, outer_key), &instance)| {
+                instance == outer
+                    && *function == generic_use.function
+                    && key
+                        .iter()
+                        .zip(outer_key)
+                        .any(|(new, old)| new != old && new.contains(&|part| part == old))
+            })
     }
 
     /// The tables a pick in the body of `instance` goes in, or the shared
@@ -282,6 +317,7 @@ impl Analyser {
                 function: generic_use.function,
                 key,
                 instance: Some(instance),
+                span: generic_use.span,
             });
         }
         self.settle_waiting(first);

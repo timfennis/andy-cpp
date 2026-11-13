@@ -1121,10 +1121,15 @@ impl Analyser {
         // the parameter it's passed for, as `nest([x], n - 1)` in `fn
         // nest(x, n)`, would need a version of itself for `x`'s type, one
         // for lists of it, one for lists of those, without end.
+        // Another overload may take the call, as `f(xs: List<Any>)` does
+        // `f([x])`, so it's only this function's when no other can.
         if let Some(function) = self.declaring
             && self.copied_through.is_none()
             && self.recording.is_none()
             && reachable.contains(&function)
+            && reachable
+                .iter()
+                .all(|&symbol| symbol == function || !self.could_accept(symbol, &arguments))
             && let StaticType::Function {
                 parameters: Some(parameters),
                 ..
@@ -1609,7 +1614,7 @@ impl Analyser {
     /// `site`, stays the function itself, so two values of it are equal.
     pub(super) fn flush_copies(&mut self, site: Option<CallSite>, call: Span) {
         match site {
-            Some(site) => self.record_uses(site),
+            Some(site) => self.record_uses(site, call),
             None => self.pending.uses.clear(),
         }
         for (node, expected) in std::mem::take(&mut self.pending.checks) {
