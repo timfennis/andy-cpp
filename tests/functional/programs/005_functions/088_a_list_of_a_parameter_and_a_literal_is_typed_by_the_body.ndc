@@ -1,0 +1,5 @@
+// The `1` in `[x, 1]` is an Int, so the list holds Ints and `x` is one:
+// `g` doesn't take a Float.
+// expect-error: No function called 'g' found that matches the arguments 'Float'
+fn g(x) => [x, 1];
+print(g(2), g(2.5));

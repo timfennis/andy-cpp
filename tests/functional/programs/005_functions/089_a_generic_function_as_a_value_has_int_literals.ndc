@@ -1,5 +1,0 @@
-// A generic function used as a value runs its own body, whose integer
-// literals are Ints, so `pair` can't be a function returning Floats.
-// expect-error: mismatched types
-fn pair(x) => [x, 1];
-let f: Fn(Float) -> List<Float> = pair;
