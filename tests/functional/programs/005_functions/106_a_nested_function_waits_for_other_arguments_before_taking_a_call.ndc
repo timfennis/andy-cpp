@@ -1,0 +1,9 @@
+// A call whose other arguments aren't known yet waits for them before the
+// nearest scope takes it: `y` may make the outer `d` the one that fits.
+// expect-output: outer
+fn d(x: Int, y: String) => "outer";
+fn run(y) {
+    fn d(x, y: Int) => "inner";
+    d(1, y)
+}
+print(run("s"));

@@ -1417,8 +1417,9 @@ impl Analyser {
     }
 
     /// Whether `symbol`'s parameter for each argument with a literal in it
-    /// takes any type, as an unannotated one does, so what the literal
-    /// becomes can't change whether `symbol` takes the call.
+    /// takes any type, as an unannotated one does, and the other arguments
+    /// are known, so nothing still to come can change whether `symbol` takes
+    /// the call.
     fn takes_any_literal(&self, symbol: SymbolId, arguments: &[StaticType]) -> bool {
         let Some(parameters) = self.overloads().parameters_of(symbol) else {
             return false;
@@ -1428,17 +1429,15 @@ impl Analyser {
                 .iter()
                 .zip(arguments)
                 .all(|(parameter, argument)| {
-                    let has_literal = self
-                        .vars
-                        .unsettled(argument)
-                        .into_iter()
-                        .any(|var| self.vars.is_literal(var));
-                    !has_literal
-                        || match self.vars.resolve(parameter) {
-                            StaticType::Var(var) => !self.vars.is_literal(var),
-                            StaticType::Generic(_) => true,
-                            _ => false,
-                        }
+                    let unsettled = self.vars.unsettled(argument);
+                    if unsettled.iter().all(|&var| !self.vars.is_literal(var)) {
+                        return unsettled.is_empty();
+                    }
+                    match self.vars.resolve(parameter) {
+                        StaticType::Var(var) => !self.vars.is_literal(var),
+                        StaticType::Generic(_) => true,
+                        _ => false,
+                    }
                 })
     }
 
